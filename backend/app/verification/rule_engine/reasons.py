@@ -62,6 +62,9 @@ _FACT_LABELS: dict[str, str] = {
     "loan.ltv_percent": "loan-to-value ratio",  # MI-1 (LP-488)
     "mi.fha_ufmip_percent": "upfront FHA mortgage insurance premium financed into the note",  # MI-4 (LP-488)
     "condo.questionnaire_present": "condo questionnaire",  # CO-1 (LP-488)
+    "title.vested_owner_matches": "owner of record on the title commitment",  # TI-1 (LP-491)
+    "title.vested_owner_name": "owner of record on the title commitment",  # TI-1
+    "contract.seller_name": "seller named on the purchase agreement",  # TI-1
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
     "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
     "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)

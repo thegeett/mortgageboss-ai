@@ -189,5 +189,6 @@ def test_no_rule_activation_changed() -> None:
             "CR-8",  # LP-490a
             "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
             "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
+            "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
         )
     )

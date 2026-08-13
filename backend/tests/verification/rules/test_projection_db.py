@@ -39,7 +39,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 203  # LP-490 review +2 (credit.largest_single_collection_balance — CR-10's DU matrix turns on an
+        == 207  # LP-491 +4 (title.vested_owner_name/_2, contract.seller_name, title.vested_owner_matches); LP-490 review +2 (credit.largest_single_collection_balance — CR-10's DU matrix turns on an
         # INDIVIDUAL collection, which the aggregate cannot answer; credit.has_collections — its
         # applicability gate, since the predicate DSL is eq/ne and cannot compare a number);
         # LP-490 +10 (the credit AI cohort: liab.is_mortgage, liab.structured_history_confident, liab.mortgage_late_60_plus_last_12mo, liab.is_medical_collection, liab.collection_balance, credit.collection_aggregate_balance, credit.derogatory_months_elapsed, property.occupancy, and the two rule-judgment outputs credit.mortgage_history_assessment / credit.collection_treatment); LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
@@ -85,7 +85,8 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # +PC-2 = 39; +IH-3 = 40; +PC-3 = 41; +IN-15 (LP-430) = 42; +IN-16 (LP-433) = 43; +CR-4 (LP-444, inert) = 44;
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
     assert (
-        with_spec == 60  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
+        with_spec
+        == 61  # +TI-1 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
     )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 

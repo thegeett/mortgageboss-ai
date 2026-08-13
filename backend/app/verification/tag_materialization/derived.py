@@ -2460,6 +2460,144 @@ def _has_collections(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-491 — TI-1's vested-owner compare. ⚠️ IH-2's SHAPE, AND IT REUSES IH-2's NORMALISER RATHER THAN
+# CLONING IT (LP-487): truncate at an assignment/care-of marker, strip punctuation, drop corporate-suffix
+# tokens from BOTH sides, compare whole tokens in order with a two-token prefix tolerance. One normaliser,
+# so a fix to either rule's name handling reaches both.
+#
+# ⚠️ THE VESTING TOKENS BELOW ARE SPECULATIVE — the reported finding. ALL FOUR real title commitments
+# carry a PLAIN NAME in vested_owner_name (2-3 words, no TRUSTEE / HUSBAND AND WIFE / ET UX); the recital
+# lives in `vesting_marital_recital`, which fills 0/4. Real-world titles do carry these forms, so they are
+# stripped — but nothing in our corpus exercises them, and that is recorded rather than implied.
+# --------------------------------------------------------------------------- #
+
+_VESTING_TRUNCATE_MARKERS: tuple[str, ...] = (
+    "et ux",
+    "et al",
+    "husband and wife",
+    "a married man",
+    "a married woman",
+    "a single man",
+    "a single woman",
+    "an unmarried man",
+    "an unmarried woman",
+    "as trustee",
+    "trustee of",
+    "as joint tenants",
+    "as tenants",
+)
+
+
+def _normalise_party_name(raw: str) -> list[str]:
+    """A title party's name reduced to comparable tokens — IH-2's normaliser plus vesting recitals."""
+    text = _WS.sub(" ", raw).strip().casefold()
+    for marker in _VESTING_TRUNCATE_MARKERS:
+        index = text.find(marker)
+        if index != -1:
+            text = text[:index]
+    return _normalise_lender_name(text)
+
+
+def _file_counterparty(snapshot: Snapshot) -> tuple[list[str], str]:
+    """The party the vested owner should match, chosen by loan purpose.
+
+    ⚠️ THE PURPOSE BRANCH LIVES HERE, NOT IN AN APPLICABILITY PREDICATE, and the reason is that TI-1
+    applies to BOTH purposes — there is no single predicate value to scope on. The abstain that a
+    predicate would have given is preserved exactly: an unstated purpose returns no counterparty, the tag
+    resolves to "unknown", and the gate routes that to couldnt_check. A file that does not state its
+    purpose is SURFACED, never silently skipped (LP-487/LP-488's finding, honoured by a different means).
+
+    PURCHASE  → the seller on the purchase agreement: whoever is on title today should be selling.
+    REFINANCE → the borrower: the borrower should already own the property they are refinancing.
+    """
+    purposes = {v.casefold() for v in _parsed_strings(snapshot, "loan.purpose")}
+    if not purposes:
+        return [], "the file does not state whether this is a purchase or a refinance"
+    if len(purposes) > 1:
+        return [], f"the file states more than one loan purpose ({', '.join(sorted(purposes))})"
+    purpose = next(iter(purposes))
+    if purpose == "purchase":
+        sellers = _parsed_strings(snapshot, "contract.seller_name")
+        if not sellers:
+            return (
+                [],
+                "no purchase agreement on the file names a seller to compare the vested owner with",
+            )
+        return _normalise_party_name(
+            sellers[0]
+        ), f"the purchase agreement's seller ({sellers[0]!r})"
+    if purpose == "refinance":
+        names = _borrower_display_names(snapshot)
+        if not names:
+            return [], "the file states no borrower name to compare the vested owner with"
+        return _normalise_party_name(names[0]), f"the borrower ({names[0]!r})"
+    return [], f"the loan purpose {purpose!r} is not one this check knows how to scope"
+
+
+def _borrower_display_names(snapshot: Snapshot) -> list[str]:
+    """Each MISMO borrower's "first last", in index order."""
+    if snapshot.mismo.absent:
+        return []
+    out: list[str] = []
+    index = 1
+    while True:
+        first = snapshot.mismo.facts.get(f"borrower.{index}.first_name")
+        if first is None:
+            break
+        last = snapshot.mismo.facts.get(f"borrower.{index}.last_name")
+        # ⚠️ A borrower name is PII, so a fact here may be a PiiField carrying only a MASKED display.
+        # Read the display for one and the value for a plain Field — never assume `.value` exists.
+        parts = [
+            str(value)
+            for f in (first, last)
+            if f is not None
+            and f.is_present
+            and (value := (f.display if isinstance(f, PiiField) else f.value))
+        ]
+        if parts:
+            out.append(" ".join(parts))
+        index += 1
+    return out
+
+
+def _title_vested_owner_matches(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """title.vested_owner_matches — does this commitment's vested owner match the file's counterparty?
+
+    Per COMMITMENT (declines for any other subject, the IH-1 shape). ⚠️ Matches against EITHER vested
+    owner: 3 of the 4 real commitments carry a second owner, and a co-owned property matching only the
+    second name is still a match.
+    """
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != "title_commitment"
+    ):
+        return None, "not a title commitment — no vested-owner tag"
+    owners = [
+        str(field.value)
+        for name in ("vested_owner_name", "vested_owner_name_2")
+        if isinstance(field := subject_raw.fields.get(name), Field)
+        and field.is_present
+        and str(field.value).strip()
+    ]
+    if not owners:
+        return _UNKNOWN, "this commitment states no vested owner"
+    counterparty, label = _file_counterparty(snapshot)
+    if not counterparty:
+        return _UNKNOWN, label
+    for owner in owners:
+        tokens = _normalise_party_name(owner)
+        if tokens and _lender_names_agree(tokens, counterparty):
+            return "yes", f"the vested owner ({owner!r}) matches {label}"
+    return "no", (
+        f"the commitment's vested owner ({', '.join(repr(o) for o in owners)}) does not match {label} — "
+        "a vesting difference can be legitimate (a trust, an estate, a name change), so this is raised "
+        "for confirmation rather than treated as an error"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -3166,6 +3304,7 @@ _RECIPES: dict[str, Recipe] = {
     "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
+    "title_vested_owner_matches": _title_vested_owner_matches,  # LP-491 — TI-1
     "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
     "derogatory_months_elapsed": _derogatory_months_elapsed,  # LP-490 — CR-6
     "collection_aggregate_balance": _collection_aggregate_balance,

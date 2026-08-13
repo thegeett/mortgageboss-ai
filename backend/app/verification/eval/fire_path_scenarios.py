@@ -133,6 +133,12 @@ _LOAN_AU3_INELIGIBLE = UUID("95000000-0000-4000-8000-000000000032")
 _LOAN_AU3_REFER = UUID("95000000-0000-4000-8000-000000000033")
 _LOAN_AU3_UNKNOWN_VENDOR = UUID("95000000-0000-4000-8000-000000000034")
 _LOAN_AU3_NO_ELIGIBILITY = UUID("95000000-0000-4000-8000-000000000035")
+# LP-491 — TI-1 (title commitment parties).
+_LOAN_TI1_PURCHASE_MATCH = UUID("95000000-0000-4000-8000-000000000040")
+_LOAN_TI1_PURCHASE_MISMATCH = UUID("95000000-0000-4000-8000-000000000041")
+_LOAN_TI1_REFI_MATCH = UUID("95000000-0000-4000-8000-000000000042")
+_LOAN_TI1_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000043")
+_LOAN_TI1_SECOND_OWNER = UUID("95000000-0000-4000-8000-000000000044")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1286,6 +1292,89 @@ def build_au3_approve_without_eligibility_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-491 — TI-1. ⚠️ The owner/seller names below are INVENTED (no borrower PII in the repo); what is
+# taken from the real corpus is the SHAPE — a plain 2-3 word name in vested_owner_name, a second owner on
+# most commitments, and the seller on the purchase agreement.
+# --------------------------------------------------------------------------- #
+def _commitment(cid: str, owner: str, owner_2: str | None = None) -> DocumentEntry:
+    fields = {
+        "title_company_name": "Rivertown Title",
+        "commitment_number": "TC-0001",
+        "vested_owner_name": owner,
+        "legal_description": "LOT 7, BLOCK 2, BIRCH COURT SUBDIVISION, RIVERTOWN, ILLINOIS",
+    }
+    if owner_2 is not None:
+        fields["vested_owner_name_2"] = owner_2
+    return _doc(cid, "title_commitment", **fields)
+
+
+def _seller_contract(cid: str, seller: str) -> DocumentEntry:
+    return _doc(cid, "purchase_agreement", seller_name=seller, sales_price="400000.00")
+
+
+def _ti1_mismo(purpose: str | None, *, borrower: str | None = None) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if purpose is not None:
+        facts["loan.purpose"] = _f(purpose)
+    if borrower is not None:
+        first, _, last = borrower.partition(" ")
+        facts["borrower.1.first_name"] = _f(first)
+        facts["borrower.1.last_name"] = _f(last)
+    return facts
+
+
+def build_ti1_purchase_match_snapshot() -> Snapshot:
+    """A purchase whose vested owner IS the contract's seller → TI-1 SATISFIED."""
+    return _snapshot(
+        _LOAN_TI1_PURCHASE_MATCH,
+        [_commitment("95-tc-ok", "Miriam Okonkwo"), _seller_contract("95-pa-ok", "Miriam Okonkwo")],
+        _ti1_mismo("purchase"),
+    )
+
+
+def build_ti1_purchase_mismatch_snapshot() -> Snapshot:
+    """A purchase whose vested owner is an unrelated party → TI-1 NEEDS_REVIEW.
+    ⚠️ NOT fired — a trust, an estate or a name change all produce a legitimate difference."""
+    return _snapshot(
+        _LOAN_TI1_PURCHASE_MISMATCH,
+        [_commitment("95-tc-x", "Harold Vance"), _seller_contract("95-pa-x", "Miriam Okonkwo")],
+        _ti1_mismo("purchase"),
+    )
+
+
+def build_ti1_refinance_match_snapshot() -> Snapshot:
+    """A REFINANCE compares the vested owner against the BORROWER, not a seller → TI-1 SATISFIED."""
+    return _snapshot(
+        _LOAN_TI1_REFI_MATCH,
+        [_commitment("95-tc-refi", "Priya Raman")],
+        _ti1_mismo("refinance", borrower="Priya Raman"),
+    )
+
+
+def build_ti1_no_purpose_snapshot() -> Snapshot:
+    """⚠️ THE ABSENT-PURPOSE PROOF. The same matching names with NO stated purpose → COULDNT_CHECK, never
+    silently skipped: TI-1 cannot know which party to compare against."""
+    return _snapshot(
+        _LOAN_TI1_NO_PURPOSE,
+        [_commitment("95-tc-np", "Miriam Okonkwo"), _seller_contract("95-pa-np", "Miriam Okonkwo")],
+        _ti1_mismo(None),
+    )
+
+
+def build_ti1_second_owner_match_snapshot() -> Snapshot:
+    """⚠️ A match on the SECOND owner still matches — 3 of the 4 real commitments carry one, and a
+    co-owned property matching only the second name is not a mismatch."""
+    return _snapshot(
+        _LOAN_TI1_SECOND_OWNER,
+        [
+            _commitment("95-tc-2", "Harold Vance", owner_2="Miriam Okonkwo"),
+            _seller_contract("95-pa-2", "Miriam Okonkwo"),
+        ],
+        _ti1_mismo("purchase"),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1346,5 +1435,10 @@ __all__ = [
     "build_subject_housing_snapshot",
     "build_tax_return_with_schedules_snapshot",
     "build_terminated_employment_snapshot",
+    "build_ti1_no_purpose_snapshot",
+    "build_ti1_purchase_match_snapshot",
+    "build_ti1_purchase_mismatch_snapshot",
+    "build_ti1_refinance_match_snapshot",
+    "build_ti1_second_owner_match_snapshot",
     "build_voe_offer_labeling_snapshot",
 ]

@@ -159,6 +159,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "CR-8",  # LP-490a
             "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
             "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
+            "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
             "CR-13",
             "PR-6",
         }

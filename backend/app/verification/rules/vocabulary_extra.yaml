@@ -736,3 +736,40 @@ tags:
       payoff at all, while an investment property requires payoff at $250 individually or $1,000 in
       aggregate. ⚠️ Absent occupancy must ABSTAIN, never default to the permissive cell.
     produced_by: parsed
+
+  # --- LP-491 — TI-1's inputs and verdict tag. ------------------------------------------------------- #
+  title.vested_owner_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The current owner of record named on a title commitment (vested_owner_name), raw. ⚠️ All four real
+      commitments carry a PLAIN NAME here — the vesting recital lives in vesting_marital_recital, which
+      fills 0/4. Per commitment; a file may carry several.
+    produced_by: parsed
+  title.vested_owner_name_2:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      A second owner of record on the commitment (3/4 real documents carry one). TI-1 accepts a match
+      against EITHER owner — a co-owned property matching only the second name is still a match.
+    produced_by: parsed
+  contract.seller_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The seller named on the purchase agreement (5/5 in the corpus). TI-1's counterparty on a PURCHASE:
+      the person on title today should be the person selling.
+    produced_by: parsed
+  title.vested_owner_matches:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does this commitment's vested owner match the file's counterparty — the seller on a purchase, the
+      borrower on a refinance? Derived by the same normalised token compare IH-2 uses (LP-487). "unknown"
+      when the loan purpose is unstated, when no counterparty is on the file, or when nothing identifying
+      survives normalisation — never a guessed match.
+    produced_by: derived

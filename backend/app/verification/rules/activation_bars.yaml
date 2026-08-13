@@ -1278,3 +1278,34 @@ CR-10:
     (ADR-332). ⚠️ ALSO BLOCKED ON A MISSING FACT, not just labels: the DU-vs-manual axis does not exist
     (LP-501), so the rule abstains to `manual_underwriting_not_supported` rather than guessing a branch.
     Even a perfectly calibrated model cannot answer a question the file does not state.
+
+# --------------------------------------------------------------------------- #
+# LP-491 — TI-1 (title commitment parties). ⚠️ NOT a ratify-pending rule: the LP-491 catalog edit moved
+# it from ai_fuzzy_match to deterministic_only (IH-2's precedent — typed extraction already spends the
+# perception step), so there is NO model in its chain, nothing to self-derive, and nothing to ratify. It
+# activates on `no-ai-dependency` like any deterministic rule.
+#
+# ⚠️ `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared, their
+# extraction fields exist, and the producer resolves them on real stored data (vested_owner_name 4/4 on
+# the four real commitments, seller_name 5/5 on the purchase agreements).
+TI-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE, which is why this rule cannot fire. A vesting difference is
+    frequently LEGITIMATE — a revocable trust, an estate, a name change on marriage or divorce, a deed
+    not yet recorded — so a firing rule would be wrong on correct files repeatedly and train a processor
+    to dismiss it. A mismatch routes to needs_review, where the true mismatch (wrong property, wrong
+    party) and the legitimate difference get the same cheap glance. The residual FN is bounded by the
+    2-token prefix tolerance inherited from IH-2, recorded there as the known false-satisfied direction.
+  rationale: >-
+    No AI tag and no threshold — a declared normalisation vocabulary in the spec's reference_values,
+    reusing IH-2's normaliser rather than cloning it so a fix to either rule's name handling reaches both.
+    ⚠️ The VESTING markers are speculative: all four real commitments carry a PLAIN NAME in
+    vested_owner_name (the recital lives in vesting_marital_recital, 0/4), so nothing in the corpus
+    exercises them. They abstain-by-no-effect if wrong — stripping a marker that is not there changes
+    nothing — which is why they are safe to ship unexercised.

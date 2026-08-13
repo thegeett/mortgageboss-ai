@@ -259,6 +259,12 @@ _LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1", "AU-3")
 # collection codes, so both derivations were answering "no" on all 35 tradelines. Their bars say so.
 _LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 
+# LP-491 — TI-1 (title commitment parties). ⚠️ NOT ratify-pending: the LP-491 catalog edit moved it to
+# `deterministic_only` (IH-2's precedent, the second time typed extraction turned out to have already
+# spent the perception step), so it has no model in its chain and activates on input_resolves alone.
+# A mismatch is needs_review, never fired — a vesting difference is frequently legitimate.
+_LP491_ACTIVATED: tuple[str, ...] = ("TI-1",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -284,6 +290,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP487_ACTIVATED,
     *_LP488_ACTIVATED,
     *_LP490A_ACTIVATED,
+    *_LP491_ACTIVATED,
 )
 
 

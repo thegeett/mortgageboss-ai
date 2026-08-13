@@ -68,7 +68,7 @@ PR-8,Disaster-area reinspection,Property,judgmental,ai_judgment,false,,false,fal
 OC-1,Occupancy consistency,Occupancy,structural,ai_fuzzy_match,false,false,false,false,Stated occupancy vs address signals — compare; inference → AI.
 OC-2,Occupancy reasonableness,Occupancy,judgmental,ai_judgment,false,,false,false,Distance/existing-primary/address patterns — fraud-signal judgment.
 OC-3,Investment rental support,Occupancy,judgmental,ai_judgment,false,,false,false,Rental support docs for investment — judgment.
-TI-1,Title commitment parties,Title,structural,ai_fuzzy_match,false,false,false,false,Tolerant party+property match title vs file.
+TI-1,Title commitment parties,Title,structural,deterministic_only,false,true,false,false,"Vested owner vs the file's counterparty — normalised name compare (LP-491). Was ai_fuzzy_match; IH-2's shape exactly: typed extraction already reads vested_owner_name (4/4) and seller_name (5/5), so the perception step is spent and only a string compare remains."
 TI-2,Legal description match,Title,judgmental,ai_judgment,false,,false,false,Compare legal descriptions across sources — parse judgment.
 TI-3,Existing liens / unreleased mortgage,Title,structural,ai_fuzzy_match,false,false,false,false,Detect open liens + payoff plan — presence; interpretation → AI.
 TI-4,Judgments / tax liens on title,Title,structural,deterministic_only,false,true,false,false,Detect judgments/liens on title — presence.

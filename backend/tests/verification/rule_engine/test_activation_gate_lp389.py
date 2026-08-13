@@ -57,6 +57,7 @@ _ACTIVATED = frozenset(
         "CR-6",  # LP-490a
         "CR-8",  # LP-490a
         "CR-10",  # LP-490a
+        "TI-1",  # LP-491 — title commitment parties (deterministic after the catalog edit)
         "IN-4",
         "AS-10",
         "AS-2",
@@ -155,6 +156,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PC-3",
         "PC-7",
         "PR-6",
+        "TI-1",  # LP-491 (sorts last)
     )  # sorted
 
 

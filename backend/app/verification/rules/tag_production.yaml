@@ -336,6 +336,13 @@ tags:
   #     not there (IH-7's reasoning). ------------------------------------------------------------------ #
   condo.questionnaire_present: {mode: derived, subject: loan, data: condo_questionnaire_present}
 
+  # --- LP-491 — TI-1 (title commitment parties). ⚠️ EVERY PARSED TAG document_type-SCOPED: `seller_name`
+  #     and `vested_owner_name` both mean something specific to their own document. ------------------- #
+  title.vested_owner_name: {mode: parsed, subject: document, data: vested_owner_name, document_type: title_commitment}
+  title.vested_owner_name_2: {mode: parsed, subject: document, data: vested_owner_name_2, document_type: title_commitment}
+  contract.seller_name: {mode: parsed, subject: document, data: seller_name, document_type: purchase_agreement}
+  title.vested_owner_matches: {mode: derived, subject: document, data: title_vested_owner_matches}
+
   # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
   #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —
   #     and the ONE aus_findings document in the corpus is an LPA whose recommendation reads "ACCEPT",

@@ -76,7 +76,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | DT-6 | Retained-property PITIA | DTI | structural | ai_fuzzy_match | false | false | false | false |
 | PR-7 | Appraisal address matches | Property | structural | ai_fuzzy_match | false | false | false | false |
 | OC-1 | Occupancy consistency | Occupancy | structural | ai_fuzzy_match | false | false | false | false |
-| TI-1 | Title commitment parties | Title | structural | ai_fuzzy_match | false | false | false | false |
+| TI-1 | Title commitment parties | Title | structural | deterministic_only | false | true | false | false |
 | TI-3 | Existing liens / unreleased mortgage | Title | structural | ai_fuzzy_match | false | false | false | false |
 | TI-4 | Judgments / tax liens on title | Title | structural | deterministic_only | false | true | false | false |
 | IH-1 | Insurance adequacy | Insurance | structural | deterministic_only | false | true | false | false |
