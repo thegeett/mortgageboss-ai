@@ -12,7 +12,7 @@
 #
 # ⚠️ IT NEVER ASSERTS RETENTION, AND IT DOES NOT READ `property.is_retained_reo` OR
 # `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by
-# test_lp495a_retention_tags_unwired.py). Whether the property is being retained is exactly the question
+# test_reo_reconciliation_lp495a.py::test_retention_tags_are_not_wired_into_either_rule). Whether the property is being retained is exactly the question
 # this rule hands to the processor rather than answering.
 #
 # ⚠️ THE STATEMENT'S `monthly_payment` IS ALREADY THE PITIA — IT IS NOT ADDED TO `escrow_amount`.

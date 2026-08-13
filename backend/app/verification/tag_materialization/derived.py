@@ -40,6 +40,10 @@ from app.verification.tag_materialization.subjects import (
 Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
 
 _UNKNOWN = "unknown"
+# The classifier's UNCLASSIFIED sentinel — a SLUG, not None. classification.py sets it both when the model
+# is unsure and when the call never completed, so any "is this document type X?" read must treat it as
+# undetermined rather than as a confident "not X" (mirrors _UNKNOWN_DOC_TYPE in subjects/enumerators).
+_UNKNOWN_DOC_TYPE = "unknown"
 
 
 def _income_numbers(snapshot: Snapshot, tag_id: str) -> tuple[Decimal, bool, bool]:
@@ -3425,11 +3429,25 @@ def _stated_mortgage_liabilities(snapshot: Snapshot) -> list[dict[str, str]]:
         if value is None or not str(value).strip():
             continue
         rows.setdefault(index, {})[name] = str(value).strip()
+    # UNTYPED ROWS ARE KEPT (reported finding). `liability_type` is nullable and comes straight from
+    # optional XML, so filtering strictly to MortgageLoan dropped a row that MATCHES the statement's
+    # lender while OTHER typed rows kept the stated list non-empty — the "no stated side" abstain then
+    # did not fire and a disclosed obligation was reported UNDISCLOSED. HELOC is the real-world instance:
+    # the catalog has no HELOC statement type, so a HELOC servicer's statement classifies as
+    # mortgage_statement while the HELOC liability is typed something this filter excluded.
+    # Keeping untyped rows only widens what can MATCH; a match still requires the holder names to agree.
     return [
         row
         for _, row in sorted(rows.items(), key=lambda kv: (len(kv[0]), kv[0]))
-        if row.get("type", "").casefold().replace(" ", "") == _REO_STATED_MORTGAGE_TYPE
+        if row.get("type", "").casefold().replace(" ", "") in (_REO_STATED_MORTGAGE_TYPE, "")
     ]
+
+
+def _mortgage_statement_entries(snapshot: Snapshot) -> list[DocumentEntry]:
+    """Every mortgage statement on the file — the set the one-to-one pairing check counts against."""
+    if snapshot.documents.absent:
+        return []
+    return [e for e in snapshot.documents.entries if e.document_type == _REO_STATEMENT_DOC_TYPE]
 
 
 def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _StatementMatch:
@@ -3495,11 +3513,51 @@ def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _Statement
             statement_payment,
             statement_escrow,
         )
+    if not matches and any(not row.get("holder_name") for row in stated):
+        # A NAMELESS STATED ROW IS NOT EVIDENCE OF ABSENCE (reported finding). holder_name is nullable
+        # and mismo_section emits it only when the XML carries it, so the walrus filter above drops such
+        # rows from `matches` and control fell through to "unmatched" — reporting "does not correspond to
+        # any mortgage liability stated on the application" about an application that DOES state one, we
+        # simply cannot compare names. This is the symmetric case of the abstain directly above, and the
+        # lesson this ticket itself recorded: a negative search on ONE side does not close a
+        # cross-source rule.
+        return _StatementMatch(
+            _UNKNOWN,
+            f"the application states a mortgage liability with no holder name, so this statement's "
+            f"lender ({lender!r}) cannot be reconciled against it either way",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
     if not matches:
         return _StatementMatch(
             "unmatched",
             f"no mortgage liability stated on the application names a holder matching this statement's "
             f"lender ({lender!r})",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    # ONE-TO-ONE, BOTH WAYS (reported finding). The guard above covers one statement matching MANY
+    # stated liabilities; nothing covered MANY STATEMENTS matching ONE. The matcher runs per statement, so
+    # two statements from the same servicer — a first at 1450 and a second at 310, which the comments
+    # themselves call ordinary — BOTH matched the single stated liability and BOTH returned satisfied,
+    # clearing the genuinely undisclosed second lien; DT-6 then compared the 310 statement against the
+    # 1450 stated payment and also read "covered". Both rules auto-ship with no ratification, so that
+    # satisfied is the verdict nobody re-reads. When the file carries more mortgage statements naming
+    # this lender than the application states liabilities for it, the pairing is undetermined — abstain.
+    competing = [
+        other
+        for other in _mortgage_statement_entries(snapshot)
+        if (other_lender := _entry_text(other, "lender_name"))
+        and _lender_names_agree(_normalise_lender_name(other_lender), lender_tokens)
+    ]
+    if len(competing) > len(matches):
+        return _StatementMatch(
+            _UNKNOWN,
+            f"the file carries {len(competing)} mortgage statements naming {lender!r} but the "
+            f"application states {len(matches)} liability for it — which statement corresponds to the "
+            "stated obligation cannot be determined, so neither is read as disclosed or undisclosed",
             None,
             statement_payment,
             statement_escrow,
@@ -3704,21 +3762,26 @@ def _loe_is_explanation_letter(
 
     if not isinstance(subject_raw, DocumentEntry):
         return None, "not a document subject"
-    if subject_raw.document_type is None:
+    doc_type = subject_raw.document_type
+    if doc_type is None or doc_type == _UNKNOWN_DOC_TYPE:
         # An UNCLASSIFIED document cannot be declared "not a letter" — fail closed to unknown so the
         # applicability layer couldnt_checks it rather than skipping a letter nobody typed.
+        # THE SENTINEL IS THE SLUG "unknown", NOT None (reported finding). classification.py stores
+        # document_type="unknown" both when the model is unsure AND when the call never completed
+        # (infra_failure), so checking only None let the real production shape fall through to the
+        # confident "no" branch — rendering "this document is a unknown, not an explanation letter", the
+        # exact fail-open this comment forbids. RE-1/DT-6 read the same value through the enumerator,
+        # which maps it correctly, so LF-6T3N's four unclassified documents couldnt_check'd for them and
+        # not_applicable'd here — the split that exposed it.
         return (
             _UNKNOWN,
             "this document has no classified type, so it cannot be ruled out as a letter",
         )
-    if subject_raw.document_type in _LOE_DOC_TYPES:
+    if doc_type in _LOE_DOC_TYPES:
         return "yes", (
-            f"this document is a {document_label(subject_raw.document_type)}, one of the explanation-"
-            "letter types"
+            f"this document is a {document_label(doc_type)}, one of the explanation-letter types"
         )
-    return "no", (
-        f"this document is a {document_label(subject_raw.document_type)}, not an explanation letter"
-    )
+    return "no", f"this document is a {document_label(doc_type)}, not an explanation letter"
 
 
 def _loe_completeness(

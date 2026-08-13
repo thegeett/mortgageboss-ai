@@ -14,7 +14,7 @@
 # MISMO fact in this system states (LP-495a Phase A searched the extractor schemas, the raw source tree,
 # the MISMO projection AND the database). `property.is_retained_reo` and `property.retained_pitia` remain
 # VOCABULARY ORPHANS with no producer, and THIS RULE DOES NOT READ THEM — pinned by
-# test_lp495a_retention_tags_unwired.py, exactly as CO-1's test pins `property.is_warrantable_condo`.
+# test_reo_reconciliation_lp495a.py::test_retention_tags_are_not_wired_into_either_rule, exactly as CO-1's test pins `property.is_warrantable_condo`.
 # A rule that inferred retention would put a PITIA into the DTI for a property under contract and fail a
 # qualified borrower — which is why RE-2 stays dropped (it asserted a CONSEQUENCE from the inference;
 # this surfaces a DISCREPANCY — different acts).
