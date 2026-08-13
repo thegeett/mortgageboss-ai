@@ -468,3 +468,63 @@ per commitment on every file regardless of the answer.
 That is the safety design (an AI verdict never auto-ships), and it is what lets these rules go live on an
 unmeasured tag. But it is a real load on the processor. **Is a "confirm this is fine" item acceptable, or
 should a confident clean answer resolve silently?** The second needs the tag measured first.
+
+---
+
+## 13. From LP-492 (appraisal: PR-2 · PR-3 · PR-4 · PR-5 · PR-7)
+
+### 13a. ⚠️ Should a value shortfall FIRE, or flag?
+
+PR-2 **fires** when the appraisal comes in below the contract price. I chose that over `needs_review`
+(which IH-2 and TI-1 use) because a shortfall is not ambiguous the way a name difference is: the number
+is the number, and it has a definite consequence — cash, a renegotiation, or a rebuttal.
+
+**Question: is that how a processor wants it?** A low appraisal is extremely common on some files, and
+if it is routine in your work it may belong as a flag rather than a defect.
+
+### 13b. ⚠️ Is an appraisal address mismatch usually a real defect?
+
+PR-7 **fires** on a mismatch. PC-3 — the same comparison for the purchase contract — routes ITS mismatch
+to `needs_review`, on the reasoning that the canonicaliser does not resolve every surface form (a unit
+designator is the known case, ADR-325).
+
+**I made them differ deliberately**: PC-3's mismatch means two documents disagree; PR-7's means the
+value in the file may belong to another property. **Question: is that the right split, or should both
+behave the same way?**
+
+### 13c. Freddie's stricter condition standard is unbranchable
+
+Fannie: C1–C5 eligible as-is, C6 ineligible, repair to a minimum of **C5**. Freddie: C5 **and** C6
+ineligible, repair to at least **C4**. **The agency axis does not exist as a fact on any file** (LP-501),
+so PR-5 encodes Fannie's standard only.
+
+**Question: do your files ever go to Freddie?** If so we need a field that says which, or PR-5 will be
+wrong on those loans.
+
+### 13d. ⚠️ The UAD 2.6 → 3.6 cutover (Nov 2026)
+
+Both real appraisals are 2.6-era ("9/2011", "9/2011 (Updated 1/2014)") and spell the condition rating
+"C4" / "C3". The 3.6 layout may spell it differently. PR-5's vocabulary is closed and **abstains** on
+anything unrecognised, so the failure mode is `couldnt_check` rather than a wrong answer — but **every
+appraisal rule may quietly stop resolving after the cutover.**
+
+**Question: when do you expect 3.6 documents to start arriving?** That dates the extraction work.
+
+### 13e. What list of property types is actually eligible?
+
+PR-3 carries **no allow-list** — none was obtainable, and inventing one would fire on ordinary
+properties. It surfaces a type it cannot place instead. **Question: what is the real list for your
+programmes**, particularly around manufactured homes, condotels, co-ops and mixed-use?
+
+### 13f. ⚠️ PR-8 was dropped — where would a disaster declaration come from?
+
+A disaster-area reinspection needs a FEMA declaration. **No field in any of the 121 schema specs, and
+nothing in MISMO, states one** — it is external data. **Question: how do you learn today that a property
+is in a declared disaster area?** If it arrives as a document or a lender notice, PR-8 becomes buildable.
+
+### 13g. An LTV rounding divergence, reported
+
+Fannie **B2-1.2-01** (06/01/2022) requires the LTV result to be *"truncated to two decimal places, then
+rounded up to the nearest whole percent."* Our `ltv.py` rounds **half-up to two decimals**. It affects
+MI-1 and PR-1 rather than PR-2, and it can move a borderline file across the 80% line.
+**Question: worth fixing before more LTV consumers land?**

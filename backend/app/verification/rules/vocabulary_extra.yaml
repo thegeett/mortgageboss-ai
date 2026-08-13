@@ -832,3 +832,86 @@ tags:
       TI-6's judgment on the chain: clean, a rapid transfer worth review, a break in the chain, or too
       little history to say.
     produced_by: AI
+
+  # --- LP-492 — PR-2's gap. --------------------------------------------------------------------------- #
+  property.value_vs_price_gap:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Appraised value minus the purchase price, in dollars. NEGATIVE means the appraisal came in BELOW
+      contract and the borrower must cover the difference. "unknown" when either side is missing — never
+      0, which would read as an exact match.
+      ⚠️ Takes the LOWEST appraised value when a file carries several appraisals (LP-488's finding: the
+      first version of that reader took whichever subject iterated first).
+    produced_by: derived
+
+  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. ⚠️ Every rule reading an AI tag here is INERT until its own
+  #     derivation; the two DERIVED tags below carry no model and activate their rules directly. ------- #
+  property.condition_rating_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The appraisal's UAD condition rating exactly as extracted ("C4", "C3" on the two real appraisals).
+      ⚠️ RAW — PR-5 reads the normalised tag, because UAD 3.6 may spell these differently from 2.6.
+    produced_by: parsed
+  property.condition_rating:
+    entity: doc
+    value_type: enum
+    allowed_values: ["C1", "C2", "C3", "C4", "C5", "C6", "unknown"]
+    description: >-
+      The condition rating normalised to C1-C6 against a declared closed vocabulary (ADR-376), or
+      "unknown" for anything unrecognised. ⚠️ An equality against one UAD layout's spelling is the
+      `is_disputed` mistake — the two real appraisals are both UAD 2.6-era ("9/2011"), and the 3.6
+      cutover in Nov 2026 may change the surface form.
+    produced_by: derived
+  property.appraisal_completion_condition:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      Whether the appraisal is "as is" or made "subject to" repairs, alterations or completion. Both real
+      appraisals read "As is" / "as is" — case varies, so PR-4's judgment normalises rather than compares.
+    produced_by: parsed
+  property.appraisal_property_type:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The property type the APPRAISER states ("Condominium", "Condominium Unit" on the two real
+      appraisals — free text, not a controlled list). PR-3 judges it against the programme's eligible
+      types and against the file's own property.type.
+    produced_by: parsed
+  property.appraisal_address_match:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the appraisal's subject-property address match the loan file's (MISMO) subject-property
+      address? Derived by the SAME deterministic canonicalisers PC-3 uses (street suffixes, US state
+      names, ZIP+4 → ZIP5) — no fuzzy matcher. ⚠️ Reads the MISMO SUBJECT address only, never a
+      borrower's current_address (which the parser can fill with a MAILING address).
+    produced_by: derived
+  property.appraisal_eligibility:
+    entity: doc
+    value_type: enum
+    allowed_values: ["eligible", "ineligible", "needs_review", "unknown"]
+    description: PR-3's judgment on whether the appraised property type is eligible for the programme.
+    produced_by: AI
+  property.appraisal_completeness:
+    entity: doc
+    value_type: enum
+    allowed_values: ["complete", "subject_to", "incomplete", "unknown"]
+    description: >-
+      PR-4's judgment on whether the appraisal is a FINAL report or is made "subject to" repairs,
+      alterations or completion — i.e. not yet a final value.
+    produced_by: AI
+  property.condition_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["eligible_as_is", "requires_repair", "unknown"]
+    description: >-
+      PR-5's judgment on the condition rating against the agency requirement. ⚠️ ONLY C6 is ineligible;
+      C1-C5 are eligible "as is" (Fannie B4-1.3-06).
+    produced_by: AI

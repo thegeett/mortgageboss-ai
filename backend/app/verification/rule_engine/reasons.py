@@ -70,6 +70,13 @@ _FACT_LABELS: dict[str, str] = {
     "title.chain_transfer_count": "number of transfers in the chain of title",  # TI-6
     "title.chain_has_gap": "continuity of the chain of title",  # TI-6
     "title.chain_shortest_interval_days": "shortest interval between transfers",  # TI-6
+    "property.value_vs_price_gap": "appraised value against the purchase price",  # PR-2 (LP-492)
+    "loan.purpose": "loan purpose (purchase or refinance)",  # PR-2's applicability predicate (LP-492)
+    "property.condition_rating": "appraisal's condition rating",  # PR-5 (LP-492)
+    "property.condition_rating_raw": "appraisal's condition rating",  # PR-5
+    "property.appraisal_address_match": "property address on the appraisal",  # PR-7 (LP-492)
+    "property.appraisal_completion_condition": "whether the appraisal is made subject to repairs",  # PR-4
+    "property.appraisal_property_type": "property type stated on the appraisal",  # PR-3
     "aus.recommendation": "AUS recommendation",  # AU-3 (LP-488)
     "credit.inquiry_explained": "credit inquiries and their explanations",  # CR-5 (LP-490)
     "liab.derogatory_type": "type of derogatory credit event",  # CR-6 (LP-490)

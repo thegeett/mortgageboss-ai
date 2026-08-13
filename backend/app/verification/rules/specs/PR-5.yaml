@@ -1,0 +1,109 @@
+# PR-5 — Appraisal condition rating — AI JUDGMENT rule SPEC (LP-492).
+#
+# ⚠️ THE TICKET'S RULE TABLE HAD PR-3 AND PR-5 SWAPPED. It assigned the C1-C6 research to PR-3 and called
+# PR-5 "are repairs required". `rule_kinds.csv` — the gate of record — says PR-5 is "Appraisal condition
+# rating (Detect C5/C6/repairs)" and PR-3 is "Property type eligibility". The research is applied HERE,
+# where the catalog puts it. Reported rather than silently followed.
+#
+# ⚠️ ONLY C6 IS A FINDING. C1-C5 ARE ELIGIBLE "AS IS". The ticket flagged an earlier draft that said "C5
+# and C6 generally require repairs" and called it wrong — it is, and encoding a C5 threshold would fire
+# on a common, perfectly eligible property. A test pins C5 → eligible.
+#
+# ⚠️ THE REMEDY IS A RESULTING MINIMUM OF C5, NOT C4. Freddie is stricter (C5 and C6 both ineligible,
+# repair to at least C4) — tier S, and the Fannie-vs-Freddie axis DOES NOT EXIST AS A FACT (LP-501), so
+# there is nothing to branch on. Not branched. Logged for Priya.
+#
+# ⚠️ THE RATING VOCABULARY IS CLOSED AND ABSTAINS (ADR-376). Both real appraisals are UAD 2.6-era
+# ("9/2011") spelling it "C4" / "C3". The UAD 3.6 cutover lands Nov 2026 and may change the surface form;
+# an equality against one layout is the `is_disputed` mistake. Anything unrecognised → unknown.
+#
+# ⚠️ n=2, AND NEITHER IS A FINDING. The corpus holds C4 and C3 — both eligible. The C6 path has never
+# been observed; it is built against the guideline.
+
+rule_id: PR-5
+name: Appraisal condition rating
+category: Property
+
+kind: judgmental            # must equal rule_kinds.csv (PR-5 = judgmental, ai_judgment)
+numeric_check: false
+
+criteria: >-
+  A property rated C6 is not eligible for sale to Fannie Mae; deficiencies affecting safety, soundness or
+  structural integrity must be repaired to a resulting minimum rating of C5, and the appraisal completed
+  "subject to" that work. Ratings C1 through C5 are eligible in "as is" condition. A rating that cannot
+  be read resolves to couldnt_check rather than being guessed.
+
+applicability:
+  scope: each appraisal in the file
+  trigger: Any appraisal document. One stating no readable condition rating couldnt_checks.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    # ⚠️ PROVENANCE TIER P — VERIFIED against the live page in this session (2026-08-13), not taken on
+    # trust: Fannie Mae Selling Guide B4-1.3-06, "Property Condition and Quality of Construction of the
+    # Improvements", page dated 06/04/2025.
+    #   "Properties with condition ratings C1, C2, C3, C4, and C5 are eligible in as is condition."
+    #   "Loans secured by properties with a condition rating of C6 are not eligible for sale to Fannie
+    #    Mae. Any deficiencies impacting the safety, soundness, or structural integrity of the property
+    #    must be repaired with a resulting minimum condition rating of C5 prior to sale."
+    # ⚠️ FREDDIE IS STRICTER (C5 and C6 both ineligible, repair to C4) — TIER S, and unbranchable: the
+    # agency axis is not a fact on any file (LP-501). Logged for Priya, not encoded.
+    ineligible_rating: "C6"
+    minimum_rating_after_repair: "C5"
+    eligible_as_is_ratings: "C1|C2|C3|C4|C5"
+  guideline_text: >-
+    Properties with condition ratings C1 through C5 are eligible in "as is" condition. A property rated
+    C6 is not eligible for sale; deficiencies impacting safety, soundness or structural integrity must be
+    repaired to a resulting minimum condition rating of C5, and an initial C6 requires the appraisal to
+    be completed "subject to" completion of the deficient items.
+
+required_inputs:
+  - name: condition_rating
+    snapshot_path: 'tags.by_subject[<appraisal content_id>]["property.condition_rating"]'
+    description: >-
+      the UAD rating normalised to C1-C6 (derived, LP-492), or "unknown" for anything outside that closed
+      vocabulary.
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The condition rating exactly as the appraisal states it, and whether the report is "as is" or subject
+  to completion.
+
+guideline_reference: "Fannie Mae Selling Guide B4-1.3-06 (page dated 06/04/2025) — C1 through C5 are eligible in as is condition; C6 is not eligible for sale, and deficiencies must be repaired to a resulting minimum rating of C5."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: appraisal
+  load_bearing_tags: [property.condition_rating]
+  reasoned_over: [property.condition_rating, property.appraisal_completion_condition]
+  output_tag: property.condition_assessment
+  value_domain: ["eligible_as_is", "requires_repair", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor judging an appraisal's UAD CONDITION RATING against the
+    agency requirement. You reason ONLY over the structured facts given.
+
+    ⚠️ THE RULE IS NARROW AND THE MOST LIKELY ERROR IS FIRING TOO EARLY:
+    - "eligible_as_is" — the rating is C1, C2, C3, C4 OR **C5**. All five are eligible in as-is
+      condition. ⚠️ C5 IS ELIGIBLE. Do not treat C5 as requiring repair; that is a common and expensive
+      mistake, and C5 properties are ordinary.
+    - "requires_repair" — the rating is **C6**, and only C6. A C6 property is not eligible for sale until
+      the deficiencies affecting safety, soundness or structural integrity are repaired to a resulting
+      minimum rating of C5, with the appraisal completed "subject to" that work.
+    - "unknown" — the rating is not one of C1-C6, or is missing. Do NOT guess a rating from the
+      completion condition or from prose.
+
+    BE HONEST. "unknown" is a correct, expected answer. Cite the facts you relied on.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "eligible_as_is|requires_repair|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>"}
+
+spec_version: 1

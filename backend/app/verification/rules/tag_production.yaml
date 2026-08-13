@@ -348,6 +348,15 @@ tags:
   title.chain_transfer_count: {mode: derived, subject: document, data: title_chain_transfer_count}
   title.chain_has_gap: {mode: derived, subject: document, data: title_chain_has_gap}
   title.chain_shortest_interval_days: {mode: derived, subject: document, data: title_chain_shortest_interval}
+  # --- LP-492 — PR-2. Reads the ALREADY-DECLARED property.appraised_value (LP-488) and
+  #     property.purchase_price (MISMO), so the two sides come from TWO DOCUMENTS — not a vacuity.
+  property.value_vs_price_gap: {mode: derived, subject: loan, data: property_value_vs_price_gap}
+  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. ⚠️ Every parsed tag document_type-scoped to `appraisal`. ---
+  property.condition_rating_raw: {mode: parsed, subject: document, data: condition_rating, document_type: appraisal}
+  property.condition_rating: {mode: derived, subject: document, data: property_condition_rating}
+  property.appraisal_completion_condition: {mode: parsed, subject: document, data: appraisal_completion_condition, document_type: appraisal}
+  property.appraisal_property_type: {mode: parsed, subject: document, data: property_type, document_type: appraisal}
+  property.appraisal_address_match: {mode: derived, subject: document, data: property_appraisal_address_match}
 
   # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
   #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —

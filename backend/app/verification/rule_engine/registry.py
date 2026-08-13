@@ -268,6 +268,14 @@ _LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 # judgment rule collapses to needs_review, so they show pipeline stability rather than judgment stability.
 _LP491_ACTIVATED: tuple[str, ...] = ("TI-1", "TI-2", "TI-6")
 
+# LP-492 — the appraisal lane. PR-2 is deterministic (no model in its chain), so it activates on
+# input_resolves alone. ⚠️ PR-8 is DROPPED, not deferred: a disaster-area reinspection needs a FEMA
+# declaration, and no field in any of the 121 schema specs — nor MISMO — states one. CR-3's shape.
+# PR-7 joins PR-2 on the deterministic route (PC-3's precedent — a catalog ai_fuzzy_match row with a
+# deterministic body; no edit needed). PR-3/PR-4/PR-5 activate on ratify-pending. ⚠️ Their rates are the
+# WEAKEST in any cohort: n=2 with a SINGLE-VERDICT spread, so they show pipeline stability, not judgment.
+_LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -294,6 +302,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP488_ACTIVATED,
     *_LP490A_ACTIVATED,
     *_LP491_ACTIVATED,
+    *_LP492_ACTIVATED,
 )
 
 

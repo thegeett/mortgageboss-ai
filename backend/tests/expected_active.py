@@ -33,6 +33,9 @@ from __future__ import annotations
 # substitute, ADR-378; NOT a measured accuracy) -> 55.
 # LP-491 (+TI-1 — title commitment parties; a CATALOG EDIT to deterministic_only, so no model in its
 # chain and no self-consistency rate needed) -> 55.
-EXPECTED_ACTIVE_RULE_COUNT: int = 55
+# LP-492 (+PR-2 — appraised value vs purchase price; deterministic, no model in its chain) -> 56.
+# LP-492 (+PR-7 deterministic; +PR-3/PR-4/PR-5 ratify-pending. ⚠️ PR-8 DROPPED — no FEMA/disaster field
+# exists in any of the 121 schema specs or MISMO, so its trigger is unstateable: CR-3's shape) -> 60.
+EXPECTED_ACTIVE_RULE_COUNT: int = 60
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

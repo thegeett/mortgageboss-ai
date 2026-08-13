@@ -139,6 +139,13 @@ _LOAN_TI1_PURCHASE_MISMATCH = UUID("95000000-0000-4000-8000-000000000041")
 _LOAN_TI1_REFI_MATCH = UUID("95000000-0000-4000-8000-000000000042")
 _LOAN_TI1_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000043")
 _LOAN_TI1_SECOND_OWNER = UUID("95000000-0000-4000-8000-000000000044")
+# LP-492 — PR-2 (appraised value vs purchase price).
+_LOAN_PR2_SUPPORTS = UUID("95000000-0000-4000-8000-000000000050")
+_LOAN_PR2_SHORTFALL = UUID("95000000-0000-4000-8000-000000000051")
+_LOAN_PR2_TWO_APPRAISALS = UUID("95000000-0000-4000-8000-000000000052")
+_LOAN_PR2_REFINANCE = UUID("95000000-0000-4000-8000-000000000053")
+_LOAN_PR2_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000054")
+_LOAN_PR2_NO_PRICE = UUID("95000000-0000-4000-8000-000000000055")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1375,6 +1382,78 @@ def build_ti1_second_owner_match_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-492 — PR-2. The appraised value comes from the APPRAISAL, the price from MISMO — two documents.
+# --------------------------------------------------------------------------- #
+def _appraisal_doc(cid: str, value: str) -> DocumentEntry:
+    return _doc(cid, "appraisal", appraised_value=value, appraisal_effective_date="2026-06-01")
+
+
+def _pr2_mismo(purpose: str | None, price: str | None) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if purpose is not None:
+        facts["loan.purpose"] = _f(purpose)
+    if price is not None:
+        facts["property.purchase_price"] = _f(price)
+    return facts
+
+
+def build_pr2_value_supports_price_snapshot() -> Snapshot:
+    """A $410,000 appraisal on a $400,000 purchase → PR-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_PR2_SUPPORTS,
+        [_appraisal_doc("95-ap-ok", "410000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_shortfall_snapshot() -> Snapshot:
+    """A $380,000 appraisal on a $400,000 purchase → PR-2 FIRED: a $20,000 cash gap."""
+    return _snapshot(
+        _LOAN_PR2_SHORTFALL,
+        [_appraisal_doc("95-ap-low", "380000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_two_appraisals_snapshot() -> Snapshot:
+    """⚠️ TWO APPRAISALS — the LP-488 defect shape. $410,000 and $380,000 on a $400,000 purchase. The
+    LOWEST must drive the gap (-20,000 → fired); taking the first-iterated could give +10,000 →
+    satisfied, silently clearing a real shortfall."""
+    return _snapshot(
+        _LOAN_PR2_TWO_APPRAISALS,
+        [_appraisal_doc("95-ap-high", "410000.00"), _appraisal_doc("95-ap-low2", "380000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_refinance_snapshot() -> Snapshot:
+    """A refinance has no contract price → PR-2 NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_PR2_REFINANCE,
+        [_appraisal_doc("95-ap-refi", "380000.00")],
+        _pr2_mismo("refinance", None),
+    )
+
+
+def build_pr2_no_purpose_snapshot() -> Snapshot:
+    """⚠️ The same shortfall with NO stated purpose → COULDNT_CHECK, never silently skipped."""
+    return _snapshot(
+        _LOAN_PR2_NO_PURPOSE,
+        [_appraisal_doc("95-ap-np", "380000.00")],
+        _pr2_mismo(None, "400000.00"),
+    )
+
+
+def build_pr2_no_price_snapshot() -> Snapshot:
+    """A purchase with an appraisal but NO stated price → COULDNT_CHECK, never satisfied."""
+    return _snapshot(
+        _LOAN_PR2_NO_PRICE,
+        [_appraisal_doc("95-ap-nopx", "380000.00")],
+        _pr2_mismo("purchase", None),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1430,6 +1509,12 @@ __all__ = [
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",
+    "build_pr2_no_price_snapshot",
+    "build_pr2_no_purpose_snapshot",
+    "build_pr2_refinance_snapshot",
+    "build_pr2_shortfall_snapshot",
+    "build_pr2_two_appraisals_snapshot",
+    "build_pr2_value_supports_price_snapshot",
     "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",

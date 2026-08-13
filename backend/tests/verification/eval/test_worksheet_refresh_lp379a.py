@@ -222,6 +222,11 @@ def test_no_rule_activation_changed() -> None:
             "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
             "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
             "TI-6",  # LP-491 — ratify-pending
+            "PR-2",  # LP-492 — appraised value vs purchase price (deterministic)
+            "PR-7",  # LP-492 — appraisal address match (deterministic, PC-3's precedent)
+            "PR-3",  # LP-492 — property type eligibility (ratify-pending)
+            "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
+            "PR-5",  # LP-492 — condition rating (ratify-pending)
         )
     )
 

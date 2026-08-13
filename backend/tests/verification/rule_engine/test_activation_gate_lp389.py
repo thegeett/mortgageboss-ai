@@ -61,6 +61,11 @@ _ACTIVATED = frozenset(
         "IN-4",
         "TI-2",  # LP-491 — ratify-pending
         "TI-6",  # LP-491 — ratify-pending
+        "PR-2",  # LP-492 — appraised value vs purchase price
+        "PR-3",  # LP-492
+        "PR-4",  # LP-492
+        "PR-5",  # LP-492
+        "PR-7",  # LP-492
         "AS-10",
         "AS-2",
         "AS-12",
@@ -157,7 +162,12 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PC-2",
         "PC-3",
         "PC-7",
+        "PR-2",  # LP-492 (sorts before PR-6)
+        "PR-3",  # LP-492
+        "PR-4",  # LP-492
+        "PR-5",  # LP-492
         "PR-6",
+        "PR-7",  # LP-492 (sorts after PR-6)
         "TI-1",  # LP-491 (sorts last)
         "TI-2",  # LP-491 (ratify-pending)
         "TI-6",  # LP-491 (ratify-pending)

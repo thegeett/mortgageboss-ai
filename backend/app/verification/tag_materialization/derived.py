@@ -2764,6 +2764,105 @@ def _title_chain_shortest_interval(
     ), f"the shortest interval between consecutive transfers is {shortest} day(s)"
 
 
+def _property_value_vs_price_gap(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.value_vs_price_gap — appraised value minus purchase price (PR-2, LP-492).
+
+    ⚠️ NOT A VACUITY (ADR-330), traced in Phase A. The appraised value comes from the APPRAISAL
+    (`property.appraised_value`, document-scoped) and the price from the MISMO loan file
+    (`property.purchase_price`) — two documents. The appraisal's own `contract_price_stated` field is
+    deliberately NOT used: it fills on 1 of the 2 real appraisals, and reading it would make PR-2 compare
+    the appraisal against itself, which is DT-4's fate.
+
+    ⚠️ TAKES THE LOWEST APPRAISED VALUE (LP-488). A file carrying an original plus a replacement
+    appraisal otherwise gets whichever subject iterated first — an arbitrary answer on an ordinary file
+    shape. The conservative pick is the lowest: it makes the shortfall larger, and PR-2's costly error is
+    missing one.
+    """
+    appraised = _conservative_appraised_value(snapshot)
+    if appraised is None:
+        return _UNKNOWN, "no appraisal in the file states an appraised value"
+    price = _first_loan_decimal(snapshot, "property.purchase_price")
+    if price is None or price <= 0:
+        return _UNKNOWN, "the file states no purchase price to compare the appraised value against"
+    gap = appraised - price
+    return str(gap), (
+        f"the appraised value ({appraised}) is {'above' if gap >= 0 else 'BELOW'} the purchase price "
+        f"({price}) by {abs(gap)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-492 — PR-5's condition rating and PR-7's address match.
+#
+# ⚠️ THE CONDITION VOCABULARY IS CLOSED AND ABSTAINS (ADR-376). Both real appraisals are UAD 2.6-era
+# ("9/2011", "9/2011 (Updated 1/2014)") and spell the rating "C4" / "C3". The UAD 3.6 cutover lands in
+# Nov 2026 and MAY spell it differently; an equality against one layout is the `is_disputed` mistake, so
+# anything unrecognised resolves to "unknown" and the rule couldnt_checks rather than guessing.
+# --------------------------------------------------------------------------- #
+
+_CONDITION_RATINGS: tuple[str, ...] = ("c1", "c2", "c3", "c4", "c5", "c6")
+
+
+def _property_condition_rating(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """property.condition_rating — the UAD rating normalised to C1-C6 (PR-5, LP-492)."""
+    if not isinstance(subject_raw, DocumentEntry) or subject_raw.document_type != "appraisal":
+        return None, "not an appraisal — no condition-rating tag"
+    field = subject_raw.fields.get("condition_rating")
+    raw = field.value if isinstance(field, Field) and field.is_present else None
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "this appraisal states no condition rating"
+    text = _WS.sub("", str(raw)).strip().casefold()
+    if text in _CONDITION_RATINGS:
+        return (
+            text.upper(),
+            f"the appraisal's condition rating is {text.upper()} (stated: {str(raw)!r})",
+        )
+    return _UNKNOWN, (
+        f"the condition rating reads {str(raw)!r}, which is not one of C1-C6 — abstaining rather than "
+        "inferring (the UAD 3.6 layout may spell it differently from the 2.6 forms in our corpus)"
+    )
+
+
+def _property_appraisal_address_match(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """property.appraisal_address_match — does THIS appraisal's subject address match the file's? (PR-7)
+
+    ⚠️ Mirrors PC-3's `_property_address_match` and REUSES its canonicalisers (`_norm_address`: street
+    suffixes, US state names, ZIP+4 → ZIP5) rather than cloning them — no fuzzy matcher, so this is a
+    deterministic compare and PR-7 carries no model.
+
+    ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1, and the ticket names it again). Reads the MISMO
+    SUBJECT-property address only — never a borrower's `current_address`, which the parser can fill with
+    a MAILING address. A file lacking a COMPLETE subject address (line + city + state + postal) resolves
+    to unknown, never a comparison against a partial or wrong-typed address.
+    """
+    if not isinstance(subject_raw, DocumentEntry) or subject_raw.document_type != "appraisal":
+        return None, "not an appraisal — no address-match tag"
+    field = subject_raw.fields.get("subject_property_address")
+    raw = field.value if isinstance(field, Field) and field.is_present else None
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "this appraisal states no subject-property address"
+    line, line2, city, state, postal = (
+        _mismo_str(snapshot, k) for k in _MISMO_PROPERTY_ADDRESS_KEYS
+    )
+    if not (line and city and state and postal):
+        return _UNKNOWN, (
+            "the loan file states no complete subject-property address (street, city, state and postal "
+            "code are all required), so the appraisal's address is not compared against a partial one"
+        )
+    mismo_raw = " ".join(part for part in (line, line2, city, state, postal) if part)
+    if _norm_address(str(raw)) == _norm_address(mismo_raw):
+        return "yes", f"the appraisal's subject address matches the loan file's ({str(raw)!r})"
+    return "no", (
+        f"the appraisal's subject address ({str(raw)!r}) does not match the loan file's ({mismo_raw!r})"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -3474,6 +3573,9 @@ _RECIPES: dict[str, Recipe] = {
     "title_chain_transfer_count": _title_chain_transfer_count,  # LP-491 — TI-6
     "title_chain_has_gap": _title_chain_has_gap,  # LP-491 — TI-6
     "title_chain_shortest_interval": _title_chain_shortest_interval,  # LP-491 — TI-6
+    "property_value_vs_price_gap": _property_value_vs_price_gap,  # LP-492 — PR-2
+    "property_condition_rating": _property_condition_rating,  # LP-492 — PR-5
+    "property_appraisal_address_match": _property_appraisal_address_match,  # LP-492 — PR-7
     "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
     "derogatory_months_elapsed": _derogatory_months_elapsed,  # LP-490 — CR-6
     "collection_aggregate_balance": _collection_aggregate_balance,

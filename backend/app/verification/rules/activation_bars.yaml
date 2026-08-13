@@ -1396,3 +1396,115 @@ TI-6:
     commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE consecutive pair exists anywhere to test
     continuity against, and the rapid-transfer signal has never been observed. Deterministic code
     computes the count, the continuity check and the shortest interval; only the meaning is judged.
+
+# --------------------------------------------------------------------------- #
+# LP-492 — PR-2 (appraised value vs purchase price). Deterministic: no AI tag in the chain, so no
+# self-consistency run and no ratification — it activates on `no-ai-dependency`.
+#
+# ⚠️ `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning: the inputs are declared, their
+# extraction fields exist, and the producer resolves them on real stored data (appraised_value 2/2 on the
+# real appraisals; property.purchase_price is a MISMO fact already declared at LP-488).
+PR-2:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a value shortfall clears -> the file reaches underwriting with the wrong loan amount and the
+    borrower discovers the cash gap at the table) >> FP (a processor confirms two numbers). ⚠️ The
+    LOWEST appraised value is used deliberately: on a file with an original plus a replacement appraisal
+    the lowest makes the shortfall larger, and missing a shortfall is the costly direction.
+  rationale: >-
+    No AI tag and no threshold — zero is a comparison boundary, not a domain number (the AS-3 / CL-1
+    precedent). The lesser-of rule that makes a shortfall matter is cited to Fannie Mae B2-1.2-01, page
+    dated 06/01/2022, VERIFIED against the live page in this session. Not a vacuity: the appraised value
+    comes from the appraisal and the price from the MISMO loan file, two documents — the appraisal's own
+    contract_price_stated (1/2 fill) is deliberately not read.
+PR-7:
+  # ⚠️ NOT ratify-pending — no model in its chain. PR-7 follows PC-3 exactly: a catalog `ai_fuzzy_match`
+  # row whose body is a DETERMINISTIC compare (the shared _norm_address canonicalisers, no fuzzy
+  # matcher), on a no-ai-dependency bar. No catalog edit was needed, and none was made.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (an appraisal for the WRONG PROPERTY reads as matching -> the file is underwritten against a value
+    that belongs to another address) >> FP (a processor compares two addresses). ⚠️ The residual FP is a
+    surface form the canonicaliser does not resolve — a unit designator is the known case (ADR-325) —
+    which is why PC-3 routes ITS mismatch to needs_review; PR-7 fires because its consequence is larger.
+  rationale: >-
+    Deterministic, reusing PC-3's canonicalisers rather than cloning them. ⚠️ Reads the MISMO SUBJECT
+    address only — never a borrower's current_address, which the parser can fill with a MAILING address
+    (LP-407-4 D1) — and requires a COMPLETE address (street, city, state, postal) before comparing, so a
+    partial one abstains rather than half-matching.
+PR-3:
+  # ⚠️ ratify-pending (ADR-378) — activated on a SELF-CONSISTENCY rate, not a measurement.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 2
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [property.appraisal_eligibility]
+  fp_fn: >-
+    FN (an ineligible property type clears -> the loan is undeliverable) >> FP (a processor confirms a
+    condominium is a condominium). The prompt is told that WORDING differences are not disagreements —
+    "Condominium Unit" against "condo" is a match — because that is the likeliest false finding.
+  rationale: >-
+    ⚠️ THE WEAKEST RATE IN ANY COHORT SO FAR, and it is recorded rather than dressed up. n=2 — two
+    appraisals is the whole corpus — AND the verdict spread is SINGLE-VALUED (needs_review on both), so
+    the rate shows only that the pipeline is stable. It says nothing about whether the judgment is right.
+    Both real appraisals are condominiums; the ineligible path has never been observed. ⚠️ NO ALLOW-LIST
+    of eligible types was obtained (tier U) and none was invented — the rule surfaces an unplaceable type
+    instead of comparing against a fabricated list.
+PR-4:
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 2
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [property.appraisal_completeness]
+  fp_fn: >-
+    FN (a "subject to" appraisal reads as final -> the loan closes on a value conditioned on work nobody
+    verified) >> FP (a processor reads one field). The prompt is told NOT to infer subject-to from the
+    condition rating alone: only C6 requires it, and the completion condition is what states it.
+  rationale: >-
+    Same caveat as PR-3: n=2, SINGLE-VERDICT spread, so the rate measures pipeline stability only. Both
+    real appraisals read "As is" / "as is" — the subject-to path has never been observed.
+PR-5:
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 2
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [property.condition_assessment]
+  fp_fn: >-
+    ⚠️ THE FP DIRECTION IS THE ONE TO WATCH, and the prompt is built around it: firing on C5 would flag
+    an ordinary, perfectly eligible property on every such file. C1-C5 are eligible AS IS; ONLY C6 is a
+    finding (Fannie B4-1.3-06, verified 2026-08-13). The FN (a C6 read as eligible) is bounded by the
+    closed C1-C6 vocabulary, which abstains rather than guessing.
+  rationale: >-
+    Same caveat: n=2, SINGLE-VERDICT spread. The corpus holds C4 and C3 — both ELIGIBLE — so the C6 path
+    has never been observed and the rule is built against the guideline. ⚠️ The rating vocabulary is
+    closed and abstains (ADR-376): both real appraisals are UAD 2.6-era, and the 3.6 cutover in Nov 2026
+    may change the surface form. ⚠️ Freddie's stricter standard (C5 and C6 both ineligible) is NOT
+    branched — the agency axis is not a fact on any file (LP-501). Logged for Priya.
