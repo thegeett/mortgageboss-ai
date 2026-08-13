@@ -341,7 +341,19 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # reports them dormant) that was not diagnosed before this session's context ran out. Activating with
 # that unresolved would leave a red suite on a shared branch, which is the failure LP-494 warns about.
 # Flip this tuple to ("DT-7", "OC-3") once the probe interaction is understood; everything else is done.
-_LP495B_ACTIVATED: tuple[str, ...] = ()
+# DT-7 is NOT here, and the reason is the enum gap the ticket flagged in its Critical section.
+# dti.atr_factors_documented is declared enum ["complete","incomplete"] with no abstain. The prompt
+# sanctions "unknown" and ai.py coerces it to an unknown tag — but that coerced tag carries
+# confidence=None, which is exactly the fail-closed marker the orchestrator's degradation scan looks
+# for, so EVERY run in which ATR cannot be determined is marked `degraded`. Degradation is meant to
+# signal a broken pipeline, not a legitimate abstain.
+# The txn.is_nsf_or_overdraft precedent (LP-418) does NOT cover this: AS-7, the rule that reads it, is
+# INERT, so that pattern has never run through the orchestrator. I treated a written-down precedent as
+# validation without checking it had ever been exercised. DT-7 is BUILT and its rate measured; it
+# activates when the tag's declared vocabulary gains "unknown" at the next
+# docs/snapshot-fact-tags.xlsx reconciliation, since the generated fact_tags.csv cannot be hand-edited
+# and vocabulary_extra.yaml refuses to shadow an xlsx tag.
+_LP495B_ACTIVATED: tuple[str, ...] = ("OC-3",)
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).

@@ -54,6 +54,8 @@ _ACTIVATED = frozenset(
         "LO-2",
         "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
         "RE-1",
+        # LP-495b — activated on scenario-fixture self-consistency rates.
+        "OC-3",  # LP-495b (DT-7 held on the enum gap)
         "CL-1",
         "CR-13",
         "PR-6",
@@ -139,7 +141,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # disagreement, against PR-3/PR-4's n=2 single-valued 1.0. 10 -> 9 held.
     # LP-495b +OC-3 +DT-7 — both BUILT this ticket with measured self-consistency rates recorded on
     # their bars, and both HELD: activation hit an unresolved dormant-probe interaction. 9 -> 11 held.
-    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-495b — OC-3 and DT-7 LEFT the held set, activating on scenario-fixture rates. 11 -> 9.
+    # LP-495b — OC-3 LEFT the held set on a scenario-fixture rate; DT-7 JOINED it, built and measured
+    # but held because its tag enum has no abstain, so a coerced unknown marks the run degraded.
+    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -186,6 +191,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "MI-1",
         "MI-4",
         "OC-1",  # LP-495a — ratify-pending (sorts between MI-4 and PC-2)
+        "OC-3",  # LP-495b — investment rental support
         "PC-2",
         "PC-3",
         "PC-7",

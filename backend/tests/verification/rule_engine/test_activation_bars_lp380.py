@@ -342,6 +342,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "LO-2",
             "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474; tag NOT re-kinded)
             "RE-1",
+            # LP-495b — OC-3 activated on a scenario-fixture rate. DT-7 is BUILT and MEASURED but HELD:
+            # its tag enum has no abstain, so a coerced unknown marks the whole run degraded.
+            "OC-3",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -405,6 +408,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "LO-2",
             "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
             "RE-1",
+            "OC-3",  # LP-495b — ratify-pending (scenario-fixture rate)
             "CR-13",
             "PR-6",
         }

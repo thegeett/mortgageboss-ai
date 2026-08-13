@@ -1827,9 +1827,17 @@ OC-3:
   # rather than the stored corpus. No loaded loan file carries an investment occupancy, so a corpus
   # derivation would have returned the same abstain on every case and pre-rate check 3 would have
   # refused the rate. The constructed cases exercise all three branches and cost $0.06.
-  # THE RATE IS MEASURED AND RECORDED BELOW; the status is held only because activation hit an
-  # unresolved dormant-probe interaction (see registry.py). Flip to ratify-pending with these numbers.
-  status: not-calibratable-yet
+  # LP-495b — ACTIVATED on a self-consistency rate (ADR-378), derived over CONSTRUCTED scenario cases
+  # rather than the stored corpus. No loaded loan file carries this rule's trigger, so a corpus
+  # derivation would have returned the same abstain on every case and pre-rate check 3 would have
+  # refused the rate. The constructed cases exercise all three branches and cost $0.06.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 4
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: ratify
   threshold: null
   validated: false
@@ -1859,8 +1867,19 @@ OC-3:
     material (21 lease agreements, lease checks, Verification of Rent) and it is simply not attached.
 DT-7:
   # LP-495b — ACTIVATED on a self-consistency rate (ADR-378) over constructed cases, as for OC-3.
-  # THE RATE IS MEASURED AND RECORDED BELOW; the status is held only because activation hit an
-  # unresolved dormant-probe interaction (see registry.py). Flip to ratify-pending with these numbers.
+  # LP-495b — BUILT AND MEASURED, HELD ON THE ENUM GAP. Self-consistency 1.0000 over 4 constructed
+  # cases with a full three-value spread (complete / incomplete / unknown), 0 disagreements, model
+  # us.anthropic.claude-sonnet-4-5-20250929-v1:0, 2026-08-13. Those numbers are ready to use.
+  # WHY IT IS NOT ACTIVATED: dti.atr_factors_documented is declared enum ["complete","incomplete"] with
+  # no abstain. The prompt sanctions "unknown" and ai.py coerces it to an unknown tag — but a coerced
+  # tag carries confidence=None, which IS the fail-closed marker the orchestrator's degradation scan
+  # matches on, so every run where ATR cannot be determined is flagged `degraded`. Degradation is meant
+  # to mean a broken pipeline, not a legitimate abstain, and test_full_run_end_to_end catches it.
+  # The txn.is_nsf_or_overdraft precedent does NOT cover this: AS-7 is INERT, so that pattern has never
+  # run through the orchestrator. It was taken as validation without checking it had been exercised.
+  # UNBLOCKS when the declared vocabulary gains "unknown" at the next docs/snapshot-fact-tags.xlsx
+  # reconciliation — the generated fact_tags.csv cannot be hand-edited and vocabulary_extra.yaml
+  # refuses to shadow an xlsx tag, so there is no in-repo fix.
   status: not-calibratable-yet
   ships: ratify
   threshold: null

@@ -84,7 +84,7 @@ def test_active_rule_ids_unchanged() -> None:
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 
     assert (
-        len(ACTIVE_RULE_IDS) == 67
+        len(ACTIVE_RULE_IDS) == 68
     )  # LP-495a +RE-1/DT-6/LO-2  # LP-488 +MI-1  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
 
 

@@ -130,6 +130,8 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
         # LP-495a — the per-rule evaluation proof lives in
         # test_oc1_occupancy_consistency_lp495a.py::test_every_oc1_finding_carries_ratification.
         "OC-1",
+        # LP-495b — OC-3; its ratification proof is in test_oc3_investment_rental_lp495b.py.
+        "OC-3",
     }
     on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
     assert on_status == _EXPECTED_RATIFY_PENDING, (

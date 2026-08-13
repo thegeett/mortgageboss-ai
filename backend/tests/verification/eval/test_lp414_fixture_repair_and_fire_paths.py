@@ -149,13 +149,16 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # RATIFIES every verdict (ratify-pending, ADR-378).
     # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4. FOUR rules activated and no existing
     # verdict moved; none of the four clears on an absence. Any other movement would be a regression.
+    # LP-495b adds OC-3 and DT-7, both LOAN-scoped -> 838. A per-rule diff of the WHOLE distribution
+    # before and after confirms only those two rows appear and every other rule's counts are identical,
+    # so the +2 couldnt_check is the entire movement and it is intended.
     # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4 — TI-1 never clears on a missing
     # commitment, which would be a false all-clear on the document that establishes ownership.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 836
+    assert len(results) == 837
     assert (
         Counter(r.verdict.value for r in results)
         == {
@@ -165,7 +168,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             # confident "not a letter" and read not_applicable. They now abstain, which is what the
             # recipe's own comment and LO-2's spec both promised. The four move OUT of
             # not_applicable and INTO couldnt_check; nothing else changed.
-            "couldnt_check": 280,  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 281,  # LP-495b +1 — OC-3 (loan-scoped, abstains under the keyless stub; DT-7 held)  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 529,  # LP-495a review -4 (see couldnt_check above)  # LP-495a +74 — RE-1 x22 + DT-6 x22 (classified non-statement docs) + LO-2 x30 (no LOE of any type on LF-6T3N)  # +PC-8 x25 (LP-493 — the 25 classified non-contract documents)  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
@@ -222,6 +225,9 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         # so the LP-406-4 double-surface is two ratified prompts, not an auto-assertion racing a
         # ratification.
         "OC-1": "couldnt_check",
+        # LP-495b — OC-3 is loan-scoped and abstains under the keyless stub, like OC-1/OC-2. On a
+        # real run it RATIFIES every verdict (ratify-pending).
+        "OC-3": "couldnt_check",
     }
 
 
