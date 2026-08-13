@@ -125,6 +125,13 @@ _LOAN_CO1_PRESENT = UUID("95000000-0000-4000-8000-00000000002c")
 _LOAN_CO1_MISSING = UUID("95000000-0000-4000-8000-00000000002d")
 _LOAN_CO1_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000002e")
 _LOAN_CO1_EMPTY = UUID("95000000-0000-4000-8000-00000000002f")
+# LP-488 — AU-3 (AUS recommendation).
+_LOAN_AU3_LPA = UUID("95000000-0000-4000-8000-000000000030")
+_LOAN_AU3_DU = UUID("95000000-0000-4000-8000-000000000031")
+_LOAN_AU3_INELIGIBLE = UUID("95000000-0000-4000-8000-000000000032")
+_LOAN_AU3_REFER = UUID("95000000-0000-4000-8000-000000000033")
+_LOAN_AU3_UNKNOWN_VENDOR = UUID("95000000-0000-4000-8000-000000000034")
+_LOAN_AU3_NO_ELIGIBILITY = UUID("95000000-0000-4000-8000-000000000035")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1180,6 +1187,88 @@ def build_co1_empty_file_snapshot() -> Snapshot:
     return _snapshot(_LOAN_CO1_EMPTY, [], {"property.type": _f("condo")})
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — AU-3. ⚠️ THE LPA CASE IS THE REAL ONE: the single aus_findings document in the 303-document
+# corpus is an LPA whose recommendation reads "ACCEPT" and whose eligibility reads "ELIGIBLE" — neither
+# term appears in the DU-shaped catalog vocabulary. The DU fixtures below are RESEARCHED, not observed.
+# --------------------------------------------------------------------------- #
+def _aus(cid: str, *, engine: str, recommendation: str, eligibility: str | None) -> DocumentEntry:
+    fields = {
+        "aus_engine": engine,
+        "recommendation": recommendation,
+        "submission_date": "2026-07-27",
+    }
+    if eligibility is not None:
+        fields["eligibility_status"] = eligibility
+    return _doc(cid, "aus_findings", **fields)
+
+
+def build_au3_lpa_accept_snapshot() -> Snapshot:
+    """⚠️ THE REAL CORPUS CASE, verbatim: an LPA reading "ACCEPT" / "ELIGIBLE" → AU-3 SATISFIED. A rule
+    written as equality against DU's "Approve/Eligible" would have abstained on this file."""
+    return _snapshot(
+        _LOAN_AU3_LPA,
+        [_aus("95-aus-lpa", engine="LPA", recommendation="ACCEPT", eligibility="ELIGIBLE")],
+    )
+
+
+def build_au3_du_approve_eligible_snapshot() -> Snapshot:
+    """DU's own wording, where the eligibility is inside the recommendation → AU-3 SATISFIED.
+    ⚠️ RESEARCHED, not observed — no DU file exists in the corpus."""
+    return _snapshot(
+        _LOAN_AU3_DU,
+        [_aus("95-aus-du", engine="DU", recommendation="Approve/Eligible", eligibility=None)],
+    )
+
+
+def build_au3_approve_ineligible_snapshot() -> Snapshot:
+    """Approved but INELIGIBLE — the loan cannot be delivered as underwritten → AU-3 FIRED."""
+    return _snapshot(
+        _LOAN_AU3_INELIGIBLE,
+        [_aus("95-aus-inel", engine="DU", recommendation="Approve/Ineligible", eligibility=None)],
+    )
+
+
+def build_au3_refer_snapshot() -> Snapshot:
+    """A referral to manual underwriting → AU-3 NEEDS_REVIEW (a routing fact, not a failure)."""
+    return _snapshot(
+        _LOAN_AU3_REFER,
+        [
+            _aus(
+                "95-aus-refer",
+                engine="DU",
+                recommendation="Refer with Caution",
+                eligibility="Eligible",
+            )
+        ],
+    )
+
+
+def build_au3_unknown_vendor_wording_snapshot() -> Snapshot:
+    """⚠️ ADR-376's ABSTAIN. A third engine's wording nobody has taught the rule → AU-3 COULDNT_CHECK,
+    never a guessed approval."""
+    return _snapshot(
+        _LOAN_AU3_UNKNOWN_VENDOR,
+        [
+            _aus(
+                "95-aus-x",
+                engine="OtherAUS",
+                recommendation="Provisionally Cleared",
+                eligibility="OK",
+            )
+        ],
+    )
+
+
+def build_au3_approve_without_eligibility_snapshot() -> Snapshot:
+    """⚠️ An APPROVAL whose eligibility cannot be read → COULDNT_CHECK. "Approve" alone does not mean
+    deliverable, and reading it as approve_eligible would turn an unread field into a clearance."""
+    return _snapshot(
+        _LOAN_AU3_NO_ELIGIBILITY,
+        [_aus("95-aus-noelig", engine="DU", recommendation="Approve", eligibility=None)],
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1192,6 +1281,12 @@ __all__ = [
     "build_address_match_snapshot",
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
+    "build_au3_approve_ineligible_snapshot",
+    "build_au3_approve_without_eligibility_snapshot",
+    "build_au3_du_approve_eligible_snapshot",
+    "build_au3_lpa_accept_snapshot",
+    "build_au3_refer_snapshot",
+    "build_au3_unknown_vendor_wording_snapshot",
     "build_co1_empty_file_snapshot",
     "build_co1_not_condo_snapshot",
     "build_co1_questionnaire_missing_snapshot",

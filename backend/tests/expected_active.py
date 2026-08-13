@@ -27,6 +27,8 @@ from __future__ import annotations
 # LP-488 (+MI-1 — conventional MI requirement; the PROGRAM axis's first use) -> 44.
 # LP-488 (+MI-4 — FHA upfront MIP, the FHA side of the program axis) -> 45.
 # LP-488 (+CO-1 — condo questionnaire presence) -> 46.
-EXPECTED_ACTIVE_RULE_COUNT: int = 46
+# LP-488 (+AU-3 — AUS recommendation, DU/LPA closed vocabulary) -> 47. ⚠️ RE-2 was in the LP-488 cohort
+# and is DROPPED, not deferred: no REO/retained-property concept exists in MISMO or the data model.
+EXPECTED_ACTIVE_RULE_COUNT: int = 47
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

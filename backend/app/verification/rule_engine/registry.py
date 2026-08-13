@@ -243,7 +243,12 @@ _LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
 # MI-4 is the FHA side of the same axis. Only the UPFRONT premium is evaluated — no document carries a
 # monthly MIP figure, so the annual leg is deliberately unbuilt rather than built on an invented input.
 # CO-1 is a document-type presence read, PRESENCE ONLY — warrantability (CO-3/CO-5) has no source field.
-_LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1")
+# AU-3 normalises the AUS decision across DU and LPA wording (ADR-376). ⚠️ n=1 corpus, and that one is an
+# LPA reading "ACCEPT" — a term the DU-shaped catalog vocabulary does not contain, which is the concrete
+# evidence that a field-equality rule would have been wrong.
+# ⚠️ RE-2 IS NOT HERE AND WILL NOT BE: no REO/retained-property concept exists in MISMO or the data model,
+# and nothing states that a borrower RETAINS a property. Dropped with a reason (LP-488), not deferred.
+_LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1", "AU-3")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).

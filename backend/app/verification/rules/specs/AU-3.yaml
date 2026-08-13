@@ -1,0 +1,158 @@
+# AU-3 — AUS recommendation status — DETERMINISTIC structural rule SPEC (LP-488).
+#
+# Surfaces the automated underwriting system's decision so a processor sees it on the file: an approval
+# that is eligible, an approval the investor will not take, a referral to manual underwriting, or an
+# out-of-scope result.
+#
+# ⚠️ THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE — the reason this rule is not a field equality.
+# The catalog vocabulary for `aus.recommendation` is DU's: approve_eligible / approve_ineligible / refer
+# / out_of_scope. The ONE aus_findings document in the 303-document corpus is an **LPA** (Freddie's Loan
+# Product Advisor) whose recommendation reads **"ACCEPT"** — a term absent from that vocabulary entirely.
+# A rule written as `recommendation == "Approve/Eligible"` would abstain on, or misread, every Freddie
+# file. ONE FIELD, TWO VENDOR ENCODINGS — CR-12's case exactly. So the producer recognises a DECLARED
+# closed vocabulary spanning both engines and ABSTAINS on anything else (ADR-376).
+#
+# ⚠️ THIN CORPUS — n=1, AND IT IS AN LPA. This is the hard caveat on this rule. The DU spellings in the
+# vocabulary below are RESEARCHED, not observed: no DU file has ever exercised them. They abstain rather
+# than misfire if wrong, which is the safe direction, but they are unproven against real data. Whether
+# AU-3 is worth shipping on n=1 is logged as a question in docs/domain/priya-open-questions.md.
+#
+# ⚠️ THE DU/LPA EQUIVALENCE IS A DOMAIN CLAIM, not a reading. DU splits its answer into a recommendation
+# (Approve / Refer) plus an eligibility (Eligible / Ineligible); LPA gives a risk class (Accept / Caution)
+# plus an eligibility. Treating LPA "Accept" as DU "Approve" is the standard industry equivalence — but
+# it is a MAPPING, and it is logged for Priya rather than buried in a recipe.
+#
+# ⚠️ AN APPROVAL WHOSE ELIGIBILITY WE CANNOT READ ABSTAINS. "Approve" alone does not mean deliverable;
+# reading it as approve_eligible would turn an unread field into a clearance.
+#
+# ⚠️ PER DOCUMENT, so a file with several AUS submissions judges each (the IH-1 shape). The system has no
+# reliable "governing submission" signal — `submission_date` exists but a re-run is not always a
+# supersession — so surfacing every result for the processor to reconcile is safer than silently picking
+# one. A superseded run can therefore appear alongside the current one.
+
+rule_id: AU-3
+name: AUS recommendation status
+category: AUS
+
+kind: structural            # must equal rule_kinds.csv (AU-3 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a status surface, not a ratio
+
+criteria: >-
+  The automated underwriting decision must be on the file and must be an approval the loan is eligible
+  to deliver under. This reads the derived aus.recommendation per AUS-findings document, normalised
+  across DU and LPA wording. An approval with an ineligible finding is a failure; a referral to manual
+  underwriting and an out-of-scope result are surfaced for review. A recommendation whose wording is not
+  in the recognised vocabulary, or an approval whose eligibility cannot be read, resolves to
+  couldnt_check — never to a guessed approval.
+
+applicability:
+  scope: each AUS findings document in the file
+  trigger: >-
+    Any aus_findings document. A file with no AUS findings yields no subject; a findings document stating
+    no recommendation, or stating one outside the recognised DU/LPA vocabulary, couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — no threshold; this is a vocabulary
+  values:
+    # ⚠️ THE CLOSED VOCABULARY — pipe-delimited, case-insensitive, spanning BOTH engines. The producer
+    # mirrors these exactly and test_au3_vocabulary_matches_the_spec pins them identical, so the spec
+    # (where the mapping is reviewed) and the recipe (which runs) cannot drift — the CR-12 arrangement.
+    #
+    # ⚠️ "accept" is LPA's. "approve" is DU's. Treating them as equivalent is the DOMAIN CLAIM logged for
+    # Priya. Everything unrecognised abstains; nothing here is a guess at a third engine's wording.
+    approve_phrases: "approve|approve/eligible|approve/ineligible|accept|accept/eligible"
+    refer_phrases: "refer|refer/eligible|refer with caution|refer w/ caution|caution"
+    out_of_scope_phrases: "out of scope|outofscope|error|incomplete"
+    eligible_phrases: "eligible|eligible/approve|accept"
+    ineligible_phrases: "ineligible|not eligible"
+  guideline_text: >-
+    The automated underwriting decision governs how the file is documented and whether it can be
+    delivered. An approval that the system finds ineligible cannot be delivered as underwritten; a
+    referral means the file must be underwritten manually against the applicable agency requirements.
+    The decision's wording differs by engine — Desktop Underwriter reports Approve/Eligible, Loan Product
+    Advisor reports Accept — and the two vocabularies are treated as equivalent by the recognised mapping
+    recorded in reference_values.
+
+required_inputs:
+  - name: recommendation
+    snapshot_path: 'tags.by_subject[<aus_findings content_id>]["aus.recommendation"]'
+    description: >-
+      the AUS decision, normalised across DU and LPA (derived, LP-488): "approve_eligible" /
+      "approve_ineligible" / "refer" / "out_of_scope", or "unknown" when the document states no
+      recommendation, states one outside the recognised vocabulary, or approves without a readable
+      eligibility.
+
+subject_enumeration: per_document      # per AUS findings document — a file may carry several submissions
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The AUS engine, the recommendation exactly as the findings state it, the eligibility status, and the
+  submission date — inline on the finding, so a processor can tell a current run from a superseded one
+  without reopening the report.
+
+guideline_reference: "The automated underwriting decision governs documentation and deliverability; Desktop Underwriter reports Approve/Eligible and Loan Product Advisor reports Accept, and an approval found ineligible cannot be delivered as underwritten."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs, so an unrecognised vendor spelling can never reach the default
+# and read as an approval.
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: aus_findings
+  load_bearing_tags:
+    - aus.recommendation
+  gated_tags:
+    - aus.recommendation
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: aus.recommendation, op: eq, value: "approve_eligible"}
+      reasoning: >-
+        the automated underwriting system approved the loan and found it eligible for delivery
+    - verdict: fired
+      when_tags:
+        - {tag: aus.recommendation, op: eq, value: "approve_ineligible"}
+      reasoning: >-
+        the automated underwriting system approved the loan but found it INELIGIBLE — the loan cannot be
+        delivered as underwritten until the ineligibility is resolved
+      how_to_fix: >-
+        Read the ineligibility reasons on the findings report. Common causes are an LTV, loan amount or
+        property type outside the programme's limits. Correct the underlying data and re-run the AUS, or
+        restructure the loan so it falls inside the programme.
+    - verdict: needs_review
+      when_tags:
+        - {tag: aus.recommendation, op: eq, value: "refer"}
+      reasoning: >-
+        the automated underwriting system referred this file — it must be underwritten manually against
+        the applicable agency requirements rather than delivered on the AUS decision
+      how_to_fix: >-
+        Confirm the file is going to manual underwriting and that the documentation matches the manual
+        requirements, which are stricter than the AUS's. If the referral followed a data error, correct
+        it and re-run.
+    - verdict: needs_review
+      when_tags:
+        - {tag: aus.recommendation, op: eq, value: "out_of_scope"}
+      reasoning: >-
+        the automated underwriting system returned an out-of-scope result, so there is no AUS decision to
+        rely on for this file
+      how_to_fix: >-
+        Check why the submission was out of scope — commonly a loan type or product the engine does not
+        evaluate. The file needs a manual underwrite or a submission to the correct engine.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag here
+      # before this body runs — but a `satisfied` default would turn an unrecognised engine's wording
+      # into a silent approval on a rule that ships `auto`.
+      default: true
+      reasoning: >-
+        the AUS decision could not be determined — the findings state no recommendation, state one
+        outside the recognised Desktop Underwriter / Loan Product Advisor vocabulary, or approve the loan
+        without a readable eligibility
+      how_to_fix: >-
+        Read the recommendation and eligibility on the findings report directly. If the wording is a
+        recognised engine's variant we should support, add it to the rule's vocabulary.

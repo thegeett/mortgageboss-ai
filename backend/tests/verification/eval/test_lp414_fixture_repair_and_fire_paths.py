@@ -123,19 +123,21 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # LP-488 ACTIVATED MI-1 (loan-scoped): LF-6T3N's MISMO states NO loan program, so MI-1's applicability
     # predicate is UNDETERMINED → 1 couldnt_check. ⚠️ NOT not_applicable — an unstated program must be
     # surfaced, which is exactly why the program axis is scoped as a PREDICATE and not an outcome. +1 → 466.
-    # satisfied / fired / needs_review stay 21 / 2 / 4. LP-488 adds MI-4 (+1) and CO-1 (+1, no property type stated) → 468.
+    # satisfied / fired / needs_review stay 21 / 2 / 4. LP-488 adds MI-4 (+1) and CO-1 (+1, no property type stated) → 468, then AU-3 (per_document over the
+    # 30 docs, like IH-1/IH-2): 26 classified non-AUS docs → not_applicable, 4 unclassified → couldnt_check
+    # (an unclassified document cannot be ruled out as AUS findings) → 498.
     mat = await materialize_tags(
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 468
+    assert len(results) == 498
     assert (
         Counter(r.verdict.value for r in results)
         == {
-            "couldnt_check": 215,  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 219,  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
-            "not_applicable": 226,  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
+            "not_applicable": 252,  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
             # +IH-2 x26 (LP-487 — the same 26 classified non-binder docs)
             # ⚠️ LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
             # AUTO-SATISFY now route to a human. That is the distrusted-field guard finally reaching the

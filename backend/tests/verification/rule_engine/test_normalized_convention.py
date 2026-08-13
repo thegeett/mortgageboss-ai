@@ -269,5 +269,6 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
             "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
             "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+            "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
         )
     )

@@ -1100,3 +1100,30 @@ CO-1:
     extracted fields (the IN-8/IN-9/IN-16 discipline), which matters because the one questionnaire in the
     bench corpus fills 0 of its unit-count fields and is still genuinely present. property.type is an
     already-declared MISMO enum; the presence read resolves on any file carrying documents.
+
+# --------------------------------------------------------------------------- #
+# LP-488 — AU-3 (AUS recommendation status). Deterministic: no AI tag, no threshold (a closed
+# VOCABULARY, not a number), so eligibility is input_resolves alone and `validated` is not read.
+#
+# ⚠️ THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS HERE. n=1 across 303 documents, and that one is an
+# LPA. The DU spellings in the vocabulary are RESEARCHED, not observed — no DU file has ever exercised
+# them. They ABSTAIN rather than misfire if wrong, which is why this is shippable at all, but whether a
+# rule calibrated on one document is worth shipping is logged for Priya.
+AU-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (an approve/INELIGIBLE or a REFER reads as a clean approval -> the file is documented to the wrong
+    standard and fails at delivery) >> FP (a processor reads a recommendation already on the report). The
+    closed-vocabulary abstain keeps the FN direction closed on an unfamiliar engine, and an approval
+    whose ELIGIBILITY cannot be read abstains too — "Approve" alone is not a clearance.
+  rationale: >-
+    No AI tag and no threshold — a closed vocabulary spanning DU and LPA, recorded in the spec's
+    reference_values and mirrored by the recipe. It resolves on the one real aus_findings document in the
+    corpus: an LPA reading "ACCEPT" / "ELIGIBLE", which the DU-shaped catalog vocabulary does not contain
+    at all — the concrete evidence that a field-equality rule would have been wrong. ⚠️ n=1: the DU half
+    of the vocabulary is researched, not observed.

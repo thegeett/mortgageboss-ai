@@ -153,6 +153,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
             "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
             "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+            "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
             "CR-13",
             "PR-6",
         }

@@ -51,6 +51,7 @@ _ACTIVATED = frozenset(
         "IN-5",
         "ID-5",
         "AS-9",
+        "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
         "IN-4",
         "AS-10",
         "AS-2",
@@ -108,6 +109,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-6",  # LP-429 (sorts between AS-2 and AS-8)
         "AS-8",  # LP-406-2b
         "AS-9",
+        "AU-3",  # LP-488 (sorts between AS-9 and CL-1)
         # LP-485 — the date-compare family, in sort order: CL-1/CR-13 before ID-5, PR-6 after PC-7.
         "CL-1",
         "CO-1",  # LP-488 (sorts between CL-1 and CR-12)

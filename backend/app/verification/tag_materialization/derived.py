@@ -2015,6 +2015,102 @@ def _condo_questionnaire_present(
     return "no", "no document in the file is classified as a condo questionnaire"
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — AU-3's AUS recommendation. ⚠️ THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE.
+#
+# The catalog vocabulary for `aus.recommendation` is DU's: approve_eligible / approve_ineligible / refer
+# / out_of_scope. The ONE aus_findings document in the 303-document corpus is an **LPA** (Freddie's Loan
+# Product Advisor) whose recommendation reads **"ACCEPT"** — a term that does not appear in that
+# vocabulary at all. A rule written as equality against DU's spelling would abstain on, or misread,
+# every Freddie file. This is exactly the CR-12 `is_disputed` case: ONE FIELD, TWO VENDOR ENCODINGS.
+#
+# So the recipe recognises a DECLARED closed vocabulary spanning both engines and ABSTAINS on anything
+# else. It never stems, never fuzzy-matches, never infers.
+#
+# ⚠️ THE DU/LPA EQUIVALENCE IS A DOMAIN CLAIM, and it is logged for Priya rather than buried here.
+# DU splits its answer into a recommendation (Approve / Refer) plus an eligibility (Eligible /
+# Ineligible); LPA gives a risk class (Accept / Caution) plus an eligibility. Treating LPA "Accept" as
+# DU "Approve" is the standard industry equivalence, but it IS a mapping, not a reading.
+#
+# ⚠️ THIN CORPUS: n=1, and that one is LPA. The DU spellings below are researched, NOT observed in our
+# data. They abstain rather than misfire if wrong, which is the safe direction — but no DU file has ever
+# exercised them.
+# --------------------------------------------------------------------------- #
+
+# Vendor-spanning, mirrored in AU-3's spec reference_values and pinned identical by test.
+_AUS_APPROVE_PHRASES: frozenset[str] = frozenset(
+    {"approve", "approve/eligible", "approve/ineligible", "accept", "accept/eligible"}
+)
+_AUS_REFER_PHRASES: frozenset[str] = frozenset(
+    {"refer", "refer/eligible", "refer with caution", "refer w/ caution", "caution"}
+)
+_AUS_OUT_OF_SCOPE_PHRASES: frozenset[str] = frozenset(
+    {"out of scope", "outofscope", "error", "incomplete"}
+)
+_AUS_ELIGIBLE_PHRASES: frozenset[str] = frozenset({"eligible", "eligible/approve", "accept"})
+_AUS_INELIGIBLE_PHRASES: frozenset[str] = frozenset({"ineligible", "not eligible"})
+
+
+def _aus_recommendation(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """aus.recommendation — the AUS decision, normalised across DU and LPA (AU-3, LP-488).
+
+    Per AUS-findings document: returns ``None`` (DECLINE — no tag materialises) for any other subject,
+    so the tag lands only on the documents AU-3 reads (the IH-1 shape).
+
+    ``approve_eligible`` / ``approve_ineligible`` / ``refer`` / ``out_of_scope`` / ``unknown``. An
+    unrecognised recommendation abstains — it is NEVER read as an approval.
+    """
+    if not isinstance(subject_raw, DocumentEntry) or subject_raw.document_type != "aus_findings":
+        return None, "not an AUS findings document — no recommendation tag"
+    field = subject_raw.fields.get("recommendation")
+    raw = field.value if isinstance(field, Field) and field.is_present else None
+    if raw is None or not str(raw).strip():
+        return _UNKNOWN, "this AUS findings document states no recommendation"
+    decision = _normalise_vocab(str(raw))
+    if decision in _AUS_OUT_OF_SCOPE_PHRASES:
+        return "out_of_scope", f"the AUS returned an out-of-scope result ({str(raw)!r})"
+    if decision in _AUS_REFER_PHRASES:
+        return "refer", f"the AUS referred this file for manual underwriting ({str(raw)!r})"
+    if decision not in _AUS_APPROVE_PHRASES:
+        return _UNKNOWN, (
+            f"the AUS recommendation reads {str(raw)!r}, which is not a recognised DU or LPA "
+            "recommendation — abstaining rather than inferring (the wording varies by engine)"
+        )
+    # An APPROVE — now the eligibility half. DU may state it inside the recommendation itself
+    # ("Approve/Eligible"); LPA states it in a separate field.
+    if "ineligible" in decision:
+        return "approve_ineligible", (
+            f"the AUS approved the loan but found it INELIGIBLE for delivery ({str(raw)!r})"
+        )
+    eligibility_field = subject_raw.fields.get("eligibility_status")
+    stated = (
+        _normalise_vocab(str(eligibility_field.value))
+        if isinstance(eligibility_field, Field)
+        and eligibility_field.is_present
+        and eligibility_field.value is not None
+        else ""
+    )
+    if "eligible" in decision or stated in _AUS_ELIGIBLE_PHRASES:
+        return "approve_eligible", (
+            f"the AUS approved the loan and found it eligible ({str(raw)!r}"
+            + (f", eligibility {stated!r}" if stated else "")
+            + ")"
+        )
+    if stated in _AUS_INELIGIBLE_PHRASES:
+        return "approve_ineligible", (
+            f"the AUS approved the loan but found it INELIGIBLE for delivery ({str(raw)!r}, "
+            f"eligibility {stated!r})"
+        )
+    # ⚠️ An approval whose ELIGIBILITY we cannot read abstains. "Approve" alone does not mean
+    # deliverable, and reading it as approve_eligible would turn an unread field into a clearance.
+    return _UNKNOWN, (
+        f"the AUS recommendation reads {str(raw)!r} but the eligibility is not stated in a recognised "
+        "form — an approval is not a clearance until the eligibility is known"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -2721,6 +2817,7 @@ _RECIPES: dict[str, Recipe] = {
     "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
+    "aus_recommendation": _aus_recommendation,  # LP-488 — AU-3
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
