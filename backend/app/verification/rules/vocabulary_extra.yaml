@@ -948,15 +948,21 @@ tags:
   # ⚠️ EVERY ONE OF THESE FILLS 0/4 ON THE BENCH, and no loan file carries a condo questionnaire at all.
   # They are declared because the fields and the document type EXIST, not because data has been observed —
   # ADR-354's distinction, stated rather than glossed. Both consuming rules are INERT.
+  # ⚠️ DERIVED SINCE THE LP-494 REVIEW, and this row must say so — it is projected VERBATIM into the
+  # tag-catalog table, so leaving it as `parsed` / `doc` made the stored catalog describe a derived
+  # loan-level computation as a parsed document field. (The producer was remapped and the vocabulary was
+  # not: the same half-finished-rename shape the guards exist to catch.)
   condo.delinquent_units_pct:
-    entity: doc
+    entity: loan
     value_type: number
     allowed_values: null
     description: >-
-      The percentage of units 60+ days past due on common expense assessments, as stated on the condo
-      questionnaire. Fannie B4-2.2-02 (08/05/2026) makes more than 15% ineligible. Absent when the
-      questionnaire does not answer it; never read as 0, which would assert a fully current project.
-    produced_by: parsed
+      The percentage of units 60+ days past due on common expense assessments, COMPUTED from the
+      questionnaire's units_delinquent_over_60_days over its total_units — not read from the form's
+      generic delinquency line, which carries whatever period the form chose. Fannie B4-2.2-02
+      (08/05/2026) makes more than 15% ineligible. Absent when either input is missing; never read as 0,
+      which would assert a fully current project.
+    produced_by: derived
   condo.commercial_space_pct:
     entity: doc
     value_type: number

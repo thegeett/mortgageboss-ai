@@ -1579,7 +1579,7 @@ PC-5:
 # after evidence-backed catalog edits, so there is no AI accuracy to measure and no self-consistency rate
 # to derive — and no model call was made for either.
 #
-# ⚠️ BOTH ARE BUILT AND INERT, on `input_resolves: false`, and that flag is the honest one rather than the
+# ⚠️ BOTH WERE BUILT INERT on `input_resolves: false`; the LP-494 revision flipped both to true and ACTIVATED them — the entries below are the current state, this paragraph is the history, and that flag is the honest one rather than the
 # convenient one. LP-485's DEVELOPMENT-MODE meaning still requires that "the producer resolves it on real
 # stored data", and here it does not:
 #   * NO LOAN FILE CARRIES A CONDO QUESTIONNAIRE — condo_docs is empty on all 28 stored files, and

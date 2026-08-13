@@ -17,7 +17,12 @@
 #
 # ⚠️ THE CATALOG SAID "budget parse → AI" AND THAT DOCUMENT DOES NOT EXIST. There is no HOA-budget document
 # type in the classifier catalog, so a budget cannot be classified, extracted, or attached to a loan file.
-# The reserve percentage is a TYPED FIELD on the condo questionnaire (`reserve_contribution_percentage`),
+# The reserve percentage resolves from EITHER source: the condo questionnaire's
+# `reserve_contribution_percentage` OR the HOA statement's `reserve_percentage` — and on the corpus it
+# is the HOA STATEMENT that resolves (HOA budgets classify as hoa_statement). ⚠️ The latter field had
+# NO definition in its starter prompt until the LP-494 review; a 'percent funded' figure read into it
+# would satisfy this rule on a project contributing nothing, so the prompt now excludes that measure
+# explicitly. Original note:
 # so typed extraction has already spent the perception step (LP-487's question, answered yes a third time)
 # and what remains is one numeric comparison. rule_kinds.csv was edited from `deterministic_bookend+ai` to
 # `deterministic_bookend` — the AI-FREE bookend — with that evidence; the row count stays 135. (The kind
@@ -35,7 +40,7 @@
 #     consistent: a Lender Letter sits outside the Guide until incorporated. THIS IS WHY THE RULE CARRIES
 #     threshold_needs_signoff — the step-up is the one value not read from a primary.
 #
-# ⚠️ INERT. The tag resolves on no file in the corpus: the two bench condo questionnaires are a
+# ⚠️ WAS INERT — CO-3 and CO-4 ACTIVATED at the LP-494 revision (61 -> 63). Retained for the reasoning: The tag resolves on no file in the corpus: the two bench condo questionnaires are a
 # cancellation notice and a genuinely UNANSWERED standard form, and no loan file carries a questionnaire
 # at all. `input_resolves: false` on the bar says exactly that. Built, not shipped.
 
@@ -51,7 +56,8 @@ criteria: >-
   applicable minimum share of its annual budgeted assessment income to replacement reserves — 10% for a
   loan application dated before 2027-01-04, and 15% for one dated on or after it (Fannie Mae LL-2026-03).
   This reads the derived condo.reserve_adequacy, which resolves the property type, the reserve percentage
-  stated on the condo questionnaire, and the loan application date that selects the floor. A
+  stated on the association's budget / HOA statement (or a questionnaire carrying the line), and the
+  loan application date that selects the floor. A
   non-condominium property is not_applicable. A missing property type, a missing or unreadable reserve
   percentage, and a missing or unreadable application date each resolve to couldnt_check — never to a
   guessed adequacy, never to a reserve percentage of zero, and never to a floor chosen from today's date.
@@ -144,10 +150,10 @@ deterministic:
       default: true
       reasoning: >-
         the association's replacement-reserve adequacy could not be determined — the file does not state
-        the property type, the condo questionnaire does not state the budgeted reserve percentage, or the
+        the property type, no budget / HOA statement (or questionnaire) states the reserve percentage, or the
         loan application date that selects the applicable floor is missing or unreadable
       how_to_fix: >-
-        Confirm the property type on the application. Request a completed condo questionnaire or the
+        Confirm the property type on the application. Request the association's annual BUDGET or HOA statement showing the replacement-reserve line (a condo questionnaire that states the reserve contribution also satisfies this) or the
         association's annual budget showing the replacement-reserve allocation as a percentage of assessment
         income, and confirm the application date on the file — the required minimum is 10% for applications
         dated before 2027-01-04 and 15% on or after, so the date decides which floor applies.

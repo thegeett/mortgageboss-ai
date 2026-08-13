@@ -1151,8 +1151,8 @@ _CONDO_MAX_DELINQUENT_PCT = Decimal("15")
 _CONDO_MAX_COMMERCIAL_PCT = Decimal("35")
 _CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS = Decimal("20")
 _CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL = Decimal("2")
-_CONDO_QUESTIONNAIRE_DOC_TYPES = frozenset({"condo_questionnaire"})
-_CONDO_RESERVE_DOC_TYPES = frozenset({"condo_questionnaire", "hoa_statement"})
+# (the condo document-type sets are defined once, above — a second binding here silently won.)
+
 
 # ⚠️ A CLOSED VOCABULARY (ADR-376) — an unrecognised litigation answer ABSTAINS, and that direction is the
 # whole point: "PENDING - SEE ATTACHED" must never be read as "no litigation" and clear the project.
@@ -1257,10 +1257,19 @@ def _condo_fidelity_coverage(
             "the master policy on file does not state whether fidelity/crime coverage is carried",
         )
     if answers <= _CONDO_FIDELITY_YES:
+        # ⚠️ THE AMOUNT IS EVIDENCE, NOT A GATE (reported finding). This recipe deliberately does not
+        # judge the amount — B7-4-02's required figure needs a unit count and an assessment base that
+        # resolve on no document here. So a PROBLEM reading it (two master policies stating $50,000 and
+        # $75,000 — a prior-year certificate beside the current renewal, a routine pairing) must not flip
+        # a clearly-evidenced "present" to couldnt_check. The disagreement is reported inline instead, so
+        # the processor sees both figures and finishes the arithmetic the file cannot.
         amount, problem = _condo_decimal(snapshot, "condo.fidelity_amount")
         if problem is not None:
-            return _UNKNOWN, problem
-        detail = f" of ${amount:,}" if amount is not None else ""
+            detail = f" (the amount could not be read: {problem})"
+        elif amount is not None:
+            detail = f" of ${amount:,}"
+        else:
+            detail = ""
         return "present", (
             f"the condominium project's master policy evidences fidelity/crime coverage{detail}. ⚠️ The "
             "AMOUNT is not verified against Fannie B7-4-02's requirement (three months of assessments on "
@@ -1272,6 +1281,16 @@ def _condo_fidelity_coverage(
             "the condominium project's master policy states that no fidelity/crime coverage is carried; "
             f"Fannie B7-4-02 requires it unless the project has {_CONDO_FIDELITY_EXEMPT_MAX_UNITS} units "
             "or fewer, or would need $5,000 of coverage or less"
+        )
+    if answers & _CONDO_FIDELITY_YES and answers & _CONDO_FIDELITY_NO:
+        # ⚠️ DISAGREEMENT IS ITS OWN ANSWER (reported finding) — the same bug fixed one function below in
+        # _condo_project_eligibility. Two master policies answering "Yes" and "No" match neither subset,
+        # fell to the unrecognised branch, and reported sorted(answers)[0]: "the indicator reads 'no',
+        # which is not a recognised yes/no answer". 'no' IS recognised; the reason was false and it hid a
+        # contradiction BETWEEN DOCUMENTS.
+        return _UNKNOWN, (
+            f"the file's master policies disagree about fidelity/crime coverage "
+            f"({', '.join(sorted(answers))}) — abstaining rather than picking one"
         )
     return _UNKNOWN, (
         f"the master policy's fidelity/crime indicator reads {sorted(answers)[0]!r}, which is not a "

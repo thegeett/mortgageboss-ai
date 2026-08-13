@@ -25,6 +25,21 @@ CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
      prior_balance     (number)  the prior / previous balance carried forward, if shown
      unit_owner_email  (string)  the UNIT OWNER's email address (the homeowner's, NOT the
                                   association's contact email), if shown
+     reserve_percentage (string) ⚠️ READ THIS DEFINITION BEFORE FILLING IT. The share of the
+                                  association's ANNUAL BUDGET allocated to REPLACEMENT RESERVES —
+                                  the "reserve contribution", the measure Fannie B4-2.2-02 requires
+                                  to be at least 10%. Return it as a PERCENT ("10", "10.5"),
+                                  never as a fraction ("0.10").
+                                  ⚠️ A "PERCENT FUNDED" FIGURE IS A DIFFERENT MEASURE — return
+                                  null for it. A reserve STUDY's "reserves are 45% funded" states
+                                  how full the reserve account is, NOT what share of the budget is
+                                  contributed to it; reporting it here reads as a compliant
+                                  contribution on a project that may allocate nothing. If the
+                                  document states only percent-funded, or states a dollar
+                                  contribution with no budget total to divide by, return null and
+                                  put the figure in ADDITIONAL SECTIONS.
+                                  ⚠️ Return null when the document is a dues invoice with no
+                                  budget — most HOA statements are. Absent is the honest answer.
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Special
    Assessments", "Late Fees / Fines", "Management Contact". Do not force these into

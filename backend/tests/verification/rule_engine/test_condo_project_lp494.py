@@ -6,7 +6,7 @@ LP-508 shipped a guard whose own test called ``evaluate_gate`` with tag ids: the
 WIRING did not, and the guard reached 1 of the 5 rules it claimed to protect. The recipe-level tests are
 additions to the end-to-end ones, never substitutes.
 
-⚠️ BOTH RULES ARE BUILT AND INERT, and a test below pins that. `input_resolves` is false because no loan
+⚠️ BOTH RULES WERE BUILT INERT; the LP-494 revision ACTIVATED them, and the tests below pin the LIVE state. `input_resolves` is false because no loan
 file carries a condo questionnaire and the two in the bench corpus are a CANCELLATION NOTICE and a
 genuinely UNANSWERED standard form. Every fixture here is therefore SELF-AUTHORED (ADR-332, and the LP-487
 amendment): it may pin the LOGIC and the DIRECTION, never the LABEL — none of it is evidence of accuracy.
@@ -27,10 +27,14 @@ from decimal import Decimal
 
 import pytest
 from app.verification.eval.fire_path_scenarios import (
+    build_co3_fidelity_amount_disagreement_snapshot,
+    build_co3_fidelity_disagreement_snapshot,
+    build_co3_fidelity_present_snapshot,
     build_co4_adequate_2026_snapshot,
     build_co4_blank_questionnaire_snapshot,
     build_co4_no_application_date_snapshot,
     build_co4_not_condo_snapshot,
+    build_co4_reserves_from_hoa_statement_snapshot,
     build_co4_same_pct_2027_snapshot,
     build_co4_short_2026_snapshot,
     build_co5_blank_questionnaire_snapshot,
@@ -306,3 +310,42 @@ def test_every_parsed_condo_tag_is_document_type_scoped() -> None:
     ):
         declaration = declarations[tag_id]
         assert declaration.document_type == "condo_questionnaire", tag_id
+
+
+# --------------------------------------------------------------------------- #
+# LP-494 review — the load-bearing paths of both LIVE rules, which nothing exercised
+# --------------------------------------------------------------------------- #
+async def test_co4_resolves_from_an_hoa_statement_not_only_a_questionnaire() -> None:
+    """⚠️ THE PATH THE ACTIVATION RESTS ON (reported finding). `input_resolves: true` is justified by the
+    reserve percentage resolving from an HOA STATEMENT — HOA budgets classify as `hoa_statement`, not
+    `condo_questionnaire` — yet every CO-4 fixture fed the questionnaire field, so the wiring the
+    activation depends on was never run. This is the file's own cited LP-508 lesson: the mechanism
+    worked, the WIRING did not."""
+    assert (
+        await _verdict(build_co4_reserves_from_hoa_statement_snapshot, "CO-4") is Verdict.SATISFIED
+    )
+
+
+async def test_co3_reads_a_master_policy_that_evidences_fidelity_cover() -> None:
+    """⚠️ CO-3 had NO snapshot fixture at all — its tests asserted spec shape only, so the recipe deciding
+    a LIVE rule's verdict was never executed."""
+    assert await _verdict(build_co3_fidelity_present_snapshot, "CO-3") is Verdict.SATISFIED
+
+
+async def test_co3_abstains_when_two_master_policies_disagree() -> None:
+    """⚠️ A contradiction BETWEEN documents used to fall to the unrecognised-value branch and report
+    "the indicator reads 'no', which is not a recognised yes/no answer" — where 'no' plainly IS
+    recognised. Right verdict, false reason, and it hid the disagreement."""
+    result = await _one(build_co3_fidelity_disagreement_snapshot, "CO-3")
+    assert result.verdict is Verdict.COULDNT_CHECK
+    assert "not a recognised yes/no answer" not in (result.reasoning or "")
+
+
+async def test_co3_amount_disagreement_does_not_veto_evidenced_coverage() -> None:
+    """⚠️ The AMOUNT is evidence this rule never judges (B7-4-02's required figure needs a unit count and
+    an assessment base that resolve nowhere here), so two policies stating $50,000 and $75,000 — a
+    prior-year certificate beside the current renewal — must not flip a clearly evidenced `present` to
+    couldnt_check."""
+    assert (
+        await _verdict(build_co3_fidelity_amount_disagreement_snapshot, "CO-3") is Verdict.SATISFIED
+    )

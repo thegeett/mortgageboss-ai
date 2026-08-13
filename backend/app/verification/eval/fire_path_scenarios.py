@@ -152,6 +152,10 @@ _LOAN_CO4_ADEQUATE_2026 = UUID("95000000-0000-4000-8000-000000000060")
 _LOAN_CO4_SHORT_2026 = UUID("95000000-0000-4000-8000-000000000061")
 _LOAN_CO4_SAME_PCT_2027 = UUID("95000000-0000-4000-8000-000000000062")
 _LOAN_CO4_NO_APP_DATE = UUID("95000000-0000-4000-8000-000000000063")
+_LOAN_CO4_HOA_STATEMENT = UUID("95000000-0000-4000-8000-000000000064")
+_LOAN_CO3_FIDELITY_PRESENT = UUID("95000000-0000-4000-8000-000000000065")
+_LOAN_CO3_FIDELITY_DISAGREE = UUID("95000000-0000-4000-8000-000000000066")
+_LOAN_CO3_FIDELITY_AMOUNTS = UUID("95000000-0000-4000-8000-000000000067")
 _LOAN_CO4_BLANK_FORM = UUID("95000000-0000-4000-8000-000000000064")
 _LOAN_CO4_NOT_CONDO = UUID("95000000-0000-4000-8000-000000000065")
 _LOAN_CO5_CLEAR = UUID("95000000-0000-4000-8000-000000000066")
@@ -1529,6 +1533,86 @@ def build_co4_no_application_date_snapshot() -> Snapshot:
     )
 
 
+def build_co4_reserves_from_hoa_statement_snapshot() -> Snapshot:
+    """⚠️ THE PATH THAT JUSTIFIES CO-4 BEING LIVE, and which nothing exercised (reported finding).
+
+    `input_resolves: true` rests entirely on the reserve percentage resolving from an HOA STATEMENT — HOA
+    budgets classify as `hoa_statement`, not `condo_questionnaire` — yet every CO-4 fixture fed the
+    questionnaire field. So the wiring the activation depends on was never executed: the LP-508 lesson
+    ("the mechanism worked, the WIRING did not") in the same file whose docstring cites it.
+    """
+    return _snapshot(
+        _LOAN_CO4_HOA_STATEMENT,
+        [_doc("95-hoa-reserve", "hoa_statement", reserve_percentage="12")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_present_snapshot() -> Snapshot:
+    """A master policy evidencing fidelity/crime coverage → CO-3 reads `present`.
+
+    ⚠️ CO-3 had NO snapshot fixture at all (reported finding) — its tests asserted spec shape only, so the
+    recipe that decides a LIVE rule's verdict was never run.
+    """
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_PRESENT,
+        [
+            _doc(
+                "95-mp-fid",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="50000",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_disagreement_snapshot() -> Snapshot:
+    """⚠️ TWO master policies answering Yes and No — a contradiction BETWEEN documents, which used to fall
+    to the unrecognised-value branch and report "'no' is not a recognised yes/no answer"."""
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_DISAGREE,
+        [
+            _doc(
+                "95-mp-yes",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+            ),
+            _doc(
+                "95-mp-no",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="No",
+            ),
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_amount_disagreement_snapshot() -> Snapshot:
+    """⚠️ Both policies say Yes; their AMOUNTS differ ($50,000 vs $75,000 — a prior-year certificate beside
+    the current renewal). The amount is EVIDENCE this rule never judges, so it must not veto a clearly
+    evidenced `present`."""
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_AMOUNTS,
+        [
+            _doc(
+                "95-mp-a",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="50000",
+            ),
+            _doc(
+                "95-mp-b",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="75000",
+            ),
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
 def build_co4_blank_questionnaire_snapshot() -> Snapshot:
     """⚠️ THE CORPUS'S ACTUAL SHAPE: a questionnaire that is present and UNANSWERED → CO-4 COULDNT_CHECK,
     never satisfied. A blank form is not evidence of adequate reserves."""
@@ -1567,7 +1651,12 @@ def build_co5_clear_snapshot() -> Snapshot:
 
 
 def build_co5_delinquent_snapshot() -> Snapshot:
-    """22% of units 60+ days past due — above B4-2.2-02's 15% → CO-5 FIRED."""
+    """22 of 60 units 60+ days past due = 36.67% — above B4-2.2-02's 15% → CO-5 FIRED.
+
+    ⚠️ The figure changed with the producer: condo.delinquent_units_pct is now COMPUTED from the count
+    over total_units, so this fixture states 22 UNITS (not 22%) against a 60-unit project. The docstring
+    said 22% after the remap, which is the fixture describing an input it no longer has.
+    """
     return _snapshot(
         _LOAN_CO5_DELINQUENT,
         [
@@ -1673,10 +1762,14 @@ __all__ = [
     "build_co1_not_condo_snapshot",
     "build_co1_questionnaire_missing_snapshot",
     "build_co1_questionnaire_present_snapshot",
+    "build_co3_fidelity_amount_disagreement_snapshot",
+    "build_co3_fidelity_disagreement_snapshot",
+    "build_co3_fidelity_present_snapshot",
     "build_co4_adequate_2026_snapshot",
     "build_co4_blank_questionnaire_snapshot",
     "build_co4_no_application_date_snapshot",
     "build_co4_not_condo_snapshot",
+    "build_co4_reserves_from_hoa_statement_snapshot",
     "build_co4_same_pct_2027_snapshot",
     "build_co4_short_2026_snapshot",
     "build_co5_blank_questionnaire_snapshot",
