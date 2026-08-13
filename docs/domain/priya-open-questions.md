@@ -583,3 +583,24 @@ usually personal property; a built-in oven is a fixture; gas logs normally are.
 
 **Question: where do you draw the line in practice, and at what value does it start to matter?**
 `personal_property_value` fills on 1 of 5 contracts and that one reads "0", so no value is available.
+
+---
+
+## 15. From LP-493a — the document PC-5 actually needs
+
+PC-5 (*earnest money traced to a verified account*) is built but held. LP-493a found it abstained because
+**it was shown neither the deposit nor any transaction** — two context defects, now scoped — and
+separately that no matching debit exists in the fixture we tested on.
+
+⚠️ **Even with those fixed, PC-5 cannot be calibrated on the current corpus**, because LF-6T3N is a
+synthetic fixture: its transactions were authored, not extracted.
+
+**What a file would need, specifically:**
+1. a **purchase agreement** stating an earnest money amount, **and**
+2. **bank statements for the account the deposit actually left**, covering the period it left, **and**
+3. ideally the **cancelled cheque or the escrow holder's receipt** — because B3-4.3-09 accepts either of
+   those *instead of* a bank debit, and a real file may evidence the deposit that way.
+
+**Question: can you point us at one or two real closed files that carry all three?** It is the same ask
+as the credit lane's (§11j) but narrower — this one needs the *asset* side and the *contract* side on the
+same file, which LP-480 found is rare in what we hold.
