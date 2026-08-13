@@ -320,6 +320,12 @@ tags:
   property.appraised_value: {mode: parsed, subject: document, data: appraised_value, document_type: appraisal}
   property.value_basis: {mode: derived, subject: loan, data: property_value_basis}
   loan.ltv_percent: {mode: derived, subject: loan, data: loan_ltv_percent}
+
+  # --- LP-488 — MI-4 (FHA upfront MIP). ------------------------------------------------------------ #
+  # Reads the SAME two MISMO amounts MI-1 declares, as a pair: loan.amount is TERMS_OF_LOAN/BaseLoanAmount
+  # and loan.note_amount is TERMS_OF_LOAN/NoteAmount. On an FHA loan the difference IS the financed
+  # upfront MIP — two independent MISMO elements, so this is not an ADR-330 vacuity.
+  mi.fha_ufmip_percent: {mode: derived, subject: loan, data: fha_ufmip_percent}
   # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
   # here — not AI. The catalog planned ai_fuzzy_match; typed extraction now reads the clause into
   # mortgagee_name, so the perception step is spent and what remains is a normalised string compare

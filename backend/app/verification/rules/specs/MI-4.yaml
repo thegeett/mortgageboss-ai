@@ -1,0 +1,164 @@
+# MI-4 — FHA MIP (upfront) — DETERMINISTIC calculative rule SPEC (LP-488).
+#
+# Every FHA loan carries an upfront mortgage insurance premium. This checks the premium actually financed
+# into the note against the rate HUD publishes.
+#
+# ⚠️ THE PROGRAM AXIS, FHA SIDE. MI-4 is FHA-only and MI-1 is conventional-only; both scope with an
+# APPLICABILITY PREDICATE, never an outcome, because the applicability layer resolves absent/"unknown" to
+# COULDNT_CHECK and only definitely-false to not_applicable. A conventional file is not_applicable here;
+# a file that states no program is surfaced, not skipped.
+#
+# ⚠️ WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
+# TERMS_OF_LOAN/BaseLoanAmount (the base loan amount) and TERMS_OF_LOAN/NoteAmount (what the borrower
+# signs for). On an FHA loan the difference between them IS the financed upfront MIP. On the three
+# conventional MISMO fixtures in the repo the two are equal — exactly right, and the reason MI-4 must not
+# run on a conventional file.
+#
+# ⚠️ THE ANNUAL MIP LEG IS NOT BUILT, and this is a scope limit, not an oversight. The catalog rationale
+# reads "UFMIP financed + monthly MIP at factor". NO document type in the system carries a monthly MIP
+# figure for this loan — the only mortgage-insurance field in all 121 schema specs is
+# `form_1098.mortgage_insurance_premiums`, a PRIOR-YEAR total for an EXISTING mortgage. Building the
+# annual leg would mean inventing an input. It also means the annual-MIP RATE MATRIX is not needed here:
+# ML 2023-05's per-cell rates (by LTV x term x base loan amount) were NOT obtained, and none is written
+# into this spec. Logged in docs/domain/priya-open-questions.md.
+#
+# ⚠️ TWO EXEMPTIONS WE CANNOT DETECT, recorded rather than silently mishandled. ML 2023-05 states that
+# Section 248 mortgages (Indian Lands) require NO upfront MIP, and Section 247 (Hawaiian Home Lands)
+# require no annual MIP. No field in the system identifies either program, so a Section 248 loan would
+# reach the "no upfront premium was financed" outcome — which is needs_review, asking a processor to
+# confirm, not a failure. That is the right landing place for an undetectable exemption.
+
+rule_id: MI-4
+name: FHA MIP (upfront + monthly)
+category: MI
+
+kind: calculative           # must equal rule_kinds.csv (MI-4 = calculative, deterministic_bookend)
+numeric_check: true         # must equal rule_kinds.csv — a rate against a published rate
+
+criteria: >-
+  An FHA loan's upfront mortgage insurance premium must be 1.75% of the base loan amount. This reads the
+  derived mi.fha_ufmip_percent — the amount financed into the note, expressed as a percent of the base
+  loan amount — and compares it with the published rate. A premium materially above or below the rate is
+  a finding. A loan financing NO upfront premium is surfaced for confirmation rather than failed: the
+  premium may have been paid in cash at closing, and Section 248 mortgages are exempt entirely. A missing
+  base or note amount resolves to couldnt_check, never a guessed pass.
+
+applicability:
+  scope: the loan, when the program is FHA
+  trigger: >-
+    program.type == fha. A conventional file is not_applicable (MI-1 covers conventional MI). A file that
+    does not state its program couldnt_checks rather than being skipped.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: true   # must equal rule_kinds.csv
+  values:
+    # ⚠️ PROVENANCE TIER P — the publisher's own document, read this pass.
+    #   value:     UFMIP 175 bps (1.75%) of the base loan amount, all Title II forward mortgages
+    #   source:    HUD Mortgagee Letter 2023-05
+    #   published: 2023-02-22
+    #   url:       hud.gov/sites/dfiles/OCHCO/documents/2023-05hsgml.pdf
+    #   effective: case numbers assigned on or after 2023-03-20
+    # ⚠️ The ANNUAL MIP rate (0.55% for most Title II forward mortgages, also tier P) is deliberately NOT
+    # recorded here: MI-4 does not evaluate the annual premium, because no document carries one. Writing
+    # an unused threshold into a spec invites a later reader to build against it.
+    fha_ufmip_percent: "1.75"
+    # ⚠️ A ROUNDING ALLOWANCE, NOT A DOMAIN THRESHOLD (the AS-3 / CL-1 precedent — nobody signs this off).
+    # UFMIP is computed to the cent and commonly rounded to whole dollars on the note, so an exact rate
+    # equality would fire on correct files. +/- 0.01 percentage points is ~$34 on a $340,000 base — wider
+    # than any rounding, narrower than a wrong rate (the next rate down, 1.00%, is 75 points away).
+    fha_ufmip_tolerance_percent: "0.01"
+    fha_ufmip_max_percent: "1.76"
+    fha_ufmip_min_percent: "1.74"
+    # Below this, treat the loan as having financed NOTHING (paid in cash, or exempt) rather than as
+    # having financed a wrong premium.
+    fha_ufmip_financed_floor_percent: "0.01"
+  guideline_text: >-
+    HUD Mortgagee Letter 2023-05 (published 2023-02-22, effective for case numbers assigned on or after
+    2023-03-20) sets the upfront mortgage insurance premium at 175 basis points (1.75%) of the base loan
+    amount for all Title II forward mortgages, and reduced the annual premium to 0.55% for most such
+    mortgages. Section 248 mortgages (Indian Lands) require no upfront premium; Section 247 (Hawaiian
+    Home Lands) require no annual premium. The annual premium is NOT evaluated by this rule — see the
+    spec header.
+
+required_inputs:
+  - name: ufmip_percent
+    snapshot_path: 'tags.by_subject["loan"]["mi.fha_ufmip_percent"]'
+    description: >-
+      the upfront MIP financed into the note, as a percent of the base loan amount (derived, LP-488):
+      (note amount - base loan amount) / base loan amount x 100. "unknown" when either amount is missing
+      or the base loan amount is not positive.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The base loan amount, the note amount, the difference between them in dollars, and that difference as a
+  percent — inline on the finding, so a processor can check the premium without reopening the note.
+
+guideline_reference: "HUD Mortgagee Letter 2023-05 (published 2023-02-22) — upfront MIP is 175 bps (1.75%) of the base loan amount for all Title II forward mortgages; effective for case numbers assigned on or after 2023-03-20."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). ⚠️ ORDERED, FIRST-MATCH-WINS, with a mandatory
+# terminal row. An "unknown" tag coerces through the gate to couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ THE PROGRAM PREDICATE — see the header. Absent/"unknown" → couldnt_check; conventional →
+  # not_applicable.
+  applicability:
+    tag: program.type
+    op: eq
+    value: fha
+  load_bearing_tags:
+    - mi.fha_ufmip_percent
+  gated_tags:
+    - mi.fha_ufmip_percent
+  operands:
+    ufmip: {tag: mi.fha_ufmip_percent}
+    required: {reference: fha_ufmip_percent}
+    max_pct: {reference: fha_ufmip_max_percent}
+    min_pct: {reference: fha_ufmip_min_percent}
+    financed_floor: {reference: fha_ufmip_financed_floor_percent}
+  outcomes:
+    # 1 — MORE than the published rate. Tested first; ordering is load-bearing.
+    - verdict: fired
+      when_compare: {op: ">", left: ufmip, right: max_pct}
+      reasoning: >-
+        the upfront mortgage insurance premium financed into the note is {ufmip}% of the base loan
+        amount, above the {required}% HUD publishes — the borrower is being charged more premium than
+        the programme requires
+      how_to_fix: >-
+        Recompute the upfront MIP as {required}% of the base loan amount and have the lender correct the
+        note amount. If the note deliberately finances something else alongside the premium, that belongs
+        in the base loan amount, not on top of it.
+    # 2 — NOTHING financed. ⚠️ needs_review, NOT fired: the premium may have been paid in cash at
+    # closing, and a Section 248 (Indian Lands) mortgage is exempt entirely. Neither is detectable from
+    # any field in the system, so this asks rather than asserts. This row also catches a NEGATIVE value
+    # (a note below the base loan amount), which is a file inconsistency a processor should see.
+    - verdict: needs_review
+      when_compare: {op: "<", left: ufmip, right: financed_floor}
+      reasoning: >-
+        no upfront mortgage insurance premium is financed into this FHA note (the note amount and the
+        base loan amount are the same, or the note is lower) — every FHA loan carries an upfront premium,
+        so confirm it was paid in cash at closing or that this loan is exempt
+      how_to_fix: >-
+        Check the Closing Disclosure for an upfront MIP paid at closing. A Section 248 mortgage (Indian
+        Lands) requires no upfront premium — note that on the file if it applies. If the premium should
+        have been financed, the note amount is wrong.
+    # 3 — LESS than the published rate but something was financed.
+    - verdict: fired
+      when_compare: {op: "<", left: ufmip, right: min_pct}
+      reasoning: >-
+        the upfront mortgage insurance premium financed into the note is {ufmip}% of the base loan
+        amount, below the {required}% HUD requires — the loan is short of the required premium
+      how_to_fix: >-
+        Recompute the upfront MIP as {required}% of the base loan amount. If part of the premium was paid
+        in cash and the rest financed, confirm the two together come to {required}% and note the split on
+        the file.
+    # 4 — THE MANDATORY TERMINAL ROW. Reached only with a resolved, parseable rate inside the tolerance;
+    # the gate routes absent/"unknown"/unparseable to couldnt_check before this body runs.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the upfront mortgage insurance premium financed into the note is {ufmip}% of the base loan
+        amount, matching the {required}% HUD publishes

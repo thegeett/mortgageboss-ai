@@ -113,6 +113,13 @@ _LOAN_MI1_LOW_LTV = UUID("95000000-0000-4000-8000-000000000022")
 _LOAN_MI1_FHA = UUID("95000000-0000-4000-8000-000000000023")
 _LOAN_MI1_NO_PROGRAM = UUID("95000000-0000-4000-8000-000000000024")
 _LOAN_MI1_NO_VALUE = UUID("95000000-0000-4000-8000-000000000025")
+# LP-488 — MI-4 (FHA upfront MIP).
+_LOAN_MI4_CORRECT = UUID("95000000-0000-4000-8000-000000000026")
+_LOAN_MI4_OVER = UUID("95000000-0000-4000-8000-000000000027")
+_LOAN_MI4_UNDER = UUID("95000000-0000-4000-8000-000000000028")
+_LOAN_MI4_NONE = UUID("95000000-0000-4000-8000-000000000029")
+_LOAN_MI4_CONVENTIONAL = UUID("95000000-0000-4000-8000-00000000002a")
+_LOAN_MI4_NO_NOTE = UUID("95000000-0000-4000-8000-00000000002b")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1051,6 +1058,84 @@ def build_mi1_no_value_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-4. The FHA side of the program axis. ⚠️ The two amounts are two DIFFERENT MISMO elements:
+# loan.amount is TERMS_OF_LOAN/BaseLoanAmount, loan.note_amount is TERMS_OF_LOAN/NoteAmount. On an FHA
+# loan the difference between them IS the financed upfront MIP.
+#
+# Base $300,000 x 1.75% = $5,250 → a correct note is $305,250.
+# --------------------------------------------------------------------------- #
+def _mip_mismo(
+    *, program: str, base_loan: str, note_amount: str | None
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {
+        "loan.purpose": _f("purchase"),
+        "loan.program": _f(program),
+        "loan.amount": _f(base_loan),
+    }
+    if note_amount is not None:
+        facts["loan.note_amount"] = _f(note_amount)
+    return facts
+
+
+def build_mi4_correct_ufmip_snapshot() -> Snapshot:
+    """$305,250 note on a $300,000 base = exactly 1.75% financed → MI-4 SATISFIED."""
+    return _snapshot(
+        _LOAN_MI4_CORRECT,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="305250.00"),
+    )
+
+
+def build_mi4_over_ufmip_snapshot() -> Snapshot:
+    """$310,000 note on a $300,000 base = 3.33% financed — well above 1.75% → MI-4 FIRED."""
+    return _snapshot(
+        _LOAN_MI4_OVER,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="310000.00"),
+    )
+
+
+def build_mi4_under_ufmip_snapshot() -> Snapshot:
+    """$303,000 note on a $300,000 base = 1.00% financed — short of 1.75% → MI-4 FIRED."""
+    return _snapshot(
+        _LOAN_MI4_UNDER,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="303000.00"),
+    )
+
+
+def build_mi4_no_ufmip_financed_snapshot() -> Snapshot:
+    """Note == base: nothing financed. ⚠️ NEEDS_REVIEW, not fired — the premium may have been paid in
+    cash, and a Section 248 (Indian Lands) mortgage is exempt entirely. Neither is detectable."""
+    return _snapshot(
+        _LOAN_MI4_NONE,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="300000.00"),
+    )
+
+
+def build_mi4_conventional_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, conventional side. Note == base, which on an FHA file is a
+    needs_review — but this is a CONVENTIONAL loan, where no upfront MIP is due at all. MI-4 must be
+    NOT_APPLICABLE and must never fire."""
+    return _snapshot(
+        _LOAN_MI4_CONVENTIONAL,
+        [],
+        _mip_mismo(program="conventional", base_loan="300000.00", note_amount="300000.00"),
+    )
+
+
+def build_mi4_no_note_amount_snapshot() -> Snapshot:
+    """An FHA file stating a base loan amount but NO note amount → the rate abstains → MI-4
+    COULDNT_CHECK. Never satisfied on a missing amount."""
+    return _snapshot(
+        _LOAN_MI4_NO_NOTE,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount=None),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1086,6 +1171,12 @@ __all__ = [
     "build_mi1_low_ltv_snapshot",
     "build_mi1_no_program_snapshot",
     "build_mi1_no_value_snapshot",
+    "build_mi4_conventional_snapshot",
+    "build_mi4_correct_ufmip_snapshot",
+    "build_mi4_no_note_amount_snapshot",
+    "build_mi4_no_ufmip_financed_snapshot",
+    "build_mi4_over_ufmip_snapshot",
+    "build_mi4_under_ufmip_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",

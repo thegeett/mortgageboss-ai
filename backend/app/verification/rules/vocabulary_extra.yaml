@@ -540,3 +540,25 @@ tags:
       financed FHA upfront MIP. ⚠️ Distinct from loan.amount, which is the BASE loan amount
       (TERMS_OF_LOAN/BaseLoanAmount). MI-4 reads the difference between the two.
     produced_by: parsed
+
+  # --- LP-488 — MI-4's FHA upfront MIP, expressed as a RATE. ---------------------------------------- #
+  #
+  # ⚠️ A RATE, NOT A DOLLAR VARIANCE, and that is deliberate. MI-4 must compare the financed UFMIP with
+  # the 1.75% required by HUD ML 2023-05. Emitting a variance would mean computing "expected UFMIP"
+  # inside the producer — putting the 175-bps RATE in a recipe, where it is neither reviewable nor
+  # citable. Emitting the rate keeps the threshold in the spec's reference_values: the tag DESCRIBES what
+  # the file charged, the rule JUDGES it against the published figure.
+  #
+  # `mi.fha_ufmip` (fact_tags.csv, "FHA upfront MIP (financed)") stays INERT for the same reason it is
+  # not needed: it is the dollar amount, and MI-4 gates on the rate. The dollars appear in this tag's
+  # reason text, so a processor still sees them on the finding.
+  mi.fha_ufmip_percent:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The FHA upfront MIP financed into the loan, as a percent of the base loan amount — computed as
+      (note amount - base loan amount) / base loan amount x 100. 0 when nothing was financed (the premium
+      may have been paid in cash). "unknown" when either amount is missing or the base is not positive —
+      never 0, which would read as a real "nothing financed".
+    produced_by: derived

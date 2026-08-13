@@ -1047,3 +1047,32 @@ MI-1:
     property.purchase_price, and the appraisal's appraised_value. The LTV arithmetic is not
     reimplemented — the recipe calls app/verification/ltv.py (LP-77), so the rule path and the display
     path cannot drift.
+
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-4 (FHA upfront MIP). Deterministic: no AI tag in the chain.
+#
+# ⚠️ `validated` IS NOT READ FOR THIS BAR either (no-ai-dependency → is_eligible reads input_resolves
+# alone). MI-4's threshold IS tier-P — HUD ML 2023-05, published 2023-02-22, read this pass — but that is
+# recorded in the spec's reference_values, which is the calibration record. Setting `validated: true`
+# here would be decorative, so it stays false and this comment says why.
+MI-4:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a wrong upfront premium closes -> the loan is short of, or over-charged for, mandatory FHA
+    insurance and the endorsement is at risk) >> FP (a processor checks two numbers on the note). The
+    "nothing financed" case is deliberately NOT a failure: the premium may have been paid in cash, and a
+    Section 248 mortgage is exempt — neither is detectable from any field, so that row asks rather than
+    asserts.
+  rationale: >-
+    No AI tag. The rate is a DOMAIN number at the strongest provenance available — HUD Mortgagee Letter
+    2023-05, the publisher's own document, published 2023-02-22, effective for case numbers assigned on
+    or after 2023-03-20 — recorded with its citation in the spec's reference_values. The inputs are two
+    DIFFERENT MISMO elements (TERMS_OF_LOAN/BaseLoanAmount and TERMS_OF_LOAN/NoteAmount), so the check is
+    not an ADR-330 vacuity. ⚠️ Only the UPFRONT premium is evaluated: no document type in the system
+    carries a monthly MIP figure, so the annual leg — and ML 2023-05's per-cell annual rate matrix, which
+    was NOT obtained — is deliberately unbuilt rather than invented.

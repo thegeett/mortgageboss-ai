@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import pairwise
 
 from pydantic import JsonValue
@@ -1953,6 +1953,45 @@ def _loan_ltv_percent(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-4's FHA upfront MIP, as a RATE.
+#
+# ⚠️ WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
+# TERMS_OF_LOAN/BaseLoanAmount (the model maps it to loan_amount — its own comment records the mapping)
+# and TERMS_OF_LOAN/NoteAmount. On an FHA loan the borrower signs a note for the base amount PLUS the
+# financed upfront MIP, so the difference between them is the premium. On the three conventional MISMO
+# fixtures in the repo the two are equal, which is exactly right: no UFMIP on a conventional loan.
+#
+# ⚠️ THE RATE, NOT A VARIANCE — so the 175-bps figure stays in MI-4's reference_values where it is cited
+# and reviewable, instead of being hard-coded into this recipe.
+# --------------------------------------------------------------------------- #
+
+
+def _fha_ufmip_percent(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """mi.fha_ufmip_percent — financed upfront MIP as a percent of the base loan amount (MI-4).
+
+    ``(note amount - base loan amount) / base loan amount x 100``. Abstains when either amount is
+    missing or the base is not positive — never a fabricated 0, which a rule would read as "nothing was
+    financed" and treat as a real (if reviewable) answer.
+    """
+    base = _first_loan_decimal(snapshot, "loan.amount")
+    note = _first_loan_decimal(snapshot, "loan.note_amount")
+    if base is None:
+        return _UNKNOWN, "the file states no base loan amount"
+    if note is None:
+        return _UNKNOWN, "the file states no note amount"
+    if base <= 0:
+        return _UNKNOWN, "the base loan amount is not a positive number"
+    financed = note - base
+    percent = (financed / base * Decimal(100)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    return str(percent), (
+        f"the note amount ({note}) exceeds the base loan amount ({base}) by {financed}, which is "
+        f"{percent}% of the base loan amount"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -2657,6 +2696,7 @@ _RECIPES: dict[str, Recipe] = {
     "dwelling_settlement_basis": _dwelling_settlement_basis,
     "property_value_basis": _property_value_basis,  # LP-488 — MI-1
     "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
+    "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure

@@ -267,5 +267,6 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "IH-2",  # LP-487 — mortgagee clause (a normalised name compare; can only needs_review)
             "IH-7",  # LP-487 — condo master policy (presence + adequacy, Fannie B7-4-01 / B7-3-03)
             "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
+            "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
         )
     )
