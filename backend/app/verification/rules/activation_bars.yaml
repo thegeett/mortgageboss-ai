@@ -1006,3 +1006,11 @@ IH-7:
     in different chapters. The fidelity/crime requirement (B7-4-02) is deliberately NOT evaluated: its
     unit-count input never resolves, and building on it would make IH-7 permanently couldnt_check. Logged
     in docs/domain/priya-open-questions.md.
+    ⚠️ input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence — the same caveat CL-1
+    carries, recorded because the flag otherwise reads as verified. IH-7's applicability input
+    property.type does NOT resolve today: tag_production.yaml records MISMO property_type as null on all
+    three fixtures, and app/mismo has no property_type mapping at all, so IH-7 returns couldnt_check on
+    every MISMO-imported file. That is the SAME condition the paragraph above gives as the reason for not
+    building the fidelity leg — stated here so the two do not read as contradicting each other. The rule
+    ships under the build-first policy and fail-closes honestly; re-confirm when property.type has a
+    producer.

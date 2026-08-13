@@ -934,7 +934,7 @@ def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
     if clause == lender:
         return True
     shorter, longer = (clause, lender) if len(clause) < len(lender) else (lender, clause)
-    return len(shorter) >= 2 and longer[: len(shorter)] == shorter
+    return len(shorter) >= _IH2_MIN_PREFIX_TOKENS and longer[: len(shorter)] == shorter
 
 
 def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
@@ -970,7 +970,12 @@ def _file_lender_name(snapshot: Snapshot) -> tuple[str | None, str]:
         values = _parsed_strings(snapshot, tag_id)
         if not values:
             continue
-        distinct = {_WS.sub(" ", v).strip().casefold(): v for v in values}
+        # ⚠️ Dedup on the NORMALISED TOKENS, not the raw string (reported finding). The token normaliser
+        # lives in this same module and strips punctuation and entity suffixes; keying on the raw text
+        # meant "United Wholesale Mortgage, LLC" on the initial CD and "UNITED WHOLESALE MORTGAGE LLC" on
+        # the final CD read as TWO creditors and IH-2 abstained. Nearly every real file carries both, so a
+        # comma silently killed the rule. The abstain is for GENUINELY different creditors; this keeps it.
+        distinct = {tuple(_normalise_lender_name(v)): v for v in values}
         if len(distinct) > 1:
             return None, (
                 f"{label} names more than one creditor ({', '.join(sorted(distinct.values()))}) — "
@@ -1052,7 +1057,17 @@ def _mortgagee_clause_correct(
 # replacement cost dwelling") is a human question, not a pass.
 # --------------------------------------------------------------------------- #
 
+# ⚠️ NAMED, not inlined, so the spec↔code drift test can pin the CODE (reported finding). It was
+# hardcoded as `>= 2` while the spec declared min_prefix_tokens_for_match: "2" and the drift test compared
+# the spec's literal against the literal "2" — so changing the code to 3 left the test green and the spec
+# silently wrong about what runs. The other two IH-2 vocabulary values were already pinned spec↔constant.
+_IH2_MIN_PREFIX_TOKENS = 2
+
 _CONDO_MIN_LIABILITY_PER_OCCURRENCE = Decimal("1000000")
+# The document type whose PRESENCE answers "is there a master policy on this file?" — mirrors the
+# document_type scope of the condo.* parsed declarations in tag_production.yaml, so presence and the
+# fields read from it can never disagree about which document they mean.
+_CONDO_MASTER_POLICY_DOC_TYPES = frozenset({"master_insurance_policy_for_condominium"})
 
 _MASTER_POLICY_RC_PHRASES: tuple[str, ...] = (
     "guaranteed replacement cost",
@@ -1108,7 +1123,21 @@ def _condo_master_policy(
     if next(iter(property_types)) != "condo":
         return "n/a", "the subject property is not a condominium — no master policy is required"
 
+    # ⚠️ PRESENCE IS ABOUT THE DOCUMENT, not one extracted field (reported finding). Keying `absent` on
+    # condo.master_policy_number alone meant a master-policy certificate that IS on the file but whose
+    # number failed to extract reported "absent" and FIRED, telling a processor to request a document
+    # already in front of them. That contradicts this recipe's own discipline two branches down, where an
+    # unreadable basis abstains "rather than inferring". A present-but-unreadable document abstains.
+    has_document = any(
+        entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
+        for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+    )
     if not _parsed_strings(snapshot, "condo.master_policy_number"):
+        if has_document:
+            return _UNKNOWN, (
+                "the file carries a condominium master-policy document but no policy number could be "
+                "read from it — abstaining rather than reporting the policy as missing"
+            )
         return "absent", (
             "the property is a condominium but the file carries no master insurance policy stating a "
             "policy number"
@@ -1123,6 +1152,18 @@ def _condo_master_policy(
         return _UNKNOWN, (
             f"the master policy's coverage basis reads {unrecognised[0]!r}, which is not a recognised "
             "replacement-cost or actual-cash-value term — abstaining rather than inferring"
+        )
+    # ⚠️ NO CROSS-DOCUMENT POOLING (reported finding). These values are gathered across EVERY master-policy
+    # document with no pairing, so two certificates — a current one and a superseded one — were being
+    # judged as if they described one policy. Mixed bases fired `present_inadequate` with reasoning that
+    # flatly asserted "written on an actual-cash-value basis" when one of them was replacement cost.
+    # Disagreement is not a finding, it is an unresolved subject: abstain, exactly as _file_lender_name
+    # does directly above and as the two-binder housing.insurance_monthly rule does.
+    if len(normalised) > 1:
+        return _UNKNOWN, (
+            f"the file's master-policy documents state different coverage bases "
+            f"({', '.join(sorted(str(b) for b in normalised))}) — abstaining rather than judging one "
+            "policy by another's terms"
         )
     if normalised != {"replacement_cost"}:
         return "present_inadequate", (
@@ -1142,6 +1183,14 @@ def _condo_master_policy(
                 f"the master policy's general liability limit reads {value!r}, which is not a number — "
                 "abstaining rather than treating it as zero"
             )
+    # ⚠️ Same reasoning as the basis above: `min()` across unrelated certificates judged the CURRENT
+    # policy by a SUPERSEDED one's limit — a live $2,000,000 certificate beside an old $500,000 one fired.
+    if len({*parsed_limits}) > 1:
+        return _UNKNOWN, (
+            "the file's master-policy documents state different general liability limits "
+            f"({', '.join(f'${v:,}' for v in sorted(set(parsed_limits)))}) — abstaining rather than "
+            "judging the policy by the lowest figure on file"
+        )
     lowest = min(parsed_limits)
     if lowest < _CONDO_MIN_LIABILITY_PER_OCCURRENCE:
         return "present_inadequate", (

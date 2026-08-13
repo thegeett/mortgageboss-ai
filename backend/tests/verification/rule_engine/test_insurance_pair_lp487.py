@@ -19,6 +19,9 @@ is needs_review — "confirm" — and a test below pins that no outcome in the s
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
 from app.verification.eval.fire_path_scenarios import (
     build_ih2_clause_matches_snapshot,
@@ -37,13 +40,23 @@ from app.verification.rule_engine.result import Verdict
 from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.rules.kinds import EvaluationPath, load_rule_kinds
 from app.verification.rules.specs import load_rule_spec
-from app.verification.snapshot.model import Snapshot
+from app.verification.snapshot.model import (
+    DocumentEntry,
+    DocumentsSection,
+    MismoSection,
+    Snapshot,
+    TagsSection,
+)
+from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.tag_materialization.derived import (
     _CLAUSE_TRUNCATE_MARKERS,
     _CONDO_MIN_LIABILITY_PER_OCCURRENCE,
     _CORPORATE_SUFFIX_TOKENS,
+    _IH2_MIN_PREFIX_TOKENS,
     _MASTER_POLICY_ACV_PHRASES,
     _MASTER_POLICY_RC_PHRASES,
+    _condo_master_policy,
+    _file_lender_name,
     _lender_names_agree,
     _master_policy_basis,
     _normalise_lender_name,
@@ -166,7 +179,10 @@ def test_ih2_vocabulary_matches_the_spec() -> None:
     values = load_rule_spec("IH-2").reference_values.values
     assert tuple(values["clause_truncate_markers"].split("|")) == _CLAUSE_TRUNCATE_MARKERS
     assert set(values["corporate_suffix_tokens"].split("|")) == _CORPORATE_SUFFIX_TOKENS
-    assert values["min_prefix_tokens_for_match"] == "2"
+    # ⚠️ Pinned against the CONSTANT, not the literal "2" (reported finding): comparing the spec's literal
+    # to a literal proved nothing about the code, so a change to `>= 3` kept this green while the spec
+    # became a lie. This now fails if the code and the spec diverge, which is what the spec claims.
+    assert values["min_prefix_tokens_for_match"] == str(_IH2_MIN_PREFIX_TOKENS)
 
 
 # --------------------------------------------------------------------------- #
@@ -295,3 +311,122 @@ def test_neither_rule_reads_a_distrusted_field() -> None:
         assert not (gated & set(distrusted)), (
             f"{rule_id} gates on a distrusted tag: {gated & set(distrusted)}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# LP-487 review fixes — multi-document behaviour
+# --------------------------------------------------------------------------- #
+def _tag(value: str) -> Tag:
+    return Tag(
+        value=value,
+        confidence=None,
+        reasoning="fixture",
+        source_facts=("d",),
+        produced_by=TagProducedBy.PARSED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        stage=TagStage.A,
+    )
+
+
+def _snap(docs: list[DocumentEntry], **subjects: dict[str, Tag]) -> Snapshot:
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 8, 1, tzinfo=UTC),
+        documents=DocumentsSection.present(docs),
+        mismo=MismoSection.present({}),
+        tags=TagsSection.present(dict(subjects)),
+    )
+
+
+def _condo_doc(content_id: str) -> DocumentEntry:
+    return DocumentEntry(
+        content_id=content_id,
+        document_type="master_insurance_policy_for_condominium",
+        belongs_to=None,
+        fields={},
+    )
+
+
+def test_two_closing_disclosures_spelling_the_lender_differently_still_resolve() -> None:
+    """⚠️ THE REPORTED FN. Nearly every file carries an initial AND a final CD. Dedup keyed on the RAW
+    string, so a comma's difference read as two creditors and IH-2 abstained; the token normaliser that
+    collapses them lives in the same module."""
+    snap = _snap(
+        [],
+        cd1={"loan.lender_name_cd": _tag("United Wholesale Mortgage, LLC")},
+        cd2={"loan.lender_name_cd": _tag("UNITED WHOLESALE MORTGAGE LLC")},
+    )
+    name, label = _file_lender_name(snap)
+    assert name is not None, "one creditor spelled two ways must not abstain"
+    assert "Closing Disclosure" in label
+
+
+def test_two_genuinely_different_creditors_still_abstain() -> None:
+    """The other half — the abstain exists for REAL disagreement and must survive the fix."""
+    snap = _snap(
+        [],
+        cd1={"loan.lender_name_cd": _tag("United Wholesale Mortgage")},
+        cd2={"loan.lender_name_cd": _tag("Rocket Mortgage")},
+    )
+    name, why = _file_lender_name(snap)
+    assert name is None and "more than one creditor" in why
+
+
+def test_a_superseded_master_policy_does_not_condemn_the_current_one() -> None:
+    """⚠️ THE REPORTED FP. Limits were pooled across ALL master-policy documents and judged by min(), so a
+    live $2,000,000 certificate beside a superseded $500,000 one FIRED present_inadequate."""
+    snap = _snap(
+        [_condo_doc("m1"), _condo_doc("m2")],
+        loan={"property.type": _tag("condo")},
+        m1={
+            "condo.master_policy_number": _tag("MP-1"),
+            "condo.master_policy_basis_raw": _tag("replacement cost"),
+            "condo.master_liability_limit": _tag("2000000"),
+        },
+        m2={
+            "condo.master_policy_number": _tag("MP-0"),
+            "condo.master_policy_basis_raw": _tag("replacement cost"),
+            "condo.master_liability_limit": _tag("500000"),
+        },
+    )
+    value, why = _condo_master_policy(snap, "loan", None)
+    assert value == "unknown", why
+    assert "different general liability limits" in why
+
+
+def test_mixed_bases_across_documents_abstain_rather_than_asserting_acv() -> None:
+    """The reasoning used to flatly state "written on an actual-cash-value basis" when one document said
+    replacement cost. Disagreement is an unresolved subject, not a finding."""
+    snap = _snap(
+        [_condo_doc("m1"), _condo_doc("m2")],
+        loan={"property.type": _tag("condo")},
+        m1={
+            "condo.master_policy_number": _tag("MP-1"),
+            "condo.master_policy_basis_raw": _tag("replacement cost"),
+        },
+        m2={
+            "condo.master_policy_number": _tag("MP-0"),
+            "condo.master_policy_basis_raw": _tag("actual cash value"),
+        },
+    )
+    value, why = _condo_master_policy(snap, "loan", None)
+    assert value == "unknown", why
+    assert "different coverage bases" in why
+
+
+def test_a_present_policy_with_no_readable_number_abstains_never_absent() -> None:
+    """⚠️ THE REPORTED FALSE GAP. Presence keyed on condo.master_policy_number alone, so a certificate ON
+    THE FILE whose number failed to extract reported absent and FIRED — telling a processor to request a
+    document already in front of them, against this recipe's own abstain-rather-than-infer discipline."""
+    snap = _snap([_condo_doc("m1")], loan={"property.type": _tag("condo")})
+    value, why = _condo_master_policy(snap, "loan", None)
+    assert value == "unknown", why
+    assert "no policy number could be read" in why
+
+
+def test_a_condo_with_no_master_policy_document_still_reports_absent() -> None:
+    """The genuine gap must still fire — the fix narrows the false one, not the real one."""
+    snap = _snap([], loan={"property.type": _tag("condo")})
+    value, why = _condo_master_policy(snap, "loan", None)
+    assert value == "absent", why

@@ -84,7 +84,7 @@ title.vesting,doc,string,,Vesting; consistency w/ borrower/marital.,AI,TI-5,AI-a
 title.rapid_transfer,doc,enum,"[""yes"", ""no"", ""unknown""]",Recent transfer / rapid price change (flip signal).,AI,"TI-6, FR-2",AI-at-rule-time,enum: yes | no | unknown
 ins.dwelling_coverage,doc,number,,Dwelling coverage amount.,parsed,IH-1,Deterministic-once-tagged,number | unknown
 ins.effective_date,doc,date,,Policy effective date vs closing.,parsed,IH-3,Deterministic-once-tagged,date | unknown
-ins.mortgagee_clause_correct,doc,enum,"[""yes"", ""no"", ""unknown""]",Mortgagee clause names correct lender.,AI,IH-2,AI-at-rule-time,enum: yes | no | unknown
+ins.mortgagee_clause_correct,doc,enum,"[""yes"", ""no"", ""unknown""]",Mortgagee clause names correct lender.,derived,IH-2,Deterministic,enum: yes | no | unknown
 ins.premium_annual,doc,number,,Annual premium (for DTI).,parsed,"DT-5, IH-4",Deterministic-once-tagged,number | unknown
 flood.zone,doc,string,,Flood zone from determination.,parsed,IH-5,Deterministic-once-tagged,string | unknown
 flood.in_sfha,doc,enum,"[""yes"", ""no"", ""unknown""]",In a Special Flood Hazard Area (requires flood ins).,AI,"IH-5, IH-6",Deterministic-once-tagged,enum: yes | no | unknown
@@ -124,7 +124,7 @@ condo.reserve_pct,doc,number,,HOA budget reserve % (>=10% requirement). AI parse
 contract.unusual_credits,doc,enum,"[""yes"", ""no + detail""]",Seller credits beyond norms / side agreements.,AI,FR-3,AI-at-rule-time,enum: yes | no + detail
 id.marital_status,borrower,enum,"[""married"", ""unmarried"", ""separated"", ""unknown""]",Stated marital status (title/vesting consistency).,parsed,ID-7,Deterministic-once-tagged,enum: married | unmarried | separated | unknown
 id.title_vesting_consistent,doc,enum,"[""yes"", ""no"", ""unknown""]",Marital status consistent with title vesting.,AI,ID-7,AI-at-rule-time,enum: yes | no | unknown
-ins.condo_master_policy,doc,enum,"[""present_adequate"", ""present_inadequate"", ""absent"", ""n/a"", ""unknown""]",Condo master + fidelity policy adequacy.,AI,IH-7,AI-at-rule-time,enum: present_adequate | present_inadequate | absent | n/a | unknown
+ins.condo_master_policy,doc,enum,"[""present_adequate"", ""present_inadequate"", ""absent"", ""n/a"", ""unknown""]","Condo master policy adequacy (presence, replacement-cost basis, general liability limit). Fidelity/crime (B7-4-02) is deliberately NOT evaluated — its unit-count input never resolves.",derived,IH-7,Deterministic,enum: present_adequate | present_inadequate | absent | n/a | unknown
 ins.wind_hail_required,doc,enum,"[""yes"", ""no"", ""unknown""]",Wind/hail coverage applicability (coastal/state).,AI,IH-8,AI-at-rule-time,enum: yes | no | unknown
 income.voe_present,income,enum,"[""yes"", ""no""]",Written/verbal VOE document present.,AI,IN-8,Deterministic-once-tagged,enum: yes | no
 income.future_employment,income,enum,"[""yes"", ""no"", ""unknown""]",Future/offer-letter income with start date.,AI,IN-9,Deterministic-once-tagged,enum: yes | no | unknown
