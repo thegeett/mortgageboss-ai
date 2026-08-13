@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import pairwise
+from typing import NamedTuple
 
 from pydantic import JsonValue
 
@@ -3329,6 +3330,440 @@ def _property_appraisal_address_match(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-495a — THE MORTGAGE-STATEMENT ↔ STATED-LIABILITY RECONCILIATION (ADR-375: ONE MATCHER, TWO RULES).
+#
+# ⚠️ ONE matcher answers two DIFFERENT questions, and RE-1 / DT-6 each read one of them:
+#     RE-1  is this statement's obligation DISCLOSED among the app's stated liabilities?  (reo.statement_disclosure)
+#     DT-6  for a MATCHED obligation, does the STATED payment cover the statement's true PITIA?
+#           (reo.statement_payment_coverage)
+# Two matchers would let the two rules disagree about the same pair of documents — the CR-1/CR-4
+# precedent that ADR-375 exists to prevent.
+#
+# ⚠️ NEITHER RULE MAY ASSERT RETENTION, AND NEITHER EVER FIRES. Both SURFACE a discrepancy as
+# `needs_review` and hand the question to the processor. An unmatched statement can be a paid-off loan, a
+# duplicate, or a co-signed debt; an understated payment can be a property under contract. "Retained" is an
+# INFERENCE no document, field or MISMO fact in this system states (LP-495a Phase A), so a rule that
+# asserted it would put a PITIA into the DTI for a property being sold and fail a qualified borrower.
+#
+# ⚠️ `property.is_retained_reo` and `property.retained_pitia` STAY VOCABULARY ORPHANS. Neither recipe here
+# reads them; they have no `tag_production.yaml` entry and no producer, exactly as
+# `property.is_warrantable_condo` does. A test pins that, so this lane can never be mistaken for coverage
+# of the retention question.
+#
+# ⚠️ NO PROPERTY ADDRESS IS AVAILABLE ON THE STATED SIDE. MISMO emits only
+# `liability.{k}.type / .monthly_payment / .unpaid_balance / .holder_name` — there is no address on a
+# liability — so the match is on HOLDER NAME, reusing IH-2's `_normalise_lender_name` /
+# `_lender_names_agree` rather than cloning a second name matcher.
+#
+# ⚠️ THE ABSTAIN RATE IS REAL AND STATED, NOT DISCOVERED LATER: `lender_name` fills 54/71 mortgage
+# statements (LP-495a Phase A), so ~24% of statements abstain on the name alone. Abstain is the safe
+# direction — the alternative is reading an unnamed statement as an undisclosed debt.
+# --------------------------------------------------------------------------- #
+
+_REO_STATEMENT_DOC_TYPE = "mortgage_statement"
+# The MISMO `liability.{k}.type` value that means "a mortgage", casefolded. StatedLiability carries
+# MortgageLoan / Revolving / Installment / HELOC / Open30Day; only MortgageLoan is the comparison set for a
+# mortgage statement. ⚠️ HELOC is deliberately NOT included: a HELOC statement is a different document type
+# and a HELOC liability is not what a mortgage statement evidences — folding it in would match a first
+# mortgage's statement onto a line of credit.
+_REO_STATED_MORTGAGE_TYPE = "mortgageloan"
+
+
+class _StatementMatch(NamedTuple):
+    """The ONE matcher's result, read by both RE-1's and DT-6's recipes.
+
+    ``outcome`` is ``matched`` / ``unmatched`` / ``unknown``. The three amounts are carried so DT-6's
+    recipe never has to re-read the documents (and so the two rules cannot disagree about which stated
+    liability this statement matched).
+    """
+
+    outcome: str
+    reason: str
+    stated_payment: Decimal | None
+    statement_payment: Decimal | None
+    statement_escrow: Decimal | None
+
+
+def _entry_decimal(entry: DocumentEntry, field_name: str) -> Decimal | None:
+    """A document entry's field as a Decimal, or None when absent / empty / not a number."""
+    text = _entry_text(entry, field_name)
+    if not text:
+        return None
+    try:
+        return Decimal(text.replace(",", "").replace("$", "").strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _stated_mortgage_liabilities(snapshot: Snapshot) -> list[dict[str, str]]:
+    """The app's stated MISMO liabilities of type MortgageLoan, as ``[{field: text}, …]``.
+
+    Reads the flat ``liability.{k}.{field}`` facts the MISMO section projects. The ``{k}`` index is
+    positional and used ONLY to gather one row's fields together, never as an identity.
+    """
+    if snapshot.mismo.absent:
+        return []
+    rows: dict[str, dict[str, str]] = {}
+    for key, field in snapshot.mismo.facts.items():
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != "liability":
+            continue
+        _, index, name = parts
+        value = field.value if isinstance(field, Field) and field.is_present else None
+        if value is None or not str(value).strip():
+            continue
+        rows.setdefault(index, {})[name] = str(value).strip()
+    return [
+        row
+        for _, row in sorted(rows.items(), key=lambda kv: (len(kv[0]), kv[0]))
+        if row.get("type", "").casefold().replace(" ", "") == _REO_STATED_MORTGAGE_TYPE
+    ]
+
+
+def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _StatementMatch:
+    """⚠️ THE ONE MATCHER (ADR-375) — match ONE mortgage statement to the app's stated mortgage liabilities.
+
+    Tolerant on the holder/lender name (IH-2's normaliser + token-prefix agreement), and ABSTAINS rather
+    than guessing at every ambiguity:
+
+    * the statement states no lender name (the 54/71 fill — ~24% of statements) → ``unknown``;
+    * nothing identifying survives normalisation → ``unknown``;
+    * the file states NO MISMO mortgage liabilities at all → ``unknown``, **never ``unmatched``**. A file
+      with no stated side is a file that cannot be reconciled — reporting every statement as an
+      undisclosed debt because the application was never imported is the fail-OPEN direction;
+    * MORE THAN ONE stated liability matches the name → ``unknown``. Two loans with the same servicer is
+      ordinary (a first and a second), and picking one would attach DT-6's payment comparison to a
+      liability chosen by list order.
+    """
+    lender = _entry_text(entry, "lender_name")
+    statement_payment = _entry_decimal(entry, "monthly_payment")
+    statement_escrow = _entry_decimal(entry, "escrow_amount")
+    if not lender:
+        return _StatementMatch(
+            _UNKNOWN,
+            "this mortgage statement states no lender name, so the obligation it evidences cannot be "
+            "matched against the liabilities stated on the application",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    lender_tokens = _normalise_lender_name(lender)
+    if not lender_tokens:
+        return _StatementMatch(
+            _UNKNOWN,
+            f"nothing identifying survives normalisation of the statement's lender name ({lender!r}) — "
+            "abstaining rather than reading an empty name as an unmatched obligation",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    stated = _stated_mortgage_liabilities(snapshot)
+    if not stated:
+        return _StatementMatch(
+            _UNKNOWN,
+            "the application states no mortgage liabilities to reconcile against — with no stated side "
+            "there is nothing to match, so this is not read as an undisclosed obligation",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    matches = [
+        row
+        for row in stated
+        if (holder := row.get("holder_name"))
+        and _lender_names_agree(_normalise_lender_name(holder), lender_tokens)
+    ]
+    if len(matches) > 1:
+        return _StatementMatch(
+            _UNKNOWN,
+            f"the statement's lender ({lender!r}) matches {len(matches)} of the mortgage liabilities "
+            "stated on the application — abstaining rather than comparing the payment against one of "
+            "several the application itself does not distinguish",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    if not matches:
+        return _StatementMatch(
+            "unmatched",
+            f"no mortgage liability stated on the application names a holder matching this statement's "
+            f"lender ({lender!r})",
+            None,
+            statement_payment,
+            statement_escrow,
+        )
+    holder = matches[0].get("holder_name", "")
+    raw_payment = matches[0].get("monthly_payment")
+    stated_payment: Decimal | None = None
+    if raw_payment is not None:
+        try:
+            stated_payment = Decimal(raw_payment.replace(",", "").replace("$", "").strip())
+        except (InvalidOperation, ValueError):
+            stated_payment = None
+    return _StatementMatch(
+        "matched",
+        f"the application states a mortgage liability held by {holder!r}, which matches this "
+        f"statement's lender ({lender!r})",
+        stated_payment,
+        statement_payment,
+        statement_escrow,
+    )
+
+
+def _reo_statement_disclosure(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """reo.statement_disclosure — is THIS statement's obligation disclosed on the application? (RE-1)
+
+    Per mortgage statement: returns ``None`` (DECLINE — no tag materialises) for any other subject, so the
+    tag lands only on the documents RE-1 reads (the IH-1 / IH-2 shape).
+
+    ⚠️ ``undisclosed`` is a DISCREPANCY, NOT A DEFECT, and RE-1 routes it to ``needs_review``, never to a
+    finding. A statement with no matching stated liability can be a loan paid off since the application, a
+    duplicate of a liability recorded under a servicer's different name, or a debt the borrower co-signed
+    and is not obliged on. The rule surfaces the question; the processor answers it.
+    """
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != _REO_STATEMENT_DOC_TYPE
+    ):
+        return None, "not a mortgage statement — no disclosure tag"
+    match = _reo_match_statement(snapshot, subject_raw)
+    if match.outcome == "matched":
+        return "disclosed", match.reason
+    if match.outcome == "unmatched":
+        return "undisclosed", match.reason
+    return _UNKNOWN, match.reason
+
+
+def _reo_statement_payment_coverage(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """reo.statement_payment_coverage — does the STATED payment cover this statement's PITIA? (DT-6)
+
+    ⚠️ THE STATEMENT'S ``monthly_payment`` IS ALREADY THE PITIA — IT IS NOT ADDED TO ``escrow_amount``.
+    The extractor's own prompt defines the fields as ``monthly_payment (number) the total monthly payment
+    (principal+interest+escrow)`` and ``escrow_amount (number) the escrow PORTION of the payment``. Escrow
+    is a COMPONENT of the total, not an addend. Summing them would double-count escrow on all 50 of the 67
+    statements that fill both fields and report a shortfall on nearly every file — the CO-5 mistake (a
+    30-day figure compared against a 60-day cap) in a new place. The escrow figure is carried into the
+    REASONING instead, because it is usually the EXPLANATION for a real shortfall: a 1003 commonly states
+    principal and interest only, and the escrow is exactly the gap.
+
+    ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION, NOT AN OMISSION (ADR-361). No source
+    establishes a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so
+    any band here would be invented. The comparison is exact, and a difference of any size routes to
+    ``needs_review`` — which costs a processor one glance, never an automatic finding.
+
+    ⚠️ UNMATCHED IS ``unknown``, NOT A PASS AND NOT A SECOND REPORT. RE-1 already surfaces an unmatched
+    statement; DT-6 cannot compare a payment against a liability it never found, so it abstains rather
+    than double-reporting the same discrepancy under a second rule.
+    """
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type != _REO_STATEMENT_DOC_TYPE
+    ):
+        return None, "not a mortgage statement — no payment-coverage tag"
+    match = _reo_match_statement(snapshot, subject_raw)
+    if match.outcome != "matched":
+        return _UNKNOWN, (
+            "this statement's obligation was not matched to a single stated mortgage liability, so the "
+            f"payment stated on the application cannot be compared against it — {match.reason}"
+        )
+    if match.statement_payment is None:
+        return _UNKNOWN, (
+            "this mortgage statement states no total monthly payment, so there is nothing to compare the "
+            "application's stated payment against"
+        )
+    if match.stated_payment is None:
+        return _UNKNOWN, (
+            "the matching liability on the application states no monthly payment, so it cannot be "
+            "compared against the statement's total monthly payment"
+        )
+    escrow_note = (
+        f" The statement shows an escrow portion of {match.statement_escrow} within that total, which is "
+        "the usual explanation for a short stated figure (a 1003 often carries principal and interest "
+        "only)."
+        if match.statement_escrow is not None
+        else ""
+    )
+    if match.stated_payment < match.statement_payment:
+        return "short", (
+            f"the application states a monthly payment of {match.stated_payment} for this liability, but "
+            f"the servicer's statement bills a total monthly payment of {match.statement_payment}."
+            f"{escrow_note} If the property is being retained, the debt-to-income ratio may understate "
+            "this obligation; if it is under contract or being sold, the stated figure may be correct"
+        )
+    return "covered", (
+        f"the application states a monthly payment of {match.stated_payment} for this liability, at or "
+        f"above the total monthly payment of {match.statement_payment} the servicer's statement bills"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-495a — LO-2, LETTER-OF-EXPLANATION COMPLETENESS.
+#
+# ⚠️ THE APPROVED DIRECTIVE SAID "explanation_summary + referenced_date + borrower_signature_present,
+# document_type-scoped across ALL SIX LOX TYPES". THOSE THREE FIELDS EXIST ON EXACTLY ONE OF THEM.
+# Verified against every extractor in `app/ai/extraction/` and against the bench corpus:
+#
+#     document type                     docs  extractor fields for these three legs
+#     letter_of_explanation                9  ALL THREE (summary 9/9, date 6/9, signature 7/9)
+#     letter_of_explanation_misc           9  none — issue_orquestion / reason_or_cause / signature_date
+#     letter_of_explanation_asset          7  none — source_or_origin_of_funds / letter_date
+#     letter_of_explanation_property       7  none — reason_or_cause / letter_date / signature_date
+#     letter_of_explanation_income         2  none — reason_or_cause / letter_date / signature_date
+#     letter_of_explanation_child_care     0  none — no_expense_reason / letter_date
+#     credit_explanation_letter            4  ⚠️ NO EXTRACTOR AT ALL (bench status: `no_extractor`)
+#     application_loe                      0  borrower_signature_present only; no summary, no referenced_date
+#
+# ⚠️ PHASE A'S "9/34 · 6/34 · 7/34" DENOMINATORS ARE THE WHOLE FAMILY, BUT THE NUMERATORS CAN ONLY EVER
+# COME FROM THE 9 BASE DOCUMENTS. Read as a sparse fill across 34 letters, those rates invite a rule that
+# reports 25 of 34 LOX documents incomplete; read correctly they are 9/9, 6/9 and 7/9 on the ONLY type
+# whose extractor has the fields. Building "across all six types" on them would have produced a false
+# finding on every letter of the other types — the same shape of error as LP-494's CO-3 drop and LP-495a's
+# own RE-1/DT-6 drop: a number believed without checking what its denominator ranged over.
+#
+# ⚠️ SO THE LEGS ARE NOT ALIASED ONTO THE OTHER TYPES' FIELDS, DELIBERATELY. `letter_date` is when the
+# letter was written; `referenced_date` is the date of the event being explained — different facts.
+# `borrower_certification` / `accuracy_certification` are a prose attestation; `borrower_signature_present`
+# is whether a signature is on the page — different facts. Mapping one onto the other would answer LO-2's
+# question with a fact that is not its answer.
+#
+# ⚠️ EVERY LOE TYPE IS STILL IN SCOPE — NONE IS SILENTLY SKIPPED. A letter whose type carries no
+# completeness fields resolves to `unknown` → LO-2 `couldnt_check` ("an explanation letter is on file but
+# its completeness cannot be read"), which is a DIFFERENT verdict from "no explanation letter exists" and
+# a different verdict from "this letter is incomplete". Fail closed: absent ≠ empty ≠ unknown.
+#
+# ⚠️ THE AMOUNT LEG IS DELIBERATELY ABSENT. `referenced_amount` fills 0/34 across the family and 0/9 on
+# the one type that declares it — the TI-3/4/5 block. A leg that never resolves cannot be load-bearing.
+# ⚠️ Only `letter_of_explanation_asset` produces list rows (`transfer_path_or_chronology`, 8 rows); the
+# base type's `explanation_items` produces none, so no per-item completeness read is available.
+#
+# ⚠️ `borrower_signature_present` IS A TYPED EXTRACTOR FIELD, so the catalog's "signature (AI for scans)"
+# is STALE — LP-487's question answering yes a sixth time. REPORTED, NOT RE-KINDED: re-kinding needs its
+# own Phase A, and rule_kinds.csv stays 135 rows this ticket.
+# --------------------------------------------------------------------------- #
+
+# The one document type whose extractor carries all three completeness legs. Named, not inlined, so the
+# spec↔code drift test can pin it (the _IH2_MIN_PREFIX_TOKENS lesson).
+_LOE_FULL_FIELD_DOC_TYPE = "letter_of_explanation"
+# Every LOE-family document type in the classifier catalog. A letter of ANY of these types is in LO-2's
+# scope; the ones outside `_LOE_FULL_FIELD_DOC_TYPE` abstain because their extractor has no completeness
+# fields, NOT because they are out of scope.
+_LOE_DOC_TYPES: frozenset[str] = frozenset(
+    {
+        "letter_of_explanation",
+        "letter_of_explanation_asset",
+        "letter_of_explanation_child_care",
+        "letter_of_explanation_income",
+        "letter_of_explanation_misc",
+        "letter_of_explanation_property",
+        "credit_explanation_letter",
+        "application_loe",
+    }
+)
+# The affirmative vocabulary for `borrower_signature_present` (a free-text yes/no field). An unrecognised
+# answer abstains — it is never read as "unsigned", which would be a finding built on a value nobody
+# defined (ADR-376's discipline).
+_LOE_SIGNATURE_YES: frozenset[str] = frozenset({"yes", "y", "true", "present", "signed"})
+_LOE_SIGNATURE_NO: frozenset[str] = frozenset(
+    {"no", "n", "false", "absent", "unsigned", "not present"}
+)
+
+
+def _loe_is_explanation_letter(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """loe.is_explanation_letter — is this document an explanation letter? (LO-2's applicability predicate)
+
+    ⚠️ A SEPARATE PREDICATE TAG EXISTS BECAUSE THE APPLICABILITY DSL HAS ONLY ``eq`` / ``ne``, and LO-2's
+    scope is EIGHT document types. Gating on ``document.document_type eq letter_of_explanation`` would
+    silently drop the other seven; gating on the completeness tag itself would resolve every NON-letter in
+    the file to ``couldnt_check`` (an absent predicate tag is undetermined, not out-of-scope — LP-487), so
+    a file of pay stubs would report LO-2 as unchecked on each one.
+
+    Materialises on EVERY document (``yes`` / ``no``), so a non-letter resolves to ``not_applicable`` and
+    a letter resolves into scope.
+    """
+    # Deferred, like every other rule_engine import in this module — importing the package at module
+    # level would pull in the evaluators, which import tag_materialization back.
+    from app.verification.rule_engine.reasons import document_label
+
+    if not isinstance(subject_raw, DocumentEntry):
+        return None, "not a document subject"
+    if subject_raw.document_type is None:
+        # An UNCLASSIFIED document cannot be declared "not a letter" — fail closed to unknown so the
+        # applicability layer couldnt_checks it rather than skipping a letter nobody typed.
+        return (
+            _UNKNOWN,
+            "this document has no classified type, so it cannot be ruled out as a letter",
+        )
+    if subject_raw.document_type in _LOE_DOC_TYPES:
+        return "yes", (
+            f"this document is a {document_label(subject_raw.document_type)}, one of the explanation-"
+            "letter types"
+        )
+    return "no", (
+        f"this document is a {document_label(subject_raw.document_type)}, not an explanation letter"
+    )
+
+
+def _loe_completeness(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """loe.completeness — is THIS explanation letter complete enough to rely on? (LO-2)
+
+    Per LOE-family document: returns ``None`` (DECLINE — no tag materialises) for any other subject.
+
+    ``complete`` (all three legs present) / ``incomplete`` (a leg is missing on a letter whose extractor
+    HAS that leg) / ``unknown`` (the letter's type carries no completeness fields, or the signature answer
+    is unrecognised). See the module note above for why the other seven types abstain rather than alias
+    their own fields onto these three.
+    """
+    from app.verification.rule_engine.reasons import document_label
+
+    if (
+        not isinstance(subject_raw, DocumentEntry)
+        or subject_raw.document_type not in _LOE_DOC_TYPES
+    ):
+        return None, "not a letter of explanation — no completeness tag"
+    if subject_raw.document_type != _LOE_FULL_FIELD_DOC_TYPE:
+        return _UNKNOWN, (
+            f"this file carries a {document_label(subject_raw.document_type or 'letter')}, but that "
+            "document type's extraction captures no explanation summary, referenced date or signature "
+            "indicator — the letter is present and its completeness cannot be read from it"
+        )
+    missing: list[str] = []
+    if not _entry_text(subject_raw, "explanation_summary"):
+        missing.append("a summary of what is being explained")
+    if not _entry_text(subject_raw, "referenced_date"):
+        missing.append("the date of the event being explained")
+    signature = _entry_text(subject_raw, "borrower_signature_present").casefold()
+    if not signature:
+        missing.append("the borrower's signature")
+    elif signature in _LOE_SIGNATURE_NO:
+        missing.append("the borrower's signature (the letter is unsigned)")
+    elif signature not in _LOE_SIGNATURE_YES:
+        return _UNKNOWN, (
+            f"the letter's signature indicator reads {signature!r}, which is not a recognised yes/no "
+            "answer — abstaining rather than reporting the letter as unsigned"
+        )
+    if missing:
+        return "incomplete", (
+            "this letter of explanation is missing "
+            + ", ".join(missing)
+            + " — a letter an underwriter "
+            "can rely on states what is being explained, when it happened, and carries the borrower's "
+            "signature"
+        )
+    return "complete", (
+        "this letter of explanation states what is being explained and when, and carries the borrower's "
+        "signature"
+    )
+
+
 def _decimal_or_none(tag: Tag | None) -> Decimal | None:
     """A statement balance tag's value as a Decimal, or None (absent / unknown / unparseable)."""
     if tag is None or str(tag.value) == _UNKNOWN:
@@ -4056,6 +4491,15 @@ _RECIPES: dict[str, Recipe] = {
     "condo_fidelity_coverage": _condo_fidelity_coverage,  # LP-494 — CO-3
     "condo_reserve_adequacy": _condo_reserve_adequacy,  # LP-494 — CO-4
     "condo_project_eligibility": _condo_project_eligibility,  # LP-494 — CO-5
+    # LP-495a — ⚠️ ONE MATCHER, TWO RULES (ADR-375). Both recipes call `_reo_match_statement`; RE-1 reads
+    # the disclosure question, DT-6 the payment question, so the two rules cannot disagree about which
+    # stated liability a statement matched. Neither asserts retention and neither can fire.
+    "reo_statement_disclosure": _reo_statement_disclosure,  # LP-495a — RE-1
+    "reo_statement_payment_coverage": _reo_statement_payment_coverage,  # LP-495a — DT-6
+    # LP-495a — LO-2's completeness read + the applicability predicate its 8-type scope needs (the
+    # applicability DSL has only eq/ne).
+    "loe_is_explanation_letter": _loe_is_explanation_letter,  # LP-495a — LO-2 scope
+    "loe_completeness": _loe_completeness,  # LP-495a — LO-2
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
     # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
     # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.

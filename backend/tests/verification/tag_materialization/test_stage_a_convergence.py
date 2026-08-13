@@ -151,5 +151,9 @@ def test_no_rule_activation_changed() -> None:
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
             "CO-4",
+            # LP-495a — ONE matcher serves RE-1 and DT-6 (ADR-375); neither can produce `fired`.
+            "DT-6",
+            "LO-2",
+            "RE-1",
         )
     )

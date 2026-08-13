@@ -696,3 +696,58 @@ truncated (shortened) to two decimal places, then rounded up to the nearest whol
 `app/verification/ltv.py:103` uses `ROUND_HALF_UP` **to two decimal places** — two divergences: it rounds
 half-up rather than always up, and it does not round to a whole percent at all. **Affects MI-1 and PR-1.**
 Confirmed and reported only, not fixed here; **no ticket exists for it yet.**
+
+---
+
+## LP-495a — letters of explanation, and the retention question reopened
+
+### 1. ⛔ What conditions REQUIRE a letter of explanation? (blocks LO-1)
+
+LO-1 ("LOE required-and-present") cannot be built without this list, and **nothing in a loan file
+enumerates it.** It is lender- and AUS-driven: a DU/LPA message, an investor overlay, or an underwriter's
+condition creates the requirement, and none of those is a document the system reads.
+
+The only source available inside the system is **the run's own findings** — which would make LO-1 a
+**meta-rule over other rules' output.** No rule in the engine does that today (every rule reads fact-tags
+derived from documents and MISMO), so it is an architectural change, not a build step. **LO-1 is held.**
+
+**What would unblock it:** a list, even a partial one, of the conditions that in practice require a
+borrower LOE — e.g. credit inquiries in the last 90 days, a prior derogatory event, an employment gap, a
+large or irregular deposit, an address discrepancy. A ranked "always / usually / lender-specific" split
+would be more useful than an exhaustive list.
+
+### 2. Is an UNSIGNED letter of explanation a FINDING or a CONDITION?
+
+LO-2 currently routes an incomplete letter to **`needs_review`**, not `fired`. Two reasons, and the
+second is the one we would like confirmed:
+
+- **Evidence:** on the one LOE type whose extractor carries the fields, `referenced_date` fills 6/9 and
+  `borrower_signature_present` 7/9, so an empty field cannot be distinguished from one the extraction
+  missed. Firing would assert a defect on a letter that may well be signed and dated on the page.
+- **Domain:** we do not know whether an unsigned LOE is something a processor must FIX before submission
+  (a finding) or something underwriting routinely conditions for (a condition). If it is genuinely the
+  former, LO-2's `incomplete` outcome should be reconsidered once extraction is more reliable.
+
+### 3. Does a 1003 REO section ever reach processors?
+
+This would **reopen the retention question properly.** RE-1 and DT-6 now reconcile mortgage statements
+against the application's stated MISMO liabilities and deliberately **surface** a discrepancy rather than
+**assert** retention — because "this property is being RETAINED" is an inference that no document,
+extractor field or MISMO fact in the system states. `property.is_retained_reo` and
+`property.retained_pitia` remain vocabulary orphans with no producer.
+
+A real REO schedule (or the 1003's owned-property section) would carry the disposition — retained /
+pending sale / sold — and would let a rule state the DTI consequence directly instead of asking a
+processor to. **Do processors ever receive one?** If so, in what form, and from where in the origination
+flow?
+
+### 4. Two extraction gaps found while building LO-2 (reported, not fixed)
+
+- **`credit_explanation_letter` has NO extractor.** It is a real classifier type and 4 documents in the
+  corpus classify as it; all 4 record status `no_extractor`. They are letters of explanation that the
+  system can see but cannot read.
+- **The six LOE variant extractors capture different fields from each other.** Only the base
+  `letter_of_explanation` captures an explanation summary, a referenced date and a signature indicator;
+  the variants capture `letter_date` / `reason_or_cause` / `borrower_certification` instead. Is the
+  distinction between "the date of the event explained" and "the date the letter was written" one
+  processors care about, and should the variants capture a signature indicator too?

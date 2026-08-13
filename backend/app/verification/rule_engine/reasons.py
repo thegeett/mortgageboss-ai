@@ -75,6 +75,11 @@ _FACT_LABELS: dict[str, str] = {
     "condo.litigation_disclosed": "condo questionnaire's litigation answer",
     "condo.project_eligibility": "condo project eligibility (delinquency, concentration, litigation)",
     "loan.application_received_date": "loan application date",
+    # LP-495a — the REO reconciliation lane (RE-1 / DT-6) and LOE completeness (LO-2).
+    "reo.statement_disclosure": "whether this mortgage statement's obligation is on the application",
+    "reo.statement_payment_coverage": "stated monthly payment against the servicer's billed payment",
+    "loe.is_explanation_letter": "whether this document is a letter of explanation",
+    "loe.completeness": "letter of explanation's explanation, date and signature",
     "title.vested_owner_matches": "owner of record on the title commitment",  # TI-1 (LP-491)
     "title.vested_owner_name": "owner of record on the title commitment",  # TI-1
     "contract.seller_name": "seller named on the purchase agreement",  # TI-1

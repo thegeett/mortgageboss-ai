@@ -170,6 +170,9 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
             "CO-4",
+            "DT-6",  # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness
+            "LO-2",
+            "RE-1",
             "CR-13",
             "PR-6",
         }

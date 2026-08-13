@@ -1069,3 +1069,56 @@ tags:
       "unknown" when there is no master policy, no property type, or an unrecognised indicator. ⚠️ This is
       a PRESENCE read, not an adequacy one — see the recipe.
     produced_by: derived
+
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-495a — the mortgage-statement ↔ stated-liability reconciliation (RE-1 / DT-6) and LOE completeness
+  # (LO-2). ⚠️ `property.is_retained_reo` and `property.retained_pitia` are DELIBERATELY NOT declared here
+  # and get NO producer: "retained" is an inference no document, field or MISMO fact states, and neither
+  # rebuilt rule reads them. They stay vocabulary orphans exactly as `property.is_warrantable_condo` does,
+  # and a test pins that so this lane cannot be mistaken for coverage of the retention question.
+  # ------------------------------------------------------------------------------------------------- #
+  reo.statement_disclosure:
+    entity: doc
+    value_type: enum
+    allowed_values: ["disclosed", "undisclosed", "unknown"]
+    description: >-
+      Is the obligation this mortgage statement evidences disclosed among the mortgage liabilities stated
+      on the application (RE-1)? Matched on holder/lender name — MISMO carries NO property address on a
+      liability. "undisclosed" is a DISCREPANCY a processor resolves, never a defect: it can be a loan
+      paid off since the application, a duplicate under a servicer's other name, or a co-signed debt.
+      "unknown" when the statement names no lender (54/71 fill — ~24% abstain), when the application
+      states no mortgage liabilities at all, or when more than one stated liability matches the name.
+    produced_by: derived
+  reo.statement_payment_coverage:
+    entity: doc
+    value_type: enum
+    allowed_values: ["covered", "short", "unknown"]
+    description: >-
+      For a MATCHED obligation, does the monthly payment stated on the application cover the total monthly
+      payment the servicer's statement bills (DT-6)? ⚠️ The statement's `monthly_payment` IS ALREADY the
+      PITIA — the extractor defines it as "the total monthly payment (principal+interest+escrow)" and
+      `escrow_amount` as the escrow PORTION of it — so escrow is NOT added; the escrow figure is reported
+      as the usual EXPLANATION for a short stated figure. "unknown" when the statement was not matched to
+      exactly one stated liability, or either payment is missing.
+    produced_by: derived
+  loe.is_explanation_letter:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this document one of the eight explanation-letter types (LO-2's applicability predicate)? A
+      separate predicate tag exists because the applicability DSL has only eq/ne and LO-2's scope is eight
+      document types. "unknown" for an unclassified document — it cannot be ruled out as a letter.
+    produced_by: derived
+  loe.completeness:
+    entity: doc
+    value_type: enum
+    allowed_values: ["complete", "incomplete", "unknown"]
+    description: >-
+      Does this explanation letter state what is being explained, when it happened, and carry the
+      borrower's signature (LO-2)? ⚠️ Only `letter_of_explanation` has all three fields; the other seven
+      LOE types (and `credit_explanation_letter`, which has NO extractor at all) resolve to "unknown" —
+      the letter is present and its completeness cannot be read. That is a DIFFERENT state from "no letter
+      exists" and from "this letter is incomplete", and the three must not collapse. The AMOUNT leg is
+      deliberately absent: `referenced_amount` fills 0/34.
+    produced_by: derived

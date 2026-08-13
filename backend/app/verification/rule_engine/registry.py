@@ -297,6 +297,26 @@ _LP493_ACTIVATED: tuple[str, ...] = ("PC-8",)
 # files forever with every test green — ADR-286/289, the pattern that has killed four live rules.
 _LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
 
+# LP-495a — the REO reconciliation lane + LOE completeness. ⚠️ RE-1 AND DT-6 WERE DROPPED IN PHASE A AND
+# THE DROP WAS WRONG, for the SAME reason CO-3's was in LP-494: a search that found no source for ONE side
+# of a comparison was read as proof the comparison is impossible. Four "independent" searches all probed
+# extractor schemas and document filenames for the word "retained"; not one queried the STATED side, where
+# 135 StatedLiability rows (61 of them MortgageLoan) sat populated across 14 loan files.
+# ⚠️ BOTH RULES SURVIVE WITHOUT THE RETENTION INFERENCE because neither ASSERTS retention — they SURFACE a
+# discrepancy as needs_review and hand the question to the processor (CO-3's absent-fidelity pattern).
+# NEITHER CAN PRODUCE `fired`, pinned as a spec property, and neither reads the still-orphaned
+# `property.is_retained_reo` / `property.retained_pitia`.
+# ⚠️ ONE MATCHER SERVES BOTH (ADR-375) — `_reo_match_statement`, so they cannot disagree about the same
+# pair of documents.
+# ⚠️ LO-2 IS BUILT NARROWER THAN THE DIRECTIVE ASKED, ON EVIDENCE: its three legs exist on ONE of the eight
+# LOE document types, so a rule spanning "all six" would have reported 25 of 34 letters incomplete. Every
+# LOE type is still in scope; the seven without the fields resolve to couldnt_check ("present, unreadable")
+# — a different verdict from "no letter exists" and from "incomplete".
+# ⚠️ LO-1 IS NOT HERE AND IS NOT BUILT: it needs the list of conditions that REQUIRE an LOE, which is
+# lender- and AUS-driven and enumerated in no document. Deriving it from this run's own findings would make
+# LO-1 a META-RULE over other rules' output, which nothing in the architecture does — ADR-sized, held.
+_LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "RE-1")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -326,6 +346,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP492_ACTIVATED,
     *_LP493_ACTIVATED,
     *_LP494_ACTIVATED,
+    *_LP495A_ACTIVATED,
 )
 
 

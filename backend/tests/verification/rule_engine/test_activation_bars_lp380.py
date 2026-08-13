@@ -336,6 +336,11 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
             "CO-4",
+            # LP-495a — ONE matcher serves RE-1 and DT-6 (ADR-375); neither can produce `fired`,
+            # and neither reads the still-orphaned retention tags. All three deterministic.
+            "DT-6",
+            "LO-2",
+            "RE-1",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -395,6 +400,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
             "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
             "CO-4",
+            "DT-6",  # LP-495a — the REO reconciliation lane + LOE completeness
+            "LO-2",
+            "RE-1",
             "CR-13",
             "PR-6",
         }

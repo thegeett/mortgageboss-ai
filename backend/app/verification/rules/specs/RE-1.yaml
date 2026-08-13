@@ -1,0 +1,151 @@
+# RE-1 — Undisclosed mortgage obligation — DETERMINISTIC structural rule SPEC (LP-495a).
+#
+# Every mortgage statement in the file evidences a real monthly obligation. If the borrower did not state
+# that obligation among the liabilities on the application, the debt-to-income picture is built on an
+# incomplete liability list — so the processor must reconcile the two before submission.
+#
+# ⚠️ THIS RULE CAN NEVER PRODUCE `fired`, AND THAT IS A DESIGN PROPERTY PINNED BY TEST, NOT AN OVERSIGHT.
+# An unmatched statement is a DISCREPANCY, not a defect. It can be a loan paid off since the application
+# was taken, a duplicate of a liability recorded under a servicer's other name, or a debt the borrower
+# co-signed and is not obliged on. The rule SURFACES the question as `needs_review` and hands it to the
+# processor; it never asserts that a debt was concealed.
+#
+# ⚠️ IT ALSO NEVER ASSERTS RETENTION. "Retained REO" is an INFERENCE that no document, extractor field or
+# MISMO fact in this system states (LP-495a Phase A searched the extractor schemas, the raw source tree,
+# the MISMO projection AND the database). `property.is_retained_reo` and `property.retained_pitia` remain
+# VOCABULARY ORPHANS with no producer, and THIS RULE DOES NOT READ THEM — pinned by
+# test_lp495a_retention_tags_unwired.py, exactly as CO-1's test pins `property.is_warrantable_condo`.
+# A rule that inferred retention would put a PITIA into the DTI for a property under contract and fail a
+# qualified borrower — which is why RE-2 stays dropped (it asserted a CONSEQUENCE from the inference;
+# this surfaces a DISCREPANCY — different acts).
+#
+# ⚠️ ONE MATCHER SERVES RE-1 AND DT-6 (ADR-375). Both rules read tags produced by the SAME
+# `_reo_match_statement`; RE-1 asks whether the obligation is disclosed, DT-6 whether the stated payment
+# covers it. Two matchers would let the two rules disagree about which stated liability a given statement
+# matched — the CR-1/CR-4 precedent the discipline comes from.
+#
+# ⚠️ THE MATCH IS ON HOLDER/LENDER NAME, BECAUSE THERE IS NO OTHER KEY. MISMO emits only
+# `liability.{k}.type / .monthly_payment / .unpaid_balance / .holder_name` — a stated liability carries NO
+# property address, so a statement's `property_address` (51/67 filled) has nothing to match against. The
+# name comparison reuses IH-2's `_normalise_lender_name` / `_lender_names_agree` rather than cloning a
+# second matcher.
+#
+# ⚠️ THE ABSTAIN RATE IS ~24% AND IS STATED ON THE ACTIVATION BAR, not discovered later: `lender_name`
+# fills 54 of 71 mortgage statements (LP-495a Phase A). A statement with no lender name resolves to
+# couldnt_check. Abstain is the safe direction — the alternative is reading an unnamed statement as an
+# undisclosed debt.
+#
+# ⚠️ NO NUMERIC THRESHOLD, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION. This is a
+# name-match question; there is no rate, window or limit to cite, and inventing one would be the failure
+# ADR-361 exists to prevent.
+
+rule_id: RE-1
+name: Undisclosed mortgage obligation
+category: REO
+
+kind: structural          # must equal rule_kinds.csv (RE-1 = structural)
+numeric_check: false      # an enum verdict, not a ratio
+
+criteria: >-
+  Every mortgage statement in the file evidences a monthly mortgage obligation, and that obligation should
+  appear among the mortgage liabilities the borrower stated on the application. This reads the derived
+  reo.statement_disclosure, which matches each mortgage statement's lender against the holder names on the
+  application's stated MortgageLoan liabilities (tolerant on the name — servicer renderings vary). A
+  statement with no matching stated liability is surfaced for reconciliation, NEVER reported as a
+  concealed debt: it may be paid off, a duplicate, or co-signed. A statement that names no lender, a file
+  that states no mortgage liabilities at all, and a lender matching more than one stated liability each
+  resolve to couldnt_check — never to a guessed match and never to a confident "undisclosed".
+
+applicability:
+  scope: every mortgage statement in the loan file
+  trigger: >-
+    document.document_type == mortgage_statement. Any other document is not_applicable. ⚠️
+    applicability_expected is FALSE: a file with no mortgage statement is not a gap — most borrowers own
+    one property and the subject loan's own statement need not be in the file.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — a name match carries no threshold
+  values: {}
+  guideline_text: >-
+    The liabilities stated on the loan application must reflect the borrower's actual monthly obligations,
+    because the debt-to-income ratio is computed from them. A mortgage statement in the file evidences an
+    obligation; where it does not correspond to a stated liability, the discrepancy must be reconciled —
+    the obligation may have been paid off, may be duplicated under another servicer name, or may be a debt
+    the borrower co-signed and is not obliged on.
+
+required_inputs:
+  - name: statement_disclosure
+    snapshot_path: 'tags.by_subject[<mortgage statement content_id>]["reo.statement_disclosure"]'
+    description: >-
+      whether this statement's obligation is disclosed among the application's stated mortgage liabilities
+      (derived, LP-495a): "disclosed" / "undisclosed" from a tolerant holder-name match, and "unknown"
+      when the statement names no lender, the application states no mortgage liabilities, or more than one
+      stated liability matches.
+
+subject_enumeration: per_document
+subject_key_fields: [document]
+
+evidence_required: >-
+  The statement's lender and the holder name of the stated liability it matched (or the fact that none
+  matched), inline on the finding — so a processor can see WHICH obligation is in question without
+  reopening both documents.
+
+guideline_reference: "Fannie Mae Selling Guide B3-6-02 (Debt-to-Income Ratios) — the DTI is computed from the borrower's stated liabilities, which must reflect actual monthly obligations."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ A DOCUMENT-TYPE APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487). A non-statement document is
+  # not_applicable; an UNCLASSIFIED document couldnt_checks rather than being assumed not to be a
+  # statement.
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: mortgage_statement
+  # ⚠️ FALSE DELIBERATELY. A missing mortgage statement is NOT a gap — most files have no other-property
+  # mortgage at all, so declaring one "expected" would report a missing document on nearly every file.
+  applicability_expected: false
+  load_bearing_tags:
+    - reo.statement_disclosure
+  gated_tags:
+    - reo.statement_disclosure
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: reo.statement_disclosure, op: eq, value: "disclosed"}
+      reasoning: >-
+        the obligation this mortgage statement evidences is disclosed among the mortgage liabilities
+        stated on the application
+    # ⚠️ needs_review, NEVER fired. The rule surfaces the discrepancy and hands the question to the
+    # processor — see the header. A `fired` here would assert that a debt was concealed, which this
+    # comparison cannot establish.
+    - verdict: needs_review
+      when_tags:
+        - {tag: reo.statement_disclosure, op: eq, value: "undisclosed"}
+      reasoning: >-
+        this mortgage statement evidences a monthly obligation that does not correspond to any mortgage
+        liability stated on the application — confirm whether the loan is still owed before submission,
+        because the debt-to-income ratio is computed from the stated liabilities
+      how_to_fix: >-
+        Compare the statement against the application's liability list. If the loan is still owed, add it
+        to the application and re-check the DTI. If it was paid off, obtain the payoff or release. If it
+        is already stated under a different servicer name, note the match. If the borrower co-signed and
+        is not the obligor, document that the payment is made by another party.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A statement naming no lender must not read as
+      # "disclosed", and a file whose application was never imported must not read as a file full of
+      # undisclosed debts.
+      default: true
+      reasoning: >-
+        whether this statement's obligation is disclosed on the application could not be determined — the
+        statement names no lender, the application states no mortgage liabilities to reconcile against, or
+        the lender matches more than one stated liability
+      how_to_fix: >-
+        Confirm the servicer named on the statement and the liability list on the application. If the
+        application has not been imported, import it — with no stated liabilities there is nothing to
+        reconcile against. If two stated liabilities share a servicer, confirm which one this statement
+        belongs to.

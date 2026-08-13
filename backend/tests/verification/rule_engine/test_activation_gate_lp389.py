@@ -49,6 +49,10 @@ _ACTIVATED = frozenset(
         # ⚠️ CO-5 is deliberately absent: not one of its five inputs resolves on any document.
         "CO-3",
         "CO-4",
+        # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness.
+        "DT-6",
+        "LO-2",
+        "RE-1",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -153,6 +157,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "CR-4",  # LP-490a
         "CR-6",  # LP-490a
         "CR-8",  # LP-490a
+        "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
         "ID-5",
         "IH-1",
         "IH-2",
@@ -171,6 +176,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-7",
         "IN-8",
         "IN-9",
+        "LO-2",  # LP-495a — LOE completeness
         "MI-1",
         "MI-4",
         "PC-2",
@@ -183,6 +189,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PR-5",  # LP-492
         "PR-6",
         "PR-7",  # LP-492 (sorts after PR-6)
+        "RE-1",  # LP-495a — undisclosed mortgage obligation
         "TI-1",  # LP-491 (sorts last)
         "TI-2",  # LP-491 (ratify-pending)
         "TI-6",  # LP-491 (ratify-pending)

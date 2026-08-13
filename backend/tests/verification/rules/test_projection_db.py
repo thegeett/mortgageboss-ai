@@ -39,7 +39,9 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 237  # LP-494 (CO-3) +3 (condo.fidelity_present_raw, condo.fidelity_amount, ins.condo_fidelity_coverage); review +2 (condo.units_delinquent_over_60_days — the 60-day COUNT B4-2.2-02's cap is
+        == 241  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
+        # loe.is_explanation_letter — LO-2's 8-type applicability predicate; loe.completeness)
+        # LP-494 (CO-3) +3 (condo.fidelity_present_raw, condo.fidelity_amount, ins.condo_fidelity_coverage); review +2 (condo.units_delinquent_over_60_days — the 60-day COUNT B4-2.2-02's cap is
         # actually stated on, plus the derived condo.delinquent_units_pct built from it; the parsed
         # generic delinquency_percentage it replaced carried whatever period the form chose); LP-494 +8 (the condo project lane: 5 CO-5 questionnaire reads, condo.reserve_adequacy, condo.project_eligibility, loan.application_received_date — condo.reserve_pct already exists in fact_tags.csv); LP-493 +1 (contract.personal_property_assessment); LP-492 +9 (the appraisal lane's tags); prior +1 (property.value_vs_price_gap); LP-491 +11 (TI-1/TI-2/TI-6's inputs, chain facts and judgment outputs); prior +4 (title.vested_owner_name/_2, contract.seller_name, title.vested_owner_matches); LP-490 review +2 (credit.largest_single_collection_balance — CR-10's DU matrix turns on an
         # INDIVIDUAL collection, which the aggregate cannot answer; credit.has_collections — its
@@ -92,7 +94,7 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
     assert (
         with_spec
-        == 73  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
+        == 76  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
     )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 

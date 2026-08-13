@@ -1740,6 +1740,289 @@ def build_co5_unrecognised_litigation_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-495a — RE-1 / DT-6 (the mortgage-statement ↔ stated-liability reconciliation) and LO-2 (LOE
+# completeness). ONE MATCHER serves RE-1 and DT-6 (ADR-375), so these scenarios drive both rules.
+# --------------------------------------------------------------------------- #
+_LOAN_RE1_DISCLOSED = UUID("95000000-0000-4000-8000-00000000006c")
+_LOAN_RE1_UNDISCLOSED = UUID("95000000-0000-4000-8000-00000000006d")
+_LOAN_RE1_NO_LENDER = UUID("95000000-0000-4000-8000-00000000006e")
+_LOAN_RE1_NO_STATED = UUID("95000000-0000-4000-8000-00000000006f")
+_LOAN_RE1_AMBIGUOUS = UUID("95000000-0000-4000-8000-000000000070")
+_LOAN_DT6_COVERED = UUID("95000000-0000-4000-8000-000000000071")
+_LOAN_DT6_SHORT = UUID("95000000-0000-4000-8000-000000000072")
+_LOAN_DT6_ESCROW_GUARD = UUID("95000000-0000-4000-8000-000000000073")
+_LOAN_LO2_COMPLETE = UUID("95000000-0000-4000-8000-000000000074")
+_LOAN_LO2_INCOMPLETE = UUID("95000000-0000-4000-8000-000000000075")
+_LOAN_LO2_UNSIGNED = UUID("95000000-0000-4000-8000-000000000076")
+_LOAN_LO2_UNREADABLE = UUID("95000000-0000-4000-8000-000000000077")
+_LOAN_LO2_NO_LETTER = UUID("95000000-0000-4000-8000-000000000078")
+_LOAN_LO2_ODD_SIGNATURE = UUID("95000000-0000-4000-8000-000000000079")
+
+
+def _stated_mortgage(holder: str, monthly_payment: str, index: int = 0) -> dict[str, SnapshotField]:
+    """One MISMO stated MortgageLoan liability, in the flat `liability.{k}.*` shape mismo_section emits.
+
+    ⚠️ There is NO property address on a stated liability — that is why the match is on holder name.
+    """
+    return {
+        f"liability.{index}.type": _f("MortgageLoan"),
+        f"liability.{index}.holder_name": _f(holder),
+        f"liability.{index}.monthly_payment": _f(monthly_payment),
+        f"liability.{index}.unpaid_balance": _f("220000.00"),
+    }
+
+
+def build_re1_disclosed_snapshot() -> Snapshot:
+    """A statement whose lender matches a stated MortgageLoan holder → RE-1 SATISFIED.
+
+    ⚠️ The names differ in FORM ("Cedar Ridge Mortgage Servicing LLC" vs "Cedar Ridge Mortgage"), which is
+    the ordinary corpus variance the token-prefix matcher absorbs.
+    """
+    return _snapshot(
+        _LOAN_RE1_DISCLOSED,
+        [
+            _doc(
+                "95-stmt-disclosed",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                unpaid_balance="220000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_undisclosed_snapshot() -> Snapshot:
+    """A statement whose lender matches NO stated liability → RE-1 NEEDS_REVIEW (never fired).
+
+    ⚠️ The application DOES state a mortgage — just a different one. This is the case that separates a
+    real discrepancy from a file with no stated side at all (see build_re1_no_stated_liabilities).
+    """
+    return _snapshot(
+        _LOAN_RE1_UNDISCLOSED,
+        [
+            _doc(
+                "95-stmt-undisclosed",
+                "mortgage_statement",
+                lender_name="Harbor Point Home Loans",
+                monthly_payment="980.00",
+                unpaid_balance="140000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_no_lender_snapshot() -> Snapshot:
+    """⚠️ THE ~24% ABSTAIN, AS A TEST. `lender_name` fills 54/71 in the corpus; a statement without it
+    resolves to COULDNT_CHECK, never to "undisclosed". Reading an unnamed statement as an undisclosed
+    debt is the fail-OPEN direction this pins shut."""
+    return _snapshot(
+        _LOAN_RE1_NO_LENDER,
+        [
+            _doc(
+                "95-stmt-no-lender",
+                "mortgage_statement",
+                monthly_payment="1100.00",
+                unpaid_balance="180000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_no_stated_liabilities_snapshot() -> Snapshot:
+    """⚠️ THE FAIL-CLOSED CASE THAT MATTERS MOST. A file whose application states NO mortgage liabilities
+    (never imported, or an import that carried none) must NOT read as a file full of undisclosed debts.
+    COULDNT_CHECK, never NEEDS_REVIEW."""
+    return _snapshot(
+        _LOAN_RE1_NO_STATED,
+        [
+            _doc(
+                "95-stmt-no-stated",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        {},
+    )
+
+
+def build_re1_ambiguous_snapshot() -> Snapshot:
+    """⚠️ TWO stated liabilities share the servicer (a first and a second — ordinary). Picking one would
+    attach DT-6's payment comparison to a liability chosen by list order, so the matcher ABSTAINS."""
+    mismo = {
+        **_stated_mortgage("Cedar Ridge Mortgage", "1450.00", index=0),
+        **_stated_mortgage("Cedar Ridge Mortgage", "310.00", index=1),
+    }
+    return _snapshot(
+        _LOAN_RE1_AMBIGUOUS,
+        [
+            _doc(
+                "95-stmt-ambiguous",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        mismo,
+    )
+
+
+def build_dt6_covered_snapshot() -> Snapshot:
+    """The stated payment equals the servicer's billed total → DT-6 SATISFIED."""
+    return _snapshot(
+        _LOAN_DT6_COVERED,
+        [
+            _doc(
+                "95-stmt-covered",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_dt6_short_snapshot() -> Snapshot:
+    """The application states principal+interest only while the servicer bills the full PITIA → DT-6
+    NEEDS_REVIEW (never fired — the property may be under contract)."""
+    return _snapshot(
+        _LOAN_DT6_SHORT,
+        [
+            _doc(
+                "95-stmt-short",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                escrow_amount="310.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1140.00"),
+    )
+
+
+def build_dt6_escrow_double_count_guard_snapshot() -> Snapshot:
+    """⚠️ THE DOUBLE-COUNT GUARD — THE ONE TEST THAT WOULD CATCH THE LIKELIEST WRONG BUILD OF DT-6.
+
+    The statement bills 1450.00 TOTAL and shows 310.00 of that as the escrow portion; the application
+    states 1450.00. The extractor prompt defines `monthly_payment` as "the total monthly payment
+    (principal+interest+escrow)" and `escrow_amount` as "the escrow PORTION of the payment", so escrow is
+    a COMPONENT of the total and the stated figure COVERS it → SATISFIED.
+
+    An implementation that compared against `monthly_payment + escrow_amount` (1760.00) would report this
+    compliant file as short. On the corpus that mistake would fire on all 50 of the 67 statements that
+    fill both fields.
+    """
+    return _snapshot(
+        _LOAN_DT6_ESCROW_GUARD,
+        [
+            _doc(
+                "95-stmt-escrow-guard",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                escrow_amount="310.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_lo2_complete_snapshot() -> Snapshot:
+    """A letter stating its explanation, its referenced date and a signature → LO-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_LO2_COMPLETE,
+        [
+            _doc(
+                "95-loe-complete",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="Yes",
+            )
+        ],
+    )
+
+
+def build_lo2_incomplete_snapshot() -> Snapshot:
+    """A letter with no referenced date and no signature indicator → LO-2 NEEDS_REVIEW (never fired — an
+    empty extracted field is not proof the page is blank)."""
+    return _snapshot(
+        _LOAN_LO2_INCOMPLETE,
+        [
+            _doc(
+                "95-loe-incomplete",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+            )
+        ],
+    )
+
+
+def build_lo2_unsigned_snapshot() -> Snapshot:
+    """A letter that AFFIRMATIVELY states it is unsigned → LO-2 NEEDS_REVIEW."""
+    return _snapshot(
+        _LOAN_LO2_UNSIGNED,
+        [
+            _doc(
+                "95-loe-unsigned",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="No",
+            )
+        ],
+    )
+
+
+def build_lo2_odd_signature_snapshot() -> Snapshot:
+    """⚠️ An UNRECOGNISED signature answer ABSTAINS rather than reading as unsigned (ADR-376's
+    discipline) — a finding must never rest on a value nobody defined."""
+    return _snapshot(
+        _LOAN_LO2_ODD_SIGNATURE,
+        [
+            _doc(
+                "95-loe-odd-sig",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="see attached page 2",
+            )
+        ],
+    )
+
+
+def build_lo2_unreadable_snapshot() -> Snapshot:
+    """⚠️ "A LETTER EXISTS BUT CANNOT BE READ" — COULDNT_CHECK, distinct from "no letter exists".
+
+    A `credit_explanation_letter` is a real classifier type with NO EXTRACTOR AT ALL (the bench records
+    status `no_extractor` for all 4 in the corpus), so the letter is present and its completeness cannot
+    be read. This must not collapse into the missing-letter case below.
+    """
+    return _snapshot(
+        _LOAN_LO2_UNREADABLE,
+        [_doc("95-loe-unreadable", "credit_explanation_letter")],
+    )
+
+
+def build_lo2_no_letter_snapshot() -> Snapshot:
+    """⚠️ "NO LETTER EXISTS" — NOT_APPLICABLE and NO finding, distinct from the unreadable case above.
+
+    LO-2 never reports a MISSING letter, because knowing a letter is owed needs the list of conditions
+    that REQUIRE one — lender- and AUS-driven, enumerated nowhere in the file. That is exactly LO-1's
+    held blocker showing through (`applicability_expected: false`).
+    """
+    return _snapshot(
+        _LOAN_LO2_NO_LETTER,
+        [_doc("95-not-a-letter", "pay_stub", employer_name="Rivertown Foods")],
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1778,6 +2061,9 @@ __all__ = [
     "build_co5_delinquent_snapshot",
     "build_co5_litigation_snapshot",
     "build_co5_unrecognised_litigation_snapshot",
+    "build_dt6_covered_snapshot",
+    "build_dt6_escrow_double_count_guard_snapshot",
+    "build_dt6_short_snapshot",
     "build_far_future_closing_snapshot",
     "build_ih2_clause_matches_snapshot",
     "build_ih2_clause_mismatch_snapshot",
@@ -1796,6 +2082,12 @@ __all__ = [
     "build_insurance_replacement_cost_snapshot",
     "build_insurance_two_binder_snapshot",
     "build_insurance_unreadable_basis_snapshot",
+    "build_lo2_complete_snapshot",
+    "build_lo2_incomplete_snapshot",
+    "build_lo2_no_letter_snapshot",
+    "build_lo2_odd_signature_snapshot",
+    "build_lo2_unreadable_snapshot",
+    "build_lo2_unsigned_snapshot",
     "build_mi1_fha_snapshot",
     "build_mi1_high_ltv_snapshot",
     "build_mi1_low_ltv_snapshot",
@@ -1817,6 +2109,11 @@ __all__ = [
     "build_pr2_shortfall_snapshot",
     "build_pr2_two_appraisals_snapshot",
     "build_pr2_value_supports_price_snapshot",
+    "build_re1_ambiguous_snapshot",
+    "build_re1_disclosed_snapshot",
+    "build_re1_no_lender_snapshot",
+    "build_re1_no_stated_liabilities_snapshot",
+    "build_re1_undisclosed_snapshot",
     "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",

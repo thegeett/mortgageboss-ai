@@ -462,6 +462,26 @@ tags:
   # deliberately independent — see declarations.py's LP-325 note.)
   ins.condo_master_policy: {mode: derived, subject: loan, data: condo_master_policy}
 
+  # --- LP-495a — the mortgage-statement ↔ stated-liability reconciliation, and LOE completeness. ------ #
+  # ⚠️ ONE MATCHER, TWO RULES (ADR-375). Both `reo.*` recipes call the SAME `_reo_match_statement`, so
+  # RE-1 (is it disclosed?) and DT-6 (does the stated payment cover it?) can never disagree about which
+  # stated liability a given statement matched. Two matchers would allow exactly that — the CR-1/CR-4
+  # precedent this discipline comes from.
+  # ⚠️ DERIVED, NOT PARSED, and per DOCUMENT. The recipes read the mortgage statement's own extracted
+  # fields off the document subject (the IH-2 `mortgagee_clause_correct` shape) and compare them against
+  # the MISMO `liability.{k}.*` facts. A parsed tag could carry neither the comparison nor the abstains.
+  # ⚠️ NEITHER TAG READS `property.is_retained_reo` OR `property.retained_pitia` — those have no entry in
+  # this file and no producer, deliberately (see vocabulary_extra.yaml).
+  reo.statement_disclosure: {mode: derived, subject: document, data: reo_statement_disclosure}
+  reo.statement_payment_coverage: {mode: derived, subject: document, data: reo_statement_payment_coverage}
+  # LO-2's APPLICABILITY PREDICATE — materialises on EVERY document (yes/no/unknown) so a non-letter
+  # resolves to not_applicable rather than couldnt_check. Needed because the applicability DSL has only
+  # eq/ne while LO-2's scope is eight document types (LP-487's predicate-not-outcome discipline).
+  loe.is_explanation_letter: {mode: derived, subject: document, data: loe_is_explanation_letter}
+  # ⚠️ Materialises on the LOE types ONLY (the recipe DECLINES elsewhere), so the completeness tag lands
+  # on the documents LO-2 reads and nowhere else.
+  loe.completeness: {mode: derived, subject: document, data: loe_completeness}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal

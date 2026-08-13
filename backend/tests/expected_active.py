@@ -41,6 +41,12 @@ from __future__ import annotations
 # 0.5000 (2 cases, 1 disagreement), so PC-5 is held on a measured failure, not on an absent number. PC-1 DROPPED: duplicate
 # matcher + a 0/5 field) -> 61.
 # LP-494 +CO-3 +CO-4 (the condo lane; CO-5 built and held — no input resolves on any document) -> 63.
-EXPECTED_ACTIVE_RULE_COUNT: int = 63
+# LP-495a +RE-1 +DT-6 (the mortgage-statement ↔ stated-liability reconciliation — ONE matcher serves both,
+# ADR-375; NEITHER can produce `fired`, and neither reads the still-orphaned property.is_retained_reo /
+# property.retained_pitia) +LO-2 (LOE completeness). All three deterministic — no model in their chain, so
+# no self-consistency rate and no ratification. ⚠️ LO-1 HELD: it needs the list of conditions that REQUIRE
+# an LOE, which is lender- and AUS-driven and enumerated in no document; deriving it from this run's own
+# findings would make it a META-RULE over other rules' output, which nothing in the architecture does. -> 66.
+EXPECTED_ACTIVE_RULE_COUNT: int = 66
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

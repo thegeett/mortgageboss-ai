@@ -1669,3 +1669,120 @@ CO-5:
     at 5-20) that neither of them described. Eligibility is therefore input_resolves alone, and it is
     FALSE: every one of the five questionnaire fields fills 0/4 on the bench and no loan file carries a
     questionnaire at all. Built against real fields, held until a completed questionnaire exists.
+
+# --------------------------------------------------------------------------------------------------- #
+# LP-495a — the REO reconciliation lane (RE-1 / DT-6) and LOE completeness (LO-2).
+# ⚠️ ALL THREE ARE DETERMINISTIC: no AI tag, no threshold, therefore NO self-consistency rate and NO
+# ratification. They activate on `input_resolves` alone (no-ai-dependency), which is the LP-485
+# development-mode meaning — THE PRODUCER RESOLVES IT ON REAL STORED DATA, verified per rule below.
+# --------------------------------------------------------------------------------------------------- #
+RE-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  # ⚠️ VERIFIED ON REAL STORED DATA, not on the bench: reo.statement_disclosure materialises on 6 mortgage
+  # statements across 2 active loan files and resolves on ALL SIX — 4 `undisclosed`, 2 `disclosed`. BOTH
+  # branches are exercised by real files, which is rare in this codebase and worth recording.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). An unmatched
+    statement routes to needs_review because it is a QUESTION, not a defect: it may be a loan paid off
+    since the application, a duplicate under a servicer's other name, or a co-signed debt the borrower is
+    not obliged on. The costly direction is the FN (a genuinely undisclosed mortgage never surfaces, and
+    the DTI is computed from an incomplete liability list); the FP costs a processor one comparison.
+  rationale: >-
+    No AI tag and no threshold — a tolerant NAME match, reusing IH-2's `_normalise_lender_name` /
+    `_lender_names_agree` rather than cloning a second matcher. ⚠️ ONE MATCHER SERVES RE-1 AND DT-6
+    (ADR-375): both read tags produced by the same `_reo_match_statement`, so the two rules can never
+    disagree about which stated liability a statement matched.
+    ⚠️ THE ABSTAIN RATE IS ~24% AND IS STATED HERE RATHER THAN DISCOVERED LATER: `lender_name` fills 54 of
+    71 mortgage statements in the corpus (LP-495a Phase A), so roughly a quarter of statements resolve to
+    couldnt_check on the name alone. Abstain is the safe direction — the alternative is reading an unnamed
+    statement as an undisclosed debt. The match also abstains when the application states NO mortgage
+    liabilities (a file whose 1003 was never imported must not read as a file full of undisclosed debts)
+    and when a lender matches MORE THAN ONE stated liability (a first and a second with one servicer is
+    ordinary, and picking one would attach DT-6's payment comparison to a liability chosen by list order).
+    ⚠️ THE MATCH IS ON NAME BECAUSE THERE IS NO OTHER KEY: MISMO emits no property address on a liability,
+    so the statement's `property_address` has nothing to match against.
+    ⚠️ THIS RULE ASSERTS NOTHING ABOUT RETENTION and does not read `property.is_retained_reo` or
+    `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by test). RE-2
+    stays dropped: it asserted a CONSEQUENCE from the retention inference; this surfaces a DISCREPANCY.
+DT-6:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  # ⚠️ VERIFIED ON REAL STORED DATA: reo.statement_payment_coverage materialises on the same 6 statements
+  # and resolves on the 2 that MATCHED (both `short`); the 4 unmatched abstain BY DESIGN so DT-6 never
+  # double-reports the discrepancy RE-1 already surfaced.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). FN (a retained
+    property's full PITIA never reaches the DTI, so the ratio understates the obligation and a file
+    qualifies that should not) >> FP (a processor compares two payment figures). The FP direction is real
+    and expected: a property under contract legitimately shows a stated payment below the billed one.
+  rationale: >-
+    No AI tag and no threshold. ⚠️ THE SINGLE MOST IMPORTANT CORRECTNESS POINT, AND IT IS A MEASURED FACT
+    ABOUT THE EXTRACTOR RATHER THAN AN ASSUMPTION: the statement's `monthly_payment` IS ALREADY THE PITIA
+    and is NOT added to `escrow_amount`. The extraction prompt defines them as "the total monthly payment
+    (principal+interest+escrow)" and "the escrow PORTION of the payment" — escrow is a COMPONENT, not an
+    addend. Summing them would double-count escrow on all 50 of the 67 corpus statements that fill both
+    fields and report a shortfall on nearly every file, which is the CO-5 mistake (a 30-day figure
+    compared against a 60-day cap) in a new place. The escrow figure rides the REASONING instead, because
+    it is usually the EXPLANATION for a real shortfall — a 1003 commonly carries principal and interest
+    only. ⚠️ On the two statements that matched on real stored data, escrow is ABSENT entirely, so both
+    `short` verdicts are clean stated-vs-billed comparisons with no escrow arithmetic involved.
+    ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION: no source
+    establishes a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so
+    any band would be invented. The comparison is exact and a difference of any size routes to
+    needs_review.
+    ⚠️ THE CATALOG'S "or net rental" PATH IS UNAVAILABLE AND IS NOT FAKED: the snapshot models
+    ScheduleEPropertyRecord but there are ZERO property rows across the 15 real tax returns, so
+    B3-3.8-01's 75% factor is not used.
+LO-2:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  # ⚠️ VERIFIED ON REAL STORED DATA: loe.is_explanation_letter materialises on 98 documents across 8 loan
+  # files and resolves on ALL of them (96 `no`, 2 `yes`); loe.completeness materialises on the 2 letters
+  # and resolves on both.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    ⚠️ THE RULE CANNOT PRODUCE `fired` — an incomplete letter routes to needs_review, deliberately. On the
+    ONE document type that carries the three legs, `referenced_date` fills 6/9 and
+    `borrower_signature_present` 7/9, so an empty extracted field cannot be distinguished from a field the
+    extraction missed; a `fired` verdict would assert a defect on a letter that may well state its date on
+    the page. FN (an unsigned letter of explanation reaches underwriting) vs FP (a processor opens a letter
+    that was fine) — the FP is cheap and the extraction uncertainty makes it likely, so needs_review is the
+    honest routing.
+  rationale: >-
+    No AI tag and no threshold — a three-way presence check on typed extractor fields.
+    ⚠️ THE APPROVED DIRECTIVE SAID "all six LOX types" AND THE THREE FIELDS EXIST ON EXACTLY ONE OF THEM.
+    Verified against every extractor in app/ai/extraction/ AND the bench corpus: only
+    `letter_of_explanation` (9 docs) carries explanation_summary / referenced_date /
+    borrower_signature_present. `_misc` (9), `_asset` (7), `_property` (7), `_income` (2) and
+    `_child_care` (0) carry DIFFERENT fields (letter_date, reason_or_cause, signature_date,
+    borrower_certification); `credit_explanation_letter` (4) has NO EXTRACTOR AT ALL (the bench records
+    status `no_extractor`); `application_loe` carries the signature field only.
+    ⚠️ PHASE A'S "9/34 · 6/34 · 7/34" ARE CORRECT BUT THEIR DENOMINATOR IS THE WHOLE FAMILY WHILE THEIR
+    NUMERATOR CAN ONLY COME FROM THE 9 BASE LETTERS — they are really 9/9, 6/9 and 7/9 on the only type
+    with the fields. Building "across all six" on them would have reported 25 of 34 letters incomplete.
+    ⚠️ THE OTHER TYPES' FIELDS ARE NOT ALIASED ONTO THE LEGS: `letter_date` is when the letter was
+    WRITTEN and `referenced_date` is the date of the EVENT; `borrower_certification` is a prose attestation
+    and `borrower_signature_present` is whether a signature is on the page. Different facts.
+    ⚠️ EVERY LOE TYPE IS STILL IN SCOPE — none is silently skipped. THREE distinct states, proven by test:
+    "no letter exists" -> not_applicable and NO finding; "a letter exists but its type carries no
+    completeness fields" -> couldnt_check; "a letter exists and is incomplete" -> needs_review.
+    ⚠️ `applicability_expected` IS FALSE, and that is LO-1's held question showing through: declaring a
+    missing letter a gap needs the list of conditions that REQUIRE one, which is lender- and AUS-driven
+    and enumerated nowhere in the file.
+    ⚠️ THE AMOUNT LEG IS DELIBERATELY ABSENT — `referenced_amount` fills 0/34 across the family and 0/9 on
+    the one type that declares it (the TI-3/4/5 block). Only `letter_of_explanation_asset` produces list
+    rows; the base type's `explanation_items` produces none, so no per-item read exists.
+    ⚠️ `borrower_signature_present` IS A TYPED FIELD, so the catalog's "signature (AI for scans)" is STALE
+    — LP-487's question answering yes a SIXTH time. REPORTED, NOT RE-KINDED (rule_kinds.csv stays 135).

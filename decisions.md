@@ -14581,3 +14581,74 @@ number, and nothing in the system reminds anyone. Logged in `priya-open-question
 **Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-354 (schema presence ≠ data
 availability — CO-4's input exists and populates nowhere), ADR-375 (one matcher per comparison — why CO-3
 was dropped rather than built), ADR-330 (vacuity).
+
+---
+
+## ADR-380
+
+**A rule may SURFACE a discrepancy it cannot ASSERT — and one matcher can serve two such rules.**
+
+**Context.** RE-1 (undisclosed REO) and DT-6 (retained-property PITIA in the DTI) were both DROPPED in
+LP-495a Phase A on the reasoning that "retained" is an inference no document, extractor field or MISMO
+fact states. That much is true and still is: `property.is_retained_reo` and `property.retained_pitia` have
+no producer and remain vocabulary orphans. **The drop was still wrong**, for the same reason CO-3's was in
+LP-494 one ticket earlier — a search that found no source for ONE side of a comparison was read as proof
+the comparison is impossible. The stated side (135 `StatedLiability` rows, 61 of them `MortgageLoan`,
+across 14 loan files) was never queried.
+
+**Decision.** A rule whose TRIGGER is an inference can still be built, provided it **surfaces** the
+discrepancy to a processor rather than **asserting** the inference. RE-1 asks *"is this statement's
+obligation disclosed on the application?"* and DT-6 asks *"for a matched obligation, does the stated
+payment cover the billed one?"* Neither answers *"is this property retained?"* — that question is handed
+to the processor as `needs_review`. **Neither rule declares a `fired` outcome at all**, pinned as a spec
+property by test, so the distinction cannot erode into an assertion later.
+
+Both read tags produced by **one matcher** (`_reo_match_statement`) — ADR-375 applied to a case where the
+overlap is real: two rules asking different questions of the SAME comparison must not each own a copy of
+it, or they can disagree about which stated liability a given statement matched.
+
+**Consequences.**
+- RE-2 stays dropped and that is still right: it asserted a *consequence* (tax/insurance documents are
+  required) from the retention inference. Surfacing and asserting are different acts.
+- The abstains are load-bearing and are stated on the bars, not discovered later: no lender name on the
+  statement (~24%, `lender_name` fills 54/71), **no stated liabilities at all** (→ abstain, never
+  "undisclosed" — the fail-open direction), and **more than one stated liability matching the name**.
+- The test that matters most is negative: on LF-6T3N — four mortgage statements, zero MISMO liabilities —
+  RE-1 abstains four times instead of reporting four undisclosed mortgages.
+
+**Related:** ADR-375 (one matcher per comparison), ADR-361 (threshold provenance — these rules carry no
+threshold, a checked conclusion), ADR-289 (vocabulary orphans), ADR-330 (vacuity).
+
+---
+
+## ADR-381
+
+**A field-fill rate is only readable together with what its denominator ranged over.**
+
+**Context.** LP-495a's approved directive specified LO-2 as three fields "across all six LOX types",
+citing Phase A's measured `explanation_summary 9/34 · referenced_date 6/34 · borrower_signature_present
+7/34 · referenced_amount 0/34`. Every one of those numbers is correct. **All three fields exist on
+exactly ONE of the eight LOE document types** — the 9-document `letter_of_explanation`. The rates are
+really 9/9, 6/9 and 7/9 over the only type that HAS the fields, and 0/25 structurally over the rest. Built
+literally, LO-2 would have reported **25 of 34 letters incomplete** on real data.
+
+**Decision.** A fill rate quoted across a document FAMILY must state, alongside it, **which members of the
+family declare the field at all.** A rate whose denominator spans types that cannot produce the numerator
+is not a measurement of extraction quality — it is a measurement of schema coverage wearing extraction's
+clothes. Where the two are mixed, report them separately.
+
+**Consequences.**
+- LO-2 reads its three legs on the one type that carries them. The other seven types are **still in
+  scope** and resolve to `couldnt_check` ("present, unreadable") — a state deliberately distinct from
+  "no letter exists" (`not_applicable`) and from "incomplete" (`needs_review`).
+- **Fields are not aliased across types to manufacture coverage.** `letter_date` (when the letter was
+  written) is not `referenced_date` (the date of the event explained); `borrower_certification` (a prose
+  attestation) is not `borrower_signature_present` (a signature on the page).
+- ⚠️ **This is the third form of one recurring error in two tickets.** LP-494/CO-3 trusted "IH-7 covers
+  it" without reading IH-7's exclusions; LP-495a Phase A trusted "four independent searches" without
+  noticing none queried the stated side; this trusted a fill rate without asking what it ranged over. In
+  each case the stated fact was TRUE and the inference drawn from it was not. The check is the same every
+  time: **name what the number does not cover, before relying on it.**
+
+**Related:** ADR-354 (schema presence ≠ data availability — this is its inverse: data absence that is
+really schema absence), ADR-286/289 (vacuity and orphans), ADR-380.
