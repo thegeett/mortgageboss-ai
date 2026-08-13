@@ -1928,6 +1928,22 @@ def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
     return values[0] if values else None
 
 
+def _appraised_value_from_appraisal(snapshot: Snapshot) -> Decimal | None:
+    """The LOWEST value stated by an APPRAISAL DOCUMENT, or None. No stated-value fallback.
+
+    ⚠️ THE STRICT VARIANT, and the one a rule about the appraisal must use. ``property.appraised_value``
+    is document-scoped to `appraisal`, so None here means exactly "no appraisal on this file states a
+    value" — which is what a rule like PR-2 needs to hear in order to abstain.
+    :func:`_conservative_appraised_value` adds a MISMO stated-value fallback for the LTV consumers, and
+    that fallback silently turned PR-2's abstain into a false all-clear.
+
+    Lowest-not-first for the same reason as its caller: a file may carry an original plus a replacement
+    appraisal, and taking whichever iterated first is an arbitrary answer on an ordinary file shape.
+    """
+    values = [v for v in _parsed_decimals(snapshot, "property.appraised_value") if v > 0]
+    return min(values) if values else None
+
+
 def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
     """The LOWEST appraised value on the file, or None.
 
@@ -1943,14 +1959,22 @@ def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
     costly direction closed. MI-1's own bar names the false-negative (an MI requirement silently cleared)
     as the expensive error; a processor confirming which appraisal governs is the cheap one.
     """
-    values = [v for v in _parsed_decimals(snapshot, "property.appraised_value") if v > 0]
-    if values:
-        return min(values)
-    # ⚠️ FALL BACK TO THE WORKSHEET'S OWN FIELDS (reported finding). The "the rule path and the display
-    # path cannot drift into two different LTVs" claim covered only the ARITHMETIC: the worksheet takes
-    # `valuation_amount or estimated_value` off the property record, this took the appraisal DOCUMENT's
-    # value, so a MISMO-imported file with a valuation and no appraisal PDF showed a real LTV on the
-    # worksheet and couldnt_check on the rule. Same fields, same priority, so the two now agree on input.
+    appraised = _appraised_value_from_appraisal(snapshot)
+    if appraised is not None:
+        return appraised
+    # ⚠️ FALL BACK TO THE WORKSHEET'S OWN FIELDS. The "the rule path and the display path cannot drift
+    # into two different LTVs" claim covered only the ARITHMETIC: the worksheet takes `valuation_amount
+    # or estimated_value` off the property record, this took the appraisal DOCUMENT's value, so a
+    # MISMO-imported file with a valuation and no appraisal PDF showed a real LTV on the worksheet and
+    # couldnt_check on the rule. Same fields, same priority, so the two agree on input.
+    #
+    # ⚠️ AND THE FALLBACK IS WHY THIS FUNCTION IS NOT THE DEFAULT (reported finding). A MISMO-stated
+    # value is the BORROWER'S estimate, not an appraisal. That is the right input for an LTV consumer,
+    # which needs a denominator; it is the WRONG input for any rule whose question is "what did the
+    # appraisal say", because the estimate usually EQUALS the price on a MISMO import — so a file with no
+    # appraisal at all produced a gap of zero and PR-2 answered "the appraised value supports the
+    # purchase price". Ask for :func:`_appraised_value_from_appraisal` unless you specifically want the
+    # worksheet's basis.
     for tag_id in ("property.valuation_amount", "property.estimated_value"):
         stated = [v for v in _parsed_decimals(snapshot, tag_id) if v > 0]
         if stated:
@@ -2780,10 +2804,23 @@ def _property_value_vs_price_gap(
     shape. The conservative pick is the lowest: it makes the shortfall larger, and PR-2's costly error is
     missing one.
     """
-    appraised = _conservative_appraised_value(snapshot)
+    # ⚠️ THE STRICT HELPER (reported finding). _conservative_appraised_value falls back to the MISMO
+    # stated value for the LTV consumers, and on a MISMO import that estimate usually EQUALS the price —
+    # so a file with NO APPRAISAL yielded a gap of 0 and PR-2 answered SATISFIED, "the appraised value
+    # supports the purchase price", which this rule's own spec forbids ("never a guessed pass"). The
+    # mirror was as bad: a stated value under the price fired a phantom shortfall citing an appraisal
+    # that does not exist. PR-2's question is what the APPRAISAL said, so it asks only the appraisal.
+    appraised = _appraised_value_from_appraisal(snapshot)
     if appraised is None:
         return _UNKNOWN, "no appraisal in the file states an appraised value"
-    price = _first_loan_decimal(snapshot, "property.purchase_price")
+    # ⚠️ EITHER PRICE SOURCE (reported finding). Reading only the MISMO fact silently narrowed PR-2 to
+    # MISMO-IMPORTED files: a document-only file carrying an uploaded purchase contract and an appraisal
+    # has both numbers and still couldnt_checked forever. `contract.loan_sales_price` is the loan-level
+    # promotion of the contract's sales price that LP-407-2 added for exactly this scope. MISMO first
+    # (it is the file's own statement of the deal), the contract as the fallback.
+    price = _first_loan_decimal(snapshot, "property.purchase_price") or _first_loan_decimal(
+        snapshot, "contract.loan_sales_price"
+    )
     if price is None or price <= 0:
         return _UNKNOWN, "the file states no purchase price to compare the appraised value against"
     gap = appraised - price

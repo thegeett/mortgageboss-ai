@@ -134,9 +134,26 @@ def _per_document(snapshot: Snapshot) -> list[Subject]:
     if snapshot.documents.absent:
         return []
     tags = {} if snapshot.tags.absent else snapshot.tags.by_subject
+    # ⚠️ LOAN-LEVEL TAGS ARE MERGED IN, exactly as ``_per_borrower`` already does (reported finding).
+    # Without them a per-document rule could name a loan fact in `reasoned_over` and silently receive
+    # ONE SIDE of its own comparison: PR-3 asks whether the appraisal's property type agrees with the
+    # type the FILE states, declares `[property.appraisal_property_type, property.type]`, and
+    # `property.type` is loan-subject — so the model got the appraisal's type alone and the spec's
+    # criteria, its required_inputs path (`tags.by_subject["loan"]["property.type"]`) and its prompt's
+    # disagreement branch were all structurally unreachable. A condo appraised against a file stating
+    # single-family was undetectable, and the rule's n=2 single-valued self-consistency result is what
+    # that looks like from the outside.
+    #
+    # Precedence matches _per_borrower: the DOCUMENT'S OWN tags win over a same-id loan tag, so nothing
+    # a document says about itself can be overwritten by a file-level fact.
+    loan_tags = tags.get(LOAN_SUBJECT, {})
     subjects: list[Subject] = []
     for entry in snapshot.documents.entries:
-        subject_tags = {**tags.get(entry.content_id, {}), DOC_TYPE_TAG: _doc_type_tag(entry)}
+        subject_tags = {
+            **loan_tags,
+            **tags.get(entry.content_id, {}),
+            DOC_TYPE_TAG: _doc_type_tag(entry),
+        }
         subjects.append((entry.content_id, subject_tags))
     return subjects
 

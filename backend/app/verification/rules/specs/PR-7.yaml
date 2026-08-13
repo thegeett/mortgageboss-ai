@@ -91,12 +91,20 @@ deterministic:
       when_tags:
         - {tag: property.appraisal_address_match, op: eq, value: "yes"}
       reasoning: the appraisal values the subject property on this loan file
-    - verdict: fired
+    # ⚠️ needs_review, NOT fired (reported finding). `_norm_address` deliberately does not canonicalise
+    # UNIT DESIGNATORS (ADR-325), and both real appraisals in the corpus are condominiums — so
+    # "34 Birch Rd Unit 4B" against MISMO's "34 Birch Rd" + "#4B" normalises to
+    # "... unit 4b" vs "... 4b" and reported two DIFFERENT PROPERTIES for one condo unit. PC-3 shares
+    # this canonicaliser and routes its mismatch to needs_review for exactly this residue; PR-7 was
+    # escalating the identical failure to a hard defect on the most common document shape available.
+    # The wording no longer asserts the conclusion either — it reports what differs and asks.
+    - verdict: needs_review
       when_tags:
         - {tag: property.appraisal_address_match, op: eq, value: "no"}
       reasoning: >-
-        the appraisal's subject-property address does not match the loan file's — after canonicalisation
-        these are different properties, so the value in the file may belong to another address
+        the appraisal's subject-property address does not match the loan file's after canonicalisation —
+        confirm they are the same property, as a unit designator or a formatting difference produces this
+        without the addresses actually differing
       how_to_fix: >-
         Compare the appraisal's address against the 1003 and the title commitment. If the appraisal is
         for a different property, order a corrected report — the value cannot be used. If the difference

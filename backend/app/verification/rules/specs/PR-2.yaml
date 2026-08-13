@@ -105,10 +105,12 @@ deterministic:
     # which is what `fired` means here — PR-6 uses it the same way for "a new appraisal is required".
     - verdict: fired
       when_compare: {op: "<", left: gap, right: boundary}
+      # ⚠️ `gap` is SIGNED and NEGATIVE on this branch, so the sentence must not also say "below" —
+      # "below the purchase price by -20000.00" is the double negative CL-1 was corrected for twice.
       reasoning: >-
-        the appraised value is below the purchase price by {gap} — the loan will be sized against the
-        appraisal, so the borrower must cover the difference in cash, renegotiate the price, or the
-        appraisal must be successfully rebutted
+        the appraised value does not support the purchase price (appraised-minus-price gap: {gap}) —
+        the loan will be sized against the appraisal, so the borrower must cover the difference in
+        cash, renegotiate the price, or the appraisal must be successfully rebutted
       how_to_fix: >-
         Confirm the shortfall with the borrower and the agent. The options are: the borrower brings the
         difference in cash, the seller reduces the price, or the lender submits a reconsideration of

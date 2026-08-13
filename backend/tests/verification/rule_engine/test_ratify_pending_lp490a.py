@@ -113,8 +113,9 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
     test_cr1_undisclosed_liability_lp490.py::test_ratify_pending_findings_carry_ratification — it
     materialises tags and runs the real evaluator, then asserts every finding carries the flag. This test
     guards the SET: if a rule joins the status without that proof being extended to it, it fails."""
-    on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
-    assert on_status == {
+    # The set the assertion below pins, NAMED so the failure message diffs against the same thing
+    # the assertion checks — the two cannot drift apart the way the old literal did.
+    _EXPECTED_RATIFY_PENDING = {
         "CR-1",
         "CR-4",
         "CR-8",
@@ -125,9 +126,14 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
         "PR-3",
         "PR-4",
         "PR-5",
-    }, (
-        f"a rule joined ratify-pending without a ratification proof: {on_status ^ {'CR-1', 'CR-4', 'CR-8', 'CR-6', 'CR-10'}} "
-        "— extend the per-rule evaluation proof before adding it here"
+    }
+    on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
+    assert on_status == _EXPECTED_RATIFY_PENDING, (
+        # ⚠️ The diff was against a HAND-LISTED set from two tickets ago (reported finding), so once
+        # TI-2/TI-6 and the PR-* lane joined, the failure message printed a symmetric difference that
+        # named rules which had NOT drifted. Diffing against the asserted set keeps the message true.
+        f"a rule joined ratify-pending without a ratification proof: "
+        f"{on_status ^ _EXPECTED_RATIFY_PENDING} — extend the per-rule evaluation proof before adding it"
     )
     for rule_id in on_status:
         assert ratifies_every_finding(rule_id)

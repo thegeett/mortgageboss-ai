@@ -123,15 +123,31 @@ async def test_a_matching_address_is_satisfied() -> None:
     )
 
 
-async def test_a_different_property_fires() -> None:
-    """⚠️ `fired`, argued rather than inherited. IH-2 and TI-1 chose needs_review because a NAME
-    difference is frequently legitimate. An address is not ambiguous that way: after canonicalisation, a
-    residual mismatch means the appraisal describes a DIFFERENT property, and the value in the file may
-    belong to another address."""
+async def test_a_different_property_needs_review() -> None:
+    """⚠️ WAS `fired`, CHANGED AT THE LP-492 REVIEW. The original argument — "an address is not ambiguous
+    the way a name is, so a residual mismatch means a DIFFERENT property" — does not survive the
+    canonicaliser it depends on: `_norm_address` deliberately does not canonicalise UNIT DESIGNATORS
+    (ADR-325), and BOTH real appraisals in the corpus are condominiums. So "34 Birch Rd Unit 4B" against
+    MISMO's "34 Birch Rd" + "#4B" normalises to "... unit 4b" vs "... 4b" and reported two different
+    properties for one condo unit. PC-3 shares the canonicaliser and routes its mismatch to needs_review
+    for exactly that residue; PR-7 was escalating the identical failure to a hard defect on the most
+    common document shape available."""
     snapshot = _snapshot(subject_property_address="9 Elm Street, Othertown, IL 60001")
     materialized = await materialize_tags(snapshot, only_groups=frozenset())
     evaluations, _tags = await evaluate_rules(materialized, rule_ids=("PR-7",))
-    assert [e.verdict for e in evaluations] == [Verdict.FIRED]
+    assert [e.verdict for e in evaluations] == [Verdict.NEEDS_REVIEW]
+
+
+async def test_a_condo_unit_is_not_reported_as_a_different_property() -> None:
+    """⚠️ THE CASE THAT FORCED THE CHANGE. A unit designator rendered two ordinary ways must not read as
+    two properties — and with both corpus appraisals being condos, this is the common shape, not a
+    corner."""
+    snapshot = _snapshot(subject_property_address="34 Birch Rd Unit 4B, Rivertown, IL 60000")
+    materialized = await materialize_tags(snapshot, only_groups=frozenset())
+    evaluations, _tags = await evaluate_rules(materialized, rule_ids=("PR-7",))
+    assert [e.verdict for e in evaluations] != [Verdict.FIRED], (
+        "a condo unit differing only in its designator must never be a hard defect"
+    )
 
 
 async def test_an_incomplete_file_address_abstains_never_half_matches() -> None:
