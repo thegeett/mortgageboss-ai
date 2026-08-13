@@ -312,3 +312,95 @@ RE-2 (*retained property → tax/insurance docs present*) is **not buildable and
 **Question: where does retained-property information live on your files today?** If it is the 1003's REO
 section, that is an import gap we can close; if it is something a processor knows and records manually,
 RE-2 needs a different shape entirely.
+
+---
+
+## 11. From LP-490 (credit AI: CR-1 · CR-4 · CR-5 · CR-6 · CR-8 · CR-10)
+
+⚠️ **All six are built INERT.** They read AI tags with no measured accuracy, so none is live. What
+follows is what we could not settle without you.
+
+### 11a. ⚠️ The Chapter 13 split is not expressible — and we chose the conservative side
+
+Your matrix distinguishes a **discharged** Chapter 13 (2 years) from a **dismissed** one (4 years), and
+Chapter 7/11 at 4 years. `liab.derogatory_type` has **one** `bankruptcy` value; nothing on the report
+distinguishes chapter, or discharge from dismissal. Applying the shorter 2-year period to an
+undifferentiated bankruptcy would clear a Chapter 7 **two years early**, so **CR-6 applies 4 years to
+every bankruptcy**. A discharged Chapter 13 will therefore be surfaced for review between years 2 and 4
+rather than cleared.
+
+**Question: is that the right trade?** The alternative is to extract chapter and disposition (the
+`bankruptcy_discharge` document carries `bankruptcy_chapter`, `discharge_order_date` and
+`case_status_after_discharge`, so it is buildable) — but only when that document is in the file.
+
+### 11b. ⚠️ Foreclosure, short sale and deed-in-lieu have no completion date
+
+You were explicit that seasoning must run from the **actual event date**, never the report date, and
+CR-6 abstains rather than substituting. But `public_records[]` carries `discharge_or_satisfied_date`
+only — a **bankruptcy** has a real date; a **foreclosure, short sale or deed-in-lieu** usually appears
+as a tradeline *status* with no completion date anywhere.
+
+**Question: where does the completion date live on your files?** The deed, the title commitment, an LOE?
+Until then those three rows of the matrix will `couldnt_check` far more often than they resolve.
+
+### 11c. Ordinary consumer lates — a separate track we did NOT build
+
+Your guidance (last 12 months high attention · 13–24 months still relevant · beyond 24 months context ·
+weighed with severity, frequency and re-established credit) is a **judgment**, not a waiting period.
+Folding it into CR-6's matrix would apply a four-year bar to a single 30-day late, so we left it out.
+
+**Question: does this want its own rule?** If so, is it per-tradeline or a whole-profile judgment?
+
+### 11d. ⚠️ A mortgage charge-off — CR-6 or CR-10?
+
+We put it in **CR-6** (a 4-year seasoning requirement) and kept it out of CR-10's dollar logic, on your
+note that a mortgage charge-off is not an ordinary collection. But `liab.derogatory_type` has one
+`charge_off` value and does not say whether the account was a mortgage. **Confirm the split**, and
+whether a *consumer* charge-off should be seasoned at all or only counted in the collection aggregate.
+
+### 11e. Rental history
+
+You ruled rental history is **not** equivalent to mortgage delinquency codes and must not be mapped onto
+them, so CR-8 evaluates mortgages only. **Is rental history in scope at all?** If so it needs its own
+rule and its own source document.
+
+### 11f. ⚠️ CR-8 cannot compute "current at application"
+
+Your ruling records Fannie's definition — an existing mortgage is current when **no more than 45 days**
+have elapsed since the last paid installment date. **No last-paid-installment date is extracted**, so
+CR-8 records the definition but cannot apply it. **Is that date on your credit reports?**
+
+### 11g. ⚠️ CR-10 abstains on manually underwritten files
+
+The **DU-vs-manual axis does not exist as a fact** on any file, and we did not invent one. So a manually
+underwritten loan returns `manual_underwriting_not_supported` rather than a guessed branch — the
+thresholds differ ($250/$1,000 regardless of occupancy vs the DU occupancy matrix), so guessing could
+clear a collection that must be paid.
+
+**Question: how do you know which path a file is on?** If it is on the AUS findings, we can read it —
+AU-3 already extracts the recommendation.
+
+### 11h. `liab.account_type` — the vocabulary mapping, still unwired
+
+Its enum is `revolving / installment / mortgage / heloc / …`; the sources emit `REV` / `AUTO` / `MTG` /
+`INST` and `MortgageLoan` / `Installment`. A **parsed** tag is not validated against `allowed_values`,
+so declaring it would ship out-of-domain values silently. It stays unwired, and CR-8's need is met by a
+derived `liab.is_mortgage` with an abstain. **Please confirm the mapping** and we will wire it properly.
+
+### 11i. ⚠️ Are CR-1 and the deposit-obligation check one finding or two?
+
+CR-1 flags a debt on the credit report that the application omits. FR-4/FR-5's
+`txn.implies_obligation` flags a bank-statement transaction implying a debt nobody stated. **Same
+underwriting condition from two directions.** Should a processor see one finding or two? Two risks
+double-reporting the same debt; one risks hiding that the evidence came from two independent places.
+
+### 11j. What the corpus does and does not establish
+
+**Three credit reports.** One inquiry row (CR-5). **Zero** public-record rows and no derogatory events
+(CR-6). **Zero** collection or charge-off codes (CR-10). `payment_history_24mo` 0–84 chars across 17
+formats; `worst_delinquency` 2/35 in two incompatible formats (CR-8).
+
+So: CR-1 has **one** file supporting a bounded negative, and **CR-5, CR-6 and CR-10 have never been
+observed firing on real data at all.** Calibrating any of them needs real files, not fixtures — a
+self-authored derogatory event or collection leaks its own answer (ADR-332, and the LP-487 amendment on
+self-authored labels).
