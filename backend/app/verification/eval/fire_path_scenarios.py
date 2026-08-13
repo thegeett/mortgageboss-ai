@@ -146,6 +146,20 @@ _LOAN_PR2_TWO_APPRAISALS = UUID("95000000-0000-4000-8000-000000000052")
 _LOAN_PR2_REFINANCE = UUID("95000000-0000-4000-8000-000000000053")
 _LOAN_PR2_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000054")
 _LOAN_PR2_NO_PRICE = UUID("95000000-0000-4000-8000-000000000055")
+
+# LP-494 — the condo project lane (CO-4 reserves, CO-5 eligibility).
+_LOAN_CO4_ADEQUATE_2026 = UUID("95000000-0000-4000-8000-000000000060")
+_LOAN_CO4_SHORT_2026 = UUID("95000000-0000-4000-8000-000000000061")
+_LOAN_CO4_SAME_PCT_2027 = UUID("95000000-0000-4000-8000-000000000062")
+_LOAN_CO4_NO_APP_DATE = UUID("95000000-0000-4000-8000-000000000063")
+_LOAN_CO4_BLANK_FORM = UUID("95000000-0000-4000-8000-000000000064")
+_LOAN_CO4_NOT_CONDO = UUID("95000000-0000-4000-8000-000000000065")
+_LOAN_CO5_CLEAR = UUID("95000000-0000-4000-8000-000000000066")
+_LOAN_CO5_DELINQUENT = UUID("95000000-0000-4000-8000-000000000067")
+_LOAN_CO5_CONCENTRATION = UUID("95000000-0000-4000-8000-000000000068")
+_LOAN_CO5_LITIGATION = UUID("95000000-0000-4000-8000-000000000069")
+_LOAN_CO5_BLANK_FORM = UUID("95000000-0000-4000-8000-00000000006a")
+_LOAN_CO5_UNRECOGNISED_LITIGATION = UUID("95000000-0000-4000-8000-00000000006b")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -1454,6 +1468,189 @@ def build_pr2_no_price_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-494 — CO-4 (HOA reserves) and CO-5 (project eligibility). ⚠️ EVERY ONE OF THESE IS SELF-AUTHORED —
+# no completed condo questionnaire exists anywhere in the corpus (the two in the bench are a cancellation
+# notice and a genuinely unanswered form), so these prove WIRING AND DIRECTION, never accuracy. ADR-332,
+# and the LP-487 amendment: a self-authored fixture may pin the LOGIC, never the LABEL.
+#
+# ⚠️ CO-4's three date cases are the point. The reserve floor is 10% before 2027-01-04 and 15% on or after,
+# so the SAME 12% budget is adequate for a 2026 application and short for a 2027 one — and with no
+# application date at all the rule abstains rather than picking a floor.
+# --------------------------------------------------------------------------- #
+def _questionnaire(cid: str, **fields: str) -> DocumentEntry:
+    return _doc(cid, "condo_questionnaire", project_name="Birch Court Condominiums", **fields)
+
+
+def _condo_mismo(
+    *, application_date: str | None, property_type: str = "condo"
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {"property.type": _f(property_type)}
+    if application_date is not None:
+        facts["loan.application_received_date"] = _f(application_date)
+    return facts
+
+
+def build_co4_adequate_2026_snapshot() -> Snapshot:
+    """12% reserves on a 2026-06-08 application → the 10% floor applies → CO-4 SATISFIED."""
+    return _snapshot(
+        _LOAN_CO4_ADEQUATE_2026,
+        [_questionnaire("95-cq-ok", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_short_2026_snapshot() -> Snapshot:
+    """8% reserves on a 2026 application → below even the 10% floor → CO-4 FIRED."""
+    return _snapshot(
+        _LOAN_CO4_SHORT_2026,
+        [_questionnaire("95-cq-short", reserve_contribution_percentage="8")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_same_pct_2027_snapshot() -> Snapshot:
+    """⚠️ THE DATE-KEYED PROOF. The SAME 12% that satisfied above, on a 2027-01-04 application, is short of
+    LL-2026-03's 15% floor → CO-4 FIRED. Only the application date differs."""
+    return _snapshot(
+        _LOAN_CO4_SAME_PCT_2027,
+        [_questionnaire("95-cq-2027", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date="2027-01-04"),
+    )
+
+
+def build_co4_no_application_date_snapshot() -> Snapshot:
+    """12% reserves and NO application date → the floor cannot be selected → CO-4 COULDNT_CHECK. Never
+    defaulted to today's date, which would apply next year's floor to this year's application."""
+    return _snapshot(
+        _LOAN_CO4_NO_APP_DATE,
+        [_questionnaire("95-cq-nodate", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date=None),
+    )
+
+
+def build_co4_blank_questionnaire_snapshot() -> Snapshot:
+    """⚠️ THE CORPUS'S ACTUAL SHAPE: a questionnaire that is present and UNANSWERED → CO-4 COULDNT_CHECK,
+    never satisfied. A blank form is not evidence of adequate reserves."""
+    return _snapshot(
+        _LOAN_CO4_BLANK_FORM,
+        [_questionnaire("95-cq-blank")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_not_condo_snapshot() -> Snapshot:
+    """A single-family property → CO-4 NOT_APPLICABLE (no HOA reserve floor applies)."""
+    return _snapshot(
+        _LOAN_CO4_NOT_CONDO,
+        [],
+        _condo_mismo(application_date="2026-06-08", property_type="single_family"),
+    )
+
+
+def build_co5_clear_snapshot() -> Snapshot:
+    """All four legs answered and within Fannie's limits → CO-5 SATISFIED."""
+    return _snapshot(
+        _LOAN_CO5_CLEAR,
+        [
+            _questionnaire(
+                "95-cq-clear",
+                delinquency_percentage="4",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_delinquent_snapshot() -> Snapshot:
+    """22% of units 60+ days past due — above B4-2.2-02's 15% → CO-5 FIRED."""
+    return _snapshot(
+        _LOAN_CO5_DELINQUENT,
+        [
+            _questionnaire(
+                "95-cq-delinq",
+                delinquency_percentage="22",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_concentration_snapshot() -> Snapshot:
+    """⚠️ THE TIER THE PRIMARY RESOLVES: 18 of 60 units (30%) is above B4-2.1-03's 20% for a 21+ unit
+    project → CO-5 FIRED. Neither of the ticket's two conflicting figures describes this rule."""
+    return _snapshot(
+        _LOAN_CO5_CONCENTRATION,
+        [
+            _questionnaire(
+                "95-cq-conc",
+                delinquency_percentage="4",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="18",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_litigation_snapshot() -> Snapshot:
+    """Litigation disclosed, every limit within range → CO-5 NEEDS_REVIEW, never fired: materiality is a
+    judgment about nature and scope, and no numeric threshold expresses it."""
+    return _snapshot(
+        _LOAN_CO5_LITIGATION,
+        [
+            _questionnaire(
+                "95-cq-lit",
+                delinquency_percentage="4",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="Yes",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_blank_questionnaire_snapshot() -> Snapshot:
+    """⚠️ THE CORPUS'S ACTUAL SHAPE, and the false all-clear this rule must never give: an unanswered
+    questionnaire → CO-5 COULDNT_CHECK, never satisfied."""
+    return _snapshot(
+        _LOAN_CO5_BLANK_FORM,
+        [_questionnaire("95-cq-blank5")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_unrecognised_litigation_snapshot() -> Snapshot:
+    """⚠️ ADR-376's direction, on the answer where it matters most: "PENDING - SEE ATTACHED" is not a
+    recognised yes/no, so CO-5 COULDNT_CHECKs. Reading it as "no litigation" would clear the project."""
+    return _snapshot(
+        _LOAN_CO5_UNRECOGNISED_LITIGATION,
+        [
+            _questionnaire(
+                "95-cq-lit-x",
+                delinquency_percentage="4",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="PENDING - SEE ATTACHED",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -1476,6 +1673,18 @@ __all__ = [
     "build_co1_not_condo_snapshot",
     "build_co1_questionnaire_missing_snapshot",
     "build_co1_questionnaire_present_snapshot",
+    "build_co4_adequate_2026_snapshot",
+    "build_co4_blank_questionnaire_snapshot",
+    "build_co4_no_application_date_snapshot",
+    "build_co4_not_condo_snapshot",
+    "build_co4_same_pct_2027_snapshot",
+    "build_co4_short_2026_snapshot",
+    "build_co5_blank_questionnaire_snapshot",
+    "build_co5_clear_snapshot",
+    "build_co5_concentration_snapshot",
+    "build_co5_delinquent_snapshot",
+    "build_co5_litigation_snapshot",
+    "build_co5_unrecognised_litigation_snapshot",
     "build_far_future_closing_snapshot",
     "build_ih2_clause_matches_snapshot",
     "build_ih2_clause_mismatch_snapshot",

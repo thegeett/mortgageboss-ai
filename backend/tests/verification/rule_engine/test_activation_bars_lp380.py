@@ -60,7 +60,8 @@ def test_the_honest_activation_state_is_reported() -> None:
     )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
-        by.get("no-ai-threshold-pending", 0) == 4
+        by.get("no-ai-threshold-pending", 0)
+        == 5  # LP-494 +CO-4 (date-keyed reserve floor, tier-S step-up)
     )  # PC-7 (LP-411) + CR-13 + PR-6 (LP-485) + IH-7 (LP-487) — their thresholds are researched and
     # cited in their specs' reference_values, not in this file (IH-7: Fannie B7-4-01 / B7-3-03, both
     # pages dated 08/05/2026)

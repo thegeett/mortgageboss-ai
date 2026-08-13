@@ -14523,3 +14523,61 @@ LP-425/ADR-336 (OC-2 live on an unscored tag *because* it ratifies — the prece
 LP-508/ADR-377 (`ratification_pending` is the real mechanism; `ships` is metadata), ADR-332 + its LP-487
 amendment (self-authored labels measure self-consistency, not correctness — the same trap, named there
 first), ADR-353 (position-parsing an open-format string).
+
+---
+
+## ADR-379: A date-keyed threshold keys on the LOAN APPLICATION DATE, is expressed in a derived recipe rather than a new DSL mechanism, and is pinned to its declared reference_values by test (LP-494)
+
+**Context.** Fannie Mae Lender Letter LL-2026-03 (issued 2026-03-18) raises the minimum budgeted
+replacement reserves for a condo project from **10% to 15%** of annual budgeted assessment income, **for
+loan applications dated on or after 2027-01-04**. CO-4 is the first rule in the system whose threshold is
+not a constant. Every prior threshold — IH-7's $1M liability floor, CR-13's four-month credit window,
+PR-6's appraisal bands — is one number that was true when it was cited and is true now.
+
+**Three decisions, each with a live alternative that is wrong.**
+
+**1. The key is the LOAN APPLICATION DATE, never today's date.** A rule keyed on the current date would
+apply next year's 15% floor to an application taken in December 2026 the moment the calendar turned, and
+**fire on a compliant project**. The guideline's own words are "loan applications dated on or after", so
+the application date is the key the publisher chose. `LoanFile.application_received_date` already existed
+and populates on 22 of 28 stored files; nothing emitted it into the snapshot, so one line in
+`mismo_section.py` now does. The MISMO fact map is free-string keyed by design, so `SNAPSHOT_VERSION` is
+unaffected.
+
+**2. An ABSENT application date ABSTAINS.** This is the sharpest point, because the date is not an operand
+of the comparison — **it SELECTS the comparison**. Every other missing input degrades one input; a missing
+key here would silently choose a floor. There is no safe default: 10% wrongly clears a 2027 application,
+15% wrongly fires a 2026 one. So it resolves to `unknown` → `couldnt_check`, with the reason on the
+load-bearing tag.
+
+**3. It is expressed in a DERIVED RECIPE, not a new DSL mechanism.** The rule DSL cannot state it: an
+outcome carries exactly one `when_compare`, and a `reference` operand resolves to `Decimal` only, so there
+is no date reference. Encoding *"application < 2027-01-04 AND reserve_pct ≥ 10"* needs **two** DSL
+extensions. Both were rejected in favour of the pattern already live in IH-7 — the recipe resolves the
+whole comparison to an enum and the rule body switches on it. **A general mechanism should be built when a
+second and third rule need it, not inferred from one.**
+
+**The guard that makes "declared as data" real.** Putting the numbers in `reference_values` and *also* in
+the recipe is duplication, and duplication drifts — IH-7 duplicates its $1M today with nothing pinning the
+two together. So `test_thresholds_match_their_declared_reference_values` asserts every recipe constant
+against the spec's cited value, for CO-4's pair-plus-boundary and CO-5's four limits. **This is what
+ADR-361 was actually protecting: not that a number is cited once, but that the cited number is the one the
+code uses.** Extending it to the older thresholds is worth doing.
+
+**And the provenance asymmetry is why CO-4 holds on `threshold_needs_signoff`.** The 10% floor is tier P
+(B4-2.2-02, page dated 08/05/2026, fetched). The 15% step-up is **tier S**: fanniemae.com returns HTTP 403
+to this client for both the Lender Letter's landing page and its PDF, `robots.txt` allows both paths, and
+circumventing the bot protection was declined. Two independent secondary sources confirm it verbatim, and
+the 08/05/2026 Guide page still says 10% with no sunset — consistent, since a Lender Letter sits outside
+the Guide until incorporated. **A threshold that flips a live rule's verdict on a calendar boundary,
+sourced short of a primary, is precisely what that flag is for.**
+
+**Consequences.** A second date-keyed threshold is now cheap to express and will look like this one. If a
+third arrives, promote it: a typed date `reference` operand plus a list-valued `when_compare` would let the
+rule body carry the branch, and the recipe layer would stop being the only place a threshold can vary.
+⚠️ **The transition is real and near.** From 2027-01-04 every condo file in flight is judged by a different
+number, and nothing in the system reminds anyone. Logged in `priya-open-questions.md`.
+
+**Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-354 (schema presence ≠ data
+availability — CO-4's input exists and populates nowhere), ADR-375 (one matcher per comparison — why CO-3
+was dropped rather than built), ADR-330 (vacuity).

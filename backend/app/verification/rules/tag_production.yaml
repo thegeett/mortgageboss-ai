@@ -408,6 +408,34 @@ tags:
   condo.master_policy_number: {mode: parsed, subject: document, data: policy_number, document_type: master_insurance_policy_for_condominium}
   condo.master_policy_basis_raw: {mode: parsed, subject: document, data: replacement_cost_indicator, document_type: master_insurance_policy_for_condominium}
   condo.master_liability_limit: {mode: parsed, subject: document, data: general_liability_each_occurrence_limit, document_type: master_insurance_policy_for_condominium}
+
+  # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 eligibility). ---------------------------- #
+  #
+  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED to condo_questionnaire (LP-487's discipline).
+  # `total_units` in particular is a plausible field name on other forms; an unscoped read would let an
+  # unrelated document decide a project's single-entity concentration tier.
+  #
+  # ⚠️ THE CATALOG SAID "AI parses the budget". THERE IS NO BUDGET DOCUMENT TYPE — an HOA budget cannot be
+  # classified, extracted, or attached, so it reaches no loan file. The reserve percentage is a TYPED
+  # questionnaire field, which is why these are `parsed` and not an ai_group (LP-494 Phase A §4).
+  #
+  # ⚠️ ALL SIX FILL 0/4 ON THE BENCH CORPUS, and the bars say so. The two questionnaires there are a
+  # CANCELLATION NOTICE and a genuinely UNANSWERED standard form (all 90 of its catch-all labels carry an
+  # empty value — verified at the document, not inferred from a fill rate). Declared because the fields
+  # exist and the document type is real, NOT because data has been seen. Both rules are INERT.
+  condo.reserve_pct: {mode: parsed, subject: document, data: reserve_contribution_percentage, document_type: condo_questionnaire}
+  condo.delinquent_units_pct: {mode: parsed, subject: document, data: delinquency_percentage, document_type: condo_questionnaire}
+  condo.commercial_space_pct: {mode: parsed, subject: document, data: commercial_space_percentage, document_type: condo_questionnaire}
+  condo.total_units: {mode: parsed, subject: document, data: total_units, document_type: condo_questionnaire}
+  condo.single_entity_owned_units: {mode: parsed, subject: document, data: single_entity_owned_units, document_type: condo_questionnaire}
+  condo.litigation_disclosed: {mode: parsed, subject: document, data: litigation_indicator, document_type: condo_questionnaire}
+  # The loan's application date — the ONLY input that selects CO-4's reserve floor. LOAN-scoped, parsed
+  # straight from the MISMO fact emitted in mismo_section.py.
+  loan.application_received_date: {mode: parsed, subject: loan, data: loan.application_received_date}
+  # The two LOAN-scoped verdicts, derived. Loan-scoped for IH-7's reason: "absent" is a statement about the
+  # FILE, and no per-document tag can be produced for a document that is not there.
+  condo.reserve_adequacy: {mode: derived, subject: loan, data: condo_reserve_adequacy}
+  condo.project_eligibility: {mode: derived, subject: loan, data: condo_project_eligibility}
   # IH-7's CONCLUSION tag (enum present_adequate|present_inadequate|absent|n/a|unknown). LOAN-scoped, not
   # per-document: "absent" is a statement about the FILE, and a per-document tag cannot be produced for a
   # document that is not there. (Its vocabulary entity is `doc`; entity and materialisation subject are

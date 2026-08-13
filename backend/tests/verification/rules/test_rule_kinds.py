@@ -25,8 +25,8 @@ from app.verification.rules.kinds import (
 # Phase-0 counts from the xlsx (formalized as-is; the file's "130" title is off by 3).
 _EXPECTED = {
     RuleKindName.CALCULATIVE: 28,  # LP-447 IH-1 reclassified calculative -> structural (ADR-340, Priya's ruling)
-    RuleKindName.STRUCTURAL: 63,  # LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
-    RuleKindName.JUDGMENTAL: 29,
+    RuleKindName.STRUCTURAL: 64,  # LP-494 +CO-5 (was judgmental — its real inputs are typed questionnaire fields); LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
+    RuleKindName.JUDGMENTAL: 28,  # LP-494 -CO-5
     RuleKindName.OUT_OF_SCOPE: 15,
 }
 _TOTAL = 135  # LP-430 +IN-15; LP-433 +IN-16

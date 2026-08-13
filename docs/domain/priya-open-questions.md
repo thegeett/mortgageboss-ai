@@ -604,3 +604,95 @@ synthetic fixture: its transactions were authored, not extracted.
 **Question: can you point us at one or two real closed files that carry all three?** It is the same ask
 as the credit lane's (§11j) but narrower — this one needs the *asset* side and the *contract* side on the
 same file, which LP-480 found is rare in what we hold.
+
+---
+
+## 16. The condo lane — a deadline, a blank form, and a document type we cannot classify (LP-494)
+
+### 16a. ⚠️ A HARD DEADLINE: every condo file changes number on 4 January 2027
+
+Fannie **LL-2026-03** raises the minimum budgeted replacement reserves from **10% to 15%** of annual
+budgeted assessment income for **loan applications dated on or after 2027-01-04**. CO-4 keys on the
+application date, so it handles the transition correctly — but **nothing in the product tells a processor
+it is coming**, and the practical effect is not gradual: an association budgeting 12% is compliant for a
+December application and short for a January one, with no change on the association's side.
+
+**Questions for Priya:** should we warn on files near the boundary, and how far ahead? Should a project
+budgeting between 10% and 15% be flagged *now*, so an association has time to amend its budget before the
+pipeline turns over? **This is the first threshold in the system that expires**, and how we want to handle
+date-keyed thresholds generally is a product decision, not an engineering one (ADR-379).
+
+Two related LL-2026-03 changes are already in force and are **not** modelled:
+- **The baseline funding method is no longer accepted** for reserve studies (applications on/after
+  **2026-08-03**) — a study must adopt its highest recommended funding amount.
+- ⚠️ **Limited Review was retired entirely** (applications on/after **2026-08-03** — ten days ago).
+  **Does this change what a processor collects on a condo file today?** Previously a Limited Review file
+  needed no questionnaire at all; if every condo file now needs a full review, the questionnaire moves from
+  sometimes-needed to always-needed, and the needs list should say so.
+
+### 16b. Warrantability still has no source, and now we know it does not need one for CO-5
+
+`property.is_warrantable_condo` remains sourceless (LP-487, confirmed again here) — it is a project-review
+conclusion, not a readable datum. **But the tag map was overcautious:** CO-5 does not need a warrantability
+verdict. Delinquency, commercial share, single-entity concentration and litigation are each a typed field
+on the condo questionnaire, and CO-5 is built on those.
+
+**What warrantability would still need:** Form 1076 / PERS output, or a lender's own project-approval
+record. **Is that something the processor ever sees, or does it live only in the LOS?**
+
+### 16c. ⚠️ The blank questionnaire — the real blocker, and it is not a code problem
+
+Both rules are **built and inert**, and the reason is the corpus:
+- **No loan file carries a condo questionnaire at all** (0 of 28), and `property_type` is null on every
+  file that has documents.
+- The bench holds **two** questionnaires: a **cancellation notice**, and a **standard form nobody
+  answered**. ⚠️ Verified at the document — the 450 KB form produced 90 catch-all labels against 1 typed
+  field, which looks exactly like an extractor defect, but **all 90 carry an empty value**. The form asks
+  the questions; the answers are not there.
+
+**Question: is a blank questionnaire normal?** If associations routinely return them unanswered, that is a
+process finding worth more than either rule — a processor should be chasing the completed form, and CO-1
+(live) already reports the document as present, which may be actively misleading. **One completed
+questionnaire unblocks both rules with no code change.**
+
+### 16d. HOA budgets have no document type
+
+The catalog assumed AI would parse an HOA budget for the reserve percentage. **There is no HOA-budget
+document type**, so a budget cannot be classified, extracted, or attached — budgets in the bench routed to
+`unknown`. The reserve percentage is instead read from the questionnaire's `reserve_contribution_percentage`.
+
+**Question: do processors receive HOA budgets as separate documents?** If so, a catalog type + extractor is
+a small piece of work and gives CO-4 a second, independent source — useful, since the questionnaire's
+stated percentage is self-reported by the association.
+
+### 16e. CO-3 was dropped — and IH-7 has a gap worth deciding on
+
+CO-3's master-insurance half duplicates live **IH-7** (ADR-375), and its fidelity half cannot be computed:
+B7-4-02 (08/05/2026) exempts projects of **20 units or fewer** and sets the required amount at **three
+months of assessments on all units**, so both the gate and the amount need a unit count and an assessment
+base that no document on file provides.
+
+⚠️ **A correction found here:** the master policies *do* carry `fidelity_crime_coverage_present` and
+`_amount` (8/8 on the bench). **The coverage reads fine; the requirement is what cannot be computed.**
+So the leg is one completed questionnaire away, and it belongs **inside IH-7** — one rule, one verdict on
+the master policy — not as a second rule.
+
+### 16f. Single-entity ownership — the conflicting figures resolved
+
+Two sources gave **>20%** and **10%**. **Neither describes the rule.** B4-2.1-03 (08/05/2026, fetched) is
+**tiered**: 20% for projects of 21+ units, a maximum of **2 units** for projects of 5–20 units, and **no
+stated limit below 5 units** — where CO-5 abstains rather than inventing one.
+
+⚠️ **One discrepancy against the ticket, reported:** the ticket gave non-incidental business income as
+"may not exceed 15%". The primary makes **more than 10%** ineligible, with 15% permitted only under
+specific exceptions. **Not modelled** (no field carries it), but worth correcting wherever the 15% came
+from.
+
+### 16g. Still open from LP-492 — the LTV rounding rule, now confirmed against the primary
+
+**B2-1.2-01, page dated 06/01/2022 (tier P, fetched):** *"The result of these calculations must be
+truncated (shortened) to two decimal places, then rounded up to the nearest whole percent."*
+
+`app/verification/ltv.py:103` uses `ROUND_HALF_UP` **to two decimal places** — two divergences: it rounds
+half-up rather than always up, and it does not round to a whole percent at all. **Affects MI-1 and PR-1.**
+Confirmed and reported only, not fixed here; **no ticket exists for it yet.**

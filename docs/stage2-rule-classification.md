@@ -2,7 +2,7 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**135 rules** — calculative 28, structural 63, judgmental 29, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 21.
+**135 rules** — calculative 28, structural 64, judgmental 28, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 21.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
@@ -31,7 +31,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PR-2 | Appraised value vs purchase price | Property | calculative | deterministic_bookend | true | — | false | false |
 | PR-6 | Appraisal validity at closing | Property | calculative | deterministic_bookend | true | — | false | true |
 | IH-4 | Premium matches DTI | Insurance | calculative | deterministic_bookend | true | — | false | false |
-| CO-4 | HOA budget / reserves | Condo | calculative | deterministic_bookend+ai | true | — | false | true |
+| CO-4 | HOA budget / reserves | Condo | calculative | deterministic_bookend | true | — | false | true |
 | PC-4 | Seller credit / IPC limit | Contract | calculative | deterministic_bookend | true | — | false | true |
 | MI-1 | PMI required (Conv >80% LTV) | MI | calculative | deterministic_bookend | true | — | false | true |
 | MI-2 | MI factor correct | MI | calculative | deterministic_bookend | true | — | false | false |
@@ -39,7 +39,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend+ai | true | — | false | true |
 | PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | true |
 
-## structural (63)
+## structural (64)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -87,6 +87,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | IH-7 | Condo master policy | Insurance | structural | deterministic_only | false | true | false | false |
 | CO-1 | Condo questionnaire present | Condo | structural | deterministic_only | false | true | false | false |
 | CO-2 | HOA dues in DTI | Condo | structural | deterministic_only | false | true | false | false |
+| CO-5 | Litigation / delinquency / concentration | Condo | structural | deterministic_only | false | true | false | false |
 | PC-1 | Contract parties match | Contract | structural | ai_fuzzy_match | false | false | false | false |
 | PC-2 | Purchase price matches loan terms | Contract | structural | deterministic_only | false | true | false | false |
 | PC-3 | Property address matches | Contract | structural | ai_fuzzy_match | false | false | false | false |
@@ -107,7 +108,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | LO-1 | LOE required-and-present | LOE | structural | ai_fuzzy_match | false | false | false | false |
 | LO-2 | LOE completeness | LOE | structural | ai_fuzzy_match | false | false | false | false |
 
-## judgmental (29)
+## judgmental (28)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -131,7 +132,6 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | TI-6 | Chain of title / rapid transfer | Title | judgmental | ai_judgment | false | — | false | false |
 | IH-8 | Wind/hail coverage | Insurance | judgmental | ai_judgment | false | — | false | false |
 | CO-3 | Master insurance / fidelity | Condo | judgmental | ai_judgment | false | — | false | false |
-| CO-5 | Litigation / delinquency / concentration | Condo | judgmental | ai_judgment | false | — | false | false |
 | PC-8 | Personal property not inflating value | Contract | judgmental | ai_judgment | false | — | false | false |
 | PE-4 | FHA property condition | Program | judgmental | ai_judgment | false | — | false | false |
 | FR-1 | Altered-document appearance | Fraud | judgmental | ai_judgment | false | — | false | false |

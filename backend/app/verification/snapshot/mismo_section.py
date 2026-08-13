@@ -145,6 +145,12 @@ def build_mismo_section(
     put("loan.note_rate_percent", loan_file.note_rate_percent)
     put("loan.amortization_type", loan_file.amortization_type)
     put("loan.amortization_months", loan_file.amortization_months)
+    # LP-494 — the loan APPLICATION date. CO-4's reserve floor is DATE-KEYED (Fannie LL-2026-03 raises
+    # the minimum from 10% to 15% for applications dated on or after 2027-01-04), so the rule needs the
+    # date the application was taken, not today's date. The column has always existed and populates on 22
+    # of the 28 stored files; nothing emitted it, so no tag and no rule could see it. Keys here are free
+    # strings by design ("so new facts never need a schema change"), so SNAPSHOT_VERSION is unaffected.
+    put("loan.application_received_date", loan_file.application_received_date)
 
     # --- Property ---------------------------------------------------------
     if property_ is not None:

@@ -1109,6 +1109,268 @@ def _master_policy_basis(raw: str) -> str | None:
     return None
 
 
+# --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 project eligibility). ---------------------- #
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory). ⚠️ EVERY CONSTANT BELOW IS PINNED
+# AGAINST ITS SPEC'S DECLARED reference_values BY TEST, so the code and the citation cannot drift apart.
+#
+#   Replacement reserves — ⚠️ A DATE-KEYED PAIR, THE FIRST IN THE SYSTEM (ADR-379).
+#     10% of the annual budgeted assessment income — Fannie Mae Selling Guide B4-2.2-02, "Full Review
+#     Process", page dated 08/05/2026 (tier P, fetched): "provides for the funding of replacement reserves
+#     for capital expenditures and deferred maintenance that is at least 10% of the budget".
+#     15%, for loan applications dated ON OR AFTER 2027-01-04 — Fannie Mae Lender Letter LL-2026-03,
+#     issued 2026-03-18. ⚠️ TIER S, NOT P: the primary is behind an HTTP 403 to this client on
+#     singlefamily.fanniemae.com (both the landing page and the PDF at /media/44986/display; robots.txt
+#     ALLOWS both paths — the refusal is bot protection, and working around it was declined). Confirmed
+#     verbatim against two independent secondary sources. ⚠️ The 08/05/2026 Selling Guide page still
+#     states 10% with no sunset, which is consistent: a Lender Letter sits outside the Guide until
+#     incorporated. This is why CO-4's bar carries threshold_needs_signoff.
+#
+#   Delinquency — more than 15% of total units 60+ days past due. B4-2.2-02 (08/05/2026, tier P,
+#     fetched): "No more than 15% of the total units in a project are 60 days or more past due on common
+#     expense assessments".
+#
+#   Commercial / mixed-use — more than 35%. B4-2.1-03, "Ineligible Projects", page dated 08/05/2026
+#     (tier P, fetched): "no more than 35% of a condo or co-op project or 35% of the building in which the
+#     project is located be commercial space".
+#
+#   Single-entity ownership — ⚠️ THE TICKET'S SOURCES CONFLICTED (>20% vs 10%) AND THE PRIMARY RESOLVES IT
+#     RATHER THAN EITHER BEING GUESSED. B4-2.1-03 (08/05/2026, tier P, fetched) is TIERED, and neither
+#     figure in the ticket describes it: "projects with 21 or more units - 20%", and projects of 5-20 units
+#     allow a maximum of 2 units. Under 5 units the guide states no single-entity limit, so this leg
+#     abstains there rather than inventing one.
+#
+# ⚠️ NO LITIGATION THRESHOLD EXISTS AND NONE IS INVENTED. B4-2.1-03 turns on the NATURE and SCOPE of the
+# litigation, which is a judgment; the catalog rationale says "Surface". So disclosed litigation is
+# SURFACED to the processor with the questionnaire's own words, and never adjudicated here.
+_CONDO_RESERVE_MIN_PCT_BEFORE = Decimal("10")
+_CONDO_RESERVE_MIN_PCT_FROM = Decimal("15")
+_CONDO_RESERVE_STEP_UP_DATE = date(2027, 1, 4)
+_CONDO_MAX_DELINQUENT_PCT = Decimal("15")
+_CONDO_MAX_COMMERCIAL_PCT = Decimal("35")
+_CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS = Decimal("20")
+_CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL = Decimal("2")
+_CONDO_QUESTIONNAIRE_DOC_TYPES = frozenset({"condo_questionnaire"})
+
+# ⚠️ A CLOSED VOCABULARY (ADR-376) — an unrecognised litigation answer ABSTAINS, and that direction is the
+# whole point: "PENDING - SEE ATTACHED" must never be read as "no litigation" and clear the project.
+_CONDO_LITIGATION_YES = frozenset({"yes", "y", "true", "pending", "disclosed"})
+_CONDO_LITIGATION_NO = frozenset({"no", "n", "false", "none", "n/a", "na"})
+
+
+def _condo_scope(snapshot: Snapshot) -> tuple[str | None, str]:
+    """The shared condo applicability read: (None, reason) when this is not a condo file to judge.
+
+    ⚠️ ONE implementation for both recipes, so CO-4 and CO-5 can never disagree about whether the subject
+    property is a condominium — the ADR-375 discipline applied to a scoping read rather than a matcher.
+    """
+    property_types = {v.casefold() for v in _parsed_strings(snapshot, "property.type")}
+    if not property_types:
+        return None, "the file does not state the property type, so condo scoping is undecided"
+    if len(property_types) > 1:
+        return None, (
+            f"the file states more than one property type ({', '.join(sorted(property_types))}) — "
+            "ambiguous"
+        )
+    if next(iter(property_types)) != "condo":
+        return "n/a", "the subject property is not a condominium"
+    return "condo", ""
+
+
+def _condo_decimal(snapshot: Snapshot, tag_id: str) -> tuple[Decimal | None, str | None]:
+    """One numeric questionnaire value, or (None, reason). Disagreement across questionnaires abstains.
+
+    Never returns 0 for a missing value: a blank reserve line is not a project with no reserves.
+    """
+    raw = _parsed_strings(snapshot, tag_id)
+    if not raw:
+        return None, None
+    parsed: set[Decimal] = set()
+    for value in raw:
+        try:
+            parsed.add(Decimal(value.replace("%", "").replace(",", "").strip()))
+        except (InvalidOperation, ValueError):
+            return None, f"{tag_id} reads {value!r}, which is not a number — abstaining"
+    if len(parsed) > 1:
+        return None, (
+            f"the file's condo questionnaires state different values for {tag_id} "
+            f"({', '.join(str(v) for v in sorted(parsed))}) — abstaining rather than picking one"
+        )
+    return next(iter(parsed)), None
+
+
+def _condo_reserve_adequacy(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """condo.reserve_adequacy — do the HOA's budgeted replacement reserves meet the floor? (CO-4)
+
+    ⚠️ THE FLOOR IS DATE-KEYED, and the date is the APPLICATION's, never today's. Fannie LL-2026-03 raises
+    the minimum from 10% to 15% for applications dated on or after 2027-01-04, so a rule keyed on the
+    current date would apply next year's floor to an application taken this year and fire on a compliant
+    project. An ABSENT application date is the one input that cannot be defaulted: it SELECTS the floor,
+    so its absence abstains (ADR-379).
+    """
+    scope, reason = _condo_scope(snapshot)
+    if scope != "condo":
+        return (scope or _UNKNOWN), (
+            reason
+            if scope != "n/a"
+            else "the subject property is not a condominium — no HOA reserve floor applies"
+        )
+
+    reserve_pct, problem = _condo_decimal(snapshot, "condo.reserve_pct")
+    if problem is not None:
+        return _UNKNOWN, problem
+    if reserve_pct is None:
+        has_questionnaire = any(
+            entry.document_type in _CONDO_QUESTIONNAIRE_DOC_TYPES
+            for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+        )
+        return _UNKNOWN, (
+            "the condo questionnaire on file does not state the budgeted replacement-reserve percentage"
+            if has_questionnaire
+            else "the file carries no condo questionnaire stating the budgeted replacement-reserve percentage"
+        )
+
+    application_dates = _parsed_strings(snapshot, "loan.application_received_date")
+    if not application_dates:
+        return _UNKNOWN, (
+            "the file does not state the loan application date, and the date is what selects the reserve "
+            "floor (10% before 2027-01-04, 15% on or after) — abstaining rather than applying one of them"
+        )
+    application_date = coerce_date(application_dates[0])
+    if application_date is None:
+        return _UNKNOWN, (
+            f"the loan application date reads {application_dates[0]!r}, which is not a date — abstaining "
+            "rather than selecting a reserve floor from an unreadable date"
+        )
+
+    from_2027 = application_date >= _CONDO_RESERVE_STEP_UP_DATE
+    floor = _CONDO_RESERVE_MIN_PCT_FROM if from_2027 else _CONDO_RESERVE_MIN_PCT_BEFORE
+    citation = (
+        "Fannie Mae LL-2026-03, which raises the minimum to 15% for applications dated on or after "
+        "2027-01-04"
+        if from_2027
+        else "Fannie Mae Selling Guide B4-2.2-02 (08/05/2026)"
+    )
+    if reserve_pct < floor:
+        return "inadequate", (
+            f"the association budgets {reserve_pct}% of its annual assessment income to replacement "
+            f"reserves, below the {floor}% required for an application dated {application_date} "
+            f"({citation})"
+        )
+    return "adequate", (
+        f"the association budgets {reserve_pct}% of its annual assessment income to replacement reserves, "
+        f"at or above the {floor}% required for an application dated {application_date} ({citation})"
+    )
+
+
+def _condo_project_eligibility(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """condo.project_eligibility — delinquency, concentration and litigation surfaced (CO-5).
+
+    ⚠️ "clear" REQUIRES ALL FOUR LEGS TO HAVE BEEN READ. A blank questionnaire resolves to "unknown", never
+    "clear": telling a processor a project is eligible because nobody answered the questions is the exact
+    false all-clear this lane exists to prevent.
+    """
+    scope, reason = _condo_scope(snapshot)
+    if scope != "condo":
+        return (scope or _UNKNOWN), (
+            reason
+            if scope != "n/a"
+            else "the subject property is not a condominium — no project review applies"
+        )
+
+    delinquent_pct, problem = _condo_decimal(snapshot, "condo.delinquent_units_pct")
+    if problem is not None:
+        return _UNKNOWN, problem
+    commercial_pct, problem = _condo_decimal(snapshot, "condo.commercial_space_pct")
+    if problem is not None:
+        return _UNKNOWN, problem
+    total_units, problem = _condo_decimal(snapshot, "condo.total_units")
+    if problem is not None:
+        return _UNKNOWN, problem
+    single_entity_units, problem = _condo_decimal(snapshot, "condo.single_entity_owned_units")
+    if problem is not None:
+        return _UNKNOWN, problem
+
+    # THE HARD LIMITS FIRST — an ineligible project outranks a litigation disclosure, because it is a
+    # decided fact about the project rather than something for a processor to weigh.
+    if delinquent_pct is not None and delinquent_pct > _CONDO_MAX_DELINQUENT_PCT:
+        return "ineligible_threshold", (
+            f"{delinquent_pct}% of the project's units are 60+ days past due on common expense "
+            f"assessments; Fannie B4-2.2-02 (08/05/2026) allows no more than "
+            f"{_CONDO_MAX_DELINQUENT_PCT}%"
+        )
+    if commercial_pct is not None and commercial_pct > _CONDO_MAX_COMMERCIAL_PCT:
+        return "ineligible_threshold", (
+            f"{commercial_pct}% of the project is commercial or mixed-use space; Fannie B4-2.1-03 "
+            f"(08/05/2026) allows no more than {_CONDO_MAX_COMMERCIAL_PCT}%"
+        )
+    concentration_read = False
+    if total_units is not None and single_entity_units is not None and total_units > 0:
+        # ⚠️ TIERED, per B4-2.1-03 — and the tiers do not extend below 5 units, so a 4-unit project has no
+        # stated single-entity limit and this leg stays unread rather than inventing one.
+        if total_units >= 21:
+            concentration_read = True
+            share = single_entity_units / total_units * Decimal(100)
+            if share > _CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS:
+                return "ineligible_threshold", (
+                    f"a single entity owns {single_entity_units} of the project's {total_units} units "
+                    f"({share:.1f}%); Fannie B4-2.1-03 (08/05/2026) allows no more than "
+                    f"{_CONDO_SINGLE_ENTITY_MAX_PCT_21_PLUS}% in a project of 21 or more units"
+                )
+        elif total_units >= 5:
+            concentration_read = True
+            if single_entity_units > _CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL:
+                return "ineligible_threshold", (
+                    f"a single entity owns {single_entity_units} of the project's {total_units} units; "
+                    f"Fannie B4-2.1-03 (08/05/2026) allows a maximum of "
+                    f"{_CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL} units in a project of 5 to 20 units"
+                )
+
+    litigation_raw = _parsed_strings(snapshot, "condo.litigation_disclosed")
+    litigation_answers = {v.casefold().strip() for v in litigation_raw}
+    litigation_disclosed: bool | None = None
+    if litigation_answers:
+        if litigation_answers <= _CONDO_LITIGATION_YES:
+            litigation_disclosed = True
+        elif litigation_answers <= _CONDO_LITIGATION_NO:
+            litigation_disclosed = False
+        else:
+            return _UNKNOWN, (
+                f"the questionnaire's litigation answer reads {sorted(litigation_answers)[0]!r}, which is "
+                "not a recognised yes/no answer — abstaining rather than reading it as no litigation"
+            )
+    if litigation_disclosed:
+        return "litigation_disclosed", (
+            "the condo questionnaire discloses litigation involving the project; Fannie B4-2.1-03 turns on "
+            "the nature and scope of the action, which is a judgment for the file, not a threshold"
+        )
+
+    missing = [
+        name
+        for name, seen in (
+            ("the delinquency percentage", delinquent_pct is not None),
+            ("the commercial space percentage", commercial_pct is not None),
+            ("the single-entity concentration", concentration_read),
+            ("the litigation answer", litigation_disclosed is not None),
+        )
+        if not seen
+    ]
+    if missing:
+        return _UNKNOWN, (
+            f"the condo questionnaire does not answer {', '.join(missing)} — a project cannot be reported "
+            "eligible on questions nobody answered"
+        )
+    return "clear", (
+        f"the project's delinquency ({delinquent_pct}%), commercial space ({commercial_pct}%) and "
+        f"single-entity concentration are all within Fannie's limits, and the questionnaire discloses no "
+        "litigation"
+    )
+
+
 def _condo_master_policy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -3622,6 +3884,8 @@ _RECIPES: dict[str, Recipe] = {
     "credit_has_collections": _has_collections,  # LP-490 — CR-10
     "mortgagee_clause_correct": _mortgagee_clause_correct,  # LP-487 — IH-2
     "condo_master_policy": _condo_master_policy,  # LP-487 — IH-7
+    "condo_reserve_adequacy": _condo_reserve_adequacy,  # LP-494 — CO-4
+    "condo_project_eligibility": _condo_project_eligibility,  # LP-494 — CO-5
     # LP-453 — DETERMINISTIC numeric observations over the credit report's tradelines list (loan-level). Pure
     # aggregates only (count + monthly-payment total) — the open-ended bureau vocabulary makes classification a
     # Priya/AI question (ADR). Fail closed: no tradelines → absent, never a fabricated 0.

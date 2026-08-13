@@ -926,3 +926,90 @@ tags:
       PC-8's judgment on what a purchase contract includes. ⚠️ SURFACES ONLY — it does not decide whether
       value is inflated, and PC-8 has no firing path.
     produced_by: AI
+
+  # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 project eligibility). -------------------- #
+  #
+  # ⚠️ `condo.reserve_pct` is NOT here — it is already in the generated fact_tags.csv (row 123), so it is
+  # declared in tag_production.yaml ONLY. Its csv description says "AI parses budget"; there is no budget
+  # document type, and the value is a typed questionnaire field. The repo wins (LP-494 Phase A §5).
+  #
+  # ⚠️ EVERY ONE OF THESE FILLS 0/4 ON THE BENCH, and no loan file carries a condo questionnaire at all.
+  # They are declared because the fields and the document type EXIST, not because data has been observed —
+  # ADR-354's distinction, stated rather than glossed. Both consuming rules are INERT.
+  condo.delinquent_units_pct:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The percentage of units 60+ days past due on common expense assessments, as stated on the condo
+      questionnaire. Fannie B4-2.2-02 (08/05/2026) makes more than 15% ineligible. Absent when the
+      questionnaire does not answer it; never read as 0, which would assert a fully current project.
+    produced_by: parsed
+  condo.commercial_space_pct:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The percentage of the project (or of the building containing it) that is commercial or mixed-use
+      space, as stated on the condo questionnaire. Fannie B4-2.1-03 (08/05/2026) caps it at 35%. Absent
+      when unanswered; never 0.
+    produced_by: parsed
+  condo.total_units:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The project's total unit count, as stated on the condo questionnaire. It selects the single-entity
+      concentration TIER (B4-2.1-03: 2 units at 5-20 units, 20% at 21+), so an absent count means the tier
+      is undecidable and the concentration leg abstains rather than picking one.
+    produced_by: parsed
+  condo.single_entity_owned_units:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The number of units owned by a single entity, as stated on the condo questionnaire. Paired with
+      condo.total_units to compute the concentration; the questionnaire's own stated percentage is
+      deliberately NOT read, so one number cannot contradict the other.
+    produced_by: parsed
+  condo.litigation_disclosed:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The condo questionnaire's litigation indicator, VERBATIM. Deliberately a string, not an enum: the
+      recipe recognises a closed set of affirmative/negative spellings (ADR-376) and abstains on anything
+      else, so an unfamiliar answer can never be read as "no litigation".
+    produced_by: parsed
+  loan.application_received_date:
+    entity: loan
+    value_type: date
+    allowed_values: null
+    description: >-
+      The date the loan application was taken (MISMO / LoanFile.application_received_date). CO-4's reserve
+      floor is keyed on it, because Fannie LL-2026-03 raises the minimum from 10% to 15% for applications
+      dated on or after 2027-01-04 — a rule keyed on TODAY's date would apply the wrong floor to an
+      application taken earlier. Absent when the file states none; never defaulted to today.
+    produced_by: parsed
+  condo.reserve_adequacy:
+    entity: loan
+    value_type: enum
+    allowed_values: ["adequate", "inadequate", "n/a", "unknown"]
+    description: >-
+      Whether the HOA's budgeted replacement reserves meet the applicable Fannie floor (CO-4). "n/a" when
+      the property is not a condominium; "unknown" when the property type, the application date or the
+      reserve percentage is missing or unreadable — including when the application date is absent, because
+      the date is what SELECTS the floor and guessing it would apply the wrong one.
+    produced_by: derived
+  condo.project_eligibility:
+    entity: loan
+    value_type: enum
+    allowed_values: ["clear", "ineligible_threshold", "litigation_disclosed", "n/a", "unknown"]
+    description: >-
+      The condo project's eligibility surface (CO-5): "ineligible_threshold" when delinquency, commercial
+      space or single-entity concentration breaches a cited B4-2.1-03/B4-2.2-02 limit;
+      "litigation_disclosed" when the questionnaire discloses litigation and no threshold is breached;
+      "clear" ONLY when all four legs were readable and none tripped; "n/a" for a non-condominium;
+      "unknown" otherwise. ⚠️ "clear" requires the inputs to have been READ — a blank questionnaire is
+      never a clean project.
+    produced_by: derived

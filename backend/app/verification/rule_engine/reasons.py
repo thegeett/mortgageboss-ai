@@ -62,6 +62,16 @@ _FACT_LABELS: dict[str, str] = {
     "loan.ltv_percent": "loan-to-value ratio",  # MI-1 (LP-488)
     "mi.fha_ufmip_percent": "upfront FHA mortgage insurance premium financed into the note",  # MI-4 (LP-488)
     "condo.questionnaire_present": "condo questionnaire",  # CO-1 (LP-488)
+    # LP-494 — the condo project lane (CO-4 reserves, CO-5 eligibility).
+    "condo.reserve_pct": "HOA budgeted replacement-reserve percentage",
+    "condo.reserve_adequacy": "HOA replacement-reserve adequacy",
+    "condo.delinquent_units_pct": "percentage of units 60+ days delinquent on assessments",
+    "condo.commercial_space_pct": "project's commercial / mixed-use share",
+    "condo.total_units": "project's total unit count",
+    "condo.single_entity_owned_units": "units owned by a single entity",
+    "condo.litigation_disclosed": "condo questionnaire's litigation answer",
+    "condo.project_eligibility": "condo project eligibility (delinquency, concentration, litigation)",
+    "loan.application_received_date": "loan application date",
     "title.vested_owner_matches": "owner of record on the title commitment",  # TI-1 (LP-491)
     "title.vested_owner_name": "owner of record on the title commitment",  # TI-1
     "contract.seller_name": "seller named on the purchase agreement",  # TI-1

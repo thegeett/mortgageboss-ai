@@ -136,6 +136,7 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         id=uuid4(), loan_program="Conventional", loan_purpose="Purchase", refinance_type="CashOut",
         loan_amount=Decimal("1"), note_amount=Decimal("1"), note_rate_percent=Decimal("1"),
         amortization_type="Fixed", amortization_months=360,
+        application_received_date=date(2026, 6, 8),  # LP-494 — CO-4's date-keyed reserve floor
     )  # fmt: skip
     prop = ns(
         address_line="a", address_line_2="b", city="c", state="ST", postal_code="00000",

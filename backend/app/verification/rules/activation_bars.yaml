@@ -1573,3 +1573,64 @@ PC-5:
     INPUT GAP: `earnest_money_amount` is SINGULAR and no `additional_earnest_money_amount` field exists,
     so a contract with an initial AND an additional deposit contributes only the first (doc 183's $204k
     case). The prompt asks the model to name a second deposit in its reasoning; the tag cannot carry it.
+
+# --------------------------------------------------------------------------- #
+# LP-494 — CO-4 (HOA reserves) and CO-5 (litigation / delinquency / concentration). Both DETERMINISTIC
+# after evidence-backed catalog edits, so there is no AI accuracy to measure and no self-consistency rate
+# to derive — and no model call was made for either.
+#
+# ⚠️ BOTH ARE BUILT AND INERT, on `input_resolves: false`, and that flag is the honest one rather than the
+# convenient one. LP-485's DEVELOPMENT-MODE meaning still requires that "the producer resolves it on real
+# stored data", and here it does not:
+#   * NO LOAN FILE CARRIES A CONDO QUESTIONNAIRE — condo_docs is empty on all 28 stored files, and
+#     property_type is null on every file that has documents at all.
+#   * The two questionnaires in the BENCH corpus are a CANCELLATION NOTICE and a genuinely UNANSWERED
+#     standard form. ⚠️ That was verified AT THE DOCUMENT, not inferred from a fill rate: the standard
+#     form is 450 KB and yielded 90 catch-all labels against 1 typed field — the exact signature of the
+#     LP-493a plumbing defect — but all 90 carry an EMPTY VALUE. The form asks the questions and nobody
+#     answered them. Every substantive field fills 0/4.
+#
+# ⚠️ THIS IS NOT THE TI-3/4/5 BLOCK, and the difference is why these were built rather than dropped.
+# There, four RICHLY EXTRACTED title commitments left the fields null — the documents do not carry the
+# data. Here the fields exist, the document type exists and classifies, and the documents on hand are
+# blank. The rules work the day a completed questionnaire arrives; nothing is inferred in the meantime.
+CO-4:
+  status: no-ai-threshold-pending
+  ships: auto
+  threshold: null
+  validated: false          # ⚠️ THE REAL HOLD, and it is not a formality — see the rationale
+  input_resolves: false
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a project with underfunded reserves closes -> a special assessment the borrower cannot absorb, and
+    an ineligible project delivered) >> FP (a processor confirms a reserve line against the association's
+    budget). The abstain direction is the safe one and is where every real file currently lands.
+  rationale: >-
+    No AI tag to measure. TWO independent holds, both real. (1) input_resolves is false: no loan file
+    carries a condo questionnaire and the bench questionnaires are unanswered, so the reserve percentage
+    resolves nowhere. (2) validated is false because the threshold is DATE-KEYED and only ONE of the two
+    values came from a primary — B4-2.2-02 (08/05/2026, tier P, fetched) gives 10%, but the 15% step-up
+    for applications dated on or after 2027-01-04 is Lender Letter LL-2026-03 at TIER S: fanniemae.com
+    returned HTTP 403 to this client for both the landing page and the PDF, robots.txt allows both paths,
+    and circumventing the bot protection was declined. Two independent secondary sources confirm it
+    verbatim. A threshold that changes a live rule's verdict on a calendar boundary, sourced short of a
+    primary, is exactly what threshold_needs_signoff exists for.
+CO-5:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: false
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (an ineligible project reaches underwriting -> the loan is undeliverable after the borrower has
+    paid for an appraisal) >> FP (a processor re-confirms a delinquency or concentration figure with the
+    management company, which is worth doing anyway — questionnaires are frequently completed from stale
+    records). Litigation is needs_review rather than fired precisely to keep the FP direction cheap.
+  rationale: >-
+    No AI tag and no threshold to sign off — all four limits are cited PRIMARIES fetched 2026-08-13
+    (B4-2.2-02 and B4-2.1-03, both page-dated 08/05/2026), including the single-entity figure the ticket's
+    two secondary sources disagreed about, which the primary resolves as a TIER (20% at 21+ units, 2 units
+    at 5-20) that neither of them described. Eligibility is therefore input_resolves alone, and it is
+    FALSE: every one of the five questionnaire fields fills 0/4 on the bench and no loan file carries a
+    questionnaire at all. Built against real fields, held until a completed questionnaire exists.

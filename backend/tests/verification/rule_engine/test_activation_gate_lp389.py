@@ -122,7 +122,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # the LP-493a re-derivation (after both context fixes) scored a measured 0.5000 — held either way
     # ({unknown: 2}), and a rate over one abstain value carries no information (the CR-8 shape), so
     # none was recorded. 8 -> 9 held.
-    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-494 +CO-4 +CO-5 — BUILT AND HELD on input_resolves: false. No loan file carries a condo
+    # questionnaire, and the two in the bench corpus are a cancellation notice and an unanswered form.
+    assert len(held) == 11 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:

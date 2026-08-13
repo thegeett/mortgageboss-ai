@@ -1,0 +1,153 @@
+# CO-4 — HOA budget / reserves — DETERMINISTIC calculative rule SPEC (LP-494).
+#
+# A condominium project must budget a minimum share of its annual assessment income to replacement
+# reserves. Underfunded reserves are the direct cause of the special assessments that turn a performing
+# borrower into a distressed one, which is why Fannie tightened this in 2026.
+#
+# ⚠️ THE FLOOR IS DATE-KEYED — THE FIRST DATE-KEYED THRESHOLD IN THE SYSTEM (ADR-379). It is 10% today
+# and 15% for loan applications dated on or after 2027-01-04. The rule therefore keys on the LOAN
+# APPLICATION DATE, never on today's date: an application taken in December 2026 is judged at 10% even if
+# the file is worked in 2027, and one taken in January 2027 is judged at 15%. Both values and the boundary
+# are declared in reference_values below and PINNED to the recipe's constants by test, so the citation and
+# the code cannot drift.
+#
+# ⚠️ AND AN ABSENT APPLICATION DATE ABSTAINS. The date is not an input to the comparison — it SELECTS the
+# comparison. Defaulting it to today would silently apply next year's floor to this year's application and
+# fire on a compliant project.
+#
+# ⚠️ THE CATALOG SAID "budget parse → AI" AND THAT DOCUMENT DOES NOT EXIST. There is no HOA-budget document
+# type in the classifier catalog, so a budget cannot be classified, extracted, or attached to a loan file.
+# The reserve percentage is a TYPED FIELD on the condo questionnaire (`reserve_contribution_percentage`),
+# so typed extraction has already spent the perception step (LP-487's question, answered yes a third time)
+# and what remains is one numeric comparison. rule_kinds.csv was edited from `deterministic_bookend+ai` to
+# `deterministic_bookend` — the AI-FREE bookend — with that evidence; the row count stays 135. (The kind
+# stays `calculative`, so the path stays a bookend; what went is the `+ai` half.)
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory):
+#   10% — Fannie Mae Selling Guide B4-2.2-02, "Full Review Process", page dated 08/05/2026 (tier P,
+#     fetched 2026-08-13): "provides for the funding of replacement reserves for capital expenditures and
+#     deferred maintenance that is at least 10% of the budget."
+#   15%, applications on/after 2027-01-04 — Fannie Mae Lender Letter LL-2026-03, issued 2026-03-18.
+#     ⚠️ TIER S, NOT P, AND THE ATTEMPT IS REPORTED: singlefamily.fanniemae.com returns HTTP 403 to this
+#     client for both the landing page and the PDF (/media/44986/display). robots.txt ALLOWS both paths —
+#     the refusal is bot protection, and circumventing it was declined. Confirmed verbatim against two
+#     independent secondary sources. ⚠️ The 08/05/2026 Guide page still states 10% with no sunset, which is
+#     consistent: a Lender Letter sits outside the Guide until incorporated. THIS IS WHY THE RULE CARRIES
+#     threshold_needs_signoff — the step-up is the one value not read from a primary.
+#
+# ⚠️ INERT. The tag resolves on no file in the corpus: the two bench condo questionnaires are a
+# cancellation notice and a genuinely UNANSWERED standard form, and no loan file carries a questionnaire
+# at all. `input_resolves: false` on the bar says exactly that. Built, not shipped.
+
+rule_id: CO-4
+name: HOA budget / reserves
+category: Condo
+
+kind: calculative           # must equal rule_kinds.csv
+numeric_check: true         # must equal rule_kinds.csv — a percentage against a floor
+
+criteria: >-
+  When the subject property is a condominium, the association's budget must allocate at least the
+  applicable minimum share of its annual budgeted assessment income to replacement reserves — 10% for a
+  loan application dated before 2027-01-04, and 15% for one dated on or after it (Fannie Mae LL-2026-03).
+  This reads the derived condo.reserve_adequacy, which resolves the property type, the reserve percentage
+  stated on the condo questionnaire, and the loan application date that selects the floor. A
+  non-condominium property is not_applicable. A missing property type, a missing or unreadable reserve
+  percentage, and a missing or unreadable application date each resolve to couldnt_check — never to a
+  guessed adequacy, never to a reserve percentage of zero, and never to a floor chosen from today's date.
+
+applicability:
+  scope: the loan, when the subject property is a condominium
+  trigger: >-
+    property.type == condo. A non-condo property is not_applicable; a file that does not state the
+    property type, or states more than one, couldnt_checks rather than assuming the property is not a
+    condominium.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: true   # must equal rule_kinds.csv — the 15% step-up is tier S, not P
+  values:
+    # ⚠️ A DATE-KEYED PAIR, NOT A CONSTANT. A test pins all three against the recipe's constants.
+    min_reserve_pct_before_step_up: "10"
+    min_reserve_pct_from_step_up: "15"
+    reserve_step_up_application_date: "2027-01-04"
+  guideline_text: >-
+    A condo project's budget must provide for the funding of replacement reserves for capital expenditures
+    and deferred maintenance that is at least 10% of the association's annual budgeted assessment income
+    (Fannie Mae Selling Guide B4-2.2-02, page dated 08/05/2026). Fannie Mae Lender Letter LL-2026-03
+    (issued 2026-03-18) raises that minimum to 15% for all loan applications dated on or after 2027-01-04,
+    and separately withdraws the baseline funding method for reserve studies for applications dated on or
+    after 2026-08-03.
+
+required_inputs:
+  - name: reserve_adequacy
+    snapshot_path: 'tags.by_subject["loan"]["condo.reserve_adequacy"]'
+    description: >-
+      whether the association's budgeted replacement reserves meet the floor applicable to this loan's
+      application date (derived, LP-494): "n/a" when the property is not a condominium, "adequate" /
+      "inadequate" from the questionnaire's reserve percentage against the date-selected floor, and
+      "unknown" when the property type, the reserve percentage or the application date is missing or
+      unreadable.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The reserve percentage the association budgets, the floor it was judged against, and the loan
+  application date that selected that floor — inline on the finding, so a processor can see WHICH floor
+  applied and why without looking up the transition date.
+
+guideline_reference: "Fannie Mae Selling Guide B4-2.2-02 (08/05/2026) — replacement reserves of at least 10% of the annual budgeted assessment income; Fannie Mae Lender Letter LL-2026-03 (2026-03-18) — raised to 15% for loan applications dated on or after 2027-01-04."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487), applied
+  # unchanged. The applicability layer resolves an ABSENT or "unknown" predicate tag to COULDNT_CHECK and
+  # only a DEFINITELY-FALSE one to not_applicable, so a file that simply does not state its property type
+  # is surfaced rather than silently skipped. Fail closed on the unknown, out-of-scope only on the known.
+  applicability:
+    tag: property.type
+    op: eq
+    value: condo
+  load_bearing_tags:
+    - condo.reserve_adequacy
+  gated_tags:
+    - condo.reserve_adequacy
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: condo.reserve_adequacy, op: eq, value: "adequate"}
+      reasoning: >-
+        the association budgets at least the required share of its annual assessment income to replacement
+        reserves for a loan application of this date
+    - verdict: fired
+      when_tags:
+        - {tag: condo.reserve_adequacy, op: eq, value: "inadequate"}
+      reasoning: >-
+        the association's budgeted replacement reserves fall below the minimum share of annual assessment
+        income required for a loan application of this date — underfunded reserves are the direct cause of
+        the special assessments that make a project ineligible
+      how_to_fix: >-
+        Obtain the association's current annual budget and confirm the replacement-reserve line against its
+        total assessment income. If the allocation is genuinely short, a reserve study meeting Fannie's
+        requirements can substitute — but note that the baseline funding method is no longer accepted for
+        applications dated on or after 2026-08-03, so the study must adopt its highest recommended funding
+        amount. If neither is available, the project needs a full eligibility review before the loan
+        proceeds.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would report a project's reserves
+      # as adequate on a file whose questionnaire nobody answered.
+      default: true
+      reasoning: >-
+        the association's replacement-reserve adequacy could not be determined — the file does not state
+        the property type, the condo questionnaire does not state the budgeted reserve percentage, or the
+        loan application date that selects the applicable floor is missing or unreadable
+      how_to_fix: >-
+        Confirm the property type on the application. Request a completed condo questionnaire or the
+        association's annual budget showing the replacement-reserve allocation as a percentage of assessment
+        income, and confirm the application date on the file — the required minimum is 10% for applications
+        dated before 2027-01-04 and 15% on or after, so the date decides which floor applies.
