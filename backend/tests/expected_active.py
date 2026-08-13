@@ -41,12 +41,17 @@ from __future__ import annotations
 # 0.5000 (2 cases, 1 disagreement), so PC-5 is held on a measured failure, not on an absent number. PC-1 DROPPED: duplicate
 # matcher + a 0/5 field) -> 61.
 # LP-494 +CO-3 +CO-4 (the condo lane; CO-5 built and held — no input resolves on any document) -> 63.
+# LP-495a +OC-1 (occupancy consistency — the FIRST rule activated on a NON-VACUOUS self-consistency
+# rate: 0.9474 over 19 cases with a REAL spread and one real disagreement, unlike PR-3/PR-4's n=2
+# single-valued 1.0. ⚠️ Its tag occupancy.consistent_with_signals is NOT re-kinded — it is SHARED
+# with live OC-2, so re-kinding is a behaviour change on shipped code. The LP-406-4 activation
+# precondition is resolved by the STATUS: on ratify-pending BOTH rules route to a human) -> 67.
 # LP-495a +RE-1 +DT-6 (the mortgage-statement ↔ stated-liability reconciliation — ONE matcher serves both,
 # ADR-375; NEITHER can produce `fired`, and neither reads the still-orphaned property.is_retained_reo /
 # property.retained_pitia) +LO-2 (LOE completeness). All three deterministic — no model in their chain, so
 # no self-consistency rate and no ratification. ⚠️ LO-1 HELD: it needs the list of conditions that REQUIRE
 # an LOE, which is lender- and AUS-driven and enumerated in no document; deriving it from this run's own
 # findings would make it a META-RULE over other rules' output, which nothing in the architecture does. -> 66.
-EXPECTED_ACTIVE_RULE_COUNT: int = 66
+EXPECTED_ACTIVE_RULE_COUNT: int = 67
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

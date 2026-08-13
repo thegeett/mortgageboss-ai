@@ -289,6 +289,7 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             # LP-495a — ONE matcher serves RE-1 and DT-6 (ADR-375); neither can produce `fired`.
             "DT-6",
             "LO-2",
+            "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474; tag NOT re-kinded)
             "RE-1",
         )
     )

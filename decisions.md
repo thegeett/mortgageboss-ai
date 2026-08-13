@@ -14652,3 +14652,44 @@ clothes. Where the two are mixed, report them separately.
 
 **Related:** ADR-354 (schema presence ≠ data availability — this is its inverse: data absence that is
 really schema absence), ADR-286/289 (vacuity and orphans), ADR-380.
+
+---
+
+## ADR-382
+
+**A self-consistency rate earns its keep only when the corpus can disagree — and the disagreement is the
+finding, not the rate.**
+
+**Context.** ADR-378 introduced `ratify-pending`: a rule may activate on a SELF-CONSISTENCY rate (two
+independent derivations agreeing) instead of a measured accuracy, with ratification as the safety
+substitute. Every rate recorded under it since has been **1.0000 over n=2 with a single-valued verdict
+spread** (PR-3, PR-4, PR-5) — numbers that say the pipeline is stable and nothing whatever about whether
+the judgment is right. LP-495a's OC-1 is the first rate over a corpus large enough and varied enough to
+produce a disagreement: **0.9474 over 19 cases, 1 disagreement.**
+
+**Decision.** A recorded self-consistency rate must carry, alongside the number: the **verdict spread of
+both derivations**, the **count of ANSWERABLE (non-abstain) cases**, and **the disagreements themselves,
+individually**. A bare rate is not a record. Where a rate is 1.0 over a single-valued spread, the bar must
+say so in those words — it is a stability check wearing a calibration's clothes.
+
+**Consequences.**
+- **The disagreement carried the information, not the rate.** OC-1's single split landed on LF-XU26, the
+  ONLY file in the corpus with an asymmetric declaration set (one borrower's second-residence indicator
+  absent, the other's present). One derivation read "both intend to occupy" → `yes`; the other read the
+  MISSING indicator as a contradiction → `no`. On the prompt's own terms the second is wrong — a missing
+  declaration is "missing or ambiguous", which the prompt assigns to `unknown`. So the exercise located a
+  real false-positive mode that a 19/19 would have concealed entirely.
+- **Structural abstains are not degraded ones and must be distinguished.** 9 of OC-1's 19 files state an
+  occupancy with no second declaration to compare against; `unknown` is the CORRECT answer there, not a
+  failure. `input_resolves` is judged on the 10 that can resolve.
+- ⚠️ **Temperature 0 makes a byte-identical re-prompt a determinism check, not a consistency check.**
+  OC-1's second derivation re-serialises the same facts with its top-level keys reversed — same source
+  data, a genuinely fresh rendering. Any future rate must declare what it varied, or admit it measured
+  determinism.
+- **A rate still never discharges an acceptance that rests on a MEASUREMENT.** OC-2's ADR-336 acceptance
+  rests on `occupancy.consistent_with_signals` being unscored; OC-1 activating on a rate leaves
+  `measured_accuracy` None, so the acceptance stands unchanged and its tests now pin that fact directly
+  rather than pinning OC-1's status label.
+
+**Related:** ADR-378 (ratify-pending and ratification as the substitute), ADR-336 (the OC-2 acceptance),
+ADR-381 (a number is only readable with what it ranged over), ADR-330 (vacuity).

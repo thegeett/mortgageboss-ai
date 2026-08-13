@@ -38,7 +38,12 @@ def test_oc2_tag_is_unscored_the_fact_the_acceptance_rests_on() -> None:
     # condition (ADR-336): when this tag is calibrated (OC-1 needs it too), OC-1 flips off not-calibratable-yet
     # and OC-2 can move into the gate — so this assertion also marks WHERE the acceptance ends.
     bars = load_activation_bars()
-    assert bars["OC-1"].status == "not-calibratable-yet"
+    # ⚠️ LP-495a — OC-1 is now `ratify-pending`, NOT calibrated. The ADR-336 exit condition is UNMET
+    # and this still marks where the acceptance ends: the exit is a MEASURED accuracy against Priya
+    # labels, and `measured_accuracy is None` says it has not happened. A self-consistency rate does
+    # not discharge the acceptance — it is agreement, not correctness.
+    assert bars["OC-1"].status == "ratify-pending"
+    assert bars["OC-1"].measured_accuracy is None  # STILL unscored — the acceptance stands
     assert "occupancy.consistent_with_signals" in bars["OC-1"].load_bearing_ai_tags
     # no bar anywhere records a measured accuracy for the tag (it is genuinely unscored)
     for bar in bars.values():

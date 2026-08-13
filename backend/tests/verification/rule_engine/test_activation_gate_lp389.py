@@ -52,6 +52,7 @@ _ACTIVATED = frozenset(
         # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness.
         "DT-6",
         "LO-2",
+        "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
         "RE-1",
         "CL-1",
         "CR-13",
@@ -133,7 +134,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # none was recorded. 8 -> 9 held.
     # LP-494 +CO-4 +CO-5 — BUILT AND HELD on input_resolves: false. No loan file carries a condo
     # questionnaire, and the two in the bench corpus are a cancellation notice and an unanswered form.
-    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-495a — OC-1 LEAVES the held set for `ratify-pending` (ADR-378), on the first NON-VACUOUS
+    # self-consistency rate in this codebase: 0.9474 over 19 cases with a real spread and one real
+    # disagreement, against PR-3/PR-4's n=2 single-valued 1.0. 10 -> 9 held.
+    assert len(held) == 9 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -179,6 +183,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "LO-2",  # LP-495a — LOE completeness
         "MI-1",
         "MI-4",
+        "OC-1",  # LP-495a — ratify-pending (sorts between MI-4 and PC-2)
         "PC-2",
         "PC-3",
         "PC-7",
@@ -220,7 +225,12 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # OC-1 — the LP-406-4 rule STILL held: its AI tag occupancy.consistent_with_signals is unscored
     # (not-calibratable-yet). (PC-7 was the no-ai-threshold-pending held example through LP-411; LP-412 signed
     # off its window, so it is now live — see test_pc7_is_live_via_no_ai_threshold_pending_after_signoff.)
-    assert not is_eligible(bars["OC-1"]) and bars["OC-1"].status == "not-calibratable-yet"
+    # ⚠️ OC-1 IS NO LONGER HELD (LP-495a). It moved not-calibratable-yet -> ratify-pending on a
+    # self-consistency rate of 0.9474 over 19 cases (ADR-378), with ratification as the safety
+    # substitute for the missing measurement. Its tag is NOT re-kinded — see
+    # test_oc1_occupancy_consistency_lp495a.py.
+    assert is_eligible(bars["OC-1"]) and bars["OC-1"].status == "ratify-pending"
+    assert bars["OC-1"].measured_accuracy is None  # a rate is not a measurement
     # (IN-3 was the "calibratable but not-yet-signed" held example through LP-390-7; LP-390-9 signed off its bar,
     # so it is now eligible + active — see test_in3_is_live_after_priya_signoff. Every remaining held rule fails
     # for one of the reasons above.)

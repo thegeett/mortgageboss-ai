@@ -340,6 +340,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             # and neither reads the still-orphaned retention tags. All three deterministic.
             "DT-6",
             "LO-2",
+            "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474; tag NOT re-kinded)
             "RE-1",
         )
     )
@@ -402,6 +403,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "CO-4",
             "DT-6",  # LP-495a — the REO reconciliation lane + LOE completeness
             "LO-2",
+            "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
             "RE-1",
             "CR-13",
             "PR-6",

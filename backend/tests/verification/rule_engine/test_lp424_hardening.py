@@ -147,7 +147,12 @@ def test_oc2_is_a_base_rule_riding_an_unscored_tag_but_ratifies() -> None:
     assert "OC-2" in _BASE_ACTIVE
     assert kind_for("OC-2").kind is RuleKindName.JUDGMENTAL  # -> ratify, never auto (LP-376-B)
     # OC-1's bar (a candidate) reads the SAME tag and records it is unscored (not-calibratable-yet).
-    assert load_activation_bars()["OC-1"].status == "not-calibratable-yet"
+    # ⚠️ LP-495a — OC-1 moved to `ratify-pending`, but the FACT this assertion rests on is unchanged
+    # and is now pinned directly: the shared tag is still UNMEASURED. OC-1 activated on a
+    # self-consistency rate (agreement between two derivations), which is explicitly NOT a
+    # measurement of correctness — so OC-2 still rides an unscored tag, exactly as before.
+    assert load_activation_bars()["OC-1"].status == "ratify-pending"
+    assert load_activation_bars()["OC-1"].measured_accuracy is None
 
 
 # ======================================================================= #

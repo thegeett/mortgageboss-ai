@@ -122,22 +122,49 @@ OC-1:
   # OC-2 never needed the tag CALIBRATED; OC-1's auto-ship does. So it is not-calibratable-yet (produced but
   # unscored), threshold null, validated false → is_eligible=false → NOT activated. Calibrating the tag against
   # Priya's occupancy labels is a separate ticket; until then OC-1 is written + producing, held.
-  status: not-calibratable-yet
+  # ⚠️ LP-495a — ACTIVATED on a SELF-CONSISTENCY rate (ADR-378), not a measurement. The tag is NOT
+  # re-kinded: `occupancy.consistent_with_signals` is SHARED with live OC-2, so re-kinding it is a
+  # behaviour change on shipped code and needs its own regression evidence. It stays `ai`.
+  status: ratify-pending
+  self_consistency_rate: 0.9474
+  self_consistency_cases: 19
+  self_consistency_disagreements: 1
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: auto
   threshold: null
   validated: false
   load_bearing_ai_tags: [occupancy.consistent_with_signals]
-  fp_fn: "FN (clears a file whose occupancy declarations conflict) >> FP (a false conflict -> a human re-checks)"
+  fp_fn: >-
+    FN (clears a file whose occupancy declarations conflict — an occupancy misrepresentation is the
+    single most consequential borrower-side defect, since pricing, LTV limits and the reps-and-warrants
+    all key on it) >> FP (a false conflict -> a human re-checks two 1003 answers). ⚠️ THE OBSERVED
+    FALSE-POSITIVE DIRECTION IS THE ASYMMETRIC DECLARATION SET — see the disagreement below.
   rationale: >-
-    OC-1 reads occupancy.consistent_with_signals (AI) — the SAME tag LIVE OC-2 rides — plus the derived
-    occupancy.stated. The tag is PRODUCED (OC-2 requires the occupancy AI group) but UNSCORED: it has no
-    measured accuracy and no Priya bar, because OC-2 ratifies every verdict and so never needed it calibrated.
-    OC-1 would auto-ship, so it cannot go live until the tag is scored against Priya's occupancy labels and she
-    sets a bar. Blocked on calibration, not a producer — the inputs already materialize at the loan subject.
-    ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 both consume occupancy.consistent_with_signals
-    (OC-2 reasons over it, OC-1 fires on "no"), so activating OC-1 double-surfaces a "no" file (OC-1 auto + OC-2
-    ratify). Reconcile the overlap before activation — either OC-1 supersedes OC-2's consistency dimension (drop
-    it from OC-2's reasoned_over) or the double-surface is intended; changing the LIVE OC-2 is a domain call.
+    ⚠️ THE ACTIVATION PRECONDITION LP-406-4 RAISED IS RESOLVED BY THE STATUS ITSELF, NOT BY A CHANGE TO
+    OC-2. The precondition was that OC-1 would AUTO-ship while live OC-2 RATIFIES the same tag, so a "no"
+    file would surface once auto and once ratified. On `ratify-pending`, `ratifies_every_finding` returns
+    true for OC-1 too, so BOTH rules now route to a human and the double-surface is two ratified prompts
+    rather than an auto-assertion racing a ratification. Live OC-2 is UNCHANGED — dropping
+    consistent_with_signals from its reasoned_over is a domain call on shipped code and is NOT done here.
+    ⚠️ THE RATE IS 0.9474 (18/19), AND IT IS THE FIRST NON-VACUOUS ONE IN THIS COHORT. Unlike PR-3/PR-4
+    (n=2, single-valued), the spread is real: call 1 {yes 10, unknown 9}, call 2 {yes 9, no 1, unknown 9}.
+    Zero calls failed (the LP-491 expired-token trap), and the abstains are STRUCTURAL, not degraded — 9 of
+    the 19 files state an occupancy with NO other declaration to compare it against, so `unknown` is the
+    correct answer there. input_resolves reflects the other 10, where the tag genuinely resolves.
+    ⚠️ THE ONE DISAGREEMENT IS NOT NOISE, AND IT LOCATES THE WEAKNESS EXACTLY. LF-XU26 is the ONLY file in
+    the corpus with an ASYMMETRIC declaration set: borrower 1 states intent-to-occupy "Yes" but carries NO
+    fhasecondaryresidenceindicator, while borrower 2 carries both. Call 1 read "both intend to occupy" ->
+    yes; call 2 read the missing indicator as a contradiction -> no. ⚠️ Call 2 is arguably WRONG on the
+    prompt's own terms — a MISSING declaration is "missing or genuinely ambiguous", which the prompt
+    assigns to `unknown`, not to `no`. So the residual risk is a FALSE CONFLICT on an incompletely-stated
+    1003, which is the cheap direction and is why ratification is the right safety here.
+    ⚠️ WHAT THE RATE DOES NOT SHOW: every one of the 10 answerable files states `primary_residence` with
+    intent-to-occupy "Yes". THE INCONSISTENT ("no") PATH HAS NEVER BEEN OBSERVED ON A REAL FILE — the only
+    "no" produced in this exercise is the disagreement above, which is probably a false positive. The rate
+    measures verdict agreement between two independent derivations; it is NOT evidence of correctness, and
+    a Priya-labelled measurement remains the exit (ADR-378).
 
 AS-5:
   # LP-390-7 fail-closed check: validated MUST stay false here — AS-5 is not-calibratable-yet with a null

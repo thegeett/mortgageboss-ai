@@ -315,7 +315,13 @@ _LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
 # ⚠️ LO-1 IS NOT HERE AND IS NOT BUILT: it needs the list of conditions that REQUIRE an LOE, which is
 # lender- and AUS-driven and enumerated in no document. Deriving it from this run's own findings would make
 # LO-1 a META-RULE over other rules' output, which nothing in the architecture does — ADR-sized, held.
-_LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "RE-1")
+# ⚠️ OC-1 activates on a SELF-CONSISTENCY rate (ADR-378), the only branch that ships on something
+# other than a measurement — so ratification is the safety substitute and `ratifies_every_finding`
+# returns true for it. ⚠️ Its tag `occupancy.consistent_with_signals` is NOT re-kinded: it is SHARED
+# with live OC-2, and re-kinding it is a behaviour change on shipped code needing its own evidence.
+# ⚠️ The LP-406-4 activation precondition (OC-1 auto + OC-2 ratify double-surfacing a "no" file) is
+# resolved by the status itself — on ratify-pending BOTH rules route to a human. Live OC-2 unchanged.
+_LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).

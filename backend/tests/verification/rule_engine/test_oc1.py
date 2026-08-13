@@ -5,7 +5,8 @@ OC-2 rides), with ZERO new producer and ZERO per-rule Python.
 These pin: the satisfy + fire paths; the three D5 states (absent tag / absent MISMO / present-but-
 unclear) each couldnt_check; a shaky signal → needs_review; the SUBJECT MATCH (both tags materialize at
 the loan subject OC-1 reads — the anti-structural-death check); plain-language reasons (no dotted tag
-ids reach a processor); and that OC-1 is written-but-HELD (its AI tag is unscored — not activated).
+ids reach a processor); and (LP-495a) that OC-1 is ACTIVE on a self-consistency rate while its AI tag remains UNSCORED —
+ratification, not a measurement, is what makes that safe.
 """
 
 from __future__ import annotations
@@ -183,11 +184,16 @@ def test_reasons_are_plain_language_no_dotted_tag_ids() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_oc1_is_written_but_not_activated() -> None:
-    # OC-1 rides an UNSCORED AI tag (occupancy.consistent_with_signals) — OC-2 ratifies so never needed it
-    # calibrated; OC-1 auto-ships so it does. Held: not-calibratable-yet, not eligible, not in ACTIVE.
+def test_oc1_is_activated_on_a_rate_not_a_measurement() -> None:
+    # ⚠️ LP-495a — OC-1 WAS held (not-calibratable-yet) and is now ACTIVE on `ratify-pending` (ADR-378).
+    # The premise of the old assertion is UNCHANGED and is what this now pins directly: the tag is STILL
+    # UNSCORED. A self-consistency rate is NOT a measurement — it says two independent derivations agreed,
+    # not that either was right — so `measured_accuracy` stays None and RATIFICATION is the safety
+    # substitute. The full activation record is in test_oc1_occupancy_consistency_lp495a.py.
     bar = load_activation_bars()["OC-1"]
-    assert bar.status == "not-calibratable-yet"
+    assert bar.status == "ratify-pending"
     assert bar.load_bearing_ai_tags == ("occupancy.consistent_with_signals",)
-    assert is_eligible(bar) is False
-    assert "OC-1" not in ACTIVE_RULE_IDS
+    assert bar.measured_accuracy is None, "the tag is still unscored — a rate is not a measurement"
+    assert bar.self_consistency_rate is not None
+    assert is_eligible(bar) is True
+    assert "OC-1" in ACTIVE_RULE_IDS

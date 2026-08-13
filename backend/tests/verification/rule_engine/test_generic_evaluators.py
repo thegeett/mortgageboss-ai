@@ -172,6 +172,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "CO-4",
             "DT-6",  # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness
             "LO-2",
+            "OC-1",  # LP-495a — ratify-pending
             "RE-1",
             "CR-13",
             "PR-6",
