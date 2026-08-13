@@ -176,3 +176,17 @@ def test_mi1_is_live_and_earned_it_through_the_gate() -> None:
 def test_mi1_reads_no_distrusted_tag() -> None:
     gated = set(load_rule_spec("MI-1").deterministic.gated_tags)
     assert not (gated & set(distrusted_tag_ids()))
+
+
+def test_the_spec_mi_ltv_trigger_matches_the_calculator_constant() -> None:
+    """⚠️ TWO SOURCES OF TRUTH (reported finding). MI-1's mi_required_above_ltv_percent duplicates
+    `_PMI_REQUIRED_LTV` in app/verification/mortgage_insurance.py — the constant that decides whether PMI
+    is required AND whether it flows into the DTI's PITI line. If Fannie moves the trigger and only one
+    is updated, MI-1 and the DTI disagree about the same loan with nothing failing."""
+    from decimal import Decimal
+
+    from app.verification.mortgage_insurance import _PMI_REQUIRED_LTV
+    from app.verification.rules.specs import load_rule_spec
+
+    values = dict(load_rule_spec("MI-1").reference_values.values)
+    assert Decimal(values["mi_required_above_ltv_percent"]) == _PMI_REQUIRED_LTV

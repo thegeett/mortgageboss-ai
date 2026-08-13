@@ -45,7 +45,7 @@ AU-3,aus.recommendation
 AU-4,aus.rerun_needed
 CL-1,contract.closing_date
 CL-1,rate_lock.expiration
-CO-1,property.is_warrantable_condo
+CO-1,condo.questionnaire_present
 CO-1,property.type
 CO-2,housing.hoa_monthly
 CO-2,property.type
@@ -147,13 +147,13 @@ IN-7,income.same_line_of_work
 LO-1,loe.present_and_complete
 LO-1,loe.required_conditions
 LO-2,loe.present_and_complete
-MI-1,housing.mi_monthly
-MI-1,loan.amount
-MI-1,mi.required
-MI-1,property.appraised_value
+MI-1,loan.ltv_percent
+MI-1,program.type
 MI-2,mi.factor
 MI-3,mi.certificate_present
 MI-3,mi.required
+MI-4,mi.fha_ufmip_percent
+MI-4,program.type
 MI-5,mi.structure
 OC-1,occupancy.consistent_with_signals
 OC-1,occupancy.stated

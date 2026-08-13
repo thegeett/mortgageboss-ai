@@ -1070,6 +1070,14 @@ _CONDO_MIN_LIABILITY_PER_OCCURRENCE = Decimal("1000000")
 # fields read from it can never disagree about which document they mean.
 _CONDO_MASTER_POLICY_DOC_TYPES = frozenset({"master_insurance_policy_for_condominium"})
 
+# CO-1's document types, NAMED for the same reason (reported finding — the new recipe inlined the literal
+# and reverted the convention the comment above establishes).
+#   _CONDO_QUESTIONNAIRE_DOC_TYPES — what SATISFIES CO-1.
+#   _CONDO_PROJECT_ADJACENT_DOC_TYPES — the sibling the classifier is told is confusable with it. Its
+#   presence is not a pass, but it is not a confirmed gap either: CO-1 abstains so a human can judge.
+_CONDO_QUESTIONNAIRE_DOC_TYPES = frozenset({"condo_questionnaire"})
+_CONDO_PROJECT_ADJACENT_DOC_TYPES = frozenset({"hoa_certification"})
+
 _MASTER_POLICY_RC_PHRASES: tuple[str, ...] = (
     "guaranteed replacement cost",
     "extended replacement cost",
@@ -1912,7 +1920,18 @@ def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
     as the expensive error; a processor confirming which appraisal governs is the cheap one.
     """
     values = [v for v in _parsed_decimals(snapshot, "property.appraised_value") if v > 0]
-    return min(values) if values else None
+    if values:
+        return min(values)
+    # ⚠️ FALL BACK TO THE WORKSHEET'S OWN FIELDS (reported finding). The "the rule path and the display
+    # path cannot drift into two different LTVs" claim covered only the ARITHMETIC: the worksheet takes
+    # `valuation_amount or estimated_value` off the property record, this took the appraisal DOCUMENT's
+    # value, so a MISMO-imported file with a valuation and no appraisal PDF showed a real LTV on the
+    # worksheet and couldnt_check on the rule. Same fields, same priority, so the two now agree on input.
+    for tag_id in ("property.valuation_amount", "property.estimated_value"):
+        stated = [v for v in _parsed_decimals(snapshot, tag_id) if v > 0]
+        if stated:
+            return min(stated)
+    return None
 
 
 def _ltv_purpose(snapshot: Snapshot) -> LtvPurpose:
@@ -2017,6 +2036,13 @@ def _fha_ufmip_percent(
     if base <= 0:
         return _UNKNOWN, "the base loan amount is not a positive number"
     financed = note - base
+    if financed <= 0:
+        # ⚠️ The reason text is processor-visible evidence on MI-4's needs_review row, and that row IS the
+        # note <= base case — so "exceeds ... by 0.00" (or "by -5000") was the sentence a processor read.
+        return "0.0000", (
+            f"the note amount ({note}) does not exceed the base loan amount ({base}), so no upfront MIP "
+            "was financed into the loan (it may have been paid in cash)"
+        )
     percent = (financed / base * Decimal(100)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
     return str(percent), (
         f"the note amount ({note}) exceeds the base loan amount ({base}) by {financed}, which is "
@@ -2041,9 +2067,21 @@ def _condo_questionnaire_present(
             _UNKNOWN,
             "the file carries no documents, so the questionnaire's absence cannot be read",
         )
-    for entry in snapshot.documents.entries:
-        if entry.document_type == "condo_questionnaire":
-            return "yes", "the file carries a condo questionnaire"
+    types = {entry.document_type for entry in snapshot.documents.entries}
+    if types & _CONDO_QUESTIONNAIRE_DOC_TYPES:
+        return "yes", "the file carries a condo questionnaire"
+    # ⚠️ ABSTAIN ON THE ADJACENT TYPE (reported finding). `hoa_certification` is a sibling Tier-1 type the
+    # classifier is explicitly told is confusable with this one ("the project-eligibility certification,
+    # distinct from ... condo_questionnaire"), and it carries the very facts CO-1's how_to_fix asks for —
+    # unit counts, owner-occupancy, delinquency, litigation. Firing "request a questionnaire" at a file
+    # holding one is the IH-7 defect again: telling a processor to fetch a document already in front of
+    # them. Whether a certification SATISFIES the project review is a domain call, so this abstains rather
+    # than answering "yes" — the safe half of the fix.
+    if types & _CONDO_PROJECT_ADJACENT_DOC_TYPES:
+        return _UNKNOWN, (
+            "the file carries an HOA/condo project certification but no questionnaire — a human must "
+            "confirm whether the certification satisfies the project review"
+        )
     return "no", "no document in the file is classified as a condo questionnaire"
 
 
@@ -2070,17 +2108,53 @@ def _condo_questionnaire_present(
 # --------------------------------------------------------------------------- #
 
 # Vendor-spanning, mirrored in AU-3's spec reference_values and pinned identical by test.
+# ⚠️ SYMMETRIC (reported finding). Approve carried both /eligible and /ineligible while refer carried
+# only /eligible, so `Refer/Ineligible` — an ordinary DU recommendation — abstained on a rule already
+# caveated at n=1. Slashed forms are normalised before lookup (see _normalise_aus_decision), so the
+# equally common spaced rendering "Approve / Eligible" no longer misses either.
 _AUS_APPROVE_PHRASES: frozenset[str] = frozenset(
-    {"approve", "approve/eligible", "approve/ineligible", "accept", "accept/eligible"}
+    {
+        "approve",
+        "approve/eligible",
+        "approve/ineligible",
+        "accept",
+        "accept/eligible",
+        "accept/ineligible",
+    }
 )
 _AUS_REFER_PHRASES: frozenset[str] = frozenset(
-    {"refer", "refer/eligible", "refer with caution", "refer w/ caution", "caution"}
+    {
+        "refer",
+        "refer/eligible",
+        "refer/ineligible",
+        "refer with caution",
+        "refer w/ caution",
+        "caution",
+        "caution/eligible",
+        "caution/ineligible",
+    }
 )
+
+
+def _normalise_aus_decision(raw: str) -> str:
+    """A DU/LPA recommendation for vocabulary lookup: casefolded, whitespace-collapsed, and with the
+    spaces around a slash removed so "Approve / Eligible" and "Approve/Eligible" are one token."""
+    return re.sub(r"\s*/\s*", "/", _normalise_vocab(raw))
+
+
 _AUS_OUT_OF_SCOPE_PHRASES: frozenset[str] = frozenset(
     {"out of scope", "outofscope", "error", "incomplete"}
 )
 _AUS_ELIGIBLE_PHRASES: frozenset[str] = frozenset({"eligible", "eligible/approve", "accept"})
 _AUS_INELIGIBLE_PHRASES: frozenset[str] = frozenset({"ineligible", "not eligible"})
+
+
+def _entry_text(entry: DocumentEntry, field_name: str) -> str:
+    """A document entry's field as trimmed text, or "" when absent/empty."""
+    field = entry.fields.get(field_name)
+    if not isinstance(field, Field) or not field.is_present or field.value is None:
+        return ""
+    return str(field.value).strip()
 
 
 def _aus_recommendation(
@@ -2096,25 +2170,42 @@ def _aus_recommendation(
     """
     if not isinstance(subject_raw, DocumentEntry) or subject_raw.document_type != "aus_findings":
         return None, "not an AUS findings document — no recommendation tag"
+    # ⚠️ The RUN IDENTITY, inline (reported finding). AU-3's evidence_required promises "the AUS engine …
+    # and the submission date — inline on the finding, so a processor can tell a current run from a
+    # superseded one without reopening the report", and the spec justifies per-document evaluation on
+    # exactly that. Without it, a file with two submissions produced two findings a processor could not
+    # tell apart. Both are extracted fields on the entry; CL-1's recipe sets the inline precedent.
+    run = ", ".join(
+        f"{label} {value}"
+        for label, value in (
+            ("engine", _entry_text(subject_raw, "aus_engine")),
+            ("submitted", _entry_text(subject_raw, "submission_date")),
+        )
+        if value
+    )
+    run_suffix = f" [{run}]" if run else ""
     field = subject_raw.fields.get("recommendation")
     raw = field.value if isinstance(field, Field) and field.is_present else None
     if raw is None or not str(raw).strip():
-        return _UNKNOWN, "this AUS findings document states no recommendation"
-    decision = _normalise_vocab(str(raw))
+        return _UNKNOWN, f"this AUS findings document states no recommendation{run_suffix}"
+    decision = _normalise_aus_decision(str(raw))
     if decision in _AUS_OUT_OF_SCOPE_PHRASES:
-        return "out_of_scope", f"the AUS returned an out-of-scope result ({str(raw)!r})"
+        return "out_of_scope", f"the AUS returned an out-of-scope result ({str(raw)!r}){run_suffix}"
     if decision in _AUS_REFER_PHRASES:
-        return "refer", f"the AUS referred this file for manual underwriting ({str(raw)!r})"
+        return (
+            "refer",
+            f"the AUS referred this file for manual underwriting ({str(raw)!r}){run_suffix}",
+        )
     if decision not in _AUS_APPROVE_PHRASES:
         return _UNKNOWN, (
             f"the AUS recommendation reads {str(raw)!r}, which is not a recognised DU or LPA "
-            "recommendation — abstaining rather than inferring (the wording varies by engine)"
+            f"recommendation — abstaining rather than inferring (the wording varies by engine){run_suffix}"
         )
     # An APPROVE — now the eligibility half. DU may state it inside the recommendation itself
     # ("Approve/Eligible"); LPA states it in a separate field.
     if "ineligible" in decision:
         return "approve_ineligible", (
-            f"the AUS approved the loan but found it INELIGIBLE for delivery ({str(raw)!r})"
+            f"the AUS approved the loan but found it INELIGIBLE for delivery ({str(raw)!r}){run_suffix}"
         )
     eligibility_field = subject_raw.fields.get("eligibility_status")
     stated = (
@@ -2128,7 +2219,7 @@ def _aus_recommendation(
         return "approve_eligible", (
             f"the AUS approved the loan and found it eligible ({str(raw)!r}"
             + (f", eligibility {stated!r}" if stated else "")
-            + ")"
+            + f"){run_suffix}"
         )
     if stated in _AUS_INELIGIBLE_PHRASES:
         return "approve_ineligible", (

@@ -573,10 +573,34 @@ tags:
   # ⚠️ A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline) — the TYPE LABEL, not extracted
   # fields. A questionnaire that classified correctly but extracted badly still EXISTS, and CO-1 is not
   # the rule that judges its contents.
+  # LP-488 review — the MISMO-stated property values, so a rule's LTV denominator can fall back to the
+  # SAME source the LTV worksheet uses. Mirrors property.purchase_price exactly (a MISMO fact promoted to
+  # loan level). Without these MI-1 read ONLY the appraisal document's value, so a MISMO-imported file
+  # with a valuation and no appraisal PDF showed a real LTV on the worksheet and couldnt_check on the rule.
+  property.valuation_amount:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO-stated valuation amount for the subject property — the LTV worksheet's PRIORITY appraised
+      basis (app/services/ltv.py: `appraised = valuation_amount or estimated_value`). Absent when MISMO
+      states none; never defaulted.
+    produced_by: parsed
+  property.estimated_value:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO-stated estimated property value — the LTV worksheet's FALLBACK appraised basis, used only
+      when valuation_amount is absent. Absent when MISMO states none; never defaulted.
+    produced_by: parsed
   condo.questionnaire_present:
     entity: loan
     value_type: enum
-    allowed_values: ["yes", "no"]
+    # ⚠️ "unknown" IS a member (reported finding): the recipe abstains on a file with no documents, and
+    # allowed_values is projected into the tags table and rendered as the vocabulary column in the
+    # calibration worksheet — so omitting it stated a vocabulary the tag demonstrably violates.
+    allowed_values: ["yes", "no", "unknown"]
     description: >-
       Whether the file carries a condo questionnaire (document-type presence). "no" when the file has
       documents but none is a questionnaire; "unknown" when the file carries no documents at all — an

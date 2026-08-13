@@ -61,8 +61,11 @@ reference_values:
     #
     # ⚠️ "accept" is LPA's. "approve" is DU's. Treating them as equivalent is the DOMAIN CLAIM logged for
     # Priya. Everything unrecognised abstains; nothing here is a guess at a third engine's wording.
-    approve_phrases: "approve|approve/eligible|approve/ineligible|accept|accept/eligible"
-    refer_phrases: "refer|refer/eligible|refer with caution|refer w/ caution|caution"
+    # ⚠️ SYMMETRIC (reported finding): approve carried both /eligible and /ineligible while refer
+    # carried only /eligible, so `Refer/Ineligible` — an ordinary DU recommendation — abstained. The
+    # recipe normalises the spaces around a slash before lookup, so "Approve / Eligible" matches too.
+    approve_phrases: "approve|approve/eligible|approve/ineligible|accept|accept/eligible|accept/ineligible"
+    refer_phrases: "refer|refer/eligible|refer/ineligible|refer with caution|refer w/ caution|caution|caution/eligible|caution/ineligible"
     out_of_scope_phrases: "out of scope|outofscope|error|incomplete"
     eligible_phrases: "eligible|eligible/approve|accept"
     ineligible_phrases: "ineligible|not eligible"

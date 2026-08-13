@@ -155,3 +155,34 @@ def test_mi4_is_live_and_earned_it_through_the_gate() -> None:
 def test_mi4_reads_no_distrusted_tag() -> None:
     gated = set(load_rule_spec("MI-4").deterministic.gated_tags)
     assert not (gated & set(distrusted_tag_ids()))
+
+
+# --------------------------------------------------------------------------- #
+# LP-488 review — the spec's numbers must not drift from the code that computes them
+# --------------------------------------------------------------------------- #
+def _mi4_values() -> dict[str, str]:
+    return dict(load_rule_spec("MI-4").reference_values.values)
+
+
+def test_the_ufmip_bounds_are_the_rate_plus_and_minus_the_declared_tolerance() -> None:
+    """⚠️ THE SILENT-EDIT TRAP (reported finding). fha_ufmip_tolerance_percent is DECLARED and documented
+    as the rounding allowance, but the deterministic body binds only max/min — which are independently
+    hard-written. So widening the named tolerance to 0.02 changed nothing, and the spec then described a
+    rule that did not exist. The DSL cannot compute a reference, so this pins the arithmetic instead:
+    edit the tolerance without the bounds and this fails."""
+    values = _mi4_values()
+    rate = Decimal(values["fha_ufmip_percent"])
+    tolerance = Decimal(values["fha_ufmip_tolerance_percent"])
+    assert Decimal(values["fha_ufmip_max_percent"]) == rate + tolerance
+    assert Decimal(values["fha_ufmip_min_percent"]) == rate - tolerance
+
+
+def test_the_spec_ufmip_rate_matches_the_calculator_registry_rate() -> None:
+    """⚠️ TWO SOURCES OF TRUTH (reported finding). The spec's 1.75% duplicates LP-84's registry rule
+    `fha.mip.ufmip_rate` (175 bps), which app/services/mi.py reads to compute the MI the DTI's PITI line
+    consumes. A HUD change updating one and not the other leaves the rule and the calculator disagreeing
+    about the same loan — silently. This is the same drift argument the ticket makes for the LTV
+    arithmetic; it just was not applied here."""
+    from app.services.mi import fha_ufmip_rate_bps
+
+    assert Decimal(_mi4_values()["fha_ufmip_percent"]) * 100 == fha_ufmip_rate_bps()

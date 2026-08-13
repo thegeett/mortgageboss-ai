@@ -183,6 +183,10 @@ tags:
   contract.sales_price: {mode: parsed, subject: document, data: sales_price}
   contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
   property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
+  # LP-488 review — the LTV worksheet's two appraised-basis fields, in ITS priority order. A rule reading
+  # only the appraisal document diverged from the worksheet on every MISMO-imported file.
+  property.valuation_amount: {mode: parsed, subject: loan, data: property.valuation_amount}
+  property.estimated_value: {mode: parsed, subject: loan, data: property.estimated_value}
   # LP-454 (step D.3) — the purchase agreement's earnest-money amount (PC-5 / AS-2). A PARSED document fact
   # from the purchase_agreement extractor's earnest_money_amount field — POPULATED + clean (a number: 5000.0 on
   # LF-6T3N). ⚠️ NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
