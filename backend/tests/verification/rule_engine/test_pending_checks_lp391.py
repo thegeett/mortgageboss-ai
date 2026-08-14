@@ -139,30 +139,53 @@ async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> No
     assert [p for p in pending if p.rule_id == "AS-5"] == []
 
 
-async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:
-    # The judgment path (the reason _discarded_judgment_stub exists). LP-495b — the example moved from
-    # IN-13 to DT-7: IN-13 went live on a scenario-fixture rate, and DT-7 is now the only BLOCKED
-    # judgment rule left (held because its tag's enum has no abstain value). IN-7 played this role until
-    # LP-393-6, IN-13 until LP-495b — the demo rule keeps going live, which is the point of the ticket
-    # series rather than a problem with the test.
-    #
-    # DT-7 is LOAN-subject, not per_borrower, so the "A surfaces / B stays dark" pair is proven across
-    # two snapshots instead of two borrowers: the tag present → applicable + gate-passes → the stub
-    # drives it to needs_review (a judgment rule ALWAYS reaches needs_review when applicable, never
-    # auto) → surfaces as PENDING; the tag absent → couldnt_check → DARK. No real model call:
-    # evaluate_pending_checks binds the discarded stub for every blocked judgment rule.
+async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The judgment path (the reason `_discarded_judgment_stub` exists).
+
+    LP-495c — THE DEMO RULE RAN OUT. This example moved IN-7 -> IN-13 -> DT-7 as each went live, and
+    DT-7 was the last BLOCKED judgment rule; its enum gained an abstain and it activated, so there is
+    now NO blocked judgment rule to demonstrate with. That is the ticket series working as intended,
+    not a gap — and it is asserted below so this comment cannot go stale silently.
+
+    The path itself is still live code and must stay covered, so DT-7's prior BLOCKED state is
+    simulated by removing it from the active set that `blocked_candidate_rule_ids()` subtracts. The
+    machinery under test — the stub binding, the discarded verdict, the no-leak guarantee — is entirely
+    real; only the "which rules are blocked" input is varied. No real model call: evaluate_pending_checks
+    binds the discarded stub for every blocked judgment rule.
+
+    DT-7 is LOAN-subject, so the "A surfaces / B stays dark" pair is proven across two snapshots rather
+    than two borrowers: the tag present -> applicable + gate-passes -> the stub drives it to
+    needs_review (a judgment rule ALWAYS reaches needs_review when applicable, never auto) -> surfaces
+    as PENDING; the tag absent -> couldnt_check -> DARK.
+    """
+    from app.verification.rule_engine import pending_checks as pc
+    from app.verification.rules.kinds import RuleKindName, kind_for
+
+    # The state this test used to rely on is gone, and that is the point.
+    still_blocked_judgment = [
+        rid
+        for rid in pc.blocked_candidate_rule_ids()
+        if (k := kind_for(rid)) is not None and k.kind is RuleKindName.JUDGMENTAL
+    ]
+    assert still_blocked_judgment == [], (
+        "a blocked judgment rule exists again — prefer it over the simulation below and update this test"
+    )
+
+    monkeypatch.setattr(pc, "ACTIVE_RULE_IDS", tuple(r for r in ACTIVE_RULE_IDS if r != "DT-7"))
+    assert "DT-7" in pc.blocked_candidate_rule_ids()
+
     snap = _snap({"loan": {"dti.atr_factors_documented": _tag("complete")}})
-    pending = await evaluate_pending_checks(snap)
+    pending = await pc.evaluate_pending_checks(snap)
     dt7 = [p for p in pending if p.rule_id == "DT-7"]
     assert len(dt7) == 1
     assert dt7[0].verdict is Verdict.PENDING_AUTOMATION
-    assert (
-        dt7[0].load_bearing_tags == () and dt7[0].verdict_confidence is None
-    )  # no-leak, same as IN-12
+    assert dt7[0].load_bearing_tags == () and dt7[0].verdict_confidence is None  # no-leak
     assert "manual review" in dt7[0].reasoning.lower()
 
-    # The dark half: no tag → the rule couldnt_checks and never surfaces as pending.
-    dark = await evaluate_pending_checks(_snap({}))
+    # The dark half: no tag -> the rule couldnt_checks and never surfaces as pending.
+    dark = await pc.evaluate_pending_checks(_snap({}))
     assert [p for p in dark if p.rule_id == "DT-7"] == []
 
 

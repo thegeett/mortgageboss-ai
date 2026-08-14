@@ -206,6 +206,9 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
         # test_in13_in14_income_continuance_lp495b.py.
         "IN-13",
         "IN-14",
+        # LP-495c — DT-7; its ratification proof is in test_dt7_atr_enum_lp495c.py::
+        # test_every_dt7_verdict_carries_ratification, which runs the real evaluator.
+        "DT-7",
     }
     on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
     assert on_status == _EXPECTED_RATIFY_PENDING, (

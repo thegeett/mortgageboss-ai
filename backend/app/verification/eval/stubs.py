@@ -133,13 +133,19 @@ class _StubAiGroupReasoner:
     a genuine judgment, NOT a fail-closed degradation) for every subject the group is asked about.
 
     The abstention value is `unknown` where the tag's vocabulary allows it (or is free-text). For a
-    presence/eligibility enum that has no `unknown` but DOES have `no` (income.voe_present = yes|no — LP-428;
-    stmt.is_reserve_eligible = yes|no|partial — LP-429), `unknown` is off-vocabulary and would be COERCED to a
-    null-confidence fail-closed tag, spuriously flipping `run.degraded`; there the stub emits the in-vocab
-    honest `no` (a bank statement is not a VOE; an abstaining reserve check is "not eligible" — a real model
-    would return `no` too). A MULTI-category enum with no `no` and no `unknown` (income.type = base|bonus|…)
-    keeps abstaining to `unknown` (still coerced to fail-closed — its callers rely on that honest-unknown,
-    e.g. IN-12's self-employment gate).
+    presence/eligibility enum that has no `unknown` but DOES have `no` (income.voe_present = yes|no — LP-428),
+    `unknown` is off-vocabulary and would be COERCED to a null-confidence fail-closed tag, spuriously flipping
+    `run.degraded`; there the stub emits the in-vocab honest `no` (a bank statement is not a VOE — a real
+    model would return `no` too). A MULTI-category enum with no `no` and no `unknown` (income.type =
+    base|bonus|…) keeps abstaining to `unknown` (still coerced to fail-closed — its callers rely on that
+    honest-unknown, e.g. IN-12's self-employment gate).
+
+    LP-495c NARROWED this workaround, and the narrowing is the point. `stmt.is_reserve_eligible` was named
+    here as a case needing the in-vocab `no`; it no longer is. Its declaration (and those of
+    `txn.is_nsf_or_overdraft`, `liab.in_application` and `dti.atr_factors_documented`) now carries the
+    `unknown` its own prompt had always sanctioned, so the stub abstains honestly for all four instead of
+    asserting a substantive `no` it did not mean. `income.voe_present` is the only remaining case — its
+    prompt genuinely offers no abstain, so the declaration and the prompt agree and there is nothing to fix.
 
     A fixture built for the txn/AS-1/OC-2 pipeline has no identity documents, so the id.* groups
     correctly perceive nothing — a clean run, not a degraded one. A test that WANTS a real id.* value

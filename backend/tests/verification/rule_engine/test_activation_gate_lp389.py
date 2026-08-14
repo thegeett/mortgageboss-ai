@@ -51,6 +51,7 @@ _ACTIVATED = frozenset(
         "CO-4",
         # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness.
         "DT-6",
+        "DT-7",  # LP-495c
         "LO-2",
         "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
         "RE-1",
@@ -157,7 +158,9 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # built and measured but held because its tag enum has no abstain, so a coerced unknown marks the
     # whole run degraded. 9 - 2 + 1 = 8.
     # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
-    assert len(held) == 7 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6. NOTE: there is now NO
+    # blocked JUDGMENT rule at all; test_pending_checks_lp391 asserts that and simulates one.
+    assert len(held) == 6 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -183,6 +186,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "CR-6",  # LP-490a
         "CR-8",  # LP-490a
         "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
+        "DT-7",  # LP-495c
         "ID-5",
         "IH-1",
         "IH-2",
@@ -261,7 +265,6 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # There is no needs-producer rule left in the table, which is itself worth pinning: if one appears,
     # this assertion tells the next reader the status is reachable rather than vestigial.
     assert is_eligible(bars["IN-14"]) and bars["IN-14"].status == "ratify-pending"
-    assert not is_eligible(bars["DT-7"]) and bars["DT-7"].status == "not-calibratable-yet"
     assert not any(b.status == "needs-producer" for b in bars.values()), (
         "a needs-producer rule reappeared — give it a named reason here, as IN-14 once had"
     )

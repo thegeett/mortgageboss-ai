@@ -7,7 +7,7 @@ txn.has_identified_source,transaction,enum,"[""yes"", ""no"", ""unknown""]","Doe
 txn.source_reference,transaction,string,,"What the source was matched to (e.g. 'payroll deposit 3d prior', 'transfer from SAV 5683'). Provenance for has_identified_source.",AI,"AS-1, AS-5",AI-at-rule-time,string | null
 txn.counterparty,transaction,string,,"The other party if visible (employer, person, institution).",AI,"AS-2, AS-5, AS-12, FR-5",AI-at-rule-time,string | null
 txn.is_recurring,transaction,enum,"[""yes"", ""no"", ""unknown""]",Does this appear to be a recurring debit/credit (pattern across statements)?,AI,"FR-5, CR-1",AI-at-rule-time,enum: yes | no | unknown
-txn.is_nsf_or_overdraft,transaction,enum,"[""yes"", ""no""]",Is this an NSF/overdraft/returned-item line?,AI,AS-7,Deterministic-once-tagged,enum: yes | no
+txn.is_nsf_or_overdraft,transaction,enum,"[""yes"", ""no"", ""unknown""]",Is this an NSF/overdraft/returned-item line?,AI,AS-7,Deterministic-once-tagged,enum: yes | no | unknown
 txn.implies_obligation,transaction,enum,"[""yes"", ""no"", ""unknown""]","Does this debit imply an undisclosed monthly obligation (garnishment, loan payment, support)?",AI,"FR-4, FR-5, CR-1",AI-at-rule-time,enum: yes | no | unknown
 stmt.account_masked,statement,masked string,,"Masked account number (display only, non-matchable — no raw on branch).",parsed,"AS-6, AS-8",AI-at-rule-time,masked string
 stmt.beginning_balance,statement,number,,Statement opening balance.,parsed,AS-8,Deterministic-once-tagged,number
@@ -17,7 +17,7 @@ stmt.period_end,statement,date,,Statement period end.,parsed,AS-10,Deterministic
 stmt.page_count_declared,statement,int,,'Page X of Y' declared count.,parsed,AS-9,Deterministic-once-tagged,int | null
 stmt.page_count_present,statement,int,,Actual pages extracted.,derived,AS-9,Deterministic-once-tagged,int
 stmt.owner_matches_borrower,statement,enum,"[""yes"", ""no"", ""unknown""]",Does the account holder resolve to a borrower (fuzzy name)?,AI,AS-6,Deterministic-once-tagged,enum: yes | no | unknown
-stmt.is_reserve_eligible,statement,enum,"[""yes"", ""no"", ""partial""]",Are these funds usable as reserves (vs restricted/retirement discount)?,AI,AS-4,Hybrid,enum: yes | no | partial
+stmt.is_reserve_eligible,statement,enum,"[""yes"", ""no"", ""partial"", ""unknown""]",Are these funds usable as reserves (vs restricted/retirement discount)?,AI,AS-4,Hybrid,enum: yes | no | partial | unknown
 income.type,income,enum,"[""base"", ""bonus"", ""overtime"", ""commission"", ""self_employment"", ""rental"", ""other""]",Income category (drives treatment).,AI,"IN-11, IN-12, IN-13, DT-1",Deterministic-once-tagged,enum: base | bonus | overtime | commission | self_employment | rental | other
 income.stated_monthly,income,number,,Monthly amount claimed on the application (MISMO).,parsed,"IN-1, DT-1",Deterministic-once-tagged,number
 income.documented_monthly,income,number,,Monthly amount the DOCUMENTS actually support (AI computes from paystub/W2/frequency). The hard structuring step.,AI,"IN-1, IN-3, DT-1",Deterministic-once-tagged,number | unknown
@@ -34,7 +34,7 @@ income.continuance_3yr,income,enum,"[""yes"", ""no"", ""unknown""]",Will this in
 liab.account_type,liability,enum,"[""revolving"", ""installment"", ""mortgage"", ""heloc"", ""open_30"", ""collection"", ""lease"", ""student"", ""other""]",Liability type (drives DTI treatment).,AI,"CR-1, DT-1, CR-2, CR-9",Deterministic-once-tagged,enum: revolving | installment | mortgage | heloc | open_30 | collection | lease | student | other
 liab.monthly_payment,liability,number,,Monthly payment used for DTI.,parsed/AI,"CR-1, DT-1",Deterministic-once-tagged,number
 liab.balance,liability,number,,Unpaid balance.,parsed,"CR-2, CR-9, CR-10",Deterministic-once-tagged,number
-liab.in_application,liability,enum,"[""yes"", ""no""]",Is this tradeline reflected in the app's liabilities? (report-vs-app).,AI,"CR-1, CR-4",Deterministic-once-tagged,enum: yes | no
+liab.in_application,liability,enum,"[""yes"", ""no"", ""unknown""]",Is this tradeline reflected in the app's liabilities? (report-vs-app).,AI,"CR-1, CR-4",Deterministic-once-tagged,enum: yes | no | unknown
 liab.dti_payment,liability,number,,"The payment amount that SHOULD count in DTI per program rules (e.g. open-30 = balance if unpaid; student = % of balance). AI applies method, code sums.",AI,"DT-1, CR-9",Hybrid,number | unknown
 liab.is_derogatory,liability,enum,"[""yes"", ""no"", ""unknown""]",Any derogatory mark.,AI,"CR-6, CR-8",Deterministic-once-tagged,enum: yes | no | unknown
 liab.derogatory_type,liability,enum,"[""bankruptcy"", ""foreclosure"", ""short_sale"", ""deed_in_lieu"", ""collection"", ""charge_off"", ""none""]",Type of derogatory event.,AI,"CR-6, CR-10",Deterministic-once-tagged,enum: bankruptcy | foreclosure | short_sale | deed_in_lieu | collection | charge_off | none
@@ -63,7 +63,7 @@ dti.qualifying_income_monthly,loan,number,,Total qualifying monthly income (sum 
 debt.counts_in_dti,liability,enum,"[""yes"", ""no"", ""unknown""]",Does this debt count in DTI (AI decides omit/include per rules; code sums).,AI,DT-1,Hybrid,enum: yes | no | unknown
 property.is_retained_reo,property,enum,"[""yes"", ""no"", ""unknown""]",Is this an owned property being RETAINED (not the subject) — REO.,AI,"DT-6, RE-1, RE-2",Deterministic-once-tagged,enum: yes | no | unknown
 property.retained_pitia,property,number,,Full PITIA of a retained property (or net rental).,AI,"DT-6, RE-1",Deterministic-once-tagged,number | unknown
-dti.atr_factors_documented,loan,enum,"[""complete"", ""incomplete""]",Are all ATR factors documented.,AI,DT-7,AI-at-rule-time,enum: complete | incomplete
+dti.atr_factors_documented,loan,enum,"[""complete"", ""incomplete"", ""unknown""]",Are all ATR factors documented.,AI,DT-7,AI-at-rule-time,enum: complete | incomplete | unknown
 loan.amount,loan,number,,Loan amount.,parsed,"PR-1, PE-1, MI-1",Deterministic-once-tagged,number
 property.purchase_price,property,number,,Contract sales price.,parsed,"PR-1, PR-2, PC-2",Deterministic-once-tagged,number
 property.appraised_value,property,number,,Appraised value (unknown if no appraisal — absent≠price).,AI,"PR-1, PR-2, MI-1",Deterministic-once-tagged,number | unknown

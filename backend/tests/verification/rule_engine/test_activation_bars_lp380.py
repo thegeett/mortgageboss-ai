@@ -347,6 +347,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-13",
             "IN-14",
             "OC-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
             # LP-496a — program eligibility. PE-1 abstains in the county-dependent band rather than
             # clearing it (only the property county resolves that band, and it does not reach the
             # snapshot); PE-3 uses HUD's Adjusted Value, not the catalog's purchase price, and
@@ -422,6 +425,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-13",  # LP-495b — ratify-pending (scenario-fixture rates)
             "IN-14",
             "OC-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
             "PE-1",  # LP-496a — program eligibility (PE-2 / PE-4 held)
             "PE-3",
             # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:

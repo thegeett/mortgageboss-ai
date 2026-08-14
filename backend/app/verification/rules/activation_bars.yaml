@@ -2012,10 +2012,21 @@ DT-7:
   # to mean a broken pipeline, not a legitimate abstain, and test_full_run_end_to_end catches it.
   # The txn.is_nsf_or_overdraft precedent does NOT cover this: AS-7 is INERT, so that pattern has never
   # run through the orchestrator. It was taken as validation without checking it had been exercised.
-  # UNBLOCKS when the declared vocabulary gains "unknown" at the next docs/snapshot-fact-tags.xlsx
-  # reconciliation — the generated fact_tags.csv cannot be hand-edited and vocabulary_extra.yaml
-  # refuses to shadow an xlsx tag, so there is no in-repo fix.
-  status: not-calibratable-yet
+  # LP-495c — UNBLOCKED AND ACTIVATED. The reconciliation happened: docs/snapshot-fact-tags.xlsx now
+  # declares enum "complete | incomplete | unknown" and fact_tags.csv was regenerated from it. Proven at
+  # the mechanism rather than asserted — _build_tag on a model "unknown" with confidence 0.9 now returns
+  # a tag carrying that 0.9, so it no longer matches the degradation scan's marker (value=="unknown" AND
+  # produced_by==AI AND confidence is None). income.voe_present, whose prompt genuinely offers no
+  # abstain, still fail-closes — the control that shows the fix is targeted, not a blanket disabling.
+  # The rate below was measured in LP-495b and is used unchanged; nothing was re-derived.
+  status: ratify-pending
+  self_consistency_rate: 1.0000
+  self_consistency_cases: 4
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
+  measured_accuracy: null
   ships: ratify
   threshold: null
   validated: false

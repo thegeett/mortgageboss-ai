@@ -68,6 +68,13 @@ from __future__ import annotations
 # the old occupancy-only map returned 0 for EVERY principal residence, so a 2-4 unit primary needing
 # 6 months read as satisfied. AS-7 is BUILT AND HELD — its enum coerces an honest abstain to a
 # degraded run (LP-495c unfixed), and 2,557 raw PDFs contain no real NSF event. -> 73.
-EXPECTED_ACTIVE_RULE_COUNT: int = 73
+# LP-495c +DT-7 (ATR documentation). Its hold was never about the rule: dti.atr_factors_documented
+# was declared WITHOUT the abstain its own prompt sanctioned, so _build_tag coerced an honest
+# 'unknown' to confidence=None — the exact marker _scan_tag_degradations matches — and a legitimate
+# abstain read as a broken pipeline. Fixed upstream in docs/snapshot-fact-tags.xlsx (four tags, not
+# one: +txn.is_nsf_or_overdraft, +liab.in_application which is LIVE via CR-1/CR-4, and
+# +stmt.is_reserve_eligible) with fact_tags.csv regenerated. DT-7 activated on the rate LP-495b
+# already measured — 1.0000 over 4 cases, ratify-pending, measured_accuracy null. -> 74.
+EXPECTED_ACTIVE_RULE_COUNT: int = 74
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

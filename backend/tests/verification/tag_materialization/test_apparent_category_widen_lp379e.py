@@ -234,6 +234,9 @@ def test_no_rule_activation_changed() -> None:
             "IN-13",
             "IN-14",
             "OC-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
             # LP-496a — program eligibility. PE-1 abstains in the county-dependent band rather
             # than clearing it; PE-3 uses HUD's Adjusted Value and abstains on a missing credit
             # tier. PE-2 and PE-4 are HELD.

@@ -48,11 +48,10 @@ _DORMANT_EXPECTED = frozenset(
         # producer, loan-subject). They activate with their OWN later tickets; until then they are dormant.
         # (income_docs left in LP-428, stmt_facts in LP-429 — as their rules went live.)
         "txn_nsf",
-        # LP-495b — occupancy_rental LEFT the dormant set (OC-3 activated); atr_documentation JOINS it:
-        # DT-7's producer is declared this ticket but DT-7 is held on its tag's missing abstain value,
-        # so no live rule consumes the group yet.
-        "atr_documentation",
-        # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
+        # LP-495b — occupancy_rental LEFT the dormant set (OC-3 activated); atr_documentation JOINED it.
+        # LP-495c — atr_documentation LEFT it again: DT-7's tag gained the abstain its prompt sanctioned,
+        # DT-7 activated, and its producer is now REQUIRED by a live rule. Verified against the same
+        # single source the orchestrator uses (`required_ai_groups()`), which now contains it.
         # dormant until CR-4 activates (its own calibration ticket).
         # LP-490 — the credit AI cohort's four groups. Every rule reading them (CR-5/CR-6/CR-8/CR-10) is
         # INERT (not-calibratable-yet → is_eligible False, LP-484), so all four are dormant by design.
@@ -70,6 +69,10 @@ _DORMANT_EXPECTED = frozenset(
 )
 _LIVE_EXPECTED = frozenset(
     {
+        # LP-495c — atr_documentation JOINED the live set, the exact complement of its leaving the
+        # dormant set above: DT-7 activated once its tag gained the abstain its prompt sanctioned,
+        # so a live rule now consumes the group on every normal run.
+        "atr_documentation",
         # LP-495b — occupancy_rental JOINED the live set: OC-3 (and IN-14) activated on self-consistency
         # rates (ADR-378), so a live rule now consumes it and the normal run materialises it. It had been
         # dormant since LP-418 declared it.

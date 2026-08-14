@@ -192,23 +192,25 @@ def test_the_group_sees_documents() -> None:
     assert "lease" in group.system_prompt.lower()
 
 
-def test_dt7_is_built_but_held_on_its_enum_gap() -> None:
-    """DT-7's tag is declared enum ["complete","incomplete"] with NO abstain. The prompt sanctions
-    "unknown" and ai.py coerces it — but a coerced tag carries confidence=None, which is the fail-closed
-    marker the orchestrator's degradation scan matches, so every run where ATR cannot be determined is
-    flagged `degraded`. The txn.is_nsf_or_overdraft precedent does not cover it: AS-7 is inert, so that
-    pattern has never run through the orchestrator. This pins BOTH halves — the rule stays held, and the
-    enum stays two-valued — so whoever fixes the vocabulary sees why."""
+def test_dt7_activated_when_its_enum_gained_an_abstain() -> None:
+    """LP-495b wrote this test to fail the moment the enum gained a value, and LP-495c is that moment.
+
+    The original pinned BOTH halves — DT-7 held, and the enum two-valued — with the note: "if it now
+    has an abstain, DT-7 can activate on the rate already recorded on its bar". That is exactly what
+    happened. `docs/snapshot-fact-tags.xlsx` now declares complete|incomplete|unknown, fact_tags.csv was
+    regenerated from it, and DT-7 activated on the LP-495b rate unchanged (1.0000 over 4 cases). The
+    test is inverted rather than deleted, so the transition stays visible in the history.
+    """
     from app.verification.tag_materialization.declarations import load_declarations
 
-    assert "DT-7" not in ACTIVE_RULE_IDS
-    assert load_activation_bars()["DT-7"].status == "not-calibratable-yet"
+    assert "DT-7" in ACTIVE_RULE_IDS
+    assert load_activation_bars()["DT-7"].status == "ratify-pending"
     allowed = load_declarations()["dti.atr_factors_documented"].allowed_values
-    assert allowed == ("complete", "incomplete"), (
-        "the enum gained a value — if it now has an abstain, DT-7 can activate on the rate already "
-        "recorded on its bar"
+    assert allowed == ("complete", "incomplete", "unknown"), (
+        "DT-7's abstain must be IN vocabulary — without it, _build_tag coerces an honest 'unknown' to "
+        "confidence=None and the orchestrator reads a legitimate abstain as a broken pipeline"
     )
-    assert load_rule_spec("DT-7").judgment is not None  # built, not deleted
+    assert load_rule_spec("DT-7").judgment is not None  # still built, not replaced
 
 
 # ======================================================================= #

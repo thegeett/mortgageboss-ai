@@ -341,21 +341,29 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # exists for exactly that case; the number is now on both bars alongside a written
 # `measured_accuracy_override`. The activation is unchanged — what changed is that it is now argued in
 # the open rather than achieved by omission.
-# DT-7 is NOT here, and the reason is the enum gap the ticket flagged in its Critical section.
-# dti.atr_factors_documented is declared enum ["complete","incomplete"] with no abstain. The prompt
-# sanctions "unknown" and ai.py coerces it to an unknown tag — but that coerced tag carries
-# confidence=None, which is exactly the fail-closed marker the orchestrator's degradation scan looks
-# for, so EVERY run in which ATR cannot be determined is marked `degraded`. Degradation is meant to
-# signal a broken pipeline, not a legitimate abstain.
-# The txn.is_nsf_or_overdraft precedent (LP-418) does NOT cover this: AS-7, the rule that reads it, is
-# INERT, so that pattern has never run through the orchestrator. I treated a written-down precedent as
-# validation without checking it had ever been exercised. DT-7 is BUILT and its rate measured; it
-# activates when the tag's declared vocabulary gains "unknown" at the next
-# docs/snapshot-fact-tags.xlsx reconciliation, since the generated fact_tags.csv cannot be hand-edited
-# and vocabulary_extra.yaml refuses to shadow an xlsx tag.
-# HELD IS NOT FREE: DT-7 is a blocked candidate, so its producer `atr_documentation` still materializes on
-# every run through the pending-check pass and can surface a PENDING_AUTOMATION flag. Recorded on its bar.
+# DT-7 was held here on its enum gap; LP-495c fixed the declaration and activated it (see below).
 _LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
+
+# LP-495c — the AI-enum abstain reconciliation, and DT-7's activation.
+# FOUR TAGS declared an enum WITHOUT the abstain their own prompt sanctions, so `_build_tag` coerced an
+# honest "unknown" to a tag with confidence=None — exactly the marker `_scan_tag_degradations` matches
+# (value=="unknown" AND produced_by==AI AND confidence is None) — flipping `run.degraded`. Degradation
+# is meant to signal a broken pipeline, not a legitimate abstain.
+#   dti.atr_factors_documented  (DT-7)          complete|incomplete       -> + unknown
+#   txn.is_nsf_or_overdraft     (AS-7, inert)   yes|no                    -> + unknown
+#   liab.in_application         (CR-1, CR-4 LIVE) yes|no                  -> + unknown
+#   stmt.is_reserve_eligible    (stmt_facts)    yes|no|partial            -> + unknown
+# The audit that found them was re-run with WINDOW matching rather than line matching, because the
+# original line-based pass missed stmt.is_reserve_eligible — its prompt puts the sanctioned "unknown" on
+# a different line from the tag name. Four is the complete set; income.voe_present's prompt genuinely
+# offers no abstain, so its declaration and prompt agree and it correctly still fail-closes.
+# THE FIX IS UPSTREAM: docs/snapshot-fact-tags.xlsx is the authoring source and fact_tags.csv is
+# generated from it, so the four cells were edited there and the CSV regenerated. Hand-editing the CSV
+# would be silently reverted by the next regeneration, and vocabulary_extra.yaml refuses to shadow an
+# xlsx tag by design (ProjectionError).
+# DT-7 ACTIVATES on the rate LP-495b already measured — 1.0000 over 4 constructed cases with a full
+# three-value spread, 0 disagreements — used unchanged; nothing was re-derived and no model was called.
+_LP495C_ACTIVATED: tuple[str, ...] = ("DT-7",)
 
 # LP-496a — program eligibility. PE-1 and PE-3 ACTIVATE; PE-2 and PE-4 are HELD, and both holds are
 # measured rather than assumed.
@@ -451,6 +459,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP494_ACTIVATED,
     *_LP495A_ACTIVATED,
     *_LP495B_ACTIVATED,
+    *_LP495C_ACTIVATED,
     *_LP496A_ACTIVATED,
     *_LP497_ACTIVATED,
 )
