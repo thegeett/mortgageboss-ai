@@ -74,6 +74,17 @@ def _load_bearing(
     )
 
 
+def _ratifies_every_finding(rule_id: str) -> bool:
+    """Is this rule activated on a self-consistency rate (LP-490a / ADR-378)?
+
+    LAZY IMPORT — activation_bars imports the registry, which imports this module, so a top-level import
+    would close the cycle. The distrust loader navigates the same cycle the same way.
+    """
+    from app.verification.rule_engine.activation_bars import ratifies_every_finding
+
+    return ratifies_every_finding(rule_id)
+
+
 def _result(
     spec: RuleSpec,
     subject_id: str,
@@ -84,6 +95,7 @@ def _result(
     verdict_confidence: float | None = None,
     threshold_used: Decimal | None = None,
     how_to_fix: str | None = None,
+    ratification_pending: bool = False,
 ) -> RuleEvaluation:
     assert spec.deterministic is not None
     return RuleEvaluation(
@@ -97,6 +109,16 @@ def _result(
         gated_pending_signoff=not spec.reference_values.priya_validated,
         reasoning=reasoning,
         how_to_fix=how_to_fix,
+        # LP-508 / ADR-377 — a DISTRUSTED-field degradation is confirmed by a human, not auto-asserted.
+        # `ships` is metadata with no runtime consumer, so this per-finding flag is the only real
+        # ratification mechanism (LP-508 Phase A §5).
+        #
+        # ⚠️ LP-490a / ADR-378 — AND EVERY FINDING FROM A ratify-pending RULE. Those rules activate on a
+        # self-consistency rate rather than a measured accuracy, and ratification is the ENTIRE safety
+        # substitute for the missing measurement. This path never set the flag before LP-490a, so an
+        # ai_fuzzy_match rule (CR-1, CR-4, CR-5, OC-1, …) would have shipped an unmeasured AI judgment as
+        # an AUTO verdict with NO HUMAN IN THE LOOP — the hole that had to close before anything activated.
+        ratification_pending=ratification_pending or _ratifies_every_finding(spec.rule_id),
     )
 
 
@@ -255,6 +277,7 @@ def evaluate_deterministic_rule(
                     gate.reason or "",
                     subject_tags,
                     verdict_confidence=gate.verdict_confidence,
+                    ratification_pending=gate.ratification_pending,
                 )
             )
             continue

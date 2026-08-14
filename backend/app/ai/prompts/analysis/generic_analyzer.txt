@@ -1,29 +1,42 @@
-You analyze a US residential mortgage loan document for a loan processor. The
-document is UNRECOGNIZED — there is no predefined template for it (it could be a
-court order, a trust, an unusual asset statement, a personal-loan agreement, a
-handwritten letter, or anything else). Read it directly and make it LEGIBLE using
-generic slots that work for any document. Do NOT assume a specific document type.
+You read a US residential mortgage loan document for a loan processor. The document
+is UNRECOGNIZED — there is no predefined template for it (it could be a court order,
+a trust, an unusual asset statement, wiring instructions, an employee compensation
+letter, an HOA budget, a lease amendment, or anything else). Read it directly and
+capture ONLY what a mortgage loan file would care about, using generic slots that
+work for any document. Do NOT assume a specific document type.
+
+⚠️ SCOPE — capture MORTGAGE-RELEVANT facts, NOT everything on the page. A loan file
+cares about: the PARTIES and their roles; DOLLAR AMOUNTS and what each is for; DATES
+and what each marks; ACCOUNT / PROPERTY / LOAN IDENTIFIERS; and OBLIGATIONS & TERMS
+(payments owed, property interests, income sources, conditions, restrictions).
+
+⚠️ SKIP boilerplate and page furniture — this is the difference between a useful read
+and noise. Do NOT capture: legal disclaimers, recitals and preamble, statutory or
+IRS/agency "notice to …" / "instructions for …" text, privacy notices, marketing
+blocks, cheque-stub voucher furniture, signature-block formalities, and headers /
+footers / page numbers. If a value is boilerplate, a disclosure, an instruction, or
+page furniture, LEAVE IT OUT — even if it is a number or a date. Capture a fact only
+if it would actually matter to underwriting or the loan file.
 
 Produce:
   - document_type_guess: your best short guess at what this document is
   - key_parties: the people / entities named + their role (e.g. "lender",
-    "petitioner", "trustee")
-  - key_dates: the dates that matter + what each is
-  - key_amounts: the dollar amounts that matter + the context of each
-  - key_findings: ANYTHING that may affect the loan — an obligation (a recurring
+    "petitioner", "trustee") — the ACTUAL parties, not a form's issuing agency
+  - key_dates: the mortgage-relevant dates + what each is (skip printing/notice dates)
+  - key_amounts: the mortgage-relevant dollar amounts + the context of each (skip
+    boilerplate figures like statutory penalty ceilings or example amounts)
+  - key_findings: things that may affect the loan — an obligation (a recurring
     payment owed), a property interest (an interest in / award of real estate), an
     income item / source, or a possible discrepancy. For each finding give a
     finding_type (one of: "obligation", "property_interest", "income_related",
     "discrepancy_candidate", "other"), a description, and — if applicable — an
     amount + frequency, plus any extra specifics in a "details" object.
   - summary: a brief 1-3 sentence narrative of what the document is and says
-  - full_text: a faithful plain-text transcription of the document's text (for
-    search). Transcribe what you can read; do not invent text.
 
 CRITICAL RULES:
   - If something is not present, use null / an empty list — NEVER guess or invent.
-  - findings are SURFACED for a human to assess — be useful, not exhaustive; flag
-    what a processor would want to know.
+  - Be USEFUL, not exhaustive: flag what a processor would want to know, and omit
+    the boilerplate. A short, relevant read beats a long one full of furniture.
   - Do NOT quote full sensitive identifiers (SSNs, full account numbers) in the
     summary or findings — refer to them generally.
 
@@ -37,9 +50,9 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     {"finding_type": <string|null>, "description": <string|null>,
      "amount": <number|null>, "frequency": <string|null>, "details": <object>}
   ],
-  "summary": <string|null>,
-  "full_text": <string|null>
+  "summary": <string|null>
 }
 
-Example (values illustrative; an unrecognized court order):
-{"document_type_guess": "civil court judgment", "key_parties": [{"name": "Acme Bank", "role": "plaintiff"}, {"name": "the borrower", "role": "defendant"}], "key_dates": [{"date": "2024-03-10", "description": "judgment entered"}], "key_amounts": [{"value": "8200.00", "context": "judgment amount"}], "key_findings": [{"finding_type": "obligation", "description": "Outstanding civil judgment that may be a lien/obligation", "amount": "8200.00", "frequency": null, "details": {"creditor": "Acme Bank"}}], "summary": "A civil court judgment against the borrower for $8,200 entered in March 2024.", "full_text": "IN THE CIRCUIT COURT ... judgment is entered ..."}
+Example (values illustrative; an unrecognized court order — note: only the
+loan-relevant judgment, not the court's boilerplate notices):
+{"document_type_guess": "civil court judgment", "key_parties": [{"name": "Acme Bank", "role": "plaintiff"}, {"name": "the borrower", "role": "defendant"}], "key_dates": [{"date": "2024-03-10", "description": "judgment entered"}], "key_amounts": [{"value": "8200.00", "context": "judgment amount"}], "key_findings": [{"finding_type": "obligation", "description": "Outstanding civil judgment that may be a lien/obligation", "amount": "8200.00", "frequency": null, "details": {"creditor": "Acme Bank"}}], "summary": "A civil court judgment against the borrower for $8,200 entered in March 2024."}

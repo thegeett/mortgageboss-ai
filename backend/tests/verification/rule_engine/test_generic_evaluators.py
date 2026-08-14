@@ -145,6 +145,53 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "IN-15",  # LP-430 — terminated-employment documentation (no-ai-dependency; deterministic)
             "IN-16",  # LP-433 — pay-stub-only documentation (no-ai-dependency; deterministic)
             "IH-1",  # LP-447 — insurance adequacy / dwelling settlement basis (no-ai-dependency)
+            # LP-485 — the date-compare family, all deterministic (loan-scoped date/number compares).
+            "CL-1",
+            "CR-12",  # LP-486 — disputed accounts (structural, per_liability)
+            "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+            "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
+            "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+            "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+            "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
+            "CR-1",  # LP-490a — ratify-pending (self-consistency + ratification, ADR-378)
+            "CR-4",  # LP-490a
+            "CR-8",  # LP-490a
+            "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
+            "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
+            "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
+            "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
+            "TI-6",  # LP-491 — ratify-pending
+            "PR-2",  # LP-492 — appraised value vs purchase price (deterministic)
+            "PR-7",  # LP-492 — appraisal address match (deterministic, PC-3's precedent)
+            "PR-3",  # LP-492 — property type eligibility (ratify-pending)
+            "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
+            "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
+            "DT-6",  # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness
+            "LO-2",
+            "OC-1",  # LP-495a — ratify-pending
+            "RE-1",
+            "IN-13",  # LP-495b
+            "IN-14",
+            "OC-3",
+            # LP-496a — program eligibility (PE-2 / PE-4 held: no source for the FHA case
+            # number; no producer and zero corpus appraisals for the condition tag).
+            "PE-1",
+            "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
+            # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
+            # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
+            "FR-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
+            "CR-13",
+            "PR-6",
         }
     )
     snapshot = _loan_snapshot(None)  # no occupancy/txn tags → everything fail-closes honestly

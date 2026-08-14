@@ -131,7 +131,9 @@ def test_max_loan_binding_constraint_wins() -> None:
         term_months=360,
         property_value=Decimal("500000"),
         max_ltv_pct=Decimal("97"),
-        loan_limit=Decimal("806500"),
+        # Arbitrary for this case — any limit above the LTV-derived 485000 keeps LTV binding.
+        # Tracks the current baseline so a grep for the stale 806500 finds no false positives.
+        loan_limit=Decimal("832750"),
     )
     # LTV binds: 97% of 500k = 485000, below the DTI-derived (~632k) and the limit.
     assert result.binding_key == "ltv"

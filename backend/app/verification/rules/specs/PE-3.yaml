@@ -1,0 +1,165 @@
+# PE-3 — FHA minimum required investment — DETERMINISTIC calculative rule SPEC (LP-496a).
+#
+# FHA insures a mortgage only if the borrower puts in a minimum share of their own money. Miss it and
+# the loan is not insurable — a condition that surfaces at underwriting, after the file has been worked.
+#
+# THE BASIS IS ADJUSTED VALUE, NOT PURCHASE PRICE — and the catalog rationale says "3.5% of price".
+# THE CATALOG IS WRONG, and the divergence is recorded here deliberately rather than followed.
+# HUD 4000.1: "For purchase transactions, the Adjusted Value is the lesser of: purchase price less any
+# inducements to purchase; or the Property Value." On a LOW APPRAISAL the property value is below the
+# price, so 3.5% of price OVERSTATES the Adjusted Value and understates nothing — but the maximum
+# mortgage is computed from the Adjusted Value, so using price clears a file whose required investment
+# is actually higher. The rule uses the guideline's basis.
+#
+# TWO LIMITS SHIP WITH THE RULE, both stated on the finding rather than papered over.
+#
+#   1. INDUCEMENTS ARE NOT REPRESENTABLE ANYWHERE IN THE SNAPSHOT. Nothing carries seller inducements
+#      or sales concessions — PC-8 surfaces personal property but computes no deduction (LP-493), and
+#      no other source deducts either (measured: 0 of 19 loan files carry any inducement-shaped field).
+#      The Adjusted Value is therefore computed as min(purchase price, property value) with the
+#      "less any inducements" leg omitted.
+#      THE ERROR IS ONE-DIRECTIONAL, WHICH IS WHY THIS SHIPS: omitting the deduction can only RAISE
+#      the Adjusted Value, which RAISES the required investment. The rule can therefore never CLEAR a
+#      file it should catch on this axis — it can only over-ask, and a false condition is recoverable
+#      where a missed one is not. The finding says so in words when it fires.
+#
+#   2. THE CREDIT TIER IS NEVER ASSUMED. The MRI is tiered on the Minimum Decision Credit Score (MDCS):
+#      3.5% at 580+, 10% at 500-579, and below 500 the borrower is not eligible for FHA financing at
+#      all. The representative score is CR-7's territory, which is agency-gated and not built; the MDCS
+#      reaches the snapshot only from a credit report's repository scores, on 1 of 19 corpus files.
+#      ASSUMING 580+ WOULD APPLY THE CHEAPEST TIER TO A BORROWER WHO MAY NOT QUALIFY FOR IT and
+#      clear a file needing 10%. No score -> couldnt_check.
+#      The MDCS itself is computed per 4000.1: the MIDDLE of the three repository scores per borrower
+#      (the lower of two), then the LOWEST across borrowers — "the Mortgagee must select the lowest
+#      MDCS of the Borrower(s) with credit score(s)".
+#
+# NOTE THE LP-496 INTERACTION: the 96.5% maximum LTV is FRACTIONAL, which is why `_resolve_limit`
+# keeps the exact two-decimal LTV rather than the delivered whole percent. Not touched here.
+#
+# THE TRIGGER IS UNEXERCISED BY THE CORPUS, and that is stated rather than discovered later. Four
+# FHA loan files exist; three carry ZERO documents and the fourth carries two. No FHA file carries a
+# purchase contract, a credit report or an appraisal, so this rule resolves to couldnt_check on every
+# file in the corpus today. It is built against the guideline, not against observed data.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory). ALL TIER P, read directly from
+# HUD's hosted PDF on 2026-08-13 (WebFetch could not parse the 6.7MB binary; it was extracted with
+# pdftotext and read). Handbook 4000.1, Effective Date 09/14/2015 | Last Revised 08/14/2019:
+#   3.5% MRI — "the Borrower must make a Minimum Required Investment (MRI) of at least 3.5 percent of
+#     the Adjusted Value", and "MRI refers to the Borrower's contribution in cash or its equivalent
+#     required by Section 203(b)(9) of the National Housing Act, which represents at least 3.5 percent
+#     of the Adjusted Value of the Property".
+#   Adjusted Value — "For purchase transactions, the Adjusted Value is the lesser of: purchase price
+#     less any inducements to purchase; or the Property Value."
+#   Tiers — "If the Borrower's Minimum Decision Credit Score is ... at or above 580 [-> ] eligible for
+#     maximum financing. between 500 and 579 [-> ] limited to a maximum LTV of 90%."; "For purchase
+#     transactions, the maximum LTV is 96.5 percent of the Adjusted Value."; "The Borrower is not
+#     eligible for FHA-insured financing if the MDCS is less than 500."
+
+rule_id: PE-3
+name: FHA minimum required investment
+category: Program
+
+kind: calculative           # must equal rule_kinds.csv
+numeric_check: true         # must equal rule_kinds.csv — an investment against a percentage floor
+
+criteria: >-
+  When the loan program is FHA, the borrower's own investment must be at least the Minimum Required
+  Investment — 3.5% of the Adjusted Value at a Minimum Decision Credit Score of 580 or above, and 10%
+  between 500 and 579; below 500 the borrower is not eligible for FHA-insured financing at any
+  investment level. The Adjusted Value for a purchase is the lesser of the purchase price and the
+  property value. This reads the derived program.fha_min_investment_met. A non-FHA program is
+  not_applicable. A missing purchase price, a missing property value, a missing loan amount, and a
+  missing Minimum Decision Credit Score each resolve to couldnt_check — never to an assumed 3.5% tier,
+  and never to an Adjusted Value taken from the purchase price alone.
+
+applicability:
+  scope: the loan, when the loan program is FHA
+  trigger: >-
+    program.type == fha. A non-FHA program is not_applicable; a file that does not state a single
+    program couldnt_checks rather than assuming the loan is not FHA.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — every value is tier P from HUD 4000.1
+  values:
+    # A test pins all four against the recipe's constants.
+    fha_mri_rate: "0.035"
+    fha_mri_rate_low_score: "0.10"
+    fha_mdcs_full_financing: "580"
+    fha_mdcs_floor: "500"
+  guideline_text: >-
+    The Borrower must make a Minimum Required Investment (MRI) of at least 3.5 percent of the Adjusted
+    Value. For purchase transactions, the Adjusted Value is the lesser of: purchase price less any
+    inducements to purchase; or the Property Value. If the Borrower's Minimum Decision Credit Score is
+    at or above 580 the Borrower is eligible for maximum financing (a maximum LTV of 96.5 percent for
+    purchase transactions); between 500 and 579 the Borrower is limited to a maximum LTV of 90 percent.
+    The Borrower is not eligible for FHA-insured financing if the MDCS is less than 500 (HUD Handbook
+    4000.1, Last Revised 08/14/2019).
+
+required_inputs:
+  - name: fha_min_investment_met
+    snapshot_path: 'tags.by_subject["loan"]["program.fha_min_investment_met"]'
+    description: >-
+      whether the borrower's investment meets FHA's Minimum Required Investment (derived, LP-496a):
+      "yes" / "no" from the investment against the tier-selected percentage of the Adjusted Value, and
+      "unknown" for a non-FHA program or when the purchase price, property value, loan amount or
+      Minimum Decision Credit Score is missing or unreadable.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The borrower's computed investment, the required amount, the Adjusted Value and which of the two
+  figures it came from, and the Minimum Decision Credit Score that selected the percentage — inline on
+  the finding, so a processor can see WHY this requirement and not the other one. When the rule fires,
+  the finding must also say that inducements were not deducted.
+
+guideline_reference: "HUD Handbook 4000.1 (Effective 09/14/2015, Last Revised 08/14/2019) — Minimum Required Investment of at least 3.5 percent of the Adjusted Value; Adjusted Value for purchases is the lesser of purchase price less inducements or the Property Value; MDCS tiers 580+ / 500-579 / below 500."
+
+spec_version: 1
+
+deterministic:
+  applicability:
+    tag: program.type
+    op: eq
+    value: fha
+  load_bearing_tags:
+    - program.fha_min_investment_met
+  gated_tags:
+    - program.fha_min_investment_met
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: program.fha_min_investment_met, op: eq, value: "yes"}
+      reasoning: >-
+        the borrower's investment meets FHA's minimum required investment for the applicable credit
+        tier, computed against the Adjusted Value
+    - verdict: fired
+      when_tags:
+        - {tag: program.fha_min_investment_met, op: eq, value: "no"}
+      reasoning: >-
+        the borrower's investment falls below FHA's minimum required investment for the applicable
+        credit tier — the loan is not insurable by FHA as structured
+      how_to_fix: >-
+        Confirm the purchase price, the appraised value and the loan amount, and recompute: the Adjusted
+        Value is the LESSER of the price and the value, not the price. If the shortfall is real, either
+        the borrower increases their own contribution to at least the required percentage, or the loan
+        amount comes down. Gift funds count toward the minimum required investment when properly
+        sourced and documented; seller inducements do NOT — they reduce the Adjusted Value instead.
+        Note the Adjusted Value here is computed without deducting inducements to purchase, which this
+        file does not carry, so a seller credit would lower both the Adjusted Value and the requirement.
+    - verdict: couldnt_check
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS — and the credit tier is the reason it matters most.
+      # A `satisfied` default would clear a 500-579 borrower needing 10% against the 3.5% requirement.
+      default: true
+      reasoning: >-
+        whether the borrower meets FHA's minimum required investment could not be determined — the file
+        does not state a single loan program, the purchase price or property value needed for the
+        Adjusted Value, the loan amount, or the Minimum Decision Credit Score that selects which
+        percentage applies
+      how_to_fix: >-
+        Confirm the loan program, and obtain the purchase contract (for the price), the appraisal (for
+        the property value) and the credit report (for the repository scores). The required investment
+        is 3.5% of the Adjusted Value at a Minimum Decision Credit Score of 580 or above and 10% between
+        500 and 579, so the score decides the requirement and cannot be assumed.

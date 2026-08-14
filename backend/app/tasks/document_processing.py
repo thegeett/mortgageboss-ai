@@ -11,11 +11,14 @@ Classification + the catalog **route** handling (LP-58, tier-aware): the
 classified type's tier (from :mod:`app.documents.catalog`) selects the path —
 **Tier 1** runs the registered extractor (a Tier-1 type whose extractor isn't
 built yet is classified-only); **Tier 2** is the shared recognize/summarize path
-(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is the shared
-generic-analyzer path (LP-66 — one flexible analysis + recorded findings + indexed
-text for any unrecognized document). The
-``Document.status`` field is the source of truth the UI polls (LP-43), so the
-status is transitioned and committed at each stage.
+(LP-65 — one lightweight summary for any Tier-2 type); **Tier 3** is scoped FREE
+EXTRACTION (LP-463; was the LP-66 generic analyzer) — one flexible, mortgage-scoped
+read for any document with no fitting catalog type. Catalog types are tried FIRST;
+free extraction is the fallback. A document whose LABEL cannot be trusted — a
+model-admitted type↔document mismatch (LP-463 ``type_matches_document``) or a
+low-confidence pick — is routed to Tier 3 (READ), not left unread, and lands in
+NEEDS_REVIEW. The ``Document.status`` field is the source of truth the UI polls
+(LP-43), so the status is transitioned and committed at each stage.
 
 **Resilience.** Each document is processed on its own; one document's failure
 never crashes the worker or affects others. Graceful classify/extract outcomes
@@ -44,15 +47,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
+from app.ai.client import INFRA_RATE_LIMITED
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
-from app.ai.extraction.parsing import document_confidence_provenance
+from app.ai.extraction.consistency import run_consistency_checks
+from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
-from app.ai.summarization import summarize_document
 from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus, Tier
+from app.models.document_finding import DocumentFindingType
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
@@ -118,11 +123,52 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         document.status = DocumentStatus.CLASSIFYING
         await db.commit()
         classification = await classify_document(content, document.mime_type)
-        document.document_type = classification.document_type
+
+        # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #
+        # A classification that never COMPLETED (throttled, or a payload over the
+        # document-block limit) must be recorded as INFRASTRUCTURE, not a JUDGMENT:
+        # a throttle is not a coverage gap, and framing it as one corrupts every
+        # downstream audit. Gate BEFORE the classification-success block so we never
+        # stamp document_type="unknown" or persist a "Classified as unknown"
+        # activity for a call that never ran — the audit trail instead records the
+        # infrastructure cause (rate_limited / oversized / failed) and the document
+        # stays re-runnable. (Same terminal status; a different, honest cause.)
+        if classification.infra_failure is not None:
+            document.status = DocumentStatus.NEEDS_REVIEW
+            await log_activity(
+                db,
+                loan_file_id=document.loan_file_id,
+                activity_type=ActivityType.STATUS_CHANGED,
+                summary=f"Classification incomplete ({classification.infra_failure}) — needs review",
+                detail={
+                    "document_id": str(document.id),
+                    "infra_failure": classification.infra_failure,
+                },
+            )
+            await db.commit()
+            logger.info(
+                "document_needs_review",
+                document_id=str(document.id),
+                reason=classification.infra_failure,
+                infra_failure=True,
+            )
+            return
+
+        # --- LP-463: do NOT apply a label the model flagged as wrong -------- #
+        # ``type_matches_document`` False means the model chose a type but told us
+        # it does NOT describe the document it named (the T4→w2 harm — a wrong
+        # schema applied to a confidently-mislabelled form, invisible downstream).
+        # Honour "do not apply the label": store the type as ``unknown`` (the
+        # document is still READ via Tier 3 free extraction below), and keep the
+        # model's rejected pick + its own name for the human in the activity detail.
+        type_mismatch = not classification.type_matches_document
+        effective_type = "unknown" if type_mismatch else classification.document_type
+
+        document.document_type = effective_type
         # Catalog-driven (LP-58): the type's tier (for routing) + category (for
         # filing) both come from the single source of truth, so they never drift.
-        document.tier = get_tier(classification.document_type)
-        document.category = get_category(classification.document_type)
+        document.tier = get_tier(effective_type)
+        document.category = get_category(effective_type)
         document.classification_confidence = classification.confidence
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
@@ -130,36 +176,63 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             db,
             loan_file_id=document.loan_file_id,
             activity_type=ActivityType.DOCUMENT_PROCESSED,
-            summary=f"Classified as {classification.document_type}",
+            summary=(
+                f"Classified as {effective_type}"
+                + (
+                    f" — model picked {classification.document_type!r} but flagged it as not matching"
+                    if type_mismatch
+                    else ""
+                )
+            ),
             detail={
                 "document_id": str(document.id),
-                "document_type": classification.document_type,
+                "document_type": effective_type,
                 "confidence": classification.confidence,
+                **(
+                    {"rejected_type": classification.document_type, "type_mismatch": True}
+                    if type_mismatch
+                    else {}
+                ),
             },
         )
 
-        # --- Low-confidence gate → human review (LP-59) --------------------- #
-        # CONFIDENCE — not the "unknown" slug — decides here. A low-confidence
-        # result means the model is unsure WHICH type it is (it could be a known
-        # type) → a human confirms/corrects (the LP-44 override). A HIGH-confidence
-        # "unknown" (the model is sure it is NONE of the known types) is NOT caught
-        # here: it falls through to tier routing, where the catalog maps it to
-        # Tier 3 (the generic analyzer — that is its purpose).
-        if classification.confidence < _CONFIDENCE_THRESHOLD:
-            document.status = DocumentStatus.NEEDS_REVIEW
-            await db.commit()
-            logger.info(
-                "document_needs_review",
-                document_id=str(document.id),
-                reason="low_confidence",
-            )
+        # --- Review gate: flag, but STILL READ (LP-59 low-conf + LP-463 mismatch) - #
+        # A document whose LABEL we cannot trust — the model's confidence is low, OR
+        # the model itself flagged a type-vs-document mismatch — is flagged for human
+        # review. Unlike before (a bare NEEDS_REVIEW that left the document unread),
+        # a flagged document now routes to Tier 3 FREE EXTRACTION so its
+        # mortgage-relevant facts are still captured, then reaches a NEEDS_REVIEW
+        # terminal status. Catalog types are tried first (below); free extraction is
+        # the fallback for the flagged / declined tail, never the default.
+        review_reason: str | None = None
+        if type_mismatch:
+            review_reason = "type_mismatch"
+        elif classification.confidence < _CONFIDENCE_THRESHOLD:
+            review_reason = "low_confidence"
+
+        if review_reason is not None:
+            logger.info("document_needs_review", document_id=str(document.id), reason=review_reason)
+            await _tier3_analyze(db, document, content, review_reason=review_reason)
+            # A flagged document's LABEL is not trusted, so it must NOT auto-advance a need (the pre-LP-463
+            # low-confidence gate returned here too). Its untrusted document_type would drive a matching OPEN
+            # need RECEIVED→REJECTED, and REJECTED is not in the matcher's OPEN set — so the genuine document
+            # could never advance that need later. The LP-44 human override advances it once the type is
+            # confirmed. type_mismatch stores "unknown" (matches no need) so this only bites low_confidence.
             return
 
         # --- Route by tier (catalog-driven, LP-58) -------------------------- #
-        # The catalog gave the document its tier above; each tier has one
-        # handling path, and every path reaches a terminal status (resilience).
-        # A confident "unknown" routes here to Tier 3 (catalog default).
-        await _route_by_tier(db, document, content)
+        # A confidently-classified, self-consistent type. Each tier has one handling
+        # path, every path terminal. A confident "unknown" routes here to Tier 3 free
+        # extraction (the catalog default) and COMPLETES.
+        rerunnable_infra = await _route_by_tier(db, document, content)
+
+        # A re-runnable infrastructure outcome (a THROTTLED Tier-1 extraction) must NOT
+        # advance needs (LP-464 review): the classification is valid and the document
+        # will be re-run, but a needs update would drive the matching OPEN need
+        # RECEIVED→REJECTED — and REJECTED is not re-matched, so the successful re-run
+        # could never advance it. Skip it here; the re-run enqueues it on success.
+        if rerunnable_infra:
+            return
 
         # --- Update the needs list (LP-68) — SERIALIZED per loan file -------- #
         # The document is now terminal + committed; advance any matching need in a
@@ -175,90 +248,73 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         await _mark_failed(db, document, document_id)
 
 
-async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> None:
+async def _route_by_tier(db: AsyncSession, document: Document, content: bytes) -> bool:
     """Dispatch a classified document to its tier's handling path (LP-58).
 
     The tier was set from the catalog during classification. Exactly one branch
     runs and every branch reaches a terminal status:
 
-      * **Tier 1** → the existing EXTRACTORS registry (deep extraction). A Tier-1
-        type whose extractor isn't registered yet (LP-441 promoted 18 spec'd types
-        to Tier-1 before step 7 wires their extractors) falls back to the SAME
-        interim treatment a Tier-2 type gets — a lightweight summary — so a
-        promoted type keeps its human-reference gist until deep extraction lands,
-        rather than silently losing it (LP-441 review). NOT a crash.
-      * **Tier 2** → the shared recognize/summarize path (LP-65) — one mechanism
-        for every Tier-2 type: a lightweight summary, then a terminal status.
-      * **Tier 3** → the shared generic-analyzer path (LP-66) — one flexible
-        analysis for any unrecognized document (+ recorded findings, indexed text).
+      * **Tier 1 with a registered extractor** → the EXTRACTORS registry (deep
+        typed extraction).
+      * **Everything else** — a Tier-2 type, a Tier-1 type whose extractor isn't
+        wired yet (LP-441), or a Tier-3 uncataloged/``unknown`` type — → scoped
+        FREE EXTRACTION (:func:`_tier3_analyze`, LP-463). LP-471 routed the
+        no-typed-extractor cases here (they used to get the LP-65 lightweight
+        summary), so a correctly-classified document is never left with only a
+        thin summary or nothing — its facts land in the untyped snapshot section.
 
-    The low-confidence / ``unknown`` gate already routed those to NEEDS_REVIEW
-    before this point, so here the document is a confidently-classified type.
+    Reached only for a document whose label is TRUSTED (self-consistent + not
+    low-confidence) — the LP-463 review gate routes a flagged/declined document
+    straight to :func:`_tier3_analyze` before this point. A confident ``unknown``
+    still lands in the Tier 3 branch here and COMPLETES.
+
+    Returns ``True`` only when a Tier-1 extraction was THROTTLED (re-runnable infra whose need must not be
+    advanced — :func:`_extract_branch`); ``False`` for every other path.
     """
     if document.tier == Tier.TIER_1:
         extractor = EXTRACTORS.get(document.document_type or "")
         if extractor is not None:
-            await _extract_branch(db, document, content, extractor)
-        else:
-            # A Tier-1 type whose extractor isn't registered yet (LP-441 — promoted before its
-            # extractor is wired). Give it the Tier-2 interim summary (not classified-only): a
-            # promoted type keeps its gist until deep extraction lands (LP-441 review).
-            await _summarize_document(db, document, content)
-    elif document.tier == Tier.TIER_2:
-        await _summarize_document(db, document, content)
-    else:  # Tier.TIER_3 (the catalog default for uncataloged long-tail types)
-        await _tier3_analyze(db, document, content)
+            return await _extract_branch(db, document, content, extractor)
+    # No typed extractor for this document — a Tier-2 type (no extractor by design), a Tier-1 type
+    # promoted before its extractor is wired (LP-441), or an uncataloged/``unknown`` Tier-3 type. ALL of
+    # them now get Tier-3 scoped FREE EXTRACTION (LP-471), so a correctly-classified document is never left
+    # with only a thin summary (the old LP-65 Tier-2 path) or nothing. The output lands in the marked-UNTYPED
+    # snapshot section — read by a processor + AI cross-source reasoning, NEVER a deterministic rule (LP-463).
+    await _tier3_analyze(db, document, content)
+    return False  # only a throttled Tier-1 extraction (above) defers the needs update
 
 
-async def _summarize_document(db: AsyncSession, document: Document, content: bytes) -> None:
-    """The shared recognize/summarize path (LP-65) — the interim treatment for a document that
-    reaches a terminal status WITHOUT deep extraction: every Tier-2 type, and a Tier-1 type whose
-    extractor isn't wired yet (LP-441 review — a promoted-but-unwired type keeps its gist).
+async def _tier3_analyze(
+    db: AsyncSession, document: Document, content: bytes, *, review_reason: str | None = None
+) -> None:
+    """Tier 3 (long-tail) handling — scoped FREE EXTRACTION (LP-463; was generic analysis, LP-66).
 
-    No per-type logic: the document (already classified + categorized, LP-59) gets a single
-    lightweight 1-2 sentence AI **summary** (a human-reference gist, not extraction —
-    :func:`app.ai.summarization.summarize_document`, a cheap Haiku call) and reaches a terminal
-    status. The document is a normal, package-eligible file document filed under its category.
+    No per-type logic: a document with no fitting catalog type — a confident ``unknown``, or one FLAGGED
+    for review (low confidence, or a model-admitted type-vs-document mismatch) — is read by the flexible
+    free extractor (:func:`app.ai.generic_analyzer.analyze_document`), now SCOPED to mortgage-relevant
+    facts (parties, amounts, dates, identifiers, obligations, terms) and told to skip boilerplate (LP-463
+    A4). The output is stored on the document (``generic_analysis``) — surfaced into the snapshot's
+    marked-UNTYPED section for a processor + AI cross-source reasoning, NEVER a deterministic rule
+    (LP-463) — and each ``key_finding`` is recorded as a :class:`DocumentFinding` (uniform across tiers).
 
-    **Graceful** (resilience): ``summarize_document`` never raises and returns ``None`` on failure;
-    a failed summary still finalizes the document (recognized + categorized, ``summary`` null) —
-    never stuck, never a crash. Metadata-only log (the summary text itself is never logged — it can
-    quote document PII).
-    """
-    document.summary = await summarize_document(content, document.mime_type)
-    document.status = DocumentStatus.COMPLETED
-    await db.commit()
-    logger.info(
-        "document_summarized",
-        document_id=str(document.id),
-        document_type=document.document_type,
-        tier=document.tier,
-        category=document.category,
-        has_summary=document.summary is not None,
-    )
+    ``review_reason`` (LP-463): when set (``type_mismatch`` / ``low_confidence``), the document is READ but
+    reaches a **NEEDS_REVIEW** terminal status — a flagged document is no longer left unread. When None (a
+    confident ``unknown`` / uncataloged type), it COMPLETES normally.
 
-
-async def _tier3_analyze(db: AsyncSession, document: Document, content: bytes) -> None:
-    """Tier 3 (long-tail) handling — the ONE shared generic-analyzer path (LP-66).
-
-    No per-type logic: any unrecognized document is run through the flexible generic
-    analyzer (:func:`app.ai.generic_analyzer.analyze_document`) → a structured-but-
-    flexible analysis (type guess, parties, dates, amounts, findings, summary, full
-    text). The analysis + the full text (indexed for search) are stored on the
-    document, each ``key_finding`` is recorded as a :class:`DocumentFinding` via the
-    SAME ``create_document_finding`` the Tier 1 divorce decree uses (uniform findings
-    across tiers), and the document reaches a terminal status.
-
-    **Graceful** (resilience): ``analyze_document`` never raises and returns ``None``
-    on failure; a failed analysis still finalizes the document (analysis null, no
-    findings) — never stuck, never a crash. Metadata-only log (no extracted values).
+    **Graceful** (resilience): ``analyze_document`` never raises and returns ``None`` on failure; a failed
+    analysis still finalizes the document (analysis null, no findings) — never stuck, never a crash.
+    Metadata-only log (no extracted values).
     """
     analysis = await analyze_document(content, document.mime_type)
     findings_count = 0
     if analysis is not None:
-        # Store the structured analysis (the full text lives in its own column).
+        # Store the structured free extraction (the full text lives in its own column).
         document.generic_analysis = analysis.model_dump(mode="json", exclude={"full_text"})
         document.full_text = analysis.full_text
+        # Preserve the human-reference gist in ``document.summary`` too (the DocumentResponse field the UI
+        # shows) — LP-471 routed the old Tier-2 summarize path here, so this keeps that quick-view gist for
+        # every long-tail document (additive; the untyped extraction / findings / status are unchanged).
+        document.summary = analysis.summary
         for f in analysis.key_findings:
             await create_document_finding(
                 db,
@@ -271,7 +327,10 @@ async def _tier3_analyze(db: AsyncSession, document: Document, content: bytes) -
             )
             findings_count += 1
 
-    document.status = DocumentStatus.COMPLETED
+    # A flagged document is READ (above) but still needs a human; a clean unknown completes.
+    document.status = (
+        DocumentStatus.NEEDS_REVIEW if review_reason is not None else DocumentStatus.COMPLETED
+    )
     await db.commit()
     logger.info(
         "document_tier3_analyzed",
@@ -279,22 +338,53 @@ async def _tier3_analyze(db: AsyncSession, document: Document, content: bytes) -
         document_type=document.document_type,
         has_analysis=analysis is not None,
         findings_count=findings_count,
+        review_reason=review_reason,
     )
 
 
 async def _extract_branch(
     db: AsyncSession, document: Document, content: bytes, extractor: Extractor
-) -> None:
+) -> bool:
     """Run the registered extractor, persist a versioned extraction (+ cost), set terminal status.
 
     Type-agnostic (LP-39c): any extractor result is stored uniformly via
     ``create_extraction_version`` (its ``data.model_dump`` JSON), and the
     typed-core/transactions/catch-all shape just rides in that JSON.
+
+    Returns ``True`` when the extraction was a re-runnable infrastructure outcome (a THROTTLE) whose need
+    must NOT be advanced — the caller skips the needs update so a transient blip cannot drive the matching
+    OPEN need to REJECTED (unrecoverable on re-run). ``False`` for a completed or content-failed extraction.
     """
     document.status = DocumentStatus.EXTRACTING
     await db.commit()
 
+    # The FULL, uncapped document — deliberately, unlike classification (15 pages, LP-462) and Tier-3 free
+    # extraction (50 pages, LP-463). A >100-page file therefore hits the provider's document-block limit here
+    # (INFRA_OVERSIZED → a graceful FAILED that LP-471 falls back to Tier-3). Do NOT add a naive page cap: a
+    # 069-style multi-document PACKAGE keeps its 1003 liabilities/REO deep in the file, so a cap trades an
+    # honest crash for SILENT wrong data. The real fix is the splitter (its own ticket) — LP-473 ADR.
     result = await extractor(content, document.mime_type)
+
+    # --- LP-464: a THROTTLED extraction is infrastructure, not a content failure - #
+    # The extraction call never completed — it was rate-limited (the LP-462 retry is
+    # shared, so this only survives a sustained burst). Recording it as a FAILED
+    # extraction would read as a coverage gap and corrupt every downstream audit —
+    # the exact corrosion LP-462 fixed for classification, now on the extraction
+    # path. Gate BEFORE persisting an extraction version: no content was produced,
+    # so nothing is recorded as content; the document is flagged re-runnable.
+    # (109 extractors surface the call's ``failure_reason`` as ``reasoning``, so the
+    # throttle marker rides that channel — no per-extractor change.)
+    if result.status == ExtractionStatus.FAILED and result.reasoning == INFRA_RATE_LIMITED:
+        document.status = DocumentStatus.NEEDS_REVIEW
+        document.processing_error = "extraction throttled (rate_limited) — re-runnable"
+        await db.commit()
+        logger.info(
+            "document_needs_review",
+            document_id=str(document.id),
+            reason="rate_limited",
+            infra_failure=True,
+        )
+        return True  # re-runnable infra — the caller must NOT advance needs (see docstring)
 
     # The model that ACTUALLY ran (B1): under AI_PROVIDER=bedrock this is the
     # inference-profile id, not the tier value. Recording the tier value instead would
@@ -322,17 +412,42 @@ async def _extract_branch(
         model_used=invoked_model,
         tokens_used=tokens_used,
         cost_estimate=cost_estimate,
-        error_detail=result.reasoning if result.status == ExtractionStatus.FAILED else None,
+        error_detail=failure_detail(result.status, result.reasoning),
         confidence=reported_confidence,
         confidence_source=confidence_source,
     )
 
-    if result.status == ExtractionStatus.FAILED or result.confidence < _CONFIDENCE_THRESHOLD:
+    if result.status == ExtractionStatus.FAILED:
+        # Genuinely EMPTY (derive_status: nothing read → FAILED; PARTIAL keeps its fields and never lands
+        # here). The FAILED extraction version above already records WHY (error_detail = result.reasoning —
+        # oversized / parse / "AI call failed"; rate_limited was carved out by the throttle gate). LP-471:
+        # fall back to Tier-3 free extraction so the document is not left with zero data. ``review_reason``
+        # keeps it NEEDS_REVIEW (the typed extraction still errored — a human should see it) and the FAILED
+        # version is NOT hidden. If the fallback ALSO fails (069's oversized payload defeats it too),
+        # _tier3_analyze is graceful (analysis None) and the document ends NEEDS_REVIEW with no untyped data —
+        # that one needs the LP-464 page cap, and the fallback cannot save it.
+        # ``processing_error`` is UI-shown and MUST stay PII-safe (the module invariant above), and the log
+        # carries no extracted content — so DON'T interpolate ``result.reasoning`` here: for an all-null-parse
+        # FAILED it is the model's free-text reasoning and can quote document details. The raw reason is
+        # already persisted in the FAILED extraction version's ``error_detail`` above, the access-controlled
+        # place for it (LP-471 review).
+        document.processing_error = "extraction failed — fell back to Tier 3 free extraction"
+        await _tier3_analyze(db, document, content, review_reason="extraction_error")
+        logger.info(
+            "document_extraction_fell_back_to_tier3",
+            document_id=str(document.id),
+        )
+        # A CONTENT failure (not a throttle) — the need is correctly advanced to REJECTED below.
+        return False
+    if result.confidence < _CONFIDENCE_THRESHOLD:
+        # LOW confidence but NOT empty — the extraction captured typed fields (LP-471 A6: do NOT fall back;
+        # mixing typed + untyped data for one document would let a reader conflate them). Keep the typed
+        # fields; a human reviews. No Tier-3 fallback.
         document.status = DocumentStatus.NEEDS_REVIEW
-        document.processing_error = "extraction failed or low confidence"
+        document.processing_error = "extraction low confidence"
         await db.commit()
-        logger.info("document_needs_review", document_id=str(document.id), reason="extraction")
-        return
+        logger.info("document_needs_review", document_id=str(document.id), reason="low_confidence")
+        return False
 
     document.status = DocumentStatus.COMPLETED
     # The needs update (satisfaction-matching) is enqueued once, per-file-serialized,
@@ -340,6 +455,18 @@ async def _extract_branch(
     # under concurrent same-file arrivals). Record any findings the extraction
     # surfaced (LP-66) — e.g. a divorce decree's obligations → findings (LP-63 loop).
     findings_count = await record_findings_from_extraction(db, document, result.data)
+    # LP-474 — deterministic self-consistency checks: two extracted values that must DIFFER came out
+    # equal (e.g. state tax == federal tax withheld). FLAG a distinct CONSISTENCY finding — never
+    # rewrite the value, never fail. The coverage status is left untouched, so an accuracy flag is
+    # distinguishable from a coverage PARTIAL. No model call (deterministic).
+    for violation in run_consistency_checks(document.document_type, result.data):
+        await create_document_finding(
+            db,
+            document=document,
+            finding_type=DocumentFindingType.CONSISTENCY,
+            description=f"Possible extraction error — {violation.check.label}",
+            details={"check": violation.check.label, "detail": violation.detail},
+        )
     await db.commit()
     logger.info(
         "document_completed",
@@ -349,6 +476,7 @@ async def _extract_branch(
         cost_estimate=cost_estimate,
         findings_count=findings_count,
     )
+    return False  # completed normally — advance needs as usual
 
 
 async def _mark_failed(db: AsyncSession, document: Document, document_id: str) -> None:

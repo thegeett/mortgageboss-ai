@@ -1,0 +1,147 @@
+# DT-6 — Stated housing payment vs. the servicer's billed payment — DETERMINISTIC structural rule SPEC
+# (LP-495a).
+#
+# For an obligation the application DOES disclose, the monthly payment it states should cover what the
+# servicer actually bills. A 1003 commonly carries principal and interest only while the servicer bills a
+# full PITIA, and the difference is the escrow — so the debt-to-income ratio understates the obligation.
+#
+# ⚠️ THIS RULE CAN NEVER PRODUCE `fired`, AND THAT IS A DESIGN PROPERTY PINNED BY TEST. An understated
+# payment is a DISCREPANCY, not a defect: a property under contract, a loan being paid off at closing, or
+# a payment about to change on an escrow re-analysis are all ordinary reasons the two figures differ. The
+# rule SURFACES it as `needs_review`.
+#
+# ⚠️ IT NEVER ASSERTS RETENTION, AND IT DOES NOT READ `property.is_retained_reo` OR
+# `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by
+# test_reo_reconciliation_lp495a.py::test_retention_tags_are_not_wired_into_either_rule). Whether the property is being retained is exactly the question
+# this rule hands to the processor rather than answering.
+#
+# ⚠️ THE STATEMENT'S `monthly_payment` IS ALREADY THE PITIA — IT IS NOT ADDED TO `escrow_amount`.
+# This is the rule's single most important correctness point, and it is a MEASURED fact about the
+# extractor, not an assumption. `app/ai/prompts/extraction/mortgage_statement.txt` defines the fields as:
+#     monthly_payment  (number)  the total monthly payment (principal+interest+escrow)
+#     escrow_amount    (number)  the escrow portion of the payment, if shown
+# Escrow is a COMPONENT of the total, not an addend. Summing them would double-count escrow on all 50 of
+# the 67 corpus statements that fill both fields and report a shortfall on nearly every file — the CO-5
+# mistake (a 30-day delinquency figure compared against a 60-day cap) repeated in a new place. The escrow
+# figure is carried into the REASONING instead, because it is usually the EXPLANATION for a real
+# shortfall.
+#
+# ⚠️ ONE MATCHER SERVES RE-1 AND DT-6 (ADR-375) — see RE-1.yaml. DT-6 asks its question ONLY of an
+# obligation RE-1's matcher already matched; an unmatched statement resolves to couldnt_check here rather
+# than being reported a second time under a second rule.
+#
+# ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION. No source establishes
+# a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so any band here
+# would be INVENTED — the exact ADR-361 failure. The comparison is exact to the cent, and a difference of
+# any size routes to needs_review, which costs a processor one glance and never an automatic finding.
+#
+# ⚠️ THE "OR NET RENTAL" PATH IN THE CATALOG IS UNAVAILABLE AND IS NOT FAKED. The snapshot models
+# `ScheduleEPropertyRecord` (address, rents, expenses, net) but there are ZERO property rows across the 15
+# real tax returns in the corpus (LP-495a Phase A), so B3-3.8-01's 75%-of-gross-rent factor is NOT used
+# and is not cited here. Recorded so the next reader does not go looking for it.
+
+rule_id: DT-6
+name: Stated housing payment vs. servicer's billed payment
+category: DTI
+
+kind: structural          # must equal rule_kinds.csv (DT-6 = structural)
+numeric_check: false      # ⚠️ the COMPARISON is numeric, but the rule reads a resolved enum verdict, not a
+                          # ratio against a threshold — there is no numeric bookend and no threshold
+
+criteria: >-
+  Where a mortgage statement has been matched to a liability the borrower stated on the application, the
+  monthly payment stated for that liability should be at least the total monthly payment the servicer
+  bills. This reads the derived reo.statement_payment_coverage. A stated payment below the billed total is
+  surfaced for confirmation — the escrow portion is the usual explanation, and the property may be under
+  contract, in which case the stated figure may be correct. A statement not matched to exactly one stated
+  liability, a statement with no total monthly payment, and a stated liability with no monthly payment
+  each resolve to couldnt_check — never to a guessed comparison and never to a confident pass.
+
+applicability:
+  scope: every mortgage statement in the loan file that matched a stated mortgage liability
+  trigger: >-
+    document.document_type == mortgage_statement. Any other document is not_applicable. The
+    "matched" half of the scope is carried by the tag's "unknown" (an unmatched statement), which the gate
+    routes to couldnt_check — so DT-6 never double-reports the discrepancy RE-1 already surfaced.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — an exact comparison, no threshold
+  values: {}
+  guideline_text: >-
+    The debt-to-income ratio is computed from the monthly payments stated on the loan application. Where a
+    servicer's statement bills more than the application states for the same obligation, the ratio
+    understates the borrower's actual monthly obligation. The difference is commonly the escrow portion —
+    a loan application often carries principal and interest only — but it may also indicate a payment that
+    has changed on an escrow re-analysis, or a property under contract whose payment will not continue.
+
+required_inputs:
+  - name: statement_payment_coverage
+    snapshot_path: 'tags.by_subject[<mortgage statement content_id>]["reo.statement_payment_coverage"]'
+    description: >-
+      whether the application's stated monthly payment covers the servicer's billed total for a MATCHED
+      obligation (derived, LP-495a): "covered" / "short", and "unknown" when the statement was not matched
+      to exactly one stated liability or either payment figure is missing. ⚠️ The billed total is the
+      statement's `monthly_payment`, which ALREADY includes escrow — escrow is not added to it.
+
+subject_enumeration: per_document
+subject_key_fields: [document]
+
+evidence_required: >-
+  The payment stated on the application, the total monthly payment the servicer bills, and the escrow
+  portion within that total when the statement shows one — inline on the finding, so a processor sees the
+  size of the gap and its most likely explanation without reopening both documents.
+
+guideline_reference: "Fannie Mae Selling Guide B3-6-02 (Debt-to-Income Ratios) — the monthly housing obligation used in the DTI is the full payment including escrowed taxes and insurance."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ A DOCUMENT-TYPE APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487) — identical to RE-1's, because
+  # both rules read the same matcher over the same documents.
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: mortgage_statement
+  # ⚠️ FALSE DELIBERATELY — a missing mortgage statement is not a gap (see RE-1.yaml).
+  applicability_expected: false
+  load_bearing_tags:
+    - reo.statement_payment_coverage
+  gated_tags:
+    - reo.statement_payment_coverage
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: reo.statement_payment_coverage, op: eq, value: "covered"}
+      reasoning: >-
+        the monthly payment stated on the application for this obligation is at least the total monthly
+        payment the servicer bills
+    # ⚠️ needs_review, NEVER fired. A short stated payment can be entirely correct for a property under
+    # contract — see the header.
+    - verdict: needs_review
+      when_tags:
+        - {tag: reo.statement_payment_coverage, op: eq, value: "short"}
+      reasoning: >-
+        the application states a lower monthly payment for this obligation than the servicer's statement
+        bills — if the property is being retained the debt-to-income ratio may understate the obligation,
+        and if it is under contract the stated figure may be correct
+      how_to_fix: >-
+        Compare the payment stated on the application against the statement's total monthly payment. If
+        the application carries principal and interest only, update it to the full payment including
+        escrowed taxes and insurance and re-check the DTI. If the property is under contract or being paid
+        off at closing, document that so the obligation is excluded on the correct basis.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. An unmatched statement, or a missing payment on either
+      # side, must never read as "the stated payment covers it".
+      default: true
+      reasoning: >-
+        the application's stated payment could not be compared against this statement — the statement was
+        not matched to exactly one stated mortgage liability, the statement states no total monthly
+        payment, or the matching liability states no monthly payment
+      how_to_fix: >-
+        Confirm which stated liability this statement belongs to, and that both the application and the
+        statement state a monthly payment. Where the statement's obligation is not on the application at
+        all, that is reconciled first (see the undisclosed-mortgage-obligation check).

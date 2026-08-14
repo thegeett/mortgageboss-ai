@@ -270,6 +270,11 @@ def map_ltv(ltv: LtvCalculation) -> CalculationEntry | None:
             "ltv": _money(ltv.ltv),
             "cltv": _money(ltv.cltv),
             "hcltv": _money(ltv.hcltv),
+            # LP-496 — the exact figures above, the B2-1.2-01 delivered whole percents here. Both
+            # are shown: a bare "81" would hide whether the ratio was 80.01 or 80.99.
+            "ltv_delivered": _money(ltv.ltv_delivered),
+            "cltv_delivered": _money(ltv.cltv_delivered),
+            "hcltv_delivered": _money(ltv.hcltv_delivered),
             "value_basis": _money(ltv.value_basis),
             "value_basis_label": ltv.value_basis_label,
             "appraised_value_source": ltv.appraised_value_source,
@@ -305,6 +310,15 @@ def map_reserves(view: CalculatorView) -> CalculationEntry | None:
     PITI divisor → months not computable) — NOT on the ``headline`` display placeholder,
     so a change to that presentation string can't turn a not-computed reserves into a
     fabricated present entry.
+
+    LP-498 review — ``months_available`` IS PROJECTED, and it was not. AS-4 declares
+    ``months_available: {calc: [reserves, months_available]}``; this dict carried headline / status /
+    program only, so ``_calc_operand``'s ``entry.value.get("months_available")`` returned None, the
+    operand failed, and AS-4 resolved to ``couldnt_check`` for every subject on every real file. The
+    defect survived activation because every AS-4 test hand-builds the key (fire_path_scenarios,
+    test_assets_family) and none routes through ``build_calculations_section`` — so the rule was
+    proven against a snapshot shape production never produces. ``months_required`` goes with it: the
+    rule reads its requirement from a tag, but a reader comparing the two surfaces needs both here.
     """
     if not view.computed:
         return None
@@ -314,6 +328,8 @@ def map_reserves(view: CalculatorView) -> CalculationEntry | None:
             "headline": view.headline,
             "status": view.status,
             "program": view.program,
+            "months_available": _money(view.months_available),
+            "months_required": _money(view.months_required),
         },
         lines,
     )

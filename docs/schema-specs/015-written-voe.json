@@ -32,7 +32,9 @@
     {"name": "employer_signature_and_date", "type": "date", "why": "CL-4 (certification date must fall in the window).", "rules": ["CL-4"], "reason_class": "rule", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null},
     {"name": "direct_return_to_lender_indicator", "type": "str", "why": "processor / independence (VOE not handled by the borrower).", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": "The 'returned directly to lender' checkbox — an independence signal; report the checkbox state as text."},
     {"name": "applicant_authorization_signature", "type": "str", "why": "processor: borrower authorized the verification.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": "signature", "pii": null, "exists_today": false, "prompt_hint": null},
-    {"name": "ytd_income", "type": "Decimal", "why": "processor: YTD earnings supports base-pay reasonableness / income trend.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null}
+    {"name": "ytd_income", "type": "Decimal", "why": "processor: YTD earnings supports base-pay reasonableness / income trend.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": true, "prompt_hint": null},
+    {"name": "work_location", "type": "str", "why": "the actual work location / worksite (distinct from corporate employer_address)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "client_or_assignment_name", "type": "str", "why": "for a staffing-agency VOE, the client/assignment the employee is placed at", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
   ],
 
   "nested_lists": [

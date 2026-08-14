@@ -3,59 +3,286 @@
   "slug": "government-issued-id",
   "tier": 3,
   "rules_served": [],
-  "summary_hint": "California driver's license for Jordan A. Rivera, DOB 1985-04-12, expires 2028-04-12 — valid, photo and signature present.",
+  "summary_hint": "government-issued photo ID (<government_id_type>) for <full_name>, DOB <date_of_birth>, issued by <issuing_authority> (<issuing_country_or_state>), expires <expiry_date> — the fallback identity type when the specific kind is not a passport/green-card/EAD.",
   "existing_extractor": null,
   "catalog_coverage": "full",
-
   "typed_core": [
-    {"name":"government_id_type","type":"str","why":"identity — driver's license / passport / state ID","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'REAL ID compliant' / star markings are a status signal, not the ID type"},
-    {"name":"issuing_country","type":"str","why":"identity — country of issue","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"country_code","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"issuing_authority","type":"str","why":"identity — DMV / State Dept; source validation","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"document_number","type":"str","why":"PII (highly_restricted) — the credential number; must be masked","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":true},"exists_today":false,"prompt_hint":null},
-    {"name":"full_legal_name","type":"str","why":"identity + PII — name on the credential; borrower match","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"date_of_birth","type":"date","why":"PII (highly_restricted) — identity/age verification","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"expiration_date","type":"date","why":"processor — must be unexpired through closing (cheap future rule)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"issue_date","type":"date","why":"processor — issuance recency","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"document_status","type":"str","why":"processor — valid / expired / revoked","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"place_of_birth","type":"str","why":"identity — secondary identifier (passports)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"nationality_or_citizenship","type":"str","why":"processor — citizenship/residency eligibility signal","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"sex","type":"str","why":"identity — secondary descriptor","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"residential_address","type":"str","why":"identity — address consistency; potential PII","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"photo_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
-    {"name":"signature_present","type":"str","why":"processor — authenticity/completeness","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null}
+    {
+      "name": "document_type_as_printed",
+      "type": "str",
+      "why": "identity — the card genre as printed (passport / permanent resident / employment authorization / state ID)",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "surname",
+      "type": "str",
+      "why": "identity — family name as printed",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "given_names",
+      "type": "str",
+      "why": "identity — given/first + middle names as printed",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "full_name",
+      "type": "str",
+      "why": "identity — the individual; attaches to the borrower for ID-1 name matching",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "date_of_birth",
+      "type": "date",
+      "why": "PII (highly_restricted) + identity — disambiguates same-named individuals; unmasked (ID-3 matches on it)",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "document_number",
+      "type": "str",
+      "why": "PII (highly_restricted) + identity — the primary front number (passport no / card # / ID #)",
+      "rules": [],
+      "reason_class": "pii",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": {
+        "kind": "ACCOUNT",
+        "pre_masked": true
+      },
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "uscis_or_a_number",
+      "type": "str",
+      "why": "PII (highly_restricted) — the USCIS#/A-Number on a green card or EAD; identity/linkage",
+      "rules": [],
+      "reason_class": "pii",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": {
+        "kind": "ACCOUNT",
+        "pre_masked": true
+      },
+      "exists_today": false,
+      "prompt_hint": "USCIS#/A-Number/Alien Reg. No. (8-9 digits, often NNN-NNN-NNN) — NOT the card number"
+    },
+    {
+      "name": "issue_date",
+      "type": "date",
+      "why": "processor — when the document was issued (passport/ID); null on a green card",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "expiry_date",
+      "type": "date",
+      "why": "processor — headline: is the document unexpired through closing ('Date of Expiry'/'Card Expires')",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "valid_from_date",
+      "type": "date",
+      "why": "processor — an EAD's 'Valid From'; null elsewhere",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "resident_since_date",
+      "type": "date",
+      "why": "processor — a green card's 'Resident Since'; null elsewhere",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "category_code",
+      "type": "str",
+      "why": "processor — immigration category verbatim (EAD 'C26', green card 'E26'); null on passport/ID",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": "capture the code verbatim (e.g. C26, E26) beside 'Category'",
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "employment_terms_or_restriction",
+      "type": "str",
+      "why": "processor — an EAD's Terms & Conditions / restriction line (e.g. 'None', 'NOT VALID FOR REENTRY')",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "issuing_country_or_state",
+      "type": "str",
+      "why": "processor — issuing country (passport) or issuing US state (state ID)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "issuing_authority",
+      "type": "str",
+      "why": "processor — the issuing office/authority (passport office, USCIS, a state DMV)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "place_or_country_of_birth",
+      "type": "str",
+      "why": "processor — 'Place of Birth' (passport/ID) or 'Country of Birth' (green card/EAD)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "nationality_or_citizenship",
+      "type": "str",
+      "why": "processor — nationality as printed (passports print this)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "place_of_issue",
+      "type": "str",
+      "why": "processor — a passport's 'Place of Issue' (city); null elsewhere",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "government_id_type",
+      "type": "str",
+      "why": "identity — for a generic ID, the kind (State ID / National ID); null for passport/green-card/EAD",
+      "rules": [],
+      "reason_class": "identity",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    },
+    {
+      "name": "residential_address",
+      "type": "str",
+      "why": "processor — a residential address if the document prints one",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": false,
+      "prompt_hint": null
+    }
   ],
-
   "nested_lists": [],
-
   "rejected": [
-    {"name":"document_title, form_number, form_revision_date, document_status_or_version","reason":"classification/version metadata; document_status (Credential group) is the real status field"},
-    {"name":"issuer_name, issuer_address, issuer_phone, issuer_email_or_url","reason":"issuing_authority carries the source; an ID has no contact-us block"},
-    {"name":"party_names, party_addresses","reason":"duplicate full_legal_name / residential_address"},
-    {"name":"property_address, loan_number, account_case_reference_number","reason":"not present on an ID; no consumer"},
-    {"name":"effective_date, statement_period_start/end, document_issue_date","reason":"duplicate/adjacent to issue_date / expiration_date"},
-    {"name":"signature_blocks, notary_block","reason":"an ID is not executed; signature_present is the relevant flag"},
-    {"name":"machine_readable_zone","reason":"highly_restricted; full re-encoding of all PII — no consumer, high leak risk"},
-    {"name":"barcode_or_chip_data","reason":"highly_restricted biometric/PII key_value[]; no consumer"},
-    {"name":"legal_presence_or_use_restrictions","reason":"prose restrictions; no consumer; leave to catch-all"},
-    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+    {
+      "name": "sex",
+      "reason": "OPTIONAL; no mortgage consumer and adds protected-class exposure — dropped from the shared core (LP-472, aligning to spec 108's rejection)"
+    },
+    {
+      "name": "machine_readable_zone (MRZ)",
+      "reason": "re-encodes name/DOB/number/expiry already typed, and its contiguous digit run trips the at-rest _LONG_DIGITS guard; captured in the catch-all if read (LP-472)"
+    },
+    {
+      "name": "photo_present / signature_present",
+      "reason": "no mortgage consumer; a card always has them"
+    },
+    {
+      "name": "receipt_number / i94_admission_number / visa_number / passport_number (as a separate field)",
+      "reason": "not printed on the identity card itself (they belong to the I-797/visa foil); the catch-all captures any that appear"
+    }
   ],
-
   "encoding_variations": [
-    "government_id_type — 'DRIVER LICENSE', 'DL', 'OPERATOR LICENSE', 'REAL ID', passport 'P<'; carry issuing_authority alongside to disambiguate a state DL from a state ID",
-    "date_of_birth — 'DOB', 'Date of Birth', '3 DOB', MRZ YYMMDD; formats vary by country — normalize to ISO date, but the MRZ form is a different encoding of the same fact",
-    "expiration_date — 'EXP', '4b', 'Expires'; on some IDs the AAMVA field number (4b) is the only label"
+    "The four kinds share ONE field set (LP-472); a given card fills only its printed fields and nulls the rest.",
+    "Expiry is 'Date of Expiry' (passport), 'Card Expires' (green card / EAD), or 'Expiration' (ID) — all map to expiry_date.",
+    "A green card shows 'Resident Since' and no issue date; an EAD shows 'Valid From' — these are distinct date fields, not issue_date.",
+    "USCIS#/A-Number (green card / EAD) is distinct from the card's front number — keep the A-number in uscis_or_a_number, the card number in document_number."
   ],
-
-  "open_questions": [
-    {"id":1,"q":"document_number masking — extract already-masked (map to existing id_number_masked, pre_masked true) or extract raw and let the snapshot mask (pre_masked false)?","options":["pre-mask at extraction (id_number_masked, pre_masked true)","extract raw, snapshot masks (pre_masked false)"],"recommendation":"pre-mask at extraction to match id_number_masked and never store the full number GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false},
-    {"id":2,"q":"full_legal_name masking — names are normally unmasked, but this is a highly-sensitive identity document","options":["keep typed and unmasked (needed for borrower match)","register as masked PII"],"recommendation":"keep typed and unmasked but flag for the PII reviewer GEET'S DECISION (LP-439): name UNMASKED (typed, plain) — every name in the system is plain and ID-1 tolerant-matches on them; masking would break ID-1.","blocks_implementation":false},
-    {"id":3,"q":"residential_address — promote to a registered PII field, or accept as standard?","options":["registered PII field (pre_masked false)","accept as standard"],"recommendation":"keep typed (out of the unmasked catch-all) and flag pre_masked false for review GEET'S DECISION (LP-438): mask account-like identifiers (policy/account/plan numbers, wire/ACH trace, check references) via _PII_FIELDS; leave addresses and public-record case numbers PLAIN; DOB is unmasked (pii null).","blocks_implementation":false}
-  ],
-
+  "open_questions": [],
   "notes": [
-    "No rules consume this type today, so there is no rule floor. This document is nearly all PII: its purpose is identity verification, so most typed fields exist to protect PII or to establish identity/validity. Aggressive rejection of the machine-readable/biometric fields keeps unmasked data out of the catch-all.",
-    "Prompt hint (doc-level): US driver's licenses use AAMVA element codes (1 = family name, 2 = given name, 4b = expiry, 4d = document number, 15 = sex, 8 = address); the model should map these codes, not just visual labels.",
-    "Prompt hint (doc-level): Passport MRZ (two P< lines) encodes name, number, nationality, DOB, sex, expiry — do NOT copy the raw MRZ into any field; read the human-readable zone.",
-    "PII note: full_legal_name is listed in the PII section but names are not masked by convention — kept typed with pii null (reason_class identity), flagged for the PII reviewer. document_number, date_of_birth, and residential_address are the registered PII fields."
+    "LP-472: consolidated onto the shared identity core; extracts via the shared extract_identity_document. Typed_core IDENTICAL across the family (drift-locked by test).",
+    "The generic fallback ID: government_id_type records the kind. Prefer drivers_license/passport when the specific kind is clear.",
+    "date_of_birth is unmasked (ID-3); document_number is masked (ACCOUNT)."
   ]
 }

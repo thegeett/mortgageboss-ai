@@ -1,0 +1,90 @@
+# CR-13 — Credit report validity at closing — DETERMINISTIC calculative rule SPEC (LP-485).
+#
+# Is the credit report still current when the loan closes? credit.report_age_months_at_closing carries the
+# COMPLETE calendar months from the credit pull to closing; this rule compares that against the guideline
+# window below.
+#
+# ⚠️ CALENDAR MONTHS, NOT 120 DAYS. The guideline says "four months"; a 30-day approximation differs from
+# the calendar by up to three days at four months — enough to pass a document the guide fails, or fail one
+# it passes. _full_months_between counts COMPLETE months (a partial month does not count).
+
+rule_id: CR-13
+name: Credit report validity at closing
+category: Credit
+
+kind: calculative           # must equal rule_kinds.csv (CR-13 = calculative, deterministic_bookend)
+numeric_check: true         # must equal rule_kinds.csv — a months-vs-window compare
+
+criteria: >-
+  The credit documents in the file must be no more than four months old on the note date. This compares the
+  derived credit.report_age_months_at_closing (calendar months from the credit report's pull date
+  to the loan's closing date) against that window. When the file carries consecutive credit documents, the
+  MOST RECENT determines whether the age requirement is met — the recipe gathers one pull date and abstains
+  when the file's documents disagree. Absent or unparseable dates resolve to couldnt_check, never a guessed
+  pass.
+
+applicability:
+  scope: the loan's credit report pull date vs its closing (note) date
+  trigger: >-
+    Any file carrying a credit report with a stated pull date and a known closing date. A file with no
+    credit report yields an unknown age and couldnt_checks — it is never read as "the credit is current".
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv (the CATALOG's column; the bar carries our sign-off)
+  threshold_needs_signoff: true   # must equal rule_kinds.csv
+  values:
+    # ⚠️ SOURCE: Fannie Mae Selling Guide B1-1-03, "Allowable Age of Credit Documents and Federal Income
+    # Tax Returns", page dated 04/02/2025 — "the credit documents must be no more than four months old on
+    # the note date", for all mortgage loans (existing and new construction).
+    # FOUR CALENDAR MONTHS. Not 120 days. The tag counts calendar months for exactly this reason.
+    max_credit_report_age_months: "4"
+  guideline_text: >-
+    Fannie Mae Selling Guide B1-1-03 (Allowable Age of Credit Documents and Federal Income Tax Returns),
+    page dated 04/02/2025: credit documents must be no more than four months old on the note date, for all
+    mortgage loans (existing and new construction). Where consecutive credit documents are in the file, the
+    most recent one determines whether the age requirement is met.
+
+required_inputs:
+  - name: credit_report_age_months_at_closing
+    snapshot_path: 'tags.by_subject["loan"]["credit.report_age_months_at_closing"]'
+    description: >-
+      calendar months from the credit report's pull date to the loan's closing date (derived,
+      LP-485): "unknown" = either date is absent, unparseable, or the file's documents disagree.
+
+subject_enumeration: loan          # credit.report_age_months_at_closing is produced at the loan subject
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The credit report's pull date, the loan's closing date, and the calendar months between them —
+  inline on the finding.
+
+guideline_reference: "Fannie Mae Selling Guide B1-1-03 (Allowable Age of Credit Documents and Federal Income Tax Returns), page dated 04/02/2025 — credit documents must be no more than four months old on the note date."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). One fired outcome (older than the window) and a default
+# satisfied. An "unknown" age coerces to None → couldnt_check via the gate, so a file with no credit report
+# can never read as "the credit report is current" (never clear on a missing document).
+deterministic:
+  load_bearing_tags:
+    - credit.report_age_months_at_closing
+  gated_tags:
+    - credit.report_age_months_at_closing
+  operands:
+    age_months: {tag: credit.report_age_months_at_closing}
+    max_months: {reference: max_credit_report_age_months}
+  outcomes:
+    - verdict: fired
+      # STRICTLY greater: "no more than four months old" means four months is acceptable.
+      when_compare: {op: ">", left: age_months, right: max_months}
+      reasoning: >-
+        the credit report is {age_months} calendar month(s) (a partial month counts as a full one) old at the loan's closing date, beyond
+        the {max_months}-month limit — a re-pull is required before the note date
+      how_to_fix: >-
+        Order a new credit report (or the most recent one, if the file already holds a newer pull) so the
+        credit documents are no more than four months old on the note date.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the credit report is {age_months} calendar month(s) (a partial month counts as a full one) old at closing, within the
+        {max_months}-month allowable age

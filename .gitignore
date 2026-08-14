@@ -56,6 +56,12 @@ logs/
 # backend/app/storage/ Python package (which is source code, not uploads).
 /storage/
 /backend/storage/
+# Extraction-bench output now lives INSIDE storage (covered above); these cover the pre-fix sibling
+# location so a prior run's borrower-derived output can never be committed.
+/bench_output/
+/backend/bench_output/
+# A dev-chosen BENCH_OUTPUT_DIR inside the repo — borrower-derived output must never be committed.
+/mortgageboss-batch-bench-out/
 
 # ---- Terraform ----
 # Saved plans are what `scripts/deploy` applies. They are binary, environment- and

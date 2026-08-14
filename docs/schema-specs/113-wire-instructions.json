@@ -1,0 +1,49 @@
+{
+  "document_type": "wire_instructions",
+  "slug": "wire-instructions",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "Closing wire instructions from <issuing_firm_name>: beneficiary <beneficiary_name> at <bank_name> (routing/account masked).",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"beneficiary_name","type":"str","why":"identity — who receives the wire (the title/law-firm/escrow account holder)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The full beneficiary line, including any 'c/o' — unmasked"},
+    {"name":"beneficiary_address","type":"str","why":"identity — the beneficiary's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bank_name","type":"str","why":"identity — the receiving bank","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"bank_address","type":"str","why":"identity — the receiving bank's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"aba_routing_number","type":"str","why":"PII — the receiving bank's ABA/wire routing number (9 digits; masked at the snapshot boundary)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The wire/ABA routing number as printed; captured verbatim, masked + hashed at the snapshot boundary"},
+    {"name":"account_number","type":"str","why":"PII — the beneficiary account number the funds go to (masked at the snapshot boundary)","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"The account number as printed; captured verbatim, masked + hashed at the snapshot boundary"},
+    {"name":"account_type","type":"str","why":"processor — the account type when stated (e.g. IOLTA trust account)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"e.g. 'IOLTA', 'trust', 'operating' — only if stated"},
+    {"name":"verification_phone","type":"str","why":"processor — the callback phone to VERIFY the instructions (anti-wire-fraud); a processor must read it, so it stays UNMASKED","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The verification/callback phone as printed, KEEPING its formatting (parentheses/dashes) — do not strip to bare digits"},
+    {"name":"reference_or_memo","type":"str","why":"processor — what to reference on the wire (borrower name / property / file number)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The reference/memo instruction line"},
+    {"name":"issuing_firm_name","type":"str","why":"identity — the firm that issued the instructions (title company / law firm / escrow agent)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The letterhead / title firm name"},
+    {"name":"document_date","type":"date","why":"processor — the date on the instructions, when printed (recency / anti-fraud freshness)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if a date is printed; leave null otherwise (154 has none)"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"is_verified / looks_fraudulent / is_trusted","reason":"JUDGMENTS, not facts — whether the instructions are verified/legitimate is a processor's anti-fraud action, not a value on the page. The type EXISTS to surface the fields (masked) so a processor can verify; it must not pre-judge. Tags describe; rules judge."},
+    {"name":"wire_amount","reason":"a wire-instructions sheet is a PAYEE sheet (where to send), not an amount; the closing amount lives on the CD. Capturing an 'amount' here invites a false match and is not reliably printed."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"},
+    {"name":"swift_or_intermediary_bank","reason":"domestic closing wires rarely carry SWIFT/intermediary detail; when present it is contact/routing minutiae — catch-all"}
+  ],
+
+  "encoding_variations": [
+    "issued by a title company, law firm (IOLTA trust account), or escrow/settlement agent — issuing_firm_name + account_type vary accordingly",
+    "the routing number is 9 digits; the account number is longer — both are bare contiguous digit runs that trip the LP-209 at-rest guard and MUST be masked (registered in _PII_FIELDS)",
+    "verification_phone is usually formatted ((877) 838-0777) — kept unmasked and formatting-preserved so it does not become a bare 10-digit run",
+    "reference_or_memo may embed a file/loan number — scrubbed at the snapshot boundary as a belt-and-braces backstop"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"verification_phone masked or unmasked?","options":["unmasked (processor callback)","masked like an account"],"recommendation":"UNMASKED (GEET'S DECISION, LP-466): it is the anti-fraud callback a processor must read; a formatted phone does not trip the contiguous-digit at-rest guard","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "The reason for the type is PII HANDLING, not a rule (rules_served empty). These currently land in general_correspondence — free-form and UNMASKED. Typed + masked (aba_routing_number, account_number) beats free-form.",
+    "aba_routing_number is a NEW _PII_FIELDS registration (ACCOUNT, from_raw); account_number is already registered globally (reuse).",
+    "reference_or_memo is added to _SCRUB_FREE_TEXT_FIELDS for wire_instructions (the 9+-digit backstop) in case a memo embeds a bare file/loan number."
+  ]
+}

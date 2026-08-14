@@ -183,6 +183,184 @@ async def test_ai_failure_returns_unknown_not_raised(monkeypatch: pytest.MonkeyP
     assert "ai call failed" in result.reasoning.lower()
 
 
+# --------------------------------------------------------------------------- #
+# LP-462 — infrastructure-failure surfacing (throttled vs failed) + the page cap
+# --------------------------------------------------------------------------- #
+
+
+def _client_error(cause: Exception) -> AIClientError:
+    """An AIClientError carrying ``cause`` on __cause__, as ``complete`` raises it (``from exc``)."""
+    err = AIClientError(f"AI call failed: {type(cause).__name__}")
+    err.__cause__ = cause
+    return err
+
+
+def _sdk_error(kind: str, status: int) -> Exception:
+    """A real anthropic SDK error with the given HTTP status (for infra_failure_kind classification)."""
+    import anthropic
+    import httpx
+
+    resp = httpx.Response(status, request=httpx.Request("POST", "http://x"))
+    cls = {
+        "rate": anthropic.RateLimitError,
+        "bad": anthropic.BadRequestError,
+        "auth": anthropic.AuthenticationError,
+    }[kind]
+    return cls(kind, response=resp, body=None)
+
+
+async def test_throttle_tagged_rate_limited_not_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """⚠️ A throttled classification must be DISTINGUISHABLE from a judgment — the corrupting bug LP-462
+    fixes. It returns unknown/0.0 like any failure, but infra_failure='rate_limited' marks it re-runnable."""
+    _mock_complete(monkeypatch, exc=_client_error(_sdk_error("rate", 429)))
+    result = await classify_document(PDF_BYTES, "application/pdf")
+    assert result.document_type == "unknown" and result.confidence == 0.0
+    assert result.infra_failure == "rate_limited"  # NOT a low-confidence judgment
+
+
+async def test_oversized_tagged_oversized(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, exc=_client_error(_sdk_error("bad", 400)))
+    result = await classify_document(PDF_BYTES, "application/pdf")
+    assert result.infra_failure == "oversized"
+
+
+async def test_other_ai_error_tagged_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, exc=_client_error(_sdk_error("auth", 401)))
+    result = await classify_document(PDF_BYTES, "application/pdf")
+    assert result.infra_failure == "failed"  # a real failure, but still not a judgment
+
+
+async def test_throttle_log_carries_infra_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(monkeypatch, exc=_client_error(_sdk_error("rate", 429)))
+    with structlog.testing.capture_logs() as logs:
+        await classify_document(PDF_BYTES, "application/pdf")
+    failed = [e for e in logs if e["event"] == "classification_ai_failed"]
+    assert len(failed) == 1 and failed[0]["infra_failure"] == "rate_limited"
+
+
+def _make_pdf(pages: int) -> bytes:
+    """A real ``pages``-page PDF (each page carries a little text)."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    for i in range(pages):
+        doc.new_page().insert_text((72, 72), f"page {i + 1}")
+    return bytes(doc.tobytes())
+
+
+def _payload_pages(mock: AsyncMock) -> int:
+    """Decode the document block that was actually sent to ``complete`` and count its pages."""
+    import base64 as _b64
+
+    import pymupdf
+
+    message = mock.await_args.kwargs["messages"][0]
+    block = message["content"][0]
+    data = _b64.b64decode(block["source"]["data"])
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        return int(doc.page_count)
+    finally:
+        doc.close()
+
+
+async def test_pdf_over_cap_is_sliced_to_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A >cap PDF is trimmed to classification_max_pages before the call — the BadRequestError fix."""
+    monkeypatch.setattr(classification_module.settings, "classification_max_pages", 15)
+    mock = _mock_complete(
+        monkeypatch,
+        text='{"document_type": "closing_disclosure", "confidence": 0.9, "reasoning": "x"}',
+    )
+    await classify_document(
+        _make_pdf(120), "application/pdf"
+    )  # a 120-page package (would exceed 100)
+    assert _payload_pages(mock) == 15  # only the first 15 pages were sent
+
+
+async def test_pdf_within_cap_sent_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(classification_module.settings, "classification_max_pages", 15)
+    mock = _mock_complete(
+        monkeypatch, text='{"document_type": "w2", "confidence": 0.9, "reasoning": "x"}'
+    )
+    original = _make_pdf(3)
+    await classify_document(original, "application/pdf")
+    import base64 as _b64
+
+    sent = _b64.b64decode(mock.await_args.kwargs["messages"][0]["content"][0]["source"]["data"])
+    assert sent == original  # byte-identical — no re-encode for an under-cap document
+
+
+async def test_image_is_not_page_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cap is PDF-only; an image (single page) is sent unchanged (first_n_pages returns None)."""
+    mock = _mock_complete(
+        monkeypatch,
+        text='{"document_type": "drivers_license", "confidence": 0.9, "reasoning": "x"}',
+    )
+    await classify_document(PNG_BYTES, "image/png")
+    import base64 as _b64
+
+    sent = _b64.b64decode(mock.await_args.kwargs["messages"][0]["content"][0]["source"]["data"])
+    assert sent == PNG_BYTES
+
+
+# --------------------------------------------------------------------------- #
+# LP-463 — document_name (named first) + type_matches_document (the guard)
+# --------------------------------------------------------------------------- #
+
+
+async def test_document_name_and_self_check_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "wiring instructions from a law firm", "document_type": "unknown", '
+            '"type_matches_document": true, "confidence": 0.9, "reasoning": "law-firm wire"}'
+        ),
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.document_name == "wiring instructions from a law firm"
+    assert r.type_matches_document is True
+    assert r.document_type == "unknown"
+
+
+async def test_type_mismatch_false_is_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 158/T4 shape: the model picks a type but flags it as NOT matching the document it named."""
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "a Canadian T4 slip", "document_type": "w2", '
+            '"type_matches_document": false, "confidence": 0.85, "reasoning": "T4, closest is w2"}'
+        ),
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.type_matches_document is False  # flagged; the pipeline will not apply the w2 label
+    assert r.document_name == "a Canadian T4 slip"
+
+
+async def test_self_check_defaults_true_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A response without the field (older/degraded) must NOT spuriously flag — default True (fail safe)."""
+    _mock_complete(
+        monkeypatch, text='{"document_type": "pay_stub", "confidence": 0.9, "reasoning": "x"}'
+    )
+    r = await classify_document(PDF_BYTES, "application/pdf")
+    assert r.type_matches_document is True and r.document_name is None
+
+
+async def test_self_check_log_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_complete(
+        monkeypatch,
+        text=(
+            '{"document_name": "wire instructions", "document_type": "general_correspondence", '
+            '"type_matches_document": false, "confidence": 0.85, "reasoning": "x"}'
+        ),
+    )
+    with structlog.testing.capture_logs() as logs:
+        await classify_document(PDF_BYTES, "application/pdf")
+    ok = [e for e in logs if e["event"] == "classification_succeeded"]
+    assert len(ok) == 1 and ok[0]["type_matches_document"] is False
+    # ⚠️ the free-text document_name (PII-adjacent) is NEVER logged
+    assert "wire instructions" not in " ".join(repr(e) for e in logs)
+
+
 async def test_empty_document_skips_api(monkeypatch: pytest.MonkeyPatch) -> None:
     mock = _mock_complete(monkeypatch, text="{}")
     result = await classify_document(b"", "application/pdf")

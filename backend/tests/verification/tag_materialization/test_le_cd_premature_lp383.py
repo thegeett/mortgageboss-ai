@@ -1,4 +1,16 @@
-"""LP-383 — LE/CD extraction is PREMATURE: no rule consumes an LE/CD field yet (a reported, pinned finding).
+"""LP-383 — LE/CD extraction was PREMATURE by the LP-383 discipline (no rule consumer) — SUPERSEDED by LP-470.
+
+⚠️ UPDATE (LP-470): LP-470 promoted loan_estimate + closing_disclosure Tier 2 -> Tier 1 with a HEADLINE-block
+extractor, on PROCESSOR-VISIBILITY grounds (the wire_instructions / ACORD 25 standard, ADR-362/363), NOT on a
+rule consumer. So the LP-383 "no extractor is registered" assertion below is INVERTED — an extractor now
+exists. The REST of LP-383's map still holds and is KEPT here, because it is exactly why LP-470 is a
+visibility (not rule-coverage) promotion: there is still NO rule consumer, AS-3 is still inert, no declared
+tag is sourced from an LE/CD field, and DC-1..DC-7 are still out of scope. ⚠️ THE LP-333/369 FIELD-NAME TRAP
+STILL APPLIES: when the cash-to-close calculator (§3B / LP-323-AS-B) is built, it MUST match the headline
+extractor's field names (total_closing_costs, cash_to_close, ...) or it silently reads nothing — see ADR-366's
+"what would change it".
+
+Original LP-383 finding (historical): LE/CD extraction is PREMATURE — no rule consumes an LE/CD field yet.
 
 LP-383 was queued as "extract Loan Estimate / Closing Disclosure." LP-381/382's discipline: an extraction
 ticket first MAPS the consumer, then extracts ONLY if a real rule resolves once the field exists. The gate of
@@ -56,16 +68,19 @@ def _empty_snapshot() -> Snapshot:
 
 
 # --------------------------------------------------------------------------- #
-# The classifier can ROUTE an LE/CD, but nothing extracts one — no orphaned extractor either way
+# LP-470: the classifier ROUTES an LE/CD, and now a HEADLINE extractor exists — added on VISIBILITY, not a
+# rule consumer (the assertion below is inverted from LP-383; the no-consumer map is pinned by the tests that
+# follow, which STILL hold).
 # --------------------------------------------------------------------------- #
-def test_classifier_catalogs_le_cd_but_no_extractor_is_registered() -> None:
+def test_classifier_catalogs_le_cd_and_lp470_registers_a_headline_extractor() -> None:
     # The routing target exists: an LE/CD document classifies to a known type ...
     for doc_type in _LE_CD:
         assert doc_type in DOCUMENT_TYPE_INDICATORS
-    # ... but NO extractor is registered, so it extracts nothing. (When an extractor is added, it MUST come
-    # with a consumer — update this test and prove the field-name match, the LP-333/369 trap.)
+    # ... and LP-470 registered a headline extractor for each (Tier-2 -> Tier-1 promotion on processor
+    # visibility). ⚠️ There is still NO rule consumer (the tests below pin that); when §3B's cash-to-close
+    # calculator is built it MUST match these field names (the LP-333/369 trap — see the module docstring).
     for doc_type in _LE_CD:
-        assert doc_type not in EXTRACTORS
+        assert doc_type in EXTRACTORS
 
 
 # --------------------------------------------------------------------------- #

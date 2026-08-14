@@ -19,13 +19,19 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
   guideline_text: >-
-    Fannie Mae Selling Guide B3-3.1-09 — income from employment starting after closing may be used only
-    with an offer letter, a start date, and program-specific conditions (e.g. a first-paystub condition).
+    Fannie Mae Selling Guide B3-3.3-03, Employment Offers or Contracts (page dated 03/04/2026) — income
+    from employment that begins AFTER the loan closes may be used only with a fully executed offer or
+    contract identifying the employer, the borrower, the position, the pay type/rate and the START DATE,
+    plus a verbal VOE. Two paths: with a paystub obtained before loan delivery (purchase, principal
+    residence, one-unit, start date within 30 days before to 90 days after the note date), or without
+    one, which additionally requires a non-contingent offer, Special Feature Code 707, and either six
+    months' PITIA reserves or resources covering liabilities plus PITIA from the note date through the
+    start date plus one month. The offer letter's monthly income amount is the qualifying income.
 subject_enumeration: per_document
 subject_key_fields:
   - content_id
 evidence_required: whether an offer letter with a start date is present for future employment
-guideline_reference: "Fannie Mae Selling Guide B3-3.1-09 (future/offer-letter employment)."
+guideline_reference: "Fannie Mae Selling Guide B3-3.3-03, Employment Offers or Contracts (page dated 03/04/2026) — offer/contract with a start date for employment beginning after closing. Supersedes the former B3-3.1-09 citation, which does not resolve: B3-3.1 now ends at -04, and offer-letter employment moved to the B3-3.3 family."
 spec_version: 1
 deterministic:
   applicability:

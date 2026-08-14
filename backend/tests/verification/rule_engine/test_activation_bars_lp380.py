@@ -60,8 +60,11 @@ def test_the_honest_activation_state_is_reported() -> None:
     )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (
-        by.get("no-ai-threshold-pending", 0) == 1
-    )  # PC-7 (LP-411 — the third case, held on Priya's window)
+        by.get("no-ai-threshold-pending", 0)
+        == 5  # LP-494 +CO-4 (date-keyed reserve floor, tier-S step-up)
+    )  # PC-7 (LP-411) + CR-13 + PR-6 (LP-485) + IH-7 (LP-487) — their thresholds are researched and
+    # cited in their specs' reference_values, not in this file (IH-7: Fannie B7-4-01 / B7-3-03, both
+    # pages dated 08/05/2026)
     # LP-390-7 signed off AS-2 + AS-12; LP-390-9 signed off IN-3; LP-393-6 signed off IN-7/IN-10/IN-11/AS-11;
     # LP-429 signed off AS-6 — all validated calibratable-now rules.
     assert all(
@@ -158,9 +161,24 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     validated = {rid for rid, b in bars.items() if b.validated}
     # IN-1/IN-5 (LP-389) + AS-2/AS-12 (LP-390-7) + IN-3 (LP-390-9) + IN-7/IN-10/IN-11/AS-11 (LP-393-6) +
     # IN-6 (calibratable) + PC-7 (no-ai-threshold-pending) — LP-412 signed off the last two.
+    # LP-485 adds CR-13 + PR-6: no-ai-threshold-pending bars whose windows are RESEARCHED AND CITED to the
+    # publisher's live guide (in each spec's reference_values), not Priya-signed. See the file header.
+    # LP-487 adds IH-7 on the same footing: its $1M liability floor and replacement-cost basis are cited to
+    # Fannie B7-4-01 / B7-3-03 (both pages dated 08/05/2026) in the spec, not signed off by Priya.
+    # ⚠️ IH-2 is NOT here: it is no-ai-dependency with validated:false — a matching VOCABULARY, not a
+    # threshold, so there is nothing to validate (the CL-1 precedent).
+    # LP-494 adds CO-4 on exactly the CR-13 / PR-6 / IH-7 footing: SELF-CALIBRATED, not Priya-signed. Both
+    # reserve floors are researched and cited in the spec's reference_values — 10% from B4-2.2-02
+    # (08/05/2026, tier P, fetched) and 15% from LL-2026-03 at tier S, with the failed primary fetch
+    # reported in full on the bar. Holding a researched, cited threshold for a sign-off is the deferral
+    # this project does not do.
     assert (
         validated
         == {
+            "CO-4",
+            "CR-13",
+            "PR-6",
+            "IH-7",
             "IN-1",
             "IN-5",
             "AS-2",
@@ -289,6 +307,61 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-447 — IH-1 (insurance adequacy): no-ai-dependency, deterministic (a normalised dwelling
             # settlement-basis compare). Priya's ADR-340 basis ruling. Structural → ships auto.
             "IH-1",
+            # LP-485 — the date-compare family: CL-1 (rate lock vs closing), CR-13 (credit age), PR-6
+            # (appraisal age). All deterministic; CR-13/PR-6's windows are researched + cited (Fannie
+            # B1-1-03 04/02/2025, B4-1.2-04 06/04/2025) in their specs' reference_values.
+            "CL-1",
+            "CR-13",
+            "PR-6",
+            "CR-12",
+            "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+            "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
+            "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+            "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+            "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
+            "CR-1",  # LP-490a — ratify-pending (self-consistency + ratification, ADR-378)
+            "CR-4",  # LP-490a
+            "CR-8",  # LP-490a
+            "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
+            "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
+            "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
+            "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
+            "TI-6",  # LP-491 — ratify-pending
+            "PR-2",  # LP-492 — appraised value vs purchase price (deterministic)
+            "PR-7",  # LP-492 — appraisal address match (deterministic, PC-3's precedent)
+            "PR-3",  # LP-492 — property type eligibility (ratify-pending)
+            "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
+            "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
+            # LP-495a — ONE matcher serves RE-1 and DT-6 (ADR-375); neither can produce `fired`,
+            # and neither reads the still-orphaned retention tags. All three deterministic.
+            "DT-6",
+            "LO-2",
+            "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474; tag NOT re-kinded)
+            "RE-1",
+            # LP-495b — IN-13 (per-type continuance), IN-14 (rental, 75% calibrated) and OC-3, all
+            # on scenario-fixture rates. DT-7 is built and measured but HELD on its enum gap.
+            "IN-13",
+            "IN-14",
+            "OC-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
+            # LP-496a — program eligibility. PE-1 abstains in the county-dependent band rather than
+            # clearing it (only the property county resolves that band, and it does not reach the
+            # snapshot); PE-3 uses HUD's Adjusted Value, not the catalog's purchase price, and
+            # abstains on a missing Minimum Decision Credit Score. PE-2 and PE-4 are HELD.
+            "PE-1",
+            "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
+            # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
+            # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
+            "FR-3",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -322,6 +395,52 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-15",  # LP-430 — live via its bar (no-ai-dependency, input resolves; terminated-employment)
             "IN-16",  # LP-433 — live via its bar (no-ai-dependency, input resolves; pay-stub-only documentation)
             "IH-1",  # LP-447 — live via its bar (no-ai-dependency, input resolves; dwelling settlement basis)
+            # LP-485 — eligible: CL-1 (no-ai-dependency), CR-13 + PR-6 (no-ai-threshold-pending, windows
+            # researched + cited to Fannie B1-1-03 / B4-1.2-04 in their specs).
+            "CL-1",
+            "CR-12",  # LP-486 — disputed accounts (ADR-376)
+            "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+            "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+            "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
+            "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+            "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+            "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
+            "CR-1",  # LP-490a — ratify-pending (self-consistency + ratification, ADR-378)
+            "CR-4",  # LP-490a
+            "CR-8",  # LP-490a
+            "CR-6",  # LP-490a — ratify-pending (negative-case rate only, ADR-378)
+            "CR-10",  # LP-490a — ratify-pending (negative-case rate only)
+            "TI-1",  # LP-491 — title commitment parties (catalog edit to deterministic_only)
+            "TI-2",  # LP-491 — ratify-pending (verdict-level rate; ADR-378)
+            "TI-6",  # LP-491 — ratify-pending
+            "PR-2",  # LP-492 — appraised value vs purchase price (deterministic)
+            "PR-7",  # LP-492 — appraisal address match (deterministic, PC-3's precedent)
+            "PR-3",  # LP-492 — property type eligibility (ratify-pending)
+            "PR-4",  # LP-492 — appraisal completeness (ratify-pending)
+            "PR-5",  # LP-492 — condition rating (ratify-pending)
+            "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only, no firing path)
+            "CO-3",  # LP-494 — condo lane (CO-3 fidelity presence; CO-4 date-keyed reserve floor)
+            "CO-4",
+            "DT-6",  # LP-495a — the REO reconciliation lane + LOE completeness
+            "LO-2",
+            "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
+            "RE-1",
+            "IN-13",  # LP-495b — ratify-pending (scenario-fixture rates)
+            "IN-14",
+            "OC-3",
+            # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
+            # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
+            "DT-7",
+            "PE-1",  # LP-496a — program eligibility (PE-2 / PE-4 held)
+            "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
+            # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
+            # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
+            "FR-3",
+            "CR-13",
+            "PR-6",
         }
     )
     assert not (set(load_activation_bars()) & set(_BASE_ACTIVE))

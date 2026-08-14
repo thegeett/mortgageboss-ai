@@ -25,8 +25,8 @@ from app.verification.rules.kinds import (
 # Phase-0 counts from the xlsx (formalized as-is; the file's "130" title is off by 3).
 _EXPECTED = {
     RuleKindName.CALCULATIVE: 28,  # LP-447 IH-1 reclassified calculative -> structural (ADR-340, Priya's ruling)
-    RuleKindName.STRUCTURAL: 63,  # LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
-    RuleKindName.JUDGMENTAL: 29,
+    RuleKindName.STRUCTURAL: 65,  # LP-494 +CO-5 +CO-3 (was judgmental — its real inputs are typed questionnaire fields); LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
+    RuleKindName.JUDGMENTAL: 27,  # LP-494 -CO-5 -CO-3
     RuleKindName.OUT_OF_SCOPE: 15,
 }
 _TOTAL = 135  # LP-430 +IN-15; LP-433 +IN-16
@@ -102,15 +102,26 @@ def test_validation_gate_all_pending_and_signoff_set() -> None:
     assert all(not rk.priya_validated for rk in rules.values())
     assert len(unvalidated_rules()) == _TOTAL
 
-    # Threshold sign-off set: calculative rules with a regulatory threshold (21 of 28 after LP-447 —
-    # IH-1's threshold_needs_signoff went false when it reclassified structural, ADR-340/Priya's basis ruling).
+    # Threshold sign-off set: calculative rules with a regulatory threshold (19 of 28 after LP-496a —
+    # IH-1's went false at LP-447 when it reclassified structural, and PE-1/PE-3 went false here:
+    # every one of their values is TIER P, read from FHFA's own 2026 release and HUD Handbook 4000.1
+    # this ticket, so there is no pending threshold for an expert to sign off.
+    # LP-497 takes it to 18: AS-4's reserve months are now tier P from B3-4.1-01 (08/07/2024), read
+    # from Fannie's own page, replacing an occupancy-only map whose un-encoded cells were 'Priya-pending'.
     needs = rules_needing_threshold_signoff()
     assert all(rk.kind is RuleKindName.CALCULATIVE for rk in needs)
-    assert len(needs) == 21
+    assert len(needs) == 18
     # The named examples from the architecture summary must be in it.
     ids = {rk.rule_id for rk in needs}
-    for rid in ("AS-1", "IN-1", "CR-6", "PC-4", "PE-1", "DT-1"):
+    # PE-1 was removed from this list at LP-496a — its thresholds are tier P and signed off by
+    # citation, not pending. It is asserted ABSENT below so the removal is deliberate, not a drop.
+    for rid in ("AS-1", "IN-1", "CR-6", "PC-4", "DT-1"):
         assert rid in ids, rid
+    for rid in ("PE-1", "PE-3", "AS-4"):
+        assert rid not in ids, (
+            f"{rid} must NOT need a threshold sign-off — its values are tier P, cited in its spec's "
+            "reference_values and pinned to the recipe constants by test (LP-496a)"
+        )
 
     # Until validated, every needs-signoff rule is a ship-blocker.
     assert len(pending_threshold_signoff()) == len(needs)

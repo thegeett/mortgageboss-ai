@@ -20,10 +20,38 @@ CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
      dues_frequency    (string)  the dues period: "monthly", "quarterly", "annual"
      balance           (number)  the current account balance owed
      due_date          (date)    the payment due date
+     statement_period_start (date) the statement's period START, if a date range is shown
+     statement_period_end   (date) the statement's period END, if a date range is shown
+     prior_balance     (number)  the prior / previous balance carried forward, if shown
+     unit_owner_email  (string)  the UNIT OWNER's email address (the homeowner's, NOT the
+                                  association's contact email), if shown
+     reserve_percentage (string) ⚠️ READ THIS DEFINITION BEFORE FILLING IT. The share of the
+                                  association's ANNUAL BUDGET allocated to REPLACEMENT RESERVES —
+                                  the "reserve contribution", the measure Fannie B4-2.2-02 requires
+                                  to be at least 10%. Return it as a PERCENT ("10", "10.5"),
+                                  never as a fraction ("0.10").
+                                  ⚠️ A "PERCENT FUNDED" FIGURE IS A DIFFERENT MEASURE — return
+                                  null for it. A reserve STUDY's "reserves are 45% funded" states
+                                  how full the reserve account is, NOT what share of the budget is
+                                  contributed to it; reporting it here reads as a compliant
+                                  contribution on a project that may allocate nothing. If the
+                                  document states only percent-funded, or states a dollar
+                                  contribution with no budget total to divide by, return null and
+                                  put the figure in ADDITIONAL SECTIONS.
+                                  ⚠️ Return null when the document is a dues invoice with no
+                                  budget — most HOA statements are. Absent is the honest answer.
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Special
-   Assessments", "Late Fees / Fines", "Account History", "Management Contact". Do
-   not force these into the typed core — capture them here so nothing is lost.
+   Assessments", "Late Fees / Fines", "Management Contact". Do not force these into
+   the typed core — capture them here so nothing is lost.
+
+3. PAYMENT LEDGER — a LIST, one FLAT ROW per line in the account activity / ledger
+   table (each dated charge or payment with a running balance):
+     payment_ledger — each row: date, description, charge, paid, running_balance
+   Capture EVERY row of the ledger (do not stop at the first page — a ledger often
+   runs to a second page). ``running_balance`` is the per-row balance in that table,
+   NOT the account's current ``balance`` (a typed field). If there is no ledger /
+   activity table, return an empty list.
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -60,6 +88,11 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "past_due_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "paid_current_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "collection_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "reserve_percentage": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "reserve_percentage": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_period_start": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "statement_period_end": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "prior_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "unit_owner_email": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "special_assessment_items": [{"description": <string|null>, "amount": <string|null>, "duration": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "payment_ledger": [{"date": <string|null>, "description": <string|null>, "charge": <string|null>, "paid": <string|null>, "running_balance": <string|null>, "page": <int|null>, "snippet": <string|null>}],

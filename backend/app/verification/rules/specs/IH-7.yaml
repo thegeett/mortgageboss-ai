@@ -1,0 +1,175 @@
+# IH-7 — Condo master policy — DETERMINISTIC structural rule SPEC (LP-487).
+#
+# When the subject property is a condominium, the project's MASTER (blanket) insurance policy must be in
+# the file and must meet the agency's coverage floor. A unit owner's HO-6 walls-in policy does not cover
+# the building; if the master policy is missing or thin, the collateral is effectively uninsured.
+#
+# ⚠️ THIS IS A DIFFERENT TEST ON A DIFFERENT DOCUMENT FROM IH-1. IH-1 reads the borrower's own
+# homeowners binder (its dwelling loss-settlement basis); IH-7 reads the ASSOCIATION's master policy.
+# IH-1's spec says so explicitly and needs no condo exclusion because it never reads a master policy.
+#
+# ⚠️ LOAN-SCOPED, NOT PER-DOCUMENT — and the reason is structural. "absent" is a statement about the
+# FILE, and no per-document tag can be produced for a document that is not there. A per-document rule
+# here could only ever judge master policies that already exist, which is the one case that needs the
+# least checking.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory):
+#   general liability >= $1,000,000 per occurrence
+#     Fannie Mae Selling Guide B7-4-01, "General Liability Insurance Requirements for Project
+#     Developments", page dated 08/05/2026: "The amount of coverage must be at least $1 million for
+#     bodily injury and property damage for any single occurrence."
+#     ⚠️ B7-4-01, NOT B7-3-03 — B7-3-03 covers MASTER PROPERTY insurance and states no liability limit.
+#     The catalog rationale points at "master policy present + adequate" without naming a section; the
+#     liability floor genuinely lives in a different chapter.
+#   replacement-cost basis
+#     Fannie Mae Selling Guide B7-3-03, "Master Property Insurance Requirements for Project
+#     Developments", page dated 08/05/2026: "The master property insurance coverage amount must equal at
+#     least 100% of the estimated replacement cost value of the project improvements, including common
+#     elements and residential structures." The same section accepts GUARANTEED and EXTENDED replacement
+#     cost as ways to substantiate it, so both are in the recognised vocabulary below.
+#
+# ⚠️ WHAT THIS RULE DOES **NOT** CHECK, recorded rather than silently omitted. Fannie also requires
+# FIDELITY/CRIME coverage for projects above a unit-count threshold (B7-4-02). The unit count lives on
+# the condo questionnaire (`total_units`), which fills on 0 of the 1 questionnaire in the corpus, and
+# the master policy document carries `fidelity_crime_coverage_present` but no unit count. Building the
+# fidelity leg on an input that never resolves would make IH-7 permanently couldnt_check and hide the
+# two checks that DO resolve. Logged in docs/domain/priya-open-questions.md as the fidelity gap.
+
+rule_id: IH-7
+name: Condo master policy
+category: Insurance
+
+kind: structural            # must equal rule_kinds.csv (IH-7 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a presence + adequacy status, not a ratio
+
+criteria: >-
+  When the subject property is a condominium, the project's master insurance policy must be in the file,
+  must be written on a replacement-cost basis, and must carry general liability of at least $1,000,000
+  per occurrence. This reads the derived ins.condo_master_policy, which resolves the property type, the
+  presence of a master policy, its coverage basis against a declared vocabulary, and its liability
+  limit. A non-condominium property is not_applicable. An unrecognised coverage basis or an unparseable
+  limit resolves to couldnt_check — never to a guessed adequacy, and never to a limit of zero.
+
+applicability:
+  scope: the loan, when the subject property is a condominium
+  trigger: >-
+    property.type == condo. A non-condo property is not_applicable; a file that does not state the
+    property type, or states more than one, couldnt_checks rather than assuming the property is not a
+    condominium.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — both values are cited, not judgment calls
+  values:
+    # B7-4-01 (08/05/2026) — see the provenance block above.
+    min_general_liability_per_occurrence: "1000000"
+    # ⚠️ THE COVERAGE-BASIS VOCABULARY, and a DELIBERATE WIDENING OF ADR-376 — stated rather than
+    # slipped in. CR-12's rule is EXACT match against a closed set. This field is not a code, it is
+    # PROSE; the four master policies in the corpus read:
+    #   "Guaranteed Replacement Cost"
+    #   "Replacement Cost"
+    #   "REPLACEMENT COST AT AGREED VALUE WITH NO CO-INSURANCE"
+    #   "Replacement Cost (RCV) at Agreed Value with no coinsurance; 100% replacement cost for portion
+    #    of building insured by Association"
+    # An exact match would abstain on three of the four and leave IH-7 permanently couldnt_check. So
+    # these are matched as a LEADING PHRASE: each value states its basis first and then elaborates
+    # (agreed value, no coinsurance, the association's portion), and an elaboration is not a
+    # contradiction.
+    #
+    # ADR-376's actual protection is kept in two places: an unrecognised leading phrase is "unknown",
+    # never "inadequate"; and a value containing BOTH a replacement-cost and an actual-cash-value phrase
+    # abstains whichever leads, because a mixed basis ("ACV roof, replacement cost dwelling") states two
+    # bases for two parts of the building and neither is the policy's basis.
+    replacement_cost_phrases: "guaranteed replacement cost|extended replacement cost|replacement cost|100% replacement cost|full replacement cost"
+    actual_cash_value_phrases: "actual cash value|acv"
+  guideline_text: >-
+    For a unit in a condominium project, the project's master property insurance must cover 100% of the
+    replacement cost of the project improvements (Fannie Mae Selling Guide B7-3-03, 08/05/2026), and the
+    project must carry general liability coverage of at least $1 million for bodily injury and property
+    damage for any single occurrence (B7-4-01, 08/05/2026). A unit owner's own walls-in policy does not
+    substitute for either. Fidelity/crime coverage is separately required above a unit-count threshold
+    (B7-4-02) and is NOT evaluated by this rule — see the note in the spec header.
+
+required_inputs:
+  - name: condo_master_policy
+    snapshot_path: 'tags.by_subject["loan"]["ins.condo_master_policy"]'
+    description: >-
+      the condominium master policy's presence and adequacy (derived, LP-487): "n/a" when the property
+      is not a condominium, "absent" when no master policy states a policy number, "present_adequate" /
+      "present_inadequate" from the coverage basis and liability limit, "unknown" when the property type
+      is unstated or contradictory, or when the basis or limit is missing or unrecognised.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The master policy's carrier, policy number, stated coverage basis (the exact phrasing) and general
+  liability limit — inline on the finding, so a processor sees what the policy says and why the verdict
+  followed without reopening the certificate.
+
+guideline_reference: "Fannie Mae Selling Guide B7-3-03 (08/05/2026) — master property insurance must equal at least 100% of the replacement cost value of the project improvements; B7-4-01 (08/05/2026) — general liability of at least $1 million for any single occurrence."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — and the difference is
+  # load-bearing. The spec schema does not allow a `not_applicable` outcome, and it is right not to:
+  # the applicability layer resolves an ABSENT or "unknown" predicate tag to COULDNT_CHECK and only a
+  # DEFINITELY-FALSE one to not_applicable. Encoding the scoping as an outcome would have needed the
+  # recipe's "n/a", and a file that simply does not state its property type would then have been
+  # skipped silently instead of surfaced. Fail closed on the unknown, out-of-scope only on the known.
+  applicability:
+    tag: property.type
+    op: eq
+    value: condo
+  load_bearing_tags:
+    - ins.condo_master_policy
+  gated_tags:
+    - ins.condo_master_policy
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: ins.condo_master_policy, op: eq, value: "present_adequate"}
+      reasoning: >-
+        the condominium project's master policy is in the file, is written on a replacement-cost basis,
+        and carries at least $1,000,000 of general liability per occurrence
+    # A condo file with no master policy is a real, actionable gap — the document has to be obtained.
+    - verdict: fired
+      when_tags:
+        - {tag: ins.condo_master_policy, op: eq, value: "absent"}
+      reasoning: >-
+        the subject property is a condominium but the file carries no project master insurance policy —
+        the borrower's own walls-in policy does not cover the building, so the collateral is
+        undocumented for insurance purposes
+      how_to_fix: >-
+        Request the association's master policy certificate (an ACORD 28 or the carrier's evidence of
+        commercial property insurance) from the HOA or its management company. Confirm it names the
+        project, is current through closing, and shows both the property coverage basis and the general
+        liability limit.
+    - verdict: fired
+      when_tags:
+        - {tag: ins.condo_master_policy, op: eq, value: "present_inadequate"}
+      reasoning: >-
+        the condominium project's master policy is in the file but does not meet the agency's coverage
+        floor — either it is not written on a replacement-cost basis (B7-3-03 requires 100% of
+        replacement cost) or its general liability is below $1,000,000 per occurrence (B7-4-01)
+      how_to_fix: >-
+        Ask the association or its insurance agent for a revised certificate showing replacement-cost
+        coverage on the project improvements and general liability of at least $1,000,000 per
+        occurrence. If the association will not increase coverage, the project may be ineligible and the
+        loan needs a project-eligibility review before it proceeds.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would turn an unreadable
+      # certificate into a silent all-clear on the collateral's only building coverage.
+      default: true
+      reasoning: >-
+        the condominium master policy's adequacy could not be determined — the file does not state the
+        property type, or the master policy's coverage basis or general liability limit is missing or
+        not in a recognised form
+      how_to_fix: >-
+        Confirm the property type on the application. If a master policy certificate is in the file,
+        read its coverage basis and general liability limit directly; if the wording is a carrier
+        variant we should recognise, add it to the rule's vocabulary.

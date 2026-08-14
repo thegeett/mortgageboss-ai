@@ -28,7 +28,13 @@
     {"name": "total_payments", "type": "Decimal", "why": "processor.", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
     {"name": "attached_schedules_and_forms", "type": "str", "why": "DT-7 (documentation inventory), IN-14/OC-3 (is Schedule E present?), IN-12 (is Schedule C / K-1 present?) — the schedule-presence signal. Degraded from string[]; comma-joined.", "rules": ["DT-7", "IN-14", "OC-3", "IN-12"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": "List schedule identifiers as printed (e.g. 'Schedule C', 'Schedule E', 'Schedule 1', 'K-1') so DT-7 has an inventory."},
     {"name": "return_signed_date", "type": "date", "why": "DT-7 (return executed/documented); processor recency.", "rules": ["DT-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
-    {"name": "signatures_present", "type": "str", "why": "DT-7 — an unsigned return is an ATR documentation gap. Degraded from signature[] → present/absent.", "rules": ["DT-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null}
+    {"name": "signatures_present", "type": "str", "why": "DT-7 — an unsigned return is an ATR documentation gap. Degraded from signature[] → present/absent.", "rules": ["DT-7"], "reason_class": "rule", "rule_floor": false, "degraded_from": "object", "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "state_code", "type": "str", "why": "the bundled state return's state (PA-40 / NC D-400 / AZ 140)", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "state_taxable_income", "type": "Decimal", "why": "state taxable income", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "state_tax_liability", "type": "Decimal", "why": "state tax liability", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "state_tax_withheld", "type": "Decimal", "why": "state tax withheld", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "preparer_name", "type": "str", "why": "paid preparer name", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "preparer_ptin", "type": "str", "why": "paid preparer PTIN", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
   ],
 
   "nested_lists": [
@@ -49,6 +55,35 @@
         {"name": "depletion", "type": "Decimal", "why": "IN-12 — [RULE FLOOR — absent from catalog] add-back"},
         {"name": "amortization", "type": "Decimal", "why": "IN-12 — [RULE FLOOR — absent from catalog] add-back"},
         {"name": "business_use_of_home", "type": "Decimal", "why": "IN-12 — [RULE FLOOR — absent from catalog] add-back"}
+      ]
+    },
+    {
+      "name": "w2_forms",
+      "shape": "flat_row",
+      "shape_reason": "one row per attached W-2 - per-employer wages/withholding behind the 1040 totals",
+      "expected_item_count": "0-several",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "employer_name", "type": "str", "why": "the W-2 employer"},
+        {"name": "wages", "type": "Decimal", "why": "Box 1 wages"},
+        {"name": "federal_withheld", "type": "Decimal", "why": "Box 2 federal withholding"}
+      ]
+    },
+    {
+      "name": "capital_gains_transactions",
+      "shape": "flat_row",
+      "shape_reason": "Schedule D / Form 8949 transactions - one row per sale",
+      "expected_item_count": "0-many",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "description", "type": "str", "why": "the asset/security sold"},
+        {"name": "proceeds", "type": "Decimal", "why": "sale proceeds"},
+        {"name": "cost_basis", "type": "Decimal", "why": "cost basis"},
+        {"name": "gain_or_loss", "type": "Decimal", "why": "realized gain/(loss)"}
       ]
     }
   ],

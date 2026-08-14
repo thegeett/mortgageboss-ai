@@ -29,6 +29,21 @@ from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 pytestmark = pytest.mark.anyio
 
+
+# --------------------------------------------------------------------------- #
+# ⚠️ LP-508 review: these are RULE-LOGIC tests, so they run with the distrusted-field guard OFF.
+#
+# ID-3 and ID-5 gate on tags whose source fields are on the distrust list (a hallucinated driver's-licence
+# date on docs 146/294), so with the guard live EVERY case here degrades to needs_review and the date
+# comparison this file exists to prove is never reached. Asserting needs_review instead would delete the
+# coverage, not move it. The DEGRADATION itself is asserted in test_distrusted_fields_lp508.py; this file
+# keeps proving the logic underneath it.
+# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _without_distrust_guard(monkeypatch):
+    monkeypatch.setattr("app.verification.rule_engine.gate.distrusted_tag_ids", dict, raising=True)
+
+
 _B = uuid4()
 
 

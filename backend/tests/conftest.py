@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from app.ai.client import get_anthropic_client
 from app.core.config import settings
 from app.main import app
 from app.models import Base
@@ -22,6 +23,45 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     create_async_engine,
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministic AI-provider baseline for the WHOLE suite.
+
+    ``app/core/config.py`` builds the ``settings`` singleton at import from ``.env`` (``env_file=".env"``),
+    which is gitignored and per-worktree — so without this, a local ``AI_PROVIDER=bedrock`` (or any other
+    override) silently changes the suite's result. This autouse fixture pins the provider to the shipped
+    default (``anthropic``) so every test runs against a known baseline regardless of the ambient ``.env``.
+
+    It is autouse by design: a test must OPT OUT (by monkeypatching the provider itself) to exercise a
+    different provider, rather than opt in to hermeticity. Provider-specific tests already do exactly that
+    (e.g. ``test_provider_selection_b1.py``'s ``_use_bedrock``); their own per-test monkeypatch runs after
+    this fixture and wins within the test body, with both unwound cleanly at teardown.
+    """
+    monkeypatch.setattr(settings, "ai_provider", "anthropic")
+    # ⚠️ AND NEUTER THE KEY (LP-491). Pinning the provider makes the suite deterministic, but it also
+    # means any test that reaches a REAL reasoner bills the direct Anthropic API with the developer's
+    # own key. That is not hypothetical: LP-490 shipped a test whose reasoner seam covered ONE ai group
+    # while every other group fell through to the live model — roughly 40-60 real calls before the
+    # runtime (133s for one file) gave it away. A dummy key turns that from a silent charge into an
+    # auth error the test surfaces immediately. A test that genuinely needs a key sets its own.
+    monkeypatch.setattr(
+        settings, "anthropic_api_key", "sk-ant-test-not-a-real-key"
+    )  # pragma: allowlist secret
+    # ⚠️ TWO REPORTED FOOTGUNS IN THE LINE ABOVE, closed here.
+    #  1. A dummy key is WEAKER than no key. With the key unset, client.py fails immediately with
+    #     AIClientError("ANTHROPIC_API_KEY is not configured") — offline, instant. With a dummy key it
+    #     BUILDS a real AsyncAnthropic and issues an HTTPS request that fails on auth, which in a
+    #     network-isolated CI is a socket timeout rather than a fast, legible error. The point of the
+    #     fixture is to surface a leaked call, so the client cache is cleared and the escape hatch below
+    #     is made real rather than implied.
+    #  2. `get_anthropic_client` is @cache'd, so "a test that genuinely needs a key sets its own" did not
+    #     work — it received the already-built dummy-key client. Clearing the cache on setup AND teardown
+    #     makes that sentence true.
+    get_anthropic_client.cache_clear()
+    yield
+    get_anthropic_client.cache_clear()
 
 
 @pytest.fixture

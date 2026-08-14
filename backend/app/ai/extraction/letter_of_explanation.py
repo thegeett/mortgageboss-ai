@@ -34,6 +34,7 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
@@ -45,7 +46,9 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/letter_of_explanation.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-_MAX_TOKENS = 4096
+# LP-461 adds the explanation_items nested list (an LOE often addresses several inquiries/events) →
+# the sizing rule's 1-list tier (8192). The shared truncation guard still backstops any overflow.
+_MAX_TOKENS = 8192
 
 
 class LetterOfExplanationExtraction(BaseModel):
@@ -80,6 +83,14 @@ class LetterOfExplanationExtraction(BaseModel):
     borrower_certification: TypedField[str] = Field(default_factory=TypedField)
     borrower_signature_present: TypedField[str] = Field(default_factory=TypedField)
     borrower_signature_date: TypedField[date] = Field(default_factory=TypedField)
+
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    loan_number: TypedField[str] = Field(default_factory=TypedField)
+    property_address: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-461 diff — captured nested list (bare rows) -------------------- #
+    # An LOE frequently addresses SEVERAL items (multiple inquiries / lates / deposits) — one row each.
+    explanation_items: list[dict[str, Any]] = Field(default_factory=list)
 
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -125,6 +136,16 @@ _CORE_SPEC: CoreSpec = (
     ("borrower_certification", coerce_str),
     ("borrower_signature_present", coerce_str),
     ("borrower_signature_date", coerce_date),
+    # LP-461 diff additions
+    ("loan_number", coerce_str),
+    ("property_address", coerce_str),
+)
+
+# LP-461 — explanation_items as bare rows (one row per distinct item the letter explains).
+_EXPLANATION_ITEMS_ROW: CoreSpec = (
+    ("item_topic", coerce_str),
+    ("item_date_or_period", coerce_str),
+    ("item_explanation", coerce_str),
 )
 
 
@@ -141,16 +162,21 @@ def _parse_loe_json(text: str) -> LetterOfExplanationExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    explanation_items = parse_flat_rows(payload.get("explanation_items"), _EXPLANATION_ITEMS_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = LetterOfExplanationExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {
+                **core_payload,
+                "explanation_items": explanation_items,
+                "additional_sections": sections,
+            }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(explanation_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -203,5 +229,6 @@ async def extract_letter_of_explanation(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        explanation_items=len(result.data.explanation_items),
     )
     return result

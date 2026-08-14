@@ -26,10 +26,19 @@ There are two buckets:
                                      if any (else null)
      referenced_amount    (number)  the single key dollar amount the letter
                                      centers on, if any (else null)
+     loan_number          (string)  the loan number the letter references, if any
+     property_address     (string)  the subject property address the letter references, if any
 
 2. ADDITIONAL SECTIONS — any ADDITIONAL references the letter makes (more than one
    date/amount/employer/party), grouped under a "References" section, plus an
    "Other" section for anything else notable. Capture them here so nothing is lost.
+
+3. EXPLANATION ITEMS — a LIST, one FLAT ROW per DISTINCT item the letter explains (an
+   LOE often addresses SEVERAL inquiries / late payments / deposits in one letter):
+     explanation_items — each row: item_topic (what the item is), item_date_or_period,
+                          item_explanation (the borrower's explanation for THAT item)
+   Use it whenever the letter addresses more than one item; empty list for a
+   single-topic letter (the typed core already covers that case).
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -65,5 +74,8 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "supporting_documents": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "borrower_certification": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "borrower_signature_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "borrower_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
+    "borrower_signature_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "loan_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "property_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "explanation_items": [{"item_topic": <string|null>, "item_date_or_period": <string|null>, "item_explanation": <string|null>, "page": <int|null>, "snippet": <string|null>}],

@@ -1,0 +1,56 @@
+{
+  "document_type": "compensation_statement",
+  "slug": "compensation-statement",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "Employer compensation statement for <employee_name> (<employer_name>): base <base_pay_current>-><base_pay_new>, bonus <bonus_actual_award>, equity <equity_award_amount> <equity_award_type>.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"employee_name","type":"str","why":"identity — whose compensation; match to the borrower","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"The employee named on the statement"},
+    {"name":"employer_name","type":"str","why":"identity — the employer issuing the statement (Deloitte, Fidelity, PayPal, ...)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"effective_date","type":"date","why":"processor — the effective date of the new base pay / the statement's fiscal-year effective date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'effective' date of the new base pay (e.g. 'Effective 5/31/2026', 'effective January 01, 2026', 'Effective April 1, 2025')"},
+    {"name":"base_pay_current","type":"Decimal","why":"processor — the current/prior-year base pay (the stable-income anchor for IN-10/IN-11 once the earnings classifier exists)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The current base pay/salary before the increase"},
+    {"name":"base_pay_new","type":"Decimal","why":"processor — the new base pay after the increase","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The new base pay/salary effective the effective_date"},
+    {"name":"base_pay_increase_amount","type":"Decimal","why":"processor — the base-pay increase amount (new minus current)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The salary/base-pay change amount"},
+    {"name":"base_pay_increase_percent","type":"Decimal","why":"processor — the base-pay increase percent","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The salary/base-pay change percent"},
+    {"name":"bonus_target_percent","type":"Decimal","why":"processor — the bonus target/opportunity percent (of base), when stated","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'Bonus Opportunity' / 'Bonus Target' percent; leave null if only an actual award is shown"},
+    {"name":"bonus_actual_award","type":"Decimal","why":"processor — the actual bonus/incentive award paid (AIP award, bonus award) — a VARIABLE-income component (the base-vs-variable split is the earnings classifier's call, not ours)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The actual bonus/AIP award amount"},
+    {"name":"equity_award_amount","type":"str","why":"processor — the equity award as PRINTED. ⚠ This may be a SHARE COUNT (e.g. 625 shares) OR a DOLLAR VALUE (e.g. $50,000 RSU) depending on the employer — it is NOT normalized. Read equity_award_type to know which. NEVER sum equity_award_amount across documents (adding share counts to dollars is meaningless). Type is str (NOT Decimal): a Decimal strips the $/commas this field must preserve, and a normalized bare 9+-digit value would trip the snapshot at-rest guard (LP-468 review).","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The equity award amount EXACTLY as printed — do NOT convert shares to dollars or vice versa. If shares, capture the share count; if a dollar value, capture the dollars. equity_award_type records which."},
+    {"name":"equity_award_type","type":"str","why":"processor — what the equity award is (RSU, Chairman's Shares, stock options, ...) — also disambiguates whether equity_award_amount is a share count or a dollar value","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"e.g. 'RSU', 'Chairman's Shares', 'stock options' — as stated"},
+    {"name":"one_time_payment_amount","type":"Decimal","why":"processor — a special/one-time discretionary payment, when stated (distinct from the recurring bonus)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"A 'Special One-Time Payment' / 'Reward Excellence' / additional-award amount"},
+    {"name":"performance_rating","type":"str","why":"processor — the year-end performance rating, when stated (context for the bonus)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"e.g. 'Exceptional', 'EP - Exceptional Performance' — as stated"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"total_compensation","reason":"⚠️ a total-comp figure (e.g. the printed '$195,000 total compensation' banner) is NOT captured. It would be read as QUALIFYING INCOME, but the base-vs-variable / usable-income call is a DECISION PROCEDURE (Priya's earnings ruling, docs/domain/priya-rulings-2026-08.md — 'do not classify solely from the text label', fail-closed UNKNOWN branch), belonging to the unbuilt earnings classifier, not the extractor. Tags describe; rules judge. It falls to the catch-all."},
+    {"name":"qualifying_income / usable_income","reason":"a JUDGMENT — the earnings classifier's output, not a fact on the page."},
+    {"name":"variable_vs_base classification","reason":"same — which components count as stable vs variable income is Priya's decision procedure, not an extraction label."},
+    {"name":"bonus_target_amount","reason":"printed on only 1 of 3 samples (PayPal); derivable from base × target%. Dropped to avoid a mostly-null field (LP-461 over-recall)."},
+    {"name":"document_date","reason":"only 1 of 3 has a document date distinct from the effective date; effective_date covers the recency need."},
+    {"name":"employee_id","reason":"an employer identifier (e.g. '00323165') — not income-relevant, and a bare digit run near the at-rest guard threshold; deliberately not captured so no _PII_FIELDS entry is needed."},
+    {"name":"merit / market_adjustment / bonus_funding_percent / company_performance_percent","reason":"employer-SPECIFIC itemization (Deloitte's Merit/Market-Adj, Fidelity's Bonus Funding, PayPal's Company Performance %) that does not normalize across employers; the normalized components are the scalars above, the raw items fall to the catch-all (the scalars-over-list decision, A2)."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "employers itemize very differently (Deloitte: Base Pay / AIP / Reward Excellence; Fidelity: Bonus funding / Chairman's Shares; PayPal: Bonus target / Company Performance % / RSU / one-time) — the scalars capture the NORMALIZED components, the raw items go to the catch-all",
+    "equity is a SHARE COUNT for some employers (Fidelity '625 Chairman's Shares') and a DOLLAR VALUE for others (PayPal '$50,000 RSU') — captured as printed, equity_award_type disambiguates",
+    "some statements are screenshots / phone photos of an internal portal (247 is an angled photo) — extraction confidence may be lower",
+    "the effective date appears as 'Effective <date>' for the new base pay; a fiscal-year period may also be shown"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Fixed scalars vs a compensation_lines[] flat-row list?","options":["fixed normalized scalars","a compensation_lines[] list of raw items"],"recommendation":"SCALARS (GEET'S DECISION, LP-468): the normalized components (base/bonus/equity/one-time/rating) recur across employers with consistent MEANING and serve IN-10/IN-11's base-vs-variable split; a raw list ('Merit', 'Company Performance %') would just mirror the catch-all.","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Serves NO rule today (rules_served empty) — processor visibility now. It is the DIRECT input to IN-10 and IN-11 once the earnings classifier is built; recorded so the tie is explicit (ADR-362/363 standard: a type earns its place on reliable-processor-need + a concrete future rule consumer).",
+    "These three docs (Deloitte/Fidelity/PayPal) previously force-fit into commission_income_statement (a mortgage sales-commission type) and post-LP-463 divert to Tier 3 with type_matches_document=False; this type is their correct home.",
+    "No PII field and no scrub backstop: every captured scalar is a name / date / dollar amount (< 9 digits) / percent / rating / equity-type string. The one long identifier (employee_id) is deliberately not captured.",
+    "NO total/qualifying/variable-vs-base — the earnings classification is a separate, unbuilt decision procedure (Priya's ruling)."
+  ]
+}

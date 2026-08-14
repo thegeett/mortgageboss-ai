@@ -1,0 +1,169 @@
+# CO-5 — Litigation / delinquency / concentration — DETERMINISTIC structural rule SPEC (LP-494).
+#
+# Four separate project-eligibility conditions, all answered by the condo questionnaire: how much of the
+# project is delinquent on assessments, how much is commercial space, how much one entity owns, and
+# whether the association is in litigation. Any of them can make a project ineligible, and a processor who
+# does not surface them before submission finds out at underwriting.
+#
+# ⚠️ THE PLANNING TAG WAS WRONG AND THE REPO WINS. The catalog maps CO-5 to
+# `property.is_warrantable_condo`, which has NO source field in any of the 121 schema specs (LP-487) — a
+# project-review CONCLUSION, not a readable datum, and a test pins it inert. But CO-5 does not need a
+# warrantability verdict: every leg it actually checks is a TYPED FIELD on the condo questionnaire
+# (delinquency_percentage, commercial_space_percentage, total_units, single_entity_owned_units,
+# litigation_indicator). So the blocker the ticket expected does not apply, and nothing was wired to the
+# sourceless tag.
+#
+# ⚠️ DETERMINISTIC, NOT ai_judgment. The catalog rationale says "SURFACE litigation/delinquency/
+# concentration" — and surfacing is exactly what needs no model. Typed extraction already reads the
+# numbers; three of the four legs are numeric comparisons against cited limits, and the fourth hands the
+# association's own litigation answer to the processor. rule_kinds.csv was edited from
+# judgmental/ai_judgment to structural/deterministic_only with that evidence; the row count stays 135.
+#
+# ⚠️ NO LITIGATION THRESHOLD IS INVENTED, and that is a deliberate refusal. B4-2.1-03 turns on the NATURE
+# and SCOPE of the action — minor matters fully covered by insurance do not make a project ineligible,
+# material construction-defect actions do — and no number expresses that. Disclosed litigation is surfaced
+# as needs_review with the questionnaire's own answer, never adjudicated here.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory). All three are TIER P, fetched
+# 2026-08-13, and pinned to the recipe's constants by test:
+#   delinquency — Fannie Mae Selling Guide B4-2.2-02, "Full Review Process", page dated 08/05/2026:
+#     "No more than 15% of the total units in a project are 60 days or more past due on common expense
+#     assessments."
+#   commercial / mixed-use — Fannie Mae Selling Guide B4-2.1-03, "Ineligible Projects", page dated
+#     08/05/2026: "no more than 35% of a condo or co-op project or 35% of the building in which the
+#     project is located be commercial space."
+#   single-entity ownership — ⚠️ THE TICKET'S TWO SOURCES CONFLICTED (>20% vs 10%) AND THE PRIMARY
+#     RESOLVES IT RATHER THAN EITHER BEING GUESSED. B4-2.1-03 (08/05/2026) is TIERED, and NEITHER quoted
+#     figure describes it: "projects with 21 or more units – 20%", with a maximum of 2 units in projects
+#     of 5 to 20 units. Below 5 units the guide states no single-entity limit, so this leg abstains there
+#     rather than inventing one.
+#
+# ⚠️ INERT. Every input resolves on no file in the corpus: the two bench condo questionnaires are a
+# cancellation notice and a genuinely UNANSWERED standard form (all 90 catch-all labels carry an empty
+# value), and no loan file carries a questionnaire at all. `input_resolves: false` says exactly that.
+
+rule_id: CO-5
+name: Litigation / delinquency / concentration
+category: Condo
+
+kind: structural            # must equal rule_kinds.csv
+numeric_check: false        # must equal rule_kinds.csv — the rule body reads a status, not a ratio
+
+criteria: >-
+  When the subject property is a condominium, the project must be within Fannie's delinquency, commercial
+  space and single-entity concentration limits, and any litigation involving the association must be
+  surfaced for review. This reads the derived condo.project_eligibility, which resolves the property type
+  and the four questionnaire answers. A breached limit is a fired finding; disclosed litigation is a
+  needs_review, because its materiality is a judgment and not a threshold. A non-condominium property is
+  not_applicable. Anything unanswered resolves to couldnt_check — a project is never reported eligible on
+  questions nobody answered.
+
+applicability:
+  scope: the loan, when the subject property is a condominium
+  trigger: >-
+    property.type == condo. A non-condo property is not_applicable; a file that does not state the
+    property type, or states more than one, couldnt_checks rather than assuming the property is not a
+    condominium.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — structural; all three limits are tier P
+  values:
+    # All three cited above. A test pins each against the recipe's constant.
+    max_delinquent_units_pct: "15"
+    max_commercial_space_pct: "35"
+    max_single_entity_pct_21_plus_units: "20"
+    max_single_entity_units_5_to_20_units: "2"
+  guideline_text: >-
+    A condo project is ineligible if more than 15% of its total units are 60 days or more past due on
+    common expense assessments (Fannie Mae Selling Guide B4-2.2-02, 08/05/2026); if more than 35% of the
+    project, or of the building containing it, is commercial or mixed-use space (B4-2.1-03, 08/05/2026);
+    or if a single entity owns more than 20% of the units in a project of 21 or more units, or more than 2
+    units in a project of 5 to 20 units (B4-2.1-03, 08/05/2026). Litigation involving the association is
+    assessed on its nature and scope rather than against a numeric limit, so it is surfaced for review.
+
+required_inputs:
+  - name: project_eligibility
+    snapshot_path: 'tags.by_subject["loan"]["condo.project_eligibility"]'
+    description: >-
+      the condo project's eligibility surface (derived, LP-494): "n/a" when the property is not a
+      condominium, "ineligible_threshold" when a delinquency / commercial-space / single-entity limit is
+      breached, "litigation_disclosed" when the questionnaire discloses litigation and no limit is
+      breached, "clear" only when all four legs were readable and none tripped, and "unknown" whenever an
+      answer is missing or unrecognised.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  Which condition tripped and the figure that tripped it — the delinquency percentage, the commercial
+  share, the single-entity count against the project's unit count, or the litigation answer — inline on
+  the finding, with the limit it was measured against, so a processor can act without reopening the
+  questionnaire.
+
+guideline_reference: "Fannie Mae Selling Guide B4-2.1-03 (08/05/2026) — ineligible projects: commercial/mixed-use space above 35%, single-entity ownership above 20% in projects of 21+ units (maximum 2 units at 5–20 units); B4-2.2-02 (08/05/2026) — no more than 15% of units 60+ days past due on common expense assessments."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487), applied
+  # unchanged, so a file that does not state its property type is surfaced rather than silently skipped.
+  applicability:
+    tag: property.type
+    op: eq
+    value: condo
+  load_bearing_tags:
+    - condo.project_eligibility
+  gated_tags:
+    - condo.project_eligibility
+  operands: {}
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: condo.project_eligibility, op: eq, value: "ineligible_threshold"}
+      reasoning: >-
+        the condominium project breaches one of Fannie's eligibility limits — delinquent assessments,
+        commercial space, or single-entity ownership concentration
+      how_to_fix: >-
+        Confirm the figure with the association or its management company; questionnaires are frequently
+        completed from stale records. If the breach is real, the project is ineligible for standard
+        delivery and the loan needs a project-eligibility review — or a different investor — before it
+        proceeds.
+    - verdict: needs_review
+      # ⚠️ needs_review, NOT fired — the deliberate refusal recorded in the header. Fannie assesses
+      # litigation on its NATURE AND SCOPE; a slip-and-fall fully covered by insurance does not make a
+      # project ineligible and a construction-defect action may. Firing would call a correct file
+      # defective, and inventing a threshold to decide it would be worse.
+      when_tags:
+        - {tag: condo.project_eligibility, op: eq, value: "litigation_disclosed"}
+      reasoning: >-
+        the condo questionnaire discloses litigation involving the association — eligibility turns on the
+        nature and scope of the action, which is a judgment for the file rather than a numeric limit
+      how_to_fix: >-
+        Obtain the litigation details from the association or its counsel: what the action concerns, who
+        brought it, the amount at issue, and whether it is fully covered by the association's insurance.
+        Minor matters covered by insurance are generally acceptable; construction-defect or structural
+        actions usually are not. Document the assessment in the file.
+    - verdict: satisfied
+      when_tags:
+        - {tag: condo.project_eligibility, op: eq, value: "clear"}
+      reasoning: >-
+        the project's delinquency, commercial space and single-entity concentration are all within
+        Fannie's limits and the questionnaire discloses no litigation
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS — and here it is the load-bearing one. The corpus's
+      # questionnaires are UNANSWERED, so this is the branch that runs; a `satisfied` default would report
+      # every blank questionnaire as a clean project.
+      default: true
+      reasoning: >-
+        the condominium project's eligibility could not be determined — the file does not state the
+        property type, or the condo questionnaire does not answer the delinquency, commercial space,
+        single-entity ownership or litigation questions
+      how_to_fix: >-
+        Confirm the property type on the application, then request a COMPLETED condo questionnaire from
+        the association or its management company. A questionnaire that is on file but unanswered does not
+        establish anything about the project — the specific questions to have answered are the percentage
+        of units 60+ days delinquent, the commercial/mixed-use share, the number of units owned by any
+        single entity against the project's total, and whether the association is party to any litigation.

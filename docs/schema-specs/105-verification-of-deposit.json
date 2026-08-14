@@ -33,6 +33,7 @@
       "shape_reason":"a VOD certifies one or more deposit accounts and this is the substantive content; a borrower rarely has more than a handful at one institution, so flat rows are safely under the ceiling and carry the masked account number",
       "expected_item_count":"a handful","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["account_number_masked"],
       "fields":[
         {"name":"account_type","type":"str","why":"the type of deposit account"},
         {"name":"account_number_masked","type":"str","why":"identifies the account, masked to last-4","pii_note":"already in the 7-field _PII_FIELDS registry, pre_masked=true; carried in the nested record"},

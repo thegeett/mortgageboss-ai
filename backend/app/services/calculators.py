@@ -29,6 +29,7 @@ from app.models.calculator_override import CalculatorOverride
 from app.models.helpers import only_active
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanPurpose
+from app.models.property import Property
 from app.models.stated_financials import StatedAsset
 from app.schemas.calculators import (
     CalcFindings,
@@ -60,6 +61,7 @@ from app.verification.reserves import (
     ELIGIBLE_FORMULA,
     MONTHS_FORMULA,
     compute_reserves,
+    required_reserve_months,
 )
 from app.verification.self_employed import (
     ADD_BACK_KEYS,
@@ -74,9 +76,24 @@ CALCULATORS = ("mortgage_insurance", "self_employed", "reserves", "max_loan")
 # Grounded-starter methodology constants (validate with Priya — these are domain judgment).
 # The MI starters (PMI rate, FHA annual-MIP rate, FHA duration LTV) live in app.services.mi
 # (LP-91) — the single MI source the DTI also consumes.
-_FHA_RETIREMENT_FACTOR = Decimal("0.60")  # LP-84's FHA 60% retirement-reserve haircut
-_CONFORMING_LOAN_LIMIT = Decimal("806500")  # 2025/26 baseline FHFA conforming (starter — verify)
-_STARTER_REQUIRED_RESERVE_MONTHS = Decimal("2")
+# VERIFIED (tier P, HUD Handbook 4000.1, read from HUD's hosted PDF 2026-08-13): "The Mortgagee may
+# include up to 60 percent of the value of assets, less any existing loans, from the Borrower's
+# retirement accounts, such as IRAs, thrift savings plans, 401(k) plan, and Keogh accounts, unless the
+# Borrower provides conclusive evidence that a higher percentage may be withdrawn". So 60% is a
+# DEFAULT, not an absolute cap — a borrower with conclusive withdrawal evidence may count more, which
+# the processor can still do through the override line. Fannie applies NO haircut (conventional is
+# 1.00), which is why this factor is program-gated.
+_FHA_RETIREMENT_FACTOR = Decimal("0.60")
+# FHFA, "Conforming Loan Limit Values for 2026", page dated 2025-11-25 (tier P, fetched 2026-08-13):
+# "$832,750, an increase of $26,250 from 2025". WAS 806500 — the 2025 baseline, stale from 2026-01-01.
+# THIS IS THE ONE-UNIT BASELINE ONLY. The real limit varies by COUNTY (up to a $1,249,125 high-cost
+# ceiling), by UNIT COUNT, and by delivery YEAR, and the snapshot carries no county — which is exactly
+# why PE-1 (LP-496a) decides only at the two bounds and ABSTAINS in the band between them rather than
+# comparing against this single number. This constant is the max-loan calculator's manual STARTER line,
+# which a processor overrides per file; it is not, and must not become, a conformance test.
+_CONFORMING_LOAN_LIMIT = Decimal("832750")
+# LP-498 review — the reserves starter of 2 months is GONE. It was unsourced, and it made the reserves
+# worksheet contradict AS-4 on the same file. See `_resolve_required_reserve_months`.
 
 # Asset-type keywords (case-insensitive) — the reserves auto-population (Tier-2 heuristics).
 _RETIREMENT_KEYWORDS = ("retirement", "401", "ira", "pension")
@@ -374,7 +391,9 @@ async def build_reserves_view(
         down_default = None
 
     factor = _FHA_RETIREMENT_FACTOR if program is LoanProgram.FHA else Decimal("1.00")
-    required_months = _resolve_required_reserve_months(program, await _lender_slug(db, loan_file))
+    required_months = await _resolve_required_reserve_months(
+        db, loan_file, await _lender_slug(db, loan_file)
+    )
 
     overrides = await _active_overrides(db, loan_file.id, "reserves")
     autos = [
@@ -435,6 +454,10 @@ async def build_reserves_view(
         headline_label="Reserves available",
         status=status,
         program=program.value if program else None,
+        # LP-498 review — carried STRUCTURED so `map_reserves` can project them into the snapshot for
+        # AS-4. They were previously visible only inside `steps` as display strings ("3.0 mo").
+        months_available=result.months_available,
+        months_required=result.months_required,
         inputs=lines,
         steps=steps,
         formulas=[ELIGIBLE_FORMULA, MONTHS_FORMULA],
@@ -442,30 +465,59 @@ async def build_reserves_view(
             starter=True,
             text=(
                 "Gifts/borrowed funds are excluded from reserves; vested retirement counts at a haircut — "
-                f"FHA's 60% (LP-84) here ({int(factor * 100)}%). The required months are DU/program/property/"
-                "overlay-driven (the asset rules, threshold-as-data) — a starter to validate with Priya."
+                f"FHA's 60% (LP-84) here ({int(factor * 100)}%). The required months come from Fannie "
+                "B3-4.1-01 (occupancy x unit count), the same source AS-4 reads, unless a lender overlay "
+                "sets a higher figure; they are blank when the file does not state enough to select a "
+                "cell. The retirement haircut is the remaining starter here."
             ),
         ),
         findings=await _findings(db, loan_file.id, cutoff),
     )
 
 
-def _resolve_required_reserve_months(
-    program: LoanProgram | None, lender_slug: str | None
-) -> Decimal:
-    """The required reserve months — from the reserves rule (overlay-overrideable), else starter."""
-    if program is None:
-        return _STARTER_REQUIRED_RESERVE_MONTHS
-    rules = default_registry().resolve(program=program, lender_slug=lender_slug)
-    rule = next(
-        (
-            r
-            for r in rules
-            if r.rule_id.endswith("reserves_required") or r.rule_id.endswith("reserves.min_months")
-        ),
-        None,
+async def _resolve_required_reserve_months(
+    db: AsyncSession, loan_file: LoanFile, lender_slug: str | None
+) -> Decimal | None:
+    """The required reserve months — a lender OVERLAY if one is registered, else the B3-4.1-01 matrix.
+
+    LP-498 review — THE STARTER 2 IS GONE, and with it a contradiction. This returned the registry
+    value or a flat ``_STARTER_REQUIRED_RESERVE_MONTHS = 2`` while AS-4 read the researched B3-4.1-01
+    matrix, so the two surfaces disagreed on the same file: an investment property with 3.0 months
+    available showed "sufficient" on the worksheet (starter 2) while AS-4 fired "6 months required".
+    Both now read ``required_reserve_months``.
+
+    An overlay still wins — it is a real, sourced requirement, and a lender may demand more than the
+    agency floor. Returning ``None`` (the matrix abstained: occupancy absent, a principal residence
+    with no unit count, an occupancy outside the table) leaves ``months_required`` and ``sufficient``
+    unset rather than asserting a number nothing supports, which is the same choice AS-4 makes.
+    """
+    program = loan_file.loan_program
+    if program is not None:
+        rules = default_registry().resolve(program=program, lender_slug=lender_slug)
+        rule = next(
+            (
+                r
+                for r in rules
+                if r.rule_id.endswith("reserves_required")
+                or r.rule_id.endswith("reserves.min_months")
+            ),
+            None,
+        )
+        if rule is not None:
+            return rule.condition.value
+    # No overlay → the agency matrix, read off the subject property. Queried rather than reached
+    # through `loan_file.property`, which would lazy-load on an async session (the pattern every
+    # sibling calculator already follows).
+    stmt = only_active(select(Property).where(Property.loan_file_id == loan_file.id), Property)
+    subject = (await db.execute(stmt)).scalars().first()
+    occupancy = subject.occupancy_type.value if subject and subject.occupancy_type else None
+    units = (
+        str(subject.financed_unit_count)
+        if subject and subject.financed_unit_count is not None
+        else None
     )
-    return rule.condition.value if rule is not None else _STARTER_REQUIRED_RESERVE_MONTHS
+    months, _reason = required_reserve_months(occupancy, units)
+    return months
 
 
 # --------------------------------------------------------------------------- #

@@ -31,6 +31,11 @@ from app.verification.snapshot.traversal import all_transactions
 # A group may raise/lower it (``AiGroup.list_row_cap``) — per-group, so a dense report gets more rows.
 _DEFAULT_LIST_ROW_CAP = 50
 
+# LP-495b review — the default document cap for a LOAN-subject context that opted into `include_documents`. Set
+# above the largest file in the corpus (the densest carries 30 documents, measured) so no live context is
+# truncated today, while a pathological file is bounded and MARKED rather than silently over-sending.
+_DEFAULT_DOCUMENT_CAP = 60
+
 
 @dataclass(frozen=True)
 class ContextOptions:
@@ -40,11 +45,32 @@ class ContextOptions:
     * ``include_lists`` — serialise a document's generic lists (LP-437 ``entry.lists``) into the context.
     * ``list_row_cap`` — the per-list row cap (default 50), raisable per group for a dense list.
     * ``include_stated_liabilities`` — add the app's file-level MISMO liabilities to a BORROWER context
-      (the comparison set a report-vs-app rule like CR-4 matches report tradelines against)."""
+      (the comparison set a report-vs-app rule like CR-4 matches report tradelines against).
+    * ``include_untyped`` — serialise a document's MARKED-UNTYPED section (LP-463 ``entry.untyped_extraction``
+      — the Tier-3 scoped free-extraction output) into an AI cross-source context. Opt-in exactly like
+      ``include_lists``: a group that leaves it False gets a byte-identical context. This is the ONLY way the
+      untyped section reaches a reasoner; NO deterministic rule reads it."""
 
     include_lists: bool = False
     list_row_cap: int = _DEFAULT_LIST_ROW_CAP
     include_stated_liabilities: bool = False
+    # LP-493a — see the AiGroup fields for the reasoning. Both default off; an existing group's context
+    # is byte-identical.
+    include_unattributed_documents: bool = False
+    include_transactions: bool = False
+    include_untyped: bool = False
+    # LP-495b — a LOAN-subject group that reasons about the file's DOCUMENTS opts in here. The loan
+    # context is otherwise MISMO facts only, so a loan group asked "does the file carry a lease / a
+    # document supporting each ATR factor" was shown ZERO documents and answered from 1003 facts alone —
+    # PC-5's failure shape (LP-493a), caught by printing the context before trusting a rate. Off by
+    # default, so `occupancy` (live OC-2's and OC-1's tag) is byte-identical.
+    include_documents: bool = False
+    # LP-495b review — how many of the file's documents a loan context serialises before it is capped and MARKED
+    # truncated, the same discipline `list_row_cap` applies to rows. The loan document set is unbounded
+    # (a file can carry any number) and a loan group cannot narrow it with `applies_to` — the declaration
+    # layer rejects that on a loan subject — so the cap is the only bound available. The marker is what
+    # makes the prompts' "answer unknown when the list is truncated" instruction reachable.
+    document_cap: int = _DEFAULT_DOCUMENT_CAP
 
 
 _DEFAULT_CONTEXT_OPTIONS = ContextOptions()
@@ -57,6 +83,24 @@ LOAN_SUBJECT = "loan"
 # never used to drop a document.
 _UNKNOWN_DOC_TYPE = "unknown"
 
+# Document types that describe the PROPERTY rather than a borrower, so an absent `belongs_to` is a
+# genuine "file-level", not a failed attribution. ⚠️ A type NOT listed here (including an unclassified
+# document) is never handed to a borrower it was not linked to — see _borrower_context.
+# LP-495b review — `lease_agreement` joins them: a lease on the subject (or a retained) property describes the
+# PROPERTY and its rent, not a borrower, so it typically carries no belongs_to. That is exactly the
+# "file-level, not someone else's" case this set exists for, and it is what lets a lease reach
+# `income_stability` — the group that produces income.continuance_3yr for IN-13 and IN-14. Adding it to
+# that group's applies_to alone did nothing, because gathering happens before the doc-type filter.
+_PROPERTY_LEVEL_DOC_TYPES = frozenset(
+    {
+        "purchase_agreement",
+        "title_commitment",
+        "appraisal",
+        "flood_certification",
+        "lease_agreement",
+    }
+)
+
 RawField = Field | PiiField
 Subject = tuple[str, object]  # (content_id, the raw object to read from)
 
@@ -68,9 +112,10 @@ class SubjectType:
     enumerate: Callable[[Snapshot], list[Subject]]
     read_field: Callable[[object, str], RawField | None]
     # ``applies_to`` (LP-385) = the group's declared document types (or None = all). Only a context that
-    # GATHERS documents (the borrower context) uses it — to filter the gathered set to the group's relevant
-    # doc-types; every other subject ignores it. ``ContextOptions`` (LP-444) carries the group's list /
-    # cap / liabilities opt-ins; the document + borrower builders use them, other subjects ignore them.
+    # GATHERS documents uses it — the borrower context, and (LP-495b review) a LOAN context that opted into
+    # ``include_documents`` — to filter the gathered set to the group's relevant doc-types; every other
+    # subject ignores it. ``ContextOptions`` (LP-444) carries the group's list / cap / liabilities opt-ins;
+    # the document + borrower + loan builders use them, other subjects ignore them.
     build_context: Callable[[object, frozenset[str] | None, ContextOptions], dict[str, object]]
 
 
@@ -137,6 +182,11 @@ def _doc_context(
     # that did not declare include_lists gets a byte-identical context (this branch never runs for it).
     if opts.include_lists and raw.lists:
         fields["lists"] = _serialize_lists(raw, opts.list_row_cap)
+    # LP-463 — opt-in: add the document's MARKED-UNTYPED section (Tier-3 scoped free extraction). It is
+    # already identifier-scrubbed at snapshot-build time; a group that did not declare include_untyped gets a
+    # byte-identical context. This is the ONLY path from the untyped section to a reasoner — never a rule.
+    if opts.include_untyped and raw.untyped_extraction:
+        fields["untyped_extraction"] = _serialize_untyped(raw.untyped_extraction, opts.list_row_cap)
     return fields
 
 
@@ -155,12 +205,178 @@ def _loan_read_field(raw: object, field: str) -> RawField | None:
 
 
 def _loan_context(
-    raw: object, _applies_to: frozenset[str] | None, _opts: ContextOptions
+    raw: object, applies_to: frozenset[str] | None, opts: ContextOptions = _DEFAULT_CONTEXT_OPTIONS
 ) -> dict[str, object]:
+    """The loan subject's context: the file's MISMO facts, plus its DOCUMENTS when the group opts in.
+
+    LP-495b — `include_documents` exists because the loan context carried MISMO facts ONLY. A loan-level
+    group whose prompt asks about the file's documents (does it carry a lease? a document supporting each
+    ATR factor?) was handed an empty document set and answered from 1003 facts alone. That is PC-5's
+    failure shape: a confident answer over a context missing its subject. Off by default, so every
+    existing loan group's context is byte-identical.
+
+    Documents are summarised as type + fields — the same shape the borrower context uses — because these
+    groups ask WHETHER a document is present and what it states, not for its full text.
+
+    LP-495b review — THE TWO SECTIONS ARE INDEPENDENT AND ARE NOW READ INDEPENDENTLY. This returned ``{}`` whenever
+    ``mismo.absent``, BEFORE the documents branch — and ``MismoSection.absent`` is set by ``_build_section``
+    on ANY exception in ``load_mismo_section`` (a DB error, a savepoint rollback), while the documents
+    section is built separately and may be perfectly healthy. So a run whose MISMO query failed handed
+    ``occupancy_rental`` (live for OC-3) an empty context, the model necessarily answered ``unknown``, and
+    the API call was still paid for. Coupling the documents opt-in to MISMO presence reintroduces the exact
+    PC-5 shape the opt-in was added to remove. Each section now contributes what it has.
+    """
     assert isinstance(raw, Snapshot)
-    if raw.mismo.absent:
-        return {}
-    return {name: _field_value(field) for name, field in raw.mismo.facts.items()}
+    context: dict[str, object] = {}
+    if not raw.mismo.absent:
+        context.update({name: _field_value(field) for name, field in raw.mismo.facts.items()})
+    if opts.include_documents:
+        documents: list[dict[str, object]] = []
+        if not raw.documents.absent:
+            # LP-495b review — CAPPED AND MARKED, like every other serialised collection. This loop had no bound
+            # and no truncation marker: a 100-document file sent 100 full field maps, and if the provider
+            # truncated, the group degraded to `unknown` with nothing saying why. `atr_documentation`'s
+            # prompt already tells the model to answer `unknown` "when the document list is truncated" —
+            # an instruction that was unreachable because nothing ever marked truncation. `list_row_cap`
+            # bounds rows INSIDE a list, so the document count needs its own cap; a loan group cannot
+            # narrow the set with `applies_to` either (the declaration layer rejects it on a loan
+            # subject), which is why the bound has to live here.
+            # LP-495b review — the group's declared doc-types narrow the set, FAIL-OPEN exactly like the borrower
+            # context's filter (LP-385): drop only a KNOWN, confident type outside `applies_to`; keep
+            # None / "unknown" (the classifier abstained — never dropped on a guess), and keep everything
+            # when the group declared no `applies_to`.
+            entries = [
+                entry
+                for entry in raw.documents.entries
+                if applies_to is None
+                or entry.document_type in (None, _UNKNOWN_DOC_TYPE)
+                or entry.document_type in applies_to
+            ]
+            for entry in entries[: opts.document_cap]:
+                doc: dict[str, object] = {
+                    "document_type": entry.document_type,
+                    "fields": {name: _field_value(field) for name, field in entry.fields.items()},
+                }
+                documents.append(doc)
+            if len(entries) > opts.document_cap:
+                context["documents_truncated"] = {
+                    "truncated": True,
+                    "shown": len(documents),
+                    "total": len(entries),
+                }
+        context["documents"] = documents
+    return context
+
+
+# --------------------------------------------------------------------------- #
+# liability (LP-483)
+#
+# ⚠️ WHY THIS FAMILY DID NOT EXIST, AND WHAT IT UNBLOCKS. ``KNOWN_SUBJECTS`` held only
+# transaction/document/loan/borrower, so a tag declared with ``entity: liability`` had nowhere to be
+# produced — the loader rejects an unknown subject. That is why ALL 14 ``liab.*`` tags sit in
+# ``fact_tags.csv`` DECLARED AND UNPRODUCED (account_type, balance, dti_payment, in_application,
+# is_disputed, monthly_payment, heloc_credit_limit, derogatory_date/_type, excluded_paid_off,
+# has_open_judgment_lien, is_derogatory, payment_status, representative_score). This family is therefore
+# NOT CR-1 overhead — it is the missing floor under the whole credit tag vocabulary.
+#
+# ⚠️ IDENTITY. The subject ids MUST equal what the rule-engine's ``per_liability`` enumerator emits, or a
+# tag materialises under an id no rule reads. Both call ``liability_rows`` (rule_engine/enumerators.py) —
+# ONE derivation, so they cannot drift.
+# --------------------------------------------------------------------------- #
+
+# The two sources name the same fact differently. This maps a DECLARATION's canonical field name to each
+# source's own column. ⚠️ It normalises NAMES ONLY — never values: mapping a bureau's ``REV`` to the
+# vocabulary's ``revolving`` would be the open-vocabulary CLASSIFICATION that ADR-353 defers to Priya,
+# which is why ``liab.account_type`` has no parsed producer (see LP-483's ticket doc).
+_LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
+    # credit-report tradeline row (LP-479 ListSpec field names)
+    "credit_report_reported": {
+        "account_type": "account_type",
+        "monthly_payment": "monthly_payment",
+        "balance": "balance",
+        "creditor_name": "creditor_name",
+        "is_disputed": "is_disputed",
+        "payment_status": "payment_status",
+        # ⚠️ `heloc_credit_limit` was REMOVED here (reported finding). It aliased the vocabulary's
+        # HELOC-specific limit onto `credit_limit_or_high_credit`, which every REVOLVING tradeline
+        # populates — so the mapping is only true when the account IS a HELOC, and deciding that is the
+        # open-vocabulary classification this very block says it refuses to do. It was unconditional, and
+        # the D5 guard treats these keys as the legal universe, so declaring
+        # `liab.heloc_credit_limit: {mode: parsed, subject: liability}` would have passed every check and
+        # fed HCLTV a credit card's limit as a HELOC limit. Restore only behind an account-type classifier.
+    },
+    # MISMO stated liability (the four fields mismo_section projects — no account number exists)
+    "mismo_stated": {
+        "account_type": "type",
+        "monthly_payment": "monthly_payment",
+        "balance": "unpaid_balance",
+        "creditor_name": "holder_name",
+    },
+}
+
+
+def _liability_enumerate(snapshot: Snapshot) -> list[Subject]:
+    # LAZY IMPORT — load-bearing, do NOT hoist (the rule_engine ↔ tag_materialization init-order
+    # cycle ``derived.py`` already navigates the same way).
+    from app.verification.rule_engine.enumerators import liability_rows
+
+    return [(row.subject_id, row) for row in liability_rows(snapshot)]
+
+
+def _liability_read_field(raw: object, field: str) -> RawField | None:
+    """The raw field for a declaration's canonical name, resolved through the source's alias map.
+
+    An unknown canonical name, or a name the source does not carry (the MISMO leg has no
+    ``is_disputed``), yields None → an ABSENT tag. Fail-closed: absent ≠ empty ≠ a default.
+    """
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    assert isinstance(raw, LiabilityRow)
+    column = _LIABILITY_FIELD_ALIASES.get(raw.source, {}).get(field)
+    return raw.fields.get(column) if column is not None else None
+
+
+def _liability_context(
+    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions
+) -> dict[str, object]:
+    """This liability's own facts, under the family's CANONICAL names, PII-scrubbed.
+
+    Two reported findings shaped this:
+
+    * **Canonical names, not the source's own columns.** Both legs of the union arrive under ONE subject
+      family, so splatting ``raw.fields`` verbatim gave a prompt two different schemas — ``type`` /
+      ``unpaid_balance`` / ``holder_name`` from MISMO against ``account_type`` / ``balance`` /
+      ``creditor_name`` from a tradeline — and a single group would silently under-read one leg. The
+      alias map is applied INVERTED here, so the two legs are comparable. A column with no canonical
+      name (a tradeline field no declaration reads) is still passed through under its own name rather
+      than dropped, so nothing is hidden from a reasoner.
+    * **The universal PII backstop.** Values go through :func:`_scrub_list_value`, like every other
+      list-derived context. A ``ListRow.fields`` value is a plain ``Field``, never a ``PiiField``, and
+      ``ListSpec.redact`` covers only the fields a spec NAMED — so an account number a bureau prints
+      inside ``creditor_name`` would otherwise reach the model unscrubbed.
+
+    ⚠️ ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has
+    been answered (ADR-375). The matcher is liability-scoped, so the app's stated set is the comparison
+    set THIS subject needs; the loader guard was widened from borrower-only to ``{borrower, liability}``
+    deliberately, not incidentally. It is added ONLY to a ``credit_report_reported`` subject: a
+    mismo_stated liability comparing against the stated list would be comparing a list to itself.
+    """
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    assert isinstance(raw, LiabilityRow)
+    canonical = {
+        column: name for name, column in _LIABILITY_FIELD_ALIASES.get(raw.source, {}).items()
+    }
+    context: dict[str, object] = {
+        "liability_source": raw.source,
+        **{
+            canonical.get(column, column): _scrub_list_value(_field_value(field))
+            for column, field in sorted(raw.fields.items())
+        },
+    }
+    if opts.include_stated_liabilities and raw.source == "credit_report_reported":
+        context["stated_liabilities"] = _stated_liabilities(raw.snapshot)
+    return context
 
 
 def _field_value(field: RawField) -> object:
@@ -191,6 +407,47 @@ def _scrub_list_value(value: object) -> object:
     return value
 
 
+def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]:
+    """A document's LEGACY ``transactions`` serialised for an AI context (LP-493a), capped and scrubbed.
+
+    ⚠️ These do NOT live in ``entry.lists``. They are the per-document ``transactions`` attribute that
+    ``all_transactions()`` reads and AS-1 rides, and nothing serialised them into a context before — so a
+    cross-source rule asking "did this deposit leave a verified account?" was shown account-level
+    balances and nothing else.
+
+    Same shape and same PII backstop as :func:`_serialize_lists`: a truncation is MARKED rather than
+    silent, and every value goes through :func:`_scrub_list_value` so an account number printed inside a
+    description cannot reach a reasoner.
+    """
+    rows = tuple(entry.transactions or ())
+    shown = rows[:cap]
+    # ⚠️ ABSENT FIELDS ARE OMITTED, not emitted as null (reported finding). A TransactionRecord's
+    # date/amount/direction/description are REQUIRED Field objects, so `field is not None` filtered
+    # nothing and an absent value serialised as an explicit `"direction": null`. _serialize_row drops
+    # absent fields precisely to preserve absent != empty, and this function's docstring claims the same
+    # shape. An undeterminable direction is now simply unstated rather than asserted as null.
+    out: dict[str, object] = {
+        "rows": [
+            {
+                name: _scrub_list_value(_field_value(field))
+                for name, field in (
+                    ("date", txn.date),
+                    ("amount", txn.amount),
+                    ("direction", txn.direction),
+                    ("description", txn.description),
+                )
+                if field.is_present
+            }
+            for txn in shown
+        ]
+    }
+    if len(rows) > cap:
+        out["truncated"] = True
+        out["shown"] = len(shown)
+        out["total"] = len(rows)
+    return out
+
+
 def _serialize_lists(entry: DocumentEntry, cap: int) -> dict[str, object]:
     """A document's generic lists serialised for an AI context (LP-444) — opt-in, capped, scrubbed, marked.
 
@@ -210,6 +467,23 @@ def _serialize_lists(entry: DocumentEntry, cap: int) -> dict[str, object]:
             block["shown"] = len(shown)
             block["total"] = len(rows)
         out[name] = block
+    return out
+
+
+def _serialize_untyped(untyped: dict[str, object], cap: int) -> dict[str, object]:
+    """The marked-untyped section for an AI context (LP-463) — capped + truncation-marked like the lists.
+
+    ``untyped`` is already identifier-scrubbed at snapshot-build time. Any LIST-valued member longer than
+    ``cap`` (the group's ``list_row_cap``) is trimmed to the first ``cap`` items with a parallel
+    ``<name>__truncated`` marker (shown/total) — so a reasoner knows an item may lie beyond what's shown,
+    the same count-cross-check discipline the lists use. Scalar members (a type guess, a summary) pass through."""
+    out: dict[str, object] = {}
+    for name, value in untyped.items():
+        if isinstance(value, list) and len(value) > cap:
+            out[name] = value[:cap]
+            out[f"{name}__truncated"] = {"shown": cap, "total": len(value)}
+        else:
+            out[name] = value
     return out
 
 
@@ -334,7 +608,27 @@ def _borrower_context(
             attributed = entry.belongs_to is not None and any(
                 str(ref.borrower_id) == raw.borrower_id for ref in entry.belongs_to
             )
-            if not attributed:
+            # ⚠️ LP-493a — an UNATTRIBUTED document is file-level, not "someone else's". A purchase
+            # agreement, a title commitment or an appraisal has no belongs_to because it describes the
+            # PROPERTY, and dropping it silently is what left PC-5 reasoning about an earnest money
+            # deposit with the contract absent. A group that declares include_unattributed_documents
+            # gets them; one that does not is byte-unchanged.
+            # ⚠️ ANOTHER BORROWER'S document is still never gathered — that would be the guessed
+            # attribution LP-332/LP-336 forbid. Only genuinely unattributed documents are added.
+            # ⚠️ SCOPED TO GENUINELY PROPERTY-LEVEL TYPES (reported finding). `belongs_to is None` does
+            # NOT only mean "file-level" — it also means ATTRIBUTION FAILED, and the fail-open doc-type
+            # filter below keeps None/"unknown" types. So the relaxation was handing a borrower
+            # unclassified, unattributed documents that may be a CO-BORROWER'S: on LF-6T3N borrower 2's
+            # context gained four of them. `bank_statement` is in contract_emd.applies_to and PC-5's
+            # prompt asks about "an account the BORROWER owns", so that is an answer off someone else's
+            # account. The comment's claim that another borrower's document is never gathered holds only
+            # where attribution SUCCEEDED. Restricted to the types that describe the PROPERTY, which is
+            # the case the opt-in was added for.
+            if not attributed and not (
+                opts.include_unattributed_documents
+                and entry.belongs_to in (None, ())
+                and entry.document_type in _PROPERTY_LEVEL_DOC_TYPES
+            ):
                 continue  # unattributed → not this borrower's → the context is honestly incomplete
             # Fail-open doc-type filter (LP-385): drop only a KNOWN, confident type the group's applies_to
             # excludes; keep None/"unknown" (classifier abstained) and everything when applies_to is None.
@@ -352,6 +646,10 @@ def _borrower_context(
             # Only when the group declared include_lists → an existing borrower group is byte-unchanged.
             if opts.include_lists and entry.lists:
                 doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
+            # ⚠️ LP-493a — a document's TRANSACTIONS live in the legacy `entry.transactions` attribute,
+            # NOT in `entry.lists`. Serialising them is the only way a cross-source rule can see a debit.
+            if opts.include_transactions and entry.transactions:
+                doc["transactions"] = _serialize_transactions(entry, opts.list_row_cap)
             documents.append(doc)
     context: dict[str, object] = {"borrower_mismo": mismo, "documents": documents}
     # LP-444 — opt-in: the app's file-level stated liabilities (the CR-4 comparison set). Off by default,
@@ -390,6 +688,8 @@ _SUBJECT_TYPES: dict[str, SubjectType] = {
     "document": SubjectType(_doc_enumerate, _doc_read_field, _doc_context),
     "loan": SubjectType(_loan_enumerate, _loan_read_field, _loan_context),
     "borrower": SubjectType(_borrower_enumerate, _borrower_read_field, _borrower_context),
+    # LP-483 — the liability family (see its section above): the missing floor under all 14 liab.* tags.
+    "liability": SubjectType(_liability_enumerate, _liability_read_field, _liability_context),
 }
 
 KNOWN_CONTEXT_BUILDERS = frozenset(_SUBJECT_TYPES)

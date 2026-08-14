@@ -8,7 +8,7 @@ extracted text is never logged.
 
 import pymupdf
 import structlog
-from app.services.pdf_utils import extract_text_from_pdf
+from app.services.pdf_utils import extract_text_from_pdf, first_n_pages
 
 
 def _make_pdf(pages: list[str]) -> bytes:
@@ -98,3 +98,36 @@ async def test_extracted_text_is_not_logged() -> None:
     assert pii_text not in blob
     # Metadata IS logged.
     assert any(e["event"] == "pdf_text_layer_extracted" for e in logs)
+
+
+# --------------------------------------------------------------------------- #
+# LP-462 — first_n_pages (the classification page cap)
+# --------------------------------------------------------------------------- #
+
+
+async def test_first_n_pages_slices_over_cap() -> None:
+    pdf = _make_pdf([f"page {i}" for i in range(30)])
+    out = await first_n_pages(pdf, 15)
+    assert out is not None
+    doc = pymupdf.open(stream=out, filetype="pdf")
+    assert doc.page_count == 15
+    doc.close()
+
+
+async def test_first_n_pages_within_cap_is_byte_identical() -> None:
+    pdf = _make_pdf(["a", "b", "c"])
+    out = await first_n_pages(pdf, 15)
+    assert out == pdf  # already under the cap → original bytes, no re-encode
+
+
+async def test_first_n_pages_non_pdf_returns_none() -> None:
+    assert await first_n_pages(b"not a pdf at all", 15) is None  # caller sends original unchanged
+
+
+async def test_first_n_pages_never_logs_content() -> None:
+    pdf = _make_pdf([f"SSN 123-45-6789 page {i}" for i in range(20)])
+    with structlog.testing.capture_logs() as logs:
+        out = await first_n_pages(pdf, 5)
+    assert out is not None
+    blob = " ".join(repr(e) for e in logs)
+    assert "123-45-6789" not in blob  # the slice never logs content

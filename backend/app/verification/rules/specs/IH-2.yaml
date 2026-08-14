@@ -1,0 +1,152 @@
+# IH-2 — Mortgagee clause — DETERMINISTIC structural rule SPEC (LP-487).
+#
+# Does the homeowners binder's mortgagee clause name THIS loan's lender? A clause naming the wrong
+# entity means the lender is not on the policy: a loss cheque goes to a stranger, and the servicer
+# never receives the cancellation notice.
+#
+# ⚠️ THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-487): ai_fuzzy_match →
+# deterministic_only. That kind predates typed extraction. The PERCEPTION step — reading the clause off
+# the binder — is already spent by the extractor, which lands the mortgagee in the typed-core
+# `mortgagee_name` field on 14 of 15 binders in the corpus. What remains is comparing two strings that
+# differ by ISAOA/ATIMA, a corporate suffix, case and punctuation. Observed values, all four variants
+# of one lender: "United Wholesale Mortgage" · "UNITED WHOLESALE MORTGAGE LLC" · "United Wholesale
+# Mortgage, LLC ISAOA" · "United Wholesale Mortgage ISAOA/ATIMA". Running a model over that is spending
+# a call to do a string compare.
+#
+# ⚠️ A MISMATCH IS `needs_review`, NEVER `fired` — the decision this rule turns on. The corpus's ONE
+# file pairing a binder with a Closing Disclosure reads "Sistar Mortgage Company" on the CD against
+# "United Wholesale Mortgage" in the clause. In broker and correspondent deals the CD names the
+# CREDITOR and the clause names the INVESTOR/SERVICER who will hold the loan, and they legitimately
+# differ. A rule that fires there is WRONG ON A CORRECT FILE. So IH-2 reports "the clause names X, the
+# file's lender is Y — confirm", which is what a processor needs to see anyway, and never asserts that
+# the clause is wrong.
+#
+# ⚠️ THE LENDER NAME IS SCOPED TO TWO DOCUMENT TYPES. `lender_name` is a field on TEN document types
+# whose meanings differ — form_1098.lender_name is the CURRENT SERVICER of an existing mortgage,
+# voe.lender_name is whoever ORDERED the verification, other_property_note.lender_name is a DIFFERENT
+# property's lender. Only the Closing Disclosure (authoritative) and the Loan Estimate (fallback, for a
+# file too early to have a CD) are read. An unscoped read would compare the clause against a name that
+# was never this loan's creditor.
+#
+# ⚠️ THE IH-1 / IH-3 BOUNDARY. IH-1 reads the binder's SETTLEMENT BASIS, IH-3 its DATES, IH-2 its
+# MORTGAGEE. Three different fields on the same document; they never overlap.
+
+rule_id: IH-2
+name: Mortgagee clause
+category: Insurance
+
+kind: structural            # must equal rule_kinds.csv (IH-2 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a name compare, not a ratio
+
+criteria: >-
+  The mortgagee clause on the homeowners binder must name the lender for this loan, so that the lender
+  is a named loss payee and receives cancellation and non-renewal notices. This reads the derived
+  ins.mortgagee_clause_correct per binder, which normalises both names against a declared vocabulary
+  (ISAOA/ATIMA and care-of markers truncated, corporate suffixes and punctuation dropped) and compares
+  whole tokens in order. A clause that does not match is surfaced for confirmation, NOT failed: a
+  correspondent's creditor and the investor who will hold the loan differ legitimately, and only a
+  processor can tell that apart from a genuine error. A missing or unreadable name resolves to
+  couldnt_check, never a guessed match.
+
+applicability:
+  scope: each homeowners insurance binder's mortgagee clause
+  trigger: >-
+    Any homeowners_insurance document in the file. A file with no binder yields no subject; a binder
+    stating no mortgagee name, or a file whose Closing Disclosure and Loan Estimate both state no
+    lender, couldnt_checks — it is never read as a match.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — no threshold; this is a vocabulary
+  values:
+    # ⚠️ THE DECLARED NORMALISATION VOCABULARY — pipe-delimited, case-insensitive. The recipe mirrors
+    # these exactly and test_ih2_vocabulary_matches_the_spec pins them identical, so the spec (where
+    # they are reviewed) and the recipe (which runs) cannot drift — the CR-12 arrangement.
+    #
+    # Truncation markers: everything from the marker onward is ADDRESSING, not identity. ISAOA/ATIMA
+    # ("its successors and/or assigns, as their interests may appear") is a boilerplate assignment
+    # clause; "c/o" introduces the servicer's mailing agent — LAKEVIEW LOAN SERVICING LLC C/O LOAN CARE
+    # LLC is Lakeview's clause, not Loan Care's.
+    clause_truncate_markers: "c/o|isaoa|atima|its successors"
+    # Dropped from BOTH names, so the comparison stays symmetric and neither side is privileged.
+    corporate_suffix_tokens: "llc|lc|inc|incorporated|corp|corporation|co|company|na|lp|llp|fsb|fa|ltd|plc|bank"
+    # Two names agree when their token lists are equal, or one is a token-PREFIX of the other covering
+    # at least this many tokens. Not a threshold anyone signs off — a matching tolerance, the AS-3/CL-1
+    # precedent.
+    min_prefix_tokens_for_match: "2"
+  guideline_text: >-
+    The lender must be named in the mortgagee clause of the property insurance policy so that it is
+    entitled to loss proceeds and to notice of cancellation or non-renewal. Where the named mortgagee
+    differs from the creditor shown on the closing documents, the difference is frequently legitimate —
+    a correspondent lender's loan is insured in the name of the investor who will acquire it — so the
+    difference is reported for confirmation and the file is not failed on it.
+
+required_inputs:
+  - name: mortgagee_clause_correct
+    snapshot_path: 'tags.by_subject[<binder content_id>]["ins.mortgagee_clause_correct"]'
+    description: >-
+      whether THIS binder's mortgagee clause names the loan's lender (derived, LP-487): "yes" / "no"
+      from the normalised token compare, "unknown" when the binder states no mortgagee, when no Closing
+      Disclosure or Loan Estimate states a lender, when either source states more than one, or when
+      nothing identifying survives normalisation.
+
+subject_enumeration: per_document      # per binder (like IH-1) — a file may carry several
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The mortgagee exactly as the clause states it, the lender exactly as the closing document states it,
+  and which document that lender came from — inline on the finding, so a processor can settle a
+  correspondent-versus-investor difference without reopening either document.
+
+guideline_reference: "Fannie Mae Selling Guide B7-3-01 — the lender must be named in the mortgagee clause of the property insurance policy and be entitled to notice of cancellation or non-renewal."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs, so an absent or unreadable name can never reach the default and
+# be read as a match.
+deterministic:
+  # Scope to binders — the tag materialises only on homeowners_insurance documents, and this keeps a
+  # non-binder subject from producing a finding at all.
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: homeowners_insurance
+  load_bearing_tags:
+    - ins.mortgagee_clause_correct
+  gated_tags:
+    - ins.mortgagee_clause_correct
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: ins.mortgagee_clause_correct, op: eq, value: "yes"}
+      reasoning: >-
+        the binder's mortgagee clause names this loan's lender
+    # ⚠️ needs_review, NOT fired — see the header. A correspondent's creditor and the investor who will
+    # hold the loan differ legitimately, and the file is not failed on a difference that is frequently
+    # correct.
+    - verdict: needs_review
+      when_tags:
+        - {tag: ins.mortgagee_clause_correct, op: eq, value: "no"}
+      reasoning: >-
+        the mortgagee named on the binder does not match the lender shown on the file's closing
+        documents — this is often legitimate (a correspondent lender's loan is insured in the name of
+        the investor who will acquire it), so it needs confirmation rather than correction
+      how_to_fix: >-
+        Compare the mortgagee clause against the creditor on the Closing Disclosure. If the loan is
+        being sold to the named investor, the clause is correct and no change is needed — note it on the
+        file. If the clause names an unrelated entity, or a prior lender from a refinance, request a
+        corrected binder with the current mortgagee clause and loan number before closing.
+    - verdict: couldnt_check
+      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
+      # couldnt_check before this body runs, so this branch should be unreachable — but a `satisfied`
+      # default would turn any future third value into a silent all-clear.
+      default: true
+      reasoning: >-
+        the binder's mortgagee could not be compared with this loan's lender — either the binder states
+        no mortgagee, or no closing document in the file states a lender to compare it against
+      how_to_fix: >-
+        Confirm the binder shows a mortgagee clause. If the file has no Closing Disclosure or Loan
+        Estimate yet, this check settles once one is in the file.

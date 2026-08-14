@@ -69,10 +69,22 @@ def _use_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_default_provider_is_anthropic() -> None:
-    """The default must not change — acceptance criterion 1."""
+def test_default_provider_is_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default must not change — acceptance criterion 1.
+
+    The real invariant is the declared field default plus what a fresh construction resolves to when
+    nothing overrides it — NOT the ambient ``settings`` singleton, which reflects the gitignored ``.env``
+    (and the autouse baseline). So this constructs Settings hermetically: no ``.env``, no ``AI_PROVIDER``
+    env var, a dummy key only to satisfy the anthropic-key validator.
+    """
     assert Settings.model_fields["ai_provider"].default == "anthropic"
-    assert settings.ai_provider == "anthropic"
+    # Construct with the other required settings supplied (via _settings_kwargs) but ai_provider POPPED, so
+    # it falls to the field default. Ignore .env and the AI_PROVIDER env var so neither can override it.
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
+    kwargs = _settings_kwargs(anthropic_api_key="sk-ant-test")
+    kwargs.pop("ai_provider", None)
+    fresh = Settings(_env_file=None, **kwargs)  # type: ignore[call-arg]
+    assert fresh.ai_provider == "anthropic"
 
 
 def test_anthropic_provider_constructs_the_direct_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,18 +513,32 @@ def test_unknown_model_still_returns_zero_and_warns() -> None:
 
 
 class _FakeMessages:
+    """Streaming seam for ``complete`` — records the kwargs of each ``stream(...)`` call (so tests can
+    assert the model sent on the wire) and returns a fixed final Message via ``get_final_message()``."""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def create(self, **kwargs: Any) -> Any:
+    def stream(self, **kwargs: Any) -> Any:
         from types import SimpleNamespace
 
         self.calls.append(kwargs)
-        return SimpleNamespace(
-            content=[SimpleNamespace(type="text", text="ok")],
-            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
-            stop_reason="end_turn",
-        )
+
+        class _Stream:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+            async def get_final_message(self) -> Any:
+                return SimpleNamespace(
+                    content=[SimpleNamespace(type="text", text="ok")],
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+                    stop_reason="end_turn",
+                )
+
+        return _Stream()
 
 
 async def test_complete_sends_the_resolved_bedrock_id(monkeypatch: pytest.MonkeyPatch) -> None:

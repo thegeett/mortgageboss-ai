@@ -144,6 +144,37 @@ _DEBIT_TYPES = frozenset(
 _DESC_REDACT = re.compile(r"\d(?:[\s-]?\d){8,}")
 _REDACTED = "[redacted]"
 
+
+def _scrub_untyped(value: Any) -> Any:
+    """Scrub a Tier-3 free-extraction structure of any long identifier run (LP-463).
+
+    The untyped section carries model-extracted free text (party names, contexts, a summary). The prompt is
+    told not to quote full SSNs/account numbers, but this is the belt-and-braces backstop at the snapshot
+    boundary — the SAME 9+-digit scrub (:data:`_DESC_REDACT`) the generic lists use — so a leaked identifier
+    cannot land in the snapshot at rest (which ``_assert_no_raw_pii`` guards) or reach an AI reasoner. A
+    masked last-4 / date / short id is kept (an honest signal); a long run becomes ``[redacted]``.
+
+    Returns ``None`` for a falsy TOP-LEVEL input (no untyped read), so a typed document's entry stays
+    ``untyped_extraction=None``. The empty-check is top-level ONLY: the recursion (:func:`_scrub_value`)
+    preserves falsy LEAVES (``0`` / ``False`` / ``""`` / ``[]``) — collapsing those to ``None`` would silently
+    distort the very facts this section surfaces.
+    """
+    if not value:
+        return None
+    return _scrub_value(value)
+
+
+def _scrub_value(value: Any) -> Any:
+    """Recurse a scrubbed structure, redacting long identifier runs in strings; falsy leaves are KEPT."""
+    if isinstance(value, str):
+        return _DESC_REDACT.sub(_REDACTED, value)
+    if isinstance(value, dict):
+        return {k: _scrub_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_value(v) for v in value]
+    return value  # numbers / bools / None — cannot carry an identifier string
+
+
 # The catch-all list key inside extracted_data (not a typed field).
 _CATCH_ALL_KEY = "additional_sections"
 
@@ -193,7 +224,6 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "account_or_reference_number_masked": (PiiKind.ACCOUNT, True),
     "borrower_ssn_or_itin": (PiiKind.SSN, False),
     "borrower_ssn_or_itin_2": (PiiKind.SSN, False),
-    "card_number": (PiiKind.ACCOUNT, False),
     "card_number_last4_or_token": (PiiKind.ACCOUNT, True),
     "card_or_account_last4": (PiiKind.ACCOUNT, True),
     "case_provider_or_account_number_masked": (PiiKind.ACCOUNT, True),
@@ -203,8 +233,14 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "claim_or_account_number_masked": (PiiKind.ACCOUNT, True),
     "deposit_account_last4": (PiiKind.ACCOUNT, True),
     "direct_deposit_account_last4": (PiiKind.ACCOUNT, True),
-    "document_number": (PiiKind.ACCOUNT, True),
-    "document_or_card_number": (PiiKind.ACCOUNT, True),
+    # LP-461 review — the DL document discriminator is a unique per-card security identifier captured RAW
+    # (not prompt-masked); mask + hash it (from_raw) like the sibling document_number rather than persist it plain.
+    "document_discriminator": (PiiKind.ACCOUNT, False),
+    # LP-472 review — the shared identity_document captures the primary document number (passport #, EAD /
+    # green-card 'Card #', or the ID number) VERBATIM, so from_raw masks the display AND computes a per-file
+    # match_hash; pre_masked=True would discard the raw to last-4 with match_hash=None. (The old per-type EAD /
+    # PRC names document_or_card_number / card_number were consolidated onto this and removed from the registry.)
+    "document_number": (PiiKind.ACCOUNT, False),
     "drawer_account_last4": (PiiKind.ACCOUNT, True),
     "ein": (PiiKind.ACCOUNT, False),
     "ein_masked": (PiiKind.ACCOUNT, True),
@@ -213,7 +249,11 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "entity_ein_masked": (PiiKind.ACCOUNT, True),
     "expiration_month_year": (PiiKind.ACCOUNT, False),
     "i94_admission_number": (PiiKind.ACCOUNT, True),
-    "loan_number": (PiiKind.ACCOUNT, True),
+    # LP-461 review — stored RAW (every extractor's prompt captures the loan number verbatim; the
+    # pre-masked variant is the separate "loan_number_masked" above). from_raw masks the DISPLAY and
+    # computes a per-file match_hash, so it stays a usable cross-document join key; pre_masked=True would
+    # discard the raw to last-4 with match_hash=None (non-joinable).
+    "loan_number": (PiiKind.ACCOUNT, False),
     "local_file_or_registration_number": (PiiKind.ACCOUNT, False),
     "partner_or_shareholder_tin": (PiiKind.SSN, False),
     "passport_number": (PiiKind.ACCOUNT, True),
@@ -221,7 +261,11 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "plan_claim_or_account_last4": (PiiKind.ACCOUNT, True),
     "plan_or_claim_number_masked": (PiiKind.ACCOUNT, True),
     "policy_number_masked": (PiiKind.ACCOUNT, True),
-    "receipt_number": (PiiKind.ACCOUNT, True),
+    # LP-465 review — stored RAW (appraisal_payment / work_visa_ead_card / uscis_notice_of_action all
+    # capture it VERBATIM; the uscis prompt says so explicitly), so from_raw masks the display AND computes a
+    # per-file match_hash — consistent with the sibling beneficiary_a_number / i94_number. pre_masked=True
+    # would discard the raw to last-4 with match_hash=None (the LP-461 loan_number bug).
+    "receipt_number": (PiiKind.ACCOUNT, False),
     "recipient_account_last4": (PiiKind.ACCOUNT, True),
     "recipient_tin_masked": (PiiKind.ACCOUNT, True),
     "shareholder_or_partner_tin_masked": (PiiKind.SSN, True),
@@ -235,11 +279,42 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "tax_identification_number_masked": (PiiKind.ACCOUNT, True),
     "taxpayer_tin": (PiiKind.SSN, False),
     "taxpayer_tin_masked": (PiiKind.ACCOUNT, True),
-    "uscis_number_or_a_number": (PiiKind.ACCOUNT, False),
-    "uscis_or_a_number": (PiiKind.ACCOUNT, True),
+    # LP-472 review — the shared identity_document captures the full A-Number / USCIS# VERBATIM, so from_raw
+    # masks the display + computes a per-file match_hash (consistent with beneficiary_a_number; the future ID-8
+    # cross-document identity match needs the hash). pre_masked=True gave last-4 with match_hash=None. The old
+    # per-type name uscis_number_or_a_number (was from_raw) was consolidated onto this and removed.
+    "uscis_or_a_number": (PiiKind.ACCOUNT, False),
     "visa_number": (PiiKind.ACCOUNT, True),
     "wire_ach_trace_number": (PiiKind.ACCOUNT, False),
     "wire_or_remittance_instructions": (PiiKind.ACCOUNT, False),
+    # LP-465 — uscis_notice_of_action. Both carry 9+-digit runs that would otherwise trip the LP-209
+    # at-rest guard; from_raw masks display to last-4 + a per-file match-hash (so the A-number can
+    # correlate to an EAD card's). ``receipt_number`` is ALREADY routed above (existing entry); the
+    # ``i94_number`` route is an addition found while reading 065 — the ticket flagged only the A-number.
+    # ``beneficiary_name`` / ``beneficiary_date_of_birth`` stay UNMASKED (ID-8 matches on them).
+    "beneficiary_a_number": (PiiKind.ACCOUNT, False),
+    "i94_number": (PiiKind.ACCOUNT, False),
+    # LP-466 — wire_instructions. A 9-digit ABA routing number is a bare contiguous run that trips the
+    # LP-209 at-rest guard → mask + per-file hash (from_raw). ``account_number`` is already routed above
+    # (form_1099, reused).
+    "aba_routing_number": (PiiKind.ACCOUNT, False),
+    # LP-466/467 review — whole-value NUMERIC identifiers that can arrive as a bare 9+-digit run: an
+    # UNFORMATTED phone (5551234567) or a pure-numeric invoice/service number. Left plain, either would trip
+    # the at-rest guard (``_LONG_DIGITS``) and REFUSE the whole loan file's snapshot. from_raw masks the
+    # snapshot value (last-4 + per-file hash); the raw value stays in the document's extraction for the
+    # processor's document view — so the wire callback number is still readable there, just not at rest.
+    "verification_phone": (PiiKind.ACCOUNT, False),
+    "invoice_number": (PiiKind.ACCOUNT, False),
+    # LP-469 — form_1098. The borrower TIN is PRE-MASKED on the form (last-4 only, e.g. '*****7007') →
+    # pre_masked display, no hash. ``account_number`` reuses the entry above (from_raw).
+    "borrower_tin_masked": (PiiKind.SSN, True),
+    # LP-469 review — ``lender_phone`` gets the same from_raw treatment as verification_phone: an UNFORMATTED
+    # servicer phone (bare 9+-digit run) would otherwise trip the at-rest guard and refuse the whole loan
+    # file's snapshot. Masked in the snapshot; the raw stays in the document extraction. ``lender_tin`` is
+    # deliberately NOT registered — it is a business EIN meant to stay VISIBLE (from_raw would hide it, and a
+    # scrub would over-redact the hyphenated form since _DESC_REDACT allows the separators the at-rest guard
+    # does not); an IRS 1098 always hyphenates the EIN (26-1193089), so its residual is effectively zero.
+    "lender_phone": (PiiKind.ACCOUNT, False),
 }
 
 # Free-text typed-core fields that are NOT whole-value PII (so not in ``_PII_FIELDS`` — masking the
@@ -251,6 +326,16 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
 # document_type; keep in sync with the spec's promoted free-text fields.
 _SCRUB_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {
     "credit_report": frozenset({"ssn_alert_status", "address_usage_alert"}),
+    # LP-466 — a wire memo instructs "reference file/loan number …"; a bare ≥9-digit file number embedded
+    # there would trip the at-rest guard. Scrub the 9+-digit run (the memo wording survives) as a backstop.
+    "wire_instructions": frozenset({"reference_or_memo"}),
+    # LP-467 — the ACORD 101 remarks print a bare loan number ("Loan: 4256229242") inside these free-text
+    # fields, invisible to the field-name PII registry; an invoice's service_description could likewise embed
+    # one. Same shape as the wire-memo scrub — redact the 9+-digit run, keep the wording.
+    "certificate_of_liability_insurance": frozenset(
+        {"description_of_operations", "project_or_property_reference"}
+    ),
+    "service_invoice": frozenset({"service_description"}),
 }
 
 
@@ -650,6 +735,11 @@ _TRADELINES_LIST = ListSpec(
         "worst_delinquency",
         "is_disputed",
     ),
+    # LP-479 — row ids, so LP-480's per-liability enumerator can anchor a per-row finding to a durable
+    # subject. Content-derived over the WHOLE row (scoped by document id + list name), so it needs no
+    # composite key and cannot collide unless two tradelines are byte-identical in all 14 fields — in
+    # which case assign_content_ids' occurrence tiebreak still separates them.
+    stable_row_id=True,
     # LP-443 review — a row-PII backstop: list-row PII is NOT _PII_FIELDS-routed, so if the (unvalidated,
     # starter) prompt fails to mask, the _DESC_REDACT 9+-digit scrub redacts a leaked full account number
     # (a genuinely-masked ****1234 is untouched). Not a full PiiField route — the deterministic per-list
@@ -711,7 +801,11 @@ _MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST = ListSpec(
 # typed field (the IH-1 anti-conflation). No PII in a form code/description.
 _FORMS_AND_ENDORSEMENTS_LIST = ListSpec(
     name="forms_and_endorsements",
-    fields=("code_or_label", "description"),
+    fields=(
+        "code_or_label",
+        "description",
+        "premium_or_amount",
+    ),  # LP-460 — the endorsement Premium column
 )
 # LP-446 — the pay_stub diff's lists: the earnings split (base/OT/bonus — IN-10/IN-11) + deductions.
 # Legacy pay-stub extraction has NO list attribute, so these are purely additive (no legacy to disturb).
@@ -817,6 +911,11 @@ _UNMAPPED_KEY_VALUE_PAIRS_LIST = ListSpec(
         "label",
         "value",
     ),
+    # LP-479 follow-up — the spec (064-custom.json) declared this redaction and the shipped module
+    # dropped it. A "custom" document has no known schema, so ANY PII the model reads lands in this
+    # passthrough unmasked (the spec's own pii_note says so). This is the drift in the direction the
+    # parity test now forbids: spec-declares, module-omits.
+    redact=frozenset({"value"}),
 )
 _DEDUCTIONS_OR_OFFSETS_LIST = ListSpec(
     name="deductions_or_offsets",
@@ -1195,19 +1294,134 @@ _SPECIAL_ASSESSMENT_ITEMS_LIST = ListSpec(
     ),
 )
 
+# LP-460 — the six missing repeating-row lists (schema-gap phase 2). Each is a flat-row list the extractor
+# now captures; no rule enumerates them yet, so no stable_row_id and no derived. Five carry no per-row
+# account number (amounts/dates/descriptions/coverage names — those keep their masked typed-core scalars),
+# so no redact. The ONE exception is the master cert's coverage_lines.policy_number: it IS a per-row account
+# number whose masking rests only on the generated prompt, so it gets the same _DESC_REDACT backstop as
+# _TRADELINES_LIST's account_number_masked — a full number the prompt fails to mask is scrubbed here.
+_MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST = ListSpec(
+    name="transaction_activity",
+    fields=("date", "description", "principal", "interest", "escrow", "fees_or_other", "total"),
+)
+_RETIREMENT_ACCOUNT__HOLDINGS_LIST = ListSpec(
+    name="holdings",
+    fields=(
+        "symbol",
+        "description",
+        "quantity",
+        "price",
+        "market_value",
+        "cost_basis",
+        "unrealized_gain_loss",
+    ),
+)
+_HOA_STATEMENT__PAYMENT_LEDGER_LIST = ListSpec(
+    name="payment_ledger",
+    fields=("date", "description", "charge", "paid", "running_balance"),
+)
+_PROPERTY_TAX_BILL__JURISDICTION_BREAKDOWN_LIST = ListSpec(
+    name="jurisdiction_breakdown",
+    fields=("taxing_unit", "tax_rate", "amount_billed", "adjusted_billed"),
+)
+_HOMEOWNERS_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=("coverage_name", "limit", "premium"),
+)
+_MASTER_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=("type_of_insurance", "policy_number", "limit", "deductible", "causes_of_loss"),
+    # LP-460 review — a row-PII backstop mirroring _TRADELINES_LIST: policy_number is a per-row account
+    # number masked only by the (generated, unvalidated-for-masking) master prompt, so if the model returns
+    # a full number the _DESC_REDACT 9+-digit scrub redacts it here (a genuinely-masked ****4432 is untouched).
+    redact=frozenset({"policy_number"}),
+)
+# LP-467 — the ACORD 25 certificate's coverage grid, ONE ROW PER COVERAGE SECTION (CGL / Auto / Umbrella /
+# Workers Comp), the section's headline limit per row. policy_number redacted as a row-PII backstop (mirrors
+# the master-policy list) though ACORD policy numbers are usually separator'd and clear the guard.
+_CERTIFICATE_OF_LIABILITY_INSURANCE__COVERAGE_LINES_LIST = ListSpec(
+    name="coverage_lines",
+    fields=(
+        "coverage_type",
+        "insurer_name",
+        "insurer_naic_number",
+        "policy_number",
+        "policy_effective_date",
+        "policy_expiration_date",
+        "limit_description",
+        "limit_amount",
+    ),
+    redact=frozenset({"policy_number"}),
+)
+
+# LP-461 — the schema-gap phase-3 flat-row lists. No stable_row_id / derived (no rule enumerates them yet).
+_W2__BOX_12_ITEMS_LIST = ListSpec(
+    name="box_12_items",
+    fields=("code", "amount"),
+)
+_TAX_RETURN__W2_FORMS_LIST = ListSpec(
+    name="w2_forms",
+    fields=("employer_name", "wages", "federal_withheld"),
+)
+_TAX_RETURN__CAPITAL_GAINS_LIST = ListSpec(
+    name="capital_gains_transactions",
+    fields=("description", "proceeds", "cost_basis", "gain_or_loss"),
+)
+_LETTER_OF_EXPLANATION__EXPLANATION_ITEMS_LIST = ListSpec(
+    name="explanation_items",
+    fields=("item_topic", "item_date_or_period", "item_explanation"),
+)
+_BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST = ListSpec(
+    name="additional_accounts",
+    fields=("account_number_masked", "account_type", "beginning_balance", "ending_balance"),
+    # row-PII backstop (mirrors _TRADELINES_LIST): the prompt masks account_number_masked to last 4; if a
+    # full number leaks the _DESC_REDACT 9+-digit scrub redacts it here (a genuine ****6290 is untouched).
+    redact=frozenset({"account_number_masked"}),
+)
+
+# LP-465 — the temporary buydown's per-period payment schedule (the substance of the type: reduced
+# rate, borrower's reduced payment, and the monthly subsidy per year-range). No PII (rates/amounts/dates).
+_PAYMENT_SCHEDULE_LIST = ListSpec(
+    name="payment_schedule",
+    fields=(
+        "period_label",
+        "period_start",
+        "effective_rate",
+        "borrower_payment",
+        "monthly_subsidy",
+        "source",
+    ),
+)
+
 _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
+    "temporary_buydown_agreement": (_PAYMENT_SCHEDULE_LIST,),  # LP-465
+    "certificate_of_liability_insurance": (
+        _CERTIFICATE_OF_LIABILITY_INSURANCE__COVERAGE_LINES_LIST,
+    ),  # LP-467
     "voe": (_GROSS_EARNINGS_HISTORY_LIST,),  # LP-446 diff (live extractor)
     "investment_account": (_SECURITY_POSITIONS_LIST,),  # LP-446 diff (live extractor)
     "purchase_agreement": (
         _ADDENDA_LIST,
         _CONTINGENCIES_LIST,
     ),  # LP-446 diff (live extractor)
-    "property_tax_bill": (
+    "property_tax_bill": (  # LP-446 diff + LP-460 jurisdiction_breakdown
         _PROPERTY_TAX_BILL__INSTALLMENTS_AND_DUE_DATES_LIST,
-    ),  # LP-446 diff (live extractor)
+        _PROPERTY_TAX_BILL__JURISDICTION_BREAKDOWN_LIST,
+    ),
     "profit_and_loss": (_FINANCIAL_LINE_ITEMS_LIST,),  # LP-446 diff (live extractor)
-    "hoa_statement": (_SPECIAL_ASSESSMENT_ITEMS_LIST,),  # LP-446 diff (live extractor)
-    "bank_statement": (_TRANSACTIONS_LIST,),
+    "hoa_statement": (  # LP-446 diff + LP-460 payment_ledger
+        _SPECIAL_ASSESSMENT_ITEMS_LIST,
+        _HOA_STATEMENT__PAYMENT_LEDGER_LIST,
+    ),
+    "mortgage_statement": (_MORTGAGE_STATEMENT__TRANSACTION_ACTIVITY_LIST,),  # LP-460
+    "retirement_account": (_RETIREMENT_ACCOUNT__HOLDINGS_LIST,),  # LP-460
+    "bank_statement": (  # LP-461 + additional_accounts (combined-statement recovery)
+        _TRANSACTIONS_LIST,
+        _BANK_STATEMENT__ADDITIONAL_ACCOUNTS_LIST,
+    ),
+    "w2": (_W2__BOX_12_ITEMS_LIST,),  # LP-461
+    "tax_return": (_TAX_RETURN__W2_FORMS_LIST, _TAX_RETURN__CAPITAL_GAINS_LIST),  # LP-461
+    "letter_of_explanation": (_LETTER_OF_EXPLANATION__EXPLANATION_ITEMS_LIST,),  # LP-461
     "appraisal": (_COMPARABLE_SALES_LIST,),
     "credit_report": (_TRADELINES_LIST, _PUBLIC_RECORDS_LIST, _INQUIRIES_LIST),
     "title_commitment": (_SCHEDULE_B_ITEMS_LIST, _CHAIN_OF_TITLE_LIST),
@@ -1215,7 +1429,10 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "certificate_of_eligibility": (_PRIOR_VA_LOAN_OR_ENTITLEMENT_CHARGES_LIST,),
     "verification_of_mortgage": (_PAYMENT_HISTORY_MONTHS_LIST,),
     "homeowner_s_insurance_quote": (_MORTGAGEE_OR_LIENHOLDER_ENTRIES_LIST,),
-    "homeowners_insurance": (_FORMS_AND_ENDORSEMENTS_LIST,),  # LP-446 diff (live extractor)
+    "homeowners_insurance": (  # LP-446 diff + LP-460 coverage_lines
+        _FORMS_AND_ENDORSEMENTS_LIST,
+        _HOMEOWNERS_INSURANCE__COVERAGE_LINES_LIST,
+    ),
     "pay_stub": (_EARNINGS_LINES_LIST, _DEDUCTION_LINES_LIST),  # LP-446 diff (live extractor)
     # LP-443 Phase C — the remaining generated list-bearing types.
     "affiliated_business_disclosure": (_AFFILIATE_ENTRIES_LIST,),
@@ -1242,7 +1459,10 @@ _LIST_SPECS: dict[str, tuple[ListSpec, ...]] = {
     "k1_statement": (_K1_BOX_ITEMS_LIST,),
     "k_1_shareholder_profit_and_loss_transcripts": (_TRANSCRIPT_LINE_ITEMS_LIST,),
     "letter_of_explanation_asset": (_TRANSFER_PATH_OR_CHRONOLOGY_LIST,),
-    "master_insurance_policy_for_condominium": (_BUILDING_LIMITS_LIST,),
+    "master_insurance_policy_for_condominium": (
+        _BUILDING_LIMITS_LIST,
+        _MASTER_INSURANCE__COVERAGE_LINES_LIST,
+    ),
     "military_leave_and_earning_statement_les": (_ENTITLEMENTS_LIST,),
     "miscellaneous_document": (_KEY_VALUE_PAIRS_LIST,),
     "mortgage_loan_origination_agreement": (_ORIGINATION_AND_BROKER_FEE_ITEMS_LIST,),
@@ -1549,7 +1769,7 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
     """
     _documents, reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
     entries: list[DocumentEntry] = []
-    for d, doc_id in zip(reshaped, doc_ids, strict=True):
+    for document, d, doc_id in zip(_documents, reshaped, doc_ids, strict=True):
         entries.append(
             DocumentEntry(
                 content_id=doc_id,
@@ -1564,6 +1784,10 @@ async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list
                 lists=finalize_lists(
                     d.list_drafts, document_content_id=doc_id
                 ),  # LP-437 — {} today
+                # LP-463 — the marked-untyped section: the Tier 3 scoped free-extraction output, scrubbed of
+                # any long identifier run so no raw account/SSN reaches the snapshot at rest. None for a
+                # typed/catalog document. NEVER read by a deterministic rule (see DocumentEntry docstring).
+                untyped_extraction=_scrub_untyped(document.generic_analysis),
             )
         )
     return entries

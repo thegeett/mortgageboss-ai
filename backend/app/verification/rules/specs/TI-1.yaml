@@ -1,0 +1,139 @@
+# TI-1 — Title commitment parties — DETERMINISTIC structural rule SPEC (LP-491).
+#
+# Does the owner of record on the title commitment match the party the file says should own it — the
+# seller on a purchase, the borrower on a refinance?
+#
+# ⚠️ THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-491): ai_fuzzy_match →
+# deterministic_only, the SECOND time this has been needed (IH-2 was the first, LP-487). The reasoning is
+# identical: typed extraction already reads `vested_owner_name` (4/4 real commitments) and `seller_name`
+# (5/5 real purchase agreements), so the PERCEPTION step is spent and what remains is comparing two
+# strings. Recorded as a deliberate edit with its evidence, not slipped in — row count stays 135.
+#
+# ⚠️ THE CONSEQUENCE OF THAT EDIT IS THE POINT: TI-1 needs NO self-consistency run and no ratification.
+# It activates on `no-ai-dependency` like any deterministic rule, because there is no model in its chain.
+#
+# ⚠️ A MISMATCH IS `needs_review`, NEVER `fired` — argued, not assumed (the ticket asked for the
+# argument). A vesting difference is frequently legitimate: the property is held in a revocable trust
+# whose trustee is the borrower under another name; an estate is selling; a name changed on marriage or
+# divorce; the deed into the seller has not yet recorded. Each of those is a correct file that a firing
+# rule would call defective. The failure this rule really guards — the commitment is for the WRONG
+# PROPERTY OR WRONG PARTY — is caught just as well by surfacing it for a processor's glance. So TI-1
+# reports "the owner of record is X, the file's counterparty is Y, confirm", which is IH-2's precedent
+# and, on the same reasoning, the right direction here.
+#
+# ⚠️ MATCHES EITHER OWNER. Three of the four real commitments carry a `vested_owner_name_2`; a co-owned
+# property matching only the second name is still a match.
+#
+# ⚠️ THE PURPOSE BRANCH IS IN THE PRODUCER, NOT AN APPLICABILITY PREDICATE — and the abstain a predicate
+# would have given is preserved. TI-1 applies to BOTH purposes, so there is no single predicate value to
+# scope on. The recipe returns "unknown" when the purpose is unstated, and the gate routes that to
+# couldnt_check: a file that does not state its purpose is SURFACED, never silently skipped.
+
+rule_id: TI-1
+name: Title commitment parties
+category: Title
+
+kind: structural            # must equal rule_kinds.csv (TI-1 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a name compare
+
+criteria: >-
+  The owner of record on the title commitment must be the party the file says should own the property:
+  the seller on a purchase, the borrower on a refinance. This reads the derived
+  title.vested_owner_matches, which normalises both names against a declared vocabulary and compares
+  whole tokens in order. A mismatch is surfaced for confirmation rather than failed — a trust, an estate
+  or a name change all produce a legitimate difference. A commitment stating no owner, a file stating no
+  purpose, or a file with no counterparty resolves to couldnt_check, never a guessed match.
+  ⚠️ The vesting-recital markers are UNEXERCISED by the corpus: all four real commitments carry a PLAIN
+  NAME in vested_owner_name (the recital lives in vesting_marital_recital, which fills 0/4). Stripping a
+  marker that is not present changes nothing, so they are safe to ship — but nothing here is measured
+  behaviour. ⚠️ They match on WORD BOUNDARIES: an unbounded substring match truncated ordinary names
+  ("margarET ALonso" contains "et al") and manufactured agreement between different people.
+
+applicability:
+  scope: each title commitment in the file
+  trigger: >-
+    Any title_commitment document. A file with no commitment yields no subject; a commitment whose owner
+    cannot be compared couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — a vocabulary, not a threshold
+  values:
+    # ⚠️ THE DECLARED NORMALISATION VOCABULARY, pipe-delimited and case-insensitive. The producer mirrors
+    # IH-2's markers and suffixes exactly (ONE normaliser, shared — LP-487) and adds the vesting recitals
+    # below; test_ti1_vocabulary_matches_the_spec pins them identical.
+    #
+    # ⚠️ THE VESTING MARKERS ARE SPECULATIVE, and this is the reported finding. ALL FOUR real commitments
+    # carry a PLAIN NAME in vested_owner_name — 2 to 3 words, no TRUSTEE, no HUSBAND AND WIFE, no ET UX —
+    # because the extractor puts the recital in `vesting_marital_recital`, which fills 0/4. Real titles do
+    # carry these forms, so they are stripped; but NOTHING IN OUR CORPUS EXERCISES THEM.
+    vesting_truncate_markers: "et ux|et al|husband and wife|a married man|a married woman|a single man|a single woman|an unmarried man|an unmarried woman|as trustee|trustee of|as joint tenants|as tenants"
+    # Two names agree on equal token lists, or a token-PREFIX covering at least this many tokens (IH-2).
+    min_prefix_tokens_for_match: "2"
+  guideline_text: >-
+    The title commitment must show title vested in the party the transaction assumes: the seller on a
+    purchase, the borrower on a refinance. Where the vesting differs — a trust, an estate, a name change,
+    or a deed not yet recorded — the difference is documented and cleared before closing rather than
+    treated as a defect in itself.
+
+required_inputs:
+  - name: vested_owner_matches
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.vested_owner_matches"]'
+    description: >-
+      whether THIS commitment's owner of record matches the file's counterparty (derived, LP-491):
+      "yes" / "no", or "unknown" when the commitment states no owner, the loan purpose is unstated or
+      contradictory, or the file names no seller/borrower to compare against.
+
+subject_enumeration: per_document      # per commitment — a file may carry several
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The owner(s) of record exactly as the commitment states them, the counterparty exactly as the file
+  states it, and which document that counterparty came from — so a processor can settle a trust or
+  name-change difference without reopening either document.
+
+guideline_reference: "Title must be vested in the party the transaction assumes — the seller on a purchase, the borrower on a refinance — with any difference (trust, estate, name change, unrecorded deed) documented before closing."
+
+spec_version: 1
+
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: title_commitment
+  load_bearing_tags:
+    - title.vested_owner_matches
+  gated_tags:
+    - title.vested_owner_matches
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: title.vested_owner_matches, op: eq, value: "yes"}
+      reasoning: >-
+        the owner of record on the title commitment matches the party the file expects to own the property
+    # ⚠️ needs_review, NOT fired — see the header for the argument.
+    - verdict: needs_review
+      when_tags:
+        - {tag: title.vested_owner_matches, op: eq, value: "no"}
+      reasoning: >-
+        the owner of record on the title commitment is not the party the file expects — this is often
+        legitimate (a revocable trust, an estate, a name change, or a deed that has not yet recorded), so
+        it needs confirmation rather than correction
+      how_to_fix: >-
+        Compare the commitment's vesting against the seller on the contract (purchase) or the borrower
+        (refinance). If the property is held in a trust the borrower controls, or a name changed, document
+        it and the vesting is fine. If the commitment names an unrelated party, it may be for the wrong
+        property or the wrong file — request a corrected commitment before closing.
+    - verdict: couldnt_check
+      # ⚠️ ABSTAIN, NOT A PASS. "The vested owner matches" on a file with no commitment, no purpose, or no
+      # counterparty is a false all-clear on the one document that establishes who owns the property.
+      default: true
+      reasoning: >-
+        the commitment's owner of record could not be compared with the file's counterparty — the
+        commitment states no owner, the loan purpose is not stated, or the file names no seller or
+        borrower to compare against
+      how_to_fix: >-
+        Confirm the commitment shows a vested owner, and that the file states its loan purpose. A purchase
+        needs the contract's seller; a refinance needs the borrower on the application.

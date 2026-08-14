@@ -227,6 +227,31 @@ def parse_catch_all(raw: Any) -> list[dict[str, Any]]:
     return sections
 
 
+def parse_flat_rows(raw: Any, row_spec: CoreSpec) -> list[dict[str, Any]]:
+    """Coerce a bare-row list (LP-437 ``flat_row``) — each declared field coerced, a per-row page/snippet
+    ``source`` kept, a fully-empty row dropped (no hallucinated rows). Row values are read as strings by
+    the snapshot; mirrors bank_statement's transactions parse.
+
+    Shared by every flat-row list-bearing extractor (was copied per module). A ``source`` DECLARED in
+    ``row_spec`` (a real data column named "source") is never clobbered — provenance is only added when the
+    row has no field of that name.
+    """
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return rows
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        row: dict[str, Any] = {name: coerce(entry.get(name)) for name, coerce in row_spec}
+        if (
+            "source" not in row
+        ):  # never clobber a declared 'source' data field; else keep provenance
+            row["source"] = source_payload(entry)
+        if any(row[name] is not None for name, _ in row_spec):
+            rows.append(row)
+    return rows
+
+
 def derive_status(non_null: int, coercion_lost: bool) -> ExtractionStatus:
     """Status from the typed core: nothing read → FAILED; a coercion loss → PARTIAL; else SUCCEEDED."""
     if non_null == 0:
@@ -234,3 +259,23 @@ def derive_status(non_null: int, coercion_lost: bool) -> ExtractionStatus:
     if coercion_lost:
         return ExtractionStatus.PARTIAL
     return ExtractionStatus.SUCCEEDED
+
+
+#: The self-explaining reason for a FAILED extraction that carried NO reasoning — i.e. the model
+#: returned a parseable response whose typed core was entirely null (``derive_status``: nothing read).
+#: This is the honest-none case, NOT an exception: an infra/parse failure sets its own reason via
+#: ``.failed(...)`` (oversized / "AI call failed" / "could not parse extraction"), so a FAILED result that
+#: still has no reasoning here is an all-null read. Naming it turns "empty failure, no error type" — a
+#: symptom with no location that cost a diagnosis cycle (LP-473; the LP-464 lesson) — into a self-locating
+#: record.
+FAILED_ALL_NULL_DETAIL = "all typed fields null — model returned no values (no exception)"
+
+
+def failure_detail(status: ExtractionStatus, reasoning: str | None) -> str | None:
+    """The persisted / bench ``why-it-FAILED`` string. ``None`` for a non-FAILED result; the result's own
+    reasoning when it has one (an infra/parse failure); else :data:`FAILED_ALL_NULL_DETAIL` for the
+    honest all-null case. One helper so the production record and the bench name it identically."""
+    if status != ExtractionStatus.FAILED:
+        return None
+    reason = reasoning.strip() if isinstance(reasoning, str) else None
+    return reason or FAILED_ALL_NULL_DETAIL

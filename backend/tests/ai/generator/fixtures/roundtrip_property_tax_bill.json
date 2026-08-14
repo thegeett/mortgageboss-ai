@@ -259,6 +259,16 @@
       "pii": null,
       "exists_today": false,
       "prompt_hint": null
+    },
+    {
+      "name": "interest_begins_date",
+      "type": "date",
+      "why": "LP-461 diff"
+    },
+    {
+      "name": "legal_description",
+      "type": "str",
+      "why": "LP-461 diff"
     }
   ],
   "nested_lists": [
@@ -300,6 +310,22 @@
           "name": "source",
           "type": "str",
           "why": "LP-446 diff row field"
+        }
+      ]
+    },
+    {
+      "name": "jurisdiction_breakdown",
+      "shape": "flat_row",
+      "shape_reason": "LP-460 diff",
+      "expected_item_count": "a handful",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {
+          "name": "taxing_unit",
+          "type": "str",
+          "why": "LP-460 diff row field"
         }
       ]
     }

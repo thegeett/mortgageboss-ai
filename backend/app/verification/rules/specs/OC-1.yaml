@@ -15,11 +15,11 @@
 #   consistency, deterministic). rule_kinds.csv is GENERATED from docs/snapshot-fact-tags.xlsx, so the
 #   census row must be reconciled UPSTREAM in the xlsx (editing the CSV is reverted on regen) — tracked.
 #
-# ⚠️ NOT ACTIVATED by this ticket (held). OC-1 is deterministic in FORM but its verdict rests on an AI
+# ACTIVATED at LP-495a on a self-consistency rate (ratify-pending) — the paragraph below is the HISTORY of why it was held, not the current state. OC-1 is deterministic in FORM but its verdict rests on an AI
 # tag (occupancy.consistent_with_signals) that is UNSCORED — no measured accuracy, no Priya bar. LIVE
 # OC-2 rides the same tag but RATIFIES every verdict (a human signs each), so it never needed the tag
 # CALIBRATED; OC-1 would AUTO-ship, which does. So OC-1 ships "written + producing", HELD on calibration
-# (activation_bars.yaml: not-calibratable-yet). See LP-406-4.
+# (activation_bars.yaml: now ratify-pending (was not-calibratable-yet)). See LP-406-4.
 #
 # ⚠️ ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 BOTH consume
 # occupancy.consistent_with_signals (OC-2 reasons over it; OC-1 fires deterministically on "no"), so once

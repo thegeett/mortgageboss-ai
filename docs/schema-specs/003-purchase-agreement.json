@@ -44,7 +44,8 @@
     {"name":"all_parties_signed","type":"str","why":"PC-6 — 'assess signature presence'","rules":["PC-6"],"reason_class":"rule","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"personal_property_included","type":"str","why":"PC-8 — 'AI-surface included personal property'","rules":["PC-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"personal_property_value","type":"Decimal","why":"PC-8 — 'flag for value adjustment'","rules":["PC-8"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if separately stated — do not estimate"},
-    {"name":"side_agreements_referenced","type":"str","why":"FR-3 — 'referenced side agreements'","rules":["FR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
+    {"name":"side_agreements_referenced","type":"str","why":"FR-3 — 'referenced side agreements'","rules":["FR-3"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"due_diligence_fee","type":"Decimal","why":"NC due-diligence fee - non-refundable, credited at closing; distinct from earnest money","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
   "nested_lists": [

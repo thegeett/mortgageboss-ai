@@ -37,6 +37,7 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
@@ -48,9 +49,10 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/w2.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# A W-2 is a single page but the full form (state/local, Box 12 codes, …) is
-# captured, so allow room.
-_MAX_TOKENS = 4096
+# A W-2 is a single page, but LP-461 promotes the state/local boxes (15-20) to typed core and adds the
+# Box 12 codes as a nested list → one nested list, so the sizing rule's 1-list tier (8192). The shared
+# truncation guard (app.ai.extraction.model_call) still backstops any overflow.
+_MAX_TOKENS = 8192
 
 
 class W2Extraction(BaseModel):
@@ -92,6 +94,26 @@ class W2Extraction(BaseModel):
     retirement_plan_checked: TypedField[str] = Field(default_factory=TypedField)
     statutory_employee_checked: TypedField[str] = Field(default_factory=TypedField)
     is_corrected_w2: TypedField[str] = Field(default_factory=TypedField)
+
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    control_number: TypedField[str] = Field(default_factory=TypedField)  # Box d
+    # Box 13 checkbox #3 (statutory + retirement already exist). ⚠️ null ≠ "unchecked": the prompt returns
+    # "checked"/"unchecked" when the box is VISIBLE, null only when Box 13 is not legible (LP-458 fix,
+    # extended to all three Box-13 checkboxes).
+    third_party_sick_pay_checked: TypedField[str] = Field(default_factory=TypedField)
+    # State boxes 15-17 (single-state; a 2-state W-2's repeating block is future — see LP-461 doc).
+    state_code: TypedField[str] = Field(default_factory=TypedField)  # Box 15
+    state_employer_id: TypedField[str] = Field(default_factory=TypedField)  # Box 15
+    state_wages: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 16
+    state_income_tax: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 17
+    # Local boxes 18-20.
+    local_wages: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 18
+    local_income_tax: TypedField[Decimal] = Field(default_factory=TypedField)  # Box 19
+    locality_name: TypedField[str] = Field(default_factory=TypedField)  # Box 20
+
+    # --- LP-461 diff — captured nested list (bare rows) -------------------- #
+    # Box 12 codes (A-HH) with amounts — typically 0-4 per W-2.
+    box_12_items: list[dict[str, Any]] = Field(default_factory=list)
 
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
@@ -137,6 +159,22 @@ _CORE_SPEC: CoreSpec = (
     ("retirement_plan_checked", coerce_str),
     ("statutory_employee_checked", coerce_str),
     ("is_corrected_w2", coerce_str),
+    # LP-461 diff additions
+    ("control_number", coerce_str),
+    ("third_party_sick_pay_checked", coerce_str),
+    ("state_code", coerce_str),
+    ("state_employer_id", coerce_str),
+    ("state_wages", coerce_decimal),
+    ("state_income_tax", coerce_decimal),
+    ("local_wages", coerce_decimal),
+    ("local_income_tax", coerce_decimal),
+    ("locality_name", coerce_str),
+)
+
+# LP-461 — Box 12 codes as bare rows (mirrors bank_statement's transactions parse).
+_BOX_12_ITEMS_ROW: CoreSpec = (
+    ("code", coerce_str),
+    ("amount", coerce_str),
 )
 
 
@@ -158,14 +196,17 @@ def _parse_w2_json(text: str) -> W2ExtractionResult | None:
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    box_12_items = parse_flat_rows(payload.get("box_12_items"), _BOX_12_ITEMS_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
-        data = W2Extraction.model_validate({**core_payload, "additional_sections": sections})
+        data = W2Extraction.model_validate(
+            {**core_payload, "box_12_items": box_12_items, "additional_sections": sections}
+        )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(box_12_items), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -218,5 +259,6 @@ async def extract_w2(content: bytes, media_type: str) -> W2ExtractionResult:
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        box_12_items=len(result.data.box_12_items),
     )
     return result

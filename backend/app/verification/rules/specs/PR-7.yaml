@@ -1,0 +1,121 @@
+# PR-7 — Appraisal address matches — structural rule SPEC (LP-492).
+#
+# Does the appraisal describe the property the loan is secured by? An appraisal for the wrong address
+# values the wrong asset.
+#
+# ⚠️ NO CATALOG EDIT WAS NEEDED, and that is the finding. LP-487 asked of every `ai_fuzzy_match` row
+# whether typed extraction has already spent the perception step; here it has (both real appraisals state
+# `subject_property_address`). But PC-3 — LIVE, catalogued `ai_fuzzy_match`, comparing the CONTRACT's
+# address to the same MISMO address — already carries a fully deterministic body on a
+# `no-ai-dependency` bar. PR-7 is that rule's twin, so it follows the same route: a deterministic
+# producer, no model, no derivation, no ratification load, and the catalog row left alone.
+# ⚠️ Both PC-3's and PR-7's rows are arguably stale in the IH-2/TI-1 sense. Reported, not edited — an
+# edit that buys nothing is churn, and the loader is satisfied either way.
+#
+# ⚠️ IT REUSES PC-3's CANONICALISERS rather than cloning them (`_norm_address`: street suffixes, US state
+# names, ZIP+4 → ZIP5), so a fix to address handling reaches both rules.
+#
+# ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1). The producer reads the MISMO SUBJECT-property address only —
+# never a borrower's `current_address`, which the parser can fill with a MAILING address. A file lacking
+# a COMPLETE subject address (street + city + state + postal) resolves to couldnt_check rather than
+# comparing against a partial or wrong-typed one.
+#
+# ⚠️ A MISMATCH IS `fired`, and the direction is argued rather than inherited. IH-2 and TI-1 both chose
+# needs_review because a NAME difference is frequently legitimate — a trust, an assignment, a marriage.
+# An ADDRESS is not ambiguous in that way: after canonicalisation, two renderings of the same property
+# agree, and a residual mismatch means the appraisal describes a DIFFERENT property. That is a defect,
+# not a difference. ⚠️ The residual risk is a surface form the canonicaliser does not resolve — a unit
+# designator is the known case (ADR-325) — which is why PC-3 routes ITS mismatch to needs_review. PR-7
+# fires because its consequence is larger: PC-3's mismatch means two documents disagree, PR-7's means the
+# value in the file may belong to another property. Logged for Priya either way.
+
+rule_id: PR-7
+name: Appraisal address matches
+category: Property
+
+kind: structural            # must equal rule_kinds.csv (PR-7 = structural, ai_fuzzy_match)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  The address the appraisal values must be the subject property on the loan file. This reads the derived
+  property.appraisal_address_match, a deterministic compare after the same canonicalisation PC-3 uses. A
+  file with no complete subject-property address, or an appraisal stating none, resolves to
+  couldnt_check — never a comparison against a partial address or a borrower's mailing address.
+
+applicability:
+  scope: each appraisal in the file
+  trigger: >-
+    Any appraisal document. A file with no appraisal yields no subject; an appraisal whose address cannot
+    be compared couldnt_checks.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values: {}
+  guideline_text: >-
+    The appraisal must describe the property securing the loan. Address renderings differ harmlessly
+    between documents (street-suffix abbreviations, state names, ZIP+4), so the comparison is made after
+    canonicalisation; a difference that survives it means the report is for a different property.
+
+required_inputs:
+  - name: address_match
+    snapshot_path: 'tags.by_subject[<appraisal content_id>]["property.appraisal_address_match"]'
+    description: >-
+      whether THIS appraisal's subject address matches the loan file's MISMO subject-property address
+      (derived, LP-492). "unknown" when either side is missing or incomplete.
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  Both addresses exactly as their documents state them, so a processor can see whether the difference is
+  a rendering or a different property.
+
+guideline_reference: "The appraisal must describe the property securing the loan; address renderings are compared after canonicalisation so that harmless surface differences do not read as a different property."
+
+spec_version: 1
+
+deterministic:
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: appraisal
+  load_bearing_tags:
+    - property.appraisal_address_match
+  gated_tags:
+    - property.appraisal_address_match
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: property.appraisal_address_match, op: eq, value: "yes"}
+      reasoning: the appraisal values the subject property on this loan file
+    # ⚠️ needs_review, NOT fired (reported finding). `_norm_address` deliberately does not canonicalise
+    # UNIT DESIGNATORS (ADR-325), and both real appraisals in the corpus are condominiums — so
+    # "34 Birch Rd Unit 4B" against MISMO's "34 Birch Rd" + "#4B" normalises to
+    # "... unit 4b" vs "... 4b" and reported two DIFFERENT PROPERTIES for one condo unit. PC-3 shares
+    # this canonicaliser and routes its mismatch to needs_review for exactly this residue; PR-7 was
+    # escalating the identical failure to a hard defect on the most common document shape available.
+    # The wording no longer asserts the conclusion either — it reports what differs and asks.
+    - verdict: needs_review
+      when_tags:
+        - {tag: property.appraisal_address_match, op: eq, value: "no"}
+      reasoning: >-
+        the appraisal's subject-property address does not match the loan file's after canonicalisation —
+        confirm they are the same property, as a unit designator or a formatting difference produces this
+        without the addresses actually differing
+      how_to_fix: >-
+        Compare the appraisal's address against the 1003 and the title commitment. If the appraisal is
+        for a different property, order a corrected report — the value cannot be used. If the difference
+        is a unit designator or a similar surface form the canonicaliser does not resolve, note it on the
+        file and confirm the parcel matches.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the appraisal's address could not be compared with the loan file's — the appraisal states no
+        subject address, or the file states no complete subject-property address (street, city, state and
+        postal code are all required)
+      how_to_fix: >-
+        Confirm the loan file carries a complete subject-property address. ⚠️ A borrower's current
+        address is not used for this check — it can be a mailing address for a different property.

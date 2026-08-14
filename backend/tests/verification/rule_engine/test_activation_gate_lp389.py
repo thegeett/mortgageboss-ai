@@ -36,11 +36,61 @@ from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 # LP-393-6 added IN-7/IN-10/IN-11/AS-11 (the scenario-calibrated income/asset rules, signed off by Priya).
 _ACTIVATED = frozenset(
     {
+        # LP-485 — the date-compare family (deterministic; cited windows, no calibration gate).
+        # LP-486 — CR-12 (disputed accounts; closed-vocabulary abstain, ADR-376).
+        "CR-12",
+        "IH-2",  # LP-487 — mortgagee clause (normalised name compare; needs_review, never fires)
+        "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
+        "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
+        "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
+        "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
+        # LP-494 — the condo lane. CO-3 is the FIDELITY leg IH-7 explicitly excludes (inputs 8/8);
+        # CO-4 reads the reserve percentage off the HOA STATEMENT type, where HOA budgets classify.
+        # ⚠️ CO-5 is deliberately absent: not one of its five inputs resolves on any document.
+        "CO-3",
+        "CO-4",
+        # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness.
+        "DT-6",
+        "DT-7",  # LP-495c
+        "LO-2",
+        "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
+        "RE-1",
+        # LP-495b — activated on scenario-fixture self-consistency rates.
+        "IN-13",  # LP-495b
+        "IN-14",
+        "OC-3",
+        # LP-496a — program eligibility, both no-ai-dependency (one cited numeric comparison each, so
+        # the gate runs on input_resolves alone). PE-1 abstains in the county-dependent band rather
+        # than clearing it; PE-3 uses HUD's Adjusted Value and abstains on a missing credit tier.
+        # PE-2 and PE-4 are HELD and never reach this set.
+        "PE-1",
+        "PE-3",
+        # LP-497 — AS-4 (reserves adequacy), no-ai-dependency. Its 0/5 blocker measured a tag that is
+        # not in its chain; its real gap was the threshold, now tier P from B3-4.1-01. AS-7 stays held.
+        "AS-4",
+        "FR-3",  # LP-498
+        "CL-1",
+        "CR-13",
+        "PR-6",
         "IN-1",
         "IN-5",
         "ID-5",
         "AS-9",
+        "AU-3",  # LP-488 — AUS recommendation (DU/LPA closed vocabulary, ADR-376)
+        "CR-1",  # LP-490a — ratify-pending (ADR-378)
+        "CR-4",  # LP-490a
+        "CR-6",  # LP-490a
+        "CR-8",  # LP-490a
+        "CR-10",  # LP-490a
+        "TI-1",  # LP-491 — title commitment parties (deterministic after the catalog edit)
         "IN-4",
+        "TI-2",  # LP-491 — ratify-pending
+        "TI-6",  # LP-491 — ratify-pending
+        "PR-2",  # LP-492 — appraised value vs purchase price
+        "PR-3",  # LP-492
+        "PR-4",  # LP-492
+        "PR-5",  # LP-492
+        "PR-7",  # LP-492
         "AS-10",
         "AS-2",
         "AS-12",
@@ -52,6 +102,7 @@ _ACTIVATED = frozenset(
         "AS-8",  # LP-406-2b — the first Bucket 2 rule live (no-ai-dependency; stmt.continuity resolves)
         "IN-6",  # LP-412 — Priya signed off the 0.95 bar (calibratable-now, same tag/evidence as IN-5)
         "PC-7",  # LP-412 — Priya signed off the closing window (first rule live via no-ai-threshold-pending)
+        "PC-8",  # LP-493 — personal property (ratify-pending; surfaces only)
         "PC-2",  # LP-407-3 — purchase price matches loan terms (no-ai-dependency, exact compare, no threshold)
         "IH-3",  # LP-417 — insurance effective date vs closing (no-ai-dependency, native date compare)
         "PC-3",  # LP-407-4 — contract property address vs the loan file (no-ai-dependency, needs_review route)
@@ -82,7 +133,35 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     assert eligible == set(_ACTIVATED)
     # 8 held after LP-444: +CR-4 (not-calibratable-yet — its new AI tag credit.undisclosed_tradeline is
     # unscored, so it is held, never eligible). The rest: OC-1 / IN-13 / AS-4/5/7 / IN-14.
-    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
+    # Still 8 held after LP-485 — CL-1 / CR-13 / PR-6 ACTIVATED rather than held (they are deterministic;
+    # their windows are researched + cited in their specs). The 8: CR-4 (LP-444) / OC-1 / IN-13 / AS-3 /
+    # AS-4 / AS-5 / AS-7 / IN-14.
+    # LP-490 adds CR-1 to the HELD set: it reads liab.in_application, an AI tag with no measured
+    # accuracy, so its bar is not-calibratable-yet and is_eligible returns False (LP-484). The cohort
+    # builds INERT by design — 8 -> 9 held, ACTIVE_RULE_IDS unchanged at 47.
+    # LP-490 adds CR-5/CR-6/CR-8/CR-10 to the HELD set alongside CR-1 — the whole cohort reads
+    # uncalibrated AI tags, so every bar is not-calibratable-yet. 9 -> 13 held; ACTIVE unchanged at 47.
+    # LP-490a — CR-1/CR-4/CR-6/CR-8/CR-10 left the held set for `ratify-pending` (ADR-378): activated on
+    # a self-consistency rate with ratification as the safety substitute. 13 -> 8 held.
+    # LP-493 — PC-5 joins the HELD set: BUILT, its first derivation returned a uniform abstain, and
+    # the LP-493a re-derivation (after both context fixes) scored a measured 0.5000 — held either way
+    # ({unknown: 2}), and a rate over one abstain value carries no information (the CR-8 shape), so
+    # none was recorded. 8 -> 9 held.
+    # LP-494 +CO-4 +CO-5 — BUILT AND HELD on input_resolves: false. No loan file carries a condo
+    # questionnaire, and the two in the bench corpus are a cancellation notice and an unanswered form.
+    # LP-495a — OC-1 LEAVES the held set for `ratify-pending` (ADR-378), on the first NON-VACUOUS
+    # self-consistency rate in this codebase: 0.9474 over 19 cases with a real spread and one real
+    # disagreement, against PR-3/PR-4's n=2 single-valued 1.0. 10 -> 9 held.
+    # LP-495b +OC-3 +DT-7 — both BUILT this ticket with measured self-consistency rates recorded on
+    # their bars, and both HELD: activation hit an unresolved dormant-probe interaction. 9 -> 11 held.
+    # LP-495b — OC-3 and DT-7 LEFT the held set, activating on scenario-fixture rates. 11 -> 9.
+    # LP-495b — OC-3, IN-13 and IN-14 LEFT the held set on scenario-fixture rates; DT-7 JOINED it,
+    # built and measured but held because its tag enum has no abstain, so a coerced unknown marks the
+    # whole run degraded. 9 - 2 + 1 = 8.
+    # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
+    # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6. NOTE: there is now NO
+    # blocked JUDGMENT rule at all; test_pending_checks_lp391 asserts that and simulates one.
+    assert len(held) == 6 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -91,28 +170,68 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-11",
         "AS-12",
         "AS-2",
-        "AS-6",  # LP-429 (sorts between AS-2 and AS-8)
-        "AS-8",  # LP-406-2b
+        "AS-4",  # LP-497
+        "AS-6",
+        "AS-8",
         "AS-9",
+        "AU-3",
+        "CL-1",
+        "CO-1",
+        "CO-3",  # LP-494 — fidelity presence (the leg IH-7 explicitly excludes)
+        "CO-4",  # LP-494 — date-keyed reserve floor (ADR-379)
+        "CR-1",  # LP-490a — ratify-pending (ADR-378)
+        "CR-10",  # LP-490a
+        "CR-12",
+        "CR-13",
+        "CR-4",  # LP-490a
+        "CR-6",  # LP-490a
+        "CR-8",  # LP-490a
+        "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
+        "DT-7",  # LP-495c
+        "FR-3",  # LP-498 (sorts after DT-7, before ID-*)
         "ID-5",
-        "IH-1",  # LP-447 (sorts between ID-5 and IH-3)
-        "IH-3",  # LP-417 (sorts between ID-5 and IN-1)
+        "IH-1",
+        "IH-2",
+        "IH-3",
+        "IH-7",
         "IN-1",
         "IN-10",
         "IN-11",
-        "IN-12",  # LP-423 (sorts between IN-11 and IN-3)
-        "IN-15",  # LP-430 (sorts between IN-12 and IN-3)
-        "IN-16",  # LP-433 (sorts between IN-15 and IN-3)
+        "IN-12",
+        "IN-13",  # LP-495b — per-type other-income continuance
+        "IN-14",  # LP-495b — rental income support
+        "IN-15",
+        "IN-16",
         "IN-3",
         "IN-4",
         "IN-5",
-        "IN-6",  # LP-412
+        "IN-6",
         "IN-7",
-        "IN-8",  # LP-428 (sorts between IN-7 and IN-9)
-        "IN-9",  # LP-428
-        "PC-2",  # LP-407-3 (sorts before PC-7)
-        "PC-3",  # LP-407-4 (sorts between PC-2 and PC-7)
-        "PC-7",  # LP-412
+        "IN-8",
+        "IN-9",
+        "LO-2",  # LP-495a — LOE completeness
+        "MI-1",
+        "MI-4",
+        "OC-1",  # LP-495a — ratify-pending (sorts between MI-4 and PC-2)
+        "OC-3",  # LP-495b — investment rental support
+        "PC-2",
+        "PC-3",
+        "PC-7",
+        "PC-8",  # LP-493 (sorts after PC-7)
+        # LP-496a — program eligibility. PE-1 abstains in the county-dependent band; PE-3 uses
+        # Adjusted Value and abstains on a missing credit tier. PE-2 / PE-4 held.
+        "PE-1",
+        "PE-3",
+        "PR-2",  # LP-492 (sorts before PR-6)
+        "PR-3",  # LP-492
+        "PR-4",  # LP-492
+        "PR-5",  # LP-492
+        "PR-6",
+        "PR-7",  # LP-492 (sorts after PR-6)
+        "RE-1",  # LP-495a — undisclosed mortgage obligation
+        "TI-1",  # LP-491 (sorts last)
+        "TI-2",  # LP-491 (ratify-pending)
+        "TI-6",  # LP-491 (ratify-pending)
     )  # sorted
 
 
@@ -126,21 +245,42 @@ def test_id5_now_passes_after_the_subject_fix() -> None:
 
 def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     bars = load_activation_bars()
-    # a not-calibratable-yet rule: unmeasured AI tag → held regardless of anything else
-    assert not is_eligible(bars["AS-4"]) and bars["AS-4"].status == "not-calibratable-yet"
+    # a not-calibratable-yet rule: unmeasured AI tag → held regardless of anything else.
+    # LP-497 — this WAS AS-4. It is now live, and the swap to AS-7 is the point rather than a
+    # convenience: AS-4 was never held for this reason. Its bar named stmt.is_reserve_eligible
+    # load-bearing "via the reserves calculator", and that tag is not in its chain at all, so the
+    # 0/5 that held it measured something AS-4 never reads. AS-7 IS held for this reason honestly —
+    # txn.is_nsf_or_overdraft is a real, unscored AI tag in its chain (and its declaration still
+    # coerces an honest abstain into a degraded run until LP-495c lands).
+    assert not is_eligible(bars["AS-7"]) and bars["AS-7"].status == "not-calibratable-yet"
     # AS-5 — LP-390-7 fail-closed proof: not-calibratable-yet + null threshold → held; validated stays false
     # (the loader would REJECT a stray true on it — see test_loader_rejects_validating_a_non_calibratable_rule),
     # so a mis-set flag can never leak AS-5 live even though apparent_category is now measured.
     assert not is_eligible(bars["AS-5"]) and bars["AS-5"].status == "not-calibratable-yet"
     assert bars["AS-5"].threshold is None and not bars["AS-5"].validated
-    # a needs-producer rule: the tag doesn't even materialize → held
-    assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "needs-producer"
+    # LP-495b — THIS ASSERTION ENCODED A STALE BELIEF AND IS CORRECTED, NOT DELETED. It used IN-14 as
+    # the needs-producer example on the grounds that occupancy.rental_support "has NO declared producer".
+    # LP-418 declared that producer and never updated IN-14's bar, so the example had been wrong for
+    # several tickets — and LP-495b's own ticket inherited the same belief from it. IN-14 is now LIVE on
+    # a scenario-fixture rate, so the held-rule example moved to DT-7, which is held for a reason that is
+    # real and specific: its tag's enum has no abstain value.
+    # There is no needs-producer rule left in the table, which is itself worth pinning: if one appears,
+    # this assertion tells the next reader the status is reachable rather than vestigial.
+    assert is_eligible(bars["IN-14"]) and bars["IN-14"].status == "ratify-pending"
+    assert not any(b.status == "needs-producer" for b in bars.values()), (
+        "a needs-producer rule reappeared — give it a named reason here, as IN-14 once had"
+    )
     # AS-3 — no-ai but its recipe is a STUB (no §3B cash-to-close calculator): the input never resolves → held
     assert not is_eligible(bars["AS-3"]) and not bars["AS-3"].input_resolves
     # OC-1 — the LP-406-4 rule STILL held: its AI tag occupancy.consistent_with_signals is unscored
     # (not-calibratable-yet). (PC-7 was the no-ai-threshold-pending held example through LP-411; LP-412 signed
     # off its window, so it is now live — see test_pc7_is_live_via_no_ai_threshold_pending_after_signoff.)
-    assert not is_eligible(bars["OC-1"]) and bars["OC-1"].status == "not-calibratable-yet"
+    # ⚠️ OC-1 IS NO LONGER HELD (LP-495a). It moved not-calibratable-yet -> ratify-pending on a
+    # self-consistency rate of 0.9474 over 19 cases (ADR-378), with ratification as the safety
+    # substitute for the missing measurement. Its tag is NOT re-kinded — see
+    # test_oc1_occupancy_consistency_lp495a.py.
+    assert is_eligible(bars["OC-1"]) and bars["OC-1"].status == "ratify-pending"
+    assert bars["OC-1"].measured_accuracy is None  # a rate is not a measurement
     # (IN-3 was the "calibratable but not-yet-signed" held example through LP-390-7; LP-390-9 signed off its bar,
     # so it is now eligible + active — see test_in3_is_live_after_priya_signoff. Every remaining held rule fails
     # for one of the reasons above.)

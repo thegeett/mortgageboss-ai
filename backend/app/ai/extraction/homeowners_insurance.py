@@ -30,8 +30,8 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
-    source_payload,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
 from app.ai.parsing import coerce_confidence, extract_json_object
@@ -42,8 +42,8 @@ logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "extraction/homeowners_insurance.txt"
 _SUPPORTED_MEDIA_TYPES = frozenset({"application/pdf", "image/jpeg", "image/png", "image/jpg"})
-# LP-446 — now list-bearing (forms_and_endorsements) → the unbounded-list budget (guide §7; was 4096).
-_MAX_TOKENS = 8192
+# LP-460 — TWO nested lists (forms_and_endorsements + coverage_lines) → the ≥2-list tier (guide §7).
+_MAX_TOKENS = 16384
 
 
 class HomeownersInsuranceExtraction(BaseModel):
@@ -84,6 +84,10 @@ class HomeownersInsuranceExtraction(BaseModel):
 
     # --- Captured nested list (LP-446 / LP-437) — bare rows, snapshot-read generically ------- #
     forms_and_endorsements: list[dict[str, Any]] = Field(default_factory=list)
+    # --- LP-460 diff — the Coverage B-F schedule (A is the coverage_amount scalar above). Each row is a
+    # coverage LINE with its own limit + premium; deductibles are policy-level (wind_hail_deductible /
+    # the catch-all), NOT a per-line column on this document. ------------------------------------------- #
+    coverage_lines: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — everything else -------------------------------- #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -136,31 +140,30 @@ _CORE_SPEC: CoreSpec = (
 )
 
 # LP-446 — the forms_and_endorsements list: bare rows (mirrors bank_statement's transactions parse).
+# LP-460 — added ``premium_or_amount``: many endorsement schedules carry a Premium column (incl. non-numeric
+# "INCL"/credit "($300)" entries and dollar lines like "$1,402") — kept verbatim (coerce_str), never coerced
+# away. This is a COLUMN on the existing list, not a new list.
 _FORMS_AND_ENDORSEMENTS_ROW: CoreSpec = (
     ("code_or_label", coerce_str),
     ("description", coerce_str),
+    ("premium_or_amount", coerce_str),
+)
+
+# LP-460 — the Coverage B-F schedule. Coverage A is the dwelling ``coverage_amount`` scalar; B-F are lines
+# here (limit + premium). ``premium`` is kept verbatim (coerce_str) - an "INCL" premium is preserved.
+_COVERAGE_LINES_ROW: CoreSpec = (
+    ("coverage_name", coerce_str),
+    ("limit", coerce_str),
+    ("premium", coerce_str),
 )
 
 
 def _parse_forms_and_endorsements(raw: Any) -> list[dict[str, Any]]:
     """Coerce the forms_and_endorsements rows — bare scalars + a per-row page/snippet source (LP-446).
 
-    Each declared field is coerced, a per-row source kept, and a fully-empty row dropped (no hallucinated
-    rows). A PERSONAL-PROPERTY replacement-cost endorsement lands HERE as a row — never conflated with the
+    A PERSONAL-PROPERTY replacement-cost endorsement lands HERE as a row — never conflated with the
     dwelling's ``replacement_cost_or_coinsurance_basis`` typed field."""
-    rows: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return rows
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        row: dict[str, Any] = {
-            name: coerce(entry.get(name)) for name, coerce in _FORMS_AND_ENDORSEMENTS_ROW
-        }
-        row["source"] = source_payload(entry)
-        if any(row[name] is not None for name, _ in _FORMS_AND_ENDORSEMENTS_ROW):
-            rows.append(row)
-    return rows
+    return parse_flat_rows(raw, _FORMS_AND_ENDORSEMENTS_ROW)
 
 
 def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtractionResult | None:
@@ -177,6 +180,7 @@ def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtraction
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
     forms_and_endorsements = _parse_forms_and_endorsements(payload.get("forms_and_endorsements"))
+    coverage_lines = parse_flat_rows(payload.get("coverage_lines"), _COVERAGE_LINES_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
@@ -184,13 +188,16 @@ def _parse_homeowners_insurance_json(text: str) -> HomeownersInsuranceExtraction
             {
                 **core_payload,
                 "forms_and_endorsements": forms_and_endorsements,
+                "coverage_lines": coverage_lines,
                 "additional_sections": sections,
             }
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null + len(forms_and_endorsements), coercion_lost)
+    status = derive_status(
+        non_null + len(forms_and_endorsements) + len(coverage_lines), coercion_lost
+    )
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -244,5 +251,6 @@ async def extract_homeowners_insurance(
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
         forms_and_endorsements=len(result.data.forms_and_endorsements),
+        coverage_lines=len(result.data.coverage_lines),
     )
     return result

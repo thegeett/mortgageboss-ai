@@ -20,6 +20,7 @@ from app.verification.eval.dormant_probe import (
     dormant_ai_groups,
     probe_dormant_groups_on_snapshot,
 )
+from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     DocumentEntry,
     DocumentsSection,
@@ -47,14 +48,51 @@ _DORMANT_EXPECTED = frozenset(
         # producer, loan-subject). They activate with their OWN later tickets; until then they are dormant.
         # (income_docs left in LP-428, stmt_facts in LP-429 — as their rules went live.)
         "txn_nsf",
-        "occupancy_rental",
-        # LP-444 — credit_profile (CR-4's producer, borrower-subject) is declared but CR-4 is inert, so it is
+        # LP-495b — occupancy_rental LEFT the dormant set (OC-3 activated); atr_documentation JOINED it.
+        # LP-495c — atr_documentation LEFT it again: DT-7's tag gained the abstain its prompt sanctioned,
+        # DT-7 activated, and its producer is now REQUIRED by a live rule. Verified against the same
+        # single source the orchestrator uses (`required_ai_groups()`), which now contains it.
         # dormant until CR-4 activates (its own calibration ticket).
-        "credit_profile",
+        # LP-490 — the credit AI cohort's four groups. Every rule reading them (CR-5/CR-6/CR-8/CR-10) is
+        # INERT (not-calibratable-yet → is_eligible False, LP-484), so all four are dormant by design.
+        # They activate with their own calibration ticket, exactly as credit_profile will.
+        "credit_inquiries",
+        # LP-493 — contract_emd stays dormant: PC-5 is BUILT BUT HELD (its derivation returned a uniform
+        # abstain, so no rate was recorded). contract_personal_property went LIVE with PC-8.
+        "contract_emd",
+        # ⚠️ LP-490a — credit_profile / credit_derogatory / credit_mortgage_history / credit_collections
+        # LEFT the dormant set: CR-1, CR-4, CR-6, CR-8 and CR-10 went live on `ratify-pending` (ADR-378),
+        # so their groups are now REQUIRED and run on a live file. Only credit_inquiries stays dormant —
+        # CR-5 is the one credit rule still held (its trigger has one instance in the whole corpus, so
+        # there was nothing to derive twice).
     }
 )
 _LIVE_EXPECTED = frozenset(
     {
+        # LP-498 — contract_credits, FR-3's producer, declared and consumed by a live rule in the
+        # same ticket, so it is live from birth and never appears in the dormant set.
+        "contract_credits",
+        # LP-495c — atr_documentation JOINED the live set, the exact complement of its leaving the
+        # dormant set above: DT-7 activated once its tag gained the abstain its prompt sanctioned,
+        # so a live rule now consumes the group on every normal run.
+        "atr_documentation",
+        # LP-495b — occupancy_rental JOINED the live set: OC-3 (and IN-14) activated on self-consistency
+        # rates (ADR-378), so a live rule now consumes it and the normal run materialises it. It had been
+        # dormant since LP-418 declared it.
+        # LP-495b review — this note previously said DT-7 joined too and that atr_documentation "goes straight to
+        # live without ever being dormant", while `_DORMANT_EXPECTED` above lists atr_documentation. The
+        # set is right and the sentence was wrong: DT-7 is HELD on its tag's missing abstain value, so its
+        # group is dormant to the LIVE set — it does still run on every file through the pending-check
+        # pass, which is a different path and is recorded on DT-7's bar.
+        "occupancy_rental",
+        # ⚠️ LP-490a — the four credit groups JOINED the live set: CR-1, CR-4, CR-6, CR-8 and CR-10 went
+        # live on `ratify-pending` (ADR-378), so these now run on a live file. credit_inquiries stays
+        # dormant (CR-5 is still held — one inquiry row in the whole corpus).
+        "credit_profile",
+        "credit_derogatory",
+        "credit_mortgage_history",
+        "credit_collections",
+        "contract_personal_property",  # LP-493 — PC-8 is live
         "id_address",
         "id_name",
         "id_poa",
@@ -97,15 +135,24 @@ def test_probe_module_is_never_imported_by_the_normal_run() -> None:
 # --------------------------------------------------------------------------- #
 # The probe runs the dormant groups over a snapshot and reports what they produce (no DB, no writes)
 # --------------------------------------------------------------------------- #
-def _snapshot(entries: list[DocumentEntry]) -> Snapshot:
+def _snapshot(entries: list[DocumentEntry], mismo: dict[str, object] | None = None) -> Snapshot:
+    # LP-495b — `mismo` became a parameter so a BORROWER-subject dormant group can be probed: a borrower
+    # subject only enumerates when a `borrower.{n}.borrower_id` fact exists. Defaults to empty, so every
+    # existing caller is unchanged.
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),
         created_at=datetime(2026, 7, 18, tzinfo=UTC),
         documents=DocumentsSection.present(entries),
-        mismo=MismoSection.present({}),
+        mismo=MismoSection.present(
+            {k: Field.present(v, source=FieldSource.PARSED) for k, v in (mismo or {}).items()}
+        ),
         tags=TagsSection.present({}),
     )
+
+
+# LP-495b — the borrower fact a borrower-subject probe needs, and the still-dormant group it probes.
+_ONE_BORROWER = {"borrower.1.borrower_id": "b-0001"}
 
 
 class _AiStub:
@@ -141,19 +188,22 @@ def _all_dormant_stubs(**overrides: Reasoner) -> dict[str, Reasoner]:
 
 
 async def test_probe_reports_what_a_dormant_group_produced_per_subject() -> None:
-    # stmt_facts is now LIVE (AS-6, LP-429); the last document-subject dormant group is gone, so this probes a
-    # STILL-dormant LOAN-subject group — occupancy_rental (IN-14's producer). The probe machinery is
-    # subject-agnostic (document_type is None for a non-document subject); a real value still reports as usable.
-    snap = _snapshot([DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})])
-    stub = _AiStub({"rental_support": "adequate"})  # a real (non-unknown) value on the loan subject
+    # LP-495b — occupancy_rental is now LIVE (OC-3 activated), so this probes a STILL-dormant
+    # BORROWER-subject group, contract_emd (PC-5's producer). The probe machinery is subject-agnostic
+    # (document_type is None for a non-document subject); a real value still reports as usable.
+    snap = _snapshot(
+        [DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})],
+        _ONE_BORROWER,
+    )
+    stub = _AiStub({"emd_sourced": "yes"})  # a real (non-unknown) value on the borrower subject
     report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(occupancy_rental=stub)
+        snap, ai_reasoners=_all_dormant_stubs(contract_emd=stub)
     )
 
     assert stub.calls == 1  # the injected reasoner was actually invoked
-    grp = next(g for g in report.groups if g.key == "occupancy_rental")
+    grp = next(g for g in report.groups if g.key == "contract_emd")
     values = {(o.tag_id, o.value) for o in grp.observations}
-    assert ("occupancy.rental_support", "adequate") in values  # produced a real value
+    assert ("contract.emd_sourced", "yes") in values  # produced a real value
     assert grp.verdict == "produces_usable"
     assert grp.doctypes_with_real_value == {None}  # a loan subject carries no document_type
     # The probe covers the WHOLE dormant set, not just the stubbed one.
@@ -161,14 +211,17 @@ async def test_probe_reports_what_a_dormant_group_produced_per_subject() -> None
 
 
 async def test_uniform_unknown_is_reported_as_a_finding_not_a_pass() -> None:
-    # stmt_facts is now LIVE (LP-429); probe the still-dormant occupancy_rental group.
-    snap = _snapshot([DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})])
-    # The stub abstains — the LP-368 pattern. This must NOT read as "produces_usable".
-    stub = _AiStub({"rental_support": "unknown"})
-    report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(occupancy_rental=stub)
+    # LP-495b — occupancy_rental is now LIVE; probe the still-dormant contract_emd group.
+    snap = _snapshot(
+        [DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})],
+        _ONE_BORROWER,
     )
-    grp = next(g for g in report.groups if g.key == "occupancy_rental")
+    # The stub abstains — the LP-368 pattern. This must NOT read as "produces_usable".
+    stub = _AiStub({"emd_sourced": "unknown"})
+    report = await probe_dormant_groups_on_snapshot(
+        snap, ai_reasoners=_all_dormant_stubs(contract_emd=stub)
+    )
+    grp = next(g for g in report.groups if g.key == "contract_emd")
     assert grp.real == []  # nothing usable
     assert grp.verdict == "mostly_abstains"  # honest — an abstention is a finding, not a pass
     assert grp.ai_failures == []  # a genuine model abstention is NOT an AI-call failure
@@ -178,11 +231,16 @@ async def test_ai_call_failure_reads_as_ai_failed_not_an_abstention() -> None:
     # materialize_tags degrades a failed AI call to `unknown` (it catches AIClientError), so a transient
     # outage looks like uniform-unknown. The probe MUST surface that as `ai_failed`, never read it as "the
     # producer abstains" (a false producer/applicability gap — the misdiagnosis this probe exists to prevent).
-    snap = _snapshot([DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})])
-    report = await probe_dormant_groups_on_snapshot(
-        snap, ai_reasoners=_all_dormant_stubs(occupancy_rental=_failing_reasoner)
+    # LP-495b — occupancy_rental is now LIVE (OC-3 activated); the failing reasoner is injected into the
+    # still-dormant contract_emd group instead.
+    snap = _snapshot(
+        [DocumentEntry(content_id="stmt1", document_type="bank_statement", fields={})],
+        _ONE_BORROWER,
     )
-    grp = next(g for g in report.groups if g.key == "occupancy_rental")
+    report = await probe_dormant_groups_on_snapshot(
+        snap, ai_reasoners=_all_dormant_stubs(contract_emd=_failing_reasoner)
+    )
+    grp = next(g for g in report.groups if g.key == "contract_emd")
     assert grp.real == []
     assert grp.ai_failures  # the failure is surfaced, distinct from an abstention
     assert grp.abstentions == []  # a call failure is not counted as a genuine abstention

@@ -20,17 +20,43 @@ required_inputs:
 reference_values:
   priya_validated: false
   threshold_needs_signoff: false
+  # LP-495b — THE 75% FACTOR IS NO LONGER "pending Priya". It is a cited primary, verified verbatim
+  # against the live page (10/08/2025): a researched, cited threshold is calibrated (ADR-361 discipline).
+  values:
+    gross_rent_qualifying_factor_percent: "75"
+    vacancy_and_maintenance_absorption_percent: "25"
+    lease_support_bank_statement_months: "2"
   guideline_text: >-
-    Fannie Mae Selling Guide B3-3.1-08 — rental income requires supporting documents and a vacancy/
-    expense adjustment (e.g. 75% of gross rent, or Schedule E net). Gross rent is not qualifying income.
-    The adjustment factor is a program value pending Priya.
+    Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025), verbatim: "When current lease agreements
+    or market rents reported on Form 1007 or Form 1025 are used, the lender must calculate the rental
+    income by multiplying the gross monthly rent(s) by 75%." and "The remaining 25% of the gross rent
+    will be absorbed by vacancy losses and ongoing maintenance expenses." A lease must be supported by
+    "two months consecutive bank statements or electronic transfers of rental payments for existing
+    lease agreements, or copies of the security deposit and first full month's rent check with proof of
+    deposit for newly executed agreements." Gross rent is never qualifying income.
+    Form 1007 (one-unit) and Form 1025 (two- to four-unit) are the market-rent sources the guide names;
+    neither exists as a document type in this system, so a market-rent path cannot be represented today
+    and the lease path is the only available one.
 subject_enumeration: per_borrower
 subject_key_fields:
   - borrower
 evidence_required: the rental income's supporting docs + the vacancy/expense adjustment and the judgment cited
-guideline_reference: "Fannie Mae Selling Guide B3-3.1-08 (rental income)."
+guideline_reference: "Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) — rental income. Supersedes the former B3-3.1-08 citation, which is stale numbering."
 judgment:
   subject: per_borrower
+  # LP-495b review — the same missing predicate OC-3 had, and the same fix. tag_production.yaml claimed
+  # occupancy.rental_support resolving to "n/a" "lets IN-14 reach not_applicable"; no such mapping exists
+  # anywhere in the rule engine. "n/a" is a present, non-unknown value, so it PASSES the gate, and IN-14
+  # then made a rule-time model call and returned a ratification-pending needs_review about rental income
+  # on a file claiming none. IN-14 was partly shielded only because income.continuance_3yr usually resolves
+  # "unknown" and gate leg 2 couldnt_checks first — an accident of the data, not scoping.
+  # The loan-level tag reaches this per-borrower map because `_per_borrower` merges the loan subject's tags
+  # into every borrower's (a borrower's own facts win on a collision); nothing here is borrower-specific,
+  # so the predicate scopes the whole rule off on a file with no rental/investment income.
+  applicability:
+    tag: occupancy.rental_support
+    op: ne
+    value: "n/a"
   load_bearing_tags: [income.continuance_3yr, occupancy.rental_support]
   reasoned_over: [income.continuance_3yr, occupancy.rental_support]
   output_tag: income.rental_income_supportable

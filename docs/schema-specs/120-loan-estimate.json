@@ -1,0 +1,67 @@
+{
+  "document_type": "loan_estimate",
+  "slug": "loan-estimate",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "TRID Loan Estimate for <borrower_name> on loan <loan_number>: amount <loan_amount> at <interest_rate>, APR <apr>, rate lock to <rate_lock_expiration>, cash to close <cash_to_close>.",
+  "existing_extractor": null,
+  "catalog_coverage": "headline-block",
+
+  "typed_core": [
+    {"name":"loan_number","type":"str","why":"identity — the loan id (Loan ID #); the join key to the file's other documents","rules":[],"reason_class":"pii","rule_floor":false,"degraded_from":null,"pii":{"kind":"ACCOUNT","pre_masked":false},"exists_today":false,"prompt_hint":"'Loan ID #', captured verbatim; masked + hashed at the snapshot boundary"},
+    {"name":"issue_date","type":"date","why":"processor — 'Date Issued'","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Date Issued'"},
+    {"name":"borrower_name","type":"str","why":"identity — the applicant/borrower; match to the file","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"'Applicants'"},
+    {"name":"borrower_name_2","type":"str","why":"identity — a co-applicant, when present","rules":[],"reason_class":"identity","rule_floor":true,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"A second applicant, if named"},
+    {"name":"property_address","type":"str","why":"identity — the subject property","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"'Property'"},
+    {"name":"sale_price","type":"Decimal","why":"processor — 'Sale Price' (or 'Est. Prop. Value' on a refinance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Sale Price' or 'Est. Prop. Value' (refinance)"},
+    {"name":"loan_amount","type":"Decimal","why":"processor — 'Loan Amount'","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"interest_rate","type":"Decimal","why":"processor — 'Interest Rate' (the initial rate if it can increase)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Interest Rate' — the initial rate as printed"},
+    {"name":"monthly_principal_and_interest","type":"Decimal","why":"processor — 'Monthly Principal & Interest'","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"loan_term","type":"str","why":"processor — the loan term (e.g. '15 years')","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Loan Term'"},
+    {"name":"loan_product","type":"str","why":"processor — the product (e.g. 'Fixed Rate', an ARM product)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Product'"},
+    {"name":"loan_purpose","type":"str","why":"processor — 'Purpose' (Purchase / Refinance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'Purpose'"},
+    {"name":"loan_type","type":"str","why":"processor — Conventional / FHA / VA","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"enum","pii":null,"exists_today":false,"prompt_hint":"'Loan Type' (the checked box)"},
+    {"name":"lender_name","type":"str","why":"identity — the lender","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"the lender named at the top of the form"},
+    {"name":"apr","type":"Decimal","why":"processor — Annual Percentage Rate (page-3 Comparisons); a number a processor checks","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Annual Percentage Rate (APR)' in the Comparisons box (page 3)"},
+    {"name":"total_interest_percentage","type":"Decimal","why":"processor — 'Total Interest Percentage (TIP)' (page-3 Comparisons)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Total Interest Percentage (TIP)' (page 3)"},
+    {"name":"estimated_total_monthly_payment","type":"Decimal","why":"processor — 'Estimated Total Monthly Payment' (the FIRST-period value if it varies)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Estimated Total Monthly Payment' — the first period's value if the schedule steps"},
+    {"name":"estimated_escrow","type":"Decimal","why":"processor — 'Estimated Escrow' (monthly)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"estimated_taxes_insurance_assessments","type":"Decimal","why":"processor — 'Estimated Taxes, Insurance & Assessments' (monthly)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Estimated Taxes, Insurance & Assessments' a month"},
+    {"name":"total_closing_costs","type":"Decimal","why":"processor — 'Estimated Closing Costs'","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Estimated Closing Costs' (Costs at Closing)"},
+    {"name":"cash_to_close","type":"Decimal","why":"processor — 'Estimated Cash to Close'","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'Estimated Cash to Close'"},
+    {"name":"prepayment_penalty_indicator","type":"str","why":"processor — whether the loan has a prepayment penalty (YES/NO)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"'Prepayment Penalty' — YES or NO"},
+    {"name":"balloon_payment_indicator","type":"str","why":"processor — whether the loan has a balloon payment (YES/NO)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":"bool","pii":null,"exists_today":false,"prompt_hint":"'Balloon Payment' — YES or NO"},
+    {"name":"rate_lock_expiration","type":"date","why":"processor — the rate-lock expiration (LE-only). NOTE: CL-1 reads a rate-LOCK CONFIRMATION, not the LE; this is the LE's own printed lock expiry, captured as a fact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'RATE LOCK ... until <date> at <time>' — capture the expiration date"},
+    {"name":"closing_cost_estimate_expiration","type":"date","why":"processor — when the estimated closing costs expire (LE-only)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'All other estimated closing costs expire on <date>'"},
+    {"name":"in_5_years_total_payments","type":"Decimal","why":"processor — the 'In 5 Years' total paid (principal, interest, MI, loan costs) — the LE Comparisons box (LE-only)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'In 5 Years' — the total-you-will-have-paid figure"},
+    {"name":"in_5_years_principal_paid","type":"Decimal","why":"processor — the 'In 5 Years' principal paid off (LE-only)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"'In 5 Years' — the principal-you-will-have-paid-off figure"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"finance_charge / amount_financed / total_of_payments","reason":"⚠️ CD-ONLY. The LE has NO 'Loan Calculations' box — its page-3 'Comparisons' gives In-5-Years + APR + TIP instead. Including these on the LE would create three permanently-null fields on every LE (the LP-461 lesson, applied before building). They live on closing_disclosure only."},
+    {"name":"closing_date / disbursement_date / seller_name / settlement_agent","reason":"CD-only — an LE is issued early, has no closing/disbursement date, no seller, no settlement agent."},
+    {"name":"A-J itemized cost tables / transaction summaries / AIR table","reason":"serve out-of-scope TRID/ARM rules; the headline totals are captured; Tier 3 carries the rest (ADR)."},
+    {"name":"contact information block (page 3)","reason":"lender/broker contact names, NMLS IDs, phones — not captured (avoids phone/NMLS PII for a visibility type); Tier 3."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "the LE is the standard ~3-page TRID form; the headline spans page 1 (Loan Terms / Projected Payments / Costs at Closing) + page 3 (Comparisons: In 5 Years, APR, TIP)",
+    "the LE has NO seller column and NO disbursement date (both CD-only) — a strong CD-vs-LE separator",
+    "sale_price is 'Sale Price' (purchase) or 'Est. Prop. Value' (refinance)",
+    "RATE LOCK prints 'until <date> at <time>' and 'estimated closing costs expire on <date>' — the two LE expirations",
+    "on an ARM the rate can increase ('YES', 'goes as high as ...', AIR table page 2); interest_rate is the initial rate"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Headline block vs the full LE?","options":["headline only","the full form"],"recommendation":"HEADLINE ONLY (GEET'S DECISION, LP-470): no in-scope rule reads an LE; Tier 1 on processor visibility. Tier 3 carries the itemization.","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "loan_estimate was an existing Tier-2 catalog type; this PROMOTES it to Tier 1 with the headline schema (~80% shared with closing_disclosure). LE-only: rate_lock_expiration, closing_cost_estimate_expiration, in_5_years_total_payments, in_5_years_principal_paid.",
+    "No in-scope rule reads it — Tier 1 on processor visibility (wire_instructions / ACORD 25 standard).",
+    "PII: only loan_number (reuses the global registration). No account numbers in the headline; the contact block is not captured."
+  ]
+}

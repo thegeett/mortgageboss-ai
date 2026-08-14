@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     # compliance basis for putting real borrower NPI in staging.
     ai_provider: Literal["anthropic", "bedrock"] = "anthropic"
     bedrock_region: str = "us-east-1"
+    # The AWS profile the Bedrock credential chain should use, when there is no ambient AWS_PROFILE.
+    # ``AsyncAnthropicBedrock`` reads AWS_PROFILE from the process ENVIRONMENT (not from these settings),
+    # and pydantic loads ``.env`` into this object, NOT into os.environ — so a local ``uv run`` backend
+    # would otherwise inherit no profile and resolve NO credentials. This is read by the dev bench, which
+    # exports it into os.environ before its preflight (docker already injects AWS_PROFILE via compose).
+    aws_profile: str | None = None
 
     # A PARALLEL triplet, deliberately not a reuse of the three settings above. Flipping
     # provider must be ONE variable: if the same three settings held both vocabularies, a
@@ -147,6 +153,20 @@ class Settings(BaseSettings):
     # still fails closed (the affected tags become unknown-with-reason); the total ceiling
     # for a call is this value x ai_max_retries plus backoff and pacing.
     ai_request_timeout_seconds: float = 60.0
+    # LP-462: classification reads only the FIRST N pages of a PDF. The whole document was being sent, so a
+    # >100-page file (a closing package, a condo declaration) exceeded the Anthropic/Bedrock 100-page document
+    # limit and Bedrock rejected the call (BadRequestError). Classification identifies the LEAD document, which
+    # needs few pages; 15 is far under the limit with headroom for an early second document. Classification
+    # ONLY — extraction still reads the whole document (it needs the substantive pages); large-doc extraction
+    # is the splitter's problem, not this cap.
+    classification_max_pages: int = 15
+    # LP-463: Tier 3 scoped free extraction also reads the document natively, so it hits the SAME
+    # 100-page/32 MB document-block limit (a 177-page condo declaration would be rejected). Free extraction
+    # surfaces mortgage-relevant facts for a human + AI reasoning (moderate stakes), and those cluster in the
+    # lead pages, so a generous cap well under 100 both prevents the rejection and bounds token cost. Larger
+    # than classification's cap (which only needs to IDENTIFY) because free extraction READS for terms.
+    # NOTE: this is Tier-3-only — the Tier-1 typed extractors are deliberately NOT capped (LP-462).
+    tier3_max_pages: int = 50
     # Needs consolidation (LP-111): after the deterministic collapse, an AI pass FLAGS the
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.
@@ -192,6 +212,11 @@ class Settings(BaseSettings):
     # File storage
     storage_backend: Literal["local", "s3"] = "local"
     storage_local_path: str = "./storage"
+
+    # Where the dev extraction bench writes its output. None → inside storage (``<storage>/bench_output``),
+    # which is gitignored so borrower-derived output cannot be committed. Override to a dev-chosen path;
+    # if that path is inside the repo, add it to .gitignore (bench output is derived from real documents).
+    bench_output_dir: str | None = None
 
     # S3 storage (C0) — used only when storage_backend == "s3".
     # NOTE: there are deliberately NO access-key/secret-key settings. Credentials come

@@ -1,0 +1,119 @@
+# PC-8 — Personal property not inflating value — AI JUDGMENT rule SPEC (LP-493).
+#
+# Does the purchase contract include personal property in the sale? Personal property is not real estate:
+# its value does not support the mortgage, and where it is material it is treated as a sales concession
+# and deducted from the price for loan-to-value purposes.
+#
+# ⚠️ THIS RULE SURFACES; IT DOES NOT DECIDE. The catalog rationale says "Surface included personal
+# property — judgment", and a judgmental rule has exactly two exits — `needs_review` and `couldnt_check`.
+# There is NO firing path and none was added: PC-8 tells a processor that personal property is in the
+# contract, and a human decides whether it is material enough to affect value. A test pins that no
+# outcome can produce `fired`.
+#
+# ⚠️ IT COMPUTES NO DEDUCTION. Non-realty items are deducted from the sales price for LTV under the sales
+# concessions topic (tier S — the IPC page B3-4.1-02, 05/07/2025, which was NOT fetched cell by cell).
+# PC-8 carries no number and applies none; the deduction belongs to the LTV lane if it is ever built.
+#
+# ⚠️ THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies. The four real contracts that
+# state it read "None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer", "Refrigerator,
+# Washer/Dryer" — so this is a READING, and the fixture/personal-property line is the whole judgment.
+# ⚠️ `personal_property_value` fills on 1 of 5 and that one is "0", so no value is available either.
+#
+# ⚠️ CONTRACT WORDING VARIES BY STATE FORM far more than a bureau field does — the bench's free-text
+# contract reader once projected Texas TREC fields onto a North Carolina form. Unrecognised wording
+# abstains; an equality against one form's phrasing would be the `is_disputed` mistake at higher risk.
+
+rule_id: PC-8
+name: Personal property not inflating value
+category: Contract
+
+kind: judgmental            # must equal rule_kinds.csv (PC-8 = judgmental, ai_judgment)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  Personal property included in a purchase contract is surfaced for review, because it is not real estate
+  and its value does not support the mortgage. Fixtures — built-in appliances, gas logs, attached
+  fittings — are part of the real estate and are not a finding. A contract whose wording does not make
+  the distinction clear resolves to couldnt_check rather than being read as a concession.
+
+applicability:
+  scope: each purchase contract in the file
+  trigger: >-
+    Any purchase_agreement document. A contract stating nothing about personal property couldnt_checks.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    # ⚠️ TIER S, AND DELIBERATELY NOT APPLIED. Sales concessions include non-realty items whose value is
+    # deducted from the sales price for LTV purposes — from Fannie B3-4.1-02 (Interested Party
+    # Contributions, page dated 05/07/2025). The per-cell IPC limit table was NOT fetched, and PC-8
+    # computes no deduction in any case: it surfaces, a human decides. No number is encoded.
+    materiality_threshold: "none — this rule surfaces personal property; it does not value it"
+  guideline_text: >-
+    Sales concessions include non-realty items given to the borrower, and their value is deducted from
+    the sales price when calculating the loan-to-value ratio. Whether included items are personal
+    property or fixtures, and whether their value is material, is an underwriting determination.
+
+required_inputs:
+  - name: personal_property
+    snapshot_path: 'tags.by_subject[<contract content_id>]["contract.personal_property"]'
+    description: >-
+      whether this contract includes personal property (AI, LP-493): "yes" / "no" / "unknown", read from
+      a FREE-TEXT field. ⚠️ UNCALIBRATED.
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The included-items wording exactly as the contract states it, so a processor can draw the
+  fixture/personal-property line themselves.
+
+guideline_reference: "Sales concessions include non-realty items, whose value is deducted from the sales price for loan-to-value purposes; whether included items are personal property or fixtures is an underwriting determination."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: purchase_agreement
+  load_bearing_tags: [contract.personal_property]
+  # ⚠️ THE JUDGMENT SEES A YES/NO TAG, NOT THE CONTRACT'S WORDING (reported finding). reasoned_over
+  # carries only `contract.personal_property`, and _build_context passes {value, confidence, reasoning}
+  # for it — so `evidence_required` above promises "the included-items wording exactly as the contract
+  # states it" that the model never receives, and the `included` vs `fixtures_only` distinction it is
+  # asked to draw was ALREADY collapsed to yes/no by the structural prompt. In practice the judgment only
+  # ever sees "yes" and can only confirm it.
+  # Closing this needs a parsed free-text tag (contract.personal_property_text) the structural pass does
+  # not currently produce — a producer change, not a review edit. Recorded here so the promise and the
+  # inputs stop disagreeing; evidence_required below is narrowed to what the rule can actually show.
+  reasoned_over: [contract.personal_property]
+  output_tag: contract.personal_property_assessment
+  value_domain: ["included", "fixtures_only", "none", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor SURFACING personal property included in a purchase contract.
+    You reason ONLY over the structured value given. ⚠️ You are NOT deciding whether the value is
+    inflated — a human does that. Your job is to say what the contract includes.
+
+    ANSWER:
+    - "included"      — the contract includes items that are PERSONAL PROPERTY: a refrigerator, a washer
+                        or dryer, furniture, a vehicle, a boat, farm equipment.
+    - "fixtures_only" — the only items listed are FIXTURES, part of the real estate: built-in appliances,
+                        gas logs in a fireplace, light fittings, attached shelving.
+    - "none"          — the contract states no included items ("None").
+    - "unknown"       — the wording does not let you tell which side of the line an item falls on.
+
+    ⚠️ THE FIXTURE LINE IS THE WHOLE JUDGMENT AND IT IS GENUINELY HARD. A refrigerator is usually
+    personal property; a built-in oven is a fixture; gas logs in a fireplace are normally a fixture.
+    When you cannot tell, answer "unknown" — do NOT guess "included", which would put a concession
+    finding on an ordinary contract.
+
+    ⚠️ Contract wording varies by STATE FORM far more than you may expect. Judge the words in front of
+    you; do not assume one form's phrasing or infer items the contract does not name.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "included|fixtures_only|none|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>"}
+
+spec_version: 1

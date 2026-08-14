@@ -67,8 +67,27 @@ def _bad_request() -> Exception:
 
 
 def _install_fake_client(monkeypatch: pytest.MonkeyPatch, create: AsyncMock) -> AsyncMock:
-    """Replace the singleton client so ``complete`` uses our AsyncMock ``create``."""
-    fake = SimpleNamespace(messages=SimpleNamespace(create=create))
+    """Replace the singleton client so ``complete`` streams through our AsyncMock ``create``.
+
+    ``complete`` now uses the SDK STREAMING seam (``client.messages.stream(...).get_final_message()``),
+    but ``create`` still models the per-attempt call exactly as before — its ``return_value`` is the final
+    Message and its ``side_effect`` list drives retries. We invoke it inside ``get_final_message`` so
+    ``call_count`` / ``await_args`` / raised side-effects all behave identically to the old ``.create``."""
+
+    class _FakeStream:
+        def __init__(self, **kwargs: Any) -> None:
+            self._kwargs = kwargs
+
+        async def __aenter__(self) -> "_FakeStream":
+            return self
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+        async def get_final_message(self) -> Any:
+            return await create(**self._kwargs)
+
+    fake = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: _FakeStream(**kw)))
     monkeypatch.setattr(client_module, "get_anthropic_client", lambda: fake)
     return create
 
@@ -107,6 +126,28 @@ def test_is_transient_false_for_other_4xx() -> None:
     assert _is_transient(_status_error(PermissionDeniedError, 403)) is False
     assert _is_transient(_status_error(NotFoundError, 404)) is False
     assert _is_transient(ValueError("not an SDK error")) is False
+
+
+# --------------------------------------------------------------------------- #
+# LP-462 — infra_failure_kind (throttle vs oversize vs other), by __cause__
+# --------------------------------------------------------------------------- #
+
+
+def _wrapped(cause: Exception) -> AIClientError:
+    err = AIClientError(f"AI call failed: {type(cause).__name__}")
+    err.__cause__ = cause
+    return err
+
+
+def test_infra_failure_kind_classifies_by_cause() -> None:
+    from app.ai.client import infra_failure_kind
+
+    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429
+    assert infra_failure_kind(_wrapped(_server_error())) == "rate_limited"  # 5xx is transient
+    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "rate_limited"
+    assert infra_failure_kind(_wrapped(_bad_request())) == "oversized"  # 400 = payload/over-limit
+    assert infra_failure_kind(_wrapped(_status_error(AuthenticationError, 401))) == "failed"
+    assert infra_failure_kind(AIClientError("no cause")) == "failed"
 
 
 # --------------------------------------------------------------------------- #

@@ -34,6 +34,7 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
@@ -90,6 +91,11 @@ class RetirementAccountExtraction(BaseModel):
     fixed_period_or_lifetime_indicator: TypedField[str] = Field(default_factory=TypedField)
     scheduled_end_date: TypedField[date] = Field(default_factory=TypedField)
 
+    # --- LP-460 diff — captured nested list(s) (bare rows) ------------------- #
+    # The securities positions table (Positions - Equities / ETFs / Cash). No per-row account number -
+    # the masked account number stays in its typed-core slot; a holdings row is symbol/qty/value only.
+    holdings: list[dict[str, Any]] = Field(default_factory=list)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -141,6 +147,19 @@ _CORE_SPEC: CoreSpec = (
     ("scheduled_end_date", coerce_date),
 )
 
+# LP-460 — the holdings list: bare rows (mirrors bank_statement's transactions parse). Row values are read
+# as strings by the snapshot, so each is kept verbatim (coerce_str) — an "N/A" yield or a blank cost basis
+# is preserved rather than dropped by numeric coercion.
+_HOLDINGS_ROW: CoreSpec = (
+    ("symbol", coerce_str),
+    ("description", coerce_str),
+    ("quantity", coerce_str),
+    ("price", coerce_str),
+    ("market_value", coerce_str),
+    ("cost_basis", coerce_str),
+    ("unrealized_gain_loss", coerce_str),
+)
+
 
 def _parse_retirement_json(text: str) -> RetirementAccountExtractionResult | None:
     """Defensively parse a model response into a retirement result. Never raises."""
@@ -155,16 +174,17 @@ def _parse_retirement_json(text: str) -> RetirementAccountExtractionResult | Non
         return None
 
     core_payload, non_null, coercion_lost = parse_typed_core(payload, _CORE_SPEC)
+    holdings = parse_flat_rows(payload.get("holdings"), _HOLDINGS_ROW)
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
         data = RetirementAccountExtraction.model_validate(
-            {**core_payload, "additional_sections": sections}
+            {**core_payload, "holdings": holdings, "additional_sections": sections}
         )
     except ValidationError:
         return None
 
-    status = derive_status(non_null, coercion_lost)
+    status = derive_status(non_null + len(holdings), coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
     raw_reasoning = payload.get("reasoning")
     reasoning = (
@@ -218,5 +238,6 @@ async def extract_retirement_account(
         confidence=result.confidence,
         core_fields_present=core_present,
         catch_all_sections=len(result.data.additional_sections),
+        list_rows_total=len(result.data.holdings),
     )
     return result

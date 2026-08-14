@@ -1,0 +1,92 @@
+# PR-4 — Appraisal completeness — AI JUDGMENT rule SPEC (LP-492).
+#
+# Is the appraisal a FINAL report, or is it made "subject to" repairs, alterations or completion? A
+# subject-to appraisal is not a final value: the loan cannot close on it until the work is verified.
+#
+# ⚠️ THE TICKET DESCRIBED PR-4 AS "subject to repairs"; the catalog says "Appraisal completeness
+# (Required sections/fields present + match)". Those are close but not identical, and the catalog is the
+# gate of record. Built as completeness WITH the subject-to condition as its principal signal — which is
+# what `appraisal_completion_condition` (2/2 on the real appraisals) actually states.
+#
+# ⚠️ BOTH REAL APPRAISALS READ "As is" / "as is" — case varies, which is why the judgment normalises
+# rather than comparing. The subject-to path has never been observed in our corpus.
+#
+# ⚠️ NO NUMERIC THRESHOLD. None applies: this is a report-structure question.
+
+rule_id: PR-4
+name: Appraisal completeness
+category: Property
+
+kind: judgmental            # must equal rule_kinds.csv (PR-4 = judgmental, ai_judgment)
+numeric_check: false
+
+criteria: >-
+  An appraisal made "subject to" repairs, alterations, or completion of construction does not state a
+  final value — the loan cannot close on it until the work is verified (typically on Form 1004D). This
+  reads the appraisal's stated completion condition. A report whose condition cannot be read resolves to
+  couldnt_check rather than being assumed final.
+
+applicability:
+  scope: each appraisal in the file
+  trigger: Any appraisal document. One stating no completion condition couldnt_checks.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values: {}
+  guideline_text: >-
+    An appraisal completed "subject to" repairs, alterations, inspection, or completion per plans and
+    specifications is not a final value. The lender must verify completion — usually with an appraisal
+    update or completion report — before the loan is delivered. An "as is" appraisal states a final value
+    and needs no such verification.
+
+required_inputs:
+  - name: completion_condition
+    snapshot_path: 'tags.by_subject[<appraisal content_id>]["property.appraisal_completion_condition"]'
+    description: >-
+      whether the appraisal is "as is" or made subject to repairs/completion (parsed, LP-492). Free text;
+      both real appraisals read "As is" / "as is".
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The completion condition exactly as the appraisal states it, and what the report is subject to when it
+  is not "as is".
+
+guideline_reference: "An appraisal made subject to repairs, alterations or completion is not a final value; completion must be verified before delivery."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: appraisal
+  load_bearing_tags: [property.appraisal_completion_condition]
+  reasoned_over: [property.appraisal_completion_condition, property.condition_rating]
+  output_tag: property.appraisal_completeness
+  value_domain: ["complete", "subject_to", "incomplete", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor judging whether an appraisal is a FINAL report. You reason
+    ONLY over the structured values given.
+
+    ANSWER:
+    - "complete" — the appraisal is made "as is". It states a final value. ⚠️ Case and wording vary
+      ("As is", "as is", "AS-IS") — these are the same answer.
+    - "subject_to" — the appraisal is made subject to repairs, alterations, inspection, or completion per
+      plans and specifications. It does NOT state a final value: completion must be verified before
+      delivery, usually on Form 1004D. ⚠️ An initial condition rating of C6 requires exactly this.
+    - "incomplete" — the report itself is missing required content, not merely conditioned.
+    - "unknown" — the completion condition is missing or you cannot tell which of the above applies.
+
+    ⚠️ DO NOT INFER "subject_to" FROM THE CONDITION RATING ALONE. A C5 property is eligible as is; only a
+    C6 requires the subject-to treatment, and the completion condition is what actually states it.
+
+    BE HONEST. "unknown" is a correct, expected answer. Cite the values.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "complete|subject_to|incomplete|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>"}
+
+spec_version: 1

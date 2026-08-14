@@ -54,6 +54,9 @@ logger = structlog.get_logger(__name__)
 # is a deterministic client error and is NOT retried.
 _RATE_LIMIT_STATUS = 429
 _SERVER_ERROR_FLOOR = 500
+_BAD_REQUEST_STATUS = (
+    400  # LP-462: an over-limit document payload comes back as a 400 BadRequestError
+)
 
 
 class AIClientError(Exception):
@@ -185,8 +188,23 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     cache is keyed on nothing, so a stale client would otherwise survive the flip.
     """
     if settings.ai_provider == "bedrock":
-        # No api_key: the SDK resolves AWS credentials from the default chain.
-        return AsyncAnthropicBedrock(aws_region=settings.bedrock_region, max_retries=0)
+        # ⚠️ PASS THE PROFILE EXPLICITLY (LP-491). The SDK otherwise resolves credentials from the
+        # default chain, which reads AWS_PROFILE from the ENVIRONMENT — it does not know about
+        # `settings.aws_profile`. Until now only the bench engine exported it (dev/bench/engine.py), so
+        # EVERY OTHER ENTRY POINT — a script, a Celery task, a self-consistency harness — got
+        # "could not resolve credentials from session", the AI call failed, and the producer failed
+        # CLOSED to `unknown` for every subject. That is silent: a broken pipeline and a
+        # confidently-abstaining one look identical downstream, and it cost LP-490a four derivation runs
+        # that scored a perfect 1.0000 while calling nothing at all.
+        #
+        # ⚠️ PASSED AS AN ARGUMENT, NOT EXPORTED TO os.environ — the first fix did the latter and broke
+        # 22 tests: a process-wide AWS_PROFILE leaks into every other boto3 client (S3 storage included)
+        # and persists across tests. Scope the credential to the client that needs it.
+        return AsyncAnthropicBedrock(
+            aws_region=settings.bedrock_region,
+            aws_profile=settings.aws_profile,  # None → the default chain, unchanged
+            max_retries=0,
+        )
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
     return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
@@ -261,6 +279,34 @@ def _is_transient(exc: Exception) -> bool:
     return _looks_like_bedrock_throttle(exc)
 
 
+#: The infrastructure-outcome tags :func:`infra_failure_kind` returns — a call that never completed, by cause.
+INFRA_RATE_LIMITED = "rate_limited"
+INFRA_OVERSIZED = "oversized"
+INFRA_FAILED = "failed"
+
+
+def infra_failure_kind(err: AIClientError) -> str:
+    """Classify a caught :class:`AIClientError` by its underlying cause, for observability + routing (LP-462).
+
+    ``complete`` raises ``AIClientError(...) from exc``, so the ORIGINAL SDK exception is on ``__cause__``.
+    Returns ``INFRA_RATE_LIMITED`` for a throttle/transient cause (429, Bedrock throttle codes, 5xx,
+    connection/timeout — the same test the retry loop and the bench use), ``INFRA_OVERSIZED`` for an HTTP 400
+    (a payload/bad-request rejection — an over-limit document is the case LP-462 fixes), or ``INFRA_FAILED``
+    for anything else (auth, permission, an exhausted non-throttle, …). This lets a caller record a THROTTLE
+    distinctly from a JUDGMENT: a throttled document persisted as "low confidence" would read as a coverage
+    gap and corrupt every downstream audit. Keeps SDK-exception knowledge in this module, beside
+    ``_is_transient``.
+    """
+    cause = err.__cause__
+    if isinstance(cause, Exception) and _is_transient(cause):
+        return INFRA_RATE_LIMITED
+    # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload (>100 pages
+    # / >32 MB). Not transient — the page cap is the fix, not a retry.
+    if isinstance(cause, APIStatusError) and cause.status_code == _BAD_REQUEST_STATUS:
+        return INFRA_OVERSIZED
+    return INFRA_FAILED
+
+
 #: Canonical truncation marker. ``app/ai/extraction/model_call.py`` compares
 #: ``stop_reason == "max_tokens"`` to fire the LP-102 truncation guard; if a provider
 #: spelled it differently the guard would silently stop working and a cut-off response
@@ -299,6 +345,26 @@ def _backoff_delay(*, attempt: int, base_delay: float) -> float:
     return float(delay * (0.5 + random.random()))
 
 
+async def _stream_final_message(client: Any, kwargs: dict[str, Any]) -> Any:
+    """Open a streamed completion and return the assembled final ``Message`` — identical in shape to a
+    non-streaming response (``.content`` / ``.usage`` / ``.stop_reason``). Isolated so ``complete`` can
+    wrap it in a single ``asyncio.wait_for`` bound and so the test seam can replace it wholesale."""
+    async with client.messages.stream(**kwargs) as stream:
+        return await stream.get_final_message()
+
+
+def _stream_timeout(max_tokens: int) -> float:
+    """Per-attempt wall-clock bound for a STREAMING call.
+
+    Streaming removes the SDK's non-streaming ceiling (it refuses a one-shot request whose worst-case
+    time could exceed 10 min — ``max_tokens > 21,333``), but we still bound each attempt so a genuinely
+    hung stream cannot hold a worker forever. Scale the bound to ``max_tokens`` using the SDK's own
+    conservative rate (128K tokens/hour) plus margin, floored at the configured request timeout — so a
+    small call keeps a tight ~60 s bound while a dense extraction/retry gets the minutes it needs."""
+    est_seconds = max_tokens / 128_000 * 3600
+    return max(settings.ai_request_timeout_seconds, est_seconds + 30.0)
+
+
 async def complete(
     *,
     model: str,
@@ -307,27 +373,32 @@ async def complete(
     system: str | None = None,
     temperature: float | None = None,
 ) -> AICompletion:
-    """Make a (non-streaming) Claude completion call through the wrapper.
+    """Make a Claude completion call through the wrapper, using the SDK's STREAMING API.
 
-    Retries transient failures with exponential backoff + jitter up to
-    ``settings.ai_max_retries`` attempts; fails fast on non-transient errors.
-    Logs metadata only (never prompt/response content). Raises
-    :class:`AIClientError` on a non-retryable error or once retries are
-    exhausted, wrapping the underlying SDK exception as the cause.
+    Streaming (rather than one-shot) is deliberate: the SDK refuses a non-streaming request whose
+    worst-case duration could exceed 10 minutes (``max_tokens > 21,333`` → ``ValueError``), which the
+    LP-102 truncation guard's high-ceiling retry (``RETRY_MAX_TOKENS``) trips on dense documents. A
+    streamed connection never idles, so there is no such ceiling; the assembled final message is
+    identical to the one-shot response, so callers see no difference.
 
-    ``model`` is the caller's TIER value (one of the three ``anthropic_model_*``
-    settings). Under ``ai_provider="bedrock"`` it is translated to that tier's Bedrock
-    inference-profile id here, so no caller knows which provider is active (B1).
+    Retries transient failures with exponential backoff + jitter up to ``settings.ai_max_retries``
+    attempts; fails fast on non-transient errors. Logs metadata only (never prompt/response content).
+    Raises :class:`AIClientError` on a non-retryable error or once retries are exhausted, wrapping the
+    underlying SDK exception as the cause.
 
-    Every ATTEMPT — not merely every call — is paced by the process-local rate limiter
-    and bounded by ``settings.ai_request_timeout_seconds``. Per attempt because a retry
-    is a fresh request that counts against the provider quota just as the first did, and
-    because a hung attempt would otherwise hold a Celery worker slot indefinitely.
+    ``model`` is the caller's TIER value (one of the three ``anthropic_model_*`` settings). Under
+    ``ai_provider="bedrock"`` it is translated to that tier's Bedrock inference-profile id here, so no
+    caller knows which provider is active (B1).
+
+    Every ATTEMPT — not merely every call — is paced by the process-local rate limiter and bounded by
+    :func:`_stream_timeout` (scaled by ``max_tokens``). Per attempt because a retry is a fresh request
+    that counts against the provider quota just as the first did, and because a hung attempt would
+    otherwise hold a Celery worker slot indefinitely.
     """
     client = get_anthropic_client()
     max_attempts = max(1, settings.ai_max_retries)
     base_delay = settings.ai_base_retry_delay_seconds
-    timeout_s = settings.ai_request_timeout_seconds
+    timeout_s = _stream_timeout(max_tokens)
     limiter = get_rate_limiter()
 
     try:
@@ -363,7 +434,9 @@ async def complete(
             await limiter.acquire(label="complete")
             # Re-stamp so the latency metric measures the provider call, not the queueing.
             start = time.perf_counter()
-            resp = await asyncio.wait_for(client.messages.create(**kwargs), timeout=timeout_s)
+            # STREAMING: assemble the final message from a streamed connection (no non-streaming
+            # 10-min/max_tokens ceiling). The final Message is identical to a one-shot response.
+            resp = await asyncio.wait_for(_stream_final_message(client, kwargs), timeout=timeout_s)
         except Exception as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             transient = _is_transient(exc)

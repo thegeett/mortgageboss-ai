@@ -94,6 +94,63 @@ async def pdf_page_count(content: bytes) -> int | None:
     return await asyncio.to_thread(_page_count_sync, content)
 
 
+def _first_n_pages_sync(content: bytes, max_pages: int) -> bytes | None:
+    """Return a PDF of the first ``max_pages`` pages, or None if the input isn't a slice-able PDF. Blocking.
+
+    Used by classification (LP-462): the Anthropic/Bedrock document block caps at 100 pages / 32 MB, so a
+    long package must be trimmed to the lead document before the call. Returns the ORIGINAL bytes untouched
+    when the document already has ``<= max_pages`` pages (no re-encode, byte-identical) or when it can't be
+    read as a PDF (the caller then sends it as-is and the existing error path handles any rejection). Never
+    raises.
+    """
+    # A non-positive cap would disable trimming and re-expose the >100-page rejection this exists to
+    # prevent — floor at one page so the cap can never silently become a no-op (LP-462 review).
+    max_pages = max(1, max_pages)
+    try:
+        src = pymupdf.open(stream=content, filetype="pdf")  # type: ignore[no-untyped-call]
+    except Exception:
+        return None  # not a readable PDF → caller sends the original bytes unchanged
+    try:
+        if int(src.page_count) <= max_pages:
+            return content  # already within the cap — byte-identical, no re-encode
+        out = pymupdf.open()  # type: ignore[no-untyped-call]
+        try:
+            out.insert_pdf(src, from_page=0, to_page=max_pages - 1)  # type: ignore[no-untyped-call]
+            return bytes(out.tobytes())  # type: ignore[no-untyped-call]
+        finally:
+            # release the new doc's native handle too (src is closed in the outer finally)
+            out.close()  # type: ignore[no-untyped-call]
+    except Exception:
+        return None
+    finally:
+        src.close()  # type: ignore[no-untyped-call]
+
+
+async def first_n_pages(content: bytes, max_pages: int) -> bytes | None:
+    """The first ``max_pages`` pages of a PDF as new PDF bytes, or None if not a slice-able PDF (LP-462).
+
+    Async wrapper (threaded) around :func:`_first_n_pages_sync`. Returns the original bytes unchanged when the
+    document is already within the cap; None when the bytes aren't a readable PDF (the caller sends them
+    as-is). Never raises; never logs content (PII)."""
+    return await asyncio.to_thread(_first_n_pages_sync, content, max_pages)
+
+
+_PDF_MEDIA_TYPE = "application/pdf"
+
+
+async def cap_pdf_pages(content: bytes, media_type: str, max_pages: int) -> bytes:
+    """The document payload for an AI call, trimmed to the first ``max_pages`` if it's an over-cap PDF.
+
+    The boilerplate both classification (LP-462) and Tier-3 free extraction (LP-463) share around
+    :func:`first_n_pages`: only ``application/pdf`` is trimmed; a PDF already within the cap comes back
+    byte-identical; a non-PDF, or an unreadable PDF (``first_n_pages`` → None), is sent unchanged. Never raises.
+    """
+    if media_type.lower().strip() != _PDF_MEDIA_TYPE:
+        return content
+    capped = await first_n_pages(content, max_pages)
+    return capped if capped is not None else content
+
+
 async def extract_text_from_pdf(content: bytes) -> PdfTextExtractionResult:
     """Extract a PDF's text layer from bytes (multi-page). Async; never raises.
 

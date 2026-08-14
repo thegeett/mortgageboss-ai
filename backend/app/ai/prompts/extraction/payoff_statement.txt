@@ -32,6 +32,9 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
      certified_funds_requirement         (string)
      lien_release_timing                 (string) Often phrased as 'release recorded within N days of payoff' — this is TI-3's release-plan evidence
      quote_status                        (string) A preliminary/estimated quote is not the same as a paid-in-full letter for CR-3
+     fdcpa_notice_present                (string) whether the statement carries the FDCPA debt-collection
+                                                  notice ("yes"/"no"); e.g. "This is an attempt to collect a debt"
+     servicer_nmls_id                    (string) the servicer's / lender's NMLS ID number, if shown
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section (e.g. "Other"). Do not
    force these into the typed core — capture them here so nothing is lost.
@@ -80,7 +83,9 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "wire_or_remittance_instructions": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "certified_funds_requirement": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "lien_release_timing": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "quote_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "quote_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "fdcpa_notice_present": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "servicer_nmls_id": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "additional_sections": [
     {"section": "<section name>", "fields": [

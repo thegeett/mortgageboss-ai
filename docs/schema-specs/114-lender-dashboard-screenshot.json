@@ -1,0 +1,42 @@
+{
+  "document_type": "lender_dashboard_screenshot",
+  "slug": "lender-dashboard-screenshot",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "Screenshot of the <lender_or_platform_name> portal (<screen_or_section_label>); software UI, not an underlying document.",
+  "existing_extractor": null,
+  "catalog_coverage": "identity-only",
+
+  "typed_core": [
+    {"name":"lender_or_platform_name","type":"str","why":"identity — which lender/broker portal this is a capture of (e.g. UWM, uwm.com/dashboard)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The platform/lender name or portal URL (e.g. 'United Wholesale Mortgage' / 'uwm.com/dashboard')"},
+    {"name":"screen_or_section_label","type":"str","why":"identity — which screen/section the capture shows (e.g. 'Loan Activity & Tools')","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The visible page/section header — do NOT enumerate the panels' contents"},
+    {"name":"loan_number","type":"str","why":"identity — the loan number IF the capture is file-specific (ties the screenshot to a loan); often absent on an LO home page","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if a specific loan number is shown; leave null on a generic dashboard. Captured verbatim; masked at the snapshot boundary by the global PII registry"},
+    {"name":"borrower_name","type":"str","why":"identity — the borrower IF the capture is file-specific; often absent (it is the loan officer's dashboard)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"Only if a specific borrower is shown; leave null on a generic dashboard"},
+    {"name":"capture_date_if_shown","type":"date","why":"processor — the print/screenshot timestamp when shown (provenance)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The print/capture date shown in the browser header (e.g. '2/5/26, 10:38 AM'); date only"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"THE ENTIRE DASHBOARD CONTENTS","reason":"pipeline stats, PRO ranking / points / streak, loan alerts (locks expiring / problem uploads / new conditions), leads tiles, production summary, insights, rate/lock panels — DELIBERATELY not schematized. A portal's fields change with every software release; a schema built on today's layout is obsolete on the next deploy. Identity only, BY DESIGN (see ADR for LP-466)."},
+    {"name":"embedded_home_value_estimate / avm_value","reason":"an embedded AVM block routes to home_value_estimate ONLY when it DOMINATES the capture (the A3 dominance rule). On a broad dashboard the embedded value is deliberately NOT extracted — one label per document, and an AVM is not underwriting evidence."},
+    {"name":"is_current / status_ok / any judgment","reason":"a screenshot is a snapshot of software state, not a fact to judge. No verification flags."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "multi-page portal captures (061 is 4 pages) with the useful identity at the very top (URL + capture timestamp) and in the footer (lender legal name)",
+    "loan_number / borrower_name are frequently ABSENT — a loan-officer home page has a 'Find My Loan' search box, not a specific loan; capture null faithfully",
+    "an embedded Home Value Estimator block may appear amid the panels — it is NOT this type's content (see rejected)"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Tier 1 (minimal identity spec) vs Tier 2 (no spec, summary only)?","options":["Tier 1 + this minimal spec","Tier 2 + no spec"],"recommendation":"Tier 1 + minimal spec (GEET'S DECISION, LP-466): keeps the LP-441 invariant (Tier-1 iff spec) intact; 'extracts almost nothing' means not schematizing the PANELS, done as a 5-field identity extractor","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "This type extracts ALMOST NOTHING by design. Its value is twofold: (1) it stops software screenshots from diluting `unknown` (so `unknown` stays a real signal about missing types), and (2) it anchors the AVM/dashboard routing pair (an HVE-dominant capture routes to home_value_estimate instead of here).",
+    "No PII field of its own: loan_number rides the existing global _PII_FIELDS 'loan_number' registration if ever populated; all other identity fields carry no long digit runs.",
+    "Do NOT grow this into a dashboard content schema — that is the explicit anti-goal."
+  ]
+}

@@ -27,9 +27,18 @@ CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
      vested_balance          (number)  the vested / accessible balance (see above)
      total_balance           (number)  the total account balance
 
-2. ADDITIONAL SECTIONS — EVERY OTHER detail, grouped by section, e.g. "Holdings",
+2. ADDITIONAL SECTIONS — EVERY OTHER detail, grouped by section, e.g.
    "Contributions", "Employer Match", "Vesting Schedule", "Loan Balance", "Other".
    Do not force these into the typed core — capture them here so nothing is lost.
+
+3. HOLDINGS — a LIST, one FLAT ROW per security/position in the account's holdings
+   table(s) ("Positions", "Equities", "Exchange Traded Funds", "Cash and Cash
+   Investments", "Top Account Holdings"):
+     holdings — each row: symbol, description, quantity, price, market_value,
+                cost_basis, unrealized_gain_loss
+   Keep each value VERBATIM (an "N/A" yield or a blank cost basis stays as written).
+   Do NOT put a per-row account number here — the masked account number is a typed
+   field. If the statement has no itemized holdings, return an empty list.
 
 FOR EVERY FIELD (typed core AND additional sections) include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -74,3 +83,4 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "fixed_period_or_lifetime_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "scheduled_end_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "holdings": [{"symbol": <string|null>, "description": <string|null>, "quantity": <string|null>, "price": <string|null>, "market_value": <string|null>, "cost_basis": <string|null>, "unrealized_gain_loss": <string|null>, "page": <int|null>, "snippet": <string|null>}],

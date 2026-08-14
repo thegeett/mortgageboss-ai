@@ -27,6 +27,8 @@ from uuid import UUID
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
+    CalculationEntry,
+    CalculationsSection,
     DocumentEntry,
     DocumentsSection,
     MismoSection,
@@ -97,6 +99,73 @@ _LOAN_INS_ACV = UUID(
 _LOAN_INS_BASIS_UNREADABLE = UUID(
     "95000000-0000-4000-8000-000000000017"
 )  # LP-447 — an UNRECOGNISED basis string (IH-1 couldnt_check — fail closed)
+# LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy).
+_LOAN_IH2_MATCH = UUID("95000000-0000-4000-8000-000000000018")
+_LOAN_IH2_MISMATCH = UUID("95000000-0000-4000-8000-000000000019")
+_LOAN_IH2_NO_LENDER = UUID("95000000-0000-4000-8000-00000000001a")
+_LOAN_IH2_LE_ONLY = UUID("95000000-0000-4000-8000-00000000001b")
+_LOAN_IH7_ADEQUATE = UUID("95000000-0000-4000-8000-00000000001c")
+_LOAN_IH7_ABSENT = UUID("95000000-0000-4000-8000-00000000001d")
+_LOAN_IH7_LOW_LIABILITY = UUID("95000000-0000-4000-8000-00000000001e")
+_LOAN_IH7_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000001f")
+_LOAN_IH7_BASIS_UNREADABLE = UUID("95000000-0000-4000-8000-000000000020")
+# LP-488 — MI-1 (conventional MI requirement) and the PROGRAM axis.
+_LOAN_MI1_HIGH_LTV = UUID("95000000-0000-4000-8000-000000000021")
+_LOAN_MI1_LOW_LTV = UUID("95000000-0000-4000-8000-000000000022")
+_LOAN_MI1_FHA = UUID("95000000-0000-4000-8000-000000000023")
+_LOAN_MI1_NO_PROGRAM = UUID("95000000-0000-4000-8000-000000000024")
+_LOAN_MI1_NO_VALUE = UUID("95000000-0000-4000-8000-000000000025")
+_LOAN_MI1_TWO_APPRAISALS = UUID("95000000-0000-4000-8000-000000000036")
+# LP-488 — MI-4 (FHA upfront MIP).
+_LOAN_MI4_CORRECT = UUID("95000000-0000-4000-8000-000000000026")
+_LOAN_MI4_OVER = UUID("95000000-0000-4000-8000-000000000027")
+_LOAN_MI4_UNDER = UUID("95000000-0000-4000-8000-000000000028")
+_LOAN_MI4_NONE = UUID("95000000-0000-4000-8000-000000000029")
+_LOAN_MI4_CONVENTIONAL = UUID("95000000-0000-4000-8000-00000000002a")
+_LOAN_MI4_NO_NOTE = UUID("95000000-0000-4000-8000-00000000002b")
+# LP-488 — CO-1 (condo questionnaire present).
+_LOAN_CO1_PRESENT = UUID("95000000-0000-4000-8000-00000000002c")
+_LOAN_CO1_MISSING = UUID("95000000-0000-4000-8000-00000000002d")
+_LOAN_CO1_NOT_CONDO = UUID("95000000-0000-4000-8000-00000000002e")
+_LOAN_CO1_EMPTY = UUID("95000000-0000-4000-8000-00000000002f")
+# LP-488 — AU-3 (AUS recommendation).
+_LOAN_AU3_LPA = UUID("95000000-0000-4000-8000-000000000030")
+_LOAN_AU3_DU = UUID("95000000-0000-4000-8000-000000000031")
+_LOAN_AU3_INELIGIBLE = UUID("95000000-0000-4000-8000-000000000032")
+_LOAN_AU3_REFER = UUID("95000000-0000-4000-8000-000000000033")
+_LOAN_AU3_UNKNOWN_VENDOR = UUID("95000000-0000-4000-8000-000000000034")
+_LOAN_AU3_NO_ELIGIBILITY = UUID("95000000-0000-4000-8000-000000000035")
+# LP-491 — TI-1 (title commitment parties).
+_LOAN_TI1_PURCHASE_MATCH = UUID("95000000-0000-4000-8000-000000000040")
+_LOAN_TI1_PURCHASE_MISMATCH = UUID("95000000-0000-4000-8000-000000000041")
+_LOAN_TI1_REFI_MATCH = UUID("95000000-0000-4000-8000-000000000042")
+_LOAN_TI1_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000043")
+_LOAN_TI1_SECOND_OWNER = UUID("95000000-0000-4000-8000-000000000044")
+# LP-492 — PR-2 (appraised value vs purchase price).
+_LOAN_PR2_SUPPORTS = UUID("95000000-0000-4000-8000-000000000050")
+_LOAN_PR2_SHORTFALL = UUID("95000000-0000-4000-8000-000000000051")
+_LOAN_PR2_TWO_APPRAISALS = UUID("95000000-0000-4000-8000-000000000052")
+_LOAN_PR2_REFINANCE = UUID("95000000-0000-4000-8000-000000000053")
+_LOAN_PR2_NO_PURPOSE = UUID("95000000-0000-4000-8000-000000000054")
+_LOAN_PR2_NO_PRICE = UUID("95000000-0000-4000-8000-000000000055")
+
+# LP-494 — the condo project lane (CO-4 reserves, CO-5 eligibility).
+_LOAN_CO4_ADEQUATE_2026 = UUID("95000000-0000-4000-8000-000000000060")
+_LOAN_CO4_SHORT_2026 = UUID("95000000-0000-4000-8000-000000000061")
+_LOAN_CO4_SAME_PCT_2027 = UUID("95000000-0000-4000-8000-000000000062")
+_LOAN_CO4_NO_APP_DATE = UUID("95000000-0000-4000-8000-000000000063")
+_LOAN_CO4_HOA_STATEMENT = UUID("95000000-0000-4000-8000-000000000064")
+_LOAN_CO3_FIDELITY_PRESENT = UUID("95000000-0000-4000-8000-000000000065")
+_LOAN_CO3_FIDELITY_DISAGREE = UUID("95000000-0000-4000-8000-000000000066")
+_LOAN_CO3_FIDELITY_AMOUNTS = UUID("95000000-0000-4000-8000-000000000067")
+_LOAN_CO4_BLANK_FORM = UUID("95000000-0000-4000-8000-000000000064")
+_LOAN_CO4_NOT_CONDO = UUID("95000000-0000-4000-8000-000000000065")
+_LOAN_CO5_CLEAR = UUID("95000000-0000-4000-8000-000000000066")
+_LOAN_CO5_DELINQUENT = UUID("95000000-0000-4000-8000-000000000067")
+_LOAN_CO5_CONCENTRATION = UUID("95000000-0000-4000-8000-000000000068")
+_LOAN_CO5_LITIGATION = UUID("95000000-0000-4000-8000-000000000069")
+_LOAN_CO5_BLANK_FORM = UUID("95000000-0000-4000-8000-00000000006a")
+_LOAN_CO5_UNRECOGNISED_LITIGATION = UUID("95000000-0000-4000-8000-00000000006b")
 _RUN = UUID("95000000-0000-4000-8000-0000000000ff")
 # The file (snapshot) date every closing date is measured against (deterministic — never a wall-clock now()).
 _FILE_DATE = datetime(2026, 7, 1, tzinfo=UTC)
@@ -837,6 +906,1634 @@ EXPECTED_INS_BASIS_RC = (
 )
 EXPECTED_INS_BASIS_ACV = "actual_cash_value"  # LP-447 — "Actual Cash Value" → IH-1 fired
 
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-2 (mortgagee clause). Each scenario carries a homeowners binder (its mortgagee_name) plus a
+# closing document stating this loan's lender. ⚠️ THE MORTGAGEE NAMES ARE THE REAL CORPUS FORMS — the
+# ISAOA/ATIMA and c/o variants are what carriers actually print, not invented shapes.
+# --------------------------------------------------------------------------- #
+def _mortgagee_binder(cid: str, mortgagee_name: str | None) -> DocumentEntry:
+    fields = {
+        "carrier_name": "Rivertown Mutual",
+        "policy_number": "RM-0001",
+        "effective_date": "2026-06-01",
+        "expiration_date": "2027-06-01",
+    }
+    if mortgagee_name is not None:
+        fields["mortgagee_name"] = mortgagee_name
+    return _doc(cid, "homeowners_insurance", **fields)
+
+
+def _closing_disclosure(cid: str, lender_name: str) -> DocumentEntry:
+    return _doc(cid, "closing_disclosure", lender_name=lender_name, closing_date="2026-07-15")
+
+
+def build_ih2_clause_matches_snapshot() -> Snapshot:
+    """The clause names the lender, in the carrier's ISAOA form → IH-2 SATISFIED. The variance the
+    normaliser exists for: "United Wholesale Mortgage, LLC ISAOA" vs the CD's "United Wholesale
+    Mortgage, LLC"."""
+    return _snapshot(
+        _LOAN_IH2_MATCH,
+        [
+            _mortgagee_binder("95-binder-ih2-ok", "United Wholesale Mortgage, LLC ISAOA"),
+            _closing_disclosure("95-cd-ih2-ok", "United Wholesale Mortgage, LLC"),
+        ],
+    )
+
+
+def build_ih2_clause_mismatch_snapshot() -> Snapshot:
+    """THE CORRESPONDENT CASE, from the corpus: the CD names "Sistar Mortgage Company" and the clause
+    names "United Wholesale Mortgage". Both may be correct → IH-2 NEEDS_REVIEW, never fired."""
+    return _snapshot(
+        _LOAN_IH2_MISMATCH,
+        [
+            _mortgagee_binder("95-binder-ih2-x", "United Wholesale Mortgage"),
+            _closing_disclosure("95-cd-ih2-x", "Sistar Mortgage Company"),
+        ],
+    )
+
+
+def build_ih2_no_lender_snapshot() -> Snapshot:
+    """A binder with a mortgagee but NO closing document stating a lender → nothing to compare against →
+    IH-2 COULDNT_CHECK (never a guessed match)."""
+    return _snapshot(
+        _LOAN_IH2_NO_LENDER,
+        [_mortgagee_binder("95-binder-ih2-nolender", "United Wholesale Mortgage")],
+    )
+
+
+def build_ih2_loan_estimate_only_snapshot() -> Snapshot:
+    """No Closing Disclosure yet — the Loan Estimate is the FALLBACK, so a file early in processing is
+    still checkable → IH-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_IH2_LE_ONLY,
+        [
+            _mortgagee_binder("95-binder-ih2-le", "ROCKET MORTGAGE, LLC."),
+            _doc("95-le-ih2", "loan_estimate", lender_name="Rocket Mortgage, LLC"),
+        ],
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-487 — IH-7 (condo master policy). The property type comes from MISMO (property.type, the
+# PropertyType enum), the master policy from a master_insurance_policy_for_condominium document.
+# ⚠️ THE BASIS STRINGS ARE THE REAL CORPUS FORMS — free prose, not codes.
+# --------------------------------------------------------------------------- #
+def _master_policy(cid: str, *, basis: str | None, liability: str | None) -> DocumentEntry:
+    fields = {
+        "insurance_carrier": "Rivertown Commercial",
+        "policy_number": "MP-0001",
+        "condominium_project_name": "Birch Court Condominiums",
+    }
+    if basis is not None:
+        fields["replacement_cost_indicator"] = basis
+    if liability is not None:
+        fields["general_liability_each_occurrence_limit"] = liability
+    return _doc(cid, "master_insurance_policy_for_condominium", **fields)
+
+
+def build_ih7_adequate_snapshot() -> Snapshot:
+    """A condo with a master policy on a replacement-cost basis and $2M liability → IH-7 SATISFIED. The
+    basis string is the corpus's longest real form, which an EXACT-match vocabulary would abstain on."""
+    return _snapshot(
+        _LOAN_IH7_ADEQUATE,
+        [
+            _master_policy(
+                "95-mp-ok",
+                basis="REPLACEMENT COST AT AGREED VALUE WITH NO CO-INSURANCE",
+                liability="2000000",
+            )
+        ],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_ih7_absent_snapshot() -> Snapshot:
+    """A condo with NO master policy in the file → IH-7 FIRED (a real, actionable gap)."""
+    return _snapshot(_LOAN_IH7_ABSENT, [], {"property.type": _f("condo")})
+
+
+def build_ih7_low_liability_snapshot() -> Snapshot:
+    """A condo master policy with only $500k general liability — below B7-4-01's $1M floor → IH-7 FIRED."""
+    return _snapshot(
+        _LOAN_IH7_LOW_LIABILITY,
+        [_master_policy("95-mp-low", basis="Replacement Cost", liability="500000")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_ih7_not_condo_snapshot() -> Snapshot:
+    """A single-family property → IH-7 NOT_APPLICABLE (no master policy is required)."""
+    return _snapshot(_LOAN_IH7_NOT_CONDO, [], {"property.type": _f("single_family")})
+
+
+def build_ih7_unreadable_basis_snapshot() -> Snapshot:
+    """A condo master policy whose coverage basis is not a recognised term → IH-7 COULDNT_CHECK. Fail
+    closed: an unrecognised basis is NEVER read as inadequate, and never as adequate."""
+    return _snapshot(
+        _LOAN_IH7_BASIS_UNREADABLE,
+        [_master_policy("95-mp-x", basis="Special Form — see schedule", liability="2000000")],
+        {"property.type": _f("condo")},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-1. The PROGRAM AXIS's first use: `program.type` is an APPLICABILITY PREDICATE, so an FHA
+# file is not_applicable and a file stating NO program is couldnt_check (never silently skipped).
+# All facts are MISMO: loan.program, loan.amount (BaseLoanAmount), property.purchase_price.
+# --------------------------------------------------------------------------- #
+def _mi_mismo(
+    *, program: str | None, base_loan: str | None, purchase_price: str | None
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {"loan.purpose": _f("purchase")}
+    if program is not None:
+        facts["loan.program"] = _f(program)
+    if base_loan is not None:
+        facts["loan.amount"] = _f(base_loan)
+    if purchase_price is not None:
+        facts["property.purchase_price"] = _f(purchase_price)
+    return facts
+
+
+def build_mi1_high_ltv_snapshot() -> Snapshot:
+    """Conventional, $340,000 on a $400,000 purchase = 85% LTV → MI-1 NEEDS_REVIEW (MI is required).
+    ⚠️ NOT fired — MI-1 cannot see whether an MI certificate is in the file."""
+    return _snapshot(
+        _LOAN_MI1_HIGH_LTV,
+        [],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_low_ltv_snapshot() -> Snapshot:
+    """Conventional, $300,000 on a $400,000 purchase = 75% LTV → MI-1 SATISFIED (no MI required)."""
+    return _snapshot(
+        _LOAN_MI1_LOW_LTV,
+        [],
+        _mi_mismo(program="conventional", base_loan="300000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_fha_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, FHA side. An 85% LTV that WOULD trip MI-1 on a conventional file —
+    but the program is FHA, so MI-1 is NOT_APPLICABLE and never fires. MI-4 covers FHA."""
+    return _snapshot(
+        _LOAN_MI1_FHA,
+        [],
+        _mi_mismo(program="fha", base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_no_program_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, absent side. The same 85% LTV with NO stated program →
+    COULDNT_CHECK, never silently skipped. This is why the scoping is a predicate, not an outcome."""
+    return _snapshot(
+        _LOAN_MI1_NO_PROGRAM,
+        [],
+        _mi_mismo(program=None, base_loan="340000.00", purchase_price="400000.00"),
+    )
+
+
+def build_mi1_two_appraisals_snapshot() -> Snapshot:
+    """⚠️ TWO APPRAISALS ON ONE FILE — the ordinary shape (an original plus a replacement, or a 1004D the
+    classifier cannot distinguish from a full report). $340,000 base against appraisals of $400,000 and
+    $360,000. The CONSERVATIVE pick is the LOWEST: 340000/360000 = 94.44%, over the threshold. Taking the
+    higher would give 85.00% — still over here, so the fixture also pins the VALUE, not just the verdict,
+    to catch a silent regression to first-wins."""
+    return _snapshot(
+        _LOAN_MI1_TWO_APPRAISALS,
+        [
+            _doc("95-appr-high", "appraisal", appraised_value="400000.00"),
+            _doc("95-appr-low", "appraisal", appraised_value="360000.00"),
+        ],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price=None),
+    )
+
+
+def build_mi1_no_value_snapshot() -> Snapshot:
+    """Conventional with a loan amount but NO purchase price and no appraisal → no value basis → the LTV
+    abstains → MI-1 COULDNT_CHECK. Never satisfied on a missing value."""
+    return _snapshot(
+        _LOAN_MI1_NO_VALUE,
+        [],
+        _mi_mismo(program="conventional", base_loan="340000.00", purchase_price=None),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-488 — MI-4. The FHA side of the program axis. ⚠️ The two amounts are two DIFFERENT MISMO elements:
+# loan.amount is TERMS_OF_LOAN/BaseLoanAmount, loan.note_amount is TERMS_OF_LOAN/NoteAmount. On an FHA
+# loan the difference between them IS the financed upfront MIP.
+#
+# Base $300,000 x 1.75% = $5,250 → a correct note is $305,250.
+# --------------------------------------------------------------------------- #
+def _mip_mismo(
+    *, program: str, base_loan: str, note_amount: str | None
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {
+        "loan.purpose": _f("purchase"),
+        "loan.program": _f(program),
+        "loan.amount": _f(base_loan),
+    }
+    if note_amount is not None:
+        facts["loan.note_amount"] = _f(note_amount)
+    return facts
+
+
+def build_mi4_correct_ufmip_snapshot() -> Snapshot:
+    """$305,250 note on a $300,000 base = exactly 1.75% financed → MI-4 SATISFIED."""
+    return _snapshot(
+        _LOAN_MI4_CORRECT,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="305250.00"),
+    )
+
+
+def build_mi4_over_ufmip_snapshot() -> Snapshot:
+    """$310,000 note on a $300,000 base = 3.33% financed — well above 1.75% → MI-4 FIRED."""
+    return _snapshot(
+        _LOAN_MI4_OVER,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="310000.00"),
+    )
+
+
+def build_mi4_under_ufmip_snapshot() -> Snapshot:
+    """$303,000 note on a $300,000 base = 1.00% financed — short of 1.75% → MI-4 FIRED."""
+    return _snapshot(
+        _LOAN_MI4_UNDER,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="303000.00"),
+    )
+
+
+def build_mi4_no_ufmip_financed_snapshot() -> Snapshot:
+    """Note == base: nothing financed. ⚠️ NEEDS_REVIEW, not fired — the premium may have been paid in
+    cash, and a Section 248 (Indian Lands) mortgage is exempt entirely. Neither is detectable."""
+    return _snapshot(
+        _LOAN_MI4_NONE,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount="300000.00"),
+    )
+
+
+def build_mi4_conventional_snapshot() -> Snapshot:
+    """⚠️ THE PROGRAM-SCOPING PROOF, conventional side. Note == base, which on an FHA file is a
+    needs_review — but this is a CONVENTIONAL loan, where no upfront MIP is due at all. MI-4 must be
+    NOT_APPLICABLE and must never fire."""
+    return _snapshot(
+        _LOAN_MI4_CONVENTIONAL,
+        [],
+        _mip_mismo(program="conventional", base_loan="300000.00", note_amount="300000.00"),
+    )
+
+
+def build_mi4_no_note_amount_snapshot() -> Snapshot:
+    """An FHA file stating a base loan amount but NO note amount → the rate abstains → MI-4
+    COULDNT_CHECK. Never satisfied on a missing amount."""
+    return _snapshot(
+        _LOAN_MI4_NO_NOTE,
+        [],
+        _mip_mismo(program="fha", base_loan="300000.00", note_amount=None),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-488 — CO-1. A document-type PRESENCE read (the IN-8/IN-9/IN-16 discipline): the classifier's type
+# label, never extracted fields.
+# --------------------------------------------------------------------------- #
+def build_co1_questionnaire_present_snapshot() -> Snapshot:
+    """A condo whose file carries a questionnaire → CO-1 SATISFIED. ⚠️ The questionnaire states NO unit
+    counts — the same shape as the one real questionnaire in the corpus, which fills 0 of them. CO-1 is
+    still correct to say it is present: judging its contents is CO-3/CO-5's job."""
+    return _snapshot(
+        _LOAN_CO1_PRESENT,
+        [_doc("95-condo-q", "condo_questionnaire", project_name="Birch Court Condominiums")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_co1_questionnaire_missing_snapshot() -> Snapshot:
+    """A condo whose file has documents but no questionnaire → CO-1 FIRED."""
+    return _snapshot(
+        _LOAN_CO1_MISSING,
+        [_doc("95-condo-other", "pay_stub", employer_name="Rivertown Foods")],
+        {"property.type": _f("condo")},
+    )
+
+
+def build_co1_not_condo_snapshot() -> Snapshot:
+    """A single-family property with no questionnaire → CO-1 NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_CO1_NOT_CONDO,
+        [_doc("95-sf-doc", "pay_stub", employer_name="Rivertown Foods")],
+        {"property.type": _f("single_family")},
+    )
+
+
+def build_co1_empty_file_snapshot() -> Snapshot:
+    """⚠️ A condo file with NO DOCUMENTS AT ALL → CO-1 COULDNT_CHECK, never fired. An empty file is not
+    evidence the questionnaire is missing — it is evidence nothing has been uploaded yet."""
+    return _snapshot(_LOAN_CO1_EMPTY, [], {"property.type": _f("condo")})
+
+
+# --------------------------------------------------------------------------- #
+# LP-488 — AU-3. ⚠️ THE LPA CASE IS THE REAL ONE: the single aus_findings document in the 303-document
+# corpus is an LPA whose recommendation reads "ACCEPT" and whose eligibility reads "ELIGIBLE" — neither
+# term appears in the DU-shaped catalog vocabulary. The DU fixtures below are RESEARCHED, not observed.
+# --------------------------------------------------------------------------- #
+def _aus(cid: str, *, engine: str, recommendation: str, eligibility: str | None) -> DocumentEntry:
+    fields = {
+        "aus_engine": engine,
+        "recommendation": recommendation,
+        "submission_date": "2026-07-27",
+    }
+    if eligibility is not None:
+        fields["eligibility_status"] = eligibility
+    return _doc(cid, "aus_findings", **fields)
+
+
+def build_au3_lpa_accept_snapshot() -> Snapshot:
+    """⚠️ THE REAL CORPUS CASE, verbatim: an LPA reading "ACCEPT" / "ELIGIBLE" → AU-3 SATISFIED. A rule
+    written as equality against DU's "Approve/Eligible" would have abstained on this file."""
+    return _snapshot(
+        _LOAN_AU3_LPA,
+        [_aus("95-aus-lpa", engine="LPA", recommendation="ACCEPT", eligibility="ELIGIBLE")],
+    )
+
+
+def build_au3_du_approve_eligible_snapshot() -> Snapshot:
+    """DU's own wording, where the eligibility is inside the recommendation → AU-3 SATISFIED.
+    ⚠️ RESEARCHED, not observed — no DU file exists in the corpus."""
+    return _snapshot(
+        _LOAN_AU3_DU,
+        [_aus("95-aus-du", engine="DU", recommendation="Approve/Eligible", eligibility=None)],
+    )
+
+
+def build_au3_approve_ineligible_snapshot() -> Snapshot:
+    """Approved but INELIGIBLE — the loan cannot be delivered as underwritten → AU-3 FIRED."""
+    return _snapshot(
+        _LOAN_AU3_INELIGIBLE,
+        [_aus("95-aus-inel", engine="DU", recommendation="Approve/Ineligible", eligibility=None)],
+    )
+
+
+def build_au3_refer_snapshot() -> Snapshot:
+    """A referral to manual underwriting → AU-3 NEEDS_REVIEW (a routing fact, not a failure)."""
+    return _snapshot(
+        _LOAN_AU3_REFER,
+        [
+            _aus(
+                "95-aus-refer",
+                engine="DU",
+                recommendation="Refer with Caution",
+                eligibility="Eligible",
+            )
+        ],
+    )
+
+
+def build_au3_unknown_vendor_wording_snapshot() -> Snapshot:
+    """⚠️ ADR-376's ABSTAIN. A third engine's wording nobody has taught the rule → AU-3 COULDNT_CHECK,
+    never a guessed approval."""
+    return _snapshot(
+        _LOAN_AU3_UNKNOWN_VENDOR,
+        [
+            _aus(
+                "95-aus-x",
+                engine="OtherAUS",
+                recommendation="Provisionally Cleared",
+                eligibility="OK",
+            )
+        ],
+    )
+
+
+def build_au3_approve_without_eligibility_snapshot() -> Snapshot:
+    """⚠️ An APPROVAL whose eligibility cannot be read → COULDNT_CHECK. "Approve" alone does not mean
+    deliverable, and reading it as approve_eligible would turn an unread field into a clearance."""
+    return _snapshot(
+        _LOAN_AU3_NO_ELIGIBILITY,
+        [_aus("95-aus-noelig", engine="DU", recommendation="Approve", eligibility=None)],
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-491 — TI-1. ⚠️ The owner/seller names below are INVENTED (no borrower PII in the repo); what is
+# taken from the real corpus is the SHAPE — a plain 2-3 word name in vested_owner_name, a second owner on
+# most commitments, and the seller on the purchase agreement.
+# --------------------------------------------------------------------------- #
+def _commitment(cid: str, owner: str, owner_2: str | None = None) -> DocumentEntry:
+    fields = {
+        "title_company_name": "Rivertown Title",
+        "commitment_number": "TC-0001",
+        "vested_owner_name": owner,
+        "legal_description": "LOT 7, BLOCK 2, BIRCH COURT SUBDIVISION, RIVERTOWN, ILLINOIS",
+    }
+    if owner_2 is not None:
+        fields["vested_owner_name_2"] = owner_2
+    return _doc(cid, "title_commitment", **fields)
+
+
+def _seller_contract(cid: str, seller: str) -> DocumentEntry:
+    return _doc(cid, "purchase_agreement", seller_name=seller, sales_price="400000.00")
+
+
+def _ti1_mismo(purpose: str | None, *, borrower: str | None = None) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if purpose is not None:
+        facts["loan.purpose"] = _f(purpose)
+    if borrower is not None:
+        first, _, last = borrower.partition(" ")
+        facts["borrower.1.first_name"] = _f(first)
+        facts["borrower.1.last_name"] = _f(last)
+    return facts
+
+
+def build_ti1_purchase_match_snapshot() -> Snapshot:
+    """A purchase whose vested owner IS the contract's seller → TI-1 SATISFIED."""
+    return _snapshot(
+        _LOAN_TI1_PURCHASE_MATCH,
+        [_commitment("95-tc-ok", "Miriam Okonkwo"), _seller_contract("95-pa-ok", "Miriam Okonkwo")],
+        _ti1_mismo("purchase"),
+    )
+
+
+def build_ti1_purchase_mismatch_snapshot() -> Snapshot:
+    """A purchase whose vested owner is an unrelated party → TI-1 NEEDS_REVIEW.
+    ⚠️ NOT fired — a trust, an estate or a name change all produce a legitimate difference."""
+    return _snapshot(
+        _LOAN_TI1_PURCHASE_MISMATCH,
+        [_commitment("95-tc-x", "Harold Vance"), _seller_contract("95-pa-x", "Miriam Okonkwo")],
+        _ti1_mismo("purchase"),
+    )
+
+
+def build_ti1_refinance_match_snapshot() -> Snapshot:
+    """A REFINANCE compares the vested owner against the BORROWER, not a seller → TI-1 SATISFIED."""
+    return _snapshot(
+        _LOAN_TI1_REFI_MATCH,
+        [_commitment("95-tc-refi", "Priya Raman")],
+        _ti1_mismo("refinance", borrower="Priya Raman"),
+    )
+
+
+def build_ti1_no_purpose_snapshot() -> Snapshot:
+    """⚠️ THE ABSENT-PURPOSE PROOF. The same matching names with NO stated purpose → COULDNT_CHECK, never
+    silently skipped: TI-1 cannot know which party to compare against."""
+    return _snapshot(
+        _LOAN_TI1_NO_PURPOSE,
+        [_commitment("95-tc-np", "Miriam Okonkwo"), _seller_contract("95-pa-np", "Miriam Okonkwo")],
+        _ti1_mismo(None),
+    )
+
+
+def build_ti1_second_owner_match_snapshot() -> Snapshot:
+    """⚠️ A match on the SECOND owner still matches — 3 of the 4 real commitments carry one, and a
+    co-owned property matching only the second name is not a mismatch."""
+    return _snapshot(
+        _LOAN_TI1_SECOND_OWNER,
+        [
+            _commitment("95-tc-2", "Harold Vance", owner_2="Miriam Okonkwo"),
+            _seller_contract("95-pa-2", "Miriam Okonkwo"),
+        ],
+        _ti1_mismo("purchase"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-492 — PR-2. The appraised value comes from the APPRAISAL, the price from MISMO — two documents.
+# --------------------------------------------------------------------------- #
+def _appraisal_doc(cid: str, value: str) -> DocumentEntry:
+    return _doc(cid, "appraisal", appraised_value=value, appraisal_effective_date="2026-06-01")
+
+
+def _pr2_mismo(purpose: str | None, price: str | None) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if purpose is not None:
+        facts["loan.purpose"] = _f(purpose)
+    if price is not None:
+        facts["property.purchase_price"] = _f(price)
+    return facts
+
+
+def build_pr2_value_supports_price_snapshot() -> Snapshot:
+    """A $410,000 appraisal on a $400,000 purchase → PR-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_PR2_SUPPORTS,
+        [_appraisal_doc("95-ap-ok", "410000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_shortfall_snapshot() -> Snapshot:
+    """A $380,000 appraisal on a $400,000 purchase → PR-2 FIRED: a $20,000 cash gap."""
+    return _snapshot(
+        _LOAN_PR2_SHORTFALL,
+        [_appraisal_doc("95-ap-low", "380000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_two_appraisals_snapshot() -> Snapshot:
+    """⚠️ TWO APPRAISALS — the LP-488 defect shape. $410,000 and $380,000 on a $400,000 purchase. The
+    LOWEST must drive the gap (-20,000 → fired); taking the first-iterated could give +10,000 →
+    satisfied, silently clearing a real shortfall."""
+    return _snapshot(
+        _LOAN_PR2_TWO_APPRAISALS,
+        [_appraisal_doc("95-ap-high", "410000.00"), _appraisal_doc("95-ap-low2", "380000.00")],
+        _pr2_mismo("purchase", "400000.00"),
+    )
+
+
+def build_pr2_refinance_snapshot() -> Snapshot:
+    """A refinance has no contract price → PR-2 NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_PR2_REFINANCE,
+        [_appraisal_doc("95-ap-refi", "380000.00")],
+        _pr2_mismo("refinance", None),
+    )
+
+
+def build_pr2_no_purpose_snapshot() -> Snapshot:
+    """⚠️ The same shortfall with NO stated purpose → COULDNT_CHECK, never silently skipped."""
+    return _snapshot(
+        _LOAN_PR2_NO_PURPOSE,
+        [_appraisal_doc("95-ap-np", "380000.00")],
+        _pr2_mismo(None, "400000.00"),
+    )
+
+
+def build_pr2_no_price_snapshot() -> Snapshot:
+    """A purchase with an appraisal but NO stated price → COULDNT_CHECK, never satisfied."""
+    return _snapshot(
+        _LOAN_PR2_NO_PRICE,
+        [_appraisal_doc("95-ap-nopx", "380000.00")],
+        _pr2_mismo("purchase", None),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-494 — CO-4 (HOA reserves) and CO-5 (project eligibility). ⚠️ EVERY ONE OF THESE IS SELF-AUTHORED —
+# no completed condo questionnaire exists anywhere in the corpus (the two in the bench are a cancellation
+# notice and a genuinely unanswered form), so these prove WIRING AND DIRECTION, never accuracy. ADR-332,
+# and the LP-487 amendment: a self-authored fixture may pin the LOGIC, never the LABEL.
+#
+# ⚠️ CO-4's three date cases are the point. The reserve floor is 10% before 2027-01-04 and 15% on or after,
+# so the SAME 12% budget is adequate for a 2026 application and short for a 2027 one — and with no
+# application date at all the rule abstains rather than picking a floor.
+# --------------------------------------------------------------------------- #
+def _questionnaire(cid: str, **fields: str) -> DocumentEntry:
+    return _doc(cid, "condo_questionnaire", project_name="Birch Court Condominiums", **fields)
+
+
+def _condo_mismo(
+    *, application_date: str | None, property_type: str = "condo"
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {"property.type": _f(property_type)}
+    if application_date is not None:
+        facts["loan.application_received_date"] = _f(application_date)
+    return facts
+
+
+def build_co4_adequate_2026_snapshot() -> Snapshot:
+    """12% reserves on a 2026-06-08 application → the 10% floor applies → CO-4 SATISFIED."""
+    return _snapshot(
+        _LOAN_CO4_ADEQUATE_2026,
+        [_questionnaire("95-cq-ok", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_short_2026_snapshot() -> Snapshot:
+    """8% reserves on a 2026 application → below even the 10% floor → CO-4 FIRED."""
+    return _snapshot(
+        _LOAN_CO4_SHORT_2026,
+        [_questionnaire("95-cq-short", reserve_contribution_percentage="8")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_same_pct_2027_snapshot() -> Snapshot:
+    """⚠️ THE DATE-KEYED PROOF. The SAME 12% that satisfied above, on a 2027-01-04 application, is short of
+    LL-2026-03's 15% floor → CO-4 FIRED. Only the application date differs."""
+    return _snapshot(
+        _LOAN_CO4_SAME_PCT_2027,
+        [_questionnaire("95-cq-2027", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date="2027-01-04"),
+    )
+
+
+def build_co4_no_application_date_snapshot() -> Snapshot:
+    """12% reserves and NO application date → the floor cannot be selected → CO-4 COULDNT_CHECK. Never
+    defaulted to today's date, which would apply next year's floor to this year's application."""
+    return _snapshot(
+        _LOAN_CO4_NO_APP_DATE,
+        [_questionnaire("95-cq-nodate", reserve_contribution_percentage="12")],
+        _condo_mismo(application_date=None),
+    )
+
+
+def build_co4_reserves_from_hoa_statement_snapshot() -> Snapshot:
+    """⚠️ THE PATH THAT JUSTIFIES CO-4 BEING LIVE, and which nothing exercised (reported finding).
+
+    `input_resolves: true` rests entirely on the reserve percentage resolving from an HOA STATEMENT — HOA
+    budgets classify as `hoa_statement`, not `condo_questionnaire` — yet every CO-4 fixture fed the
+    questionnaire field. So the wiring the activation depends on was never executed: the LP-508 lesson
+    ("the mechanism worked, the WIRING did not") in the same file whose docstring cites it.
+    """
+    return _snapshot(
+        _LOAN_CO4_HOA_STATEMENT,
+        [_doc("95-hoa-reserve", "hoa_statement", reserve_percentage="12")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_present_snapshot() -> Snapshot:
+    """A master policy evidencing fidelity/crime coverage → CO-3 reads `present`.
+
+    ⚠️ CO-3 had NO snapshot fixture at all (reported finding) — its tests asserted spec shape only, so the
+    recipe that decides a LIVE rule's verdict was never run.
+    """
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_PRESENT,
+        [
+            _doc(
+                "95-mp-fid",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="50000",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_disagreement_snapshot() -> Snapshot:
+    """⚠️ TWO master policies answering Yes and No — a contradiction BETWEEN documents, which used to fall
+    to the unrecognised-value branch and report "'no' is not a recognised yes/no answer"."""
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_DISAGREE,
+        [
+            _doc(
+                "95-mp-yes",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+            ),
+            _doc(
+                "95-mp-no",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="No",
+            ),
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co3_fidelity_amount_disagreement_snapshot() -> Snapshot:
+    """⚠️ Both policies say Yes; their AMOUNTS differ ($50,000 vs $75,000 — a prior-year certificate beside
+    the current renewal). The amount is EVIDENCE this rule never judges, so it must not veto a clearly
+    evidenced `present`."""
+    return _snapshot(
+        _LOAN_CO3_FIDELITY_AMOUNTS,
+        [
+            _doc(
+                "95-mp-a",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="50000",
+            ),
+            _doc(
+                "95-mp-b",
+                "master_insurance_policy_for_condominium",
+                fidelity_crime_coverage_present="Yes",
+                fidelity_crime_coverage_amount="75000",
+            ),
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_blank_questionnaire_snapshot() -> Snapshot:
+    """⚠️ THE CORPUS'S ACTUAL SHAPE: a questionnaire that is present and UNANSWERED → CO-4 COULDNT_CHECK,
+    never satisfied. A blank form is not evidence of adequate reserves."""
+    return _snapshot(
+        _LOAN_CO4_BLANK_FORM,
+        [_questionnaire("95-cq-blank")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co4_not_condo_snapshot() -> Snapshot:
+    """A single-family property → CO-4 NOT_APPLICABLE (no HOA reserve floor applies)."""
+    return _snapshot(
+        _LOAN_CO4_NOT_CONDO,
+        [],
+        _condo_mismo(application_date="2026-06-08", property_type="single_family"),
+    )
+
+
+def build_co5_clear_snapshot() -> Snapshot:
+    """All four legs answered and within Fannie's limits → CO-5 SATISFIED."""
+    return _snapshot(
+        _LOAN_CO5_CLEAR,
+        [
+            _questionnaire(
+                "95-cq-clear",
+                units_delinquent_over_60_days="2",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_delinquent_snapshot() -> Snapshot:
+    """22 of 60 units 60+ days past due = 36.67% — above B4-2.2-02's 15% → CO-5 FIRED.
+
+    ⚠️ The figure changed with the producer: condo.delinquent_units_pct is now COMPUTED from the count
+    over total_units, so this fixture states 22 UNITS (not 22%) against a 60-unit project. The docstring
+    said 22% after the remap, which is the fixture describing an input it no longer has.
+    """
+    return _snapshot(
+        _LOAN_CO5_DELINQUENT,
+        [
+            _questionnaire(
+                "95-cq-delinq",
+                units_delinquent_over_60_days="22",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_concentration_snapshot() -> Snapshot:
+    """⚠️ THE TIER THE PRIMARY RESOLVES: 18 of 60 units (30%) is above B4-2.1-03's 20% for a 21+ unit
+    project → CO-5 FIRED. Neither of the ticket's two conflicting figures describes this rule."""
+    return _snapshot(
+        _LOAN_CO5_CONCENTRATION,
+        [
+            _questionnaire(
+                "95-cq-conc",
+                units_delinquent_over_60_days="2",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="18",
+                litigation_indicator="No",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_litigation_snapshot() -> Snapshot:
+    """Litigation disclosed, every limit within range → CO-5 NEEDS_REVIEW, never fired: materiality is a
+    judgment about nature and scope, and no numeric threshold expresses it."""
+    return _snapshot(
+        _LOAN_CO5_LITIGATION,
+        [
+            _questionnaire(
+                "95-cq-lit",
+                units_delinquent_over_60_days="2",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="Yes",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_blank_questionnaire_snapshot() -> Snapshot:
+    """⚠️ THE CORPUS'S ACTUAL SHAPE, and the false all-clear this rule must never give: an unanswered
+    questionnaire → CO-5 COULDNT_CHECK, never satisfied."""
+    return _snapshot(
+        _LOAN_CO5_BLANK_FORM,
+        [_questionnaire("95-cq-blank5")],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+def build_co5_unrecognised_litigation_snapshot() -> Snapshot:
+    """⚠️ ADR-376's direction, on the answer where it matters most: "PENDING - SEE ATTACHED" is not a
+    recognised yes/no, so CO-5 COULDNT_CHECKs. Reading it as "no litigation" would clear the project."""
+    return _snapshot(
+        _LOAN_CO5_UNRECOGNISED_LITIGATION,
+        [
+            _questionnaire(
+                "95-cq-lit-x",
+                units_delinquent_over_60_days="2",
+                commercial_space_percentage="10",
+                total_units="60",
+                single_entity_owned_units="6",
+                litigation_indicator="PENDING - SEE ATTACHED",
+            )
+        ],
+        _condo_mismo(application_date="2026-06-08"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-495a — RE-1 / DT-6 (the mortgage-statement ↔ stated-liability reconciliation) and LO-2 (LOE
+# completeness). ONE MATCHER serves RE-1 and DT-6 (ADR-375), so these scenarios drive both rules.
+# --------------------------------------------------------------------------- #
+_LOAN_RE1_DISCLOSED = UUID("95000000-0000-4000-8000-00000000006c")
+_LOAN_RE1_UNDISCLOSED = UUID("95000000-0000-4000-8000-00000000006d")
+_LOAN_RE1_NO_LENDER = UUID("95000000-0000-4000-8000-00000000006e")
+_LOAN_RE1_NO_STATED = UUID("95000000-0000-4000-8000-00000000006f")
+_LOAN_RE1_AMBIGUOUS = UUID("95000000-0000-4000-8000-000000000070")
+_LOAN_DT6_COVERED = UUID("95000000-0000-4000-8000-000000000071")
+_LOAN_DT6_SHORT = UUID("95000000-0000-4000-8000-000000000072")
+_LOAN_DT6_ESCROW_GUARD = UUID("95000000-0000-4000-8000-000000000073")
+_LOAN_LO2_COMPLETE = UUID("95000000-0000-4000-8000-000000000074")
+_LOAN_LO2_INCOMPLETE = UUID("95000000-0000-4000-8000-000000000075")
+_LOAN_LO2_UNSIGNED = UUID("95000000-0000-4000-8000-000000000076")
+_LOAN_LO2_UNREADABLE = UUID("95000000-0000-4000-8000-000000000077")
+_LOAN_LO2_NO_LETTER = UUID("95000000-0000-4000-8000-000000000078")
+_LOAN_LO2_ODD_SIGNATURE = UUID("95000000-0000-4000-8000-000000000079")
+
+
+def _stated_mortgage(holder: str, monthly_payment: str, index: int = 0) -> dict[str, SnapshotField]:
+    """One MISMO stated MortgageLoan liability, in the flat `liability.{k}.*` shape mismo_section emits.
+
+    ⚠️ There is NO property address on a stated liability — that is why the match is on holder name.
+    """
+    return {
+        f"liability.{index}.type": _f("MortgageLoan"),
+        f"liability.{index}.holder_name": _f(holder),
+        f"liability.{index}.monthly_payment": _f(monthly_payment),
+        f"liability.{index}.unpaid_balance": _f("220000.00"),
+    }
+
+
+def build_re1_disclosed_snapshot() -> Snapshot:
+    """A statement whose lender matches a stated MortgageLoan holder → RE-1 SATISFIED.
+
+    ⚠️ The names differ in FORM ("Cedar Ridge Mortgage Servicing LLC" vs "Cedar Ridge Mortgage"), which is
+    the ordinary corpus variance the token-prefix matcher absorbs.
+    """
+    return _snapshot(
+        _LOAN_RE1_DISCLOSED,
+        [
+            _doc(
+                "95-stmt-disclosed",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                unpaid_balance="220000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_undisclosed_snapshot() -> Snapshot:
+    """A statement whose lender matches NO stated liability → RE-1 NEEDS_REVIEW (never fired).
+
+    ⚠️ The application DOES state a mortgage — just a different one. This is the case that separates a
+    real discrepancy from a file with no stated side at all (see build_re1_no_stated_liabilities).
+    """
+    return _snapshot(
+        _LOAN_RE1_UNDISCLOSED,
+        [
+            _doc(
+                "95-stmt-undisclosed",
+                "mortgage_statement",
+                lender_name="Harbor Point Home Loans",
+                monthly_payment="980.00",
+                unpaid_balance="140000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_no_lender_snapshot() -> Snapshot:
+    """⚠️ THE ~24% ABSTAIN, AS A TEST. `lender_name` fills 54/71 in the corpus; a statement without it
+    resolves to COULDNT_CHECK, never to "undisclosed". Reading an unnamed statement as an undisclosed
+    debt is the fail-OPEN direction this pins shut."""
+    return _snapshot(
+        _LOAN_RE1_NO_LENDER,
+        [
+            _doc(
+                "95-stmt-no-lender",
+                "mortgage_statement",
+                monthly_payment="1100.00",
+                unpaid_balance="180000.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_re1_no_stated_liabilities_snapshot() -> Snapshot:
+    """⚠️ THE FAIL-CLOSED CASE THAT MATTERS MOST. A file whose application states NO mortgage liabilities
+    (never imported, or an import that carried none) must NOT read as a file full of undisclosed debts.
+    COULDNT_CHECK, never NEEDS_REVIEW."""
+    return _snapshot(
+        _LOAN_RE1_NO_STATED,
+        [
+            _doc(
+                "95-stmt-no-stated",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        {},
+    )
+
+
+def build_re1_ambiguous_snapshot() -> Snapshot:
+    """⚠️ TWO stated liabilities share the servicer (a first and a second — ordinary). Picking one would
+    attach DT-6's payment comparison to a liability chosen by list order, so the matcher ABSTAINS."""
+    mismo = {
+        **_stated_mortgage("Cedar Ridge Mortgage", "1450.00", index=0),
+        **_stated_mortgage("Cedar Ridge Mortgage", "310.00", index=1),
+    }
+    return _snapshot(
+        _LOAN_RE1_AMBIGUOUS,
+        [
+            _doc(
+                "95-stmt-ambiguous",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        mismo,
+    )
+
+
+def build_dt6_covered_snapshot() -> Snapshot:
+    """The stated payment equals the servicer's billed total → DT-6 SATISFIED."""
+    return _snapshot(
+        _LOAN_DT6_COVERED,
+        [
+            _doc(
+                "95-stmt-covered",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_dt6_short_snapshot() -> Snapshot:
+    """The application states principal+interest only while the servicer bills the full PITIA → DT-6
+    NEEDS_REVIEW (never fired — the property may be under contract)."""
+    return _snapshot(
+        _LOAN_DT6_SHORT,
+        [
+            _doc(
+                "95-stmt-short",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                escrow_amount="310.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1140.00"),
+    )
+
+
+def build_dt6_escrow_double_count_guard_snapshot() -> Snapshot:
+    """⚠️ THE DOUBLE-COUNT GUARD — THE ONE TEST THAT WOULD CATCH THE LIKELIEST WRONG BUILD OF DT-6.
+
+    The statement bills 1450.00 TOTAL and shows 310.00 of that as the escrow portion; the application
+    states 1450.00. The extractor prompt defines `monthly_payment` as "the total monthly payment
+    (principal+interest+escrow)" and `escrow_amount` as "the escrow PORTION of the payment", so escrow is
+    a COMPONENT of the total and the stated figure COVERS it → SATISFIED.
+
+    An implementation that compared against `monthly_payment + escrow_amount` (1760.00) would report this
+    compliant file as short. On the corpus that mistake would fire on all 50 of the 67 statements that
+    fill both fields.
+    """
+    return _snapshot(
+        _LOAN_DT6_ESCROW_GUARD,
+        [
+            _doc(
+                "95-stmt-escrow-guard",
+                "mortgage_statement",
+                lender_name="Cedar Ridge Mortgage Servicing LLC",
+                monthly_payment="1450.00",
+                escrow_amount="310.00",
+            )
+        ],
+        _stated_mortgage("Cedar Ridge Mortgage", "1450.00"),
+    )
+
+
+def build_lo2_complete_snapshot() -> Snapshot:
+    """A letter stating its explanation, its referenced date and a signature → LO-2 SATISFIED."""
+    return _snapshot(
+        _LOAN_LO2_COMPLETE,
+        [
+            _doc(
+                "95-loe-complete",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="Yes",
+            )
+        ],
+    )
+
+
+def build_lo2_incomplete_snapshot() -> Snapshot:
+    """A letter with no referenced date and no signature indicator → LO-2 NEEDS_REVIEW (never fired — an
+    empty extracted field is not proof the page is blank)."""
+    return _snapshot(
+        _LOAN_LO2_INCOMPLETE,
+        [
+            _doc(
+                "95-loe-incomplete",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+            )
+        ],
+    )
+
+
+def build_lo2_unsigned_snapshot() -> Snapshot:
+    """A letter that AFFIRMATIVELY states it is unsigned → LO-2 NEEDS_REVIEW."""
+    return _snapshot(
+        _LOAN_LO2_UNSIGNED,
+        [
+            _doc(
+                "95-loe-unsigned",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="No",
+            )
+        ],
+    )
+
+
+def build_lo2_odd_signature_snapshot() -> Snapshot:
+    """⚠️ An UNRECOGNISED signature answer ABSTAINS rather than reading as unsigned (ADR-376's
+    discipline) — a finding must never rest on a value nobody defined."""
+    return _snapshot(
+        _LOAN_LO2_ODD_SIGNATURE,
+        [
+            _doc(
+                "95-loe-odd-sig",
+                "letter_of_explanation",
+                explanation_summary="Explains a lapse in employment during a relocation.",
+                referenced_date="2026-02-14",
+                borrower_signature_present="see attached page 2",
+            )
+        ],
+    )
+
+
+def build_lo2_unreadable_snapshot() -> Snapshot:
+    """⚠️ "A LETTER EXISTS BUT CANNOT BE READ" — COULDNT_CHECK, distinct from "no letter exists".
+
+    A `credit_explanation_letter` is a real classifier type with NO EXTRACTOR AT ALL (the bench records
+    status `no_extractor` for all 4 in the corpus), so the letter is present and its completeness cannot
+    be read. This must not collapse into the missing-letter case below.
+    """
+    return _snapshot(
+        _LOAN_LO2_UNREADABLE,
+        [_doc("95-loe-unreadable", "credit_explanation_letter")],
+    )
+
+
+def build_lo2_no_letter_snapshot() -> Snapshot:
+    """⚠️ "NO LETTER EXISTS" — NOT_APPLICABLE and NO finding, distinct from the unreadable case above.
+
+    LO-2 never reports a MISSING letter, because knowing a letter is owed needs the list of conditions
+    that REQUIRE one — lender- and AUS-driven, enumerated nowhere in the file. That is exactly LO-1's
+    held blocker showing through (`applicability_expected: false`).
+    """
+    return _snapshot(
+        _LOAN_LO2_NO_LETTER,
+        [_doc("95-not-a-letter", "pay_stub", employer_name="Rivertown Foods")],
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-496a — PE-1 (conforming limit / the jumbo catch) and PE-3 (FHA MRI).
+#
+# CONSTRUCTED CASES, NOT CORPUS CASES, and deliberately so. No loan file in the corpus carries a
+# conventional loan near the conforming limit, and the four FHA files hold two documents between them —
+# a corpus derivation would return the same abstain on every case. These exercise every branch,
+# including the two that matter most: PE-1's county-dependent BAND and PE-3's missing credit tier.
+# Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_PE1_WITHIN = UUID("96000000-0000-4000-8000-000000000001")
+_LOAN_PE1_EXCEEDS = UUID("96000000-0000-4000-8000-000000000002")
+_LOAN_PE1_BAND = UUID("96000000-0000-4000-8000-000000000003")
+_LOAN_PE1_FHA = UUID("96000000-0000-4000-8000-000000000004")
+_LOAN_PE1_NO_AMOUNT = UUID("96000000-0000-4000-8000-000000000005")
+_LOAN_PE1_MULTI_UNIT = UUID("96000000-0000-4000-8000-000000000006")
+_LOAN_PE1_ALASKA_WITHIN = UUID("96000000-0000-4000-8000-000000000007")
+# LP-498 review — the two absent-fact cases PE-1 used to answer instead of abstain.
+_LOAN_PE1_NO_UNITS = UUID("96000000-0000-4000-8000-000000000008")
+_LOAN_PE1_NO_STATE = UUID("96000000-0000-4000-8000-000000000009")
+_LOAN_PE3_MET = UUID("96000000-0000-4000-8000-000000000011")
+_LOAN_PE3_SHORT = UUID("96000000-0000-4000-8000-000000000012")
+_LOAN_PE3_NO_SCORE = UUID("96000000-0000-4000-8000-000000000013")
+_LOAN_PE3_LOW_TIER = UUID("96000000-0000-4000-8000-000000000014")
+_LOAN_PE3_LOW_APPRAISAL = UUID("96000000-0000-4000-8000-000000000015")
+_LOAN_PE3_CONVENTIONAL = UUID("96000000-0000-4000-8000-000000000016")
+# LP-498 review — the appraisal-absent and multi-borrower-one-score cases.
+_LOAN_PE3_NO_APPRAISAL = UUID("96000000-0000-4000-8000-000000000017")
+_LOAN_PE3_TWO_BORROWERS = UUID("96000000-0000-4000-8000-000000000018")
+_PE3_BORROWER_1 = UUID("96000000-0000-4000-8000-0000000000a1")
+_PE3_BORROWER_2 = UUID("96000000-0000-4000-8000-0000000000a2")
+
+
+def _pe_mismo(
+    program: str | None,
+    amount: str | None,
+    *,
+    state: str | None = None,
+    units: str | None = None,
+    price: str | None = None,
+    value: str | None = None,
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if program is not None:
+        facts["loan.program"] = _f(program)
+    if amount is not None:
+        facts["loan.amount"] = _f(amount)
+    if state is not None:
+        facts["property.state"] = _f(state)
+    if units is not None:
+        facts["property.financed_unit_count"] = _f(units)
+    if price is not None:
+        facts["property.purchase_price"] = _f(price)
+    if value is not None:
+        facts["property.valuation_amount"] = _f(value)
+    return facts
+
+
+# LP-498 review — PE-3's appraisals reuse LP-492's `_appraisal_doc` (defined above for PR-2), rather
+# than a second helper of the same shape. The fixtures used to put the value in MISMO's
+# `property.valuation_amount` because PE-3 read the MISMO stated values; so the low-appraisal case
+# "proved" the Adjusted Value basis with no appraisal on the file at all, and could not have caught
+# PE-3 never reading one. The value now arrives where an appraisal actually puts it.
+
+
+def _credit_report_doc(
+    content_id: str, equifax: str, experian: str, transunion: str
+) -> DocumentEntry:
+    """A credit report carrying the three repository scores PE-3's MDCS is computed from."""
+    return DocumentEntry(
+        content_id=content_id,
+        document_type="credit_report",
+        fields={
+            "score_equifax": _f(equifax),
+            "score_experian": _f(experian),
+            "score_transunion": _f(transunion),
+        },
+    )
+
+
+# --- PE-1 ------------------------------------------------------------------- #
+def build_pe1_within_limit_snapshot() -> Snapshot:
+    """$700,000 conventional, below the $832,750 baseline -> conforming in EVERY county -> SATISFIED."""
+    return _snapshot(
+        _LOAN_PE1_WITHIN, [], _pe_mismo("conventional", "700000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_exceeds_limit_snapshot() -> Snapshot:
+    """$1,400,000 conventional, above the $1,249,125 ceiling -> over the limit in EVERY county -> FIRED."""
+    return _snapshot(
+        _LOAN_PE1_EXCEEDS, [], _pe_mismo("conventional", "1400000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_county_band_snapshot() -> Snapshot:
+    """THE CASE THE WHOLE RULE IS SHAPED AROUND. $1,000,000 sits BETWEEN the $832,750 baseline and
+    the $1,249,125 ceiling. It is conforming in a high-cost county and jumbo in most of the country, and
+    the snapshot carries no county — so the only correct answer is COULDNT_CHECK. A baseline-only
+    comparison would call this FIRED on a perfectly conforming San Francisco loan; a ceiling-only
+    comparison would CLEAR a jumbo. Neither is acceptable, so the rule abstains."""
+    return _snapshot(
+        _LOAN_PE1_BAND, [], _pe_mismo("conventional", "1000000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_fha_snapshot() -> Snapshot:
+    """An FHA loan -> the conforming limit does not apply -> NOT_APPLICABLE."""
+    return _snapshot(_LOAN_PE1_FHA, [], _pe_mismo("fha", "700000.00", state="NC", units="1"))
+
+
+def build_pe1_no_amount_snapshot() -> Snapshot:
+    """Conventional with NO stated loan amount -> COULDNT_CHECK, never satisfied on a missing figure."""
+    return _snapshot(
+        _LOAN_PE1_NO_AMOUNT, [], _pe_mismo("conventional", None, state="NC", units="1")
+    )
+
+
+def build_pe1_multi_unit_snapshot() -> Snapshot:
+    """A 2-unit property at $900,000. The 2-4 unit limits were NOT verified against a primary source,
+    so the rule abstains rather than judging against an unverified number -> COULDNT_CHECK."""
+    return _snapshot(
+        _LOAN_PE1_MULTI_UNIT, [], _pe_mismo("conventional", "900000.00", state="NC", units="2")
+    )
+
+
+def build_pe1_alaska_within_snapshot() -> Snapshot:
+    """$1,000,000 in ALASKA — the SAME amount that abstains in North Carolina. Alaska's baseline IS
+    the national ceiling ($1,249,125), so this is below baseline there and conforming in every Alaskan
+    borough -> SATISFIED. Pins the special-area carve-out: without it this file would abstain."""
+    return _snapshot(
+        _LOAN_PE1_ALASKA_WITHIN, [], _pe_mismo("conventional", "1000000.00", state="AK", units="1")
+    )
+
+
+def build_pe1_no_unit_count_snapshot() -> Snapshot:
+    """LP-498 review — $1,400,000 conventional with NO stated unit count -> COULDNT_CHECK.
+
+    This used to FIRE. `units` stayed None when the fact was absent, so the `units > 1` abstain did not
+    trigger and the loan fell through to the ONE-UNIT limits: a 3-unit purchase at this amount was
+    reported "jumbo, not deliverable" against a limit that does not apply to it. LP-496a measured the
+    fact reaching the snapshot on 10 of 19 files, so about half of real files took that path.
+    """
+    return _snapshot(_LOAN_PE1_NO_UNITS, [], _pe_mismo("conventional", "1400000.00", state="NC"))
+
+
+def build_pe1_no_state_snapshot() -> Snapshot:
+    """LP-498 review — $1,000,000 conventional with NO stated state -> COULDNT_CHECK.
+
+    The same defaulting on the other axis: `(state or "").upper()` made an absent state a non-special
+    area. This amount is ABOVE the national ceiling band and BELOW Alaska's baseline, so defaulting
+    decided the verdict — the file would have been judged against limits that may not govern it.
+    """
+    return _snapshot(_LOAN_PE1_NO_STATE, [], _pe_mismo("conventional", "1000000.00", units="1"))
+
+
+# --- PE-3 ------------------------------------------------------------------- #
+def build_pe3_no_appraisal_snapshot() -> Snapshot:
+    """LP-498 review — the satisfied case's numbers with NO appraisal on the file -> COULDNT_CHECK.
+
+    PE-3 read `property.valuation_amount or property.estimated_value` — both MISMO STATED figures, the
+    second being the borrower's own 1003 estimate — and never `property.appraised_value`. HUD's
+    Adjusted Value is the lesser of price and APPRAISED value, so a file with no appraisal was answered
+    from the number the application claimed. Its `how_to_fix` says "obtain the appraisal (for the
+    property value)", which could not change the verdict. The MISMO value is still stated here, so this
+    abstains only because the appraisal is what is read.
+    """
+    return _snapshot(
+        _LOAN_PE3_NO_APPRAISAL,
+        [_credit_report_doc("96-cr-noap", "700", "710", "690")],
+        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+    )
+
+
+def build_pe3_two_borrowers_one_score_snapshot() -> Snapshot:
+    """LP-498 review — two borrowers, ONE score-bearing credit report -> COULDNT_CHECK.
+
+    The MDCS is "the lowest across borrowers", but the loop keys on DOCUMENTS and the extractor carries
+    one score triple per document. A joint file whose single report is the primary's 700 would apply
+    the 3.5% tier while an unscored co-borrower could sit at 550 and require 10% — the assumption the
+    function's own contract says it will never make.
+    """
+    return _snapshot(
+        _LOAN_PE3_TWO_BORROWERS,
+        [
+            _credit_report_doc("96-cr-joint", "700", "710", "690"),
+            DocumentEntry(
+                content_id="96-ps-b1",
+                document_type="pay_stub",
+                belongs_to=(BorrowerRef(borrower_id=_PE3_BORROWER_1, name="A. Borrower"),),
+                fields={"gross_pay": _f("5000.00")},
+            ),
+            DocumentEntry(
+                content_id="96-ps-b2",
+                document_type="pay_stub",
+                belongs_to=(BorrowerRef(borrower_id=_PE3_BORROWER_2, name="B. Borrower"),),
+                fields={"gross_pay": _f("4000.00")},
+            ),
+            _appraisal_doc("96-ap-joint", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
+    )
+
+
+def build_pe3_investment_met_snapshot() -> Snapshot:
+    """$400,000 price, $400,000 value, $380,000 loan -> a $20,000 investment against $14,000 required
+    (3.5% of 400,000 at an MDCS of 700) -> SATISFIED."""
+    return _snapshot(
+        _LOAN_PE3_MET,
+        [
+            _credit_report_doc("96-cr-ok", "700", "710", "690"),
+            _appraisal_doc("96-ap-ok", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
+    )
+
+
+def build_pe3_investment_short_snapshot() -> Snapshot:
+    """$400,000 price and value, $390,000 loan -> a $10,000 investment against $14,000 required -> FIRED."""
+    return _snapshot(
+        _LOAN_PE3_SHORT,
+        [
+            _credit_report_doc("96-cr-short", "700", "710", "690"),
+            _appraisal_doc("96-ap-short", "400000.00"),
+        ],
+        _pe_mismo("fha", "390000.00", price="400000.00"),
+    )
+
+
+def build_pe3_no_credit_score_snapshot() -> Snapshot:
+    """THE TIER MAY NOT BE ASSUMED. The same numbers as the satisfied case but NO credit report. The
+    MRI is 3.5% at 580+ and 10% at 500-579; assuming 580+ would clear a borrower who needs 10%. A
+    $20,000 investment clears 3.5% ($14,000) and FAILS 10% ($40,000) — so the assumption would flip the
+    verdict. COULDNT_CHECK."""
+    return _snapshot(
+        _LOAN_PE3_NO_SCORE,
+        [_appraisal_doc("96-ap-noscore", "400000.00")],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
+    )
+
+
+def build_pe3_low_credit_tier_snapshot() -> Snapshot:
+    """An MDCS of 550 (500-579) needs 10% = $40,000. The $20,000 investment that SATISFIES at 580+
+    FIRES here -> the tier genuinely changes the answer."""
+    return _snapshot(
+        _LOAN_PE3_LOW_TIER,
+        [
+            _credit_report_doc("96-cr-low", "545", "550", "560"),
+            _appraisal_doc("96-ap-low", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
+    )
+
+
+def build_pe3_low_appraisal_snapshot() -> Snapshot:
+    """THE ADJUSTED-VALUE CASE — why the basis is not the purchase price. A $400,000 price with a
+    $360,000 appraisal and a $348,000 loan. Against the PRICE the investment reads $52,000 vs $14,000
+    required and CLEARS. Against the ADJUSTED VALUE (the lesser, $360,000) it is $12,000 vs $12,600
+    required and FIRES. The catalog's '3.5% of price' would clear a file that fails."""
+    return _snapshot(
+        _LOAN_PE3_LOW_APPRAISAL,
+        [
+            _credit_report_doc("96-cr-lowap", "700", "710", "690"),
+            _appraisal_doc("96-ap-lowap", "360000.00"),
+        ],
+        _pe_mismo("fha", "348000.00", price="400000.00"),
+    )
+
+
+def build_pe3_conventional_snapshot() -> Snapshot:
+    """A conventional loan -> FHA's MRI does not apply -> NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_PE3_CONVENTIONAL,
+        [
+            _credit_report_doc("96-cr-conv", "700", "710", "690"),
+            _appraisal_doc("96-ap-conv", "400000.00"),
+        ],
+        _pe_mismo("conventional", "380000.00", price="400000.00"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-497 — AS-4 (reserves adequacy).
+#
+# CONSTRUCTED CASES. The corpus cannot exercise this rule: only 5 loan files carry a bank statement
+# and the reserves calculator needs a PITI divisor from the DTI calculation, so a corpus run abstains.
+# These pin the cell that carried a RECORDED FALSE-GREEN before this ticket — a 2-4 unit principal
+# residence, which requires 6 months, read as requiring 0 under the old occupancy-only map.
+# Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_AS4_ONE_UNIT_OK = UUID("97000000-0000-4000-8000-000000000001")
+_LOAN_AS4_MULTI_UNIT_SHORT = UUID("97000000-0000-4000-8000-000000000002")
+_LOAN_AS4_MULTI_UNIT_OK = UUID("97000000-0000-4000-8000-000000000003")
+_LOAN_AS4_UNITS_UNKNOWN = UUID("97000000-0000-4000-8000-000000000004")
+_LOAN_AS4_INVESTMENT_SHORT = UUID("97000000-0000-4000-8000-000000000005")
+_LOAN_AS4_SECOND_HOME_OK = UUID("97000000-0000-4000-8000-000000000006")
+_LOAN_AS4_NO_OCCUPANCY = UUID("97000000-0000-4000-8000-000000000007")
+_LOAN_AS4_GATED_CALC = UUID("97000000-0000-4000-8000-000000000008")
+_LOAN_AS4_FIVE_UNITS = UUID("97000000-0000-4000-8000-000000000009")
+
+
+def _as4_snapshot(
+    loan_id: UUID,
+    *,
+    occupancy: str | None,
+    units: str | None,
+    months_available: str | None,
+    gated: bool = False,
+) -> Snapshot:
+    """A loan whose reserves calculation is already computed, plus the MISMO facts that select the
+    requirement. ``months_available=None`` with ``gated=True`` is the fail-closed calculator.
+
+    LP-498 review — THIS FABRICATES THE ENTRY, and that is why AS-4 could ship broken. ``map_reserves``
+    projected headline / status / program only, so ``months_available`` existed on no real snapshot and
+    AS-4 ``couldnt_check``ed on every file — invisible here, because every fixture writes the key by
+    hand. The mapper now emits it, and `test_as4_operand_key_is_one_the_mapper_actually_emits` pins the
+    contract so this fixture cannot drift away from production again.
+    """
+    mismo: dict[str, SnapshotField] = {}
+    if occupancy is not None:
+        mismo["property.occupancy"] = _f(occupancy)
+    if units is not None:
+        mismo["property.financed_unit_count"] = _f(units)
+    reserves = CalculationEntry(
+        value={"months_available": months_available},
+        gated=gated,
+        gate_reason="no PITI divisor — the housing payment is unknown" if gated else None,
+    )
+    return Snapshot(
+        loan_file_id=loan_id,
+        run_id=_RUN,
+        created_at=_FILE_DATE,
+        documents=DocumentsSection.present([]),
+        mismo=MismoSection.present(mismo),
+        calculations=CalculationsSection.present(reserves=reserves),
+        tags=TagsSection.present({}),
+    )
+
+
+def build_as4_one_unit_primary_snapshot() -> Snapshot:
+    """A one-unit principal residence requires NO reserves (B3-4.1-01), so 0.5 months is SATISFIED."""
+    return _as4_snapshot(
+        _LOAN_AS4_ONE_UNIT_OK, occupancy="primary_residence", units="1", months_available="0.5"
+    )
+
+
+def build_as4_multi_unit_primary_short_snapshot() -> Snapshot:
+    """THE CASE THAT WAS A FALSE-GREEN. A 3-unit principal residence requires 6 months; this file has
+    2.0. Under the old occupancy-only map every principal residence required 0, so this read
+    SATISFIED — a real reserve shortfall reported as adequate. It must FIRE."""
+    return _as4_snapshot(
+        _LOAN_AS4_MULTI_UNIT_SHORT,
+        occupancy="primary_residence",
+        units="3",
+        months_available="2.0",
+    )
+
+
+def build_as4_multi_unit_primary_ok_snapshot() -> Snapshot:
+    """The same 3-unit primary with 7.0 months — above the 6 required, so SATISFIED. Pins that the
+    multi-unit cell is a real comparison and not a blanket fire."""
+    return _as4_snapshot(
+        _LOAN_AS4_MULTI_UNIT_OK, occupancy="primary_residence", units="3", months_available="7.0"
+    )
+
+
+def build_as4_units_unknown_snapshot() -> Snapshot:
+    """A principal residence with NO stated unit count. The requirement is 0 or 6 and nothing between,
+    so the answer decides the verdict: 2.0 months clears 0 and fails 6. It must ABSTAIN, not default
+    to one unit — defaulting is exactly the false-green this ticket removed."""
+    return _as4_snapshot(
+        _LOAN_AS4_UNITS_UNKNOWN, occupancy="primary_residence", units=None, months_available="2.0"
+    )
+
+
+def build_as4_investment_short_snapshot() -> Snapshot:
+    """An investment property requires 6 months; 3.0 available -> FIRED."""
+    return _as4_snapshot(
+        _LOAN_AS4_INVESTMENT_SHORT, occupancy="investment", units="1", months_available="3.0"
+    )
+
+
+def build_as4_second_home_ok_snapshot() -> Snapshot:
+    """A second home requires 2 months; 4.0 available -> SATISFIED."""
+    return _as4_snapshot(
+        _LOAN_AS4_SECOND_HOME_OK, occupancy="second_home", units="1", months_available="4.0"
+    )
+
+
+def build_as4_no_occupancy_snapshot() -> Snapshot:
+    """No stated occupancy -> no requirement can be selected -> COULDNT_CHECK."""
+    return _as4_snapshot(_LOAN_AS4_NO_OCCUPANCY, occupancy=None, units="1", months_available="1.0")
+
+
+def build_as4_gated_calculation_snapshot() -> Snapshot:
+    """The reserves calculator is GATED (no PITI divisor), so months_available is null. The rule must
+    abstain rather than read a missing number as zero months and fire."""
+    return _as4_snapshot(
+        _LOAN_AS4_GATED_CALC,
+        occupancy="investment",
+        units="1",
+        months_available=None,
+        gated=True,
+    )
+
+
+def build_as4_five_units_snapshot() -> Snapshot:
+    """Five units is beyond B3-4.1-01's one- to four-unit residential table -> ABSTAIN rather than
+    apply a requirement the guide does not state for it."""
+    return _as4_snapshot(
+        _LOAN_AS4_FIVE_UNITS, occupancy="primary_residence", units="5", months_available="1.0"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-498 — FR-3 (unusual seller credits / side agreements).
+#
+# CONSTRUCTED CASES, and what they establish is narrow. The loaded corpus carries two purchase
+# agreements with 0/2 fill on every credit field, so nothing stored exercises this rule. These cases
+# prove the PLUMBING works and every branch is REACHABLE. They establish NOTHING about detecting a real
+# unusual credit: the author knows the intended answer, so scoring them measures self-consistency, not
+# correctness (ADR-332, and LP-487's amendment). Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_FR3_ORDINARY = UUID("98000000-0000-4000-8000-000000000001")
+_LOAN_FR3_SIDE_AGREEMENT = UUID("98000000-0000-4000-8000-000000000002")
+_LOAN_FR3_LARGE_CREDIT = UUID("98000000-0000-4000-8000-000000000003")
+_LOAN_FR3_FIELDS_ABSENT = UUID("98000000-0000-4000-8000-000000000004")
+_LOAN_FR3_NO_CONTRACT = UUID("98000000-0000-4000-8000-000000000005")
+
+
+def _fr3_contract(content_id: str, **fields: str) -> DocumentEntry:
+    """A purchase agreement carrying only the credit/concession fields the case needs."""
+    return DocumentEntry(
+        content_id=content_id,
+        document_type="purchase_agreement",
+        fields={k: _f(v) for k, v in fields.items()},
+    )
+
+
+def build_fr3_ordinary_credit_snapshot() -> Snapshot:
+    """A routine $3,000 closing-cost credit, purpose stated, nothing outside the contract. The
+    producer should read this as ordinary — the prompt says a seller credit IS ordinary — so the
+    branch under test is "a credit exists and still does not warrant review"."""
+    return _snapshot(
+        _LOAN_FR3_ORDINARY,
+        [
+            _fr3_contract(
+                "98-k-ordinary",
+                seller_credit_amount="3000.00",
+                seller_credit_purpose="buyer's closing costs",
+                other_concessions_amount="0.00",
+                side_agreements_referenced="none",
+            )
+        ],
+    )
+
+
+def build_fr3_side_agreement_snapshot() -> Snapshot:
+    """THE CASE THE RULE EXISTS FOR. A modest credit, but the contract references an agreement OUTSIDE
+    itself — a term the file does not price. Should warrant review regardless of the amount."""
+    return _snapshot(
+        _LOAN_FR3_SIDE_AGREEMENT,
+        [
+            _fr3_contract(
+                "98-k-side",
+                seller_credit_amount="2000.00",
+                seller_credit_purpose="closing costs",
+                other_concessions_amount="0.00",
+                side_agreements_referenced=(
+                    "separate written agreement between buyer and seller regarding post-closing "
+                    "repairs and a further payment, not attached to this contract"
+                ),
+            )
+        ],
+    )
+
+
+def build_fr3_large_unclear_credit_snapshot() -> Snapshot:
+    """A large concession with an unclear purpose and nothing outside the contract — the other route
+    to review, so the two "yes" cases do not both rest on the side-agreement field."""
+    return _snapshot(
+        _LOAN_FR3_LARGE_CREDIT,
+        [
+            _fr3_contract(
+                "98-k-large",
+                seller_credit_amount="45000.00",
+                seller_credit_purpose="per addendum",
+                other_concessions_amount="12000.00",
+                side_agreements_referenced="none",
+            )
+        ],
+    )
+
+
+def build_fr3_fields_absent_snapshot() -> Snapshot:
+    """A purchase agreement whose credit fields did NOT extract. Must be "unknown", never "no": an
+    unread contract is not a clean contract, and this is the branch nearly every real corpus file
+    would take today (0/2 fill on the two stored agreements)."""
+    return _snapshot(
+        _LOAN_FR3_FIELDS_ABSENT,
+        [_fr3_contract("98-k-absent", buyer_name="A Buyer", seller_name="A Seller")],
+    )
+
+
+def build_fr3_no_contract_snapshot() -> Snapshot:
+    """No purchase agreement at all -> the rule is NOT_APPLICABLE. There are no contract terms to
+    review, and a file without a contract must not be surfaced as if there were."""
+    return _snapshot(_LOAN_FR3_NO_CONTRACT, [])
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -849,7 +2546,59 @@ __all__ = [
     "build_address_match_snapshot",
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
+    "build_as4_five_units_snapshot",
+    "build_as4_gated_calculation_snapshot",
+    "build_as4_investment_short_snapshot",
+    "build_as4_multi_unit_primary_ok_snapshot",
+    "build_as4_multi_unit_primary_short_snapshot",
+    "build_as4_no_occupancy_snapshot",
+    "build_as4_one_unit_primary_snapshot",
+    "build_as4_second_home_ok_snapshot",
+    "build_as4_units_unknown_snapshot",
+    "build_au3_approve_ineligible_snapshot",
+    "build_au3_approve_without_eligibility_snapshot",
+    "build_au3_du_approve_eligible_snapshot",
+    "build_au3_lpa_accept_snapshot",
+    "build_au3_refer_snapshot",
+    "build_au3_unknown_vendor_wording_snapshot",
+    "build_co1_empty_file_snapshot",
+    "build_co1_not_condo_snapshot",
+    "build_co1_questionnaire_missing_snapshot",
+    "build_co1_questionnaire_present_snapshot",
+    "build_co3_fidelity_amount_disagreement_snapshot",
+    "build_co3_fidelity_disagreement_snapshot",
+    "build_co3_fidelity_present_snapshot",
+    "build_co4_adequate_2026_snapshot",
+    "build_co4_blank_questionnaire_snapshot",
+    "build_co4_no_application_date_snapshot",
+    "build_co4_not_condo_snapshot",
+    "build_co4_reserves_from_hoa_statement_snapshot",
+    "build_co4_same_pct_2027_snapshot",
+    "build_co4_short_2026_snapshot",
+    "build_co5_blank_questionnaire_snapshot",
+    "build_co5_clear_snapshot",
+    "build_co5_concentration_snapshot",
+    "build_co5_delinquent_snapshot",
+    "build_co5_litigation_snapshot",
+    "build_co5_unrecognised_litigation_snapshot",
+    "build_dt6_covered_snapshot",
+    "build_dt6_escrow_double_count_guard_snapshot",
+    "build_dt6_short_snapshot",
     "build_far_future_closing_snapshot",
+    "build_fr3_fields_absent_snapshot",
+    "build_fr3_large_unclear_credit_snapshot",
+    "build_fr3_no_contract_snapshot",
+    "build_fr3_ordinary_credit_snapshot",
+    "build_fr3_side_agreement_snapshot",
+    "build_ih2_clause_matches_snapshot",
+    "build_ih2_clause_mismatch_snapshot",
+    "build_ih2_loan_estimate_only_snapshot",
+    "build_ih2_no_lender_snapshot",
+    "build_ih7_absent_snapshot",
+    "build_ih7_adequate_snapshot",
+    "build_ih7_low_liability_snapshot",
+    "build_ih7_not_condo_snapshot",
+    "build_ih7_unreadable_basis_snapshot",
     "build_insurance_acv_snapshot",
     "build_insurance_binder_plus_decree_snapshot",
     "build_insurance_decree_only_snapshot",
@@ -858,13 +2607,60 @@ __all__ = [
     "build_insurance_replacement_cost_snapshot",
     "build_insurance_two_binder_snapshot",
     "build_insurance_unreadable_basis_snapshot",
+    "build_lo2_complete_snapshot",
+    "build_lo2_incomplete_snapshot",
+    "build_lo2_no_letter_snapshot",
+    "build_lo2_odd_signature_snapshot",
+    "build_lo2_unreadable_snapshot",
+    "build_lo2_unsigned_snapshot",
+    "build_mi1_fha_snapshot",
+    "build_mi1_high_ltv_snapshot",
+    "build_mi1_low_ltv_snapshot",
+    "build_mi1_no_program_snapshot",
+    "build_mi1_no_value_snapshot",
+    "build_mi1_two_appraisals_snapshot",
+    "build_mi4_conventional_snapshot",
+    "build_mi4_correct_ufmip_snapshot",
+    "build_mi4_no_note_amount_snapshot",
+    "build_mi4_no_ufmip_financed_snapshot",
+    "build_mi4_over_ufmip_snapshot",
+    "build_mi4_under_ufmip_snapshot",
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",
+    "build_pe1_alaska_within_snapshot",
+    "build_pe1_county_band_snapshot",
+    "build_pe1_exceeds_limit_snapshot",
+    "build_pe1_fha_snapshot",
+    "build_pe1_multi_unit_snapshot",
+    "build_pe1_no_amount_snapshot",
+    "build_pe1_within_limit_snapshot",
+    "build_pe3_conventional_snapshot",
+    "build_pe3_investment_met_snapshot",
+    "build_pe3_investment_short_snapshot",
+    "build_pe3_low_appraisal_snapshot",
+    "build_pe3_low_credit_tier_snapshot",
+    "build_pe3_no_credit_score_snapshot",
+    "build_pr2_no_price_snapshot",
+    "build_pr2_no_purpose_snapshot",
+    "build_pr2_refinance_snapshot",
+    "build_pr2_shortfall_snapshot",
+    "build_pr2_two_appraisals_snapshot",
+    "build_pr2_value_supports_price_snapshot",
+    "build_re1_ambiguous_snapshot",
+    "build_re1_disclosed_snapshot",
+    "build_re1_no_lender_snapshot",
+    "build_re1_no_stated_liabilities_snapshot",
+    "build_re1_undisclosed_snapshot",
     "build_self_employed_no_history_snapshot",
     "build_statement_break_snapshot",
     "build_subject_housing_snapshot",
     "build_tax_return_with_schedules_snapshot",
     "build_terminated_employment_snapshot",
+    "build_ti1_no_purpose_snapshot",
+    "build_ti1_purchase_match_snapshot",
+    "build_ti1_purchase_mismatch_snapshot",
+    "build_ti1_refinance_match_snapshot",
+    "build_ti1_second_owner_match_snapshot",
     "build_voe_offer_labeling_snapshot",
 ]

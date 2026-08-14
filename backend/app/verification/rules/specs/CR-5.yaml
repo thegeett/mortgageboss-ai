@@ -1,0 +1,99 @@
+# CR-5 — Credit inquiry LOE — AI structural rule SPEC (LP-490). ⚠️ BUILDS INERT.
+#
+# A recent credit inquiry can mean the borrower took on NEW DEBT the report does not yet show. Each
+# inquiry needs either a tradeline that plausibly resulted from it, or a letter of explanation.
+#
+# ⚠️ INERT. Gates on `credit.inquiry_explained`, an AI tag with no measured accuracy →
+# `not-calibratable-yet` → `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
+#
+# ⚠️ n≈0 — THE HARD CAVEAT ON THIS RULE. Across all THREE real credit reports there is exactly ONE
+# inquiry row. This rule is built against the schema (`inquiries[]` carries inquiry_date, creditor_name,
+# inquiry_type) and against the guideline, NOT against observed behaviour. Calibrating it needs files
+# with real inquiry activity, which the corpus does not contain.
+
+rule_id: CR-5
+name: Credit inquiry LOE
+category: Credit
+
+kind: structural            # must equal rule_kinds.csv (CR-5 = structural, ai_fuzzy_match)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  Every recent credit inquiry must be accounted for: matched to a tradeline that plausibly resulted from
+  it, covered by a letter of explanation, or identifiable as a soft or promotional pull. An unexplained
+  recent inquiry may mean new debt the credit report does not yet reflect, which would change the
+  qualifying ratios. A report that states no inquiry dates, or an inquiry list that cannot be read,
+  resolves to couldnt_check — never to a guessed all-clear.
+
+applicability:
+  scope: each borrower on the loan
+  trigger: >-
+    Any borrower with a credit report. A borrower with no credit report yields an unknown tag, which the
+    gate routes to couldnt_check — never a finding on a missing document.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv
+  values:
+    # ⚠️ TIER S — the 120-day lookback is the customary agency window for inquiry review and matches the
+    # credit-document validity horizon, but no page was read for it this pass. It is applied INSIDE the
+    # prompt (the model is told "the last 120 days"), so it is recorded here as the reviewable place it
+    # lives, and logged for Priya. It is not a computed threshold this rule compares against.
+    inquiry_lookback_days: "120"
+  guideline_text: >-
+    Recent credit inquiries are reviewed because they may indicate debt incurred after the credit report
+    was pulled. Each inquiry is either matched to an account already reflected on the report, or the
+    borrower explains in writing that no new debt resulted. Where new debt did result, it is added to the
+    application and counted in the qualifying ratios.
+
+required_inputs:
+  - name: inquiry_explained
+    snapshot_path: 'tags.by_subject[<borrower_id>]["credit.inquiry_explained"]'
+    description: >-
+      whether every recent inquiry on this borrower's report is matched to a tradeline, covered by a
+      letter of explanation, or a soft pull (AI, LP-490): "yes" / "no" / "unknown". ⚠️ UNCALIBRATED.
+
+subject_enumeration: per_borrower
+subject_key_fields: [borrower]
+
+evidence_required: >-
+  The inquiry dates and the inquiring creditors, and which of them were matched to a tradeline or a
+  letter of explanation — so a processor can request exactly the missing letters rather than all of them.
+
+guideline_reference: "Fannie Mae Selling Guide B3-5.1 (Credit Assessment) — recent inquiries are reviewed for debt incurred after the credit report was issued, and any resulting debt is included in the qualifying ratios."
+
+spec_version: 1
+
+deterministic:
+  load_bearing_tags:
+    - credit.inquiry_explained
+  gated_tags:
+    - credit.inquiry_explained
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: credit.inquiry_explained, op: eq, value: "yes"}
+      reasoning: >-
+        every recent credit inquiry is matched to an account on the report, covered by a letter of
+        explanation, or identifiable as a soft pull
+    - verdict: fired
+      when_tags:
+        - {tag: credit.inquiry_explained, op: eq, value: "no"}
+      reasoning: >-
+        a recent credit inquiry has no matching tradeline and no letter of explanation — the borrower may
+        have taken on debt the credit report does not yet show
+      how_to_fix: >-
+        Ask the borrower for a letter of explanation naming each recent inquiry and stating whether any
+        new debt resulted. If debt did result, add it to the application and re-check the debt-to-income
+        ratio; a new account may also need its own verification.
+    - verdict: couldnt_check
+      # ⚠️ ABSTAIN, NOT A PASS. A `satisfied` default would clear the inquiry review on a file whose
+      # report states no inquiry dates at all.
+      default: true
+      reasoning: >-
+        the credit inquiries could not be reviewed — the report states no inquiry dates, or the inquiry
+        list could not be read
+      how_to_fix: >-
+        Confirm the credit report includes its inquiry section. If inquiries are listed but unreadable,
+        request a re-issued report.

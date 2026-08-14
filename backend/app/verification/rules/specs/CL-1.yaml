@@ -1,0 +1,91 @@
+# CL-1 — Rate lock expiration — DETERMINISTIC structural rule SPEC (LP-485).
+#
+# The simplest compare in the engine: does the borrower's rate lock expire BEFORE the loan closes? Two
+# dates, one subtraction, no threshold. rate_lock.days_to_closing carries the SIGNED day count (positive =
+# the lock still has room at closing; negative = it expires first) and this rule branches on its sign.
+#
+# NO threshold, so nothing here awaits a domain number (rule_kinds.csv: threshold_needs_signoff=false).
+# `zero` below is a literal comparison boundary, not a domain threshold — the AS-3 / CR-13 precedent.
+#
+# ⚠️ DAYS, not months. Unlike CR-13 and PR-6 (whose guideline windows are stated in calendar months), a
+# lock expires ON a date and the only question is which date comes first — a day count is exact here.
+
+rule_id: CL-1
+name: Rate lock expiration
+category: Closing
+
+kind: structural            # must equal rule_kinds.csv (CL-1 = structural, deterministic_only)
+numeric_check: false        # must equal rule_kinds.csv — a date ordering, not a ratio
+
+criteria: >-
+  The borrower's interest-rate lock must not expire before the loan closes. This compares the loan
+  estimate's stated rate-lock expiration against the file's closing date. A lock that expires first must be
+  extended or re-locked before closing, usually at a cost to someone. Absent or unparseable dates, or
+  documents that disagree on either date, resolve to couldnt_check — never a guessed pass.
+
+applicability:
+  scope: the loan's rate-lock expiration vs its closing date
+  trigger: >-
+    Any file whose loan estimate states a rate-lock expiration and whose closing date is known. A file with
+    neither (no loan estimate, or no stated closing date) yields an unknown day count and couldnt_checks.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — this rule has NO domain threshold
+  values:
+    # A literal boundary, NOT a domain threshold — the sign test needs a 0 to compare against. Mirrors
+    # AS-3's `zero`. Not a number anyone signs off.
+    zero: "0"
+  guideline_text: >-
+    Loan-processing documentation standard — the interest-rate lock must remain in force through closing.
+    This is an ordering check between two dates the file already states; it encodes no agency threshold and
+    no tolerance, so there is no window to calibrate.
+
+required_inputs:
+  - name: rate_lock_days_to_closing
+    snapshot_path: 'tags.by_subject["loan"]["rate_lock.days_to_closing"]'
+    description: >-
+      signed days from the loan's closing date to the rate lock's expiration (derived, LP-485): positive =
+      the lock still has room at closing, negative = it expires first, "unknown" = either date is absent,
+      unparseable, or the file's documents disagree.
+
+subject_enumeration: loan          # rate_lock.days_to_closing is produced at the loan subject (LP-485)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The rate lock's expiration date, the loan's closing date, and the signed number of days between them —
+  inline on the finding.
+
+guideline_reference: "Loan-processing documentation standard — the interest-rate lock must remain in force through the closing date."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). One fired outcome (the lock expires first) and a
+# default satisfied. "unknown" on the tag coerces the operand to None → couldnt_check via the gate, so a
+# missing loan estimate can never read as "the lock is fine" (never clear on a missing document).
+deterministic:
+  load_bearing_tags:
+    - rate_lock.days_to_closing
+  gated_tags:
+    - rate_lock.days_to_closing
+  operands:
+    days: {tag: rate_lock.days_to_closing}   # signed days from closing to lock expiry
+    zero: {reference: zero}
+  outcomes:
+    - verdict: fired
+      # The lock expires strictly BEFORE closing.
+      when_compare: {op: "<", left: days, right: zero}
+      # ⚠️ `days` is SIGNED and is NEGATIVE on this branch (it fires on days < 0), so the sentence must not
+      # also say "before" — "expires -14 day(s) before closing" is a double negative a processor reads as
+      # the opposite of the finding. Phrased as a signed margin, which reads correctly negative.
+      reasoning: >-
+        the interest-rate lock has already expired by the loan's closing date (lock-to-closing margin:
+        {days} day(s)) — the lock must be extended or re-locked, or the borrower's rate and pricing will
+        change at closing
+      how_to_fix: >-
+        Confirm the current lock expiration with the lender and extend or re-lock through the closing date,
+        or obtain the updated loan estimate reflecting the new lock.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the interest-rate lock is still in force at the loan's closing date ({days} day(s) of room)

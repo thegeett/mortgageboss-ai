@@ -26,6 +26,15 @@ CAPTURE EVERYTHING ON THE STATEMENT — lose nothing. There are two buckets:
    "Year to Date", "Account". Do not force these into the typed core — capture them
    here so nothing is lost.
 
+3. TRANSACTION ACTIVITY — a LIST, one FLAT ROW per posting in the statement's
+   "transactions since your last statement" / activity table:
+     transaction_activity — each row: date, description, principal, interest,
+                            escrow, fees_or_other, total
+   Capture ONLY the itemized posting table (each dated payment / charge / fee line).
+   Do NOT put the "Payment Breakdown" / "Explanation of Amount Due" SUMMARY blocks
+   here — those are single figures for the ADDITIONAL SECTIONS. If there is no
+   transaction table, return an empty list.
+
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
   - "snippet" (string)   the verbatim text you read the value from
@@ -63,3 +72,4 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "delinquency_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "loss_mitigation_or_bankruptcy_messages": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "transaction_activity": [{"date": <string|null>, "description": <string|null>, "principal": <string|null>, "interest": <string|null>, "escrow": <string|null>, "fees_or_other": <string|null>, "total": <string|null>, "page": <int|null>, "snippet": <string|null>}],

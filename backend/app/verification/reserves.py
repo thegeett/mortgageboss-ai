@@ -8,8 +8,10 @@ transparent (every asset source shown) and applies the program-specific treatmen
   Gifts and borrowed funds are EXCLUDED from reserves; vested retirement balances count at
   a haircut — for FHA, the **60% retirement haircut** from LP-84 (passed in by the service).
 * **Months of reserves** = eligible assets ÷ the monthly housing payment (PITI).
-* **Available vs required:** the required months are DU / program / property / overlay-DRIVEN
-  (threshold-as-data, marked starter) — passed in by the service from the asset rules.
+* **Available vs required:** the required months come from :func:`required_reserve_months` — Fannie
+  B3-4.1-01's occupancy x unit-count matrix — unless a lender overlay sets a higher figure. That
+  function lives here so the reserves WORKSHEET and rule AS-4 read one source; they previously did
+  not, and disagreed on the same file (LP-498 review).
 
 Pure: numeric inputs → a transparent :class:`ReservesResult`. ``Decimal`` throughout.
 """
@@ -17,10 +19,96 @@ Pure: numeric inputs → a transparent :class:`ReservesResult`. ``Decimal`` thro
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 _CENTS = Decimal("0.01")
 _TENTH = Decimal("0.1")
+
+# --------------------------------------------------------------------------- #
+# The B3-4.1-01 minimum-reserve matrix — ONE source for both surfaces.
+#
+# LP-498 review — the calculator worksheet and AS-4 answered the same question with different numbers.
+# `_resolve_required_reserve_months` returned a lender-registry value or an unsourced starter of 2
+# months; AS-4's `reserves.required_months` recipe read this matrix. On an investment property with 3.0
+# months available the worksheet said "3.0 months, sufficient" (starter 2) while AS-4 fired "6 months
+# required, the file lacks adequate reserves" — two surfaces of one product contradicting each other on
+# one file. Activating AS-4 is what made it visible; the divergence pre-dates it.
+#
+# The matrix is the researched side (tier P, read from Fannie's own page), so it is what both now read.
+# A lender OVERLAY still wins where one is registered — an overlay is a real, sourced requirement; the
+# starter 2 was not.
+# --------------------------------------------------------------------------- #
+_RESERVE_MONTHS_ONE_UNIT_PRIMARY = Decimal("0")
+_RESERVE_MONTHS_SECOND_HOME = Decimal("2")
+_RESERVE_MONTHS_MULTI_UNIT_PRIMARY = Decimal("6")
+_RESERVE_MONTHS_INVESTMENT = Decimal("6")
+MAX_RESIDENTIAL_UNITS = 4
+
+_GUIDE = "Fannie B3-4.1-01, page dated 08/07/2024"
+
+
+def required_reserve_months(
+    occupancy: str | None, financed_unit_count: str | None
+) -> tuple[Decimal | None, str]:
+    """The reserve requirement in months of PITIA, per B3-4.1-01 — ``(months, reason)``.
+
+    ``months is None`` means ABSTAIN, and the reason says why. Every abstain is deliberate: a guessed
+    requirement is a silent, permanent error, and for the principal-residence cell the guess is between
+    0 and 6 months — the difference between clearing a file and catching it.
+
+    WHAT THIS DOES NOT MODEL, stated because a `satisfied` built on it means less than it appears to:
+    B3-4.1-01 also requires reserves of 2% / 4% / 6% of the aggregate UPB when the borrower owns 1-4 /
+    5-6 / 7-10 financed properties, and 6 months for a cash-out refinance with DTI over 45%. Neither
+    the financed-property count nor the aggregate UPB reaches the snapshot, so neither overlay is
+    applied here. Both can only RAISE the requirement, so this figure is a FLOOR.
+    """
+    if occupancy is None:
+        return None, "occupancy is unknown — cannot select the reserve requirement"
+    key = occupancy.casefold()
+
+    if key == "investment":
+        return _RESERVE_MONTHS_INVESTMENT, (
+            f"reserve requirement for an investment property: {_RESERVE_MONTHS_INVESTMENT} months "
+            f"({_GUIDE})"
+        )
+    if key == "second_home":
+        return _RESERVE_MONTHS_SECOND_HOME, (
+            f"reserve requirement for a second home: {_RESERVE_MONTHS_SECOND_HOME} months ({_GUIDE})"
+        )
+    if key != "primary_residence":
+        return None, f"no encoded reserve requirement for occupancy {occupancy!r}"
+
+    # The primary-residence cell splits on unit count, and the split is 0 vs 6 months.
+    if financed_unit_count is None:
+        return None, (
+            "the file states a principal residence but not the financed unit count, and the reserve "
+            "requirement turns on it — none for one unit, 6 months for two to four (Fannie "
+            "B3-4.1-01). Abstaining rather than assuming one unit, which would report a 2-4 unit file "
+            "as needing no reserves"
+        )
+    try:
+        units = int(Decimal(financed_unit_count))
+    except (InvalidOperation, ValueError):
+        return None, (
+            f"the financed unit count reads {financed_unit_count!r}, which is not a number — the "
+            "reserve requirement for a principal residence turns on it"
+        )
+    if units <= 0:
+        return None, f"the financed unit count reads {units}, which is not a unit count"
+    if units == 1:
+        return _RESERVE_MONTHS_ONE_UNIT_PRIMARY, (
+            f"no minimum reserve requirement for a one-unit principal residence ({_GUIDE})"
+        )
+    if units <= MAX_RESIDENTIAL_UNITS:
+        return _RESERVE_MONTHS_MULTI_UNIT_PRIMARY, (
+            f"reserve requirement for a {units}-unit principal residence: "
+            f"{_RESERVE_MONTHS_MULTI_UNIT_PRIMARY} months ({_GUIDE})"
+        )
+    return None, (
+        f"the property is financed as {units} units, beyond the one- to four-unit residential table "
+        "B3-4.1-01 covers — abstaining rather than applying a requirement the guide does not state"
+    )
+
 
 ELIGIBLE_FORMULA = (
     "Eligible reserves = liquid assets + (vested retirement x retirement factor) "
@@ -47,7 +135,9 @@ class ReservesResult:
     eligible_reserves: Decimal  # the funds available for reserves (never negative)
     monthly_housing_payment: Decimal | None  # PITI (the divisor)
     months_available: Decimal | None
-    months_required: Decimal | None  # program/DU/overlay-driven (starter)
+    months_required: (
+        Decimal | None
+    )  # the B3-4.1-01 cell, or a lender overlay; None = undeterminable
     sufficient: bool | None  # available ≥ required (None when required unknown)
 
 

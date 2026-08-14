@@ -39,13 +39,27 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
     assert (
         result.tags.inserted
-        == 175  # LP-453 +2 (credit.tradeline_count/_monthly_payment_total); LP-447 +1 (ins.dwelling_settlement_basis); LP-444 +1; LP-430 +2; LP-433 +1
+        == 245  # LP-498 +1 (contract.credits_warrant_review)  # LP-496a +1 (program.conforming_eligibility — PE-3's program.fha_min_investment_met was already in fact_tags.csv)  # LP-495b +2 (OC-3's and DT-7's judgment output tags)  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
+        # loe.is_explanation_letter — LO-2's 8-type applicability predicate; loe.completeness)
+        # LP-494 (CO-3) +3 (condo.fidelity_present_raw, condo.fidelity_amount, ins.condo_fidelity_coverage); review +2 (condo.units_delinquent_over_60_days — the 60-day COUNT B4-2.2-02's cap is
+        # actually stated on, plus the derived condo.delinquent_units_pct built from it; the parsed
+        # generic delinquency_percentage it replaced carried whatever period the form chose); LP-494 +8 (the condo project lane: 5 CO-5 questionnaire reads, condo.reserve_adequacy, condo.project_eligibility, loan.application_received_date — condo.reserve_pct already exists in fact_tags.csv); LP-493 +1 (contract.personal_property_assessment); LP-492 +9 (the appraisal lane's tags); prior +1 (property.value_vs_price_gap); LP-491 +11 (TI-1/TI-2/TI-6's inputs, chain facts and judgment outputs); prior +4 (title.vested_owner_name/_2, contract.seller_name, title.vested_owner_matches); LP-490 review +2 (credit.largest_single_collection_balance — CR-10's DU matrix turns on an
+        # INDIVIDUAL collection, which the aggregate cannot answer; credit.has_collections — its
+        # applicability gate, since the predicate DSL is eq/ne and cannot compare a number);
+        # LP-490 +10 (the credit AI cohort: liab.is_mortgage, liab.structured_history_confident, liab.mortgage_late_60_plus_last_12mo, liab.is_medical_collection, liab.collection_balance, credit.collection_aggregate_balance, credit.derogatory_months_elapsed, property.occupancy, and the two rule-judgment outputs credit.mortgage_history_assessment / credit.collection_treatment); LP-488 review +2 (property.valuation_amount, property.estimated_value — the LTV
+        # worksheet's own appraised-basis fields, so MI-1 stops diverging from it on MISMO-only
+        # files); LP-488 +5 (…, condo.questionnaire_present); prior +4 (loan.ltv_percent, loan.note_amount, loan.refinance_type, mi.fha_ufmip_percent); prior LP-488 +3 (loan.ltv_percent, loan.note_amount, loan.refinance_type); LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv); LP-485 +3 (the date-compare family); LP-453 +2 (credit.tradeline_count/_monthly_payment_total); LP-447 +1 (ins.dwelling_settlement_basis); LP-444 +1; LP-430 +2; LP-433 +1
     )  # +4 assets (LP-323-AS-B) +2 ID-5 (LP-389-A) +2 stmt +1 LP-417 (ins.loan_effective_date)
     # variance/co-holder (LP-400) +3 LP-410 derived-producer wave (days_until_closing / continuity / coverage)
     # +1 LP-407-2 (contract.loan_sales_price — the PC-2 loan promotion)
     # +1 LP-418 (income.is_self_employed — the deterministic per-borrower self-employment promotion)
     # +1 LP-422 (income.has_rental_income — the deterministic per-borrower rental presence off Schedule E)
-    assert result.rule_tags.inserted == 203
+    # LP-490 review +7: the four credit rules' catalog rows corrected to what each rule actually reads.
+    # LP-491 review +3: the TI-* catalog rows were corrected to what each rule actually reads
+    # (TI-1 pointed at title.parties_match, TI-2 at title.legal_desc_matches, TI-6 at
+    # title.rapid_transfer — three live rules wired to dead vocabulary). Same defect the LP-490
+    # review fixed for the credit rules, one ticket later.
+    assert result.rule_tags.inserted == 213
     assert result.rules.deleted == result.tags.deleted == 0
 
 
@@ -77,8 +91,11 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     )
     # 34 = +10 AS-2..AS-12 (LP-323-AS-B); +OC-1 (LP-406-4); +AS-8 (LP-406-2b); +IN-6 (LP-406-3b); +PC-7 (LP-406-1b).
     # +PC-2 = 39; +IH-3 = 40; +PC-3 = 41; +IN-15 (LP-430) = 42; +IN-16 (LP-433) = 43; +CR-4 (LP-444, inert) = 44;
-    # +IH-1 (LP-447 — its spec now exists) = 45.
-    assert with_spec == 45
+    # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
+    assert (
+        with_spec
+        == 81  # LP-498 +FR-3 (spec written, ACTIVE)  # LP-496a +PE-1/PE-3 (specs written, both ACTIVE)  # LP-495b +OC-3/DT-7 (specs written, both held)  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
+    )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 
 async def test_db_loses_to_files(db_session: AsyncSession) -> None:

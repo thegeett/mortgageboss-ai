@@ -1,0 +1,126 @@
+# PR-2 — Appraised value vs purchase price — DETERMINISTIC calculative rule SPEC (LP-492).
+#
+# Did the appraisal come in at or above the contract price? An appraisal below contract means the
+# borrower covers the difference in cash, renegotiates, or the deal changes — the processor has to know.
+#
+# ⚠️ NOT A VACUITY (ADR-330), traced in Phase A. The appraised value comes from the APPRAISAL and the
+# price from the MISMO loan file — TWO documents. The appraisal's own `contract_price_stated` field is
+# deliberately NOT read: it fills on 1 of the 2 real appraisals, and using it would make PR-2 compare the
+# appraisal against itself, which is exactly what killed DT-4.
+#
+# ⚠️ TAKES THE LOWEST APPRAISED VALUE (LP-488's finding). A file carrying an original plus a replacement
+# appraisal would otherwise get whichever subject iterated first — an arbitrary answer on an ordinary
+# file shape. The conservative pick is the lowest: it makes the shortfall larger, and missing a shortfall
+# is this rule's costly error. Pinned BY VALUE in the tests, not just by verdict.
+#
+# ⚠️ PR-2 STATES THE GAP; IT DOES NOT RECOMPUTE LTV. The LTV consequence belongs to the LTV/DTI lane
+# (MI-1 already reads `loan.ltv_percent`, which calls app/verification/ltv.py — one arithmetic, LP-488).
+#
+# ⚠️ A REPORTED DIVERGENCE, not fixed here. B2-1.2-01 requires the LTV result to be "truncated to two
+# decimal places, then rounded up to the nearest whole percent". `app/verification/ltv.py` rounds
+# half-up to two decimals instead. That affects the LTV CONSUMERS (MI-1, PR-1), not PR-2's dollar gap, so
+# it is recorded here and in priya-open-questions rather than changed inside this ticket.
+#
+# ⚠️ PURCHASE ONLY, as an applicability predicate. A refinance has no contract price, so there is nothing
+# to compare. Absent-or-unknown purpose → couldnt_check (the applicability layer's behaviour), never a
+# silent skip.
+
+rule_id: PR-2
+name: Appraised value vs purchase price
+category: Property
+
+kind: calculative           # must equal rule_kinds.csv (PR-2 = calculative, deterministic_bookend)
+numeric_check: true         # must equal rule_kinds.csv — a dollar comparison
+
+criteria: >-
+  On a purchase, the appraised value must support the contract price. An appraisal below the price is a
+  gap the borrower must cover in cash or renegotiate, and it changes the loan-to-value the file is
+  underwritten at. This reads the derived property.value_vs_price_gap — the lowest appraised value on
+  the file minus the purchase price. A file with no appraisal or no stated price resolves to
+  couldnt_check, never a guessed pass.
+
+applicability:
+  scope: the loan, when the purpose is a purchase
+  trigger: >-
+    loan.purpose == purchase. A refinance is not_applicable — there is no contract price. A file that
+    does not state its purpose couldnt_checks rather than being skipped.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — zero is a comparison boundary, not a
+                                  # domain number anyone signs off (the AS-3 / CL-1 precedent)
+  values:
+    # ⚠️ PROVENANCE TIER P — VERIFIED AGAINST THE LIVE PAGE IN THIS SESSION (2026-08-13), not taken on
+    # trust from the ticket. Fannie Mae Selling Guide B2-1.2-01, "Loan-to-Value (LTV) Ratios", page dated
+    # 06/01/2022. Verbatim: "Divide the original loan amount by the property value. (The property value
+    # is the lower of the sales price or the current appraised value.)"
+    #
+    # That LESSER-OF rule is why a value below price matters: the loan is sized against the appraisal,
+    # not the contract, so the shortfall lands on the borrower as cash.
+    #
+    # ⚠️ THE SAME PAGE ALSO REQUIRES the LTV result to be "truncated (shortened) to two decimal places,
+    # then rounded up to the nearest whole percent". app/verification/ltv.py rounds HALF-UP to two
+    # decimals instead — a real divergence, reported (see the header) rather than fixed here, and it does
+    # not affect this rule, which compares dollars.
+    shortfall_boundary: "0"
+  guideline_text: >-
+    The property value used to size the loan is the LOWER of the sales price and the current appraised
+    value (Fannie Mae Selling Guide B2-1.2-01, 06/01/2022). An appraisal below the contract price
+    therefore reduces the value the loan is underwritten against; the difference is covered by the
+    borrower, renegotiated with the seller, or the contract is cancelled.
+
+required_inputs:
+  - name: gap
+    snapshot_path: 'tags.by_subject["loan"]["property.value_vs_price_gap"]'
+    description: >-
+      appraised value minus purchase price, in dollars (derived, LP-492). Negative = the appraisal is
+      below contract. "unknown" when the file has no appraisal or states no price — never 0.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The appraised value, the purchase price, and the difference between them — inline on the finding, so a
+  processor sees the cash impact without reopening either document.
+
+guideline_reference: "Fannie Mae Selling Guide B2-1.2-01, Loan-to-Value (LTV) Ratios (page dated 06/01/2022) — the property value is the lower of the sales price and the current appraised value, so an appraisal below contract reduces the value the loan is sized against."
+
+deterministic:
+  applicability:
+    tag: loan.purpose
+    op: eq
+    value: purchase
+  load_bearing_tags:
+    - property.value_vs_price_gap
+  gated_tags:
+    - property.value_vs_price_gap
+  operands:
+    gap: {tag: property.value_vs_price_gap}
+    boundary: {reference: shortfall_boundary}
+  outcomes:
+    # ⚠️ `fired`, and the direction is argued rather than inherited. IH-2 and TI-1 both chose
+    # needs_review because a name difference is frequently LEGITIMATE — a trust, a name change. A value
+    # shortfall is not ambiguous in that way: the number is the number, and it has a definite
+    # consequence (more cash to close, a renegotiation, or a rebuttal). It is an actionable requirement,
+    # which is what `fired` means here — PR-6 uses it the same way for "a new appraisal is required".
+    - verdict: fired
+      when_compare: {op: "<", left: gap, right: boundary}
+      # ⚠️ `gap` is SIGNED and NEGATIVE on this branch, so the sentence must not also say "below" —
+      # "below the purchase price by -20000.00" is the double negative CL-1 was corrected for twice.
+      reasoning: >-
+        the appraised value does not support the purchase price (appraised-minus-price gap: {gap}) —
+        the loan will be sized against the appraisal, so the borrower must cover the difference in
+        cash, renegotiate the price, or the appraisal must be successfully rebutted
+      how_to_fix: >-
+        Confirm the shortfall with the borrower and the agent. The options are: the borrower brings the
+        difference in cash, the seller reduces the price, or the lender submits a reconsideration of
+        value with better comparable sales. Whichever is chosen, the loan amount and the cash to close
+        both change — re-check them before the file goes to underwriting.
+    - verdict: satisfied
+      # Reached only with a resolved, parseable gap — the gate routes absent/"unknown" to couldnt_check
+      # before this body runs. A numeric compare has no third state (PR-6's structure).
+      default: true
+      reasoning: >-
+        the appraised value supports the purchase price (the appraisal is {gap} above it)
+
+spec_version: 1

@@ -1,0 +1,119 @@
+# TI-6 — Chain of title / rapid transfer — AI JUDGMENT rule SPEC (LP-491).
+#
+# Does the chain of title show a rapid resale or a break that warrants review? A property transferring
+# twice in a short window, or a chain whose grantee is not the next grantor, is the classic flip and
+# straw-buyer signal.
+#
+# ⚠️ NOT AN ADR-330 VACUITY — the Phase A question, answered. A chain gap is grantee[n] against
+# grantor[n+1]: a continuity check ACROSS ROWS, which is exactly AS-8's shape (a statement's ending
+# balance against the next statement's opening). One field judged against itself would be vacuous;
+# consecutive rows judged against each other is a real comparison.
+#
+# ⚠️ DETERMINISTIC CODE COMPUTES THE FACTS; THE AI JUDGES THEM. The transfer count, the continuity check
+# and the shortest interval are arithmetic and a name compare, all in `derived.py` — no judgment in any of
+# them. Whether a 40-day resale is a flip or a probate transfer is the judgment, and that is this rule's.
+#
+# ⚠️ THE CORPUS IS THIN, and this is the honest limit. The four real commitments carry 1, 2, 1 and 0 chain
+# rows — so exactly ONE consecutive pair exists anywhere to test continuity against, and the
+# rapid-transfer signal has never been observed at all. Built against the schema and the guideline.
+#
+# ⚠️ A JUDGMENT RULE RATIFIES EVERY VERDICT, so an uncalibrated tag can never auto-assert (OC-2/ADR-336).
+
+rule_id: TI-6
+name: Chain of title / rapid transfer
+category: Title
+
+kind: judgmental            # must equal rule_kinds.csv (TI-6 = judgmental, ai_judgment)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  The chain of title must run continuously through the listed owners and must not show a transfer pattern
+  that suggests a flip. A break — a transfer's grantee is not the next transfer's grantor — and a very
+  short interval between transfers are both reviewed. A commitment listing fewer than two transfers has
+  too little history to judge and abstains rather than reporting a clean chain.
+
+applicability:
+  scope: each title commitment in the file
+  trigger: >-
+    Any title_commitment document. A commitment with no chain, or with a single transfer, resolves to
+    insufficient history — never to "clean".
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv
+  values:
+    # ⚠️ PROVENANCE TIER U — NOT OBTAINED, and deliberately NOT written as a threshold this rule compares
+    # against. A "rapid transfer" window (90 or 180 days is commonly cited) is an investor-overlay and
+    # fraud-review convention, and no page was read for it this pass. So the rule does NOT encode a
+    # cutoff: the interval is handed to the judgment as a FACT and the model weighs it with the rest.
+    # Recorded here so a later reader knows the omission is deliberate. Logged for Priya.
+    rapid_transfer_window_days: "not obtained — see the note above; no cutoff is applied"
+  guideline_text: >-
+    A property that has transferred more than once in a short period, or whose chain of title does not
+    run continuously through the listed owners, is reviewed for property-flipping and identity concerns
+    before the loan closes. The review weighs the interval, any change in consideration, and whether the
+    parties are related or the transfer was a probate or divorce settlement.
+
+required_inputs:
+  - name: chain_transfer_count
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.chain_transfer_count"]'
+    description: how many transfers the chain lists (derived, LP-491). "unknown" when no chain is listed.
+  - name: chain_has_gap
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.chain_has_gap"]'
+    description: >-
+      whether a transfer's grantee fails to be the next transfer's grantor (derived, LP-491) — a
+      deterministic continuity check using the shared name normaliser. "unknown" below two transfers.
+  - name: chain_shortest_interval_days
+    snapshot_path: 'tags.by_subject[<commitment content_id>]["title.chain_shortest_interval_days"]'
+    description: the shortest interval in days between consecutive transfers (derived, LP-491).
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  The listed transfers with their dates, grantors, grantees and consideration — so a processor can see
+  the pattern the judgment rests on without reopening the commitment.
+
+guideline_reference: "A property transferring more than once in a short period, or a chain that does not run continuously through the listed owners, is reviewed for property-flipping and identity concerns before closing."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: title_commitment
+  load_bearing_tags: [title.chain_transfer_count]
+  reasoned_over:
+    - title.chain_transfer_count
+    - title.chain_has_gap
+    - title.chain_shortest_interval_days
+  output_tag: title.chain_of_title_assessment
+  value_domain: ["clean", "rapid_transfer", "chain_gap", "insufficient_history", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor judging a property's CHAIN OF TITLE for flip and
+    straw-buyer signals. You reason ONLY over the structured facts given — a transfer count, a
+    continuity flag, and the shortest interval in days between consecutive transfers. Deterministic code
+    computed all three; your job is what they MEAN together.
+
+    ANSWER:
+    - "chain_gap" — the continuity flag is "yes": a transfer's grantee is not the next transfer's
+      grantor. The chain does not run through the listed owners, which needs explaining before closing.
+    - "rapid_transfer" — the transfers are close enough together to warrant review. ⚠️ THERE IS NO FIXED
+      CUTOFF IN THIS RULE, deliberately: judge the interval as a processor would, and say so in your
+      reasoning. A resale within a few months at a changed price is the classic flip; a transfer between
+      related parties, a probate, or a divorce settlement is not, and the facts here may not tell you
+      which — prefer "clean" or "unknown" over a flip call you cannot support.
+    - "insufficient_history" — fewer than two transfers, or the count is unknown. ⚠️ This is NOT "clean".
+      A commitment that lists one transfer has told you almost nothing.
+    - "clean" — two or more transfers, no gap, and an interval that gives no cause for concern.
+    - "unknown" — the facts do not support any of the above.
+
+    ⚠️ BE HONEST. "insufficient_history" and "unknown" are correct, expected answers, and on a thin chain
+    they are usually the right ones. Do NOT report a clean chain to seem decisive. Cite the facts.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "clean|rapid_transfer|chain_gap|insufficient_history|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the facts>"}
+
+spec_version: 1

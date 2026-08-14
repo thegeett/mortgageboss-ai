@@ -1,0 +1,126 @@
+# DT-7 — ATR documentation completeness — JUDGMENTAL rule SPEC (LP-495b).
+#
+# THIS RULE CHECKS DOCUMENT PRESENCE, NOT THE ABILITY-TO-REPAY DETERMINATION, and the distinction is the
+# most important thing in this file. Ability-to-repay is a CREDITOR obligation under Regulation Z,
+# assessed at underwriting by the creditor. A processor assembling a loan file is not the party making
+# that determination, and a rule that asserted it would put a compliance conclusion into a processor's
+# queue where it does not belong. So the question asked here is the one a processor can actually answer:
+# for each of the eight factors, does the file carry a document that would SUPPORT it?
+#
+# The rule's NAME invites the stronger reading, which is why the criteria, the prompt and the tag's own
+# declaration all say presence explicitly.
+#
+# THE TAG HAD NO PRODUCER UNTIL THIS TICKET. dti.atr_factors_documented sat in fact_tags.csv and
+# rule_tags.csv with no tag_production.yaml entry and no AI group — the ADR-289 vocabulary-orphan shape,
+# recorded by LP-405 as needs-producer. LP-495b declares the `atr_documentation` AI group at the loan
+# subject; that is what makes DT-7 buildable at all.
+#
+# THE DECLARED ENUM HAS NO ABSTAIN, AND THAT IS HANDLED RATHER THAN IGNORED. fact_tags.csv declares
+# enum ["complete","incomplete"]. Every other AI verdict tag in the vocabulary carries an abstain. The
+# prompt therefore sanctions "unknown" explicitly and ai.py coerces an off-vocabulary value to an
+# unknown-valued tag that keeps its reasoning (the txn.is_nsf_or_overdraft precedent, LP-418), which the
+# gate routes to couldnt_check. This makes the abstain work by coercion rather than by declaration, so it
+# is recorded as value-space drift for the next docs/snapshot-fact-tags.xlsx reconciliation — the
+# generated fact_tags.csv cannot be hand-edited. A low-confidence answer is NEVER mapped onto
+# "incomplete": that would convert "I could not tell" into an accusation, which is the worst failure
+# available to this rule.
+#
+# NEVER SATISFIED ON A MISSING DOCUMENT. "All ATR factors are documented" on an empty file is the worst
+# false all-clear in this cohort, and the prompt, the outcome table and a test all close it.
+#
+# THE FACTOR LIST IS VERBATIM FROM THE REGULATION, not paraphrased. eCFR's own URL 302-redirects to a
+# bot-block interstitial, which was not circumvented; items (i)-(v) were read from the publisher
+# (consumerfinance.gov) and (vi)-(viii) from Cornell LII's eCFR text, edition 2025-01-10 [90 FR 2503].
+# The substitution is recorded rather than presented as an eCFR fetch.
+
+rule_id: DT-7
+name: ATR documentation completeness
+category: DTI
+
+kind: judgmental          # must equal rule_kinds.csv (DT-7 = judgmental, ai_judgment)
+numeric_check: false      # a presence judgment across eight factors, not a ratio
+
+criteria: >-
+  For each of the eight ability-to-repay factors at 12 CFR 1026.43(c)(2)(i)-(viii), the loan file should
+  carry at least one document that would support it. This reads the loan-level
+  dti.atr_factors_documented, a DOCUMENT-PRESENCE read across the file's whole document set. It does NOT
+  assert that the ability-to-repay requirement is satisfied — that is the creditor's determination, made
+  at underwriting. A file with no documents, a truncated document list, or an unreadable set resolves to
+  couldnt_check; it is never reported as complete and never as incomplete.
+
+applicability:
+  scope: the loan file, once
+  trigger: >-
+    Evaluated once per loan against the file's document set. There is no document-type gate: the question
+    is about the set as a whole, and a file with no documents abstains rather than being reported as
+    missing every factor.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — a presence check has no threshold
+  values:
+    atr_factor_count: "8"
+    regulation: "12 CFR 1026.43(c)(2)(i)-(viii)"
+  guideline_text: >-
+    12 CFR 1026.43(c)(2) requires a creditor to consider and verify eight underwriting factors:
+    (i) the consumer's current or reasonably expected income or assets, other than the value of the
+    dwelling; (ii) if the creditor relies on income from the consumer's employment in determining
+    repayment ability, the consumer's current employment status; (iii) the consumer's monthly payment on
+    the covered transaction, calculated in accordance with paragraph (c)(5); (iv) the consumer's monthly
+    payment on any simultaneous loan that the creditor knows or has reason to know will be made;
+    (v) the consumer's monthly payment for mortgage-related obligations; (vi) the consumer's current debt
+    obligations, alimony, and child support; (vii) the consumer's monthly debt-to-income ratio or
+    residual income in accordance with paragraph (c)(7) of this section; and (viii) the consumer's credit
+    history. This rule checks that the FILE CARRIES SUPPORTING DOCUMENTS for each factor; the
+    consideration and verification themselves are the creditor's obligation at underwriting.
+
+required_inputs:
+  - name: atr_factors_documented
+    snapshot_path: 'tags.by_subject["loan"]["dti.atr_factors_documented"]'
+    description: >-
+      whether the file carries at least one supporting document for each of the eight ATR factors
+      (AI, LP-495b): "complete" / "incomplete", and "unknown" when the file has no documents, the list is
+      truncated, or the set cannot be read. The declared enum omits "unknown"; the prompt sanctions it and
+      the materialiser coerces it to an unknown tag (see the header).
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  Which of the eight factors have supporting documents in the file and which do not, named individually,
+  so a processor can request the specific missing item rather than being told the file is incomplete.
+
+guideline_reference: "12 CFR 1026.43(c)(2)(i)-(viii) (Regulation Z, ability to repay) — the eight factors a creditor must consider and verify. This rule checks document presence for each; the determination is the creditor's."
+
+spec_version: 1
+
+judgment:
+  subject: loan
+  load_bearing_tags: [dti.atr_factors_documented]
+  reasoned_over: [dti.atr_factors_documented]
+  output_tag: dti.atr_documentation_adequate
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor making ONE reasoned judgment: does this loan file carry the
+    DOCUMENTS needed to support each of the eight ability-to-repay factors?
+
+    YOU ARE NOT DECIDING WHETHER THE BORROWER CAN REPAY, and you are not deciding whether the loan
+    complies with the ability-to-repay rule. That determination belongs to the creditor and is made at
+    underwriting. You are judging whether the folder is complete enough for that determination to be made.
+
+    You reason ONLY over the STRUCTURED TAG below — never raw documents. The tag already records whether
+    every factor has supporting documentation in the file.
+
+    Answer "yes" when the file's documentation covers all eight factors. Answer "no" when a factor is
+    genuinely without support and you can name it. Answer "unknown" when the file is empty, the document
+    set could not be read, or you cannot tell — an absent document set is NOT evidence of missing
+    factors, it is a reason to abstain.
+
+    NEVER answer "yes" on a file whose documents you have not seen. "All ATR factors are documented" on
+    an empty file is the worst thing this rule can say.
+
+    BE HONEST. If the tag does not support a judgment, answer "unknown". NEVER guess. Cite the tag.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tag>"}

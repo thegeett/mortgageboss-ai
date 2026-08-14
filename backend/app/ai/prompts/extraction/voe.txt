@@ -23,6 +23,10 @@ CAPTURE EVERYTHING ON THE FORM — lose nothing. There are two buckets:
      ytd_income                           (number)  year-to-date earnings
      hours                                (number)  scheduled hours (e.g. per week)
      probability_of_continued_employment  (string)  if stated (e.g. "likely", "yes")
+     work_location                        (string)  the actual work location / worksite, if stated
+                                                     (distinct from the corporate employer_address)
+     client_or_assignment_name            (string)  for a STAFFING-AGENCY letter, the client / assignment
+                                                     the employee is placed at (e.g. "Fidelity Investments")
 
 2. ADDITIONAL SECTIONS — EVERY OTHER field on the form, grouped by section, e.g.
    "Prior Year Earnings" (base/overtime/bonus/commission by year), "Pay Breakdown"
@@ -72,6 +76,8 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "employer_signer_phone": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "employer_signature_and_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
     "direct_return_to_lender_indicator": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "applicant_authorization_signature": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "applicant_authorization_signature": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "work_location": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "client_or_assignment_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "gross_earnings_history": [{"period": <string|null>, "base": <string|null>, "overtime": <string|null>, "commission": <string|null>, "bonus": <string|null>, "page": <int|null>, "snippet": <string|null>}],

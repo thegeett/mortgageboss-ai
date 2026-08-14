@@ -120,8 +120,16 @@ def test_recipe_reads_the_typed_dwelling_field_only_not_a_list() -> None:
 # The branches, on the real-shaped binder scenarios (materialized end to end)
 # --------------------------------------------------------------------------- #
 async def test_replacement_cost_binder_satisfies() -> None:
+    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
+    # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
+    # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
+    # extractor improves and the entry is pruned. The basis NORMALISER is still asserted below, so the
+    # moment the entry is pruned this rule returns to its old verdicts.
     mat = await _materialize(build_insurance_replacement_cost_snapshot())
-    assert _binder_verdicts(evaluate_deterministic_rule(_SPEC, mat)) == [Verdict.SATISFIED]
+    results = evaluate_deterministic_rule(_SPEC, mat)
+    assert _binder_verdicts(results) == [Verdict.NEEDS_REVIEW]
+    assert all(r.ratification_pending for r in results if r.verdict is Verdict.NEEDS_REVIEW)
     # the normaliser folded "Replacement Cost" -> the controlled value
     tag = next(
         t["ins.dwelling_settlement_basis"]
@@ -133,11 +141,18 @@ async def test_replacement_cost_binder_satisfies() -> None:
 
 
 async def test_actual_cash_value_binder_fires() -> None:
+    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
+    # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
+    # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
+    # extractor improves and the entry is pruned. The basis NORMALISER is still asserted below, so the
+    # moment the entry is pruned this rule returns to its old verdicts.
     mat = await _materialize(build_insurance_acv_snapshot())
     results = evaluate_deterministic_rule(_SPEC, mat)
-    assert _binder_verdicts(results) == [Verdict.FIRED]
-    fired = next(r for r in results if r.verdict is Verdict.FIRED)
-    assert "actual-cash-value" in fired.reasoning and fired.how_to_fix
+    assert _binder_verdicts(results) == [Verdict.NEEDS_REVIEW]
+    degraded = next(r for r in results if r.verdict is Verdict.NEEDS_REVIEW)
+    assert degraded.ratification_pending
+    assert "read wrongly before" in degraded.reasoning
     assert (
         EXPECTED_INS_BASIS_ACV
     )  # the expected controlled value is exported for the fixture record
@@ -164,11 +179,17 @@ async def test_multiple_binders_are_judged_per_binder() -> None:
     # being per_document — judges EACH: SATISFIED on the replacement-cost binder AND FIRED on the ACV binder.
     # This is deliberate/fail-closed (no operative-policy signal), but it CAN flag a superseded ACV binder.
     # If Priya later rules that multiple binders reconcile to one operative policy, this test changes with it.
+    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
+    # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
+    # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
+    # extractor improves and the entry is pruned. The basis NORMALISER is still asserted below, so the
+    # moment the entry is pruned this rule returns to its old verdicts.
     mat = await _materialize(build_insurance_two_basis_binders_snapshot())
     verdicts = _binder_verdicts(evaluate_deterministic_rule(_SPEC, mat))
-    assert sorted(v.value for v in verdicts) == sorted(
-        [Verdict.SATISFIED.value, Verdict.FIRED.value]
-    )
+    # Still judged PER BINDER (two subjects, two verdicts) — the per_document shape is unchanged; both are
+    # now degraded rather than one satisfied and one fired.
+    assert verdicts == [Verdict.NEEDS_REVIEW, Verdict.NEEDS_REVIEW]
 
 
 async def test_no_homeowners_policy_is_not_applicable() -> None:
@@ -198,12 +219,12 @@ async def test_ih1_reason_is_distinct_from_ih3() -> None:
     ih3 = load_rule_spec("IH-3")
     # IH-1 talks about the loss-settlement BASIS; IH-3 about the effective DATE / coverage gap. On the SAME
     # adequate binder, IH-1's satisfied reason names the settlement basis and never the effective date.
-    mat = await _materialize(build_insurance_replacement_cost_snapshot())
-    ih1_reason = next(
-        r.reasoning
-        for r in evaluate_deterministic_rule(_SPEC, mat)
-        if r.verdict is Verdict.SATISFIED
-    )
+    # ⚠️ LP-508 — read the SATISFIED outcome's reasoning off the SPEC, not off a live verdict: IH-1's
+    # gated tag is now distrusted (ADR-377) so it degrades before its body runs and never reaches
+    # satisfied. What this test protects — that IH-1 talks about the BASIS and IH-3 about the DATE, and
+    # that their inputs do not overlap — is unchanged and still asserted.
+    assert _SPEC.deterministic is not None
+    ih1_reason = next(o.reasoning for o in _SPEC.deterministic.outcomes if o.verdict == "satisfied")
     assert "settle" in ih1_reason.lower() and "basis" in ih1_reason.lower()
     assert "effective date" not in ih1_reason.lower() and "closing" not in ih1_reason.lower()
     # and the two specs read DIFFERENT load-bearing tags (no input overlap)

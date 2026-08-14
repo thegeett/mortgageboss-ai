@@ -39,7 +39,11 @@ _VOCAB_EXTRA_YAML = _RULES_DIR / "vocabulary_extra.yaml"
 
 # The subject keys a production declaration may attach a tag to (resolved by the subjects registry).
 # LP-332 added `borrower` (a tag keyed by borrower_id, materialized from MISMO borrower.{n}.*).
-KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
+# LP-483 — ``liability`` joins the four originals. Its absence is why every ``liab.*`` tag was declared
+# and unproduced; see tag_materialization/subjects.py's liability section.
+KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower", "liability"})
+# The subjects that may pull the app's stated liabilities into an AI context (ADR-375).
+_LIABILITY_CONTEXT_SUBJECTS = frozenset({"borrower", "liability"})
 
 # The subjects a DERIVED recipe may be declared for. LP-332 generalized the derived producer beyond
 # loan-only; the producer enumerates the subject registry and passes the subject's own raw object to the
@@ -48,7 +52,10 @@ KNOWN_SUBJECTS = frozenset({"transaction", "document", "loan", "borrower"})
 # DocumentEntry and keys under the content_id — the producer already handles this correctly (verified), so
 # a document recipe does NOT mis-key. A derived tag on `transaction` stays unsupported (no recipe reads a
 # TransactionRecord). Each recipe still asserts its expected raw type, so a wrong subject fails loudly.
-_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document"})
+# LP-486 — ``liability`` joins the derived subjects. The LP-483 family already supplies enumerate /
+# read_field / context; only this allowlist blocked a per-liability recipe. The producer is generic (it
+# passes each subject's raw object through), and each recipe asserts its own raw type.
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document", "liability"})
 
 
 class DeclarationError(Exception):
@@ -112,6 +119,25 @@ class AiGroup:
     # undisclosed tradeline) opts in here; the borrower context then adds `stated_liabilities`. Off by
     # default → an existing borrower group is byte-unchanged.
     include_stated_liabilities: bool = False
+    # LP-493a — the two opt-ins PC-5's investigation showed were missing. Both DEFAULT OFF, so every
+    # existing group's context is byte-identical.
+    #
+    # ⚠️ `include_unattributed_documents` — a borrower context gathers only documents ATTRIBUTED to that
+    # borrower (belongs_to), which is right for an income question and WRONG for a cross-source one: a
+    # purchase agreement is a PROPERTY document with no belongs_to, so PC-5 was asked about an earnest
+    # money deposit while the contract stating it was silently dropped. This adds UNATTRIBUTED documents
+    # of the group's declared types — never another BORROWER's, which would be the guessed attribution
+    # LP-332/LP-336 forbid.
+    include_unattributed_documents: bool = False
+    # ⚠️ `include_transactions` — a document's transactions live in the LEGACY per-document
+    # `entry.transactions` attribute (what all_transactions() reads and AS-1 rides), NOT in `entry.lists`.
+    # A group could declare include_lists, see an empty list, and conclude the data was absent when it was
+    # one attribute away. PC-5 was shown five bank statements' account-level fields and zero transactions.
+    include_transactions: bool = False
+    # LP-495b — a LOAN-subject group whose prompt reasons about the file's DOCUMENTS opts in here. The
+    # loan context is MISMO facts only without it, so such a group was shown zero documents (PC-5's
+    # shape). Off by default: every existing loan group's context is byte-identical.
+    include_documents: bool = False
 
 
 def _parse_allowed(raw: str) -> tuple[str, ...] | None:
@@ -246,10 +272,60 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(
                 f"ai group {key!r}: `include_stated_liabilities` must be a boolean, got {include_liabilities!r}"
             )
-        if include_liabilities and subject != "borrower":
+        # LP-483 / ADR-375 — WIDENED from borrower-only to {borrower, liability}, deliberately. The original
+        # reasoning ("the file-level liabilities are the per-borrower comparison set") does not survive the
+        # inversion: the comparison set belongs to whichever subject performs the match, and that is now the
+        # LIABILITY. Still a CLOSED set — a document/transaction group asking for the liabilities is an error.
+        if include_liabilities and subject not in _LIABILITY_CONTEXT_SUBJECTS:
             raise DeclarationError(
-                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower-subject group "
-                f"(the file-level liabilities are the per-borrower comparison set), got subject={subject!r}"
+                f"ai group {key!r}: `include_stated_liabilities` is only for a borrower- or "
+                f"liability-subject group (the comparison set belongs to the subject that matches), "
+                f"got subject={subject!r}"
+            )
+        include_unattributed = body.get("include_unattributed_documents", False)
+        if not isinstance(include_unattributed, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_unattributed_documents` must be a boolean, got "
+                f"{include_unattributed!r}"
+            )
+        # ⚠️ BORROWER-ONLY, and the restriction is the point: it exists to relax borrower ATTRIBUTION.
+        # No other subject filters by belongs_to, so asking for it elsewhere is a declaration error, not
+        # a no-op — a document-subject group already sees its own document.
+        if include_unattributed and subject != "borrower":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_unattributed_documents` is only for a borrower-subject "
+                f"group (it relaxes borrower attribution), got subject={subject!r}"
+            )
+        include_docs = body.get("include_documents", False)
+        if not isinstance(include_docs, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_documents` must be a boolean, got {include_docs!r}"
+            )
+        # LP-495b review — compare the NORMALIZED `subject`, like every sibling validator above. Reading the raw
+        # YAML value meant `subject: "loan "` passed `subject not in KNOWN_SUBJECTS` (which strips) and was
+        # then rejected here with a misleading message. Fails safe either way; it was simply the one check
+        # in this function not following the pattern.
+        if include_docs and subject != "loan":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_documents` is only for a LOAN-subject group (a document or "
+                f"borrower context already gathers documents), got subject={subject!r}"
+            )
+        include_txns = body.get("include_transactions", False)
+        if not isinstance(include_txns, bool):
+            raise DeclarationError(
+                f"ai group {key!r}: `include_transactions` must be a boolean, got {include_txns!r}"
+            )
+        # ⚠️ BORROWER ONLY (reported finding). The validator used to admit `document` as well, but only
+        # `_borrower_context` reads this opt-in — `_doc_context` ignores it entirely. So a document-subject
+        # group could declare it, pass validation, and silently receive account fields with ZERO
+        # transactions: the exact silent no-op the sibling checks call "a declaration error, not a silent
+        # no-op", and the exact failure LP-493a was written to eliminate. Widen this the day
+        # `_doc_context` serialises transactions, not before.
+        if include_txns and subject != "borrower":
+            raise DeclarationError(
+                f"ai group {key!r}: `include_transactions` is only for a BORROWER-subject group (it "
+                f"serialises the borrower's gathered documents' transactions, and only the borrower "
+                f"context reads it), got subject={subject!r}"
             )
         groups[key] = AiGroup(
             key=key,
@@ -257,16 +333,23 @@ def load_ai_groups() -> dict[str, AiGroup]:
             context_builder=context_builder,
             tag_ids=tuple(str(t) for t in tags),
             system_prompt=prompt,
-            applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
+            applies_to=_parse_applies_to(
+                key, subject, body.get("applies_to"), include_documents=include_docs
+            ),
             include_borrower_roster=roster,
             include_lists=include_lists,
             list_row_cap=cap,
             include_stated_liabilities=include_liabilities,
+            include_unattributed_documents=include_unattributed,
+            include_transactions=include_txns,
+            include_documents=include_docs,
         )
     return groups
 
 
-def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | None:
+def _parse_applies_to(
+    key: str, subject: str, raw: object, *, include_documents: bool = False
+) -> frozenset[str] | None:
     """``applies_to`` (LP-377-D): a list of document-type slugs, or absent / ``"all"`` → None (all types).
 
     None is the fail-open default — an omitted or ``all`` declaration runs the group on every document, so a
@@ -278,11 +361,21 @@ def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | N
         return None
     # `applies_to` names document types, so it is only meaningful for a group that GATES on them
     # (document subject — LP-377-D dispatcher gate) or GATHERS them (borrower subject — LP-385 context
-    # filter). On a loan/transaction group it would silently do nothing, so reject it.
-    if subject not in ("document", "borrower"):
+    # filter, and LP-495b review a LOAN subject that opted into `include_documents`). On any other group it would
+    # silently do nothing, so reject it.
+    # LP-495b review — a loan group WITH `include_documents` gathers documents too, and until now had no way to
+    # narrow them: the set was every document on the file, unbounded, for every such group. `occupancy_
+    # rental` needs leases / Schedule E / an appraisal rent schedule, not the borrower's driver's licence.
+    # A loan group WITHOUT the opt-in still gathers nothing, so `applies_to` on it stays an error.
+    if subject not in ("document", "borrower") and not (subject == "loan" and include_documents):
+        gathers = (
+            " (a loan group gathers documents only with `include_documents`)"
+            if subject == "loan"
+            else ""
+        )
         raise DeclarationError(
             f"ai group {key!r}: `applies_to` is only meaningful for a document- or borrower-subject group "
-            f"(subject={subject!r} does not gate or gather documents) — use 'all' or omit it"
+            f"(subject={subject!r} does not gate or gather documents){gathers} — use 'all' or omit it"
         )
     if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
         raise DeclarationError(

@@ -55,6 +55,7 @@ from app.ai.extraction.parsing import (
     coerce_str,
     derive_status,
     parse_catch_all,
+    parse_flat_rows,
     parse_typed_core,
 )
 from app.ai.extraction.shape import CatchAllSection, TypedField
@@ -149,10 +150,24 @@ class TaxReturnExtraction(BaseModel):
     return_signed_date: TypedField[date] = Field(default_factory=TypedField)
     signatures_present: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    # The state return bundled with the federal 1040 (PA-40 / NC D-400 / AZ 140), + the paid-preparer block.
+    state_code: TypedField[str] = Field(default_factory=TypedField)
+    state_taxable_income: TypedField[Decimal] = Field(default_factory=TypedField)
+    state_tax_liability: TypedField[Decimal] = Field(default_factory=TypedField)
+    state_tax_withheld: TypedField[Decimal] = Field(default_factory=TypedField)
+    preparer_name: TypedField[str] = Field(default_factory=TypedField)
+    preparer_ptin: TypedField[str] = Field(default_factory=TypedField)
+
     # --- Typed income-critical schedules (present-or-null; repeatable lists) - #
     schedule_c: list[ScheduleC] = Field(default_factory=list)
     schedule_e: ScheduleE | None = None
     k1s: list[K1] = Field(default_factory=list)
+
+    # --- LP-461 diff — captured flat-row lists (bare rows) ----------------- #
+    # Per-employer W-2 breakdown behind the 1040 wage total, + Schedule D / Form 8949 sale transactions.
+    w2_forms: list[dict[str, Any]] = Field(default_factory=list)
+    capital_gains_transactions: list[dict[str, Any]] = Field(default_factory=list)
 
     # --- Grouped catch-all — other schedules / attachments / everything else - #
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
@@ -203,6 +218,26 @@ _CORE_1040_SPEC: CoreSpec = (
     ("attached_schedules_and_forms", coerce_str),
     ("return_signed_date", coerce_date),
     ("signatures_present", coerce_str),
+    # LP-461 diff additions
+    ("state_code", coerce_str),
+    ("state_taxable_income", coerce_decimal),
+    ("state_tax_liability", coerce_decimal),
+    ("state_tax_withheld", coerce_decimal),
+    ("preparer_name", coerce_str),
+    ("preparer_ptin", coerce_str),
+)
+
+# LP-461 — flat-row lists (mirror bank_statement's transactions parse; snapshot-read generically).
+_W2_FORMS_ROW: CoreSpec = (
+    ("employer_name", coerce_str),
+    ("wages", coerce_str),
+    ("federal_withheld", coerce_str),
+)
+_CAPITAL_GAINS_TRANSACTIONS_ROW: CoreSpec = (
+    ("description", coerce_str),
+    ("proceeds", coerce_str),
+    ("cost_basis", coerce_str),
+    ("gain_or_loss", coerce_str),
 )
 _SCHEDULE_C_SPEC: CoreSpec = (
     ("business_name", coerce_str),
@@ -286,6 +321,10 @@ def _parse_tax_return_json(text: str) -> TaxReturnExtractionResult | None:
     sched_c, c_nn, c_lost = _parse_schedule_list(payload.get("schedule_c"), _SCHEDULE_C_SPEC)
     sched_e, e_nn, e_lost = _parse_schedule_e(payload.get("schedule_e"))
     k1s, k_nn, k_lost = _parse_schedule_list(payload.get("k1s"), _K1_SPEC)
+    w2_forms = parse_flat_rows(payload.get("w2_forms"), _W2_FORMS_ROW)
+    capital_gains = parse_flat_rows(
+        payload.get("capital_gains_transactions"), _CAPITAL_GAINS_TRANSACTIONS_ROW
+    )
     sections = parse_catch_all(payload.get("additional_sections"))
 
     try:
@@ -295,13 +334,15 @@ def _parse_tax_return_json(text: str) -> TaxReturnExtractionResult | None:
                 "schedule_c": sched_c,
                 "schedule_e": sched_e,
                 "k1s": k1s,
+                "w2_forms": w2_forms,
+                "capital_gains_transactions": capital_gains,
                 "additional_sections": sections,
             }
         )
     except ValidationError:
         return None
 
-    non_null = core_nn + c_nn + e_nn + k_nn
+    non_null = core_nn + c_nn + e_nn + k_nn + len(w2_forms) + len(capital_gains)
     coercion_lost = core_lost or c_lost or e_lost or k_lost
     status = derive_status(non_null, coercion_lost)
     confidence = coerce_confidence(payload.get("confidence"))
@@ -365,6 +406,8 @@ async def extract_tax_return(content: bytes, media_type: str) -> TaxReturnExtrac
             len(result.data.schedule_e.properties) if result.data.schedule_e else 0
         ),
         k1_count=len(result.data.k1s),
+        w2_forms=len(result.data.w2_forms),
+        capital_gains_transactions=len(result.data.capital_gains_transactions),
         catch_all_sections=len(result.data.additional_sections),
     )
     return result

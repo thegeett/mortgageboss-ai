@@ -81,6 +81,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "alimony_income": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),  # LP-442: split target
     "rental_income_schedule": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
     "commission_income_statement": (Tier.TIER_2, DocumentCategory.INCOME_EMPLOYMENT),
+    # LP-468 — an employer-issued annual compensation/rewards statement (base + bonus + equity). The home
+    # for the Deloitte/Fidelity/PayPal docs that were force-fitting into commission_income_statement. No
+    # rule today; the direct input to IN-10/IN-11 once the earnings classifier exists.
+    "compensation_statement": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     "employment_offer_letter": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
     # LP-442 — schema'd types reconciled into the catalog (every one has a spec → Tier-1).
     "form_1040_personal_tax_transcripts": (Tier.TIER_1, DocumentCategory.INCOME_EMPLOYMENT),
@@ -141,6 +145,10 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
+    # LP-469 — IRS Form 1098 Mortgage Interest Statement. PROPERTY (not INCOME like form_1099): its subject is
+    # a mortgage on a property, and its neighbours are mortgage_statement / property_tax_bill. DT-6 reads the
+    # interest + taxes + principal as a housing expense on a (often retained) property.
+    "form_1098": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "property_tax_bill": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "hoa_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "appraisal": (Tier.TIER_1, DocumentCategory.PROPERTY),
@@ -173,6 +181,13 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "subject_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "other_property_note": (Tier.TIER_1, DocumentCategory.PROPERTY),
     "seller_signature_authority": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    # LP-466 — an AVM / Home Value Estimate. NOT an appraisal and NOT evidence of value for
+    # underwriting (see the indicator + ADR); a non-binding estimate a processor may glance at.
+    "home_value_estimate": (Tier.TIER_1, DocumentCategory.PROPERTY),
+    # LP-467 — an ACORD 25 liability CERTIFICATE (a summary of coverage, distinct from the master
+    # POLICY; joins the insurance family here as there is no INSURANCE category). Visibility only —
+    # serves no rule; NOTE it is NOT CO-3 evidence (CO-3 wants ACORD 27/28 property + a fidelity cert).
+    "certificate_of_liability_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),
     # ===================================================================== #
     # Credit
     # ===================================================================== #
@@ -194,8 +209,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # ===================================================================== #
     # Disclosures
     # ===================================================================== #
-    "closing_disclosure": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
-    "loan_estimate": (Tier.TIER_2, DocumentCategory.DISCLOSURES),
+    # LP-470 — promoted Tier 2 -> Tier 1 with a HEADLINE-block schema (spec 119/120). No in-scope rule reads
+    # a CD/LE (CL-2..7, DC-1..7 are out of pre-submission scope), so they earn Tier 1 on processor visibility;
+    # the full cost tables / transaction summaries stay on Tier 3 (ADR).
+    "closing_disclosure": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    "loan_estimate": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     # LP-442 decision 2: the generic borrower_authorization is RETIRED — the two
     # authorization specs (authorization_to_run_credit, borrower_authorization_and_certification)
     # are distinct documents and cannot share a key. Verified unused (no rule/fixture/test).
@@ -220,13 +238,17 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "social_security_administration_ssa_89": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     "mortgage_loan_origination_agreement": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     "prior_closing_disclosure_final_cd_from_purchase": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
+    # LP-465 — a temporary buydown reduces the borrower's actual payment below the note
+    # payment for the first 1-2 years; the per-period schedule + rates are structured data a
+    # rule (and the processor) reads → Tier 1. (Promoted from `unknown`.)
+    "temporary_buydown_agreement": (Tier.TIER_1, DocumentCategory.DISCLOSURES),
     # ===================================================================== #
     # Borrower Info
     # ===================================================================== #
     "drivers_license": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "divorce_decree": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
     "letter_of_explanation": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # T1
-    "passport": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
+    "passport": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),  # LP-472 — shared identity extractor
     "social_security_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "permanent_resident_card": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "visa_documentation": (Tier.TIER_2, DocumentCategory.BORROWER_INFO),
@@ -248,6 +270,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "letter_of_explanation_income": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "letter_of_explanation_misc": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     "letter_of_explanation_property": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
+    # LP-465 — a USCIS Notice of Action (Form I-797A/B/C) feeds ID-8 (citizenship/residency);
+    # its receipt/case/validity + I-94 block are structured facts → Tier 1. Sits with the
+    # immigration/identity family. (Promoted from `unknown`; absorbs I-797 misroutes to
+    # visa_documentation / work_visa_ead_card.)
+    "uscis_notice_of_action": (Tier.TIER_1, DocumentCategory.BORROWER_INFO),
     # ===================================================================== #
     # Misc — recognized loan-file documents that don't fit the buckets above.
     # (The Tier-3 default below catches anything UNCATALOGED; these are known.)
@@ -263,6 +290,14 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "evidence_of_payment": (Tier.TIER_1, DocumentCategory.MISC),
     "custom": (Tier.TIER_1, DocumentCategory.MISC),
     "miscellaneous_document": (Tier.TIER_1, DocumentCategory.MISC),
+    # LP-466 — closing/settlement wire instructions (typed + MASKED routing/account; was landing in
+    # general_correspondence free-form + unmasked) and a lender-portal dashboard screenshot (identity
+    # only — a software capture, extracts almost nothing by design; stops diluting `unknown`).
+    "wire_instructions": (Tier.TIER_1, DocumentCategory.MISC),
+    "lender_dashboard_screenshot": (Tier.TIER_1, DocumentCategory.MISC),
+    # LP-467 — one generic vendor service invoice (a BILL: vendor/amount/loan; distinct from the
+    # evidence_of_payment/appraisal_payment RECEIPT types). Visibility only — serves no rule.
+    "service_invoice": (Tier.TIER_1, DocumentCategory.MISC),
 }
 
 # The default for any type not in the catalog: the long-tail Tier 3 / Misc bucket.

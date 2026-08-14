@@ -407,3 +407,784 @@ tags:
       liability payments. A present 0 (paid-off account) contributes 0; "unknown" when no tradeline carries a
       payment figure (never a fabricated 0). Loan-level aggregate.
     produced_by: derived
+
+  # ------------------------------------------------------------------ #
+  # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Every tag is DESCRIPTIVE: it emits a number or
+  # a date. The acceptable WINDOW lives in each rule's reference_values, never here (a tag carrying a
+  # threshold is a rule in disguise — five rules have died from that confusion).
+  # ------------------------------------------------------------------ #
+  rate_lock.days_to_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      SIGNED days from the closing date to the rate lock's expiration. Positive = the lock still has room
+      at closing; negative = it expires BEFORE closing. "unknown" when either date is absent, unparseable,
+      or the file's documents disagree — never 0.
+    produced_by: derived
+  property.appraisal_age_months_at_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      COMPLETE calendar months from the appraisal's effective date to the loan's closing date. Calendar
+      months, not a 30-day approximation. "unknown" when either date is missing or disputed — never 0.
+    produced_by: derived
+  credit.report_age_months_at_closing:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      COMPLETE calendar months from the credit report's pull date to the loan's closing date. Calendar
+      months, not a 120-day approximation. "unknown" when either date is missing or disputed — never 0.
+    produced_by: derived
+
+  # --- LP-487 — IH-2's and IH-7's PARSED inputs. The two CONCLUSION tags they gate on
+  #     (ins.mortgagee_clause_correct, ins.condo_master_policy) already exist in the generated
+  #     fact_tags.csv, so they are NOT redeclared here — only their inputs, which are new. ---------- #
+
+  # IH-2. ⚠️ THE LENDER NAME IS READ FROM TWO DOCUMENT TYPES UNDER TWO TAG IDS, deliberately. A parsed
+  # declaration carries ONE document_type filter, and `lender_name` is a field name shared by TEN
+  # document types whose meanings differ: form_1098.lender_name is the CURRENT SERVICER of an existing
+  # mortgage, voe.lender_name is whoever ORDERED the verification, other_property_note.lender_name is a
+  # DIFFERENT property's lender. An unscoped declaration would match all of them and poison the compare
+  # with a name that was never this loan's creditor. Two scoped tags, no inference.
+  ins.mortgagee_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The mortgagee named on a homeowners binder's mortgagee clause, read from the typed-core
+      mortgagee_name field. The RAW carrier wording, un-normalised — IH-2's recipe normalises it.
+      Per binder (a file may carry several).
+    produced_by: parsed
+  loan.lender_name_cd:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The creditor named on the Closing Disclosure. The AUTHORITY for "this loan's lender" — the CD is
+      the final, binding statement of the creditor, where a Loan Estimate is preliminary and supersedable.
+    produced_by: parsed
+  loan.lender_name_le:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The lender named on a Loan Estimate. IH-2's FALLBACK, used only when no Closing Disclosure states a
+      creditor — early in processing the CD does not exist yet, and a file with only an LE should still be
+      checkable rather than a permanent couldnt_check.
+    produced_by: parsed
+
+  # IH-7. The condo master policy's three adequacy inputs. Each is PARSED off the master-policy document,
+  # so when the file carries NO master policy none of them materialise — which is exactly how the derived
+  # recipe distinguishes "absent" from "present but inadequate".
+  condo.master_policy_number:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The condominium master policy's policy number — IH-7's PRESENCE signal. A master policy document
+      that states no policy number is not treated as evidence the policy exists.
+    produced_by: parsed
+  condo.master_policy_basis_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The master policy's replacement_cost_indicator, RAW. Carrier wording varies ("Replacement Cost",
+      "Guaranteed Replacement", "REPLACEMENT COST AT AG"), so IH-7's recipe matches a declared closed
+      vocabulary and abstains on anything else (ADR-376). Never read as inadequate by default.
+    produced_by: parsed
+  condo.master_liability_limit:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The master policy's general liability limit per occurrence, in dollars. "unknown" when absent or
+      unparseable — never 0, which would read as a real limit of zero and fire IH-7 wrongly.
+    produced_by: parsed
+
+  # --- LP-488 — MI-1's comparable LTV, and MI-4's note amount. --------------------------------------- #
+  #
+  # ⚠️ WHY loan.ltv_percent EXISTS WHEN calc.ltv ALREADY DOES. `calc.ltv` (fact_tags.csv) is an OBJECT —
+  # {value, breakdown[]} — built for PR-1's transparent display, and a rule cannot compare an object with
+  # a threshold. This is the same fact in the shape a rule can gate on: one number. `calc.ltv` stays
+  # undeclared/inert; when it is wired for display it must read the SAME arithmetic (app/verification/ltv.py),
+  # which this recipe calls rather than reimplements.
+  loan.ltv_percent:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The loan-to-value ratio as a percent (e.g. 85.00), from the base loan amount over the value basis —
+      the lesser of purchase price and appraised value on a purchase, the appraised value on a refinance.
+      "unknown" when the loan amount or the value basis is missing — never 0, which would read as a
+      fully-collateralised loan.
+    produced_by: derived
+  loan.refinance_type:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The MISMO refinance kind (cash_out / rate_term), or absent on a purchase. Read by the LTV purpose
+      resolver so it mirrors app.services.ltv.ltv_purpose_for. It does not change the LTV denominator —
+      both refinance kinds divide by the appraised value.
+    produced_by: parsed
+  loan.note_amount:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO note amount (TERMS_OF_LOAN/NoteAmount) — what the borrower signs for, INCLUDING any
+      financed FHA upfront MIP. ⚠️ Distinct from loan.amount, which is the BASE loan amount
+      (TERMS_OF_LOAN/BaseLoanAmount). MI-4 reads the difference between the two.
+    produced_by: parsed
+
+  # --- LP-488 — MI-4's FHA upfront MIP, expressed as a RATE. ---------------------------------------- #
+  #
+  # ⚠️ A RATE, NOT A DOLLAR VARIANCE, and that is deliberate. MI-4 must compare the financed UFMIP with
+  # the 1.75% required by HUD ML 2023-05. Emitting a variance would mean computing "expected UFMIP"
+  # inside the producer — putting the 175-bps RATE in a recipe, where it is neither reviewable nor
+  # citable. Emitting the rate keeps the threshold in the spec's reference_values: the tag DESCRIBES what
+  # the file charged, the rule JUDGES it against the published figure.
+  #
+  # `mi.fha_ufmip` (fact_tags.csv, "FHA upfront MIP (financed)") stays INERT for the same reason it is
+  # not needed: it is the dollar amount, and MI-4 gates on the rate. The dollars appear in this tag's
+  # reason text, so a processor still sees them on the finding.
+  mi.fha_ufmip_percent:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The FHA upfront MIP financed into the loan, as a percent of the base loan amount — computed as
+      (note amount - base loan amount) / base loan amount x 100. 0 when nothing was financed (the premium
+      may have been paid in cash). "unknown" when either amount is missing or the base is not positive —
+      never 0, which would read as a real "nothing financed".
+    produced_by: derived
+
+  # --- LP-488 — CO-1's condo questionnaire. ---------------------------------------------------------- #
+  #
+  # ⚠️ PRESENCE ONLY. Priya's standing point is that condo rules must distinguish WARRANTABLE from
+  # non-warrantable, not merely confirm a questionnaire exists — but that is CO-3/CO-5's job, and
+  # `property.is_warrantable_condo` has NO source field anywhere in the 121 schema specs (LP-487), so it
+  # stays inert. CO-1 answers the question it can answer honestly: is the document there?
+  #
+  # ⚠️ A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline) — the TYPE LABEL, not extracted
+  # fields. A questionnaire that classified correctly but extracted badly still EXISTS, and CO-1 is not
+  # the rule that judges its contents.
+  # LP-488 review — the MISMO-stated property values, so a rule's LTV denominator can fall back to the
+  # SAME source the LTV worksheet uses. Mirrors property.purchase_price exactly (a MISMO fact promoted to
+  # loan level). Without these MI-1 read ONLY the appraisal document's value, so a MISMO-imported file
+  # with a valuation and no appraisal PDF showed a real LTV on the worksheet and couldnt_check on the rule.
+  property.valuation_amount:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO-stated valuation amount for the subject property — the LTV worksheet's PRIORITY appraised
+      basis (app/services/ltv.py: `appraised = valuation_amount or estimated_value`). Absent when MISMO
+      states none; never defaulted.
+    produced_by: parsed
+  property.estimated_value:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The MISMO-stated estimated property value — the LTV worksheet's FALLBACK appraised basis, used only
+      when valuation_amount is absent. Absent when MISMO states none; never defaulted.
+    produced_by: parsed
+  # LP-490 review — CR-10's two missing inputs.
+  credit.largest_single_collection_balance:
+    entity: borrower
+    value_type: number
+    allowed_values: null
+    description: >-
+      The largest SINGLE non-medical collection balance on the borrower's credit report. CR-10's DU
+      investment-property cell turns on "any individual collection is $250 or more", which the aggregate
+      alone cannot answer. "unknown" whenever the aggregate abstains — same rows, same guards.
+    produced_by: derived
+  credit.has_collections:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the borrower have ANY non-medical collection? CR-10's applicability gate — the predicate DSL is
+      eq/ne on a tag and cannot compare the aggregate numerically, so without this the rule ran on every
+      borrower including the common zero-collection file.
+    produced_by: derived
+  # LP-494 review — the 60-day delinquent unit COUNT, the numerator B4-2.2-02's cap is stated on.
+  # condo.delinquent_units_pct is now DERIVED from this over condo.total_units, because the
+  # questionnaire's generic `delinquency_percentage` carries whatever period the form chose (commonly
+  # 30+ days) and comparing that to a 60-day cap fires CO-5 on a compliant project.
+  condo.units_delinquent_over_60_days:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The number of units 60 or more days past due on common expense assessments, as stated on the condo
+      questionnaire. Absent when the form does not state it; never defaulted to zero.
+    produced_by: parsed
+  condo.questionnaire_present:
+    entity: loan
+    value_type: enum
+    # ⚠️ "unknown" IS a member (reported finding): the recipe abstains on a file with no documents, and
+    # allowed_values is projected into the tags table and rendered as the vocabulary column in the
+    # calibration worksheet — so omitting it stated a vocabulary the tag demonstrably violates.
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Whether the file carries a condo questionnaire (document-type presence). "no" when the file has
+      documents but none is a questionnaire; "unknown" when the file carries no documents at all — an
+      empty file is not evidence the questionnaire is missing.
+    produced_by: derived
+
+  # --- LP-490 — the credit AI cohort's NEW tags. The rest of the cohort's tags already exist in the
+  #     generated fact_tags.csv and are declared in tag_production.yaml only.
+  #     ⚠️ EVERY TAG HERE IS UNCALIBRATED. Every rule reading one is INERT. -------------------------- #
+
+  # CR-8. ⚠️ PRIYA'S OWN GATE, and the most important tag in this cohort. `payment_history_24mo` runs
+  # 0–84 characters across 17 distinct formats on the three real reports; position-parsing it is the
+  # ADR-353 trap and the field name is misleading. So the model states whether it could read the history
+  # RELIABLY, and CR-8 routes "no" to needs_review — it NEVER converts an ambiguous string into a late.
+  liab.structured_history_confident:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Could this tradeline's payment history be interpreted reliably? "no" when the history string is
+      absent, truncated, or in a format whose positions cannot be read with confidence. CR-8 evaluates
+      automatically only on "yes".
+    produced_by: ai
+  # ⚠️ NEVER creditor name alone — Priya was explicit. Account type, creditor type, MORTGAGE / REAL
+  # ESTATE indicators, HELOC markers, original/current balance and term, Metro 2 classification.
+  liab.is_mortgage:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this tradeline a mortgage (including a HELOC secured by real estate)? Judged from account type,
+      creditor type, balance/term shape and Metro 2 classification — never from the creditor's name
+      alone, which is how a mortgage servicer and a card issuer get confused.
+    produced_by: ai
+  liab.mortgage_late_60_plus_last_12mo:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does this mortgage tradeline show a 60-, 90-, 120- or 150-day delinquency in the previous twelve
+      months? Fannie's excessive prior mortgage delinquency definition. "unknown" whenever the history
+      could not be read reliably — the same abstention as structured_history_confident.
+    produced_by: ai
+
+  # CR-10.
+  liab.is_medical_collection:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this collection a MEDICAL collection? Medical collections are EXCLUDED from Fannie's payoff
+      limits and treated differently under FHA, so misreading one changes the requirement.
+    produced_by: ai
+  liab.collection_balance:
+    entity: liability
+    value_type: number
+    allowed_values: null
+    description: >-
+      The outstanding balance of THIS collection or charged-off account, in dollars. "unknown" when the
+      balance is not stated — never 0, which would read as a settled account and drop it out of the
+      aggregate.
+    produced_by: ai
+  credit.collection_aggregate_balance:
+    entity: borrower
+    value_type: number
+    allowed_values: null
+    description: >-
+      The sum of NON-MEDICAL collection balances for this borrower (derived). "unknown" when any
+      contributing balance is unreadable — a partial sum would understate the aggregate and could clear
+      a threshold the file does not actually clear.
+    produced_by: derived
+
+  # CR-6.
+  credit.derogatory_months_elapsed:
+    entity: liability
+    value_type: number
+    allowed_values: null
+    description: >-
+      Complete calendar months from THIS derogatory event's own date (discharge, dismissal or
+      completion) to the loan's closing date. ⚠️ "unknown" when the event has no date — the seasoning is
+      NEVER computed from the credit report's date, which would season an event to whenever the report
+      happened to be pulled.
+    produced_by: derived
+
+  # --- LP-490 — the two RULE-JUDGMENT output tags (CR-8, CR-10). These are produced by the judgment
+  #     evaluator at rule time, not by the materializer, so they are NOT declared in tag_production.yaml
+  #     (the as.borrowed_funds precedent). ⚠️ Both rules are INERT. ------------------------------------ #
+  credit.mortgage_history_assessment:
+    entity: liability
+    value_type: enum
+    allowed_values: ["acceptable", "one_30_day_late", "multiple_30_day_lates", "excessive_60_plus", "not_interpretable", "unknown"]
+    description: >-
+      CR-8's judgment on ONE mortgage tradeline's payment history. ⚠️ "not_interpretable" is Priya's own
+      gate — when the payment history cannot be read reliably the rule says so rather than converting an
+      ambiguous string into a delinquency.
+    produced_by: AI
+  credit.collection_treatment:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["no_payoff_required", "payoff_required", "payment_plan_or_5pct_may_apply", "manual_underwriting_not_supported", "unknown"]
+    description: >-
+      CR-10's judgment on how this borrower's collections must be treated. ⚠️ The DU-vs-manual axis does
+      not exist as a fact (LP-501), so "manual_underwriting_not_supported" is the honest abstention for a
+      manually underwritten file rather than a guessed branch.
+    produced_by: AI
+
+  property.occupancy:
+    entity: loan
+    value_type: string
+    allowed_values: null
+    description: >-
+      The stated occupancy of the subject property (primary_residence / second_home / investment), from
+      MISMO. CR-10's Fannie DU branch is occupancy-keyed: a one-unit primary requires no collection
+      payoff at all, while an investment property requires payoff at $250 individually or $1,000 in
+      aggregate. ⚠️ Absent occupancy must ABSTAIN, never default to the permissive cell.
+    produced_by: parsed
+
+  # --- LP-491 — TI-1's inputs and verdict tag. ------------------------------------------------------- #
+  title.vested_owner_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The current owner of record named on a title commitment (vested_owner_name), raw. ⚠️ All four real
+      commitments carry a PLAIN NAME here — the vesting recital lives in vesting_marital_recital, which
+      fills 0/4. Per commitment; a file may carry several.
+    produced_by: parsed
+  title.vested_owner_name_2:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      A second owner of record on the commitment (3/4 real documents carry one). TI-1 accepts a match
+      against EITHER owner — a co-owned property matching only the second name is still a match.
+    produced_by: parsed
+  contract.seller_name:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The seller named on the purchase agreement (5/5 in the corpus). TI-1's counterparty on a PURCHASE:
+      the person on title today should be the person selling.
+    produced_by: parsed
+  title.vested_owner_matches:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does this commitment's vested owner match the file's counterparty — the seller on a purchase, the
+      borrower on a refinance? Derived by the same normalised token compare IH-2 uses (LP-487). "unknown"
+      when the loan purpose is unstated, when no counterparty is on the file, or when nothing identifying
+      survives normalisation — never a guessed match.
+    produced_by: derived
+
+  # --- LP-491 — TI-2 and TI-6. ---------------------------------------------------------------------- #
+  title.legal_description:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The commitment's legal description, raw (337-1942 characters on the four real documents — metes and
+      bounds, or lot/block). ⚠️ Verified to contain NO 9+ digit runs, so the list-context PII scrub does
+      not redact it (the CR-8 trap, checked before use).
+    produced_by: parsed
+  title.property_address:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: The street address the commitment states for the same property (4/4 real documents).
+    produced_by: parsed
+  title.legal_description_matches:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      TI-2's judgment: does the commitment's legal description describe the property at the address it
+      states? "unknown" when either is missing or the description cannot be read.
+    produced_by: AI
+  title.chain_transfer_count:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      How many transfers the commitment's chain of title lists. ⚠️ "unknown" when the commitment carries
+      no chain at all — never 0, which would read as a confirmed absence of transfers.
+    produced_by: derived
+  title.chain_has_gap:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the chain break — is a transfer's grantee NOT the next transfer's grantor? A deterministic
+      continuity check across ROWS (AS-8's shape: ending balance == next opening), using the same name
+      normaliser TI-1 and IH-2 share. "unknown" with fewer than two transfers, or when a name does not
+      normalise.
+    produced_by: derived
+  title.chain_shortest_interval_days:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The shortest gap in days between consecutive transfers in the chain — the rapid-transfer signal TI-6
+      judges. "unknown" with fewer than two dated transfers.
+    produced_by: derived
+  title.chain_of_title_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["clean", "rapid_transfer", "chain_gap", "insufficient_history", "unknown"]
+    description: >-
+      TI-6's judgment on the chain: clean, a rapid transfer worth review, a break in the chain, or too
+      little history to say.
+    produced_by: AI
+
+  # --- LP-492 — PR-2's gap. --------------------------------------------------------------------------- #
+  property.value_vs_price_gap:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Appraised value minus the purchase price, in dollars. NEGATIVE means the appraisal came in BELOW
+      contract and the borrower must cover the difference. "unknown" when either side is missing — never
+      0, which would read as an exact match.
+      ⚠️ Takes the LOWEST appraised value when a file carries several appraisals (LP-488's finding: the
+      first version of that reader took whichever subject iterated first).
+    produced_by: derived
+
+  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. ⚠️ Every rule reading an AI tag here is INERT until its own
+  #     derivation; the two DERIVED tags below carry no model and activate their rules directly. ------- #
+  property.condition_rating_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The appraisal's UAD condition rating exactly as extracted ("C4", "C3" on the two real appraisals).
+      ⚠️ RAW — PR-5 reads the normalised tag, because UAD 3.6 may spell these differently from 2.6.
+    produced_by: parsed
+  property.condition_rating:
+    entity: doc
+    value_type: enum
+    allowed_values: ["C1", "C2", "C3", "C4", "C5", "C6", "unknown"]
+    description: >-
+      The condition rating normalised to C1-C6 against a declared closed vocabulary (ADR-376), or
+      "unknown" for anything unrecognised. ⚠️ An equality against one UAD layout's spelling is the
+      `is_disputed` mistake — the two real appraisals are both UAD 2.6-era ("9/2011"), and the 3.6
+      cutover in Nov 2026 may change the surface form.
+    produced_by: derived
+  property.appraisal_completion_condition:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      Whether the appraisal is "as is" or made "subject to" repairs, alterations or completion. Both real
+      appraisals read "As is" / "as is" — case varies, so PR-4's judgment normalises rather than compares.
+    produced_by: parsed
+  property.appraisal_property_type:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The property type the APPRAISER states ("Condominium", "Condominium Unit" on the two real
+      appraisals — free text, not a controlled list). PR-3 judges it against the programme's eligible
+      types and against the file's own property.type.
+    produced_by: parsed
+  property.appraisal_address_match:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the appraisal's subject-property address match the loan file's (MISMO) subject-property
+      address? Derived by the SAME deterministic canonicalisers PC-3 uses (street suffixes, US state
+      names, ZIP+4 → ZIP5) — no fuzzy matcher. ⚠️ Reads the MISMO SUBJECT address only, never a
+      borrower's current_address (which the parser can fill with a MAILING address).
+    produced_by: derived
+  property.appraisal_eligibility:
+    entity: doc
+    value_type: enum
+    allowed_values: ["eligible", "ineligible", "needs_review", "unknown"]
+    description: PR-3's judgment on whether the appraised property type is eligible for the programme.
+    produced_by: AI
+  property.appraisal_completeness:
+    entity: doc
+    value_type: enum
+    allowed_values: ["complete", "subject_to", "incomplete", "unknown"]
+    description: >-
+      PR-4's judgment on whether the appraisal is a FINAL report or is made "subject to" repairs,
+      alterations or completion — i.e. not yet a final value.
+    produced_by: AI
+  property.condition_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["eligible_as_is", "requires_repair", "unknown"]
+    description: >-
+      PR-5's judgment on the condition rating against the agency requirement. ⚠️ ONLY C6 is ineligible;
+      C1-C5 are eligible "as is" (Fannie B4-1.3-06).
+    produced_by: AI
+
+  # --- LP-493 — PC-8's rule-judgment output (produced by the judgment evaluator, not the materializer,
+  #     so it is NOT declared in tag_production.yaml — the as.borrowed_funds precedent). ------------- #
+  contract.personal_property_assessment:
+    entity: doc
+    value_type: enum
+    allowed_values: ["included", "fixtures_only", "none", "unknown"]
+    description: >-
+      PC-8's judgment on what a purchase contract includes. ⚠️ SURFACES ONLY — it does not decide whether
+      value is inflated, and PC-8 has no firing path.
+    produced_by: AI
+
+  # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 project eligibility). -------------------- #
+  #
+  # ⚠️ `condo.reserve_pct` is NOT here — it is already in the generated fact_tags.csv (row 123), so it is
+  # declared in tag_production.yaml ONLY. Its csv description says "AI parses budget"; there is no budget
+  # document type, and the value is a typed questionnaire field. The repo wins (LP-494 Phase A §5).
+  #
+  # ⚠️ EVERY ONE OF THESE FILLS 0/4 ON THE BENCH, and no loan file carries a condo questionnaire at all.
+  # They are declared because the fields and the document type EXIST, not because data has been observed —
+  # ADR-354's distinction, stated rather than glossed. Both consuming rules are INERT.
+  # ⚠️ DERIVED SINCE THE LP-494 REVIEW, and this row must say so — it is projected VERBATIM into the
+  # tag-catalog table, so leaving it as `parsed` / `doc` made the stored catalog describe a derived
+  # loan-level computation as a parsed document field. (The producer was remapped and the vocabulary was
+  # not: the same half-finished-rename shape the guards exist to catch.)
+  condo.delinquent_units_pct:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The percentage of units 60+ days past due on common expense assessments, COMPUTED from the
+      questionnaire's units_delinquent_over_60_days over its total_units — not read from the form's
+      generic delinquency line, which carries whatever period the form chose. Fannie B4-2.2-02
+      (08/05/2026) makes more than 15% ineligible. Absent when either input is missing; never read as 0,
+      which would assert a fully current project.
+    produced_by: derived
+  condo.commercial_space_pct:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The percentage of the project (or of the building containing it) that is commercial or mixed-use
+      space, as stated on the condo questionnaire. Fannie B4-2.1-03 (08/05/2026) caps it at 35%. Absent
+      when unanswered; never 0.
+    produced_by: parsed
+  condo.total_units:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The project's total unit count, as stated on the condo questionnaire. It selects the single-entity
+      concentration TIER (B4-2.1-03: 2 units at 5-20 units, 20% at 21+), so an absent count means the tier
+      is undecidable and the concentration leg abstains rather than picking one.
+    produced_by: parsed
+  condo.single_entity_owned_units:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The number of units owned by a single entity, as stated on the condo questionnaire. Paired with
+      condo.total_units to compute the concentration; the questionnaire's own stated percentage is
+      deliberately NOT read, so one number cannot contradict the other.
+    produced_by: parsed
+  condo.litigation_disclosed:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The condo questionnaire's litigation indicator, VERBATIM. Deliberately a string, not an enum: the
+      recipe recognises a closed set of affirmative/negative spellings (ADR-376) and abstains on anything
+      else, so an unfamiliar answer can never be read as "no litigation".
+    produced_by: parsed
+  loan.application_received_date:
+    entity: loan
+    value_type: date
+    allowed_values: null
+    description: >-
+      The date the loan application was taken (MISMO / LoanFile.application_received_date). CO-4's reserve
+      floor is keyed on it, because Fannie LL-2026-03 raises the minimum from 10% to 15% for applications
+      dated on or after 2027-01-04 — a rule keyed on TODAY's date would apply the wrong floor to an
+      application taken earlier. Absent when the file states none; never defaulted to today.
+    produced_by: parsed
+  condo.reserve_adequacy:
+    entity: loan
+    value_type: enum
+    allowed_values: ["adequate", "inadequate", "n/a", "unknown"]
+    description: >-
+      Whether the HOA's budgeted replacement reserves meet the applicable Fannie floor (CO-4). "n/a" when
+      the property is not a condominium; "unknown" when the property type, the application date or the
+      reserve percentage is missing or unreadable — including when the application date is absent, because
+      the date is what SELECTS the floor and guessing it would apply the wrong one.
+    produced_by: derived
+  condo.project_eligibility:
+    entity: loan
+    value_type: enum
+    allowed_values: ["clear", "ineligible_threshold", "litigation_disclosed", "n/a", "unknown"]
+    description: >-
+      The condo project's eligibility surface (CO-5): "ineligible_threshold" when delinquency, commercial
+      space or single-entity concentration breaches a cited B4-2.1-03/B4-2.2-02 limit;
+      "litigation_disclosed" when the questionnaire discloses litigation and no threshold is breached;
+      "clear" ONLY when all four legs were readable and none tripped; "n/a" for a non-condominium;
+      "unknown" otherwise. ⚠️ "clear" requires the inputs to have been READ — a blank questionnaire is
+      never a clean project.
+    produced_by: derived
+  condo.reserve_pct_questionnaire:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The budgeted replacement-reserve percentage as stated on the CONDO QUESTIONNAIRE — the second source
+      for CO-4, beside condo.reserve_pct (the HOA statement's). Fills 0/4 today because the corpus's
+      questionnaires are unanswered; declared so a completed form is read the day one arrives. The recipe
+      abstains when the two sources disagree rather than preferring either.
+    produced_by: parsed
+  condo.fidelity_present_raw:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The master policy's fidelity/crime coverage indicator, VERBATIM. A string, not an enum: the recipe
+      recognises a closed set of spellings (ADR-376) and abstains on anything else, so an unfamiliar
+      answer can never be read as "no coverage" and raise a finding against a covered project.
+    produced_by: parsed
+  condo.fidelity_amount:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The fidelity/crime coverage amount on the project's master policy. Reported inline as evidence; it
+      is NOT compared against B7-4-02's "three months of assessments on all units", because the unit count
+      and assessment base resolve on no document in the corpus.
+    produced_by: parsed
+  ins.condo_fidelity_coverage:
+    entity: loan
+    value_type: enum
+    allowed_values: ["present", "absent", "n/a", "unknown"]
+    description: >-
+      Whether the condominium project's master policy evidences fidelity/crime coverage (CO-3, B7-4-02).
+      "n/a" for a non-condominium; "absent" when a master policy is on file and states no coverage;
+      "unknown" when there is no master policy, no property type, or an unrecognised indicator. ⚠️ This is
+      a PRESENCE read, not an adequacy one — see the recipe.
+    produced_by: derived
+
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-495a — the mortgage-statement ↔ stated-liability reconciliation (RE-1 / DT-6) and LOE completeness
+  # (LO-2). ⚠️ `property.is_retained_reo` and `property.retained_pitia` are DELIBERATELY NOT declared here
+  # and get NO producer: "retained" is an inference no document, field or MISMO fact states, and neither
+  # rebuilt rule reads them. They stay vocabulary orphans exactly as `property.is_warrantable_condo` does,
+  # and a test pins that so this lane cannot be mistaken for coverage of the retention question.
+  # ------------------------------------------------------------------------------------------------- #
+  reo.statement_disclosure:
+    entity: doc
+    value_type: enum
+    allowed_values: ["disclosed", "undisclosed", "unknown"]
+    description: >-
+      Is the obligation this mortgage statement evidences disclosed among the mortgage liabilities stated
+      on the application (RE-1)? Matched on holder/lender name — MISMO carries NO property address on a
+      liability. "undisclosed" is a DISCREPANCY a processor resolves, never a defect: it can be a loan
+      paid off since the application, a duplicate under a servicer's other name, or a co-signed debt.
+      "unknown" when the statement names no lender (54/71 fill — ~24% abstain), when the application
+      states no mortgage liabilities at all, or when more than one stated liability matches the name.
+    produced_by: derived
+  reo.statement_payment_coverage:
+    entity: doc
+    value_type: enum
+    allowed_values: ["covered", "short", "unknown"]
+    description: >-
+      For a MATCHED obligation, does the monthly payment stated on the application cover the total monthly
+      payment the servicer's statement bills (DT-6)? ⚠️ The statement's `monthly_payment` IS ALREADY the
+      PITIA — the extractor defines it as "the total monthly payment (principal+interest+escrow)" and
+      `escrow_amount` as the escrow PORTION of it — so escrow is NOT added; the escrow figure is reported
+      as the usual EXPLANATION for a short stated figure. "unknown" when the statement was not matched to
+      exactly one stated liability, or either payment is missing.
+    produced_by: derived
+  loe.is_explanation_letter:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is this document one of the eight explanation-letter types (LO-2's applicability predicate)? A
+      separate predicate tag exists because the applicability DSL has only eq/ne and LO-2's scope is eight
+      document types. "unknown" for an unclassified document — it cannot be ruled out as a letter.
+    produced_by: derived
+  loe.completeness:
+    entity: doc
+    value_type: enum
+    allowed_values: ["complete", "incomplete", "unknown"]
+    description: >-
+      Does this explanation letter state what is being explained, when it happened, and carry the
+      borrower's signature (LO-2)? ⚠️ Only `letter_of_explanation` has all three fields; the other seven
+      LOE types (and `credit_explanation_letter`, which has NO extractor at all) resolve to "unknown" —
+      the letter is present and its completeness cannot be read. That is a DIFFERENT state from "no letter
+      exists" and from "this letter is incomplete", and the three must not collapse. The AMOUNT leg is
+      deliberately absent: `referenced_amount` fills 0/34.
+    produced_by: derived
+
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-495b — the two judgment OUTPUT tags for the rules built this ticket. Vocabulary only: a judgment
+  # rule's output tag is emitted by the judgment evaluator, not by a producer, so neither gets a
+  # tag_production.yaml entry (the same shape as income.other_income_continues and
+  # income.rental_income_supportable).
+  # ------------------------------------------------------------------------------------------------- #
+  occupancy.investment_rental_supported:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the loan's declared INVESTMENT occupancy have adequate rental-income support behind it (OC-3
+      verdict)? "unknown" for a non-investment occupancy, or when the support picture cannot be read.
+      Distinct from IN-14's per-borrower question about whether that income may be USED to qualify.
+    produced_by: AI
+  dti.atr_documentation_adequate:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the file carry supporting DOCUMENTS for each of the eight ability-to-repay factors at 12 CFR
+      1026.43(c)(2)(i)-(viii) (DT-7 verdict)? A document-presence judgment, NOT the ability-to-repay
+      determination, which is the creditor's and is made at underwriting. "unknown" on an empty or
+      unreadable file — never "no", which would accuse a file nobody could read.
+    produced_by: AI
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-496a — the program-eligibility conclusion tags. Both are DERIVED (a recipe in derived.py), not
+  # AI: each is one arithmetic comparison against a cited, declared reference value, so there is no
+  # perception step left to spend. The CO-4 precedent exactly (LP-494).
+  #
+  # `program.conforming_limit` already exists in the generated fact_tags.csv declared `number (from
+  # spec)` — a SINGLE value, which cannot express a limit that varies by county, unit count and year.
+  # It is deliberately NOT used and NOT redeclared here; PE-1 reads this conclusion tag instead, the
+  # same shape as CO-4 reading condo.reserve_adequacy rather than a raw percentage.
+  # ------------------------------------------------------------------------------------------------- #
+  program.conforming_eligibility:
+    entity: loan
+    value_type: enum
+    allowed_values: ["within_limit", "exceeds_limit", "n/a", "unknown"]
+    description: >-
+      Does this CONVENTIONAL loan's amount fall within the applicable FHFA conforming loan limit (PE-1)?
+      "n/a" for a non-conventional program. "unknown" when the amount is missing, when the property is
+      multi-unit (the 2-4 unit limits are not verified against a primary source), or when the amount
+      falls in the band between the baseline and the high-cost ceiling — where the answer depends on the
+      property COUNTY, which the snapshot does not carry. Never guesses that band clear.
+    produced_by: derived
+  # NOTE: PE-3's `program.fha_min_investment_met` is NOT declared here. It already exists in the
+  # generated fact_tags.csv (row 108, `derived`, enum yes|no|unknown), and a tag_id declared in this
+  # overlay that already exists in the CSV fails loud by design. It gets a tag_production.yaml entry
+  # only.
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-498 — FR-3's judgment OUTPUT tag. Vocabulary only: a judgment rule's output is emitted by the
+  # judgment evaluator, not by a producer, so it gets no tag_production.yaml entry (the same shape as
+  # occupancy.investment_rental_supported and dti.atr_documentation_adequate).
+  # ------------------------------------------------------------------------------------------------- #
+  contract.credits_warrant_review:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Do this contract's seller credits or side-agreement references warrant a processor's review
+      (FR-3 verdict)? A SURFACING judgment, not an accusation: "yes" means a human should look, never
+      that anything improper occurred. "unknown" when the contract's credit and concession fields are
+      absent or unreadable — an absent field is not evidence of a clean contract.
+    produced_by: AI

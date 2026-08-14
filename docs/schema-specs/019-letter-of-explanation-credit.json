@@ -25,10 +25,27 @@
     {"name": "supporting_documents", "type": "str", "why": "processor; LO-2: named evidence the letter references (light string list, not a wrapped record)", "rules": ["LO-2"], "reason_class": "processor", "rule_floor": false, "degraded_from": "list", "pii": null, "exists_today": false, "prompt_hint": null},
     {"name": "borrower_certification", "type": "str", "why": "processor: the attestation clause; underwriters check it is present", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
     {"name": "borrower_signature_present", "type": "str", "why": "LO-2 floor: the scalar signature-present indicator the rule reads (catalog only has signature[])", "rules": ["LO-2"], "reason_class": "rule", "rule_floor": true, "degraded_from": "bool", "pii": null, "exists_today": false, "prompt_hint": "Assess signature presence as a yes/no (AI for scans); do not judge whether the LOE is 'sufficient' — LO-1/LO-2 judge, this schema describes"},
-    {"name": "borrower_signature_date", "type": "date", "why": "LO-2 floor: the signature date completeness check; distinct from letter_date", "rules": ["LO-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
+    {"name": "borrower_signature_date", "type": "date", "why": "LO-2 floor: the signature date completeness check; distinct from letter_date", "rules": ["LO-2"], "reason_class": "rule", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "loan_number", "type": "str", "why": "the loan this letter pertains to", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null},
+    {"name": "property_address", "type": "str", "why": "the subject property address", "rules": [], "reason_class": "processor", "rule_floor": false, "degraded_from": null, "pii": null, "exists_today": false, "prompt_hint": null}
   ],
 
-  "nested_lists": [],
+  "nested_lists": [
+    {
+      "name": "explanation_items",
+      "shape": "flat_row",
+      "shape_reason": "one row per distinct item the letter explains (an LOE often addresses several inquiries/events)",
+      "expected_item_count": "0-many",
+      "rules": [],
+      "exists_today": false,
+      "plumbing_sites": 5,
+      "fields": [
+        {"name": "item_topic", "type": "str", "why": "what the item is (inquiry / late / large deposit / address / employment gap)"},
+        {"name": "item_date_or_period", "type": "str", "why": "the date or period"},
+        {"name": "item_explanation", "type": "str", "why": "the borrower's explanation for that item"}
+      ]
+    }
+  ],
 
   "rejected": [
     {"name": "document_title, form_number, form_revision_date, document_status_or_version", "reason": "an LOE is free-form prose, not a standardized form; classification handles type"},

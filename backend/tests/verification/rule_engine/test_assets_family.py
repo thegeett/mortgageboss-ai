@@ -84,10 +84,35 @@ def test_reserves_required_months_matrix_and_abstention() -> None:
     assert _reserves_required_months(inv, "loan", None)[0] == "6"  # agency-standard cell
     sh = _snap(mismo={"property.occupancy": _f("second_home")})
     assert _reserves_required_months(sh, "loan", None)[0] == "2"
-    # An occupancy not in the encoded map ABSTAINS (Priya-pending) — never a guessed requirement.
+    # An occupancy not in the encoded map ABSTAINS — never a guessed requirement.
+    # LP-497: the reason no longer says "Priya-pending". Every encoded cell is now tier P from
+    # B3-4.1-01 (page dated 08/07/2024), so nothing is pending an expert sign-off; the cells that are
+    # not encoded abstain on their own terms.
     other = _snap(mismo={"property.occupancy": _f("triplex_investment")})
     v, r = _reserves_required_months(other, "loan", None)
-    assert v == "unknown" and "Priya-pending" in r
+    assert v == "unknown" and "no encoded reserve requirement" in r
+
+    # LP-497 — THE PRINCIPAL-RESIDENCE CELL, which this test did not cover before, and that gap is
+    # why the defect it now guards survived: the matrix keyed on occupancy ONLY and returned 0 for
+    # EVERY principal residence, so a 2-4 unit primary needing 6 months read as needing none.
+    one_unit = _snap(
+        mismo={
+            "property.occupancy": _f("primary_residence"),
+            "property.financed_unit_count": _f("1"),
+        }
+    )
+    assert _reserves_required_months(one_unit, "loan", None)[0] == "0"
+    three_unit = _snap(
+        mismo={
+            "property.occupancy": _f("primary_residence"),
+            "property.financed_unit_count": _f("3"),
+        }
+    )
+    assert _reserves_required_months(three_unit, "loan", None)[0] == "6"
+    # A primary with NO unit count cannot be defaulted — the answer is 0 or 6 and nothing between.
+    no_units = _snap(mismo={"property.occupancy": _f("primary_residence")})
+    v, r = _reserves_required_months(no_units, "loan", None)
+    assert v == "unknown" and "unit count" in r
 
 
 def test_nsf_count_and_min_account_months_recipes() -> None:

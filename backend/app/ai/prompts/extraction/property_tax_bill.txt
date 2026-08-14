@@ -17,15 +17,34 @@ CAPTURE EVERYTHING ON THE BILL — lose nothing. There are two buckets:
      property_address   (string)  the taxed property's address (capture it!)
      assessed_value     (number)  the assessed / taxable value
      annual_tax_amount  (number)  the total annual property tax
+     penalties_and_interest (number) penalty + interest (+ costs) currently due on the
+                                   bill — the sum of the interest / penalty / costs
+                                   line items. Capture an explicit 0.00 when those
+                                   lines are present and shown at zero (a bill that is
+                                   current, no penalties). null only if the bill has no
+                                   penalty/interest line at all.
      due_dates          (string)  the due date(s) AS WRITTEN — a tax bill often has
                                    two installments; capture them verbatim (e.g.
                                    "1st: 11/01/2024; 2nd: 02/01/2025")
      taxing_authority   (string)  the county / municipality / taxing body
+     interest_begins_date (date)  the date interest / penalty BEGINS to accrue on the unpaid bill
+                                   (e.g. "Interest Begins: 01/06/2026"), if shown
+     legal_description  (string)  the property's legal description (lot / block / subdivision text),
+                                   distinct from the parcel_or_apn / PIN number
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Installments"
    (each installment amount + date), "Exemptions", "Parcel/APN", "Special
-   Assessments", "Tax Breakdown". Do not force these into the typed core — capture
-   them here so nothing is lost.
+   Assessments". Do not force these into the typed core — capture them here so
+   nothing is lost.
+
+3. JURISDICTION BREAKDOWN — a LIST, one FLAT ROW per taxing unit when the bill
+   splits the total across districts (county / municipality / fire / school /
+   special district), each with its OWN rate and amount:
+     jurisdiction_breakdown — each row: taxing_unit, tax_rate, amount_billed,
+                              adjusted_billed
+   Keep each value VERBATIM (a rate like ".5200", a per-district amount as written).
+   If the bill shows a single combined total with no per-district split, return an
+   empty list (do NOT invent districts).
 
 FOR EVERY FIELD include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -63,6 +82,9 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "base_tax_amount": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "current_balance": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
     "penalties_and_interest": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "delinquent_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "delinquent_or_lien_status": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "interest_begins_date": {"value": <YYYY-MM-DD|null>, "page": <int|null>, "snippet": <string|null>},
+    "legal_description": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "installments_and_due_dates": [{"installment_label": <string|null>, "amount": <string|null>, "due_date": <string|null>, "paid_status": <string|null>, "paid_date": <string|null>, "source": <string|null>, "page": <int|null>, "snippet": <string|null>}],
+  "jurisdiction_breakdown": [{"taxing_unit": <string|null>, "tax_rate": <string|null>, "amount_billed": <string|null>, "adjusted_billed": <string|null>, "page": <int|null>, "snippet": <string|null>}],

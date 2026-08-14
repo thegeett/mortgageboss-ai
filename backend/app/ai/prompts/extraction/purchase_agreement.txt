@@ -17,6 +17,10 @@ CAPTURE EVERYTHING IN THE CONTRACT — lose nothing. There are two buckets:
      sales_price           (number)  the purchase / sales price
      closing_date          (date)    the agreed closing / settlement date
      earnest_money_amount  (number)  the earnest money deposit amount
+     due_diligence_fee     (number)  the NC due-diligence FEE (a separate, non-refundable amount paid to
+                                      the seller for the right to terminate; credited at closing). This is
+                                      NOT earnest money and NOT the settlement balance — capture only the
+                                      explicit due-diligence fee line, null if there is none.
 
 2. ADDITIONAL SECTIONS — EVERYTHING ELSE, grouped by section, e.g. "Contingencies"
    (financing, inspection, appraisal), "Financing Terms", "Included/Excluded Items",
@@ -72,7 +76,8 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "all_parties_signed": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "personal_property_included": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "personal_property_value": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
-    "side_agreements_referenced": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "side_agreements_referenced": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "due_diligence_fee": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>}
   },
   "addenda": [{"addendum_name": <string|null>, "addendum_type": <string|null>, "addendum_date": <string|null>, "is_signed": <string|null>, "is_attached": <string|null>, "page": <int|null>, "snippet": <string|null>}],
   "contingencies": [{"contingency_type": <string|null>, "deadline_date": <string|null>, "is_waived": <string|null>, "page": <int|null>, "snippet": <string|null>}],

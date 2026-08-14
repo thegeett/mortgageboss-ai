@@ -142,10 +142,17 @@ def test_count_crosscheck_empty_when_no_count_field(tmp_path: Path) -> None:
 
 
 def test_bank_statement_002_emits_the_lp437_demo_list_spec() -> None:
-    ls = _exec_list_spec(emit_list_specs(load_spec(_SPECS / "002-bank-statement.json")))
-    assert ls.name == "transactions"
+    # LP-461 added a second list (additional_accounts) to spec 002 → emit_list_specs now emits two;
+    # select the transactions demo among them and assert its LP-437 properties are intact.
+    block = emit_list_specs(load_spec(_SPECS / "002-bank-statement.json")).split("# Register")[0]
+    body = "\n".join(line for line in block.splitlines() if not line.startswith("#"))
+    ns: dict[str, Any] = {"ListSpec": ListSpec, "DerivedSpec": DerivedSpec}
+    exec(compile(body, "<gen>", "exec"), ns)
+    specs = {v.name: v for v in ns.values() if isinstance(v, ListSpec)}
+    ls = specs["transactions"]
     assert ls.stable_row_id and "description" in ls.redact
     assert ls.derived[0].mapping == {"deposit": "credit", "withdrawal": "debit"}
+    assert "additional_accounts" in specs  # LP-461 — the combined-statement list emits too
 
 
 # --------------------------------------------------------------------------- #

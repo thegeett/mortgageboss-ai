@@ -26,7 +26,12 @@
     {"name":"total_deductions_current","type":"Decimal","why":"FR-1 — the middle term of the reconciliation","rules":["FR-1"],"reason_class":"rule","rule_floor":true,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
     {"name":"ytd_gross","type":"Decimal","why":"IN-3 — 'YTD/periods_elapsed vs stated monthly'","rules":["IN-3","IN-10"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
     {"name":"hours","type":"Decimal","why":"IN-11 (variable income)","rules":["IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
-    {"name":"rate","type":"Decimal","why":"IN-11","rules":["IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null}
+    {"name":"rate","type":"Decimal","why":"IN-11","rules":["IN-11"],"reason_class":"rule","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":true,"prompt_hint":null},
+    {"name":"net_pay_ytd","type":"Decimal","why":"YTD net pay (schema has current net_pay + ytd_gross, not net YTD) - income continuity","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"federal_taxable_wages_current","type":"Decimal","why":"federal taxable wages this period (gross less pre-tax) - income base","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"federal_taxable_wages_ytd","type":"Decimal","why":"federal taxable wages YTD - income base","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"employer_phone","type":"str","why":"employer phone (schema has employer_address only) - VOE/contact","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"check_or_payment_status","type":"str","why":"check status e.g. VOID / NON-NEGOTIABLE / For Record Purposes Only","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null}
   ],
 
   "nested_lists": [

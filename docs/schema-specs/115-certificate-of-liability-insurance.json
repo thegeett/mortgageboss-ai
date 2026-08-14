@@ -1,0 +1,67 @@
+{
+  "document_type": "certificate_of_liability_insurance",
+  "slug": "certificate-of-liability-insurance",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "ACORD 25 Certificate of Liability Insurance #<certificate_number> for <insured_name> (holder <certificate_holder_name>); <coverage_lines> liability coverage sections. A CERTIFICATE, not a policy.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"certificate_number","type":"str","why":"identity — the ACORD 25 certificate id","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'CERTIFICATE NUMBER' as printed (e.g. 'W47440846')"},
+    {"name":"certificate_date","type":"date","why":"identity/processor — the certificate issue date (recency of the evidence)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'DATE (MM/DD/YYYY)' in the ACORD 25 header"},
+    {"name":"producer_name","type":"str","why":"identity — the insurance producer/agency that issued the certificate","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'PRODUCER' name"},
+    {"name":"producer_address","type":"str","why":"identity — the producer's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"insured_name","type":"str","why":"identity — the named insured the policies were issued to (e.g. the builder / HOA / association)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'INSURED' name"},
+    {"name":"insured_address","type":"str","why":"identity — the insured's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"certificate_holder_name","type":"str","why":"identity — who the certificate is furnished to (often the lender, ISAOA/ATIMA)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'CERTIFICATE HOLDER' name"},
+    {"name":"certificate_holder_address","type":"str","why":"identity — the certificate holder's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"description_of_operations","type":"str","why":"processor — the free-text 'DESCRIPTION OF OPERATIONS / LOCATIONS / VEHICLES' (project, units, buyer, etc.)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The description-of-operations block, verbatim"},
+    {"name":"project_or_property_reference","type":"str","why":"processor — the project/property the coverage relates to (from the operations block or the ACORD 101 remarks: project name, property address, unit)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The project/property reference (e.g. 'Senata at Research Park', a unit address); capture as printed"}
+  ],
+
+  "nested_lists": [
+    {
+      "name":"coverage_lines","shape":"flat_row",
+      "shape_reason":"the ACORD 25 lists several COVERAGE SECTIONS (CGL, Auto, Umbrella/Excess, Workers Comp), each with an insurer, policy number, effective/expiration dates, and limits. ONE ROW PER SECTION (the LP-460 lesson: NOT one row per sub-limit). A CGL section prints ~6 sub-limits; the row carries the section's PRIMARY headline limit, the rest fall to the catch-all. Mirrors the master_insurance coverage_lines (one limit per section).",
+      "expected_item_count":"1-6","rules":[],
+      "exists_today":false,"plumbing_sites":5,
+      "redact":["policy_number"],
+      "fields":[
+        {"name":"coverage_type","type":"str","why":"the coverage section label: Commercial General Liability / Automobile Liability / Umbrella (Excess) Liability / Workers Compensation / Property / Crime / Fidelity — as printed"},
+        {"name":"insurer_name","type":"str","why":"the insurer affording this coverage (Insurer A/B/... resolved to its name)"},
+        {"name":"insurer_naic_number","type":"str","why":"the insurer's NAIC # for this coverage"},
+        {"name":"policy_number","type":"str","why":"the policy number for this coverage section"},
+        {"name":"policy_effective_date","type":"date","why":"POLICY EFF (MM/DD/YYYY) for this section"},
+        {"name":"policy_expiration_date","type":"date","why":"POLICY EXP (MM/DD/YYYY) for this section"},
+        {"name":"limit_description","type":"str","why":"the label of the section's PRIMARY headline limit (e.g. 'Each Occurrence', 'Combined Single Limit', 'E.L. Each Accident')"},
+        {"name":"limit_amount","type":"Decimal","why":"the amount of that primary headline limit"}
+      ]
+    }
+  ],
+
+  "rejected": [
+    {"name":"per-sub-limit rows","reason":"the LP-460 lesson applied directly — a blunt 'emit every labeled limit' fragments one CGL section into ~6 rows. The unit of capture is ONE ROW PER COVERAGE SECTION; secondary sub-limits (Damage to Rented Premises, Med Exp, General Aggregate, Products-Comp/Op) fall to the catch-all."},
+    {"name":"is_adequate / meets_requirement / coverage_sufficient","reason":"JUDGMENTS, not facts — whether coverage satisfies a program requirement is a rule/processor call, not a value on the certificate. Tags describe; rules judge."},
+    {"name":"master_property_coverage / fidelity_bond_amount","reason":"an ACORD 25 is a LIABILITY certificate (CGL/Auto/WC/Umbrella); it does NOT carry master-property (dwelling replacement cost) or fidelity/crime coverage. That is an ACORD 27/28 (Evidence of Property Insurance) + a crime cert — a different form. Do not invent property/fidelity fields the ACORD 25 does not print."},
+    {"name":"producer_phone / producer_email / contact_name / revision_number","reason":"contact/administrative minutiae — catch-all"},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "ACORD 25 is a fixed-layout form; the coverage grid rows are CGL, Auto, Umbrella/Excess, Workers Comp (blank rows have no policy → no coverage_lines row)",
+    "an insurer is referenced as 'INSURER A/B/...' in the grid and named in the 'INSURER(S) AFFORDING COVERAGE' block with a NAIC # — resolve the letter to the name",
+    "a CGL section prints ~6 sub-limits; capture the PRIMARY (Each Occurrence) as the row limit",
+    "an ACORD 101 Additional Remarks Schedule (page 2) may carry the property address and loan number — feed project_or_property_reference (and note the loan number is scrubbed at the snapshot boundary)"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Certificate vs the existing master_insurance_policy_for_condominium — redundant?","options":["separate type","let the master-policy type absorb it"],"recommendation":"SEPARATE (GEET'S DECISION, LP-467): a summary CERTIFICATE (ACORD 25 liability) is structurally and content-wise disjoint from the governing condo master POLICY; forcing 073 into the master schema (dwelling/deductible/causes-of-loss) produces garbage. Not redundant.","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "⚠️ CO-3 CORRECTION (LP-467): the plan tied this type to CO-3 (condo master policy + fidelity bond). THAT IS WRONG. CO-3's inputs are master-PROPERTY coverage + a fidelity/crime bond, which arrive on an ACORD 27/28 (Evidence of Property Insurance) + a crime certificate — NOT this ACORD 25 (liability). Anyone building CO-3 must NOT look for its inputs here. This type serves NO rule (rules_served empty); it earns its catalog entry on PROCESSOR VISIBILITY (a real, distinct standard document that otherwise dilutes `unknown`), the same standard as wire_instructions (ADR-362/363).",
+    "The sample 073 is a homebuilder's (Taylor Morrison) liability certificate — CGL + Auto + Workers Comp for a project — not a condo master-property/fidelity cert.",
+    "No _PII_FIELDS entry: certificate_number ('W'-prefixed), policy numbers (separator'd), NAIC (5-digit), and limits (<9 digits) do not trip the contiguous-digit guard. description_of_operations + project_or_property_reference get the 9+-digit scrub backstop (the ACORD 101 prints a bare loan number)."
+  ]
+}

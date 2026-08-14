@@ -78,6 +78,10 @@ class PayoffStatementExtraction(BaseModel):
     lien_release_timing: TypedField[str] = Field(default_factory=TypedField)
     quote_status: TypedField[str] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar additions --------------------------- #
+    fdcpa_notice_present: TypedField[str] = Field(default_factory=TypedField)
+    servicer_nmls_id: TypedField[str] = Field(default_factory=TypedField)
+
     # --- Captured nested lists (LP-443) — bare rows, snapshot-read generically ------- #
     payoff_conditions_orlimitations: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -130,6 +134,9 @@ _CORE_SPEC: CoreSpec = (
     ("certified_funds_requirement", coerce_str),
     ("lien_release_timing", coerce_str),
     ("quote_status", coerce_str),
+    # LP-461 diff additions
+    ("fdcpa_notice_present", coerce_str),
+    ("servicer_nmls_id", coerce_str),
 )
 
 

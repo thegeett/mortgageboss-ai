@@ -1,0 +1,50 @@
+{
+  "document_type": "service_invoice",
+  "slug": "service-invoice",
+  "tier": 1,
+  "rules_served": [],
+  "summary_hint": "Service invoice from <vendor_name> for <service_description>: <total_amount> (loan <loan_number>). A bill, not a receipt.",
+  "existing_extractor": null,
+  "catalog_coverage": "full",
+
+  "typed_core": [
+    {"name":"vendor_name","type":"str","why":"identity — the service provider billing (loan processor, surveyor, credit/title vendor, etc.)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The vendor/issuer name on the invoice"},
+    {"name":"vendor_address","type":"str","why":"identity — the vendor's address","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"invoice_number","type":"str","why":"identity — the vendor's invoice id, when printed","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if an 'INVOICE #' is printed (some invoices have none)"},
+    {"name":"invoice_date","type":"date","why":"processor — the invoice date","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":null},
+    {"name":"due_date","type":"date","why":"processor — the payment due date, when printed","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if printed; leave null otherwise"},
+    {"name":"bill_to_name","type":"str","why":"identity — who the invoice is billed to (may be the borrower, the lender, or a broker)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The 'Bill To' / 'Invoice To' name"},
+    {"name":"loan_number","type":"str","why":"identity — the loan the invoice relates to, when printed (ties the invoice to the file)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"Only if a loan number is printed; captured verbatim, masked at the snapshot boundary by the global PII registry"},
+    {"name":"borrower_name","type":"str","why":"identity — the borrower, when named (often coincides with bill_to_name, but a lender-billed invoice may differ)","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"person","pii":null,"exists_today":false,"prompt_hint":"Only if a borrower is named distinctly"},
+    {"name":"property_address","type":"str","why":"identity — the property the service was for, when printed","rules":[],"reason_class":"identity","rule_floor":false,"degraded_from":"address","pii":null,"exists_today":false,"prompt_hint":"e.g. a 'FOR:' line or property reference; leave null if absent"},
+    {"name":"service_description","type":"str","why":"processor — what was billed (e.g. 'Third Party Loan Processing', 'Survey Fee', 'Credit Report')","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The service/line description; if several lines, the primary/summary description"},
+    {"name":"total_amount","type":"Decimal","why":"processor — the invoice total (the amount owed)","rules":[],"reason_class":"processor","rule_floor":false,"degraded_from":null,"pii":null,"exists_today":false,"prompt_hint":"The invoice total"}
+  ],
+
+  "nested_lists": [],
+
+  "rejected": [
+    {"name":"line_items[]","reason":"both sampled invoices are SINGLE-LINE (064 one description + total; 058's table is one 'Survey Fee' line + 10 EMPTY template rows). A single service_description + total_amount suffices; an unused list is plumbing for nothing (A4). Add it only when a genuine multi-line invoice appears."},
+    {"name":"amount_paid / payment_status / balance_due","reason":"an invoice is a BILL (what is OWED), not a receipt. The paid/receipt side is the existing appraisal_payment / evidence_of_payment types. Neither is printed on the samples; adding them would blur the invoice/receipt line."},
+    {"name":"loan_originator_name / processor_name / vendor_nmls","reason":"processing-invoice-specific fields (on 064) — this is ONE generic vendor-invoice type; vendor-specific fields do not generalise (four of six samples are one processor = one borrower's workflow, not a market pattern). Catch-all."},
+    {"name":"is_valid / is_reasonable / fee_is_customary","reason":"JUDGMENTS, not facts. Tags describe; rules judge."},
+    {"name":"the 8 TECHNICAL provenance fields","reason":"already in the TypedField wrapper"}
+  ],
+
+  "encoding_variations": [
+    "one GENERIC type across vendor kinds — processing (HR Loan Processing), survey (Van Metre), credit-order, title, etc.",
+    "fields are INCONSISTENT across vendor kinds: 064 has a loan number but no invoice number; 058 has an invoice number and a property ('FOR:') but no loan number — hence most fields optional",
+    "bill_to_name often equals the borrower; a lender-billed invoice may name the lender (e.g. 'UWM') separately",
+    "single-line is the norm; a 'DESCRIPTION/AMOUNT' table may be a template with empty rows"
+  ],
+
+  "open_questions": [
+    {"id":1,"q":"Separate types per vendor kind (processing / survey / credit)?","options":["one generic service_invoice","per-vendor types"],"recommendation":"ONE generic type (GEET'S DECISION, LP-467): four of six samples are one processor (HR Loan Processing) — that is one borrower's workflow, not a market pattern; a processing_invoice type would not generalise.","blocks_implementation":false}
+  ],
+
+  "notes": [
+    "Serves NO rule (rules_served empty) — low value per document (vendor, amount, loan number), but six documents and a trivial schema; earns a catalog entry on processor visibility (ADR-362/363), keeping them out of `unknown`.",
+    "loan_number reuses the existing global _PII_FIELDS 'loan_number' registration (masked). invoice_number is left UNMASKED (a vendor invoice id a processor needs to read; short on samples) — a rare 9+-digit bare invoice number is an accepted residual.",
+    "service_description gets the 9+-digit scrub backstop (_SCRUB_FREE_TEXT_FIELDS) in case a description embeds a bare loan number."
+  ]
+}

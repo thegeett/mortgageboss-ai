@@ -65,6 +65,14 @@ class CalculatorView(BaseModel):
     headline_label: str
     status: str | None  # "pass" / "over" / "required" / "not_required" / "sufficient" / ...
     program: str | None
+    # LP-498 review — the STRUCTURED reserve months, for the same reason ``computed`` is structured:
+    # a rule must never read a number out of ``headline``. AS-4 declares
+    # ``months_available: {calc: [reserves, months_available]}``, and ``map_reserves`` had no such key
+    # to project — it emitted headline/status/program only, so the operand resolved to None and AS-4
+    # ``couldnt_check``ed on every real file while its tests hand-built the key. None on a view that
+    # did not compute (no PITI divisor) or whose requirement is unknown.
+    months_available: Decimal | None = None
+    months_required: Decimal | None = None
     inputs: list[CalcLine]
     steps: list[CalcStep]
     formulas: list[str]

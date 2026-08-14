@@ -84,6 +84,11 @@ class GiftLetterExtraction(BaseModel):
     donor_signature_present: TypedField[str] = Field(default_factory=TypedField)
     donor_signature_date: TypedField[date] = Field(default_factory=TypedField)
 
+    # --- LP-461 diff — verified scalar addition ---------------------------- #
+    # The loan number the gift is tied to. UNMASKED on purpose: this is the join key used to match the
+    # gift to THE loan file (a masked value cannot match). (subject_property_address already exists.)
+    loan_number: TypedField[str] = Field(default_factory=TypedField)
+
     additional_sections: list[CatchAllSection] = Field(default_factory=list)
 
 
@@ -134,6 +139,8 @@ _CORE_SPEC: CoreSpec = (
     ("document_issue_date", coerce_date),
     ("donor_signature_present", coerce_str),
     ("donor_signature_date", coerce_date),
+    # LP-461 diff addition
+    ("loan_number", coerce_str),
 )
 
 

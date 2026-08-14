@@ -55,7 +55,10 @@ from app.services.tag_production import (
 )
 from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
-from app.verification.rule_engine.enumerators import enumerate_subjects
+from app.verification.rule_engine.enumerators import (
+    enumerate_subjects,
+    per_liability_source_is_degraded,
+)
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
 from app.verification.rule_engine.result import RuleEvaluation
@@ -74,7 +77,12 @@ from app.verification.tag_materialization.producer import materialize_tags
 # proven separately) — this stage adds the id.* families keyed under the document / loan subjects, and
 # (LP-332) the borrower subject (borrower-keyed citizenship + the per-borrower income shortfall), which
 # activates ID-8 and IN-1 live.
-_MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower"})
+# LP-483 review: ``liability`` was MISSING here while its declaration shipped, so the "first produced
+# liab.* tag" materialized in tests (which omit ``only_subjects``) and NEVER on a real run. ⚠️ And the
+# orphan guard could not catch it: that guard reads ``load_declarations()``, so DECLARING a tag makes it
+# look produced no matter what this scope says. ``test_declared_subjects_are_all_materialized`` now pins
+# the two together — a new subject family fails until it is added here.
+_MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower", "liability"})
 
 
 # Subject enumerations whose subjects are derived from the DOCUMENTS section (per-transaction /
@@ -86,8 +94,19 @@ _MATERIALIZED_SUBJECTS = frozenset({"document", "loan", "borrower"})
 # ``per_account`` (accounts are grouped from the statement documents — zero accounts means no statements
 # resolved, a degraded reason, not "the accounts are gone").
 _DOCUMENT_DERIVED_ENUMERATIONS = frozenset(
-    {"per_deposit", "per_borrower", "per_document", "per_account"}
+    {"per_deposit", "per_borrower", "per_document", "per_account", "per_liability"}
 )
+
+# ⚠️ MIXED-SOURCE enumerations, where "zero subjects" is NOT a sufficient degradation signal (LP-480
+# review). ``per_liability`` unions credit-report tradelines with MISMO stated liabilities, so a file with
+# stated liabilities returns a NON-EMPTY union even when the credit report failed to build — the union
+# looks healthy while the whole document-derived half is missing, and every prior tradeline finding would
+# retire as "no longer applies". Each entry maps its enumeration to a predicate that answers "was the
+# document-derived SOURCE degraded?", checked in ADDITION to the empty check. A future mixed-source shape
+# adds its key here; a single-source shape needs nothing.
+_MIXED_SOURCE_DEGRADATION: dict[str, Callable[[Snapshot], bool]] = {
+    "per_liability": per_liability_source_is_degraded,
+}
 
 
 def _load_bearing_tag_ids(rule_id: str) -> set[str]:
@@ -399,14 +418,17 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     covered automatically (LP-327).
     """
     eligible = set(ACTIVE_RULE_IDS)
-    enumerated_empty: dict[str, bool] = {}  # memoize per enumeration key (rules share enumerations)
+    degraded: dict[str, bool] = {}  # memoize per enumeration key (rules share enumerations)
     for rule_id in ACTIVE_RULE_IDS:
         enumeration = load_rule_spec(rule_id).subject_enumeration
         if enumeration not in _DOCUMENT_DERIVED_ENUMERATIONS:
             continue
-        if enumeration not in enumerated_empty:
-            enumerated_empty[enumeration] = not enumerate_subjects(enumeration, snapshot)
-        if enumerated_empty[enumeration]:
+        if enumeration not in degraded:
+            source_degraded = _MIXED_SOURCE_DEGRADATION.get(enumeration)
+            degraded[enumeration] = not enumerate_subjects(enumeration, snapshot) or (
+                source_degraded is not None and source_degraded(snapshot)
+            )
+        if degraded[enumeration]:
             eligible.discard(rule_id)
     return frozenset(eligible)
 

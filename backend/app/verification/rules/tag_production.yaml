@@ -43,6 +43,16 @@ tags:
   # LP-332: the loan program (loan.program in MISMO), ID-8's other load-bearing tag. The loan subject
   # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
   program.type: {mode: parsed, subject: loan, data: loan.program}
+  # LP-498 — FR-3's input. Document-subject, scoped to the purchase contract: the seller-credit and
+  # side-agreement fields live on purchase_agreement (seller_credit_amount, seller_credit_purpose,
+  # other_concessions_amount, side_agreements_referenced) and nowhere else in the schema.
+  contract.unusual_credits: {mode: ai, subject: document, data: contract_credits}
+  # LP-496a — the program-eligibility conclusion tags (PE-1, PE-3). Both DERIVED: each is one cited
+  # arithmetic comparison, no perception step left to spend (the CO-4 precedent).
+  # program.conforming_limit is deliberately NOT produced — it is declared `number (from spec)`, a
+  # single value, and the limit varies by county / unit count / year. PE-1 reads the conclusion tag.
+  program.conforming_eligibility: {mode: derived, subject: loan, data: program_conforming_eligibility}
+  program.fha_min_investment_met: {mode: derived, subject: loan, data: fha_min_investment_met}
   # LP-424 (item 4) — the loan's purpose (purchase/refinance), promoted from the MISMO loan.purpose fact.
   loan.purpose: {mode: parsed, subject: loan, data: loan.purpose}
   contract.closing_date: {mode: parsed, subject: document, data: closing_date}
@@ -183,6 +193,10 @@ tags:
   contract.sales_price: {mode: parsed, subject: document, data: sales_price}
   contract.loan_sales_price: {mode: derived, subject: loan, data: loan_sales_price}
   property.purchase_price: {mode: parsed, subject: loan, data: property.purchase_price}
+  # LP-488 review — the LTV worksheet's two appraised-basis fields, in ITS priority order. A rule reading
+  # only the appraisal document diverged from the worksheet on every MISMO-imported file.
+  property.valuation_amount: {mode: parsed, subject: loan, data: property.valuation_amount}
+  property.estimated_value: {mode: parsed, subject: loan, data: property.estimated_value}
   # LP-454 (step D.3) — the purchase agreement's earnest-money amount (PC-5 / AS-2). A PARSED document fact
   # from the purchase_agreement extractor's earnest_money_amount field — POPULATED + clean (a number: 5000.0 on
   # LF-6T3N). ⚠️ NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
@@ -246,10 +260,45 @@ tags:
   # LP-418 — are the rental-income supporting documents adequate (leases, occupancy)? An AI perception at the
   # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
   # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
+  # LP-495b review — "n/a" IS JUST A VALUE; the SPECS carry the scoping. An earlier note here said "n/a" "lets IN-14
+  # reach not_applicable", describing a mechanism that does not exist: nothing in the rule engine treats
+  # "n/a" specially, `evaluate_gate` short-circuits on None and "unknown" only, so "n/a" passes the gate like
+  # any other present value. OC-3 and IN-14 now each declare a `judgment.applicability` predicate
+  # (occupancy.rental_support ne "n/a") — that is what turns this value into not_applicable.
+  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation) — rule_tags.csv has NO OC-3 rows at all, and no
+  # `IN-14,occupancy.rental_support` row, though fact_tags.csv already names OC-3 as this tag's consumer
+  # and DT-7 has its edge. rule_tags.csv is GENERATED from the "Rule → Tags" sheet of
+  # docs/snapshot-fact-tags.xlsx, and unlike the vocabulary it has NO vocabulary_extra.yaml overlay, so
+  # there is no in-repo fix — the same wall DT-7's missing enum value hits. Behaviourally harmless today:
+  # the projection only validates that a referenced rule exists in rule_kinds.csv, `_ai_groups_for_rules`
+  # derives from spec load_bearing_tags + bar load_bearing_ai_tags, and nothing calls
+  # tags_required_by_rule / rules_requiring_tag. But the projected tag -> rule graph is wrong for both
+  # rules LP-495b activated, so it should be corrected at the next reconciliation:
+  #   OC-3,occupancy.rental_support / OC-3,occupancy.stated / IN-14,occupancy.rental_support
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
+  # LP-495b — DT-7's producer. This tag was a vocabulary orphan (fact_tags.csv + rule_tags.csv, no
+  # producer anywhere), the ADR-289 shape, and LP-405 recorded it as needs-producer. It now materialises
+  # at the LOAN subject from the file's whole document set.
+  # THE TAG ANSWERS A PRESENCE QUESTION, NOT THE ATR DETERMINATION. Ability-to-repay is a CREDITOR
+  # obligation under Reg Z assessed at underwriting; a processor assembling a file is not the party
+  # making it. So the question asked is "does the file carry documents that would SUPPORT each of the
+  # eight factors" — checkable from the document set, and genuinely a processor's job. The prompt says so
+  # explicitly, because the rule's NAME ("ATR documentation completeness") invites the stronger reading.
+  # The declared enum is ["complete","incomplete"] with NO abstain. The prompt therefore sanctions
+  # "unknown" explicitly and ai.py coerces it to an unknown tag (the txn.is_nsf_or_overdraft precedent,
+  # LP-418). Recorded as value-space drift for the next docs/snapshot-fact-tags.xlsx reconciliation,
+  # since the generated fact_tags.csv cannot be hand-edited. Low confidence must NEVER be mapped onto
+  # "incomplete" — that would turn "I could not tell" into an accusation.
+  dti.atr_factors_documented: {mode: ai, subject: loan, data: atr_documentation}
   # LP-444 — CR-4's verdict tag (INERT: CR-4 not in ACTIVE_RULE_IDS, so credit_profile is not required
   # and does not run live). Produced by the credit_profile borrower group (list-visibility's first consumer).
-  credit.undisclosed_tradeline: {mode: ai, subject: borrower, data: credit_profile}
+  # ADR-375 — DEMOTED from `ai` to `derived`. The per-liability judgment (liab.in_application) is now the
+  # single source of truth; this borrower-level tag AGGREGATES it, so CR-1 and CR-4 cannot disagree about
+  # the same file. Fail-closed: `unknown` when there is nothing to aggregate, NEVER "no" (a false all-clear
+  # on a file with no credit report is exactly what the aggregation step could otherwise invent).
+  credit.undisclosed_tradeline: {mode: derived, subject: borrower, data: credit_undisclosed_tradeline}
+  # ADR-375 — the atomic judgment Priya calibrates: "is THIS tradeline on the application?"
+  liab.in_application: {mode: ai, subject: liability, data: credit_profile}
   # --- LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric OBSERVATIONS over the credit
   #     report's tradelines list (loan-level aggregate). Pure aggregates ONLY — the row vocabulary is open-ended
   #     bureau text (account_type = AUTO/INST/REV/…, is_disputed = free-text incl. non-disputes,
@@ -257,6 +306,26 @@ tags:
   #     interpreting a dispute/late is a Priya/AI question (ADR), NOT this recipe. Tags DESCRIBE, rules judge:
   #     no threshold, no is_derogatory. Fail closed: no tradelines → the tag abstains to "unknown" (never a 0).
   #     Feeds CR-1's DTI cross-check; the per-row classification rules (CR-8/9/10/12) are deferred. ------------ #
+  # LP-483 — the FIRST produced liab.* tag. Parsed from whichever source the subject came from (the
+  # liability family's alias map resolves the column: the tradeline's `monthly_payment`, the MISMO
+  # liability's `monthly_payment`). A raw number, so no classification is involved.
+  # ⚠️ `liab.account_type` is deliberately NOT declared here: its vocabulary enum
+  # (revolving/installment/mortgage/...) does not match either source's raw codes (REV/AUTO/MTG;
+  # MortgageLoan/Installment), and mapping between them is the open-vocabulary classification ADR-353
+  # defers to Priya. A parsed tag is NOT validated against allowed_values, so declaring it would ship
+  # out-of-domain values silently. See docs/tickets/LP-483.md.
+  liab.monthly_payment: {mode: parsed, subject: liability, data: monthly_payment}
+  # LP-485 — the date-compare family. The two parsed dates are document_type-SCOPED so an unrelated
+  # document sharing a field name can never materialize them (the contract.emd_amount precedent).
+  rate_lock.expiration: {mode: parsed, subject: document, data: rate_lock_expiration, document_type: loan_estimate}
+  property.appraisal_date: {mode: parsed, subject: document, data: appraisal_effective_date, document_type: appraisal}
+  rate_lock.days_to_closing: {mode: derived, subject: loan, data: rate_lock_days_to_closing}
+  credit.report_age_months_at_closing: {mode: derived, subject: loan, data: credit_report_age_months}
+  property.appraisal_age_months_at_closing: {mode: derived, subject: loan, data: appraisal_age_months}
+  # LP-486 / ADR-376 — CR-12's dispute flag. DERIVED (not parsed) because the raw field's encoding varies
+  # by bureau (clean Y/N on one, free text on another) and the recipe recognises a CLOSED vocabulary,
+  # abstaining on anything else. A parsed passthrough would emit out-of-domain values silently.
+  liab.is_disputed: {mode: derived, subject: liability, data: liability_dispute_status}
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report
@@ -269,6 +338,189 @@ tags:
   # (never the literal "unknown" the vocabulary lists — a gated rule reads couldnt_check on the absence).
   credit.report_date: {mode: parsed, subject: document, data: report_date, document_type: credit_report}
 
+  # --- LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy). ------------------------------ #
+  #
+  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED. `lender_name` is a field on TEN document types and
+  # `policy_number` on many more; an unscoped declaration matches on FIELD NAME ALONE and would read a
+  # 1098's servicer, or a VOE's requester, as this loan's creditor. Scope is the whole safety of the
+  # compare — see the note in vocabulary_extra.yaml.
+  ins.mortgagee_name: {mode: parsed, subject: document, data: mortgagee_name, document_type: homeowners_insurance}
+  loan.lender_name_cd: {mode: parsed, subject: document, data: lender_name, document_type: closing_disclosure}
+  loan.lender_name_le: {mode: parsed, subject: document, data: lender_name, document_type: loan_estimate}
+
+  # --- LP-488 — MI-1 (conventional MI requirement). ------------------------------------------------- #
+  # loan.amount is the MISMO BASE loan amount (TERMS_OF_LOAN/BaseLoanAmount — the model's own comment
+  # records the mapping); loan.note_amount is TERMS_OF_LOAN/NoteAmount. Both already exist in the MISMO
+  # section; neither was ever declared, so neither reached a rule.
+  loan.amount: {mode: parsed, subject: loan, data: loan.amount}
+  # Read by the LTV purpose resolver so it mirrors app.services.ltv.ltv_purpose_for exactly. It does not
+  # change the DENOMINATOR (both refinance kinds divide by the appraised value) — it is declared so the
+  # resolver reads a real fact rather than silently defaulting.
+  loan.refinance_type: {mode: parsed, subject: loan, data: loan.refinance_type}
+  loan.note_amount: {mode: parsed, subject: loan, data: loan.note_amount}
+  # ⚠️ document_type-SCOPED. `appraised_value` is the appraisal's own field; reading it unscoped would let
+  # a future document reusing the name drive the LTV denominator.
+  property.appraised_value: {mode: parsed, subject: document, data: appraised_value, document_type: appraisal}
+  property.value_basis: {mode: derived, subject: loan, data: property_value_basis}
+  loan.ltv_percent: {mode: derived, subject: loan, data: loan_ltv_percent}
+
+  # --- LP-488 — MI-4 (FHA upfront MIP). ------------------------------------------------------------ #
+  # Reads the SAME two MISMO amounts MI-1 declares, as a pair: loan.amount is TERMS_OF_LOAN/BaseLoanAmount
+  # and loan.note_amount is TERMS_OF_LOAN/NoteAmount. On an FHA loan the difference IS the financed
+  # upfront MIP — two independent MISMO elements, so this is not an ADR-330 vacuity.
+  mi.fha_ufmip_percent: {mode: derived, subject: loan, data: fha_ufmip_percent}
+
+  # --- LP-488 — CO-1 (condo questionnaire present). A document-type PRESENCE read, loan-scoped because
+  #     "no questionnaire" is a statement about the FILE and cannot be produced on a document that is
+  #     not there (IH-7's reasoning). ------------------------------------------------------------------ #
+  condo.questionnaire_present: {mode: derived, subject: loan, data: condo_questionnaire_present}
+
+  # --- LP-491 — TI-1 (title commitment parties). ⚠️ EVERY PARSED TAG document_type-SCOPED: `seller_name`
+  #     and `vested_owner_name` both mean something specific to their own document. ------------------- #
+  title.vested_owner_name: {mode: parsed, subject: document, data: vested_owner_name, document_type: title_commitment}
+  title.vested_owner_name_2: {mode: parsed, subject: document, data: vested_owner_name_2, document_type: title_commitment}
+  contract.seller_name: {mode: parsed, subject: document, data: seller_name, document_type: purchase_agreement}
+  title.vested_owner_matches: {mode: derived, subject: document, data: title_vested_owner_matches}
+  # LP-491 — TI-2's two inputs, and TI-6's three deterministic chain facts. ⚠️ All document_type-scoped.
+  title.legal_description: {mode: parsed, subject: document, data: legal_description, document_type: title_commitment}
+  title.property_address: {mode: parsed, subject: document, data: property_address, document_type: title_commitment}
+  title.chain_transfer_count: {mode: derived, subject: document, data: title_chain_transfer_count}
+  title.chain_has_gap: {mode: derived, subject: document, data: title_chain_has_gap}
+  title.chain_shortest_interval_days: {mode: derived, subject: document, data: title_chain_shortest_interval}
+  # --- LP-492 — PR-2. Reads the ALREADY-DECLARED property.appraised_value (LP-488) and
+  #     property.purchase_price (MISMO), so the two sides come from TWO DOCUMENTS — not a vacuity.
+  property.value_vs_price_gap: {mode: derived, subject: loan, data: property_value_vs_price_gap}
+  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. ⚠️ Every parsed tag document_type-scoped to `appraisal`. ---
+  property.condition_rating_raw: {mode: parsed, subject: document, data: condition_rating, document_type: appraisal}
+  property.condition_rating: {mode: derived, subject: document, data: property_condition_rating}
+  property.appraisal_completion_condition: {mode: parsed, subject: document, data: appraisal_completion_condition, document_type: appraisal}
+  property.appraisal_property_type: {mode: parsed, subject: document, data: property_type, document_type: appraisal}
+  property.appraisal_address_match: {mode: derived, subject: document, data: property_appraisal_address_match}
+
+  # --- LP-493 — PC-5 and PC-8. ⚠️ contract.emd_amount is ALREADY declared (parsed, purchase_agreement).
+  #     contract.arms_length and title.parties_match are deliberately NOT declared — see LP-493.md.
+  #     ⚠️ emd_sourced is BORROWER-scoped, not document-scoped: tracing a deposit needs the contract AND
+  #     the bank statements together, and a document-subject group sees only its own document.
+  contract.emd_sourced: {mode: ai, subject: borrower, data: contract_emd}
+  contract.personal_property: {mode: ai, subject: document, data: contract_personal_property}
+
+  # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
+  #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —
+  #     and the ONE aus_findings document in the corpus is an LPA whose recommendation reads "ACCEPT",
+  #     which is not in the tag's DU-shaped vocabulary at all. A parsed passthrough compared for equality
+  #     against one vendor's spelling would misread every file from the other. ADR-376: recognise a
+  #     declared closed vocabulary, abstain on anything else. ------------------------------------------ #
+  aus.recommendation: {mode: derived, subject: document, data: aus_recommendation}
+
+  # --- LP-490 — the credit AI cohort. ⚠️ EVERY TAG HERE IS UNCALIBRATED; every rule reading one is INERT
+  #     (`not-calibratable-yet` → is_eligible False, LP-484). Declared so they MATERIALIZE and can be
+  #     scored later; nothing here goes live in this ticket. ---------------------------------------- #
+  credit.inquiry_explained: {mode: ai, subject: borrower, data: credit_inquiries}
+  # CR-6's three derogatory facts, co-produced per liability by one pass (one read of one tradeline).
+  liab.is_derogatory: {mode: ai, subject: liability, data: credit_derogatory}
+  liab.derogatory_type: {mode: ai, subject: liability, data: credit_derogatory}
+  liab.derogatory_date: {mode: ai, subject: liability, data: credit_derogatory}
+  # CR-8's mortgage-history facts. ⚠️ structured_history_confident is Priya's OWN gate: when the payment
+  #     history cannot be read reliably, CR-8 must say so rather than parse an ambiguous string.
+  liab.payment_status: {mode: ai, subject: liability, data: credit_mortgage_history}
+  liab.is_mortgage: {mode: ai, subject: liability, data: credit_mortgage_history}
+  liab.structured_history_confident: {mode: ai, subject: liability, data: credit_mortgage_history}
+  liab.mortgage_late_60_plus_last_12mo: {mode: ai, subject: liability, data: credit_mortgage_history}
+  # CR-10's collection facts.
+  liab.is_medical_collection: {mode: ai, subject: liability, data: credit_collections}
+  liab.collection_balance: {mode: ai, subject: liability, data: credit_collections}
+  # Derived seasoning + collection aggregates (deterministic arithmetic over the AI facts above).
+  credit.derogatory_months_elapsed: {mode: derived, subject: liability, data: derogatory_months_elapsed}
+  credit.collection_aggregate_balance: {mode: derived, subject: borrower, data: collection_aggregate_balance}
+  credit.largest_single_collection_balance: {mode: derived, subject: borrower, data: credit_largest_single_collection_balance}
+  credit.has_collections: {mode: derived, subject: borrower, data: credit_has_collections}
+  # CR-10's DU branch reads the subject property's OCCUPANCY. It is a MISMO fact that has always been in
+  # the snapshot and was never declared, so it reached no rule. ⚠️ Absent occupancy must abstain, never
+  # default to the most permissive cell (one-unit primary requires no payoff at all).
+  property.occupancy: {mode: parsed, subject: loan, data: property.occupancy}
+  # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
+  # here — not AI. The catalog planned ai_fuzzy_match; typed extraction now reads the clause into
+  # mortgagee_name, so the perception step is spent and what remains is a normalised string compare
+  # (LP-487 / rule_kinds.csv edit). Per BINDER, like IH-1 — a file may carry several.
+  ins.mortgagee_clause_correct: {mode: derived, subject: document, data: mortgagee_clause_correct}
+
+  condo.master_policy_number: {mode: parsed, subject: document, data: policy_number, document_type: master_insurance_policy_for_condominium}
+  condo.master_policy_basis_raw: {mode: parsed, subject: document, data: replacement_cost_indicator, document_type: master_insurance_policy_for_condominium}
+  condo.master_liability_limit: {mode: parsed, subject: document, data: general_liability_each_occurrence_limit, document_type: master_insurance_policy_for_condominium}
+
+  # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 eligibility). ---------------------------- #
+  #
+  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED to condo_questionnaire (LP-487's discipline).
+  # `total_units` in particular is a plausible field name on other forms; an unscoped read would let an
+  # unrelated document decide a project's single-entity concentration tier.
+  #
+  # ⚠️ THE CATALOG SAID "AI parses the budget". THERE IS NO BUDGET DOCUMENT TYPE — an HOA budget cannot be
+  # classified, extracted, or attached, so it reaches no loan file. The reserve percentage is a TYPED
+  # questionnaire field, which is why these are `parsed` and not an ai_group (LP-494 Phase A §4).
+  #
+  # ⚠️ ALL SIX FILL 0/4 ON THE BENCH CORPUS, and the bars say so. The two questionnaires there are a
+  # CANCELLATION NOTICE and a genuinely UNANSWERED standard form (all 90 of its catch-all labels carry an
+  # empty value — verified at the document, not inferred from a fill rate). Declared because the fields
+  # exist and the document type is real, NOT because data has been seen. Both rules are INERT.
+  # ⚠️ TWO SOURCES, AND THE SECOND IS THE ONE THAT RESOLVES (LP-494 follow-up). The reserve percentage
+  # was first declared on the condo questionnaire, where it fills 0/4. The HOA STATEMENT carries its own
+  # `reserve_percentage`, and that fills on 6 of 59 real statements — four of them stating exactly "10",
+  # the current Fannie floor. So `condo.reserve_pct` reads the HOA statement (the resolving source) and
+  # the questionnaire keeps its own tag for the day a completed form arrives. The recipe reads BOTH and
+  # abstains if they disagree — the IH-7 no-cross-document-pooling discipline.
+  condo.reserve_pct: {mode: parsed, subject: document, data: reserve_percentage, document_type: hoa_statement}
+  condo.reserve_pct_questionnaire: {mode: parsed, subject: document, data: reserve_contribution_percentage, document_type: condo_questionnaire}
+  # ⚠️ THE 60-DAY MEASURE, NOT THE GENERIC ONE (reported finding). This was parsed straight from the
+  # questionnaire's `delinquency_percentage`, a field the extractor prompt attaches NO definition to —
+  # while the vocabulary, every reason string and CO-5 all describe it as "units 60+ days past due" and
+  # compare it to B4-2.2-02's 60-day 15% cap. A form reporting "% delinquent (30+ days): 22%" made CO-5
+  # fire on a project that is compliant on the measure Fannie states. Now DERIVED from the pair that
+  # matches the citation — units_delinquent_over_60_days over total_units — and absent when either is.
+  condo.delinquent_units_pct: {mode: derived, subject: loan, data: condo_delinquent_60day_pct}
+  condo.units_delinquent_over_60_days: {mode: parsed, subject: document, data: units_delinquent_over_60_days, document_type: condo_questionnaire}
+  condo.commercial_space_pct: {mode: parsed, subject: document, data: commercial_space_percentage, document_type: condo_questionnaire}
+  condo.total_units: {mode: parsed, subject: document, data: total_units, document_type: condo_questionnaire}
+  condo.single_entity_owned_units: {mode: parsed, subject: document, data: single_entity_owned_units, document_type: condo_questionnaire}
+  condo.litigation_disclosed: {mode: parsed, subject: document, data: litigation_indicator, document_type: condo_questionnaire}
+  # The loan's application date — the ONLY input that selects CO-4's reserve floor. LOAN-scoped, parsed
+  # straight from the MISMO fact emitted in mismo_section.py.
+  loan.application_received_date: {mode: parsed, subject: loan, data: loan.application_received_date}
+  # The two LOAN-scoped verdicts, derived. Loan-scoped for IH-7's reason: "absent" is a statement about the
+  # FILE, and no per-document tag can be produced for a document that is not there.
+  # LP-494 (revised) — CO-3's fidelity leg. ⚠️ NOT A DUPLICATE OF IH-7: IH-7's spec header explicitly
+  # excludes fidelity/crime, so this is the one condo-insurance question no live rule asks. Both fields
+  # fill 8/8 on the bench's master policies — the strongest-resolving input in the whole condo lane.
+  condo.fidelity_present_raw: {mode: parsed, subject: document, data: fidelity_crime_coverage_present, document_type: master_insurance_policy_for_condominium}
+  condo.fidelity_amount: {mode: parsed, subject: document, data: fidelity_crime_coverage_amount, document_type: master_insurance_policy_for_condominium}
+  ins.condo_fidelity_coverage: {mode: derived, subject: loan, data: condo_fidelity_coverage}
+  condo.reserve_adequacy: {mode: derived, subject: loan, data: condo_reserve_adequacy}
+  condo.project_eligibility: {mode: derived, subject: loan, data: condo_project_eligibility}
+  # IH-7's CONCLUSION tag (enum present_adequate|present_inadequate|absent|n/a|unknown). LOAN-scoped, not
+  # per-document: "absent" is a statement about the FILE, and a per-document tag cannot be produced for a
+  # document that is not there. (Its vocabulary entity is `doc`; entity and materialisation subject are
+  # deliberately independent — see declarations.py's LP-325 note.)
+  ins.condo_master_policy: {mode: derived, subject: loan, data: condo_master_policy}
+
+  # --- LP-495a — the mortgage-statement ↔ stated-liability reconciliation, and LOE completeness. ------ #
+  # ⚠️ ONE MATCHER, TWO RULES (ADR-375). Both `reo.*` recipes call the SAME `_reo_match_statement`, so
+  # RE-1 (is it disclosed?) and DT-6 (does the stated payment cover it?) can never disagree about which
+  # stated liability a given statement matched. Two matchers would allow exactly that — the CR-1/CR-4
+  # precedent this discipline comes from.
+  # ⚠️ DERIVED, NOT PARSED, and per DOCUMENT. The recipes read the mortgage statement's own extracted
+  # fields off the document subject (the IH-2 `mortgagee_clause_correct` shape) and compare them against
+  # the MISMO `liability.{k}.*` facts. A parsed tag could carry neither the comparison nor the abstains.
+  # ⚠️ NEITHER TAG READS `property.is_retained_reo` OR `property.retained_pitia` — those have no entry in
+  # this file and no producer, deliberately (see vocabulary_extra.yaml).
+  reo.statement_disclosure: {mode: derived, subject: document, data: reo_statement_disclosure}
+  reo.statement_payment_coverage: {mode: derived, subject: document, data: reo_statement_payment_coverage}
+  # LO-2's APPLICABILITY PREDICATE — materialises on EVERY document (yes/no/unknown) so a non-letter
+  # resolves to not_applicable rather than couldnt_check. Needed because the applicability DSL has only
+  # eq/ne while LO-2's scope is eight document types (LP-487's predicate-not-outcome discipline).
+  loe.is_explanation_letter: {mode: derived, subject: document, data: loe_is_explanation_letter}
+  # ⚠️ Materialises on the LOE types ONLY (the recipe DECLINES elsewhere), so the completeness tag lands
+  # on the documents LO-2 reads and nowhere else.
+  loe.completeness: {mode: derived, subject: document, data: loe_completeness}
+
 # --- AI GROUPS — one structuring pass each: a subject, the tags it co-produces, a context-builder
 #     key, and the system prompt (the perceiver question, as DATA). The model answers per subject
 #     index with one JSON object per tag keyed by the tag's LAST segment; "unknown" is always legal
@@ -278,53 +530,282 @@ ai_groups:
   # credit report's TRADELINES (a generic list, opt-in via include_lists) against the app's file-level
   # STATED LIABILITIES (include_stated_liabilities — the MISMO comparison set), producing CR-4's verdict.
   # INERT: CR-4 is not in ACTIVE_RULE_IDS, so this group is not required and does not run on a live file.
-  credit_profile:
+  # LP-490 — CR-5's inquiry check. PER BORROWER, because "was each inquiry explained?" is a question
+  # about the borrower's file as a whole: the answer needs the inquiries, the tradelines that may have
+  # resulted from them, and any letters of explanation, together.
+  # ⚠️ n≈0 — ONE inquiry row exists across all three real credit reports. This group is built and
+  # UNCALIBRATED; CR-5 is inert.
+  # LP-493 — PC-5's earnest-money trace. PER BORROWER, because the question needs BOTH sides: the
+  # contract states the deposit, the bank statements show whether it left a verified account.
+  # ⚠️ THIS IS THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on no
+  # file at all; LF-6T3N carries a purchase agreement AND bank statements, so PC-5 can actually be proven.
+  contract_emd:
     subject: borrower
     context_builder: borrower
-    applies_to: [credit_report, uniform_residential_loan_application]
-    include_lists: true
-    include_stated_liabilities: true
-    list_row_cap: 50
-    tags: [credit.undisclosed_tradeline]
+    applies_to: [purchase_agreement, bank_statement]
+    # ⚠️ LP-493a — BOTH opt-ins are load-bearing, and PC-5 abstained on LF-6T3N without them.
+    #   include_unattributed_documents: a purchase agreement is a PROPERTY document with no belongs_to,
+    #     so borrower-scoped gathering dropped it and the model never saw the deposit it was asked about.
+    #   include_transactions: a statement's transactions live in the legacy `entry.transactions`
+    #     attribute, not in `entry.lists`, so the model saw account balances and zero debits.
+    include_unattributed_documents: true
+    include_transactions: true
+    tags: [contract.emd_sourced]
     system_prompt: |
-      You are a senior mortgage loan processor STRUCTURING one factual credit tag for ONE borrower. Your
-      only job is to compare what the credit report shows against what the loan application (1003) states —
-      you do NOT decide the consequence; a downstream rule (CR-4) does. It can only be correct if your fact
-      is accurate.
+      You are a senior mortgage loan processor STRUCTURING one factual tag: has the earnest money
+      deposit stated on the purchase contract been TRACED to a debit from a verified account?
+
+      WHY IT MATTERS: the deposit is an acceptable source for the down payment and closing costs, but the
+      lender must verify RECEIPT and, where it counts toward the borrower's minimum contribution, that
+      the funds came from an acceptable source. A deposit nobody can trace is an unsourced large sum.
+
+      ANSWER emd_sourced:
+      - "yes"     — a debit on a bank statement plausibly corresponds to the contract's earnest money:
+                    a similar amount, at or shortly after the contract date, leaving an account the
+                    borrower owns.
+      - "no"      — you can see the statements covering that period and NO debit corresponds to it.
+      ⚠️ TRUNCATION. A statement's transaction list may be CAPPED — when it is, the context carries
+      `"truncated": true` alongside `"shown"` and `"total"` for that document. If any statement you would
+      need to rely on is truncated, answer "unknown", NEVER "no": the debit you are looking for may be
+      among the rows you were not shown, and a confirmed absence you cannot actually confirm is the one
+      answer that fires this rule wrongly.
+      - "unknown" — no contract amount, no statements covering the period, or you cannot tell. ⚠️ This is
+                    the RIGHT answer far more often than "no". Statements rarely cover every account.
+
+      ⚠️ DO NOT infer a trace from a matching amount alone if the DATE is wrong, and do not call it
+      untraced merely because you cannot see every account. "no" is a claim that the money did NOT move
+      from a verified account; make it only when the statements would have shown it.
+
+      ⚠️ A CONTRACT MAY STATE MORE THAN ONE DEPOSIT — an initial and an additional. If you see a second
+      deposit, say so in your reasoning even though this tag answers about the deposit as a whole.
+
+      Return ONLY a JSON array, one object per borrower, echoing the given "index":
+      [{"index": <i>, "emd_sourced": {"value","confidence","reasoning"}}]
+
+  # LP-493 — PC-8's personal property. PER DOCUMENT (the contract).
+  # ⚠️ THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies: the four real contracts read
+  # "None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer". So this is a reading, not a lookup.
+  contract_personal_property:
+    subject: document
+    context_builder: document
+    applies_to: [purchase_agreement]
+    tags: [contract.personal_property]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual tag: does this purchase contract
+      include PERSONAL PROPERTY in the sale?
+
+      WHY IT MATTERS: personal property is not real estate. Its value does not support the mortgage, and
+      where it is material it is treated as a sales concession and deducted from the price for
+      loan-to-value purposes. You are NOT deciding whether value is inflated — a downstream rule surfaces
+      that for a human.
+
+      ANSWER personal_property:
+      - "yes"     — the contract includes items that are personal property: appliances not built in,
+                    furniture, a vehicle, a boat, farm equipment, window treatments listed as personal.
+      - "no"      — the contract states none, or lists only FIXTURES (built-in appliances, gas logs,
+                    light fittings, attached shelving), which are part of the real estate.
+      - "unknown" — the field is absent or you cannot tell what is meant.
+
+      ⚠️ THE FIXTURE / PERSONAL-PROPERTY LINE IS THE WHOLE JUDGMENT, and it is genuinely hard: a
+      refrigerator is usually personal property, a built-in oven is a fixture, gas logs in a fireplace
+      are normally a fixture. When the wording does not let you tell, answer "unknown" — do NOT guess
+      "yes", which would put a concession finding on an ordinary contract.
+
+      ⚠️ Contract wording varies by STATE FORM far more than a bureau's field does. Judge the words in
+      front of you; do not assume one form's phrasing.
+
+      Return ONLY a JSON array, one object per document, echoing the given "index":
+      [{"index": <i>, "personal_property": {"value","confidence","reasoning"}}]
+
+  credit_inquiries:
+    subject: borrower
+    context_builder: borrower
+    applies_to: [credit_report, letter_of_explanation]
+    # ⚠️ include_lists IS LOAD-BEARING (reported finding). `inquiries[]` and `tradelines[]` are GENERIC
+    # LISTS, and the borrower context serialises them ONLY on this opt-in. Without it the prompt asked the
+    # model to match each inquiry to the tradeline it produced and to an explanation letter while the
+    # context contained neither list — so credit.inquiry_explained was structurally always "unknown" and
+    # CR-5 permanently couldnt_check. credit_profile declares it for exactly this reason.
+    include_lists: true
+    tags: [credit.inquiry_explained]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual credit tag. Your only job is to
+      say whether the credit inquiries on this borrower's report are ACCOUNTED FOR — you do NOT decide
+      the consequence; a downstream rule (CR-5) does.
+
+      WHY THIS MATTERS: a recent inquiry can mean the borrower took on NEW DEBT that the credit report
+      does not yet show. That debt would change the qualifying ratios, so each inquiry needs either a
+      tradeline that plausibly resulted from it, or a letter of explanation saying no new debt followed.
 
       NORTH STAR — ACCURACY AND HONESTY:
-      - A WRONG tag silently corrupts CR-4. When you cannot determine the answer, return "unknown".
-        "unknown" is a correct, expected answer — NEVER guess "yes" (a false undisclosed-debt flag on the
-        borrower) or "no" (missing a real one) to look complete.
+      - When you cannot determine the answer, return "unknown". That is a correct, expected answer.
+      - ⚠️ BOTH errors are expensive. A wrong "yes" lets undisclosed new debt through. A wrong "no"
+        sends a processor chasing letters for inquiries that are already explained.
 
-      THE CONTEXT you are given for this borrower:
-      - documents[].lists.tradelines.rows — the CREDIT REPORT's tradelines (creditor, balance, monthly
-        payment, status). These are the debts the bureaus see.
-      - stated_liabilities — the debts the borrower DISCLOSED on the 1003 (creditor, monthly payment).
-      - Match a report tradeline to a stated liability by CREDITOR and, where present, the payment/balance.
-        Creditor names vary (BANK OF AMERICA vs BofA, CHASE vs JPMCB) — match on meaning, tolerantly.
+      ANSWER inquiry_explained:
+      - "yes" — EVERY inquiry in the last 120 days is either matched by a tradeline opened at about the
+        same time, or covered by a letter of explanation, or is a soft/promotional pull.
+      - "no"  — at least one recent inquiry has NO matching tradeline and NO explanation.
+      - "unknown" — the report states no inquiry dates, the inquiry list is unreadable, or you cannot
+        tell whether a tradeline corresponds to an inquiry.
+      Judge ONLY from what you are given. Return ONLY a JSON array, one object per borrower, echoing
+      the given "index":
+      [{"index": <i>, "inquiry_explained": {"value","confidence","reasoning"}}]
 
-      PRODUCE ONE TAG — undisclosed_tradeline — with value:
-      - "yes"  — at least ONE credit-report tradeline with a monthly payment > 0 (an active, DTI-relevant
-                 debt) matches NO stated liability. That debt is undisclosed on the application.
-      - "no"   — EVERY payment-bearing tradeline you can see is reflected in the stated liabilities.
-      - "unknown" — you cannot compare: there is NO credit report (no tradelines) or NO stated
-                 liabilities, OR a list you needed is marked truncated (see below).
+  # LP-490 — CR-6's derogatory facts. PER LIABILITY: seasoning is a property of ONE event, and the
+  # finding must name which. Three tags co-produced by one read of one tradeline.
+  # ⚠️ ZERO public-record rows and no collection/charge-off codes exist on any of the three real
+  # reports. This group is built against the schema, not against observed data.
+  credit_derogatory:
+    subject: liability
+    context_builder: liability
+    tags: [liab.is_derogatory, liab.derogatory_type, liab.derogatory_date]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING factual derogatory-credit tags for ONE DEBT.
+      You do NOT decide eligibility; a downstream rule (CR-6) applies the waiting periods.
 
-      ⚠️ TRUNCATION DISCIPLINE (this is the whole point of the marker): a list in the context may carry
-      "truncated": true with "shown"/"total" counts — you were given only the first `shown` of `total`
-      rows. If the tradelines OR the liabilities you must compare are truncated, an item you cannot match
-      may simply be among the rows you were NOT shown. In that case you MUST answer "unknown" — NEVER a
-      confident "no" (you did not see every row) and NEVER a "yes" you cannot fully substantiate. A
-      confident verdict over an unseen row is exactly the error this tag must not make.
+      NORTH STAR — ACCURACY AND HONESTY: when you cannot determine a value, return "unknown". Never
+      guess. A wrong derogatory type applies the wrong waiting period (a foreclosure waits seven years,
+      a short sale four), and a wrong date seasons an event that is not yet seasoned.
 
-      Judge ONLY from the tradelines and liabilities in front of you. Do not invent a debt, a creditor, or
-      a match the context does not support. Ignore a tradeline with a zero or absent monthly payment (paid
-      off / not DTI-relevant) for the undisclosed test.
+      ANSWER, for this ONE tradeline:
+      1. is_derogatory — does this account carry ANY derogatory mark? "yes" | "no" | "unknown".
+      2. derogatory_type — one of: "bankruptcy", "foreclosure", "short_sale", "deed_in_lieu",
+         "collection", "charge_off", "none". Use "none" when is_derogatory is "no".
+      3. derogatory_date — ⚠️ THE EVENT'S OWN DATE in YYYY-MM-DD: the DISCHARGE or DISMISSAL date for a
+         bankruptcy, the COMPLETION date for a foreclosure, short sale or deed-in-lieu, the charge-off
+         date for a charge-off. Return "unknown" if the account does not state that date.
+         ⚠️ NEVER substitute the credit report's own date, the account opening date, or the date last
+         reported. Those are not the event, and using one would season the event to whenever the report
+         happened to be pulled. "unknown" is far better than a plausible wrong date.
+      Return ONLY a JSON array, one object per debt, echoing the given "index":
+      [{"index": <i>, "is_derogatory": {"value","confidence","reasoning"},
+        "derogatory_type": {"value","confidence","reasoning"},
+        "derogatory_date": {"value","confidence","reasoning"}}]
 
-      Respond with ONLY a JSON array, one object per borrower by the index you were given, exactly:
-      [{"index": <n>, "undisclosed_tradeline": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
-      "reasoning": "<one short sentence; name the unmatched creditor if yes; do NOT quote account numbers>"}}]
+  # LP-490 — CR-8's mortgage history. PER LIABILITY. ⚠️ THE CONFIDENCE GATE IS PRIYA'S OWN DESIGN:
+  # structured_history_confident=false → CR-8 returns needs_review rather than interpreting.
+  credit_mortgage_history:
+    subject: liability
+    context_builder: liability
+    tags:
+      - liab.is_mortgage
+      - liab.payment_status
+      - liab.structured_history_confident
+      - liab.mortgage_late_60_plus_last_12mo
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING factual mortgage-history tags for ONE DEBT.
+      You do NOT decide whether the file passes; a downstream rule (CR-8) does.
+
+      ⚠️ THE MOST IMPORTANT INSTRUCTION IN THIS PROMPT. The payment-history string on these reports runs
+      from 0 to 84 characters and appears in many different formats. It is NOT a fixed one-character-
+      per-month encoding, and its field name is misleading. DO NOT COUNT POSITIONS to derive a late. If
+      you cannot read the history with genuine confidence, say so — that is the expected answer, and the
+      rule is designed around it. Turning an ambiguous string into a "60-day late" is the single worst
+      thing you can do here: it invents a derogatory event on a clean borrower.
+
+      ANSWER, for this ONE tradeline:
+      1. is_mortgage — is this a mortgage (including a HELOC secured by real estate)? "yes"|"no"|
+         "unknown". ⚠️ Judge from account type, creditor TYPE, MORTGAGE / REAL ESTATE indicators, HELOC
+         markers, balance and term shape, Metro 2 classification — NEVER from the creditor's name alone.
+      2. structured_history_confident — could you interpret this account's payment history RELIABLY?
+         "yes" | "no" | "unknown". Answer "no" whenever the string is absent, truncated, or in a format
+         whose positions you cannot read with confidence.
+      3. payment_status — the WORST delinquency this account shows: "current" | "30" | "60" | "90" |
+         "120+" | "unknown". Return "unknown" unless structured_history_confident is "yes".
+      4. mortgage_late_60_plus_last_12mo — does this MORTGAGE show a 60/90/120/150-day delinquency in
+         the previous twelve months? "yes" | "no" | "unknown". Return "unknown" unless
+         structured_history_confident is "yes" and is_mortgage is "yes".
+      Return ONLY a JSON array, one object per debt, echoing the given "index":
+      [{"index": <i>, "is_mortgage": {"value","confidence","reasoning"},
+        "structured_history_confident": {"value","confidence","reasoning"},
+        "payment_status": {"value","confidence","reasoning"},
+        "mortgage_late_60_plus_last_12mo": {"value","confidence","reasoning"}}]
+
+  # LP-490 — CR-10's collection facts. PER LIABILITY.
+  # ⚠️ ZERO collection or charge-off codes exist on any of the three real reports — the trigger is
+  # entirely unexercised. Built against the schema.
+  credit_collections:
+    subject: liability
+    context_builder: liability
+    tags: [liab.is_medical_collection, liab.collection_balance]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING factual collection tags for ONE DEBT. You do
+      NOT decide whether it must be paid; a downstream rule (CR-10) applies the agency requirements.
+
+      NORTH STAR — ACCURACY AND HONESTY: return "unknown" when you cannot tell. A wrong "medical"
+      wrongly EXCLUDES a collection from the payoff requirement; a wrong balance moves an aggregate
+      across a threshold.
+
+      ANSWER, for this ONE tradeline:
+      1. is_medical_collection — is this a MEDICAL collection? "yes" | "no" | "unknown". Medical
+         collections are excluded from Fannie's payoff limits and treated differently under FHA. Judge
+         from the creditor type and account description; a collection agency's name alone rarely says.
+      2. collection_balance — the outstanding balance of this collection or charged-off account, as a
+         plain number of dollars. Return "unknown" if it is not stated. ⚠️ NEVER return 0 for an
+         unstated balance: 0 reads as a settled account and drops it out of the aggregate.
+      ⚠️ A MORTGAGE charge-off is NOT an ordinary collection — it carries a seasoning requirement
+      instead (CR-6). Still report its balance; the rule handles the distinction.
+      Return ONLY a JSON array, one object per debt, echoing the given "index":
+      [{"index": <i>, "is_medical_collection": {"value","confidence","reasoning"},
+        "collection_balance": {"value","confidence","reasoning"}}]
+
+  credit_profile:
+    # ADR-375 — MOVED from the borrower subject to the liability subject. One matcher, at the scope where
+    # the answer is actionable (WHICH debt), with the borrower-level rollup derived from it.
+    subject: liability
+    context_builder: liability
+    # ADR-375 — applies_to is GONE too: it gated/gathered DOCUMENTS for a borrower-subject group. A
+    # liability subject neither gates nor gathers documents (the enumerator already scopes the tradeline
+    # leg to credit_report), so the loader rejects it here — correctly.
+    # include_lists is GONE, not widened: it existed so a BORROWER-subject group could see the
+    # tradelines list. The subject is now the tradeline itself, so the opt-in is obsolete here. Only the
+    # stated liabilities (the other side of the comparison) still have to be brought in.
+    include_stated_liabilities: true
+    tags: [liab.in_application]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual credit tag for ONE DEBT. Your only
+      job is to say whether THIS ONE credit-report tradeline is reflected in the loan application's stated
+      liabilities — you do NOT decide the consequence; a downstream rule (CR-1) does. It can only be
+      correct if your fact is accurate.
+
+      NORTH STAR — ACCURACY AND HONESTY:
+      - A WRONG tag silently corrupts CR-1. When you cannot determine the answer, return "unknown".
+        "unknown" is a correct, expected answer — NEVER guess.
+      - ⚠️ BOTH errors are expensive, and neither is the "safe" one:
+        * a wrong "yes" (you call it disclosed when it is not) HIDES an undisclosed debt — the exact thing
+          this check exists to catch.
+        * a wrong "no" (you call it undisclosed when it is stated) FABRICATES a condition on a clean file
+          and sends a processor chasing a debt that was always disclosed.
+        Do not lean either way to look decisive. If the match is genuinely unclear, say "unknown".
+
+      THE CONTEXT you are given is ONE tradeline plus the application's stated liabilities:
+      - the tradeline's own fields (creditor_name, account_type, balance, monthly_payment, ...) at the top
+        level of your context.
+      - stated_liabilities — the debts the borrower DISCLOSED on the 1003 (creditor, type, payment,
+        balance).
+      - Match on CREDITOR and, where present, the payment/balance. Creditor names vary
+        (BANK OF AMERICA vs BofA, CHASE vs JPMCB) — match on meaning, tolerantly. A payment or balance
+        that differs by a small amount is still the same debt (a statement date differs); a different
+        creditor AND different amounts is not.
+
+      PRODUCE ONE TAG — in_application — with value:
+      - "yes" — this tradeline IS reflected in the stated liabilities.
+      - "no"  — this tradeline is NOT among them; the debt is undisclosed on the application.
+      - "unknown" — you cannot compare: there are NO stated liabilities to compare against, or a list you
+                needed is marked truncated (see below), or the match is genuinely ambiguous.
+
+      ⚠️ TRUNCATION DISCIPLINE: a list in the context may carry "truncated": true with "shown"/"total"
+      counts — you were given only the first `shown` of `total` rows. If the stated liabilities are
+      truncated, the debt you cannot find may simply be among the rows you were NOT shown. In that case
+      you MUST answer "unknown" — NEVER a confident "no" over an unseen row.
+
+      Judge ONLY from what is in front of you. Do not invent a debt, a creditor, or a match the context
+      does not support.
+
+      Respond with ONLY a JSON array, one object per liability by the index you were given, exactly:
+      [{"index": <n>, "in_application": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
+      "reasoning": "<one short sentence; name the stated liability you matched, or say none matched; do NOT quote account numbers>"}}]
 
   # LP-344: this text is CONVERGED with the shipped standalone STAGE_A_TRANSACTION_SYSTEM_PROMPT
   # (app/ai/tag_production.py) — the prompt LIVE AS-1 actually runs. A drift guard
@@ -538,7 +1019,35 @@ ai_groups:
     # gathered documents to these, so a bank statement / tax bill / ID is not sent (the over-production
     # surface LP-377-D/LP-378 measured the prompt's "ignore" instruction failing to hold). Fails open on an
     # unknown/None type. The 1003 (uniform_residential_loan_application) carries the borrower's stated income.
-    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application]
+    # LP-495b — WIDENED to the documents that establish continuance for NON-EMPLOYMENT income. The
+    # four original types are all EMPLOYMENT documents, so income.continuance_3yr — the verdict tag of
+    # IN-13 ("Other income continuance") and IN-14 (rental) — was produced by a group that could never
+    # see an award letter, a pension letter or a lease. The prompt asked about continuance; the gathering
+    # delivered only pay stubs. Same shape as the loan-context defect this ticket fixed for OC-3/DT-7.
+    # SHARED GROUP, so this is not a local edit: IN-7, IN-10, IN-11 and IN-12 are LIVE on its other three
+    # tags. Widening is a no-op on real data and that is verified, not asserted — the corpus carries ZERO
+    # award letters of any kind, ZERO leases and ZERO 1099s on any loan file, so no live verdict can move.
+    # The LF-6T3N distribution and the byte-identical AS-1/AS-2/AS-12/IN-12 md5 both confirm it.
+    # LP-495b review — THE 1099 COUNT WAS THE ONE MISSING FROM THAT SENTENCE, and it is the type that mattered
+    # most: unlike an award letter or a lease, a 1099 is a COMMON income document (IN-16's deterministic
+    # rule keys off borrower-attributed w2 / 1099 / pay_stub), so "zero in the corpus" had to be measured
+    # rather than assumed. Measured 2026-08-13: 0 of 100 stored documents are `1099`. THE OBLIGATION THIS
+    # LEAVES: income.has_2yr_history is Priya-validated at 0.9 on the PRE-WIDENING context. The first real
+    # file carrying a borrower-attributed 1099 (or lease, or award letter) feeds a context that validation
+    # never covered, and the fingerprint cache will re-judge rather than reuse. Re-measure has_2yr_history
+    # when one arrives; the 0.9 does not automatically carry across.
+    # LP-495b review — `include_unattributed_documents` IS WHAT MAKES THE LEASE REACH THIS GROUP. Adding
+    # lease_agreement to applies_to alone did nothing: this is a BORROWER-subject group and
+    # `_borrower_context` gathers only documents whose belongs_to resolves to that borrower, so a lease —
+    # which describes the PROPERTY and usually carries no belongs_to — was dropped before applies_to was
+    # ever consulted. The opt-in relaxes that, and `lease_agreement` is now in `_PROPERTY_LEVEL_DOC_TYPES`
+    # so it qualifies as genuinely file-level. Scope of the relaxation: the other property-level types
+    # (purchase_agreement, title_commitment, appraisal, flood_certification) are NOT in this applies_to, so
+    # the doc-type filter still drops them — only unattributed leases are added.
+    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application,
+                 social_security_award_letter, disability_award_letter,
+                 retirement_pension_award_letter, lease_agreement, "1099"]
+    include_unattributed_documents: true
     tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one BORROWER'S income-stability signals into
@@ -751,10 +1260,128 @@ ai_groups:
   # whether the file's rental/lease documents support the claimed rental income; a downstream rule + a human
   # ratify decide the consequence. "n/a" when the loan has no rental/investment income (lets IN-14 reach
   # not_applicable); "unknown" first-class.
+  # LP-495b — DT-7's AI group. PRESENCE OF SUPPORTING DOCUMENTS per ATR factor, not the ATR
+  # determination itself (see the tag declaration above for why that distinction is load-bearing).
+  # LP-498 — FR-3's producer. Document-subject, SCOPED to the purchase contract: applies_to keeps it off
+  # every other document type, so the group never runs on a pay stub or a statement (the LP-495b lesson —
+  # income_stability produced a continuance tag while scoped to four employment types).
+  contract_credits:
+    subject: document
+    context_builder: document
+    applies_to: [purchase_agreement]
+    include_lists: true          # the addenda list — a side agreement is often an addendum
+    tags: [contract.unusual_credits]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one factual tag about a PURCHASE CONTRACT. Describe
+      what the contract SHOWS. You do NOT decide whether anything improper happened, and you are NOT
+      looking for fraud — a downstream rule (FR-3) decides whether a human should look.
+
+      PRODUCE ONE TAG — unusual_credits — answering: does this contract show seller credits, other
+      concessions, or a reference to an agreement OUTSIDE the contract, such that a processor should
+      review the terms?
+
+        "yes" — the contract states a seller credit or concession, OR references a side agreement,
+                addendum or separate understanding affecting price or money changing hands.
+        "no"  — the contract's credit and concession fields are present and show none, and nothing
+                references an agreement outside it.
+        "unknown" — the fields that would answer this are absent or unreadable. THIS IS THE CORRECT
+                ANSWER on a contract whose credit fields did not extract. An absent field is NOT
+                evidence of a clean contract, and "no" on an empty contract is a false all-clear.
+
+      WHAT YOU ARE GIVEN: the contract's extracted fields — seller_credit_amount,
+      seller_credit_purpose, other_concessions_amount, side_agreements_referenced — and its addenda
+      list. Judge ONLY from these.
+
+      A SELLER CREDIT IS ORDINARY. Most purchase contracts carry one, and a routine closing-cost credit
+      is not a red flag. Say in your reasoning WHAT you saw, with the amount when there is one, so a
+      processor can judge without reopening the document. Do not speculate about intent. Do not call
+      anything fraudulent.
+
+      YOU ARE NOT ASKED WHETHER THE CREDIT COMPLIES WITH ANYTHING. Whether a credit exceeds an
+      interested-party-contribution limit, or needs checking against appraisal or program requirements,
+      is a DIFFERENT question answered by a different rule. Do not answer "yes" because a credit
+      "should be verified" or "should be reviewed for compliance" — that is true of every credit and
+      would make this tag say "yes" on every contract, which is the same as saying nothing.
+
+      Answer "yes" ONLY when something about the TERMS THEMSELVES is unusual:
+        - a reference to any agreement, addendum or understanding OUTSIDE this contract;
+        - a credit or concession whose stated purpose is missing, vague, or does not explain it;
+        - a concession that is large relative to the transaction.
+      A credit with a clearly stated ordinary purpose (closing costs, prepaids, a rate buydown), no
+      other concessions, and no reference outside the contract is "no" — even though a processor will
+      still see the number elsewhere in the file.
+
+      STRICT OUTPUT — return ONLY a JSON array, one object per document, echoing the given "index":
+      [{"index": <i>, "unusual_credits": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
+        "reasoning": "<what the contract shows>"}}]
+
+  atr_documentation:
+    subject: loan
+    context_builder: loan
+    applies_to: all
+    # LP-495b — this group's prompt asks about the file's DOCUMENTS; without this it saw none.
+    include_documents: true
+    tags: [dti.atr_factors_documented]
+    system_prompt: |
+      You are a senior mortgage loan processor STRUCTURING one factual tag about a loan file's DOCUMENT
+      SET. Your ONLY job is to describe whether the file carries documents that would SUPPORT each of the
+      eight ability-to-repay factors. You do NOT decide whether the borrower can repay, whether the loan
+      complies with the ability-to-repay rule, or whether underwriting should approve it. Those are the
+      CREDITOR's determinations, made at underwriting by someone else. You are describing what is in the
+      folder.
+
+      The eight factors are 12 CFR 1026.43(c)(2)(i)-(viii), verbatim:
+        (i)    the consumer's current or reasonably expected income or assets, other than the value of
+               the dwelling;
+        (ii)   if the creditor relies on income from the consumer's employment, the consumer's current
+               employment status;
+        (iii)  the consumer's monthly payment on the covered transaction;
+        (iv)   the consumer's monthly payment on any simultaneous loan;
+        (v)    the consumer's monthly payment for mortgage-related obligations;
+        (vi)   the consumer's current debt obligations, alimony, and child support;
+        (vii)  the consumer's monthly debt-to-income ratio or residual income;
+        (viii) the consumer's credit history.
+
+      For each factor, ask only: does this file contain at least one document that a processor would put
+      forward as support for it? For example pay stubs, W-2s, a VOE or bank statements for (i) and (ii);
+      a Closing Disclosure or Loan Estimate for (iii) and (v); a credit report for (vi) and (viii).
+
+      TWO FACTORS ARE NOT EVIDENCED BY A DOCUMENT, AND TREATING THEM AS MISSING IS WRONG:
+        - (iv) simultaneous loan. If the file shows no second or simultaneous loan, there is NOTHING to
+          document and the factor is SATISFIED. Only an undocumented simultaneous loan that the file
+          does evidence counts as missing.
+        - (vii) debt-to-income ratio or residual income. This is a CALCULATION the lender performs from
+          the income and debt documents, not a document a borrower supplies. Treat it as satisfied when
+          the inputs it is computed from — income documents and a credit report or debt list — are
+          present.
+      Counting either of those as "missing" would report every file in the world as incomplete.
+
+      Produce ONE tag:
+      1. atr_factors_documented
+         - "complete"   — every one of the eight factors has at least one supporting document in the file.
+         - "incomplete" — the file is READABLE and you can identify at least one factor with NO supporting
+           document. Name the missing factor(s) in your reasoning.
+         - "unknown"    — you cannot tell. Use this when the file carries no documents at all, when the
+           document list is truncated or unreadable, or when you are not confident you have seen the whole
+           folder. "unknown" is a CORRECT and expected answer.
+
+      NEVER answer "incomplete" because you are unsure. "incomplete" means you looked and a factor's
+      support is genuinely absent; "unknown" means you could not look properly. An empty or unreadable
+      file is "unknown", never "complete" and never "incomplete".
+
+      Give a confidence (0.0-1.0) reflecting genuine certainty and a short reasoning naming the factors
+      you found support for and any you did not.
+
+      STRICT OUTPUT — return ONLY a JSON ARRAY (no markdown fences, no prose before or after), one object
+      (this is one loan), echoing the "index" you were given:
+      [{"index": <i>, "atr_factors_documented": {"value": "complete|incomplete|unknown", "confidence": <0.0-1.0>, "reasoning": "<which factors have support, which do not>"}}]
+
   occupancy_rental:
     subject: loan
     context_builder: loan
     applies_to: all
+    # LP-495b — this group's prompt asks about the file's DOCUMENTS; without this it saw none.
+    include_documents: true
     tags: [occupancy.rental_support]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one loan's RENTAL-INCOME support into a single factual
@@ -765,6 +1392,12 @@ ai_groups:
       You are given the loan's structured 1003 / MISMO facts and its documents. Consider the rental-income
       supporting evidence: a lease agreement, a rental agreement, Schedule E on a tax return, an appraisal's rent
       schedule (Form 1007/1025), and the stated occupancy (investment vs primary vs second home).
+
+      SCOPE FIRST, AND THIS IS THE MOST COMMON ERROR ON THIS TAG. Look at the stated occupancy BEFORE
+      judging any document. If the occupancy is NOT investment and NOT a rental scenario, the answer is
+      "n/a" — even when the file happens to carry a lease. A lease on a primary-residence file is
+      usually the borrower's OWN current housing, not rental income they are claiming, and calling that
+      "adequate" invents a rental-income claim the file never made.
 
       Produce ONE tag:
       1. rental_support — is the claimed rental income supported by adequate documentation (a lease / rent

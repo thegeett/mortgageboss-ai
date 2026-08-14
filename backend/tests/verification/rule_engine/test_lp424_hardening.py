@@ -21,6 +21,7 @@ from app.verification.rule_engine.activation_bars import (
 )
 from app.verification.rule_engine.registry import _BASE_ACTIVE, ACTIVE_RULE_IDS
 from app.verification.rules.kinds import RuleKindName, kind_for
+from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     DocumentsSection,
@@ -113,12 +114,26 @@ async def test_loan_purpose_absent_when_no_purpose_stated() -> None:
     assert "loan.purpose" not in mat.tags.by_subject.get("loan", {})
 
 
-def test_loan_purpose_has_no_consuming_rule_yet_predicate_deferred() -> None:
-    # LP-424 built the tag but DID NOT wire the PC-2/PC-7 predicate (LF-6T3N carries no loan.purpose → it would
-    # regress to couldnt_check; no refi fixture exists). So no live rule reads it yet — an intentional orphan.
+def test_loan_purpose_is_now_consumed_by_pr2() -> None:
+    """⚠️ UPDATED AT LP-492, and the cause is the deferral ending — not a weakened assertion.
+
+    LP-424 built `loan.purpose` but deliberately did NOT wire the PC-2/PC-7 predicate: LF-6T3N carries no
+    purpose, so those rules would have regressed to couldnt_check, and no refinance fixture existed. It
+    was an intentional orphan, and this test pinned that.
+
+    PR-2 (LP-492) is its FIRST consumer, as an applicability predicate — a purchase concept that must not
+    run on a refinance. The deferral's own condition is satisfied this time: PR-2 is NEW, so nothing
+    regresses, and all three directions are proven (purchase, refinance, and absent → couldnt_check,
+    never a silent skip).
+
+    ⚠️ The orphan check is not dropped, it is INVERTED: the tag must now be read by exactly the rule that
+    claims it. If PR-2 stops reading it, this fails."""
     from tests.verification.tag_materialization.test_vocabulary_orphans import _live_hard_reads
 
-    assert "loan.purpose" not in _live_hard_reads()
+    assert "loan.purpose" in _live_hard_reads()
+    applicability = load_rule_spec("PR-2").deterministic.applicability
+    assert applicability is not None
+    assert (applicability.tag, applicability.value) == ("loan.purpose", "purchase")
 
 
 # ======================================================================= #
@@ -132,7 +147,12 @@ def test_oc2_is_a_base_rule_riding_an_unscored_tag_but_ratifies() -> None:
     assert "OC-2" in _BASE_ACTIVE
     assert kind_for("OC-2").kind is RuleKindName.JUDGMENTAL  # -> ratify, never auto (LP-376-B)
     # OC-1's bar (a candidate) reads the SAME tag and records it is unscored (not-calibratable-yet).
-    assert load_activation_bars()["OC-1"].status == "not-calibratable-yet"
+    # ⚠️ LP-495a — OC-1 moved to `ratify-pending`, but the FACT this assertion rests on is unchanged
+    # and is now pinned directly: the shared tag is still UNMEASURED. OC-1 activated on a
+    # self-consistency rate (agreement between two derivations), which is explicitly NOT a
+    # measurement of correctness — so OC-2 still rides an unscored tag, exactly as before.
+    assert load_activation_bars()["OC-1"].status == "ratify-pending"
+    assert load_activation_bars()["OC-1"].measured_accuracy is None
 
 
 # ======================================================================= #

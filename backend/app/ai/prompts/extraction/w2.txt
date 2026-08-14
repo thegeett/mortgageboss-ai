@@ -23,16 +23,35 @@ CAPTURE EVERYTHING ON THE FORM — lose nothing. There are two buckets:
      social_security_tax_withheld  (number)   Box 4
      medicare_wages                (number)   Box 5
      medicare_tax_withheld         (number)   Box 6
+     control_number                (string)   Box d control number
+     state_code                    (string)   Box 15 state (e.g. "PA")
+     state_employer_id             (string)   Box 15 employer's state ID number
+     state_wages                   (number)   Box 16 state wages, tips, etc.
+     state_income_tax              (number)   Box 17 state income tax
+     local_wages                   (number)   Box 18 local wages, tips, etc.
+     local_income_tax              (number)   Box 19 local income tax
+     locality_name                 (string)   Box 20 locality name
+     statutory_employee_checked    (string)   Box 13 — see the checkbox rule below
+     retirement_plan_checked       (string)   Box 13 — see the checkbox rule below
+     third_party_sick_pay_checked  (string)   Box 13 — see the checkbox rule below
+   ⚠️ BOX 13 CHECKBOX RULE (all THREE checkboxes — statutory_employee_checked,
+   retirement_plan_checked, third_party_sick_pay_checked): return "checked" when the
+   box has a mark, and "unchecked" when the box is PRESENT but empty — do NOT return
+   null when Box 13 is visible on the form. null and "unchecked" are DIFFERENT facts:
+   null = the box could not be read; "unchecked" = definitively NOT set (a downstream
+   rule relies on this distinction). If only ONE state row is shown, use state_code /
+   state_wages / etc.; a two-state W-2's second state is future — put it in "Other".
+
+   Box 12 codes go in the box_12_items LIST (below), one flat row per code + amount.
 
 2. ADDITIONAL SECTIONS — EVERY OTHER field on the W-2, grouped by section:
-     "State/Local"  — Boxes 15–20 (state, employer state ID, state wages/tax,
-                       local wages/tax, locality name)
-     "Box 12 Codes" — each Box 12 entry (code + amount, e.g. D = 401(k), W = HSA)
-     "Box 13"       — the checkboxes (statutory employee, retirement plan,
-                       third-party sick pay) and whether each is checked
      "Box 14 Other" — any Box 14 "Other" entries
-     "Other"        — control number (box d), employer/employee addresses, etc.
+     "Other"        — anything else not captured above
    Do not force these into the typed core — capture them here so nothing is lost.
+
+3. BOX 12 — a LIST, one FLAT ROW per Box 12 entry (0–4 typically):
+     box_12_items — each row: code (the letter code D/DD/W/…), amount
+   Return an empty list if Box 12 has no entries.
 
 FOR EVERY FIELD (typed core AND additional sections) include WHERE you read it:
   - "page"    (integer)  the 1-based page the value appears on
@@ -67,5 +86,15 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
     "employee_address": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "retirement_plan_checked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
     "statutory_employee_checked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
-    "is_corrected_w2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
+    "is_corrected_w2": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "control_number": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "third_party_sick_pay_checked": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_code": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_employer_id": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_wages": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "state_income_tax": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "local_wages": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "local_income_tax": {"value": <number|null>, "page": <int|null>, "snippet": <string|null>},
+    "locality_name": {"value": <string|null>, "page": <int|null>, "snippet": <string|null>}
   },
+  "box_12_items": [{"code": <string|null>, "amount": <string|null>, "page": <int|null>, "snippet": <string|null>}],

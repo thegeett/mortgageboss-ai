@@ -1,0 +1,125 @@
+# PC-5 — EMD amount & source — structural rule SPEC (LP-493).
+#
+# The earnest money deposit stated on the contract must be traceable to a debit from a verified account.
+# A deposit nobody can trace is an unsourced large sum entering the transaction.
+#
+# ⚠️ CORRECTION (reported finding): the AMOUNT half below is NOT implemented. required_inputs and
+# deterministic.load_bearing_tags reference ONLY contract.emd_sourced, and contract.emd_amount could
+# not be read as declared anyway — it is produced on the DOCUMENT subject while PC-5 enumerates
+# per_borrower. So the "the file states no deposit" couldnt_check is never actually evaluated and the
+# rule delegates the whole question to the AI tag. Resolve before PC-5 is activated.
+# ⚠️ GENUINELY MIXED, and that is why it is worth building: `contract.emd_amount` is PARSED (the number
+# on the contract, 4 of the 5 real contracts state one) and `contract.emd_sourced` is an AI judgment (did
+# a matching debit leave a verified account?). Deterministic code reads the amount; the trace is a
+# reading of two documents against each other.
+#
+# ⚠️ THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on NO file in
+# the corpus, and CR-1 has exactly one. LF-6T3N carries a purchase agreement AND bank statements, so
+# PC-5's trace can actually be exercised rather than only reasoned about.
+#
+# ⚠️ IT TIES TO AS-2, WHICH IS LIVE — but NOT through shared tags, and the ticket's claim that they share
+# both is wrong against the repo. AS-2 reads `txn.has_identified_source` and `txn.apparent_category` on
+# the TRANSACTION subject; PC-5 reads the contract's amount and a borrower-level trace. They answer the
+# same underwriting question from opposite ends, which is why AS-2's snapshot AND verdict are both
+# checked for movement (separately — LP-490a's distinction).
+#
+# ⚠️ A SECOND DEPOSIT IS LOST, and this is a reported input gap rather than a design choice. Doc 183
+# understated a $204k ADDITIONAL earnest money distinct from the primary figure. `earnest_money_amount`
+# is SINGULAR and NO `additional_earnest_money_amount` field exists in the schema — so a contract with an
+# initial and an additional deposit contributes only the first. The prompt asks the model to SAY when it
+# sees a second, so the finding carries the fact even though the tag cannot. Logged for LP-499.
+#
+# ⚠️ NO "CUSTOMARY FOR THE AREA" THRESHOLD IS ENCODED. B3-4.3-09 says large deposits and deposits
+# exceeding what is customary "should be closely evaluated" and gives NO number. Inventing a percentage
+# would fire on ordinary files. This rule surfaces the trace; it does not size the deposit.
+
+rule_id: PC-5
+name: EMD amount & source
+category: Contract
+
+kind: structural            # must equal rule_kinds.csv (PC-5 = structural, ai_fuzzy_match)
+numeric_check: false        # must equal rule_kinds.csv
+
+criteria: >-
+  The earnest money deposit stated on the purchase contract must be traceable to a debit from an account
+  the borrower owns. Receipt is verified by a cancelled cheque or a statement from the deposit holder,
+  and where the deposit counts toward the borrower's minimum contribution the source itself must be
+  acceptable. A file whose statements do not cover the period, or which states no deposit, resolves to
+  couldnt_check — never a guessed trace.
+
+applicability:
+  scope: each borrower on the loan
+  trigger: >-
+    Any borrower. A file with no purchase contract or no statements yields an unknown tag, which the gate
+    routes to couldnt_check — never a finding on a missing document.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    # ⚠️ PROVENANCE TIER P — VERIFIED against the live page in this session (2026-08-13), not taken from
+    # the ticket. Fannie Mae Selling Guide B3-4.3-09, "Earnest Money Deposit", page dated 05/04/2022.
+    #   "Receipt of the deposit must be verified by either a copy of the borrower's canceled check or a
+    #    written statement from the holder of the deposit."
+    #   "Large earnest money deposits and deposits that exceed the amount customary for the area should
+    #    be closely evaluated."
+    # ⚠️ "CUSTOMARY FOR THE AREA" IS NOT A NUMBER — the guide gives none, and none is invented here. A
+    # rule that compared against a fabricated percentage would fire on ordinary files. Logged for Priya.
+    customary_deposit_threshold: "not defined by the guideline — no number is applied"
+  guideline_text: >-
+    Receipt of the earnest money deposit must be verified by a copy of the borrower's cancelled cheque or
+    a written statement from the holder of the deposit. Large deposits, and deposits exceeding the amount
+    customary for the area, should be closely evaluated. The deposit is an acceptable source of funds for
+    both the down payment and closing costs; where it is used toward the borrower's minimum contribution,
+    the lender must verify the funds came from an acceptable source.
+
+required_inputs:
+  - name: emd_sourced
+    snapshot_path: 'tags.by_subject[<borrower_id>]["contract.emd_sourced"]'
+    description: >-
+      whether the contract's earnest money traces to a debit from a verified account (AI, LP-493):
+      "yes" / "no" / "unknown". ⚠️ UNCALIBRATED.
+
+subject_enumeration: per_borrower
+subject_key_fields: [borrower]
+
+evidence_required: >-
+  The deposit amount as the contract states it, the debit that was matched to it (or the fact that the
+  statements do not cover the period), and any ADDITIONAL deposit the contract names — so a processor
+  sees the second one even though the tag carries only the first.
+
+guideline_reference: "Fannie Mae Selling Guide B3-4.3-09, Earnest Money Deposit (page dated 05/04/2022) — receipt must be verified by a cancelled cheque or the deposit holder's written statement; large deposits and those exceeding what is customary for the area should be closely evaluated."
+
+spec_version: 1
+
+deterministic:
+  load_bearing_tags:
+    - contract.emd_sourced
+  gated_tags:
+    - contract.emd_sourced
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: contract.emd_sourced, op: eq, value: "yes"}
+      reasoning: >-
+        the earnest money deposit traces to a debit from an account the borrower owns
+    - verdict: fired
+      when_tags:
+        - {tag: contract.emd_sourced, op: eq, value: "no"}
+      reasoning: >-
+        the earnest money deposit does not trace to any debit on the verified accounts — an unsourced
+        deposit of this size has to be documented before the file goes to underwriting
+      how_to_fix: >-
+        Obtain the cancelled cheque or a written statement from the deposit holder, and the statement for
+        the account the money left. If the deposit came from an account not yet verified, that account
+        needs its own statements. If it was a gift or borrowed, it needs the documentation for that
+        source instead — it is not automatically an acceptable deposit.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        the earnest money deposit could not be traced — the file states no deposit, carries no bank
+        statements covering the period, or the statements do not show the account it left
+      how_to_fix: >-
+        Confirm the contract states an earnest money amount and that the file carries statements covering
+        the contract date. ⚠️ A deposit that cannot be traced is not the same as one that was not paid.

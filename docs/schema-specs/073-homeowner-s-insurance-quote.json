@@ -39,6 +39,7 @@
       "shape_reason":"1–3 entries; flat rows support a mortgagee-clause verification. Serves lender-listed-correctly checks",
       "expected_item_count":"1–3","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["loan_number"],
       "fields":[
         {"name":"lender_name","type":"str","why":"mortgagee-clause verification — lender listed correctly"},
         {"name":"loan_number","type":"str","why":"mortgagee-clause verification — the lender's own identifier (not borrower PII)"},

@@ -1,0 +1,102 @@
+# PR-3 — Property type eligibility — AI JUDGMENT rule SPEC (LP-492).
+#
+# ⚠️ THE TICKET'S RULE TABLE HAD PR-3 AND PR-5 SWAPPED — it called PR-3 "UAD condition rating".
+# `rule_kinds.csv`, the gate of record, says PR-3 is "Property type eligibility (Classify property type
+# vs allowed)". Built to the catalog; the condition-rating research went to PR-5, where it belongs.
+#
+# ⚠️ NO NUMERIC THRESHOLD, and none was invented. Eligible property types are programme- and
+# investor-specific, and no page was read for a governing list this pass — so the rule surfaces a type it
+# cannot place rather than comparing against a fabricated allow-list. Tier U, stated.
+#
+# ⚠️ THE APPRAISER'S TYPE IS FREE TEXT: the two real appraisals read "Condominium" and "Condominium
+# Unit". A controlled vocabulary does not exist here, which is exactly why this is a judgment and not a
+# lookup — and why the rule ALSO reads the file's own `property.type` (a clean MISMO enum) so the model
+# has both sides.
+#
+# ⚠️ n=2, both condominiums. The ineligible path has never been observed.
+
+rule_id: PR-3
+name: Property type eligibility
+category: Property
+
+kind: judgmental            # must equal rule_kinds.csv (PR-3 = judgmental, ai_judgment)
+numeric_check: false
+
+criteria: >-
+  The property type the appraiser states must be one the loan programme allows, and must agree with the
+  type the loan file states. A type the rule cannot place, or a disagreement between the appraisal and
+  the file, is surfaced for review rather than resolved automatically — eligible types are
+  programme-specific and this rule carries no allow-list.
+
+applicability:
+  scope: each appraisal in the file
+  trigger: Any appraisal document. One stating no property type couldnt_checks.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+  values:
+    # ⚠️ PROVENANCE TIER U — NOT OBTAINED. A governing list of eligible property types is
+    # programme- and investor-specific, and no page was read for one this pass. Deliberately NOT
+    # encoded: an invented allow-list would fire on ordinary properties. The rule surfaces instead.
+    eligible_property_types: "not obtained — the rule surfaces an unplaceable type rather than comparing"
+  guideline_text: >-
+    The property type must be eligible for the loan programme, and the appraisal must agree with the loan
+    file about what the property is. A manufactured home, a condotel, a co-op or a mixed-use property
+    each carry programme-specific treatment, so a type that does not match the file is reviewed before
+    the loan proceeds.
+
+required_inputs:
+  - name: appraisal_property_type
+    snapshot_path: 'tags.by_subject[<appraisal content_id>]["property.appraisal_property_type"]'
+    description: the property type the APPRAISER states (parsed, LP-492) — free text.
+  - name: file_property_type
+    snapshot_path: 'tags.by_subject["loan"]["property.type"]'
+    description: the property type the LOAN FILE states (parsed, MISMO enum).
+
+subject_enumeration: per_document
+subject_key_fields:
+  - content_id
+
+evidence_required: >-
+  Both property types exactly as stated, so a processor can see whether the difference is wording
+  ("Condominium" vs "Condominium Unit") or a genuinely different kind of property.
+
+guideline_reference: "The property type must be eligible for the loan programme and must agree between the appraisal and the loan file; eligible types are programme-specific."
+
+judgment:
+  subject: per_document
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: appraisal
+  load_bearing_tags: [property.appraisal_property_type]
+  reasoned_over: [property.appraisal_property_type, property.type]
+  output_tag: property.appraisal_eligibility
+  value_domain: ["eligible", "ineligible", "needs_review", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor judging whether an appraisal's PROPERTY TYPE is consistent
+    with the loan file and ordinary for conventional financing. You reason ONLY over the structured
+    values given.
+
+    ⚠️ YOU HAVE NO ALLOW-LIST, deliberately — eligible types are programme-specific and none was
+    supplied. Do NOT invent one. Judge consistency and obvious risk only:
+    - "eligible" — the two types agree (wording may differ: "Condominium" and "Condominium Unit" are the
+      same thing) and the type is an ordinary residential kind: single family, condominium, townhouse,
+      PUD, 2-4 unit.
+    - "needs_review" — the types DISAGREE in substance, or the type is one carrying programme-specific
+      treatment a processor must confirm: manufactured or mobile home, condotel or hotel-condo,
+      co-operative, mixed-use, agricultural, or more than four units.
+    - "ineligible" — reserve this for a type that is plainly not residential real property at all.
+    - "unknown" — either type is missing or you cannot tell what the appraiser means.
+
+    ⚠️ WORDING DIFFERENCES ARE NOT DISAGREEMENTS. The appraiser writes free text; the file uses a fixed
+    list. "Condominium Unit" against "condo" is a match, not a finding.
+
+    BE HONEST. "unknown" and "needs_review" are correct, expected answers. Cite the values.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "eligible|ineligible|needs_review|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>"}
+
+spec_version: 1

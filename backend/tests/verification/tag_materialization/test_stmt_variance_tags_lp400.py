@@ -43,10 +43,16 @@ def test_both_new_tags_are_declared_on_the_document_subject_via_stmt_facts() -> 
 
 
 def test_owner_matches_and_reserve_are_semantically_unchanged() -> None:
-    # THE equivalence that matters: the existing tags' enums are untouched, so their goldens stay valid.
+    # THE equivalence that matters: the existing tags' VALUES are untouched, so their goldens stay valid.
     av = _allowed_values_by_tag()
     assert av["stmt.owner_matches_borrower"] == ("yes", "no", "unknown")
-    assert av["stmt.is_reserve_eligible"] == ("yes", "no", "partial")
+    # LP-495c WIDENED this enum by adding "unknown", and the equivalence this test guards still holds:
+    # the widening is purely ADDITIVE, so no existing value's meaning changed and every yes/no/partial
+    # golden remains exactly as valid as before. What changed is that the prompt's own sanctioned
+    # abstain is now IN vocabulary. Before, `_build_tag` coerced it to a tag with confidence=None —
+    # the marker `_scan_tag_degradations` matches — so an honest "I cannot tell from this statement"
+    # marked the whole run degraded. That is what the added value fixes.
+    assert av["stmt.is_reserve_eligible"] == ("yes", "no", "partial", "unknown")
     # both still in the group, unmoved
     assert "stmt.owner_matches_borrower" in load_ai_groups()["stmt_facts"].tag_ids
     assert "stmt.is_reserve_eligible" in load_ai_groups()["stmt_facts"].tag_ids

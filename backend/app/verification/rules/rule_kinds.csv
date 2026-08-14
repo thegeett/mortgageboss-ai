@@ -41,7 +41,7 @@ IN-16,Pay-stub-only documentation,Income,structural,deterministic_only,false,tru
 AS-1,Large-deposit sourcing sweep,Assets,calculative,deterministic_bookend+ai,true,,false,true,Each deposit vs income-derived threshold — arithmetic; AI recognizes payroll/transfers + per-deposit subject enum.
 AS-2,Earnest money deposit sourcing,Assets,structural,ai_fuzzy_match,false,false,false,false,Match contract EMD to a debit in verified account — match; sourcing judgment → AI.
 AS-3,Cash-to-close sufficiency,Assets,calculative,deterministic_bookend+ai,true,,false,false,assets vs down+costs+reserves — arithmetic.
-AS-4,Reserves adequacy,Assets,calculative,deterministic_bookend+ai,true,,false,true,reserve-eligible assets in months PITIA vs required — arithmetic; eligibility judgment.
+AS-4,Reserves adequacy,Assets,calculative,deterministic_bookend,true,,false,false,"Reserve-eligible assets in months PITIA vs required. LP-497: evaluation_path drops the +ai half and threshold_needs_signoff drops to false. NO AI tag is in this rule's chain — the reserves calculator reads DB assets and the DTI housing line, and reserves.required_months reads MISMO occupancy + unit count; the activation bar's claim that stmt.is_reserve_eligible is load-bearing was stale (that tag feeds nothing here). Every encoded cell is tier P from B3-4.1-01 (08/07/2024)."
 AS-5,Gift-fund documentation chain,Assets,structural,ai_fuzzy_match,false,false,false,false,Three-link presence (letter/donor/transfer); deposit-match → AI.
 AS-6,Account ownership,Assets,structural,ai_fuzzy_match,false,false,false,false,Holder name vs borrower — tolerant match.
 AS-7,NSF / overdraft flag,Assets,structural,ai_fuzzy_match,false,false,false,false,Detect NSF/overdraft count vs tolerance; ambiguous labels → AI.
@@ -68,14 +68,14 @@ PR-8,Disaster-area reinspection,Property,judgmental,ai_judgment,false,,false,fal
 OC-1,Occupancy consistency,Occupancy,structural,ai_fuzzy_match,false,false,false,false,Stated occupancy vs address signals — compare; inference → AI.
 OC-2,Occupancy reasonableness,Occupancy,judgmental,ai_judgment,false,,false,false,Distance/existing-primary/address patterns — fraud-signal judgment.
 OC-3,Investment rental support,Occupancy,judgmental,ai_judgment,false,,false,false,Rental support docs for investment — judgment.
-TI-1,Title commitment parties,Title,structural,ai_fuzzy_match,false,false,false,false,Tolerant party+property match title vs file.
+TI-1,Title commitment parties,Title,structural,deterministic_only,false,true,false,false,"Vested owner vs the file's counterparty — normalised name compare (LP-491). Was ai_fuzzy_match; IH-2's shape exactly: typed extraction already reads vested_owner_name (4/4) and seller_name (5/5), so the perception step is spent and only a string compare remains."
 TI-2,Legal description match,Title,judgmental,ai_judgment,false,,false,false,Compare legal descriptions across sources — parse judgment.
 TI-3,Existing liens / unreleased mortgage,Title,structural,ai_fuzzy_match,false,false,false,false,Detect open liens + payoff plan — presence; interpretation → AI.
 TI-4,Judgments / tax liens on title,Title,structural,deterministic_only,false,true,false,false,Detect judgments/liens on title — presence.
 TI-5,Vesting,Title,judgmental,ai_judgment,false,,false,false,Vesting vs borrower/marital — judgment.
 TI-6,Chain of title / rapid transfer,Title,judgmental,ai_judgment,false,,false,false,Recent transfers/price jumps — flip/fraud judgment.
 IH-1,Insurance adequacy,Insurance,structural,deterministic_only,false,true,false,false,dwelling loss-settlement basis == replacement cost (ADR-340 — Priya retired the coverage-vs-loan arithmetic 2026-03-18); a basis check.
-IH-2,Mortgagee clause,Insurance,structural,ai_fuzzy_match,false,false,false,false,Clause names correct lender — presence/parse (AI for clause text).
+IH-2,Mortgagee clause,Insurance,structural,deterministic_only,false,true,false,false,"Clause names correct lender — normalised name compare (LP-487). Was ai_fuzzy_match; that kind predates typed extraction, which now reads the clause into mortgagee_name (14/15), so the perception step is already spent and only a string compare remains."
 IH-3,Insurance effective date,Insurance,structural,deterministic_only,false,true,false,false,effective date <= closing — date compare.
 IH-4,Premium matches DTI,Insurance,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare (dup DT-5).
 IH-5,Flood zone determination,Insurance,structural,deterministic_only,false,true,false,false,Flood determination present + zone extracted — presence.
@@ -84,9 +84,9 @@ IH-7,Condo master policy,Insurance,structural,deterministic_only,false,true,fals
 IH-8,Wind/hail coverage,Insurance,judgmental,ai_judgment,false,,false,false,State/property applicability + policy parse — judgment.
 CO-1,Condo questionnaire present,Condo,structural,deterministic_only,false,true,false,false,Condo → questionnaire present — presence.
 CO-2,HOA dues in DTI,Condo,structural,deterministic_only,false,true,false,false,HOA detected → dues in payment — presence (overlaps DT-2).
-CO-3,Master insurance / fidelity,Condo,judgmental,ai_judgment,false,,false,false,Master + fidelity adequacy vs requirements — judgment.
-CO-4,HOA budget / reserves,Condo,calculative,deterministic_bookend+ai,true,,false,true,reserve % vs requirement (>=10%) — arithmetic; budget parse → AI.
-CO-5,Litigation / delinquency / concentration,Condo,judgmental,ai_judgment,false,,false,false,Surface litigation/delinquency/concentration — judgment.
+CO-3,Master insurance / fidelity,Condo,structural,deterministic_only,false,true,false,false,"Fidelity/crime coverage EVIDENCED on the project master policy — a presence read. Was judgmental/ai_judgment on master + fidelity adequacy: the master half is live IH-7 and the fidelity AMOUNT cannot be computed (B7-4-02 needs the unit count and assessment base, which resolve nowhere), so what remains is reading one indicator the extractor already types 8/8. No judgment ""left (LP-494)."
+CO-4,HOA budget / reserves,Condo,calculative,deterministic_bookend,true,,false,true,"Reserve % vs a DATE-KEYED floor — 10%, and 15% for applications dated on/after 2027-01-04 (LL-2026-03). Was deterministic_bookend+ai on the assumption that AI parses an HOA budget; now the AI-free bookend: there is NO HOA-budget document type in the catalog, so no budget can be classified, extracted or attached, while the condo questionnaire carries a typed reserve_contribution_percentage. The perception step is spent (LP-494); only the comparison remains. rule_kinds keeps calculative + a bookend path; the +ai half is what went."
+CO-5,Litigation / delinquency / concentration,Condo,structural,deterministic_only,false,true,false,false,"Surface litigation/delinquency/concentration. Was judgmental/ai_judgment against property.is_warrantable_condo, which has no source field anywhere; the real inputs are five TYPED condo-questionnaire fields, three legs are numeric compares against cited B4-2.1-03 / B4-2.2-02 limits, and the fourth SURFACES the litigation answer to a human rather than judging it. Nothing left for a model to perceive (LP-494)."
 PC-1,Contract parties match,Contract,structural,ai_fuzzy_match,false,false,false,false,Tolerant party match contract vs file/title.
 PC-2,Purchase price matches loan terms,Contract,structural,deterministic_only,false,true,false,false,contract price == MISMO price — exact compare.
 PC-3,Property address matches,Contract,structural,ai_fuzzy_match,false,false,false,false,Tolerant address match across sources.
@@ -101,9 +101,9 @@ MI-2,MI factor correct,MI,calculative,deterministic_bookend,true,,false,false,MI
 MI-3,MI certificate present,MI,structural,deterministic_only,false,true,false,false,MI required → certificate present — presence.
 MI-4,FHA MIP (upfront + monthly),MI,calculative,deterministic_bookend,true,,false,true,UFMIP financed + monthly MIP at factor — arithmetic.
 MI-5,Borrower-paid vs lender-paid MI,MI,structural,deterministic_only,false,true,false,false,MI structure used vs certificate/pricing — match.
-PE-1,Conventional eligibility,Program,calculative,deterministic_bookend+ai,true,,false,true,Eligibility matrix incl. CONFORMING LIMIT check (the jumbo catch) — reference values in spec; AI assembles.
+PE-1,Conventional eligibility,Program,calculative,deterministic_bookend,true,,false,false,"Loan amount vs the FHFA conforming limit (the jumbo catch). Was deterministic_bookend+ai on the catalog's 'AI assembles' rationale; now the AI-free bookend, the CO-4 precedent (LP-494): the limit is a declared reference value and the loan amount is a typed MISMO fact, so the perception step is already spent and only the comparison remains. threshold_needs_signoff drops to false — every value is tier P from FHFA's own 2026 release, not a secondary source. rule_kinds keeps calculative + a bookend path; the +ai half is what went."
 PE-2,FHA case number,Program,structural,deterministic_only,false,true,false,false,FHA → case number present — presence.
-PE-3,FHA minimum required investment,Program,calculative,deterministic_bookend,true,,false,true,borrower investment vs 3.5% of price — arithmetic.
+PE-3,FHA minimum required investment,Program,calculative,deterministic_bookend,true,,false,false,"Borrower investment vs the Minimum Required Investment. threshold_needs_signoff drops to false: the 3.5%/10% rates, the 580/500 tiers and the Adjusted Value definition are all tier P, read directly from HUD Handbook 4000.1 (LP-496a). NOTE the basis is ADJUSTED VALUE (the lesser of price and property value), not the price this row previously named — the catalog rationale was wrong and the guideline governs."
 PE-4,FHA property condition,Program,judgmental,ai_judgment,false,,false,false,FHA condition callouts — interpretive.
 PE-5,VA / USDA / Jumbo / Non-QM,Program,out_of_scope,static_filter,false,,false,false,Out of scope (Conv+FHA only).
 AU-1,AUS data matches documents,AUS,structural,ai_fuzzy_match,false,false,false,false,AUS inputs vs documented values — compare; material-diff judgment → AI.

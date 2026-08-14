@@ -121,3 +121,57 @@ def test_failed_factory() -> None:
     result = UniformResidentialLoanApplicationExtractionResult.failed("nope")
     assert result.status == ExtractionStatus.FAILED
     assert result.data == UniformResidentialLoanApplicationExtraction()
+
+
+# --------------------------------------------------------------------------- #
+# LP-464 — the 1003 REGRESSION GUARD (mandated). Both URLAs in the bench errored
+# to a completely EMPTY result (the truncation-retry ValueError, since fixed by
+# streaming). 100% of a type read by 28 rules failed silently, and nothing caught
+# it. This guard fails LOUD if a full multi-section URLA ever returns empty again.
+# --------------------------------------------------------------------------- #
+
+
+async def test_full_urla_extracts_many_fields_not_silently_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_complete(monkeypatch, text=FULL_JSON)
+    result = await extract_uniform_residential_loan_application(PDF_BYTES, "application/pdf")
+    assert result.status == ExtractionStatus.SUCCEEDED
+    # A real multi-section 1003 populates MANY fields — the empty-result bug produced ZERO. Guard a
+    # substantial floor so a silent-empty regression on the highest-value document cannot pass.
+    populated = sum(
+        1
+        for name in type(result.data).model_fields
+        if hasattr(getattr(result.data, name), "value")
+        and getattr(result.data, name).value is not None
+    )
+    assert populated >= 20, f"URLA extracted only {populated} fields — a silent-empty regression"
+
+
+async def test_urla_survives_truncate_then_full_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exact shape of the fixed bug: a dense URLA truncates at the first budget, the guard retries at
+    the high ceiling, and the FULL result comes back — the retry must not raise (the streaming fix) and
+    must not silently empty."""
+    mock = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                text="{trunc",
+                input_tokens=100,
+                output_tokens=99,
+                model="m",
+                stop_reason="max_tokens",
+            ),
+            SimpleNamespace(
+                text=FULL_JSON,
+                input_tokens=150,
+                output_tokens=900,
+                model="m",
+                stop_reason="end_turn",
+            ),
+        ]
+    )
+    monkeypatch.setattr(model_call, "complete", mock)
+    result = await extract_uniform_residential_loan_application(PDF_BYTES, "application/pdf")
+    assert mock.await_count == 2  # truncation guard retried once (at 32768) — no crash
+    assert result.status == ExtractionStatus.SUCCEEDED
+    assert result.data.borrower_legal_name.value == "SAMPLE"  # the full data survived the retry

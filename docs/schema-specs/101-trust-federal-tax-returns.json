@@ -37,6 +37,7 @@
       "shape_reason":"a trust genuinely has multiple beneficiaries and this is the highest-value repeating structure (it carries the borrower's distribution income and TIN); item count is small-to-moderate (typically < 20), but a flat row keeps token cost low and matches the other financial lists",
       "expected_item_count":"< 20","rules":[],
       "exists_today":false,"plumbing_sites":5,
+      "redact":["beneficiary_tin_masked"],
       "fields":[
         {"name":"beneficiary_name","type":"str","why":"names the beneficiary receiving the distributive share"},
         {"name":"beneficiary_tin_masked","type":"str","why":"the beneficiary's SSN/TIN, the join to a borrower's stated trust income","pii_note":"beneficiary SSN/TIN — needs its own row redactor via the nested-record (transaction-description) pattern; needs registration, pre_masked=true"},

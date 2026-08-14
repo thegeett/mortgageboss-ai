@@ -12389,6 +12389,40 @@ silently rot back into "just run a labeling round."
 invented ambiguity), LP-406-4 (OC-1's tag measures declaration consistency; LF-6T3N states no occupancy), LP-418
 (the voe/offer/continuance fixtures), LP-419 (`income.type` unscored; IN-12's self-employment gate).
 
+### Amendment (LP-487, 2026-08-12) — a self-authored LABEL is a second failure mode, distinct from a self-authored FIXTURE
+
+ADR-332 names ONE way self-authorship corrupts a score: **the fixture encodes the answer.** We invent the
+document, so the document already contains what we want the tag to say, and measuring against it measures
+nothing.
+
+**There is a second, and this ADR did not name it.** Scoring a model against ground truth WE read off a
+REAL document escapes the first failure mode entirely — the document is external, and the carrier or bureau
+who wrote it had no knowledge of our rule, so it cannot encode our answer. That distinction is real and
+should not be blurred: reading a printed clause off a PDF is **not** the same act as authoring a fixture.
+
+But it does not make the exercise sound, because **the same reader supplies the label and the logic.** Where
+a document is ambiguous — a mortgagee clause reading `UWM ISAOA ATIMA C/O CENLAR`, where the mortgagee could
+be read as UWM or as Cenlar — our ground-truth label and our matching rule encode the *same* judgment about
+how to resolve it. The score then measures **self-consistency, not correctness**, and it does so most
+strongly on exactly the cases that matter, because the unambiguous ones would score correctly under any
+sensible rule.
+
+**The practical consequence.** The two failure modes want different remedies:
+
+| | corrupts because | remedy |
+|---|---|---|
+| self-authored **fixture** (ADR-332 as written) | the artifact contains our answer | a real file |
+| self-authored **label** (this amendment) | our reading of an ambiguous real artifact matches our own logic | an independent reader — or removing the need for a score |
+
+A real file fixes the first and **not** the second. Where the perception step is already spent (typed
+extraction has read the field), the cheapest sound answer is usually the third column's second option:
+**drop the AI path so there is no threshold to calibrate.** LP-487 took it — IH-2 became a deterministic
+normalised compare, and the scoring run that would have needed self-authored labels was never run.
+
+**Cross-refs (amendment).** LP-487 (IH-2's catalog change from `ai_fuzzy_match` to `deterministic_only`),
+ADR-361 (threshold provenance — cite, never recall), ADR-376 (closed-vocabulary abstain, which LP-487 widens
+for a prose field and states the widening).
+
 ## ADR-333: The extraction→snapshot boundary is lossy for nested typed structures — a signal can be extracted correctly and still be invisible to every producer (LP-421)
 
 **The finding (named).** A document type's extractor can produce a field as fully TYPED CORE and that field can
@@ -13579,6 +13613,30 @@ logging), LP-102 (the truncation guard this protects), ADR-343 (C0's client-life
 re-tested rather than assumed), `scripts/verify-bedrock.py` (the empirical follow-up for the two PENDING
 findings).
 
+
+---
+
+## ⚠️ ADR NUMBERING COLLISION — 362 onwards is allocated TWICE
+
+Two lines of work appended to this log independently and both continued from 361:
+the **C-series** (C0–C6: the AWS/Bedrock deployment line, ADR-362…ADR-377) and the
+**LP-series** (the rule-engine line, ADR-362…ADR-383). They were merged in
+`bedrock_integration_with_rules_staging`; both blocks are kept below, in full and
+unrenumbered.
+
+⚠️ **They are deliberately NOT renumbered.** Both sets are cited from code and from
+other docs — `ADR-377` alone has 12 references, `ADR-362` has 7 — so renumbering
+either side would silently invalidate comments that point at a decision by number.
+A number alone is therefore ambiguous in this file from 362 to 377: cite the
+series too ("ADR-370 (C4)" / "ADR-370 (LP)") until someone reconciles them.
+
+Resolving this properly means renumbering one series AND updating every reference,
+which is a deliberate change, not a merge resolution.
+
+---
+
+### C-series (C0–C6 — deployment, infrastructure, Bedrock provider)
+
 ---
 
 ## ADR-362: Dev routes private egress through a NAT gateway; staging uses interface endpoints — the choice is cost in one environment and compliance in the other (C2)
@@ -14172,3 +14230,1146 @@ is the enclosing block, not the line:
 ```
 
 `.tfvars` files are in scope — their values flow into resources — and were clean.
+
+---
+
+### LP-series (rule engine, extraction, catalog)
+
+## ADR-362: A document type earns a catalog entry when a RULE reads it OR a processor needs it reliably — Tier 3 gives visibility, never reliability (LP-465)
+
+**Context.** The catalog spans ~156 types; the temptation on every `unknown` a bench surfaces is to add a type
+"so the processor can see it." LP-465 added two (`temporary_buydown_agreement`, `uscis_notice_of_action`), and
+the question is what *principle* justified them so the next dozen `unknown`s are decided consistently rather
+than by whoever is looking.
+
+**The decision — a type earns a Tier-1/Tier-2 catalog entry when EITHER a verification rule reads its fields,
+OR a processor needs those fields reliably enough to justify a typed extractor.** "A processor glances at it"
+is *not* sufficient on its own — that is what Tier 3 is for. The buydown qualifies on both counts: it alters
+the borrower's actual payment (a future qualifying-payment/DTI rule reads it) and a processor needs the
+schedule reliably today. The USCIS notice qualifies because it feeds ID-8 (citizenship/residency) directly.
+
+**Why the distinction is real and not bureaucratic.** Tier 3 (free extraction) gives *visibility* — the
+document is classified, filed, and its gist surfaced — but its output is untyped, unvalidated, rule-inaccessible
+(ADR of LP-463), and unstable field-to-field. A rule cannot depend on it and a processor cannot trust a
+specific field to be present and correctly typed. Promoting a type to Tier 1 buys *reliability*: a typed core,
+per-field confidence, PII routing, and a generated test. That reliability has a cost (a spec, a prompt to tune
+with Priya, plumbing), so it must be earned by a consumer that needs reliability — a rule, or a processor task
+that breaks without it — not spent on visibility that Tier 3 already provides for free.
+
+**The corollary that kept scope honest.** The four I-797 misroutes (to `visa_documentation` /
+`work_visa_ead_card`) proved the *absence* of a reliable home was actively harming an existing rule's inputs —
+which is exactly the "a rule reads it" test being failed. That is the signal to add a type; a pile of
+`unknown`s that no rule and no processor task consumes is the signal to leave them in Tier 3.
+
+**Cross-refs.** LP-465 (`docs/tickets/LP-465.md`), LP-58/ADR-053/ADR-167 (the catalog as app-layer
+tier/category knowledge), LP-463 (the Tier-3-is-rule-inaccessible ADR this leans on), LP-434/LP-437 (the
+generator + generic-list mechanism that made the promotion cheap).
+
+## ADR-363: A type can earn a catalog entry to keep `unknown` meaningful and to ANCHOR routing — not to extract; and an AVM is named so it can never be mistaken for an appraisal (LP-466)
+
+**Context.** LP-466 added three types, two of which stress the "what earns a type" rule (ADR-362) from the
+opposite side of a rule-reads-it justification: `lender_dashboard_screenshot` extracts almost nothing, and
+`home_value_estimate` is a value document that must **never** be read as evidence of value. Both decisions are
+recorded because both are easy to get wrong later — someone will want to schematize the dashboard, or wire the
+AVM into a property rule.
+
+**A type can be worth adding with almost no schema.** `lender_dashboard_screenshot` is a software screenshot
+(a UWM portal capture), not a document. Its typed core is five identity fields (platform, section label,
+loan_number, borrower_name, capture_date) — and in practice three (loan/borrower are usually null on a loan
+officer's home page). It exists for two reasons, neither of which is extraction:
+1. **It keeps `unknown` a real signal.** Screenshots were diluting the `unknown` bucket; every one that lands
+   in `unknown` is noise that hides an actual missing type. Giving the screenshots a home makes the residual
+   `unknown` count mean "a type we still lack," not "someone printed their dashboard."
+2. **It anchors a routing pair.** The portal embeds a Home Value Estimator block. The dashboard type exists so
+   the classifier can *route by dominance*: an HVE-dominant capture goes to `home_value_estimate` (value
+   extracted); a broad dashboard with a buried HVE goes here (value deliberately NOT extracted). One label per
+   document — the closing-package limit in miniature.
+
+**The deliberate anti-goal: do NOT grow a dashboard content schema.** A portal's panels change with every
+software release; a schema built on today's layout is obsolete on the next deploy. The typed core is identity
+only; the panel text falls to the generic catch-all (rule-inaccessible), never a typed schema. Phase C
+confirmed it: the three dashboards returned 3 typed fields each, with the pipeline/ranking/alert furniture in
+the catch-all — the scoping held.
+
+**An AVM is not an appraisal, and the NAME is the primary defense.** `home_value_estimate` is an Automated
+Valuation Model — a non-binding software estimate. It is not an `appraisal` (a licensed URAR/Form 1004 with
+comparables, condition, and a certified value) and not a `property_profile_subject` (a data-vendor profile).
+The separation is enforced in three places so no single reader has to remember it:
+- **the type name** — `home_value_estimate`, not `home_value` or `valuation`, so a field consumer sees
+  "estimate";
+- **the indicator** — quotes the document's own disclaimer ("does not constitute an appraisal; should not be
+  relied upon in lieu of an appraisal") and explicitly excludes `appraisal` and `property_profile_subject`;
+- **the schema** — `rules_served` is empty and `appraised_value`/`value_conclusion`/`comparable_sales` are
+  explicitly *rejected* fields, with the reason recorded: naming an `appraised_value` field would invite wiring
+  the estimate into a property rule as certified value, the exact error the type exists to prevent. The one
+  free-text field that survives, `disclaimer_text`, carries the not-an-appraisal language *with* the value so
+  the caveat travels attached to the number.
+
+**Why it matters downstream.** Mistaking an AVM for an appraisal (or the reverse) is a serious valuation error.
+The Phase-C regression check — a real appraisal must still classify as `appraisal`, not `home_value_estimate`
+— is the standing guard against the new neighbor pulling the appraisal family in; it held at 0.95.
+
+**Cross-refs.** LP-466 (`docs/tickets/LP-466.md`), ADR-362 (the "what earns a type" rule this extends to the
+no-schema and no-rule cases), LP-441 (the Tier-1-iff-spec invariant the dashboard's minimal spec honors rather
+than special-cases), LP-465 (the prior missing-types ticket + the `_PII_FIELDS` at-rest-guard pattern reused
+for the wire routing/account numbers).
+
+## ADR-364: A single-document type earns its place when the document is a real, distinct STANDARD form — but only after the redundancy test; and record the correction when a claimed rule tie is wrong (LP-467)
+
+**Context.** LP-467 added `certificate_of_liability_insurance` (ACORD 25) on the strength of a *single*
+corpus document, and `service_invoice` (a generic vendor bill) on six. Two lessons worth pinning: what makes
+a low-count type legitimate, and the discipline that a claimed rule justification must survive contact with the
+document.
+
+**A count of one is a corpus artifact, not a frequency finding.** The corpus happens to hold one ACORD 25; a
+condo/new-construction file routinely carries one. A type earns a catalog entry when the document is a real,
+distinct, STANDARD form (ACORD 25 is an industry-standard certificate) that currently dilutes `unknown` — not
+when it appears N times. Rarity in a 900-document sample says nothing about whether the type belongs.
+
+**But the type must first pass the redundancy test — a split schema is worse than a gap.** Before adding
+`certificate_of_liability_insurance`, the question was whether the existing
+`master_insurance_policy_for_condominium` already covers it. The test: *would forcing one document into the
+other's schema produce usable data or garbage?* Here it produces garbage — an ACORD 25 is a one-page liability
+CERTIFICATE (CGL/Auto/Workers-Comp limits) with none of the dwelling-replacement-cost / deductible /
+causes-of-loss fields the master-POLICY schema exists to capture. Disjoint content, different artifact
+(summary certificate vs governing contract), different purpose (evidence to a holder vs the policy itself). So
+the two are genuinely distinct and both belong. Had the schemas overlapped, the right call would have been the
+opposite — **not** adding the type, because splitting the same documents across two schemas means no rule knows
+which to read. A redundant type is worse than a missing one.
+
+**⚠️ Record the correction when a claimed rule tie is wrong.** The plan and the ticket both justified the ACORD
+25 by CO-3 (a condo project's master policy + fidelity bond). **That tie is wrong, and it is recorded loudly so
+no one acts on it.** CO-3's inputs are master-PROPERTY coverage and a FIDELITY/crime bond, which arrive on an
+**ACORD 27/28** (Evidence of Property Insurance) + a crime certificate — a *different* form. An ACORD 25 is a
+LIABILITY certificate; the sample (073) is a homebuilder's CGL/Auto/WC cert with no property or fidelity line.
+So `certificate_of_liability_insurance` serves **no rule** — anyone building CO-3 must not look for its inputs
+here. The type still earns its place, on **processor visibility** (a real, distinct standard document out of
+`unknown`), the same standard as `wire_instructions` (ADR-362/363). The lesson: a rule justification in a plan
+is a hypothesis; verify it against the document, and when it fails, keep the type on its real merit and record
+the correction rather than quietly leaving the false tie in place.
+
+**A corollary the extraction surfaced — the LP-460 one-row-per-section lesson recurs, and the generator does
+not carry it.** The ACORD 25 `coverage_lines` list must be ONE ROW PER COVERAGE SECTION (CGL/Auto/WC), not per
+sub-limit. The generated STARTER prompt emitted only the row's fields, so the model fragmented one CGL section
+into 6 rows (12 total). The fix was a manual prompt-tuning pass adding the explicit framing (→ 3 rows). The
+generator emits list *fields* but not the spec's shape framing; any list whose unit of capture is a section
+(not a labeled sub-item) needs that tuning pass — a known generator gap, not a per-ticket surprise.
+
+**Cross-refs.** LP-467 (`docs/tickets/LP-467.md`), ADR-362/363 (the "what earns a type" / visibility-only
+rules this applies), LP-460 (the one-row-per-section lesson that recurred), LP-441 (the Tier-1-iff-spec
+invariant both new types honor).
+
+## ADR-365: Two limits on classification accuracy — the LP-463 guard cannot catch a confident-but-coherent misread, and an indicator cannot fix an unreadable input (LP-468)
+
+**Context.** LP-468 fixed two misclassifications from the missing-extractor diagnostic. One (compensation
+statements force-fit into `commission_income_statement`) was fixed cleanly by a new type + sharpened
+indicators. The other (an EAD card read as a `passport`) exposed two distinct ceilings on classification
+accuracy that are easy to conflate with "the prompt needs work." Both are recorded because assuming either is
+a prompt problem wastes effort on the wrong layer.
+
+**Limit 1 — the LP-463 reasoning-vs-label guard only catches ADMITTED contradictions.** LP-463 made the
+classifier able to decline, and added a `type_matches_document` guard that fires when the model's chosen label
+disagrees with its own reasoning (the case that diverts a document to Tier 3). That guard caught the
+compensation statements — they returned `commission_income_statement` with `type_matches_document = False`,
+because the model's *own* description ("employee compensation statement … base pay, incentive awards") did not
+match the mortgage-sales-commission label. **But the EAD returned `passport` @0.92 with
+`type_matches_document = TRUE`** — the model's label and its reasoning AGREED ("a U.S. passport photo page").
+A confident, self-consistent, wrong read is invisible to a contradiction guard: there is no contradiction to
+detect. That class needs an *indicator* fix (teach the boundary), not a guard. This is worth knowing before
+anyone assumes the LP-463 guard covers all misclassification — it covers the model second-guessing itself, not
+the model being coherently wrong.
+
+**Limit 2 — an indicator cannot fix an input the model cannot READ.** The indicator fix for the EAD/passport
+boundary is correct and provably works: a *readable* EAD (Harshita's) now classifies as `work_visa_ead_card`
+@0.95, and the whole immigration family held (passport, driver's license, USCIS notice all unchanged). **But
+the ticket's target document, 266, is a 90°-rotated, low-resolution CamScanner photo** — across three runs the
+classifier hallucinated "UK passport" / "UK biometric residence permit" / "UK passport", never once reading
+the card's own separators ("EMPLOYMENT AUTHORIZATION", "Form I-766", "NOT VALID FOR REENTRY"). An indicator
+teaches a boundary between things the model can perceive; it cannot make an unreadable image legible. A second
+EAD, `453__Saikumar_EAD`, → `passport` @0.95, so this is **systemic, not a single bad scan** — ID cards are
+routinely photographed rotated and low-res, and the classifier's default in that state is `passport`.
+
+**The evidence that this is a preprocessing gap, not an illegible document.** The *extractor* — given the same
+image but a prompt primed to look for EAD fields — pulled "Employment Authorization Document / Form I-766" from
+266, at confidence 0.35. So the text IS there and IS partially machine-readable; the classifier fails because
+it is choosing among ~160 type descriptions on a rotated image and latches onto the visual gestalt (a photo-ID
+card with security features → passport). That 0.35 partial read is the strongest signal that **image
+preprocessing — auto-rotation, OCR — would close this**, rather than the image being genuinely illegible. That
+is the follow-up, and it is out of scope for an indicator ticket.
+
+**The combined lesson.** Classification accuracy has at least three separable layers: the guard (catches
+self-contradiction), the indicator (teaches boundaries the model can perceive), and the input pipeline (makes
+the document perceivable). A failure at one layer cannot be fixed at another. Reach for the right layer:
+self-contradiction → guard; coherent boundary confusion → indicator; unreadable input → preprocessing.
+
+**Why `compensation_statement` earns a type with no rule today.** It serves no rule now — but it is the direct
+input to IN-10 and IN-11 once the earnings classifier is built, and a processor needs the base/bonus/equity
+split reliably in the meantime. Same standard as `wire_instructions`/`home_value_estimate` (ADR-362/363):
+processor visibility plus a concrete future rule consumer. Critically, the extractor captures the printed
+components ONLY — no total-compensation figure, no qualifying-income, no variable-vs-base label — because
+earnings classification is a separate decision procedure (Priya's ruling: "do not classify solely from the
+text label", with a fail-closed UNKNOWN branch), not a number to read off the page. The `$195,000 total
+compensation` banner on the Deloitte statement is deliberately left to the catch-all for exactly this reason.
+
+**Cross-refs.** LP-468 (`docs/tickets/LP-468.md`), LP-463 (the guard whose blind spot this names), LP-465 (the
+prior immigration-family indicator fix + the "NOT A VISA" separator pattern reused here as "NOT VALID FOR
+REENTRY"), ADR-362/363 (the visibility-plus-future-rule standard).
+
+## ADR-366: A document type with no in-scope rule gets the HEADLINE BLOCK, not the full form — and what would change that (LP-470)
+
+**Context.** LP-470 promoted the two densest documents in a loan file — the TRID Closing Disclosure (~140
+fields across five pages: party blocks, projected payments, A–J cost tables, borrower AND seller transaction
+summaries, payoffs, loan calculations, escrow, an ARM table) and its sibling the Loan Estimate — from Tier 2
+to Tier 1. The question was how much of that form to schematize.
+
+**The decision — build the HEADLINE BLOCK only.** ~28 fields per form: the parties, the property, the loan
+terms (amount, rate, P&I, term, product, purpose, type), the numbers a processor actually checks (APR, finance
+charge, TIP, total closing costs, cash to close), and the two indicators (prepayment penalty, balloon). The
+full A–J cost tables, both transaction summaries, the payoffs list, and the ARM/AIR/AP tables are NOT built —
+Tier 3 free extraction carries them until a rule needs them.
+
+**Why — no in-scope rule reads a CD or an LE.** Verified in the LP-467 diagnostic against `rule_kinds.csv`:
+CL-1 reads a rate-LOCK confirmation (not the CD); CL-2…CL-7 are out of pre-submission scope (post-close);
+DC-1…DC-7 are all out_of_scope / "likely an LOS function" (TRID timing, fee tolerance, APR tolerance). So the
+CD and LE earn Tier 1 on **processor visibility**, exactly like `wire_instructions` and the ACORD 25
+(ADR-362/363) — not on rule coverage. Schematizing ~140 fields for zero in-scope rules is disproportionate;
+the headline is what a processor checks at this stage, and the itemization has no consumer.
+
+**The field-partition correction (the LP-461 lesson, applied before building).** The plan listed
+`finance_charge` / `amount_financed` / `total_of_payments` as shared. They are **CD-only** — the LE has no
+"Loan Calculations" box; its page-3 "Comparisons" gives an "In 5 Years" figure + APR + TIP instead. Putting
+the three CD-only fields on the LE would have created three permanently-null fields on every Loan Estimate.
+Caught by reading a real LE (258) in Phase A, before writing the spec rather than after.
+
+**⚠️ What would change this decision — write it down so the boundary is revisited deliberately.** The headline
+is a scoping choice contingent on the pre-submission rule set, not a claim that the rest of the CD is
+worthless. If **the pre-submission scope boundary moves**, or **DC-4 (fee tolerance 0%/10%) or DC-5 (APR
+change threshold) are confirmed in scope**, the CD becomes rule-bearing: DC-4 needs the full A–J cost
+itemization (the LE→CD fee buckets) and DC-5 needs the APR comparison — and the cost tables and both
+transaction summaries become necessary, not optional. At that point the headline schema is extended, not
+replaced. Anyone asked to "add the CD cost tables" should first confirm which rule now reads them.
+
+**Cross-refs.** LP-470 (`docs/tickets/LP-470.md`), ADR-362/363 (the visibility-plus-future-rule standard this
+applies), LP-467 diagnostic (the CD/LE scope verification against `rule_kinds.csv`), LP-461 (the
+drop-fields-not-on-the-page lesson applied to the CD-only partition).
+
+## ADR-367: `general_correspondence` — a thin envelope schema was CONSIDERED AND REJECTED; build nothing (LP-470)
+
+**Context.** The missing-extractor report flagged `general_correspondence` (six documents) as needing an
+extractor. LP-470 had to decide what to build. This ADR records that the answer is **nothing**, and why —
+because "build nothing" is invisible in the code, and without this someone will build the thin schema later.
+
+**What the documents are.** All five in scope (152, 153, 156, 159, 214) are **Gmail email threads** —
+borrower/broker/lender correspondence delivering explanations: an employment history, an arms-length
+relationship disclosure, two paystub/bank-statement address-discrepancy explanations, a Non-QM rationale. The
+**envelope is uniform** (from, to, cc, date, subject, attachments); the **value is entirely in the body, and
+it varies per letter**.
+
+**The option considered and rejected: a thin envelope schema** (from / to / date / subject / attachments,
+plus a "key facts" area). Rejected for three reasons:
+1. **It captures the wrapper and misses the content.** The from/to/date is the least useful part; the
+   employment rows, the disputed addresses, the LOE questions are the point, and they differ every letter.
+2. **Tier 3 already serves the content.** Since LP-463, Tier 3 free extraction lands the body in a
+   marked-untyped snapshot section readable by AI cross-source verification — which is exactly right for
+   per-letter-varying free text. A thin typed schema beside it would be strictly worse (it would look
+   structured while carrying nothing structured).
+3. **Four of the five are Letters of Explanation.** The existing `letter_of_explanation` family (seven types)
+   already covers explanations. Where the classifier routes an explanation-email to `letter_of_explanation` it
+   gets a real schema; where it lands in `general_correspondence` it gets a Tier-2 summary + a Tier-3 body.
+   Both are acceptable; **neither needs a new extractor.**
+
+**So `general_correspondence` stays Tier 2 (recognized + summarized), with no spec and no extractor**, and no
+"key facts" area is built. This is the **third time in this workstream a "missing extractor" turned out to be
+routing, not a missing type** — EAD→passport (LP-468), compensation→commission (LP-468), and now
+correspondence→LOE/Tier-3. The recurring lesson: before building an extractor for a "missing type", confirm
+the documents aren't already served by an existing type reached by a different route.
+
+**Cross-refs.** LP-470 (`docs/tickets/LP-470.md`), LP-463 (Tier-3 scoped free extraction + the untyped
+snapshot section this leans on), LP-468 (the two prior routing-not-missing-type findings), the
+`letter_of_explanation` family (the seven LOE types that cover the explanation content).
+
+## ADR-368: No document ever yields zero data — a missing type, extractor, or crash costs TYPED data, not ALL data (LP-471)
+
+**Context.** Since LP-463 a document that classifies as `unknown` routes to Tier-3 scoped free extraction and
+is read. But two other paths to "no data" bypassed Tier 3: a type with no registered extractor (Tier-2, or a
+Tier-1 promoted before its extractor is wired) got only a thin LP-65 summary — not surfaced into the snapshot's
+untyped section — and an extractor that FAILED terminated at `NEEDS_REVIEW` with nothing. So a document could
+classify correctly at 0.99 and still yield zero usable data. The v2 bench counted 56 no-extractor + 3 errored.
+
+**The principle — no document should ever yield ZERO data.** A missing type, a missing extractor, or a crash
+should cost **typed** data (the structured fields a rule can read), never **all** data. Both no-data paths now
+fall back to the SAME existing `_tier3_analyze` scoped free extraction: `_route_by_tier` routes every
+no-typed-extractor document there (replacing the summarize path), and `_extract_branch` falls back there on a
+genuinely-empty FAILED extraction. The output lands in the marked-untyped snapshot section
+(`DocumentEntry.untyped_extraction`) — read by a processor and by AI cross-source verification (opt-in
+`include_untyped`), **never by a deterministic rule** (LP-463's constraint, inherited unchanged: no rule reads
+`untyped_extraction`). A missed type now costs untyped data, not nothing.
+
+**⚠️ This deliberately reduces the pressure to re-tune the classifier — and that is the point.** The v2 run
+showed how a type gets missed: `passport` was on the build list, the diagnostic split it, LP-468 fixed the
+misclassification, and the remaining passport step was skipped without anyone deciding to skip it —
+`warranty_deed`, `certificate_of_deposit`, `money_market_statement` are in the same position. A fallback means
+that a lost item, an unwired extractor, or a crash costs untyped data rather than no data — a much cheaper
+mistake, and one that does not depend on nobody ever losing track of a plan item. It also changes the
+classifier calculus: LP-463's declining was CORRECT and caused over-declining, and v2's ~14 reclassification
+regressions hurt precisely because `unknown` meant near-nothing. With this fallback, "no extractor" and
+"crashed" also mean "read anyway", so the pressure to aggressively re-tune the classifier drops. **Making the
+failure mode cheap is a safer fix than loosening the classifier and risking the LP-463 force-fits returning** —
+which is why classifier re-tuning is deliberately a later, narrower ticket, not this one.
+
+**Fallback runs AFTER retries, never instead of them — and never for a re-runnable throttle.** The extractor's
+own retries (the LP-462 rate-limit backoff, the LP-464 truncation retry) run inside the extractor call; only
+its final result reaches `_extract_branch`. The throttle gate (LP-464) sits BEFORE the fallback: a sustained
+rate-limit after retries is recorded as re-runnable `NEEDS_REVIEW` and returns — it must NOT fall back, because
+a re-run may extract fine and a fallback would silently degrade it. Only a *non-throttle* FAILED reaches the
+fallback. So a transient throttle can never trigger it (the LP-462 lesson: a throttle recorded as a plain
+failure corrupts every downstream audit — here it is never recorded as a fallback either).
+
+**A fallback must not make a failure look like a success.** The FAILED extraction version is KEPT (with
+`error_detail = result.reasoning` — oversized / parse / "AI call failed"), the document stays `NEEDS_REVIEW`
+(a human still sees the error), and `processing_error` names the error type. The presence of `generic_analysis`
+marks "fell back to untyped"; it never overwrites or hides the typed failure. A `PARTIAL` or low-confidence
+extraction that DID capture fields does **not** fall back (`derive_status`: FAILED means genuinely empty) —
+mixing typed and untyped data for one document would let a reader conflate them.
+
+**One case the fallback cannot save — recorded honestly.** 069 is an oversized `BadRequestError`; the fallback
+`analyze_document` sends the same oversized content and also fails, so 069 ends `NEEDS_REVIEW` with the FAILED
+version + no untyped data. It needs the LP-464 page-cap work; the fallback is graceful about it rather than
+pretending the document is handled.
+
+**Cross-refs.** LP-471 (`docs/tickets/LP-471.md`), LP-463 (the Tier-3 free extraction + rule-unreadable untyped
+section this reuses), LP-462/LP-464 (the retry/throttle gates the fallback sits after), LP-472 (the shared
+identity schema — the eventual typed home for the no-extractor identity types).
+
+## ADR-369: Classify precisely, extract in common — one shared identity schema for a whole document family; and a typed extractor can make a bad scan WORSE (LP-472)
+
+**Context.** Four government-identity types — `passport`, `permanent_resident_card`, `work_visa_ead_card`,
+`government_issued_id` — carry the same identity facts (name, DOB, document number, expiry, issuing authority).
+The ticket assumed all four lacked an extractor. The code said otherwise: only `passport` had none (Tier-2);
+the other three each already had a **separate generated extractor with drifting field names for the same fact**
+— `full_name` vs `full_legal_name`, `card_number` vs `document_number` vs `document_or_card_number`,
+`card_expiration_date` vs `expiration_date` vs `expiration_or_admit_until_date`. That drift is exactly what
+defeats the purpose of a family schema: a within-family misclassification (a green card read as an EAD) would
+yield DIFFERENT field names for the borrower's name and expiry, so a downstream reader could not treat the
+family uniformly.
+
+**Decision — classify precisely, extract in common.** The four stay **distinct** in the catalog and the
+classifier (distinct indicators; ID-8 needs the citizenship vs. work-authorization-with-expiry distinction),
+but they **extract through ONE shared module** (`extract_identity_document`) with ONE superset field set and
+ONE prompt. All four `EXTRACTORS` keys point at the same function. The schema is literally identical across the
+family (Geet's principle: *the schema should share all, but it should classify correctly*); a given card fills
+only its printed fields and nulls the rest (a passport nulls `category_code`; an EAD nulls `place_of_issue`).
+`drivers_license` is deliberately **excluded** — it keeps its own tuned extractor (spec 014).
+
+**Why one module, not four-plus-a-sync-test.** The `Tier-1-iff-spec` invariant (LP-441) forces four spec files
+(one per slug), so the spec layer is necessarily four files whose cores are held byte-identical by a CI drift
+test. But the **runtime** truth is a single function: there is nothing to diverge. Four modules kept in sync by
+a test would *detect* drift after someone wrote it; one module *prevents* it. The four specs exist to satisfy
+the invariant and document the field set; the drift test locks their cores identical to each other and to the
+module's `_CORE_SPEC`. This is the generalizable answer to a repeatedly-failing family — the same shape applies
+to any set of types that classify distinctly but share their decision-relevant fields.
+
+**Field decisions.** The shared core reuses the already-registered `_PII_FIELDS` names (`document_number`,
+`uscis_or_a_number`) so consolidation added ZERO new PII wiring. `date_of_birth` and `full_name` stay unmasked
+(ID-1/ID-3 match on them; the `drivers_license` precedent). **`sex` was dropped** — spec 108 had already
+rejected it (no mortgage consumer, protected-class exposure); in a shared schema the most conservative sibling
+wins. **The MRZ was dropped from the typed core** — it re-encodes name/DOB/number/expiry already captured, and
+its contiguous digit run would trip the at-rest `_LONG_DIGITS` guard; it lands in the catch-all if read. The
+EAD's pre-LP-472 I-797/visa-foil fields (receipt/i94/visa/passport numbers, employer) are not printed on the
+EAD card itself and were dropped to the catch-all.
+
+**Verdict-safety window — and why it will close.** Consolidating renamed fields on three live extractors. It is
+safe ONLY because **no active rule reads any family field today** (grep of `app/verification/rules/` is empty;
+ID-1/ID-3/ID-8 are visibility-only, ADR-362/363), so no rename can move a verdict. That window is temporary:
+the moment a rule reads `document_number` or `category_code`, consolidating the family means touching a live
+rule. Doing it now — while the fields are processor-visibility only — is deliberately the cheap time to do it.
+Passport-only (leaving three drifting schemas) was rejected: it is half a fix and guarantees a second ticket.
+
+**⚠️ A limit on the no-zero-data principle (ADR-368): a typed extractor can make a bad scan WORSE.** ADR-368
+established that a missing extractor costs *typed* data, not *all* data, because a no-extractor type falls back
+to Tier-3 free extraction. Promoting `passport` (and giving the family a typed extractor) REMOVES these types
+from that fallback path — they now go through typed extraction. But the LP-471 fallback only fires on `FAILED`
+(a genuinely-empty extraction), **not** on a *confident-but-wrong* read. On an unreadable input — e.g. 266, the
+90°-rotated CamScanner EAD that LP-468 showed the model hallucinates as a UK passport (ADR-365) — a typed
+extractor can return a **confident, coherent, wrong** identity, and the fallback cannot tell that from a
+correct one, so it does not fire. An honest Tier-3 summary ("a low-quality scan of an identity card, largely
+illegible") beats confident garbage, but the confident-misread path bypasses it. So: **adding a typed extractor
+is a strict improvement only for READABLE inputs; for an unreadable scan it can degrade the result below what
+the untyped fallback would have produced.** This is not fixed here (it needs image-preprocessing / a legibility
+gate — ADR-365's open gap); it is recorded as the boundary of the no-zero-data principle. `confidence` +
+`field_confidence` on the typed result are the only current signal a reader has, and neither is a reliable
+legibility detector.
+
+**Confirmed live (LP-472 Phase C), and partially mitigated.** The first shared-prompt run fabricated
+identities on obscured EAD scans — a *readable* EAD got a hallucinated name at conf 0.92; a rotated one became
+"JOHN SMITH, US PASSPORT" at 0.87. An A/B against the deleted per-type prompt (which read the same doc as
+`EAD (Form I-766)`, `C26`, `full_name = null`) proved the *generic shared prompt* caused it: unable to
+pre-declare the type across four kinds, the model guesses on an obscured title band and guesses the more common
+green card, then invents a plausible name. **Prompt discipline closed the dangerous half** — a hard honest-null
+rule ("never emit John Smith / a guessed spelling; a null name is correct, a confident wrong name is a serious
+error") + title-anchoring turned the fabricated names into honest nulls with lower, honest confidence. **The
+residual — mis-reading the EAD's title/category (C26→E26) under glare — is not fixable by prompt alone**, because
+a shared extractor structurally cannot pre-declare its type. The real fix is architectural: **thread the
+already-decided classified `document_type` into the extractor** so it anchors on what classification determined
+(restoring the per-type prompt's advantage without re-introducing schema drift). That changes the uniform
+`(content, media_type)` extractor signature, so it is a deliberate follow-up. The lesson generalizes: a
+one-schema-many-types extractor should be *told what it was classified as*, or it re-litigates classification
+worse than the classifier did.
+
+**Cross-refs.** LP-472 (`docs/tickets/LP-472.md`), ADR-368 (the no-zero-data principle this bounds), ADR-365
+(the confident-coherent-misread + unreadable-scan limits this inherits), ADR-362/363 (the visibility-only
+standard that makes the rename verdict-safe today), LP-441 (Tier-1-iff-spec, which shapes the four-spec layer).
+
+## ADR-370: A limit applied to one call path must be checked against every call path — typed extraction is the one uncapped path (LP-473, 069)
+
+**Context.** 069 is a 118-page closing package. Its typed extraction fails with a provider `BadRequestError`
+(HTTP 400): the document exceeds the **100-page / 32 MB document-block limit**. The classification path does
+NOT fail (LP-462 caps it to `classification_max_pages = 15`); the Tier-3 free-extraction path does NOT fail
+(LP-463 caps it to `tier3_max_pages = 50`). **Typed extraction is the ONE call path that sends the full,
+uncapped document** — `_extract_branch` passes the whole `content` to the extractor — so it alone hits the
+100-page wall.
+
+**The lesson.** LP-462 fixed the page limit on classification; LP-463/471 applied a cap on the Tier-3 path;
+neither pass checked the typed-extraction path against the same provider limit. A limit discovered on one call
+path is a property of the *provider*, not of that path — it must be checked against **every** path that sends a
+document. The `client.py` `INFRA_OVERSIZED` classification (a 400 → not-transient) already anticipates this
+("the page cap is the fix, not a retry"), but no cap was ever wired on extraction.
+
+**Decision — do NOT add a naive extraction page cap here.** A page cap is the right trade for *classification*
+(it only needs the lead document's first pages) and *tolerable* for Tier-3 (facts cluster in the lead pages).
+It is the WRONG trade for typed extraction of a **package**: 069 is CD + Note + Deed of Trust + 1003 + riders,
+and a 1003's liabilities / REO sit deep in the file. A 50-page cap would extract the first ~50 pages of a
+118-page package and **silently drop the later documents** — trading a loud crash for silent, wrong data (the
+exact anti-pattern LP-464 warned about: too tight a cap trades a crash for silent loss). The honest fix for a
+multi-document package is **the splitter** (its own ticket; backlog holds 066/167/204/271), which separates the
+package into single documents each under the limit. Until then the crash is already **graceful**: LP-471 falls
+069 back to Tier-3 (capped to 50 pp), which captures the substance ($688,500 loan, 8.070%, a 2-1 buydown,
+$54,184 cash-to-close) as rule-UNREADABLE untyped data. So 069 loses *typed* data, not *all* data (ADR-368),
+and the real recovery is the splitter, not a cap.
+
+**What would change this.** A single oversized document that is NOT a package (one 120-page appraisal, say)
+could take an extraction page cap safely, because there is no "later document" to lose — only later pages of
+the same document, where a cap is a defensible degradation. That is a different case from 069 and should be
+decided on its own when a real instance appears.
+
+**Cross-refs.** LP-473 (`docs/tickets/LP-473.md`), LP-462 (classification page cap), LP-463/471 (the Tier-3
+cap + the no-zero-data fallback that makes 069's crash graceful), ADR-368 (typed-vs-all data), the splitter
+backlog (066/167/204/271).
+
+## ADR-371: 174 is the image-only gap, not a parse bug — a third instance to consolidate (LP-473)
+
+**Context.** 174 (a lease agreement) was tagged in the v2 bench as a `ValueError`. It is **not** a parse bug.
+The `ValueError` was the pre-streaming SDK ceiling — `.create()` raised `ValueError("Streaming is required …")`
+for `max_tokens > 21,333`, client-side, before the call — which `dcc2196` ("Stream completions to fix the
+truncation-retry ValueError") fixed for the whole cluster (8 of v2's 10 failures, incl. 174/175/176). That fix
+**is an ancestor of HEAD** and the extraction path now uses `client.messages.stream`, so that `ValueError`
+cannot recur; 174's siblings 175/176 already succeed on the fixed path. 174's v2 tag is **stale** (the v2 bench
+predates the fix). `build_document_message` and `cap_pdf_pages` both succeed on 174 locally — there is no parse
+error left to fix.
+
+**What actually remains.** 174 is an **image-only scan** (LP-464: 0 extractable text, defeated pypdf on both
+readers). Post-fix, typed extraction runs on the vision model and either reads the scan or returns an honest
+empty → LP-471 falls it back to Tier-3, which captures the lease terms ($3,000/mo rent, deposit, obligations).
+Any residual weakness is **image legibility**, i.e. the **ADR-365 image-preprocessing gap** — the same class as
+266 (the rotated EAD) and 294. No OCR / preprocessing is attempted here (ADR-365 is deliberately deferred).
+
+**Decision.** Record 174 as a **third instance of the image gap** (266, 294, 174), not as an extractor bug.
+The value of naming the third instance is to make the preprocessing case concrete and worth consolidating into
+one ticket: these documents don't need a parser fix or an extractor fix — they need de-rotation / OCR / a
+legibility gate *before* extraction, so the model isn't handed an unreadable image (and, per ADR-369's A6
+finding, doesn't return a confident wrong reading of one). No code change in LP-473.
+
+**Cross-refs.** LP-473 (`docs/tickets/LP-473.md`), LP-464 (`dcc2196`, the streaming fix + the image-only note),
+ADR-365 (the image-preprocessing gap), ADR-369 (the A6 confident-misread limit on unreadable scans), 266 / 294
+(the sibling image-gap instances).
+
+## ADR-372: The accuracy-audit layer — deterministic self-consistency checks that FLAG, never correct (LP-474)
+
+**Context.** The extraction pipeline measured **coverage** (did we capture the fields?) and never
+**correctness** (are the values right?). The v2 bench surfaced nine confident-wrong values, and a wrong value
+is worse than a missing one: a rule computes on it and nobody knows. The same error class appeared on Sonnet in
+the free-reader comparison (a tradeline payment scaled 100×, a $650 deposit read as $2,650), and doc 244's Box-1
+= Box-10 misread survived **two escalating prompt-tuning attempts**. So this is not a model problem and prompts
+do not solve it.
+
+**Decision 1 — FLAG, never correct.** The layer emits a distinct `DocumentFinding` (`DocumentFindingType.
+CONSISTENCY`) naming the two equal values; it **never rewrites a value and never fails the extraction**. A
+pipeline that silently repairs its own inputs is worse than one that reports them: a wrong "fix" is undetectable,
+while a flagged value gets a human. The coverage status is left untouched, so an accuracy flag is
+**distinguishable from a coverage `PARTIAL`** (a missing/dropped field) — the LP-462 lesson that recording one
+signal as another corrupts every downstream audit, applied here.
+
+**Decision 2 — deterministic, no model call.** The whole point is model-independence: it keeps working when the
+model changes (extraction is on Haiku and may move again). 244 proves prompts don't fix this class, and the same
+class on Sonnet proves it isn't Haiku-specific. A deterministic arithmetic/equality check is the only thing that
+survives a model swap.
+
+**Decision 3 — one declaration-driven primitive, not per-type code.** Three of the nine collapse into a single
+primitive: *two extracted values that must DIFFER came out equal.* Declared in `app/ai/extraction/consistency.py`
+as `MustDiffer(left, right, label)` entries keyed by document_type; adding a fourth is a line, not new code (the
+LP-437/460 lesson — a declaration scaled where bespoke per-type files did not). It **extends the philosophy** of
+the LP-445 `count_field` cross-check (a declared equality that must HOLD → PARTIAL) with its dual (a declared
+equality that must NOT hold → a finding). The three proven pairs, each measured at **ZERO false positives across
+the 303-doc stored corpus**: `w2` state_income_tax ≠ federal_income_tax_withheld (088), `w2` a box_12 amount ≠
+medicare_tax_withheld (096), `bank_statement` a transaction amount ≠ its running_balance (049).
+
+**The coverage-vs-accuracy distinction, and the boundary.** The bench measures coverage; this is the first layer
+that measures a slice of accuracy. But **self-consistency can only catch a wrong value that contradicts another
+extracted value.** A magnitude error with no internal cross-reference (253: a lone $224,307.94 gift with no
+sibling amount) and a wrong-but-plausible value (293: a check date in range but wrong) are **invisible to this
+layer by construction** — they need source cross-checks or cross-document reconciliation, a later ticket. Stating
+the boundary so the next builder owns it.
+
+**Rejected checks, with evidence (so they are not rebuilt on the same reasoning).**
+- **Full bank-arithmetic reconciliation** (beginning + deposits − withdrawals = ending / per-row chain): tested
+  across all 24 stored bank statements — **~10 broke the chain** from transaction ordering, sign-label, and
+  incompleteness, **not value errors**. A ~40 % false-positive rate is the LP-446 anti-pattern (a guard that
+  misfires more than it catches). The tighter `amount == running_balance` signature is the shippable 0-FP subset.
+- **244 (Box 1 = Box 10):** deferred as **"needs a typed Box-10 field"**, not "uncatchable" — form_1098 currently
+  drops the real-estate-taxes figure into `other_information` free text, so there is no field to compare against.
+  The day a `real_estate_taxes_paid` field is added, a `must_differ(mortgage_interest_received, that_field)` pair
+  drops in for free. That is a schema decision a later ticket may make.
+- **credit_report `date_opened` day-fabrication:** the stored `source.snippet` does not contain the opened-date
+  source, so a snippet-precision check has nothing to read; needs per-field source-precision capture first.
+- **253 / 104 / 146 / 294 / 293:** out of reach of self-consistency (no internal contradiction) or another
+  ticket (image gap ADR-365/371; value-content).
+
+**⚠️ This layer should run BEFORE tags are written at scale.** A tag on a wrong value is worse than a tag on a
+missing one — the wrong tag propagates a confident falsehood into every rule that reads it. The consistency
+flag belongs upstream of tag materialization so a flagged value is visible before it feeds a verdict.
+
+**Cross-refs.** LP-474 (`docs/tickets/LP-474.md`), LP-445 (the `count_field` cross-check this extends), LP-446
+(the FP-gate lesson that rejected the arithmetic chain), LP-437/460 (declaration-over-per-type-code), LP-462
+(signal-distinctness), ADR-368/369 (no-zero-data / the A6 confident-misread the accuracy layer complements).
+
+## ADR-373: We measured the benefit of declining and not its cost — the remedy was to make the failure CHEAP, not to loosen the classifier; and the triage rule for reclassification regressions (LP-475)
+
+**The two-sided lesson.** LP-463 made declining legitimate: a document that matches no catalog type returns
+`unknown` instead of being forced into the nearest neighbour. That fix was **correct and measured** — T4s (a
+Canadian wage slip) stopped emitting plausible US `w2` numbers, HOA budgets and payment-portal screenshots
+stopped becoming `hoa_statement`. What we did **not** measure was the other side: the same guard also made the
+classifier abstain on ~14 documents whose specialised type exists and whose extractor demonstrably works. We
+counted the force-fits removed; we did not count the correct classifications lost. **A guard's benefit and its
+cost are two different measurements, and shipping on one of them is how a fix becomes a regression.**
+
+**⚠️ The remedy was NOT to loosen declining.** The obvious response — lower the confidence threshold, weaken
+`type_matches_document`, make abstention generally harder — would have traded this regression for the strictly
+worse one. A force-fit produces **confident wrong typed data** that flows into deterministic rules; an
+over-decline produces **untyped data** that no rule reads. The two failures are not symmetric, so a general
+loosening is a bad trade even when it fixes more documents than it breaks.
+
+**The remedy that worked was two-part, and neither part touches the decline logic.** (1) **Make the failure
+cheap** — ADR-368/LP-471 routed every no-type/no-extractor/failed document to Tier-3 free extraction, so an
+over-decline now costs typed data rather than all data. That is what buys the right to leave a marginal case
+alone. (2) **Fix only evidence-backed cases**, one document type at a time, with **positive indicator cues
+drawn from the document's own printed separators** (the LP-465/468 mechanism) — never a threshold change.
+LP-475 shipped exactly two cue edits (`earnest_money_receipt`, `title_commitment`), each naming a printed
+heading ("ACKNOWLEDGMENT OF RECEIPT OF MONIES"; "commitment or BINDER (ALTA) … Schedule A/B") that the
+force-fit candidates do not carry. **Proven by the acceptance test, not predicted:** post-change, the T4 still
+declines, the payment-portal screenshot still declines, the compensation statement still reaches
+`compensation_statement` (not `commission_income_statement`).
+
+**The triage rule — when a reclassification regression earns a fix.** All three must hold:
+1. the lost type has a **registered, working extractor**;
+2. that extractor is **proven on a sibling document in the same corpus** (not merely registered);
+3. the document is **genuinely that type** — not a multi-document package, not an addendum, not a near-miss.
+
+**⚠️ "Correctly conservative" is the expected verdict for most of them.** Of 10 candidates, **3 qualified**
+(202, 208, 209). The 7 that did not, and why the honest answer is to leave them declining: **packages** (204's
+73-page URLA bundle, 196's CPA tax package) are the **splitter's** job — classification cannot name a document
+that is five documents; **addenda** (177/178, AZ REALTORS® lease renewal/extension) are genuinely **not** the
+parent type, and forcing them there is the exact failure LP-463 fixed; **portal screenshots** (132) are the
+LP-463/470 correct decline; **`evidence_of_payment`** (211) fails rule 2 — **zero** documents in the corpus
+ever classified as it, so its extractor is registered but **never exercised**, and a cue for it would be
+unbacked; and **236**, an occupancy explanation **by content** but a Gmail thread **by form**, has no printed
+standard-form identity to anchor on — any cue tight enough to catch it must key on content, which is precisely
+how generic correspondence gets pulled back in. The honest destination for a near-miss is a **new type** later
+or **Tier 3** now — never a neighbour.
+
+**Cross-refs.** LP-475 (`docs/tickets/LP-475.md`), LP-463 (the declining guard whose cost this measures),
+ADR-368/LP-471 (making the failure cheap — the precondition for leaving a case alone), LP-465/468 (the
+positive-cue-from-printed-separators mechanism), ADR-365 (the image gap that excludes 265), LP-464 (the sibling
+extractor results that are the evidence of record).
+
+## ADR-374: Declared and reported debt are UNIONED, never merged — the enumerator hands both lists to the rules, because the difference between them IS the signal (LP-480)
+
+**Context.** Liabilities are described by two independent sources for the same real debts: MISMO file-level
+`liability.{n}.*` facts (what the borrower **declared** on the application) and credit-report `tradelines` rows
+(what the bureau **reported**). Seven rules — CR-1, CR-3, CR-5, CR-6, CR-8, CR-10, CR-12 — need a per-liability
+subject to attach a finding to, and LP-480 built the `per_liability` enumerator to provide one. How the two
+sources relate had to be decided before the first of those rules is written.
+
+**The decision: UNION, NO MERGE.** Every row from either source becomes its own subject, carrying a
+`liability.source` marker (`mismo_stated` / `credit_report_reported`). Nothing is matched, nothing is merged.
+A debt appearing in both sources is deliberately present **twice, once per source**.
+
+**⚠️ Why — the signal is the difference.** An undisclosed tradeline is *precisely* a debt present in one source
+and absent from the other. **CR-4 exists to detect exactly that.** Any merge — however careful — destroys the
+evidence CR-4 is built to read, and it destroys it silently: the merged list looks complete. Preserving both
+lists intact and labelled is what keeps that comparison possible at all.
+
+**Rejected: match-and-merge with a fail-closed fallback.** Attractive in the abstract, and it is the option a
+future reader will reach for first. Two independent reasons to refuse it:
+1. **It is not deterministically implementable on the available identity.** MISMO carries **no account number
+   anywhere** in the chain (parser → model → snapshot projection) — only `liability_type`, `holder_name`,
+   `monthly_payment`, `unpaid_balance`. The only shared dimension with a tradeline is a **free-text name in a
+   different convention** (`NR/SMS/CAL` vs `PENNYMAC LOAN SERVICES`), plus amounts that legitimately drift
+   between a stated figure and a reported one. Any matcher is therefore **fuzzy** — which needs an AI tag,
+   which needs a scored bar, which needs Priya. That is CR-4's own job (`rule_kinds.csv` classifies CR-4
+   `ai_fuzzy_match`), and it does not belong in an enumerator.
+2. **It puts domain logic where rules belong.** *Tags describe, rules judge.* An enumerator that decides two
+   rows are "the same debt" has made a credit judgment before any rule ran.
+
+**Rejected: single-source-of-truth** (tradelines when a credit report exists, MISMO otherwise). It solves
+double-counting, but it **destroys CR-4's signal outright** — you cannot detect "reported but not declared"
+having discarded the declared list — and it makes a file's debts depend on which documents happen to be
+present. A rule would silently see a different world before and after a credit report is uploaded.
+
+**⚠️ The cost this accepts, stated so it is not discovered later.** A naive rule that sums `monthly_payment`
+across every liability subject **will double-count** a debt present in both sources. That is why the
+`liability.source` marker is on **every** subject and not only the ambiguous ones: **a summing rule must filter
+by source.** DT-1 (back-end DTI) is the rule that will care most. This is a real sharp edge, chosen knowingly
+over destroying CR-4.
+
+**The identity scheme, and the trap it avoids.** A tradeline subject uses its LP-479 `row_id` (a content hash
+over the whole row); a MISMO liability gets a content-derived id over its four available fields — **never the
+positional `liability.{n}` index**, so the id survives a reordering. ⚠️ **The `_per_account` composite
+`(institution, masked-number)` was measured and rejected for this shape:** the LP-443 redact backstop scrubs
+unmasked account numbers, leaving **9 of 35** real tradelines a bare `[redacted]` and collapsing **two distinct
+SETOYOTA FIN DBA OF WO tradelines onto one key** — a guess-merge on real data, in the one place this design
+exists to prevent it. A liability that cannot be identified at all (a stated liability with no holder name)
+still gets its own subject plus a `liability.unresolved` marker — the `_per_account` fail-closed rule,
+inherited: never dropped, never merged into an equally-anonymous neighbour.
+
+**⚠️ CORRECTED BY LP-483 — this claim was wrong, in two ways.** It read: *"the two sources never co-occur
+anywhere in the repo."* **They do co-occur: LF-96SV carries 5 stated liabilities AND a credit report with 18
+tradelines on one real loan file.**
+
+*The first error is scoping.* The search covered the committed fixtures and the 303-document bench corpus — not
+the **dev database**, where the loan files actually live. "Anywhere in the repo" was true of what was searched
+and false of what exists.
+
+*The second error is the one worth keeping.* **A fixture and its own database row diverge.**
+`build_lf6t3n_snapshot()` produces **0** liability facts while the LF-6T3N database row carries **7**. So even
+a correct search of the fixtures would have concluded liabilities were absent from a file that has them. The
+lesson is not merely "search wider" — it is that **an in-code fixture is not evidence about the data**, and a
+claim about what the corpus contains must be checked against the corpus, not its stand-in.
+
+⚠️ **The evidence was already cited inside this repository when the claim was written:**
+`tag_materialization/derived.py`'s own `_credit_tradeline_count` preamble names LF-96SV's 18 stored rows, and
+LP-453 recorded its payment total. The ADR asserted absence while a neighbouring module documented presence —
+a cross-check of the repo's own prose would have caught it.
+
+**What still stands:** the ADR-374 *policy* (union, no merge) is unchanged, and every property proven against
+authored fixtures at the time remains fixture-proven. LP-483 is the first ticket to test the cross-source path
+against real data.
+
+The original claim, kept for the record: the bench corpus is 303 loose documents with no MISMO at all, and the
+LF-6T3N **fixture** carries five bank statements and **zero** liability facts. So every cross-source property — the union count, the
+no-double-count arithmetic, the source marking — is proven **against constructed fixtures only**. What is
+proven on real data is single-source: 35 tradeline subjects from documents 250/251, ids unique 35/35,
+deterministic and order-independent. **A real loan file carrying both a credit report and MISMO liabilities is
+the missing evidence**, and it belongs in the same document request LP-476 already recommends batching.
+
+**Cross-refs.** LP-480 (`docs/tickets/LP-480.md`), LP-479 (the `row_id` this reuses), LP-336/ADR (the
+`_per_account` fail-closed marker pattern this inherits), LP-476 (the census that found no enumerator for
+liabilities), ADR-353 (the open-ended bureau row vocabulary that makes interpretation a Priya question),
+ADR-332 (a judgment cannot be calibrated on a fixture you authored).
+
+### Review addendum — three consequences this ADR did not state, now decided
+
+**1. The retire guard needed a PER-SOURCE check, not the empty check.** `_retire_eligible_rules`
+(`services/verification_run.py`) protects a document-derived rule from retiring its prior findings on a
+degraded run by asking *"did this enumeration yield zero subjects?"*. `per_liability` was missing from
+`_DOCUMENT_DERIVED_ENUMERATIONS` entirely — so once LP-481 lands a CR rule, a degraded run would have
+retired every prior tradeline finding as "no longer applies", the exact false-close that set prevents.
+⚠️ **And adding the key is not sufficient**, because this is the first MIXED-SOURCE enumeration: a file with
+stated MISMO liabilities returns a non-empty union even when the credit report failed to build, so the union
+looks healthy while the whole document-derived half is missing. Resolved by adding the key **and** a
+`_MIXED_SOURCE_DEGRADATION` predicate map, whose `per_liability` entry
+(`per_liability_source_is_degraded`) reports the credit-report leg degraded when the documents section is
+absent, or when a `credit_report` document is on the file but contributed no tradeline rows. A file with no
+credit report at all is **not** degraded — that is an honest "nothing reported", and retiring is correct.
+
+**2. The MISMO subject id is a function of MUTABLE amounts — kept, with the consequence stated.**
+`_MISMO_LIABILITY_FIELDS` hashes `monthly_payment` and `unpaid_balance`, so a re-imported 1003 with a moved
+balance mints a **different** id for the same real debt; LP-322 reconciles by `(rule_id, subject_key)`, so
+the prior finding retires and a duplicate appears, **losing any processor resolution on it**. Kept because
+every alternative is worse: `(holder_name, type)` alone collides on the two SETOYOTA rows in the real file
+and falls back to the occurrence tiebreak, making the id depend on projection order — the property this
+shape refuses. MISMO carries no account number anywhere in the chain, so there is no stable natural key.
+**This is a decision, not an oversight** — revisit if a liability finding ever needs to survive a re-import.
+Pinned by a test so that whoever changes the identity fields learns what it fixes.
+
+**3. There is no dedup WITHIN a source, and `liability.source` does not substitute for it.** Two
+`credit_report` documents on one file — the same report uploaded twice, or a per-borrower report on a joint
+file — carry distinct document content-ids, hence distinct `row_id`s, hence **two subjects for one debt**. A
+summing rule filtering on `liability.source == credit_report_reported` still double-counts. This is the same
+limitation the loan-level aggregate already records (`tag_materialization/derived.py`, the
+`_credit_tradeline_count` preamble); multi-report reconciliation is a rule's concern, once one reconciles
+bureaus.
+
+**Also corrected:** a tradeline row with no `row_id` was `continue`d away silently, turning an unreadable
+tradeline into "nothing found" rather than `couldnt_check` — contradicting this enumerator's own
+"never dropped, never merged" contract. It now becomes its own **content-identified** subject (never
+positional — the original guarantee is preserved) carrying `liability.unresolved`.
+
+## ADR-375: The atomic per-liability judgment is the calibration unit — the borrower-level rollup is DERIVED from it, not judged separately (LP-483)
+
+**Context.** CR-1 (undisclosed liability) needs to know *which* debt on the credit report is missing from the
+1003. CR-4 needs to know *whether any* is. Both are the same comparison — report tradelines against stated
+liabilities — and the codebase already had one implementation: the `credit_profile` AI group, borrower-scoped,
+producing `credit.undisclosed_tradeline`, with tolerant creditor matching (`BANK OF AMERICA` vs `BofA`),
+`unknown`-when-uncomparable, and truncation discipline.
+
+Building a second matcher at liability scope was the obvious move and is the one this ADR refuses. **Two
+matchers over one comparison drift, and the day CR-1 and CR-4 disagree about the same file is a bug a
+processor cannot reason about** — one says "this borrower has an undisclosed debt", the other says every debt
+is disclosed, and nothing in the system says which is right.
+
+**The decision — invert the direction.** The **liability-scoped** matcher becomes the single source of truth,
+producing `liab.in_application` per liability. `credit.undisclosed_tradeline` is **demoted from `mode: ai` to
+`mode: derived`**, aggregating it: any `credit_report_reported` liability whose `in_application` is `no` → the
+borrower tag is `yes`. One AI judgment, one comparison, and **CR-1 and CR-4 cannot disagree by construction** —
+the borrower answer is a pure function of the per-liability answers.
+
+**⚠️ Why the atomic judgment is the right calibration unit.** *"Is this tradeline on the application?"* is a
+question Priya can answer per row, against the two lists in front of her, and score. *"Does this borrower have
+any undisclosed debt?"* is a **rollup**: one wrong row flips the whole answer, a right answer can be right for
+the wrong reason (two errors cancelling), and a wrong answer **tells you nothing about which row was wrong** —
+so a failed label produces no actionable correction. Scoring the rollup measures the aggregation as much as the
+perception. **Calibrate the smallest judgment the model actually makes, and derive everything above it.**
+
+**⚠️ The failure direction is NOT one-sided, and whoever sets the bar with Priya must have this.** The
+instinct is that a false MATCH is the dangerous one — it marks an undisclosed debt as disclosed and hides
+exactly what this rule exists to catch. That is true, and it argues for over-flagging. **But the opposite
+error is also expensive:** on a clean file — LF-96SV, where all five stated liabilities correspond 1:1 to the
+five payment-bearing tradelines — a false NON-MATCH **fabricates an undisclosed debt that does not exist**,
+sending a processor to chase a condition that was never there and eroding trust in every future flag. **Both
+directions fail expensively; the bar is a real trade, not a lean.** `unclear` → `couldnt_check` on that
+specific subject exists precisely so the model is not forced to pick a side when it cannot tell.
+
+**Fail-closed at the aggregation step — where a false all-clear would slip in.** The derived recipe abstains to
+`unknown` (never `no`) when there is nothing to aggregate: no credit report, no tradeline subjects, or no
+`liab.in_application` produced. **"No undisclosed debt" on a file with no credit report is a false all-clear**,
+and the aggregation is exactly the seam where an empty list would otherwise read as "nothing wrong". Same
+contract every derived recipe already keeps (`_credit_tradeline_count`: absent ≠ empty, `_UNKNOWN` never `0`).
+
+**The guard relaxation was considered, not incidental.** `declarations.py` restricted
+`include_stated_liabilities` to a **borrower**-subject group, on the reasoning that the file-level liabilities
+are the per-borrower comparison set. That reasoning does not survive the inversion: the comparison set is
+needed by whichever subject performs the match, and that is now the liability. The guard is widened to
+`{borrower, liability}` — **still a closed set**, so a document- or transaction-subject group asking for the
+liabilities remains an error. The alternative (drop the guard) was rejected: it would let any group pull the
+liability list into a prompt that has no business comparing against it.
+
+**What this costs, recorded honestly.** CR-4's input changes producer. CR-4 is INERT (bar
+`not-calibratable-yet`, no measured accuracy), so no live rule is affected today — but a calibration already
+planned against the borrower tag must be re-planned against the per-liability tag. That is the point, not a
+side effect: the per-liability labels are the ones worth collecting.
+
+**Cross-refs.** LP-483 (`docs/tickets/LP-483.md`), ADR-374 (the union-no-merge enumerator this consumes, and
+its corrected scoping note), ADR-353 (the open bureau vocabulary — why `liab.account_type` has no parsed
+producer), ADR-332 (a self-authored fixture leaks its answer — why LF-96SV matters), LP-444 (the
+`include_lists` / `include_stated_liabilities` context opt-ins this widens).
+
+## ADR-376: A field whose ENCODING varies by source must match a CLOSED vocabulary and abstain on anything else — never infer from unfamiliar text (LP-486)
+
+**Context.** CR-12 asks a simple question: is this tradeline disputed? The credit report has a field for it,
+`is_disputed`, and on the two bench reports it is a clean **`Y`/`N`** (34 N, 1 Y across 35 rows). Written the
+obvious way — `is_disputed == "Y"` — the rule is three lines.
+
+**Then the same field was read on LF-96SV, a different bureau's format.** It holds free text:
+`ACCOUNT IN FORBEARANCE` · `ACCOUNT CLOSED BY CREDIT GRANTOR` ·
+`ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER`. **One field, two encodings, both real.**
+
+⚠️ **The obvious rule fails silently on the second format.** `"ACCOUNT PREVIOUSLY IN DISPUTE…" != "Y"`, so
+every tradeline on that report reads **not disputed** — a false negative on a fraud-adjacent rule, with no
+error, no log line, and every test green. And CR-12 **ships `auto`** (forced by kind), so there is no human
+in the loop to notice.
+
+**The decision — recognise a CLOSED SET, abstain on everything else.** The producer normalises (case-fold +
+collapse whitespace, nothing more) and matches against two explicit lists — the dispute phrasings and the
+account-status remarks that are *not* disputes. A value in neither list returns `unknown`, which the gate
+turns into `couldnt_check`. **It never stems, never fuzzy-matches, never infers.**
+
+**⚠️ The case that defines the pattern.** `PREVIOUSLY IN DISPUTE — NOW RESOLVED` is deliberately in
+**neither** list. It is tempting to read it as "not disputed" — the text nearly says so. But that is an
+*inference about what the bureau meant*, and the whole failure mode here is inferring from unfamiliar text.
+It abstains. A processor reads the remark and decides; the rule does not guess on their behalf.
+
+**Why abstain rather than classify.** Classifying open bureau vocabulary is a domain judgment
+(ADR-353's finding, reached the same way: verify the vocabulary before assuming a lookup). A closed set is
+not classification — it is recognition, and recognition can be exhaustively enumerated, reviewed by the
+domain expert, and tested. What it cannot do is quietly extend itself to text nobody has seen.
+
+**Where the vocabulary lives.** In the **spec's `reference_values`** — it is domain data the expert edits,
+not code. The producer mirrors it, and a test pins the two identical, so the list Priya reviews and the list
+that runs cannot drift apart silently.
+
+**⚠️ The asymmetry that sets the default.** A false "not disputed" hides a real dispute and the file closes on
+suppressed bureau data. A `couldnt_check` costs a processor ten seconds of reading a remark. **The catch-all
+branch is therefore `couldnt_check`, not `satisfied`** — belt and braces with the gate, because a `satisfied`
+default would convert any future third encoding into a silent all-clear.
+
+**The shape every future credit rule should copy.** `account_type` (`REV`/`AUTO`/`MTG` vs
+`MortgageLoan`/`Installment`), `payment_status` (Metro-2 codes), `account_status`, `worst_delinquency` — all
+carry the same bureau-varying encoding. Each needs this treatment, and none should be written as an equality
+against one bureau's spelling.
+
+**Cross-refs.** LP-486 (`docs/tickets/LP-486.md`), ADR-353 (the open bureau vocabulary this operationalises),
+LP-424 (`ships` is derived from kind — why there is no human in the loop here), ADR-286/289 (a declaration
+that silently reads absent — the adjacent silent-failure class), `docs/domain/priya-open-questions.md` (the
+vocabulary is listed there for confirmation).
+
+## ADR-377: A parsed value carries no confidence, so the gate's four defences cannot see a confidently-WRONG one — the fifth defence is a declared distrust list, and here is what it does not cover (LP-508)
+
+**Context.** `gate.py` (ADR-254) is the fail-closed core every rule runs first. It checks, in fixed order:
+a required tag **absent** → `couldnt_check`; a value of **`"unknown"`** → `couldnt_check`; a
+**contradiction** → `needs_review`; the **minimum load-bearing confidence** below the floor → `needs_review`.
+
+**⚠️ A confidently-wrong parsed value defeats all four by construction.** It is present, it is not
+`"unknown"`, nothing contradicts it — and the parsed producer sets `confidence=None` ("a deterministic
+passthrough, not a judgment", `parsed.py:46`), which the confidence minimum **filters out**:
+
+```python
+confidences = [t.confidence for t in load_bearing.values() if t is not None and t.confidence is not None]
+verdict_confidence = min(confidences) if confidences else None
+if verdict_confidence is not None and verdict_confidence < confidence_floor:
+```
+
+And worse than "excluded from the minimum": when **every** load-bearing tag is parsed, `confidences` is
+empty, `verdict_confidence` is `None`, and the floor check is **skipped entirely**. **IH-1 — whose only gated
+tag derives from a parsed field, and which ships `auto` — had no confidence defence at all.** Doc 104 read
+"coinsurance contract" as the loss-settlement basis off a replacement-cost HO3, and IH-1 auto-asserted an
+insurance-adequacy verdict on it.
+
+**The decision — a fifth check, driven by a declared list.** `distrusted_fields.yaml` names fields with a
+**confirmed wrong value in the corpus**, each with the document and the error behind it. `gate.py` gains a
+check, ordered after absent/`"unknown"` and before contradiction: a load-bearing tag whose source field is
+listed → `needs_review` with **`ratification_pending=True`** and a processor-facing reason. The finding still
+reaches the processor, marked; it is never suppressed and never fired.
+
+**⚠️ Distrusted is a FIFTH STATE, not a fourth.** It is not absent (the value is there), not empty, not
+`"unknown"` (the extractor was confident), and not low-confidence (there is no confidence to read). Collapsing
+it into any of the four would lose the one thing it says: *this value looks certain and should not be
+trusted.*
+
+**⚠️ WHAT THIS DOES NOT COVER — the boundary, stated so it is not rediscovered.** LP-474's per-extraction
+`must_differ` checks cover **3 of the 9** accuracy-ledger items (088, 049, 096 — each with 0 false
+positives). This list covers a different 4 (104, the two hallucinated licence fields, and the single-source
+dates). **Neither covers doc 253** — a gift read as $224,307.94 instead of $24,307.94. LP-474 recorded why: a
+lone amount with **no sibling to contradict it** is invisible to any self-consistency layer, and a
+field-level list cannot help either unless every gift amount on every file is distrusted. **Catching 253
+needs a source-magnitude check — a different layer that does not exist.** Nor is 244 covered (it needs a
+Box-10 field that was never extracted) or 293 (a plausible-but-wrong date).
+
+**⚠️ THE DIVISION OF LABOUR, learned by measurement.** The seed list included `txn.amount` for doc 049.
+`txn.amount` is load-bearing on **AS-1**, the flagship live rule, so listing it degraded **every deposit on
+every file** — 39 tests moved — to protect a case LP-474 already catches **exactly**. It was removed. The
+rule that came out of it: **LP-474 handles a wrong value with an INTERNAL SIGNATURE; the distrust list
+handles one with NONE.** Using the crude tool where the precise one already works costs a whole lane and buys
+nothing.
+
+**⚠️ THE COST, stated honestly and larger than forecast.** The list keys on the FIELD, not on whether a given
+extraction was wrong — so **every** file's value degrades. For IH-1 that is not "rarely auto-asserts": its
+only gated tag is distrusted, so it **never** auto-asserts. Every IH-1 finding is now
+`needs_review` + ratification-pending until the extractor improves and the entry is pruned. That is the trade,
+made deliberately, while `auto` is the default for ~54 of the 78 remaining rules and there is no ratify
+fallback. **The list must be pruned as extractors improve** — every entry carries its evidence precisely so
+it can be deleted with confidence rather than kept "just in case".
+
+**Option (a) — wiring LP-474's flag through to the verdict — remains worth doing later, as a complement.** It
+is precise where it applies. It was not chosen now for two measured reasons: its flag is a `DocumentFinding`
+row that **never reaches the snapshot** (nothing in `verification/snapshot/` reads document findings), so it
+needs a plumbing step; and it does **not** cover doc 104, the case that motivated this work.
+
+**A correction this ADR carries.** LP-485 and LP-486 both record "`ships: ratify` is not settable" as a
+structural constraint. **That is wrong.** `ships` is metadata with **no runtime consumer** — it appears in
+`registry.py`/`engine.py`/`verification_run.py` only in comments. The real mechanism is
+**`ratification_pending`**, a per-finding field on `RuleEvaluation` that `judgment.py` sets unconditionally
+and `deterministic.py` never did. A deterministic rule *can* be made to ratify per finding, with no change to
+its catalog `kind` and no lie about what it is. Both ticket docs are amended.
+
+**Cross-refs.** LP-508 (`docs/tickets/LP-508.md`), ADR-254 (the four-defence gate this extends), LP-474 (the
+per-extraction checks and their measured 3/9 coverage), ADR-376 (the same declared-data-with-reasons shape),
+LP-424 (`ships` derives from kind — and why that is not the ratification mechanism).
+
+## ADR-378: Activation on a SELF-CONSISTENCY rate with ratification as the safety substitute — the gate's principle, deliberately inverted (LP-490a)
+
+**Status.** Accepted — a product decision by Geet, taken with the trade-offs below stated rather than
+softened. **Mechanism shipped; no rule activated on it yet** (every candidate failed a precondition —
+see LP-490a.md).
+
+**1. The gate's stated principle is INVERTED.** `is_eligible()` documents itself as *"activation never
+trusts what it hasn't measured."* The new `ratify-pending` branch activates a rule whose load-bearing AI
+tag has **no measured accuracy at all**, on the strength of a **self-consistency rate** plus
+**ratification**. That is a real reversal, made knowingly. The three existing branches are unchanged, and
+`calibratable-now` still requires `measured_accuracy` — a consistency number can never open the
+calibrated door.
+
+**2. ⚠️ `self_consistency_rate` IS NOT EVIDENCE OF CORRECTNESS, and the field is named for what it
+measures.** It is the rate at which **two independent derivations** of the same tag, from the same source
+data in **fresh contexts** (the second never shown the first's answer), agreed with each other.
+
+- **Two agreeing derivations are STABLE, not RIGHT.** A systematically wrong tag scores **1.0**.
+- **Disagreement is a real signal; agreement is weak evidence.** The asymmetry is the whole value.
+- It is deliberately NOT same-context grading. The v2 bench measured misclassifications at **0.75–0.99
+  confidence**; a model with its own reasoning in front of it agrees with itself and returns ~1.0 on
+  everything, which would activate every rule and carry no information.
+- **The documented divergence case: AS-4's `stmt.is_reserve_eligible` measured 0/5 against Priya's
+  labels** (LP-390-5) — the model calls standard checking and savings reserve-eligible where she says no.
+  A *systematic* disagreement, so two derivations would agree with each other **every time**. That is why
+  the branch requires `measured_accuracy is None`: measured-and-failing is not unmeasured, and a
+  consistency rate must never override a measurement that already failed.
+
+**⚠️ The naming was load-bearing on the very first run.** CR-8's tags scored **1.0000 over 35 cases** —
+and every value was `unknown`, because the PII backstop redacts `payment_history_24mo` (a long digit run)
+before the model sees it. The model was answering correctly about a destroyed input. Had the field been
+called `self_assessed_accuracy`, a 1.0 would have activated a rule that **cannot function**.
+
+**3. The accepted cost.** A systematically wrong tag now surfaces as **repeated false findings** rather
+than being held. The mitigation is ratification — a human confirms every finding — **and it only holds if
+the wiring holds**. Before LP-490a `deterministic.py` **never set `ratification_pending`**, so every
+`ai_fuzzy_match` rule (CR-1, CR-4, CR-5, OC-1, TI-1, PC-1, RE-1, IN-6, PR-7 …) would have shipped an
+unmeasured AI judgment as an **auto** verdict with no human in the loop. That hole is closed at the point
+the verdict is built, not asserted in a comment.
+
+**4. The exit.** A processor's confirmations **are real labels**. `measured_accuracy` should be populated
+from them, and `self_consistency_rate` retired per rule as it is. The two fields must never be collapsed:
+a loader check rejects a bar carrying both, because the distinction is the only thing telling a future
+reader which kind of number a bar holds.
+
+**Cross-refs.** LP-484 (an uncalibrated AI rule cannot pass the gate — the constraint this changes),
+LP-425/ADR-336 (OC-2 live on an unscored tag *because* it ratifies — the precedent this generalises),
+LP-508/ADR-377 (`ratification_pending` is the real mechanism; `ships` is metadata), ADR-332 + its LP-487
+amendment (self-authored labels measure self-consistency, not correctness — the same trap, named there
+first), ADR-353 (position-parsing an open-format string).
+
+---
+
+## ADR-379: A date-keyed threshold keys on the LOAN APPLICATION DATE, is expressed in a derived recipe rather than a new DSL mechanism, and is pinned to its declared reference_values by test (LP-494)
+
+**Context.** Fannie Mae Lender Letter LL-2026-03 (issued 2026-03-18) raises the minimum budgeted
+replacement reserves for a condo project from **10% to 15%** of annual budgeted assessment income, **for
+loan applications dated on or after 2027-01-04**. CO-4 is the first rule in the system whose threshold is
+not a constant. Every prior threshold — IH-7's $1M liability floor, CR-13's four-month credit window,
+PR-6's appraisal bands — is one number that was true when it was cited and is true now.
+
+**Three decisions, each with a live alternative that is wrong.**
+
+**1. The key is the LOAN APPLICATION DATE, never today's date.** A rule keyed on the current date would
+apply next year's 15% floor to an application taken in December 2026 the moment the calendar turned, and
+**fire on a compliant project**. The guideline's own words are "loan applications dated on or after", so
+the application date is the key the publisher chose. `LoanFile.application_received_date` already existed
+and populates on 22 of 28 stored files; nothing emitted it into the snapshot, so one line in
+`mismo_section.py` now does. The MISMO fact map is free-string keyed by design, so `SNAPSHOT_VERSION` is
+unaffected.
+
+**2. An ABSENT application date ABSTAINS.** This is the sharpest point, because the date is not an operand
+of the comparison — **it SELECTS the comparison**. Every other missing input degrades one input; a missing
+key here would silently choose a floor. There is no safe default: 10% wrongly clears a 2027 application,
+15% wrongly fires a 2026 one. So it resolves to `unknown` → `couldnt_check`, with the reason on the
+load-bearing tag.
+
+**3. It is expressed in a DERIVED RECIPE, not a new DSL mechanism.** The rule DSL cannot state it: an
+outcome carries exactly one `when_compare`, and a `reference` operand resolves to `Decimal` only, so there
+is no date reference. Encoding *"application < 2027-01-04 AND reserve_pct ≥ 10"* needs **two** DSL
+extensions. Both were rejected in favour of the pattern already live in IH-7 — the recipe resolves the
+whole comparison to an enum and the rule body switches on it. **A general mechanism should be built when a
+second and third rule need it, not inferred from one.**
+
+**The guard that makes "declared as data" real.** Putting the numbers in `reference_values` and *also* in
+the recipe is duplication, and duplication drifts — IH-7 duplicates its $1M today with nothing pinning the
+two together. So `test_thresholds_match_their_declared_reference_values` asserts every recipe constant
+against the spec's cited value, for CO-4's pair-plus-boundary and CO-5's four limits. **This is what
+ADR-361 was actually protecting: not that a number is cited once, but that the cited number is the one the
+code uses.** Extending it to the older thresholds is worth doing.
+
+**And the provenance asymmetry is why CO-4 holds on `threshold_needs_signoff`.** The 10% floor is tier P
+(B4-2.2-02, page dated 08/05/2026, fetched). The 15% step-up is **tier S**: fanniemae.com returns HTTP 403
+to this client for both the Lender Letter's landing page and its PDF, `robots.txt` allows both paths, and
+circumventing the bot protection was declined. Two independent secondary sources confirm it verbatim, and
+the 08/05/2026 Guide page still says 10% with no sunset — consistent, since a Lender Letter sits outside
+the Guide until incorporated. **A threshold that flips a live rule's verdict on a calendar boundary,
+sourced short of a primary, is precisely what that flag is for.**
+
+**Consequences.** A second date-keyed threshold is now cheap to express and will look like this one. If a
+third arrives, promote it: a typed date `reference` operand plus a list-valued `when_compare` would let the
+rule body carry the branch, and the recipe layer would stop being the only place a threshold can vary.
+⚠️ **The transition is real and near.** From 2027-01-04 every condo file in flight is judged by a different
+number, and nothing in the system reminds anyone. Logged in `priya-open-questions.md`.
+
+**Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-354 (schema presence ≠ data
+availability — CO-4's input exists and populates nowhere), ADR-375 (one matcher per comparison — why CO-3
+was dropped rather than built), ADR-330 (vacuity).
+
+---
+
+## ADR-380
+
+**A rule may SURFACE a discrepancy it cannot ASSERT — and one matcher can serve two such rules.**
+
+**Context.** RE-1 (undisclosed REO) and DT-6 (retained-property PITIA in the DTI) were both DROPPED in
+LP-495a Phase A on the reasoning that "retained" is an inference no document, extractor field or MISMO
+fact states. That much is true and still is: `property.is_retained_reo` and `property.retained_pitia` have
+no producer and remain vocabulary orphans. **The drop was still wrong**, for the same reason CO-3's was in
+LP-494 one ticket earlier — a search that found no source for ONE side of a comparison was read as proof
+the comparison is impossible. The stated side (135 `StatedLiability` rows, 61 of them `MortgageLoan`,
+across 14 loan files) was never queried.
+
+**Decision.** A rule whose TRIGGER is an inference can still be built, provided it **surfaces** the
+discrepancy to a processor rather than **asserting** the inference. RE-1 asks *"is this statement's
+obligation disclosed on the application?"* and DT-6 asks *"for a matched obligation, does the stated
+payment cover the billed one?"* Neither answers *"is this property retained?"* — that question is handed
+to the processor as `needs_review`. **Neither rule declares a `fired` outcome at all**, pinned as a spec
+property by test, so the distinction cannot erode into an assertion later.
+
+Both read tags produced by **one matcher** (`_reo_match_statement`) — ADR-375 applied to a case where the
+overlap is real: two rules asking different questions of the SAME comparison must not each own a copy of
+it, or they can disagree about which stated liability a given statement matched.
+
+**Consequences.**
+- RE-2 stays dropped and that is still right: it asserted a *consequence* (tax/insurance documents are
+  required) from the retention inference. Surfacing and asserting are different acts.
+- The abstains are load-bearing and are stated on the bars, not discovered later: no lender name on the
+  statement (~24%, `lender_name` fills 54/71), **no stated liabilities at all** (→ abstain, never
+  "undisclosed" — the fail-open direction), and **more than one stated liability matching the name**.
+- The test that matters most is negative: on LF-6T3N — four mortgage statements, zero MISMO liabilities —
+  RE-1 abstains four times instead of reporting four undisclosed mortgages.
+
+**Related:** ADR-375 (one matcher per comparison), ADR-361 (threshold provenance — these rules carry no
+threshold, a checked conclusion), ADR-289 (vocabulary orphans), ADR-330 (vacuity).
+
+---
+
+## ADR-381
+
+**A field-fill rate is only readable together with what its denominator ranged over.**
+
+**Context.** LP-495a's approved directive specified LO-2 as three fields "across all six LOX types",
+citing Phase A's measured `explanation_summary 9/34 · referenced_date 6/34 · borrower_signature_present
+7/34 · referenced_amount 0/34`. Every one of those numbers is correct. **All three fields exist on
+exactly ONE of the eight LOE document types** — the 9-document `letter_of_explanation`. The rates are
+really 9/9, 6/9 and 7/9 over the only type that HAS the fields, and 0/25 structurally over the rest. Built
+literally, LO-2 would have reported **25 of 34 letters incomplete** on real data.
+
+**Decision.** A fill rate quoted across a document FAMILY must state, alongside it, **which members of the
+family declare the field at all.** A rate whose denominator spans types that cannot produce the numerator
+is not a measurement of extraction quality — it is a measurement of schema coverage wearing extraction's
+clothes. Where the two are mixed, report them separately.
+
+**Consequences.**
+- LO-2 reads its three legs on the one type that carries them. The other seven types are **still in
+  scope** and resolve to `couldnt_check` ("present, unreadable") — a state deliberately distinct from
+  "no letter exists" (`not_applicable`) and from "incomplete" (`needs_review`).
+- **Fields are not aliased across types to manufacture coverage.** `letter_date` (when the letter was
+  written) is not `referenced_date` (the date of the event explained); `borrower_certification` (a prose
+  attestation) is not `borrower_signature_present` (a signature on the page).
+- ⚠️ **This is the third form of one recurring error in two tickets.** LP-494/CO-3 trusted "IH-7 covers
+  it" without reading IH-7's exclusions; LP-495a Phase A trusted "four independent searches" without
+  noticing none queried the stated side; this trusted a fill rate without asking what it ranged over. In
+  each case the stated fact was TRUE and the inference drawn from it was not. The check is the same every
+  time: **name what the number does not cover, before relying on it.**
+
+**Related:** ADR-354 (schema presence ≠ data availability — this is its inverse: data absence that is
+really schema absence), ADR-286/289 (vacuity and orphans), ADR-380.
+
+---
+
+## ADR-382
+
+**A self-consistency rate earns its keep only when the corpus can disagree — and the disagreement is the
+finding, not the rate.**
+
+**Context.** ADR-378 introduced `ratify-pending`: a rule may activate on a SELF-CONSISTENCY rate (two
+independent derivations agreeing) instead of a measured accuracy, with ratification as the safety
+substitute. Every rate recorded under it since has been **1.0000 over n=2 with a single-valued verdict
+spread** (PR-3, PR-4, PR-5) — numbers that say the pipeline is stable and nothing whatever about whether
+the judgment is right. LP-495a's OC-1 is the first rate over a corpus large enough and varied enough to
+produce a disagreement: **0.9474 over 19 cases, 1 disagreement.**
+
+**Decision.** A recorded self-consistency rate must carry, alongside the number: the **verdict spread of
+both derivations**, the **count of ANSWERABLE (non-abstain) cases**, and **the disagreements themselves,
+individually**. A bare rate is not a record. Where a rate is 1.0 over a single-valued spread, the bar must
+say so in those words — it is a stability check wearing a calibration's clothes.
+
+**Consequences.**
+- **The disagreement carried the information, not the rate.** OC-1's single split landed on LF-XU26, the
+  ONLY file in the corpus with an asymmetric declaration set (one borrower's second-residence indicator
+  absent, the other's present). One derivation read "both intend to occupy" → `yes`; the other read the
+  MISSING indicator as a contradiction → `no`. On the prompt's own terms the second is wrong — a missing
+  declaration is "missing or ambiguous", which the prompt assigns to `unknown`. So the exercise located a
+  real false-positive mode that a 19/19 would have concealed entirely.
+- **Structural abstains are not degraded ones and must be distinguished.** 9 of OC-1's 19 files state an
+  occupancy with no second declaration to compare against; `unknown` is the CORRECT answer there, not a
+  failure. `input_resolves` is judged on the 10 that can resolve.
+- ⚠️ **Temperature 0 makes a byte-identical re-prompt a determinism check, not a consistency check.**
+  OC-1's second derivation re-serialises the same facts with its top-level keys reversed — same source
+  data, a genuinely fresh rendering. Any future rate must declare what it varied, or admit it measured
+  determinism.
+- **A rate still never discharges an acceptance that rests on a MEASUREMENT.** OC-2's ADR-336 acceptance
+  rests on `occupancy.consistent_with_signals` being unscored; OC-1 activating on a rate leaves
+  `measured_accuracy` None, so the acceptance stands unchanged and its tests now pin that fact directly
+  rather than pinning OC-1's status label.
+
+**Related:** ADR-378 (ratify-pending and ratification as the substitute), ADR-336 (the OC-2 acceptance),
+ADR-381 (a number is only readable with what it ranged over), ADR-330 (vacuity).
+
+---
+
+## ADR-383
+
+**One rounding cannot serve every consumer of a calculated ratio. The split is by consumer NEED, not by
+call-site convenience.**
+
+**Context.** `app/verification/ltv.py` rounded every ratio one way — `ROUND_HALF_UP` to two decimals —
+and every consumer read that single value. Fannie Mae Selling Guide **B2-1.2-01** (page dated
+06/01/2022) requires the ratio a lender DELIVERS to be *"truncated (shortened) to two decimal places,
+then rounded up to the nearest whole percent"*, and the same page extends that to CLTV and HCLTV. The
+obvious fix — change the rounding in place — is wrong.
+
+**The concrete reason it is wrong.** `services/ltv.py::_resolve_limit` compares the ratio against a
+program cap, and **`fha.ltv.purchase_max` is 96.5% — a fractional limit**. Rounding up to a whole percent
+before that comparison turns 96.01 into 97 and fails a loan that is inside the cap:
+
+```
+raw 96.01   exact 96.01 -> pass      delivered 97 -> over
+raw 96.50   exact 96.50 -> pass      delivered 97 -> over
+```
+
+**96.5% is FHA's actual maximum**, so real FHA purchase files cluster in exactly the band that breaks.
+Fannie's whole-percent rule governs the ratio delivered **to Fannie**; HUD's cap is a different authority
+with an inherently fractional limit. No single rounded value is correct for both.
+
+**Decision.** `compute_ltv` returns **both** figures for each of the three ratios, computed once from the
+same raw quotient: `*_pct` (exact, two decimals) and `*_pct_delivered` (B2-1.2-01's whole percent). Each
+consumer takes the one its QUESTION requires:
+
+- a **whole-percent eligibility threshold** (MI-1's "MI above 80%", the FHA MIP duration's 90%) → the
+  **delivered** value;
+- a **fractional or mixed-authority cap** (`_resolve_limit`) → the **exact** value;
+- **display and finding evidence** → **both**, so `80.95% → 81%` remains visible and a verdict stays
+  checkable.
+
+**Consequences.**
+- **Rounding is never applied at a call site.** Both values are computed in `ltv.py` and read from there.
+  The defect this replaces was not the choice of rounding but that one value was reused for questions
+  that needed different ones — re-rounding downstream would reintroduce exactly that.
+- **The split is per-consumer-need, not per-call-site convenience.** "Which value does this comparison's
+  authority define?" is the test — not which is nearer to hand. A new consumer must answer it.
+- **The order of operations is load-bearing and is taken from the RAW quotient.** Truncation discards
+  everything past two decimals; only then is the ceiling of the whole percent taken. Deriving the
+  delivered value from the already-half-up figure smuggles a second rounding in ahead of the guide's —
+  it turns a raw 80.005 into 81 where the guide gives 80. LP-496's own first implementation had this
+  bug and its own test caught it.
+- **The fix RELAXES MI-1 in one narrow band**, `[80.005, 80.01)`: the old half-up value required MI
+  and the guideline does not. B2-1.2-01 permitted the old behaviour (*"the same or a higher LTV
+  ratio"*), so this is a move toward the guideline, not away from it — recorded because the ticket
+  expected a tightening.
+- **CLTV and HCLTV share the rule**, on the primary's own words: B2-1.2-01 says the rounding *"also
+  applies"* to both, and B2-1.2-02 (12/04/2018) / B2-1.2-03 (02/23/2016) are silent on rounding. One
+  shared helper is therefore correct rather than an over-generalisation.
+
+**Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-381 (a number is only readable
+with what it ranged over), ADR-330 (vacuity).

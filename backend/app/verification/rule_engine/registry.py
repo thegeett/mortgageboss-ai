@@ -211,6 +211,257 @@ _LP433_ACTIVATED: tuple[str, ...] = ("IN-16",)
 # basis; per-document, so a file with no binder is not_applicable (DIFFERENT from IH-3's missing-binder couldnt_check).
 _LP447_ACTIVATED: tuple[str, ...] = ("IH-1",)
 
+# LP-485 — the date-compare family goes LIVE. All three are deterministic (no AI tag in any chain), so none
+# is calibration-gated: CL-1 clears on input_resolves alone (no domain threshold — a date ordering), and
+# CR-13 / PR-6 clear on input_resolves + validated, their windows RESEARCHED AND CITED to the publisher's
+# live guide in each spec's reference_values (Fannie B1-1-03 04/02/2025 — four months; B4-1.2-04 06/04/2025
+# — twelve months, update beyond four). That citation is our calibration and stands until Priya revises it;
+# every value is listed in docs/domain/priya-open-questions.md for her review.
+_LP485_ACTIVATED: tuple[str, ...] = ("CL-1", "CR-13", "PR-6")
+
+# LP-486 / ADR-376 — CR-12 (disputed accounts). Deterministic detection over a CLOSED vocabulary that
+# abstains on anything unrecognised: the same `is_disputed` field is clean Y/N on one bureau's reports and
+# free text on another's, so a rule that classified open text would silently miss disputes.
+_LP486_ACTIVATED: tuple[str, ...] = ("CR-12",)
+
+# LP-487 — the insurance pair. IH-2 (mortgagee clause) carries a CATALOG EDIT with it: rule_kinds.csv
+# moved it from `ai_fuzzy_match` to `deterministic_only`, because that kind predates typed extraction —
+# the perception step is already spent by the extractor (mortgagee_name fills on 14/15 bench binders) and
+# what remains is a normalised string compare. A MISMATCH IS needs_review, NEVER fired: a correspondent's
+# creditor and the investor who will hold the loan legitimately differ, so a firing rule would be wrong on
+# a correct file. IH-7 (condo master policy) is a presence + adequacy check whose two bounds are researched
+# and cited (Fannie B7-4-01 08/05/2026 — $1M general liability per occurrence; B7-3-03 08/05/2026 — 100% of
+# replacement cost); its fidelity/crime leg (B7-4-02) is deliberately unbuilt because the unit-count input
+# never resolves.
+_LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
+
+# LP-488 — MI-1, the FIRST use of the PROGRAM axis. `program.type` scopes it to conventional as an
+# APPLICABILITY PREDICATE (not an outcome), so an FHA file is not_applicable and a file that states no
+# program is couldnt_check rather than silently skipped. ⚠️ MI-1 never FIRES: it can prove MI is
+# REQUIRED (LTV > 80) but cannot prove MI is PRESENT — no document type in the system carries an MI
+# certificate — so the requirement routes to needs_review for confirmation.
+# MI-4 is the FHA side of the same axis. Only the UPFRONT premium is evaluated — no document carries a
+# monthly MIP figure, so the annual leg is deliberately unbuilt rather than built on an invented input.
+# CO-1 is a document-type presence read, PRESENCE ONLY — warrantability (CO-3/CO-5) has no source field.
+# AU-3 normalises the AUS decision across DU and LPA wording (ADR-376). ⚠️ n=1 corpus, and that one is an
+# LPA reading "ACCEPT" — a term the DU-shaped catalog vocabulary does not contain, which is the concrete
+# evidence that a field-equality rule would have been wrong.
+# ⚠️ RE-2 IS NOT HERE AND WILL NOT BE: no REO/retained-property concept exists in MISMO or the data model,
+# and nothing states that a borrower RETAINS a property. Dropped with a reason (LP-488), not deferred.
+_LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1", "AU-3")
+
+# LP-490a / ADR-378 — activated on a SELF-CONSISTENCY rate, not a measured accuracy, with RATIFICATION as
+# the safety substitute: every finding these produce carries ratification_pending=True (enforced in
+# deterministic.py), so a wrong tag costs a processor's attention and can never auto-assert.
+# ⚠️ Rates are model-produced and measure STABILITY, not correctness — a systematically wrong tag scores
+# 1.0. CR-1/CR-4 share one matcher (1.0000, 13 cases); CR-8 is 0.9714 over 35 real tradelines.
+# ⚠️ CR-6 and CR-10's rates cover NEGATIVE CASES ONLY — the corpus holds zero derogatory events and zero
+# collection codes, so both derivations were answering "no" on all 35 tradelines. Their bars say so.
+_LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
+
+# LP-491 — TI-1 (title commitment parties). ⚠️ NOT ratify-pending: the LP-491 catalog edit moved it to
+# `deterministic_only` (IH-2's precedent, the second time typed extraction turned out to have already
+# spent the perception step), so it has no model in its chain and activates on input_resolves alone.
+# A mismatch is needs_review, never fired — a vesting difference is frequently legitimate.
+# TI-2 and TI-6 are ai_judgment and activate on `ratify-pending` (ADR-378) — a judgment rule ratifies
+# every verdict, so an uncalibrated tag can never auto-assert. ⚠️ Their rates compare VERDICTS, which a
+# judgment rule collapses to needs_review, so they show pipeline stability rather than judgment stability.
+_LP491_ACTIVATED: tuple[str, ...] = ("TI-1", "TI-2", "TI-6")
+
+# LP-492 — the appraisal lane. PR-2 is deterministic (no model in its chain), so it activates on
+# input_resolves alone. ⚠️ PR-8 is DROPPED, not deferred: a disaster-area reinspection needs a FEMA
+# declaration, and no field in any of the 121 schema specs — nor MISMO — states one. CR-3's shape.
+# PR-7 joins PR-2 on the deterministic route (PC-3's precedent — a catalog ai_fuzzy_match row with a
+# deterministic body; no edit needed). PR-3/PR-4/PR-5 activate on ratify-pending. ⚠️ Their rates are the
+# WEAKEST in any cohort: n=2 with a SINGLE-VERDICT spread, so they show pipeline stability, not judgment.
+_LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
+
+# LP-493 — the purchase-contract lane. ⚠️ ONLY PC-8 ACTIVATES.
+# PC-5 is BUILT AND HELD: its derivation returned a uniform abstain ({unknown: 2}), and a rate over a
+# single abstain value carries no information (the CR-8 shape) — recording it would activate a rule on
+# nothing. PC-1 is DROPPED: its `title.parties_match` duplicates TI-1's live comparison (one matcher, one
+# comparison — LP-483), and its other input `contract.arms_length` has only `parties_relationship_
+# disclosed`, which is 0/5 on the real contracts (TI-3/4/5's shape).
+_LP493_ACTIVATED: tuple[str, ...] = ("PC-8",)
+
+# LP-494 — the condo lane. ⚠️ CO-3 AND CO-4 ACTIVATE; CO-5 IS BUILT AND HELD.
+# CO-3 was DROPPED mid-ticket and un-dropped on evidence: it is the FIDELITY leg, which IH-7's own spec
+# header excludes, so it duplicates nothing — and its two inputs fill 8/8, the lane's strongest.
+# CO-4's reserve percentage reads from the HOA STATEMENT type, which is where HOA BUDGETS classify; the
+# first search looked only at documents labelled condo_questionnaire and wrongly concluded no budget
+# document type existed.
+# ⚠️ CO-5 STAYS HELD, and it is the only one of the three whose blocker research could not remove: NOT ONE
+# of its five inputs (delinquency, commercial share, unit count, single-entity units, litigation) resolves
+# on any document of any type. hoa_certification declares every one of them and ZERO such documents exist
+# (ADR-354 exactly: schema present, data absent). Activating it would produce couldnt_check on 100% of
+# files forever with every test green — ADR-286/289, the pattern that has killed four live rules.
+_LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
+
+# LP-495a — the REO reconciliation lane + LOE completeness. ⚠️ RE-1 AND DT-6 WERE DROPPED IN PHASE A AND
+# THE DROP WAS WRONG, for the SAME reason CO-3's was in LP-494: a search that found no source for ONE side
+# of a comparison was read as proof the comparison is impossible. Four "independent" searches all probed
+# extractor schemas and document filenames for the word "retained"; not one queried the STATED side, where
+# 135 StatedLiability rows (61 of them MortgageLoan) sat populated across 14 loan files.
+# ⚠️ BOTH RULES SURVIVE WITHOUT THE RETENTION INFERENCE because neither ASSERTS retention — they SURFACE a
+# discrepancy as needs_review and hand the question to the processor (CO-3's absent-fidelity pattern).
+# NEITHER CAN PRODUCE `fired`, pinned as a spec property, and neither reads the still-orphaned
+# `property.is_retained_reo` / `property.retained_pitia`.
+# ⚠️ ONE MATCHER SERVES BOTH (ADR-375) — `_reo_match_statement`, so they cannot disagree about the same
+# pair of documents.
+# ⚠️ LO-2 IS BUILT NARROWER THAN THE DIRECTIVE ASKED, ON EVIDENCE: its three legs exist on ONE of the eight
+# LOE document types, so a rule spanning "all six" would have reported 25 of 34 letters incomplete. Every
+# LOE type is still in scope; the seven without the fields resolve to couldnt_check ("present, unreadable")
+# — a different verdict from "no letter exists" and from "incomplete".
+# ⚠️ LO-1 IS NOT HERE AND IS NOT BUILT: it needs the list of conditions that REQUIRE an LOE, which is
+# lender- and AUS-driven and enumerated in no document. Deriving it from this run's own findings would make
+# LO-1 a META-RULE over other rules' output, which nothing in the architecture does — ADR-sized, held.
+# ⚠️ OC-1 activates on a SELF-CONSISTENCY rate (ADR-378), the only branch that ships on something
+# other than a measurement — so ratification is the safety substitute and `ratifies_every_finding`
+# returns true for it. ⚠️ Its tag `occupancy.consistent_with_signals` is NOT re-kinded: it is SHARED
+# with live OC-2, and re-kinding it is a behaviour change on shipped code needing its own evidence.
+# ⚠️ The LP-406-4 activation precondition (OC-1 auto + OC-2 ratify double-surfacing a "no" file) is
+# resolved by the status itself — on ratify-pending BOTH rules route to a human. Live OC-2 unchanged.
+_LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
+
+# LP-495b — the judgmental cohort. OC-3 and DT-7 activate on self-consistency rates derived over
+# CONSTRUCTED scenario cases rather than the stored corpus: no loaded file carries an investment
+# occupancy or an other-income document, so a corpus derivation would have returned the same abstain on
+# every case and pre-rate check 3 would have refused the rate. The constructed cases exercise all three
+# branches of each tag and cost $0.12 for the cohort.
+# IN-13 AND IN-14 ARE LIVE. The blocker was a PRODUCER, not a fixture gap: their shared
+# income.continuance_3yr tag was produced by a group whose applies_to listed four EMPLOYMENT document
+# types, so it could never see an award letter, a pension letter or a lease. Widening it (tag_production
+# .yaml `income_stability`) let the derivation run; both rates were then measured and recorded on the bars.
+# Both rules' RESEARCH landed in LP-495b: IN-13 now carries the per-type continuance table (it applied
+# one blanket 3-year test across every income type) and IN-14's 75%/25% factor is calibrated from the
+# verified primary instead of "pending Priya". Their stale B3-3.1-08 / B3-3.1-09 citations are corrected.
+# LP-495b review — IN-13 AND IN-14 CARRY A DECLARED BELOW-BAR MEASUREMENT. Their shared income.continuance_3yr
+# scored 5/6 = 0.833 against Priya's labels (LP-427), under the 0.9 its sibling tag was validated at.
+# LP-495b activated them with `measured_accuracy` left null, which bypassed the ratify-pending guard that
+# exists for exactly that case; the number is now on both bars alongside a written
+# `measured_accuracy_override`. The activation is unchanged — what changed is that it is now argued in
+# the open rather than achieved by omission.
+# DT-7 was held here on its enum gap; LP-495c fixed the declaration and activated it (see below).
+_LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
+
+# LP-495c — the AI-enum abstain reconciliation, and DT-7's activation.
+# FOUR TAGS declared an enum WITHOUT the abstain their own prompt sanctions, so `_build_tag` coerced an
+# honest "unknown" to a tag with confidence=None — exactly the marker `_scan_tag_degradations` matches
+# (value=="unknown" AND produced_by==AI AND confidence is None) — flipping `run.degraded`. Degradation
+# is meant to signal a broken pipeline, not a legitimate abstain.
+#   dti.atr_factors_documented  (DT-7)          complete|incomplete       -> + unknown
+#   txn.is_nsf_or_overdraft     (AS-7, inert)   yes|no                    -> + unknown
+#   liab.in_application         (CR-1, CR-4 LIVE) yes|no                  -> + unknown
+#   stmt.is_reserve_eligible    (stmt_facts)    yes|no|partial            -> + unknown
+# The audit that found them was re-run with WINDOW matching rather than line matching, because the
+# original line-based pass missed stmt.is_reserve_eligible — its prompt puts the sanctioned "unknown" on
+# a different line from the tag name. Four is the complete set; income.voe_present's prompt genuinely
+# offers no abstain, so its declaration and prompt agree and it correctly still fail-closes.
+# THE FIX IS UPSTREAM: docs/snapshot-fact-tags.xlsx is the authoring source and fact_tags.csv is
+# generated from it, so the four cells were edited there and the CSV regenerated. Hand-editing the CSV
+# would be silently reverted by the next regeneration, and vocabulary_extra.yaml refuses to shadow an
+# xlsx tag by design (ProjectionError).
+# DT-7 ACTIVATES on the rate LP-495b already measured — 1.0000 over 4 constructed cases with a full
+# three-value spread, 0 disagreements — used unchanged; nothing was re-derived and no model was called.
+_LP495C_ACTIVATED: tuple[str, ...] = ("DT-7",)
+
+# LP-496a — program eligibility. PE-1 and PE-3 ACTIVATE; PE-2 and PE-4 are HELD, and both holds are
+# measured rather than assumed.
+# PE-1 SHIPS WITH A DELIBERATE BLIND SPOT, WHICH IS THE POINT. The conforming limit varies by county,
+# and the county does NOT reach the snapshot — MISMO parses <CountyName> (parser.py) into mismo/schema.py
+# and the Property model has no column to hold it, so it is dropped before projection. The rule therefore
+# decides only at the two ends (at/below the baseline -> conforming everywhere; above the high-cost
+# ceiling -> jumbo everywhere) and ABSTAINS in the band between them, where only the county resolves it.
+# Comparing the band against the baseline alone would clear a high-cost-county jumbo, which is the exact
+# file the rule exists to catch. Restoring county is one column plus one `put()` line — a follow-on.
+# PE-1's rule_kinds row moved from `deterministic_bookend+ai` to the AI-FREE bookend on CO-4's precedent
+# (LP-494): the limit is a declared reference value and the amount a typed MISMO fact, so the perception
+# step is already spent. 135 rows, unchanged.
+# PE-3's BASIS DIVERGES FROM THE CATALOG, DELIBERATELY. The catalog says "3.5% of price"; HUD 4000.1
+# says the MRI is 3.5% of the ADJUSTED VALUE (for a purchase, the lesser of price-less-inducements and
+# the Property Value). On a low appraisal the two differ in the direction that CLEARS a failing file, so
+# the guideline governs. Two limits ship with it, both stated on the finding: inducements are not
+# representable anywhere in the snapshot (0/19 files) — an omission that can only RAISE the requirement,
+# never clear a failing file — and the Minimum Decision Credit Score reaches 1/19, so the tier ABSTAINS
+# rather than defaulting to the cheapest one.
+# NEITHER RULE IS EXERCISED BY THE CORPUS, and this is measured: no conventional file carries an
+# amount near the limit, and of the four FHA files three carry ZERO documents and the fourth carries two
+# — none a purchase contract, appraisal or credit report. Both rules are proven on CONSTRUCTED scenario
+# cases whose right answer is known by construction (the LP-495b method), not on observed data.
+# PE-2 IS HELD: `program.fha_case_number` has NO source. Three independent queries — no extraction field
+# (the only file in app/ai/extraction mentioning FHA is appraisal.py), no FHA document type among the 163
+# in the classifier catalog, and ZERO hits for an FHA case number / 92900 / case-number-assignment across
+# all 2,558 raw corpus PDFs (30.2M characters; the 108 files mentioning FHA are unchecked form
+# checkboxes, HUD privacy recitals and site chrome). Built now it would couldnt_check forever with green
+# tests — the ADR-286/289 failure that has killed four live rules. PC-1's position exactly.
+# PE-4 IS HELD: `property.fha_condition_ok` has no producer, no MPR/MPS section was cited this ticket,
+# and the corpus carries ZERO appraisals of 98 documents — so LP-492's 0/2 fill is now 0/0, without even
+# a denominator.
+_LP496A_ACTIVATED: tuple[str, ...] = ("PE-1", "PE-3")
+
+# LP-497 — the inert assets specs. AS-4 ACTIVATES; AS-7 is BUILT AND HELD.
+# AS-4 was blocked on a 0/5 measurement of stmt.is_reserve_eligible, and the block was doubly wrong.
+# First, THAT TAG IS NOT IN AS-4's CHAIN: build_reserves_view sums assets from the DB and takes its PITI
+# divisor from the DTI calculator, and reserves.required_months reads MISMO occupancy + unit count —
+# nothing AI-produced feeds either operand. Second, the 0/5 was not a model failure: the stmt_facts
+# prompt asks about ACCOUNT TYPE ("a normal checking/savings balance"), while Priya was answering
+# whether those funds count as reserves for THIS loan — they do not, because they are the funds to
+# close. Both answers are right to their own question, which is why the disagreement was systematic
+# rather than noisy, and compute_reserves already subtracts down payment and closing costs, so the
+# judgment the tag was invented to supply is redundant with arithmetic that was already correct.
+# What AS-4 actually lacked was its THRESHOLD. B3-4.1-01 (page dated 08/07/2024) is now fetched, tier P:
+# none for a one-unit principal residence, 2 months for a second home, 6 for a two- to four-unit primary
+# or an investment property. The prior occupancy-ONLY map carried a recorded false-green — every
+# principal residence required 0, so a 2-4 unit primary needing 6 months read as SATISFIED on a real
+# shortfall. It now reads the unit count and ABSTAINS when a primary's unit count is unknown, because
+# there the answer is 0 or 6 and nothing between.
+# NOT MODELLED, so AS-4's `satisfied` is scoped in its own finding text: the 2%/4%/6%-of-aggregate-UPB
+# overlay for other financed properties, and the 6-month cash-out-over-45%-DTI cell. Neither the
+# financed-property count nor the aggregate UPB reaches the snapshot. Both can only RAISE the
+# requirement, so the encoded figure is a floor and the rule never errs toward clearing.
+# AS-7 IS HELD FOR TWO INDEPENDENT REASONS, neither of them calibration. Its chain is complete and
+# verified (txn_nsf -> _stmt_nsf_count -> AS-7), but (1) txn.is_nsf_or_overdraft is still declared
+# ["yes","no"] while its prompt offers "unknown", so an honest abstain coerces to confidence=None and
+# flags the whole run degraded — LP-495c's fix has NOT landed (68186a1 is its plan doc only); and
+# (2) the trigger does not exist in any available data: 0 NSF lines across the loaded corpus, and in
+# the raw corpus 886 NSF/overdraft mentions across 223 files of which NONE is a real event — 55 fee
+# totals all reading $0.00. No tolerance was invented; the Selling Guide sets none.
+_LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
+
+# LP-498 — the fraud cohort. FR-3 ACTIVATES; FR-1, FR-2, FR-4, FR-5 and FR-6 are HELD, each for a
+# reason established in Phase A rather than inherited.
+# THE COHORT'S PRINCIPLE IS INVERTED, and every rule here is built to it. Everywhere else the rule is
+# "never clear on a missing document"; a fraud-adjacent finding NAMES A PERSON, so here the mirror
+# governs — never accuse on thin evidence. FR-3 asks "should a human look at these terms?", never
+# "was there fraud?"; its prompt is told a seller credit is ordinary and forbidden to speculate about
+# intent; and being judgmental it routes every verdict to needs_review (LP-376-B), so it cannot accuse
+# on its own. That is argued from FR-3's own facts, not inherited from CO-3/RE-1/TI-1.
+# FR-3 is the only rule in the cohort whose EVIDENCE EXISTS: seller_credit_amount,
+# seller_credit_purpose, other_concessions_amount and side_agreements_referenced are first-class typed
+# fields on the purchase-contract extractor — the side-agreement signal is a field, not an inference.
+# Its malformed declaration was fixed first: `enum: yes | no + detail` parsed to the literal value
+# "no + detail", so the xlsx was corrected to yes|no|unknown and fact_tags.csv regenerated.
+# FR-1 HELD — its tag cannot see its subject. An AI group receives EXTRACTED VALUES (_doc_context),
+# never a rendering, so font/alignment/typeface anomalies do not survive to be judged. The pipeline CAN
+# see a page (classify_document / analyze_document take PDF bytes) but that is the document-analysis
+# layer, not a snapshot tag. And the only viable reshape — internal consistency across extracted fields
+# — DUPLICATES LP-474's MustDiffer layer, which is deterministic, needs no model call, and is proven at
+# zero false positives. A judgmental version of that would be strictly worse on this cohort's own axis.
+# FR-2 HELD — title.rapid_transfer and contract.arms_length both have NO producer, the latter
+# deliberately (LP-493, whose only evidence field measured 0/5); title commitments are 41 in the raw
+# corpus and 0 loaded; and the corpus carries no real flip (12 hits, every one appraisal-form checkbox
+# vocabulary). 24 CFR 203.37a is now tier P (GPO, edition 2024-04-01) when FR-2 is built — note its
+# exception list is EIGHT categories, not the five the planning ticket carried.
+# FR-4 HELD — it asks a BANK-TRANSACTION tag (txn.implies_obligation) about a PAY-STUB fact. A
+# garnishment is a deduction line, and the corpus has zero real ones (4 strict hits: a bank's account
+# agreement and a tax-relief firm's service menu).
+# FR-5 HELD — _txn_context serialises FOUR fields for ONE transaction, so txn.is_recurring's declared
+# "pattern across statements" is unanswerable at that scope.
+# FR-6 HELD — it would be the first list-producing tag in the system (five tags declare value_type
+# list; none has a producer), and open-ended discovery has no closed vocabulary to abstain against, so
+# nothing distinguishes a real discovery from a fabricated one. Needs a mechanism and an ADR.
+_LP498_ACTIVATED: tuple[str, ...] = ("FR-3",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -231,6 +482,21 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP430_ACTIVATED,
     *_LP433_ACTIVATED,
     *_LP447_ACTIVATED,
+    *_LP485_ACTIVATED,
+    *_LP486_ACTIVATED,
+    *_LP487_ACTIVATED,
+    *_LP488_ACTIVATED,
+    *_LP490A_ACTIVATED,
+    *_LP491_ACTIVATED,
+    *_LP492_ACTIVATED,
+    *_LP493_ACTIVATED,
+    *_LP494_ACTIVATED,
+    *_LP495A_ACTIVATED,
+    *_LP495B_ACTIVATED,
+    *_LP495C_ACTIVATED,
+    *_LP496A_ACTIVATED,
+    *_LP497_ACTIVATED,
+    *_LP498_ACTIVATED,
 )
 
 
