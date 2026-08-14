@@ -97,6 +97,17 @@ services:
       # host vs. container). The robust long-term answer is object storage (S3/MinIO —
       # already supported via storage_backend) so host + worker share a network store.
       - ./backend/storage:/app/storage
+      # SCHEMA SPECS — the same host/container path trap as the storage mount above, and it makes the
+      # rule engine fail 100% of the time in a container. `distrust.py` resolves its spec directory as
+      # `Path(__file__).parents[4] / "docs" / "schema-specs"`, which assumes the REPO layout (backend/
+      # nested in a repo root). The image flattens backend/ -> /app, so parents[4] is `/` and the
+      # lookup becomes `/docs/schema-specs`. The build context is ./backend, so repo-root docs/ is
+      # never copied in either way: the glob returns nothing, `known_fields` is empty, and the FIRST
+      # distrusted_fields.yaml entry raises DistrustError("no schema spec declares that field...").
+      # That is not a stale entry — it is an empty universe. Mounted read-only (reference data).
+      # The proper fix is to stop depending on a path outside the build context; this unblocks the
+      # container until that lands.
+      - ./docs/schema-specs:/docs/schema-specs:ro
     depends_on:
       postgres:
         condition: service_healthy
