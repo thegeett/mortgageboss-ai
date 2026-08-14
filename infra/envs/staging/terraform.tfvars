@@ -185,10 +185,34 @@ alb_access_logs_bucket = ""
 worker_stop_timeout_seconds  = 120
 deregistration_delay_seconds = 30
 
-# ⚠️ PER PROCESS, and the account is still at RPM 10 (a raise to 100 is pending).
-# At desired_count = 1, 8 leaves headroom. Raising the worker count REQUIRES
-# dividing this by the new count.
-ai_requests_per_minute_bedrock = 8
+# Client-side pacing for Bedrock. NOT the quota — a backstop under it.
+#
+# The granted quota in this account (058190633983, us-east-1) is 10,000 RPM on
+# BOTH models the application uses, verified from Service Quotas:
+#   Cross-region model inference requests per minute for Anthropic Claude Haiku 4.5      10000
+#   Cross-region model inference requests per minute for Anthropic Claude Sonnet 4.5 V1  10000
+# `us.`-prefixed inference profile ids consume the CROSS-REGION family above. Two
+# neighbouring quotas are decoys: the "Global cross-region" family is still 10, and
+# "Sonnet 4.5 V1 1M Context Length" is 1 — neither is used here, and a model id
+# gaining a `global.` prefix or the 1M variant would silently drop the ceiling by
+# three orders of magnitude.
+#
+# 2000 is ~20% of 10,000. The headroom is deliberate: a REJECTED request still
+# counts against the quota, so pacing at the ceiling turns one burst of throttling
+# into a self-sustaining one.
+#
+# ⚠️ THE LIMITER IS PER PROCESS, NOT PER ENVIRONMENT. At desired_count = 1 this IS
+# the effective rate; at N worker tasks the effective rate is N x this value.
+# Raising the worker count REQUIRES dividing this by the new count — scaling the
+# worker otherwise multiplies the request rate silently.
+#
+# Kept rather than unset. At 10,000 RPM it is mostly insurance, but a runaway loop
+# is far cheaper to notice at 2000 than unbounded.
+#
+# Was 8, tuned for the old ceiling of 10. At 10,000 that pacing made the limiter
+# the constraint rather than the backstop: a full loan file spent minutes waiting
+# for no reason.
+ai_requests_per_minute_bedrock = 2000
 
 bedrock_model_ids = {
   classification = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
