@@ -177,6 +177,10 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "IN-13",  # LP-495b
             "IN-14",
             "OC-3",
+            # LP-496a — program eligibility (PE-2 / PE-4 held: no source for the FHA case
+            # number; no producer and zero corpus appraisals for the condition tag).
+            "PE-1",
+            "PE-3",
             "CR-13",
             "PR-6",
         }

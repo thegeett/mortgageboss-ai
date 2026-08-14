@@ -1148,3 +1148,28 @@ tags:
       determination, which is the creditor's and is made at underwriting. "unknown" on an empty or
       unreadable file — never "no", which would accuse a file nobody could read.
     produced_by: AI
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-496a — the program-eligibility conclusion tags. Both are DERIVED (a recipe in derived.py), not
+  # AI: each is one arithmetic comparison against a cited, declared reference value, so there is no
+  # perception step left to spend. The CO-4 precedent exactly (LP-494).
+  #
+  # `program.conforming_limit` already exists in the generated fact_tags.csv declared `number (from
+  # spec)` — a SINGLE value, which cannot express a limit that varies by county, unit count and year.
+  # It is deliberately NOT used and NOT redeclared here; PE-1 reads this conclusion tag instead, the
+  # same shape as CO-4 reading condo.reserve_adequacy rather than a raw percentage.
+  # ------------------------------------------------------------------------------------------------- #
+  program.conforming_eligibility:
+    entity: loan
+    value_type: enum
+    allowed_values: ["within_limit", "exceeds_limit", "n/a", "unknown"]
+    description: >-
+      Does this CONVENTIONAL loan's amount fall within the applicable FHFA conforming loan limit (PE-1)?
+      "n/a" for a non-conventional program. "unknown" when the amount is missing, when the property is
+      multi-unit (the 2-4 unit limits are not verified against a primary source), or when the amount
+      falls in the band between the baseline and the high-cost ceiling — where the answer depends on the
+      property COUNTY, which the snapshot does not carry. Never guesses that band clear.
+    produced_by: derived
+  # NOTE: PE-3's `program.fha_min_investment_met` is NOT declared here. It already exists in the
+  # generated fact_tags.csv (row 108, `derived`, enum yes|no|unknown), and a tag_id declared in this
+  # overlay that already exists in the CSV fails loud by design. It gets a tag_production.yaml entry
+  # only.

@@ -52,6 +52,15 @@ from __future__ import annotations
 # no self-consistency rate and no ratification. ⚠️ LO-1 HELD: it needs the list of conditions that REQUIRE
 # an LOE, which is lender- and AUS-driven and enumerated in no document; deriving it from this run's own
 # findings would make it a META-RULE over other rules' output, which nothing in the architecture does. -> 66.
-EXPECTED_ACTIVE_RULE_COUNT: int = 70
+# LP-496a +PE-1 +PE-3 (program eligibility). PE-1 decides only at the two ends of the conforming
+# limit and ABSTAINS in the band between the baseline and the high-cost ceiling, where only the
+# property COUNTY resolves it — MISMO parses <CountyName> but the Property model has no column, so
+# it is dropped before projection; clearing that band would pass the high-cost jumbo the rule exists
+# to catch. PE-3 uses HUD's ADJUSTED VALUE (the lesser of price and property value), NOT the
+# catalog's "3.5% of price", and abstains on a missing Minimum Decision Credit Score rather than
+# assuming the 3.5% tier. PE-2 HELD: `program.fha_case_number` has NO source — no extractor field,
+# no FHA document type among the catalog's 163, and 0 hits across 2,558 raw PDFs. PE-4 HELD: no
+# producer, no cited MPR section, and ZERO appraisals in the corpus (LP-492's 0/2 is now 0/0). -> 72.
+EXPECTED_ACTIVE_RULE_COUNT: int = 72
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

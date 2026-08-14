@@ -357,6 +357,40 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # every run through the pending-check pass and can surface a PENDING_AUTOMATION flag. Recorded on its bar.
 _LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
 
+# LP-496a — program eligibility. PE-1 and PE-3 ACTIVATE; PE-2 and PE-4 are HELD, and both holds are
+# measured rather than assumed.
+# PE-1 SHIPS WITH A DELIBERATE BLIND SPOT, WHICH IS THE POINT. The conforming limit varies by county,
+# and the county does NOT reach the snapshot — MISMO parses <CountyName> (parser.py) into mismo/schema.py
+# and the Property model has no column to hold it, so it is dropped before projection. The rule therefore
+# decides only at the two ends (at/below the baseline -> conforming everywhere; above the high-cost
+# ceiling -> jumbo everywhere) and ABSTAINS in the band between them, where only the county resolves it.
+# Comparing the band against the baseline alone would clear a high-cost-county jumbo, which is the exact
+# file the rule exists to catch. Restoring county is one column plus one `put()` line — a follow-on.
+# PE-1's rule_kinds row moved from `deterministic_bookend+ai` to the AI-FREE bookend on CO-4's precedent
+# (LP-494): the limit is a declared reference value and the amount a typed MISMO fact, so the perception
+# step is already spent. 135 rows, unchanged.
+# PE-3's BASIS DIVERGES FROM THE CATALOG, DELIBERATELY. The catalog says "3.5% of price"; HUD 4000.1
+# says the MRI is 3.5% of the ADJUSTED VALUE (for a purchase, the lesser of price-less-inducements and
+# the Property Value). On a low appraisal the two differ in the direction that CLEARS a failing file, so
+# the guideline governs. Two limits ship with it, both stated on the finding: inducements are not
+# representable anywhere in the snapshot (0/19 files) — an omission that can only RAISE the requirement,
+# never clear a failing file — and the Minimum Decision Credit Score reaches 1/19, so the tier ABSTAINS
+# rather than defaulting to the cheapest one.
+# NEITHER RULE IS EXERCISED BY THE CORPUS, and this is measured: no conventional file carries an
+# amount near the limit, and of the four FHA files three carry ZERO documents and the fourth carries two
+# — none a purchase contract, appraisal or credit report. Both rules are proven on CONSTRUCTED scenario
+# cases whose right answer is known by construction (the LP-495b method), not on observed data.
+# PE-2 IS HELD: `program.fha_case_number` has NO source. Three independent queries — no extraction field
+# (the only file in app/ai/extraction mentioning FHA is appraisal.py), no FHA document type among the 163
+# in the classifier catalog, and ZERO hits for an FHA case number / 92900 / case-number-assignment across
+# all 2,558 raw corpus PDFs (30.2M characters; the 108 files mentioning FHA are unchecked form
+# checkboxes, HUD privacy recitals and site chrome). Built now it would couldnt_check forever with green
+# tests — the ADR-286/289 failure that has killed four live rules. PC-1's position exactly.
+# PE-4 IS HELD: `property.fha_condition_ok` has no producer, no MPR/MPS section was cited this ticket,
+# and the corpus carries ZERO appraisals of 98 documents — so LP-492's 0/2 fill is now 0/0, without even
+# a denominator.
+_LP496A_ACTIVATED: tuple[str, ...] = ("PE-1", "PE-3")
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -388,6 +422,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP494_ACTIVATED,
     *_LP495A_ACTIVATED,
     *_LP495B_ACTIVATED,
+    *_LP496A_ACTIVATED,
 )
 
 

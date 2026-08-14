@@ -58,6 +58,12 @@ _ACTIVATED = frozenset(
         "IN-13",  # LP-495b
         "IN-14",
         "OC-3",
+        # LP-496a — program eligibility, both no-ai-dependency (one cited numeric comparison each, so
+        # the gate runs on input_resolves alone). PE-1 abstains in the county-dependent band rather
+        # than clearing it; PE-3 uses HUD's Adjusted Value and abstains on a missing credit tier.
+        # PE-2 and PE-4 are HELD and never reach this set.
+        "PE-1",
+        "PE-3",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -201,6 +207,10 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "PC-3",
         "PC-7",
         "PC-8",  # LP-493 (sorts after PC-7)
+        # LP-496a — program eligibility. PE-1 abstains in the county-dependent band; PE-3 uses
+        # Adjusted Value and abstains on a missing credit tier. PE-2 / PE-4 held.
+        "PE-1",
+        "PE-3",
         "PR-2",  # LP-492 (sorts before PR-6)
         "PR-3",  # LP-492
         "PR-4",  # LP-492

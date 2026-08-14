@@ -68,6 +68,9 @@ _FACT_LABELS: dict[str, str] = {
     "condo.fidelity_present_raw": "master policy's fidelity / crime indicator",
     "condo.fidelity_amount": "fidelity / crime coverage amount",
     "condo.reserve_adequacy": "HOA replacement-reserve adequacy",
+    # LP-496a — program eligibility (PE-1, PE-3).
+    "program.conforming_eligibility": "loan amount against the conforming loan limit",
+    "program.fha_min_investment_met": "FHA minimum required investment",
     "condo.delinquent_units_pct": "percentage of units 60+ days delinquent on assessments",
     "condo.commercial_space_pct": "project's commercial / mixed-use share",
     "condo.total_units": "project's total unit count",

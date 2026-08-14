@@ -751,3 +751,54 @@ flow?
   the variants capture `letter_date` / `reason_or_cause` / `borrower_certification` instead. Is the
   distinction between "the date of the event explained" and "the date the letter was written" one
   processors care about, and should the variants capture a signature indicator too?
+
+## LP-496a — program eligibility (PE-1 / PE-3)
+
+### 1. How does a processor determine the applicable county conforming limit in practice?
+
+PE-1 currently abstains for any conventional loan whose amount falls between the national baseline
+($832,750 for one unit in 2026) and the high-cost ceiling ($1,249,125). In that band the answer
+depends entirely on the subject property's county, and the loan file does not carry a county today.
+
+- Where does a processor look this up — FHFA's published county file, the LOS, the AUS findings, or
+  the lender's own matrix?
+- Is the county the processor uses always the property's county, or does anything else (an MSA, a
+  metropolitan division) come into it?
+- How often does a file in this band actually arise? If it is rare, the abstain costs little; if it
+  is common in our markets, restoring the county becomes urgent.
+
+### 2. Does an FHA case number reach the processor before submission, and on what document?
+
+PE-2 is **held** because the datum has no source: no extractor field, no FHA document type among the
+classifier's 163, and zero hits across all 2,558 raw corpus PDFs.
+
+- Is the case number assigned before or after the processor assembles the file?
+- Which document carries it in practice — the case number assignment printout, form 92900-A/LT, the
+  AUS findings, or only the LOS screen?
+- Should the system expect one at all at this stage, or is PE-2 checking something that legitimately
+  does not exist until later?
+
+### 3. Are inducements to purchase visible anywhere in a file?
+
+PE-3 computes FHA's Adjusted Value as the lesser of purchase price and property value, **without**
+the "less any inducements to purchase" deduction HUD 4000.1 requires, because nothing in the snapshot
+represents inducements (0 of 19 loan files carry any such field). The omission is one-directional and
+safe — it can only raise the required investment, never clear a failing file — but it can raise a
+false condition.
+
+- Where do seller inducements/concessions actually appear: the purchase contract, an addendum, the
+  closing disclosure, or the appraisal's sales-concession adjustment?
+- Are they usually itemized, or embedded in a "seller paid closing costs" figure?
+- Is the distinction between a seller credit toward closing costs and an inducement that reduces
+  Adjusted Value one that processors track explicitly?
+
+### 4. What the research could not obtain
+
+- **The 2-4 unit conforming limits.** FHFA's release states one-unit figures only; the multi-unit
+  values ship inside the downloadable county file, which was not transcribed this ticket. PE-1
+  therefore abstains on any multi-unit property rather than judging against an unverified number. Is a
+  2-4 unit conventional purchase common enough for this to matter?
+- **HUD 4000.1's MPR/MPS section** was not cited (PE-4 is held on other grounds anyway). If PE-4 is
+  ever built, which condition callouts do processors actually see FHA appraisers write?
+- **FHFA's "6 counties moved into high-cost"** figure could not be verified; FHFA's own release states
+  only that values rose in "all but 32" counties.

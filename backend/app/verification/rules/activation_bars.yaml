@@ -2016,3 +2016,69 @@ DT-7:
     PENDING_AUTOMATION flag ships to the processor — "manual review needed", never the uncalibrated verdict.
     That is the honest-middle behaviour LP-391 was built for and it is left ON deliberately: silence on a
     file that qualifies reads as "checked, clean". Recorded so the cost is a decision, not a surprise.
+
+PE-1:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  # `validated: false` is NOT a hold here — it is the only legal value. `validated` is Priya's
+  # THRESHOLD sign-off, and the loader permits it only on calibratable-now / no-ai-threshold-pending.
+  # This rule has no threshold pending: every value is researched, cited and TIER P from FHFA's own
+  # 2026 release, so rule_kinds carries threshold_needs_signoff=false and the gate runs on
+  # `input_resolves` alone. The eligibility path is no-ai-dependency + input_resolves (is_eligible).
+  validated: false
+  # The inputs resolve: `program.type` reads MISMO loan.program and `loan.amount` reads
+  # TERMS_OF_LOAN/BaseLoanAmount, both already-live parsed tags. What does NOT resolve is the property
+  # COUNTY, and that is a DESIGN input rather than a missing one — the rule abstains in the band where
+  # the county decides, instead of guessing it. See PE-1.yaml.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (a jumbo is processed as conforming -> re-pricing, re-disclosure and a delayed closing late in
+    the file) >> FP (a processor confirms a loan amount against a published county limit). The rule is
+    built so the FN cannot happen through the band: an amount between the baseline and the high-cost
+    ceiling ABSTAINS rather than clearing, because only the county resolves it.
+  rationale: >-
+    No AI tag to measure — the rule is one numeric comparison against declared reference values, which
+    is why rule_kinds.csv moved from deterministic_bookend+ai to the AI-free bookend (the CO-4
+    precedent). The 2026 one-unit baseline ($832,750), the high-cost ceiling ($1,249,125) and the
+    Alaska / Hawaii / Guam / USVI pair ($1,249,125 / $1,873,675) are TIER P from FHFA's release dated
+    2025-11-25, fetched 2026-08-13. The 2-4 unit limits were NOT verified against a primary (FHFA's
+    release states one-unit figures only; the multi-unit table ships inside a downloadable county
+    file), so a multi-unit property abstains rather than being judged against an unverified number.
+    THE CORPUS DOES NOT EXERCISE THE FIRED BRANCH: no conventional loan file carries an amount near
+    the limit, so the verdicts below are proven on constructed scenario cases whose right answer is
+    known by construction, not on observed data.
+
+PE-3:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  # `validated: false` is the only legal value for a no-ai-dependency bar, and nothing is pending:
+  # the 3.5% / 10% rates, the 580 / 500 tiers and the Adjusted Value definition are all TIER P, read
+  # directly from HUD Handbook 4000.1 this ticket, so threshold_needs_signoff=false.
+  validated: false
+  # input_resolves is TRUE on the GUIDELINE inputs and the rule is honest about the two it lacks:
+  # inducements to purchase are not representable anywhere in the snapshot (0/19 loan files), and the
+  # Minimum Decision Credit Score reaches 1/19. Neither is defaulted — the first is omitted in the
+  # ONE-DIRECTIONAL safe sense (it can only raise the requirement, never clear a failing file) and the
+  # second ABSTAINS. Both are stated on the finding.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN (an FHA file closes short of the minimum required investment -> the loan is not insurable, found
+    at underwriting after the file has been worked) >> FP (a processor re-checks a down payment against
+    the appraisal). The missing-inducement approximation errs toward FP by construction.
+  rationale: >-
+    No AI tag to measure — one arithmetic comparison against a cited percentage. HUD Handbook 4000.1
+    (Effective 09/14/2015, Last Revised 08/14/2019), read directly from HUD's hosted PDF on 2026-08-13:
+    the MRI is "at least 3.5 percent of the Adjusted Value"; for purchases "the Adjusted Value is the
+    lesser of: purchase price less any inducements to purchase; or the Property Value"; an MDCS "at or
+    above 580" gets maximum financing (96.5% LTV on a purchase), "between 500 and 579" is capped at 90%
+    LTV, and below 500 the borrower "is not eligible for FHA-insured financing".
+    THE CATALOG RATIONALE SAID "3.5% OF PRICE" AND THAT IS WRONG — the basis is Adjusted Value, and
+    on a low appraisal the two differ in the direction that CLEARS a failing file. The divergence is
+    recorded in the spec and pinned by a scenario test.
+    THE CORPUS CANNOT EXERCISE THIS RULE AT ALL: four FHA loan files exist, three carry ZERO
+    documents and the fourth carries two, and none carries a purchase contract, appraisal or credit
+    report. Every verdict below is proven on constructed scenario cases, not on observed data.

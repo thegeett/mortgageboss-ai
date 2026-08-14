@@ -1,0 +1,163 @@
+# PE-1 — Conventional eligibility (the conforming-limit / jumbo catch) — DETERMINISTIC calculative
+# rule SPEC (LP-496a).
+#
+# A conventional loan above the FHFA conforming loan limit is not deliverable to Fannie or Freddie —
+# it is a jumbo, priced and underwritten on a different track. Catching it late means re-disclosing and
+# re-pricing a file that is already in process, which is why the catalog calls this "the jumbo catch".
+#
+# THE LIMIT IS A LOOKUP, NOT A NUMBER, AND THAT SHAPED THE WHOLE RULE. It varies three ways:
+#   COUNTY      — ~3,000 county values, published annually by FHFA as a flat file.
+#   UNIT COUNT  — 1-4 units carry different limits.
+#   YEAR        — annual, applying by DELIVERY year (a loan originated in December 2025 and delivered
+#                 in 2026 takes the 2026 value).
+# `program.conforming_limit` is declared in fact_tags.csv as `number (from spec)` — a SINGLE value,
+# which cannot express any of the three. It is therefore NOT produced and NOT read. PE-1 reads the
+# derived `program.conforming_eligibility` conclusion tag instead — the CO-4 shape, where the rule reads
+# one resolved conclusion rather than assembling raw values itself.
+#
+# THE COUNTY DOES NOT REACH THE SNAPSHOT, AND THE RULE IS BUILT AROUND THAT — the central design
+# decision, recorded so it is not silently "fixed" by widening the comparison later.
+#   MISMO CARRIES IT: `parse_mismo()` on the committed real fixture returns
+#   `property.county = 'Bergen County'`, read by parser.py from `.//m:ADDRESS/m:CountyName`.
+#   IT IS DROPPED ONE LAYER LATER: the `Property` model has no `county` column, so the parsed value is
+#   discarded at import and `mismo_section.py` has nothing to project.
+# So the datum exists and is one column plus one `put()` line away. Until then the rule uses the only
+# thing knowable WITHOUT a county — the BOUNDS the county-specific limit must lie between:
+#   at or below the BASELINE  -> conforming in EVERY county          -> satisfied
+#   above the high-cost CEILING -> over the limit in EVERY county    -> fired
+#   between the two           -> ONLY the county decides             -> couldnt_check
+# THE BAND MUST NEVER CLEAR. Comparing a high-cost-county loan against the baseline alone would
+# report a conforming San Francisco loan as jumbo, and — the expensive direction — would clear nothing
+# it should catch only because the baseline happens to be the lower bound. The abstain is the rule's
+# correctness argument, not a limitation of it.
+#
+# MULTI-UNIT ABSTAINS, DELIBERATELY. FHFA's published release states ONE-UNIT figures only; the 2-4
+# unit values live inside the downloadable county file and were NOT verified against a primary source
+# this ticket. A 2-4 unit loan therefore abstains rather than being judged against an unverified number.
+#
+# KIND CHANGED, ROW COUNT UNCHANGED: rule_kinds.csv carried `deterministic_bookend+ai` on the catalog's
+# "AI assembles" rationale. There is nothing left for a model to assemble — typed extraction already
+# spent the perception step, and what remains is one numeric comparison against a declared value. The
+# row is now `deterministic_bookend`, the AI-FREE bookend. This is CO-4's precedent exactly (LP-494),
+# with the same evidence and the same outcome: 135 rows, unchanged.
+#
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory):
+#   $832,750 baseline / $1,249,125 ceiling (one unit) — FHFA, "FHFA Announces Conforming Loan Limit
+#     Values for 2026", page dated 2025-11-25 (TIER P, fetched 2026-08-13): "$832,750, an increase of
+#     $26,250 from 2025" and "$1,249,125, which is 150 percent of $832,750".
+#   $1,249,125 / $1,873,675 (Alaska, Hawaii, Guam, USVI) — same release, same fetch. A statutory
+#     carve-out: those areas take the national ceiling AS their baseline.
+#   The same release states the values are higher "in all but 32 U.S. counties or county
+#     equivalents" — 32, not the 31 the planning ticket carried. Corrected here.
+
+rule_id: PE-1
+name: Conventional eligibility
+category: Program
+
+kind: calculative           # must equal rule_kinds.csv
+numeric_check: true         # must equal rule_kinds.csv — an amount against a limit
+
+criteria: >-
+  When the loan program is conventional, the loan amount must fall within the FHFA conforming loan
+  limit applicable to the subject property. This reads the derived program.conforming_eligibility,
+  which resolves the program, the loan amount, the financed unit count and the property state against
+  the 2026 one-unit baseline and high-cost ceiling. A non-conventional program is not_applicable. A
+  missing loan amount, a multi-unit property, and — critically — a loan amount that falls between the
+  baseline and the high-cost ceiling each resolve to couldnt_check: in that band the applicable limit
+  depends on the property county, which the snapshot does not carry, so the rule abstains rather than
+  clearing a loan that may be over its county's limit.
+
+applicability:
+  scope: the loan, when the loan program is conventional
+  trigger: >-
+    program.type == conventional. A non-conventional program is not_applicable; a file that does not
+    state a single program couldnt_checks rather than assuming conventional.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — every value is tier P from FHFA
+  values:
+    # A test pins all four against the recipe's constants.
+    conforming_baseline_1_unit: "832750"
+    conforming_ceiling_1_unit: "1249125"
+    conforming_special_area_baseline_1_unit: "1249125"
+    conforming_special_area_ceiling_1_unit: "1873675"
+  guideline_text: >-
+    The 2026 baseline conforming loan limit value for one-unit properties is $832,750, an increase of
+    $26,250 from 2025. In high-cost areas the ceiling is $1,249,125, which is 150 percent of $832,750.
+    For Alaska, Hawaii, Guam and the U.S. Virgin Islands the baseline is $1,249,125 and the ceiling is
+    $1,873,675. The values are higher in all but 32 U.S. counties or county equivalents (FHFA,
+    Conforming Loan Limit Values for 2026, 2025-11-25).
+
+required_inputs:
+  - name: conforming_eligibility
+    snapshot_path: 'tags.by_subject["loan"]["program.conforming_eligibility"]'
+    description: >-
+      whether the conventional loan amount falls within the applicable FHFA conforming limit (derived,
+      LP-496a): "n/a" for a non-conventional program, "within_limit" at or below the baseline,
+      "exceeds_limit" above the high-cost ceiling, and "unknown" when the amount is missing, the
+      property is multi-unit, or the amount falls in the county-dependent band between the two.
+
+subject_enumeration: loan
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The loan amount, the limit it was compared against, and — when the rule abstains in the band — the
+  fact that the county is what would decide it, so a processor sees WHY the file needs a county rather
+  than reading the abstain as a system failure.
+
+guideline_reference: "FHFA, Conforming Loan Limit Values for 2026 (page dated 2025-11-25) — $832,750 one-unit baseline; $1,249,125 high-cost ceiling; $1,249,125 / $1,873,675 for Alaska, Hawaii, Guam and the U.S. Virgin Islands."
+
+spec_version: 1
+
+# The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
+# couldnt_check BEFORE this body runs.
+deterministic:
+  # The conventional scoping is an APPLICABILITY PREDICATE, not an outcome (IH-7's finding, LP-487).
+  # An ABSENT or "unknown" program resolves to couldnt_check and only a definitely-non-conventional one
+  # to not_applicable — a file that does not state its program is surfaced, never silently skipped.
+  applicability:
+    tag: program.type
+    op: eq
+    value: conventional
+  load_bearing_tags:
+    - program.conforming_eligibility
+  gated_tags:
+    - program.conforming_eligibility
+  operands: {}
+  outcomes:
+    - verdict: satisfied
+      when_tags:
+        - {tag: program.conforming_eligibility, op: eq, value: "within_limit"}
+      reasoning: >-
+        the loan amount is at or below the baseline conforming loan limit, so it is within the limit in
+        every county — no county lookup is needed to confirm it
+    - verdict: fired
+      when_tags:
+        - {tag: program.conforming_eligibility, op: eq, value: "exceeds_limit"}
+      reasoning: >-
+        the loan amount exceeds the highest one-unit conforming loan limit any county reaches, so the
+        loan is above the limit in every county — it is a jumbo and is not deliverable to Fannie Mae or
+        Freddie Mac as a conforming loan
+      how_to_fix: >-
+        Confirm the loan amount on the application. If it is correct, the file is a jumbo and must be
+        moved to a jumbo or non-QM product with its own pricing, underwriting and disclosure track —
+        the sooner the better, since re-disclosure late in process delays closing. If the borrower
+        intends a conforming loan, the amount must come down (a larger down payment) to at or below the
+        applicable county limit.
+    - verdict: couldnt_check
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS — and here it carries the county band. A `satisfied`
+      # default would clear every high-cost-county loan sitting between the baseline and the ceiling,
+      # which is precisely the file this rule exists to catch.
+      default: true
+      reasoning: >-
+        whether the loan amount is within the conforming limit could not be determined — the file does
+        not state a single loan program or loan amount, the property is financed as more than one unit
+        (the 2-4 unit limits are not carried), or the amount falls between the baseline and the
+        high-cost ceiling, where the applicable limit depends on the property's county
+      how_to_fix: >-
+        Confirm the loan program and loan amount on the application. If the amount falls between the
+        baseline and the high-cost ceiling, look up the conforming loan limit for the subject property's
+        COUNTY on FHFA's published county list for the delivery year and compare the loan amount against
+        it — that county value is what decides whether this file is conforming or jumbo, and it is the
+        one input the loan file does not currently carry.

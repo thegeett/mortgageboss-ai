@@ -2,7 +2,7 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**135 rules** — calculative 28, structural 65, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 21.
+**135 rules** — calculative 28, structural 65, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 19.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
@@ -36,8 +36,8 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | MI-1 | PMI required (Conv >80% LTV) | MI | calculative | deterministic_bookend | true | — | false | true |
 | MI-2 | MI factor correct | MI | calculative | deterministic_bookend | true | — | false | false |
 | MI-4 | FHA MIP (upfront + monthly) | MI | calculative | deterministic_bookend | true | — | false | true |
-| PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend+ai | true | — | false | true |
-| PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | true |
+| PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend | true | — | false | false |
+| PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | false |
 
 ## structural (65)
 

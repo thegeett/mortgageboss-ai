@@ -2023,6 +2023,186 @@ def build_lo2_no_letter_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-496a — PE-1 (conforming limit / the jumbo catch) and PE-3 (FHA MRI).
+#
+# CONSTRUCTED CASES, NOT CORPUS CASES, and deliberately so. No loan file in the corpus carries a
+# conventional loan near the conforming limit, and the four FHA files hold two documents between them —
+# a corpus derivation would return the same abstain on every case. These exercise every branch,
+# including the two that matter most: PE-1's county-dependent BAND and PE-3's missing credit tier.
+# Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_PE1_WITHIN = UUID("96000000-0000-4000-8000-000000000001")
+_LOAN_PE1_EXCEEDS = UUID("96000000-0000-4000-8000-000000000002")
+_LOAN_PE1_BAND = UUID("96000000-0000-4000-8000-000000000003")
+_LOAN_PE1_FHA = UUID("96000000-0000-4000-8000-000000000004")
+_LOAN_PE1_NO_AMOUNT = UUID("96000000-0000-4000-8000-000000000005")
+_LOAN_PE1_MULTI_UNIT = UUID("96000000-0000-4000-8000-000000000006")
+_LOAN_PE1_ALASKA_WITHIN = UUID("96000000-0000-4000-8000-000000000007")
+_LOAN_PE3_MET = UUID("96000000-0000-4000-8000-000000000011")
+_LOAN_PE3_SHORT = UUID("96000000-0000-4000-8000-000000000012")
+_LOAN_PE3_NO_SCORE = UUID("96000000-0000-4000-8000-000000000013")
+_LOAN_PE3_LOW_TIER = UUID("96000000-0000-4000-8000-000000000014")
+_LOAN_PE3_LOW_APPRAISAL = UUID("96000000-0000-4000-8000-000000000015")
+_LOAN_PE3_CONVENTIONAL = UUID("96000000-0000-4000-8000-000000000016")
+
+
+def _pe_mismo(
+    program: str | None,
+    amount: str | None,
+    *,
+    state: str | None = None,
+    units: str | None = None,
+    price: str | None = None,
+    value: str | None = None,
+) -> dict[str, SnapshotField]:
+    facts: dict[str, SnapshotField] = {}
+    if program is not None:
+        facts["loan.program"] = _f(program)
+    if amount is not None:
+        facts["loan.amount"] = _f(amount)
+    if state is not None:
+        facts["property.state"] = _f(state)
+    if units is not None:
+        facts["property.financed_unit_count"] = _f(units)
+    if price is not None:
+        facts["property.purchase_price"] = _f(price)
+    if value is not None:
+        facts["property.valuation_amount"] = _f(value)
+    return facts
+
+
+def _credit_report_doc(
+    content_id: str, equifax: str, experian: str, transunion: str
+) -> DocumentEntry:
+    """A credit report carrying the three repository scores PE-3's MDCS is computed from."""
+    return DocumentEntry(
+        content_id=content_id,
+        document_type="credit_report",
+        fields={
+            "score_equifax": _f(equifax),
+            "score_experian": _f(experian),
+            "score_transunion": _f(transunion),
+        },
+    )
+
+
+# --- PE-1 ------------------------------------------------------------------- #
+def build_pe1_within_limit_snapshot() -> Snapshot:
+    """$700,000 conventional, below the $832,750 baseline -> conforming in EVERY county -> SATISFIED."""
+    return _snapshot(
+        _LOAN_PE1_WITHIN, [], _pe_mismo("conventional", "700000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_exceeds_limit_snapshot() -> Snapshot:
+    """$1,400,000 conventional, above the $1,249,125 ceiling -> over the limit in EVERY county -> FIRED."""
+    return _snapshot(
+        _LOAN_PE1_EXCEEDS, [], _pe_mismo("conventional", "1400000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_county_band_snapshot() -> Snapshot:
+    """THE CASE THE WHOLE RULE IS SHAPED AROUND. $1,000,000 sits BETWEEN the $832,750 baseline and
+    the $1,249,125 ceiling. It is conforming in a high-cost county and jumbo in most of the country, and
+    the snapshot carries no county — so the only correct answer is COULDNT_CHECK. A baseline-only
+    comparison would call this FIRED on a perfectly conforming San Francisco loan; a ceiling-only
+    comparison would CLEAR a jumbo. Neither is acceptable, so the rule abstains."""
+    return _snapshot(
+        _LOAN_PE1_BAND, [], _pe_mismo("conventional", "1000000.00", state="NC", units="1")
+    )
+
+
+def build_pe1_fha_snapshot() -> Snapshot:
+    """An FHA loan -> the conforming limit does not apply -> NOT_APPLICABLE."""
+    return _snapshot(_LOAN_PE1_FHA, [], _pe_mismo("fha", "700000.00", state="NC", units="1"))
+
+
+def build_pe1_no_amount_snapshot() -> Snapshot:
+    """Conventional with NO stated loan amount -> COULDNT_CHECK, never satisfied on a missing figure."""
+    return _snapshot(
+        _LOAN_PE1_NO_AMOUNT, [], _pe_mismo("conventional", None, state="NC", units="1")
+    )
+
+
+def build_pe1_multi_unit_snapshot() -> Snapshot:
+    """A 2-unit property at $900,000. The 2-4 unit limits were NOT verified against a primary source,
+    so the rule abstains rather than judging against an unverified number -> COULDNT_CHECK."""
+    return _snapshot(
+        _LOAN_PE1_MULTI_UNIT, [], _pe_mismo("conventional", "900000.00", state="NC", units="2")
+    )
+
+
+def build_pe1_alaska_within_snapshot() -> Snapshot:
+    """$1,000,000 in ALASKA — the SAME amount that abstains in North Carolina. Alaska's baseline IS
+    the national ceiling ($1,249,125), so this is below baseline there and conforming in every Alaskan
+    borough -> SATISFIED. Pins the special-area carve-out: without it this file would abstain."""
+    return _snapshot(
+        _LOAN_PE1_ALASKA_WITHIN, [], _pe_mismo("conventional", "1000000.00", state="AK", units="1")
+    )
+
+
+# --- PE-3 ------------------------------------------------------------------- #
+def build_pe3_investment_met_snapshot() -> Snapshot:
+    """$400,000 price, $400,000 value, $380,000 loan -> a $20,000 investment against $14,000 required
+    (3.5% of 400,000 at an MDCS of 700) -> SATISFIED."""
+    return _snapshot(
+        _LOAN_PE3_MET,
+        [_credit_report_doc("96-cr-ok", "700", "710", "690")],
+        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+    )
+
+
+def build_pe3_investment_short_snapshot() -> Snapshot:
+    """$400,000 price and value, $390,000 loan -> a $10,000 investment against $14,000 required -> FIRED."""
+    return _snapshot(
+        _LOAN_PE3_SHORT,
+        [_credit_report_doc("96-cr-short", "700", "710", "690")],
+        _pe_mismo("fha", "390000.00", price="400000.00", value="400000.00"),
+    )
+
+
+def build_pe3_no_credit_score_snapshot() -> Snapshot:
+    """THE TIER MAY NOT BE ASSUMED. The same numbers as the satisfied case but NO credit report. The
+    MRI is 3.5% at 580+ and 10% at 500-579; assuming 580+ would clear a borrower who needs 10%. A
+    $20,000 investment clears 3.5% ($14,000) and FAILS 10% ($40,000) — so the assumption would flip the
+    verdict. COULDNT_CHECK."""
+    return _snapshot(
+        _LOAN_PE3_NO_SCORE, [], _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00")
+    )
+
+
+def build_pe3_low_credit_tier_snapshot() -> Snapshot:
+    """An MDCS of 550 (500-579) needs 10% = $40,000. The $20,000 investment that SATISFIES at 580+
+    FIRES here -> the tier genuinely changes the answer."""
+    return _snapshot(
+        _LOAN_PE3_LOW_TIER,
+        [_credit_report_doc("96-cr-low", "545", "550", "560")],
+        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+    )
+
+
+def build_pe3_low_appraisal_snapshot() -> Snapshot:
+    """THE ADJUSTED-VALUE CASE — why the basis is not the purchase price. A $400,000 price with a
+    $360,000 appraisal and a $348,000 loan. Against the PRICE the investment reads $52,000 vs $14,000
+    required and CLEARS. Against the ADJUSTED VALUE (the lesser, $360,000) it is $12,000 vs $12,600
+    required and FIRES. The catalog's '3.5% of price' would clear a file that fails."""
+    return _snapshot(
+        _LOAN_PE3_LOW_APPRAISAL,
+        [_credit_report_doc("96-cr-lowap", "700", "710", "690")],
+        _pe_mismo("fha", "348000.00", price="400000.00", value="360000.00"),
+    )
+
+
+def build_pe3_conventional_snapshot() -> Snapshot:
+    """A conventional loan -> FHA's MRI does not apply -> NOT_APPLICABLE."""
+    return _snapshot(
+        _LOAN_PE3_CONVENTIONAL,
+        [_credit_report_doc("96-cr-conv", "700", "710", "690")],
+        _pe_mismo("conventional", "380000.00", price="400000.00", value="400000.00"),
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -2103,6 +2283,19 @@ __all__ = [
     "build_other_income_continuance_snapshot",
     "build_past_closing_snapshot",
     "build_pay_stub_only_snapshot",
+    "build_pe1_alaska_within_snapshot",
+    "build_pe1_county_band_snapshot",
+    "build_pe1_exceeds_limit_snapshot",
+    "build_pe1_fha_snapshot",
+    "build_pe1_multi_unit_snapshot",
+    "build_pe1_no_amount_snapshot",
+    "build_pe1_within_limit_snapshot",
+    "build_pe3_conventional_snapshot",
+    "build_pe3_investment_met_snapshot",
+    "build_pe3_investment_short_snapshot",
+    "build_pe3_low_appraisal_snapshot",
+    "build_pe3_low_credit_tier_snapshot",
+    "build_pe3_no_credit_score_snapshot",
     "build_pr2_no_price_snapshot",
     "build_pr2_no_purpose_snapshot",
     "build_pr2_refinance_snapshot",

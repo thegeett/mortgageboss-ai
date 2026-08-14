@@ -4522,8 +4522,260 @@ def _income_history_documentation(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-496a — program eligibility (PE-1, PE-3).
+# --------------------------------------------------------------------------- #
+# PE-1's reference values. FHFA, "Conforming Loan Limit Values for 2026", page dated 2025-11-25
+# (tier P, fetched 2026-08-13). Pinned to PE-1.yaml's reference_values by test.
+#
+# THE LIMIT IS A LOOKUP, NOT A CONSTANT — it varies by COUNTY, by UNIT COUNT and by YEAR, and the
+# snapshot carries none of the three well enough to key one. What IS knowable without a county is the
+# pair of BOUNDS the county-specific limit must lie between: no county's one-unit limit is below the
+# baseline, and none exceeds the high-cost ceiling. So the comparison is decidable at the two ends and
+# GENUINELY UNDECIDABLE in the band between them, where the answer depends on which county the property
+# sits in. The band ABSTAINS. It must never clear: clearing it would pass a high-cost-county jumbo,
+# which is the exact failure "the jumbo catch" exists to prevent.
+_CONFORMING_BASELINE_1_UNIT = Decimal("832750")
+_CONFORMING_CEILING_1_UNIT = Decimal("1249125")
+# Alaska, Hawaii, Guam and the U.S. Virgin Islands take the ceiling AS their baseline, and 150% of it
+# as their own ceiling. A statutory carve-out, not a high-cost designation.
+_CONFORMING_SPECIAL_AREA_STATES = frozenset({"AK", "HI", "GU", "VI"})
+_CONFORMING_SPECIAL_BASELINE_1_UNIT = Decimal("1249125")
+_CONFORMING_SPECIAL_CEILING_1_UNIT = Decimal("1873675")
+
+# PE-3's reference values. HUD Handbook 4000.1, Effective 09/14/2015 | Last Revised 08/14/2019
+# (tier P, read directly from HUD's hosted PDF 2026-08-13).
+_FHA_MRI_RATE = Decimal("0.035")  # "at least 3.5 percent of the Adjusted Value"
+_FHA_MRI_RATE_LOW_SCORE = Decimal("0.10")  # 500-579 -> max LTV 90%, i.e. a 10% investment
+_FHA_MDCS_FULL_FINANCING = 580  # "at or above 580 -> eligible for maximum financing"
+_FHA_MDCS_FLOOR = 500  # "not eligible ... if the MDCS is less than 500"
+
+
+def _program_type(snapshot: Snapshot) -> str | None:
+    """The loan's program, lowercased — or None when the file does not state one."""
+    values = {v.lower() for v in _parsed_strings(snapshot, "program.type")}
+    if len(values) != 1:
+        return None  # absent, or two programs on one file — either way, not a program to judge
+    return next(iter(values))
+
+
+def _loan_amount(snapshot: Snapshot) -> tuple[Decimal | None, str | None]:
+    """The MISMO base loan amount as a Decimal, or (None, reason)."""
+    raw = _parsed_strings(snapshot, "loan.amount")
+    if not raw:
+        return None, "the file does not state the loan amount"
+    try:
+        return Decimal(raw[0].replace(",", "").replace("$", "").strip()), None
+    except (InvalidOperation, ValueError):
+        return None, f"the loan amount reads {raw[0]!r}, which is not a number"
+
+
+def _program_conforming_eligibility(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """program.conforming_eligibility — is this conventional loan within the conforming limit? (PE-1)
+
+    THE HIGH-COST BAND ABSTAINS, AND THAT IS THE WHOLE DESIGN. The applicable limit depends on the
+    property's COUNTY, which does not reach the snapshot: MISMO parses <CountyName> (parser.py) into
+    mismo/schema.py, but the Property model has no county column, so it is dropped before projection.
+    Comparing against the baseline alone would clear every high-cost-county loan between the baseline
+    and the ceiling — files that ARE conforming in San Francisco and ARE jumbo in most of the country.
+    Below the baseline every county agrees it conforms; above the ceiling every county agrees it does
+    not. In between, only the county decides, so the tag says so instead of guessing.
+    """
+    program = _program_type(snapshot)
+    if program is None:
+        return _UNKNOWN, (
+            "the file does not state a single loan program, so the conforming limit that applies "
+            "cannot be selected"
+        )
+    if program != "conventional":
+        return "n/a", (
+            f"the loan program is {program} — the FHFA conforming loan limit applies to conventional "
+            "loans"
+        )
+
+    amount, problem = _loan_amount(snapshot)
+    if amount is None:
+        return _UNKNOWN, f"{problem} — the conforming limit cannot be checked without it"
+
+    # The unit count changes the limit. The 2-4 unit values were NOT verified against a primary source
+    # (FHFA's release states one-unit figures only; the multi-unit table ships inside a downloadable
+    # county file), so a multi-unit loan abstains rather than being judged against an unverified number.
+    units_raw = _mismo_str(snapshot, "property.financed_unit_count")
+    units: int | None = None
+    if units_raw is not None:
+        try:
+            units = int(Decimal(units_raw))
+        except (InvalidOperation, ValueError):
+            return _UNKNOWN, (
+                f"the financed unit count reads {units_raw!r}, which is not a number — the conforming "
+                "limit depends on the unit count"
+            )
+    if units is not None and units > 1:
+        return _UNKNOWN, (
+            f"the property is financed as {units} units, and the 2-4 unit conforming limits are not "
+            "carried — only the one-unit values are verified against FHFA's published release"
+        )
+
+    state = (_mismo_str(snapshot, "property.state") or "").upper()
+    special = state in _CONFORMING_SPECIAL_AREA_STATES
+    baseline = _CONFORMING_SPECIAL_BASELINE_1_UNIT if special else _CONFORMING_BASELINE_1_UNIT
+    ceiling = _CONFORMING_CEILING_1_UNIT if not special else _CONFORMING_SPECIAL_CEILING_1_UNIT
+    area = f" for {state}" if special else ""
+
+    if amount > ceiling:
+        return "exceeds_limit", (
+            f"the loan amount of ${amount:,.2f} exceeds ${ceiling:,.2f}, the highest 2026 one-unit "
+            f"conforming limit any county reaches{area} — it is above the limit in every county, so no "
+            "county lookup is needed to say so"
+        )
+    if amount <= baseline:
+        return "within_limit", (
+            f"the loan amount of ${amount:,.2f} is at or below the ${baseline:,.2f} 2026 one-unit "
+            f"baseline conforming limit{area} — it is within the limit in every county"
+        )
+    return _UNKNOWN, (
+        f"the loan amount of ${amount:,.2f} falls between the ${baseline:,.2f} baseline and the "
+        f"${ceiling:,.2f} high-cost ceiling{area}, where the applicable limit depends on the property's "
+        "county — and the county does not reach the snapshot. Abstaining rather than clearing a loan "
+        "that may be over its county's limit"
+    )
+
+
+def _fha_min_investment_met(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """program.fha_min_investment_met — MRI of 3.5% of the Adjusted Value? (PE-3)
+
+    THE BASIS IS ADJUSTED VALUE, NOT PURCHASE PRICE. 4000.1: "For purchase transactions, the Adjusted
+    Value is the lesser of: purchase price less any inducements to purchase; or the Property Value."
+    On a low appraisal the two differ, and using price would clear a file that fails.
+
+    TWO HONEST LIMITS, both stated on the finding rather than papered over:
+      1. INDUCEMENTS ARE NOT REPRESENTABLE. Nothing in the snapshot carries seller inducements (PC-8
+         surfaces personal property but computes no deduction, LP-493). Omitting the deduction can only
+         RAISE the Adjusted Value, which RAISES the required investment — so the rule can never clear a
+         file it should catch on this axis; it can only over-ask. That asymmetry is why it ships.
+      2. THE TIER IS NOT ASSUMED. The MRI is 3.5% at MDCS >= 580 and 10% at 500-579, and below 500 the
+         borrower is not eligible at all. The Minimum Decision Credit Score reaches the snapshot on
+         almost no file, and assuming 580+ would apply the cheapest tier to a borrower who may not
+         qualify for it. No score -> abstain.
+    """
+    program = _program_type(snapshot)
+    if program is None:
+        return _UNKNOWN, (
+            "the file does not state a single loan program, so it is not known whether FHA's minimum "
+            "required investment applies"
+        )
+    if program != "fha":
+        return _UNKNOWN, (
+            f"the loan program is {program} — FHA's minimum required investment applies to FHA loans"
+        )
+
+    price_raw = _mismo_str(snapshot, "property.purchase_price")
+    value_raw = _mismo_str(snapshot, "property.valuation_amount") or _mismo_str(
+        snapshot, "property.estimated_value"
+    )
+    if price_raw is None or value_raw is None:
+        missing = "purchase price" if price_raw is None else "property value"
+        return _UNKNOWN, (
+            f"the file does not state the {missing}, and the Adjusted Value is the lesser of the two — "
+            "it cannot be computed from one"
+        )
+    try:
+        price = Decimal(price_raw.replace(",", "").replace("$", "").strip())
+        value = Decimal(value_raw.replace(",", "").replace("$", "").strip())
+    except (InvalidOperation, ValueError):
+        return _UNKNOWN, (
+            "the purchase price or property value is not a number, so the Adjusted Value cannot be "
+            "computed"
+        )
+    if price <= 0 or value <= 0:
+        return _UNKNOWN, (
+            "the purchase price or property value is zero or negative, so the Adjusted Value cannot be "
+            "computed"
+        )
+
+    adjusted_value = min(price, value)
+
+    score, score_reason = _fha_minimum_decision_credit_score(snapshot)
+    if score is None:
+        return _UNKNOWN, (
+            f"{score_reason} — FHA's minimum required investment is 3.5% of the Adjusted Value at a "
+            "Minimum Decision Credit Score of 580 or above and 10% between 500 and 579, so the "
+            "requirement cannot be set without the score"
+        )
+    if score < _FHA_MDCS_FLOOR:
+        return "no", (
+            f"the Minimum Decision Credit Score of {score} is below {_FHA_MDCS_FLOOR} — the borrower is "
+            "not eligible for FHA-insured financing at any investment level (HUD 4000.1)"
+        )
+    rate = _FHA_MRI_RATE if score >= _FHA_MDCS_FULL_FINANCING else _FHA_MRI_RATE_LOW_SCORE
+    required = (adjusted_value * rate).quantize(Decimal("0.01"))
+
+    amount, problem = _loan_amount(snapshot)
+    if amount is None:
+        return _UNKNOWN, (
+            f"{problem} — the borrower's investment is the Adjusted Value less the loan amount, so it "
+            "cannot be computed without it"
+        )
+    investment = adjusted_value - amount
+    basis = (
+        "the purchase price" if price <= value else "the property value (below the purchase price)"
+    )
+    pct = f"{rate * 100:.1f}".rstrip("0").rstrip(".")
+    if investment >= required:
+        return "yes", (
+            f"the borrower's investment of ${investment:,.2f} meets the ${required:,.2f} required — "
+            f"{pct}% of an Adjusted Value of ${adjusted_value:,.2f}, taken from {basis}, at a Minimum "
+            f"Decision Credit Score of {score}"
+        )
+    return "no", (
+        f"the borrower's investment of ${investment:,.2f} falls short of the ${required:,.2f} required "
+        f"— {pct}% of an Adjusted Value of ${adjusted_value:,.2f}, taken from {basis}, at a Minimum "
+        f"Decision Credit Score of {score}. Note the Adjusted Value is computed WITHOUT deducting "
+        "inducements to purchase, which the file does not carry; a seller credit would lower it and "
+        "lower the requirement with it"
+    )
+
+
+def _fha_minimum_decision_credit_score(snapshot: Snapshot) -> tuple[int | None, str]:
+    """The MDCS: the MIDDLE of the three repository scores, and the LOWEST across borrowers.
+
+    4000.1: "the Mortgagee must select the lowest MDCS of the Borrower(s) with credit score(s)". Per
+    borrower the decision score is the middle of three (or the lower of two); across borrowers the
+    lowest of those wins. Abstains on no score at all rather than assuming a tier.
+    """
+    per_document: list[int] = []
+    for entry in () if snapshot.documents.absent else snapshot.documents.entries:
+        scores: list[int] = []
+        for key in ("score_equifax", "score_experian", "score_transunion"):
+            field = entry.fields.get(key)
+            # A plain Field, never a PiiField — the guard is semantic as well as type-level: a score
+            # arriving masked carries no comparable number, and reading one would produce a tier from
+            # a redaction. An unusable score is skipped, and if every score is skipped the caller
+            # abstains rather than assuming a tier.
+            if not isinstance(field, Field) or not field.is_present:
+                continue
+            try:
+                scores.append(int(Decimal(str(field.value).strip())))
+            except (InvalidOperation, ValueError):
+                continue
+        if not scores:
+            continue
+        scores.sort()
+        # three -> the middle; two -> the lower; one -> itself.
+        per_document.append(scores[1] if len(scores) >= 3 else scores[0])
+    if not per_document:
+        return None, "no credit report on the file states a repository credit score"
+    return min(per_document), ""
+
+
 _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
+    "program_conforming_eligibility": _program_conforming_eligibility,  # LP-496a — PE-1
+    "fha_min_investment_met": _fha_min_investment_met,  # LP-496a — PE-3
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
     # the derived producer is loan-only, so these aggregate the file like the DTI calc does — see the
     # LP-323-IN-B doc). Registry entries only; produce_derived_tags is untouched (the wave criterion).

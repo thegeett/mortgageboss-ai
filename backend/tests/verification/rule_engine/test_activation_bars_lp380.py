@@ -347,6 +347,12 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-13",
             "IN-14",
             "OC-3",
+            # LP-496a — program eligibility. PE-1 abstains in the county-dependent band rather than
+            # clearing it (only the property county resolves that band, and it does not reach the
+            # snapshot); PE-3 uses HUD's Adjusted Value, not the catalog's purchase price, and
+            # abstains on a missing Minimum Decision Credit Score. PE-2 and PE-4 are HELD.
+            "PE-1",
+            "PE-3",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -413,6 +419,8 @@ def test_active_set_is_base_plus_lp389() -> None:
             "IN-13",  # LP-495b — ratify-pending (scenario-fixture rates)
             "IN-14",
             "OC-3",
+            "PE-1",  # LP-496a — program eligibility (PE-2 / PE-4 held)
+            "PE-3",
             "CR-13",
             "PR-6",
         }

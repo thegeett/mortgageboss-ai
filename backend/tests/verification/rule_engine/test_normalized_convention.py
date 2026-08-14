@@ -296,5 +296,9 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "IN-13",
             "IN-14",
             "OC-3",
+            # LP-496a — program eligibility (PE-2 / PE-4 held: no source for the FHA case
+            # number; no producer and zero corpus appraisals for the condition tag).
+            "PE-1",
+            "PE-3",
         )
     )

@@ -43,6 +43,12 @@ tags:
   # LP-332: the loan program (loan.program in MISMO), ID-8's other load-bearing tag. The loan subject
   # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
   program.type: {mode: parsed, subject: loan, data: loan.program}
+  # LP-496a — the program-eligibility conclusion tags (PE-1, PE-3). Both DERIVED: each is one cited
+  # arithmetic comparison, no perception step left to spend (the CO-4 precedent).
+  # program.conforming_limit is deliberately NOT produced — it is declared `number (from spec)`, a
+  # single value, and the limit varies by county / unit count / year. PE-1 reads the conclusion tag.
+  program.conforming_eligibility: {mode: derived, subject: loan, data: program_conforming_eligibility}
+  program.fha_min_investment_met: {mode: derived, subject: loan, data: fha_min_investment_met}
   # LP-424 (item 4) — the loan's purpose (purchase/refinance), promoted from the MISMO loan.purpose fact.
   loan.purpose: {mode: parsed, subject: loan, data: loan.purpose}
   contract.closing_date: {mode: parsed, subject: document, data: closing_date}

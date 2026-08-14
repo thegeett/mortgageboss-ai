@@ -161,5 +161,10 @@ def test_no_rule_activation_changed() -> None:
             "IN-13",
             "IN-14",
             "OC-3",
+            # LP-496a — program eligibility. PE-1 abstains in the county-dependent band rather
+            # than clearing it; PE-3 uses HUD's Adjusted Value and abstains on a missing credit
+            # tier. PE-2 and PE-4 are HELD.
+            "PE-1",
+            "PE-3",
         )
     )
