@@ -44,9 +44,29 @@ locals {
     { name = k, value = local.merged_api_env[k] }
   ]
 
+  # ⚠️ HOSTNAME=0.0.0.0 IS LOAD-BEARING, and it is set HERE rather than left to the
+  # image, because the image's value does not survive ECS.
+  #
+  # Next.js standalone `server.js` binds to `process.env.HOSTNAME`. The Dockerfile
+  # sets `ENV HOSTNAME=0.0.0.0` and that wins under a plain `docker run` — but in
+  # Fargate the agent injects the container's own hostname, so the app bound to the
+  # task ENI address alone:
+  #
+  #   local docker : Network: http://0.0.0.0:3000
+  #   Fargate      : Network: http://10.30.47.218:3000      <- one interface only
+  #
+  # Which produced a failure that looks like nothing at all: the ALB connects to the
+  # ENI address, so the target registered HEALTHY and the site kept serving, while
+  # anything on the loopback got connection refused. The container health check
+  # (127.0.0.1) failed every time and ECS killed the task ~132s in, over and over,
+  # until the circuit breaker failed the deployment.
+  #
+  # Setting it explicitly in the container definition puts it back on all
+  # interfaces. Merged UNDER the caller's map so an environment can still override
+  # it deliberately.
   frontend_env = [
-    for k in sort(keys(var.frontend_environment_variables)) :
-    { name = k, value = var.frontend_environment_variables[k] }
+    for k in sort(keys(merge({ HOSTNAME = "0.0.0.0" }, var.frontend_environment_variables))) :
+    { name = k, value = merge({ HOSTNAME = "0.0.0.0" }, var.frontend_environment_variables)[k] }
   ]
 
   task_secrets = [
@@ -89,12 +109,30 @@ locals {
     "uv run celery -A app.tasks.celery_app inspect ping -d celery@$HOSTNAME || exit 1",
   ]
 
-  # The frontend image has NO baked healthcheck (verified: Config.Healthcheck is
-  # null), so there is nothing to override. wget is present; curl is not.
-  frontend_container_health_command = [
-    "CMD-SHELL",
-    "wget -q --spider http://127.0.0.1:${var.frontend_port}/ || exit 1",
-  ]
+  # ⚠️ THE FRONTEND HAS NO CONTAINER HEALTH CHECK, DELIBERATELY.
+  #
+  # It had one (`wget -q --spider http://127.0.0.1:3000/`) and it caused an outage
+  # rather than catching one — see the HOSTNAME note above. The command itself was
+  # never the problem: the image is Alpine, `wget` is present at /usr/bin/wget
+  # (BusyBox), and against a correctly-bound server it exits 0. It failed because
+  # the server was not on the loopback.
+  #
+  # It is not being repaired, because for a service behind a load balancer it is
+  # redundant: the ALB target group already probes `/` with matcher 200-399 and
+  # deregisters a task that stops answering. Two checks of the same liveness, and
+  # only one of them can kill the task.
+  #
+  # ⚠️ The WORKER's check is NOT redundant and stays — it has no ALB in front of it,
+  # so `celery inspect ping` is the only way ECS can tell "alive" from "alive but
+  # not consuming". That reasoning does not transfer to a load-balanced service.
+  #
+  # If one is ever wanted back here, use the runtime rather than a shell utility —
+  # `node` is guaranteed present in a Node image, a BusyBox applet is not:
+  #
+  #   node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+  #
+  # (verified working inside the deployed image). Only add it back after confirming
+  # the task actually binds 0.0.0.0, or it will reproduce the same crash loop.
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -248,9 +286,11 @@ resource "aws_ecs_task_definition" "frontend" {
       name      = "frontend"
       image     = var.frontend_image
       essential = true
-      # No command override: the image's CMD (`node server.js`) is correct, and it
-      # already sets HOSTNAME=0.0.0.0 and PORT=3000 — binding to localhost inside a
-      # container makes the health check fail with no useful error.
+      # No command override: the image's CMD (`node server.js`) is correct.
+      #
+      # ⚠️ The image also sets ENV HOSTNAME=0.0.0.0 and PORT=3000 — but ECS injects
+      # its own HOSTNAME at runtime and the image's value loses. That is why
+      # HOSTNAME is set explicitly in local.frontend_env; see the note there.
 
       portMappings = [{
         containerPort = var.frontend_port
@@ -261,13 +301,8 @@ resource "aws_ecs_task_definition" "frontend" {
       # No secrets: the frontend holds no credential. NEXT_PUBLIC_API_URL is baked
       # at BUILD time and cannot be set here at all.
 
-      healthCheck = {
-        command     = local.frontend_container_health_command
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 30
-      }
+      # No healthCheck — see the note in locals. The ALB target group is the
+      # liveness check for this service.
 
       logConfiguration = {
         logDriver = "awslogs"
