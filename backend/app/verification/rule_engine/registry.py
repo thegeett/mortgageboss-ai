@@ -428,6 +428,40 @@ _LP496A_ACTIVATED: tuple[str, ...] = ("PE-1", "PE-3")
 # totals all reading $0.00. No tolerance was invented; the Selling Guide sets none.
 _LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
 
+# LP-498 — the fraud cohort. FR-3 ACTIVATES; FR-1, FR-2, FR-4, FR-5 and FR-6 are HELD, each for a
+# reason established in Phase A rather than inherited.
+# THE COHORT'S PRINCIPLE IS INVERTED, and every rule here is built to it. Everywhere else the rule is
+# "never clear on a missing document"; a fraud-adjacent finding NAMES A PERSON, so here the mirror
+# governs — never accuse on thin evidence. FR-3 asks "should a human look at these terms?", never
+# "was there fraud?"; its prompt is told a seller credit is ordinary and forbidden to speculate about
+# intent; and being judgmental it routes every verdict to needs_review (LP-376-B), so it cannot accuse
+# on its own. That is argued from FR-3's own facts, not inherited from CO-3/RE-1/TI-1.
+# FR-3 is the only rule in the cohort whose EVIDENCE EXISTS: seller_credit_amount,
+# seller_credit_purpose, other_concessions_amount and side_agreements_referenced are first-class typed
+# fields on the purchase-contract extractor — the side-agreement signal is a field, not an inference.
+# Its malformed declaration was fixed first: `enum: yes | no + detail` parsed to the literal value
+# "no + detail", so the xlsx was corrected to yes|no|unknown and fact_tags.csv regenerated.
+# FR-1 HELD — its tag cannot see its subject. An AI group receives EXTRACTED VALUES (_doc_context),
+# never a rendering, so font/alignment/typeface anomalies do not survive to be judged. The pipeline CAN
+# see a page (classify_document / analyze_document take PDF bytes) but that is the document-analysis
+# layer, not a snapshot tag. And the only viable reshape — internal consistency across extracted fields
+# — DUPLICATES LP-474's MustDiffer layer, which is deterministic, needs no model call, and is proven at
+# zero false positives. A judgmental version of that would be strictly worse on this cohort's own axis.
+# FR-2 HELD — title.rapid_transfer and contract.arms_length both have NO producer, the latter
+# deliberately (LP-493, whose only evidence field measured 0/5); title commitments are 41 in the raw
+# corpus and 0 loaded; and the corpus carries no real flip (12 hits, every one appraisal-form checkbox
+# vocabulary). 24 CFR 203.37a is now tier P (GPO, edition 2024-04-01) when FR-2 is built — note its
+# exception list is EIGHT categories, not the five the planning ticket carried.
+# FR-4 HELD — it asks a BANK-TRANSACTION tag (txn.implies_obligation) about a PAY-STUB fact. A
+# garnishment is a deduction line, and the corpus has zero real ones (4 strict hits: a bank's account
+# agreement and a tax-relief firm's service menu).
+# FR-5 HELD — _txn_context serialises FOUR fields for ONE transaction, so txn.is_recurring's declared
+# "pattern across statements" is unanswerable at that scope.
+# FR-6 HELD — it would be the first list-producing tag in the system (five tags declare value_type
+# list; none has a producer), and open-ended discovery has no closed vocabulary to abstain against, so
+# nothing distinguishes a real discovery from a fabricated one. Needs a mechanism and an ADR.
+_LP498_ACTIVATED: tuple[str, ...] = ("FR-3",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -462,6 +496,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP495C_ACTIVATED,
     *_LP496A_ACTIVATED,
     *_LP497_ACTIVATED,
+    *_LP498_ACTIVATED,
 )
 
 

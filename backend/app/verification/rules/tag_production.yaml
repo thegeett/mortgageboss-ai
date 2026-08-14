@@ -43,6 +43,10 @@ tags:
   # LP-332: the loan program (loan.program in MISMO), ID-8's other load-bearing tag. The loan subject
   # reads the FULL MISMO key (unlike the borrower subject, which prepends borrower.{n}.).
   program.type: {mode: parsed, subject: loan, data: loan.program}
+  # LP-498 — FR-3's input. Document-subject, scoped to the purchase contract: the seller-credit and
+  # side-agreement fields live on purchase_agreement (seller_credit_amount, seller_credit_purpose,
+  # other_concessions_amount, side_agreements_referenced) and nowhere else in the schema.
+  contract.unusual_credits: {mode: ai, subject: document, data: contract_credits}
   # LP-496a — the program-eligibility conclusion tags (PE-1, PE-3). Both DERIVED: each is one cited
   # arithmetic comparison, no perception step left to spend (the CO-4 precedent).
   # program.conforming_limit is deliberately NOT produced — it is declared `number (from spec)`, a
@@ -1258,6 +1262,59 @@ ai_groups:
   # not_applicable); "unknown" first-class.
   # LP-495b — DT-7's AI group. PRESENCE OF SUPPORTING DOCUMENTS per ATR factor, not the ATR
   # determination itself (see the tag declaration above for why that distinction is load-bearing).
+  # LP-498 — FR-3's producer. Document-subject, SCOPED to the purchase contract: applies_to keeps it off
+  # every other document type, so the group never runs on a pay stub or a statement (the LP-495b lesson —
+  # income_stability produced a continuance tag while scoped to four employment types).
+  contract_credits:
+    subject: document
+    context_builder: document
+    applies_to: [purchase_agreement]
+    include_lists: true          # the addenda list — a side agreement is often an addendum
+    tags: [contract.unusual_credits]
+    system_prompt: |
+      You are a mortgage loan processor STRUCTURING one factual tag about a PURCHASE CONTRACT. Describe
+      what the contract SHOWS. You do NOT decide whether anything improper happened, and you are NOT
+      looking for fraud — a downstream rule (FR-3) decides whether a human should look.
+
+      PRODUCE ONE TAG — unusual_credits — answering: does this contract show seller credits, other
+      concessions, or a reference to an agreement OUTSIDE the contract, such that a processor should
+      review the terms?
+
+        "yes" — the contract states a seller credit or concession, OR references a side agreement,
+                addendum or separate understanding affecting price or money changing hands.
+        "no"  — the contract's credit and concession fields are present and show none, and nothing
+                references an agreement outside it.
+        "unknown" — the fields that would answer this are absent or unreadable. THIS IS THE CORRECT
+                ANSWER on a contract whose credit fields did not extract. An absent field is NOT
+                evidence of a clean contract, and "no" on an empty contract is a false all-clear.
+
+      WHAT YOU ARE GIVEN: the contract's extracted fields — seller_credit_amount,
+      seller_credit_purpose, other_concessions_amount, side_agreements_referenced — and its addenda
+      list. Judge ONLY from these.
+
+      A SELLER CREDIT IS ORDINARY. Most purchase contracts carry one, and a routine closing-cost credit
+      is not a red flag. Say in your reasoning WHAT you saw, with the amount when there is one, so a
+      processor can judge without reopening the document. Do not speculate about intent. Do not call
+      anything fraudulent.
+
+      YOU ARE NOT ASKED WHETHER THE CREDIT COMPLIES WITH ANYTHING. Whether a credit exceeds an
+      interested-party-contribution limit, or needs checking against appraisal or program requirements,
+      is a DIFFERENT question answered by a different rule. Do not answer "yes" because a credit
+      "should be verified" or "should be reviewed for compliance" — that is true of every credit and
+      would make this tag say "yes" on every contract, which is the same as saying nothing.
+
+      Answer "yes" ONLY when something about the TERMS THEMSELVES is unusual:
+        - a reference to any agreement, addendum or understanding OUTSIDE this contract;
+        - a credit or concession whose stated purpose is missing, vague, or does not explain it;
+        - a concession that is large relative to the transaction.
+      A credit with a clearly stated ordinary purpose (closing costs, prepaids, a rate buydown), no
+      other concessions, and no reference outside the contract is "no" — even though a processor will
+      still see the number elsewhere in the file.
+
+      STRICT OUTPUT — return ONLY a JSON array, one object per document, echoing the given "index":
+      [{"index": <i>, "unusual_credits": {"value": "yes|no|unknown", "confidence": <0.0-1.0>,
+        "reasoning": "<what the contract shows>"}}]
+
   atr_documentation:
     subject: loan
     context_builder: loan

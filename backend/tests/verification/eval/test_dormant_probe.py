@@ -69,6 +69,9 @@ _DORMANT_EXPECTED = frozenset(
 )
 _LIVE_EXPECTED = frozenset(
     {
+        # LP-498 — contract_credits, FR-3's producer, declared and consumed by a live rule in the
+        # same ticket, so it is live from birth and never appears in the dormant set.
+        "contract_credits",
         # LP-495c — atr_documentation JOINED the live set, the exact complement of its leaving the
         # dormant set above: DT-7 activated once its tag gained the abstain its prompt sanctioned,
         # so a live rule now consumes the group on every normal run.

@@ -121,7 +121,7 @@ credit.inquiry_dates,borrower,list[date],,Credit inquiries on the report (for LO
 credit.inquiry_explained,borrower,enum,"[""yes"", ""no"", ""unknown""]",Each inquiry matched to a new tradeline OR an LOE.,AI,CR-5,AI-at-rule-time,enum: yes | no | unknown
 credit.report_date,doc,date,,Credit report pull date (validity at closing).,parsed,CR-13,Deterministic-once-tagged,date | unknown
 condo.reserve_pct,doc,number,,HOA budget reserve % (>=10% requirement). AI parses budget.,AI,CO-4,Hybrid,number | unknown
-contract.unusual_credits,doc,enum,"[""yes"", ""no + detail""]",Seller credits beyond norms / side agreements.,AI,FR-3,AI-at-rule-time,enum: yes | no + detail
+contract.unusual_credits,doc,enum,"[""yes"", ""no"", ""unknown""]",Seller credits beyond norms / side agreements.,AI,FR-3,AI-at-rule-time,enum: yes | no | unknown
 id.marital_status,borrower,enum,"[""married"", ""unmarried"", ""separated"", ""unknown""]",Stated marital status (title/vesting consistency).,parsed,ID-7,Deterministic-once-tagged,enum: married | unmarried | separated | unknown
 id.title_vesting_consistent,doc,enum,"[""yes"", ""no"", ""unknown""]",Marital status consistent with title vesting.,AI,ID-7,AI-at-rule-time,enum: yes | no | unknown
 ins.condo_master_policy,doc,enum,"[""present_adequate"", ""present_inadequate"", ""absent"", ""n/a"", ""unknown""]","Condo master policy adequacy (presence, replacement-cost basis, general liability limit). Fidelity/crime (B7-4-02) is deliberately NOT evaluated — its unit-count input never resolves.",derived,IH-7,Deterministic,enum: present_adequate | present_inadequate | absent | n/a | unknown

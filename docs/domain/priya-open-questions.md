@@ -845,3 +845,58 @@ conventional side matches the guideline (Fannie applies no haircut, confirming y
   financed properties reach you, and where would that count come from?
 - **The cash-out-refinance-over-45%-DTI cell** is likewise not modelled — is that combination common
   enough to matter?
+
+## LP-498 — the fraud cohort (FR-1 … FR-6)
+
+### 1. What do you actually do when a document looks altered?
+
+FR-1 was not built: its tag is asked about font inconsistency and pasted figures, but an AI group
+receives extracted field VALUES, never a rendering, so it cannot see what it is asked about.
+
+- When a document looks altered, do you flag it in the file, or does it leave the file entirely — a
+  call to the LO, an escalation to compliance, a SAR conversation?
+- If it leaves the file, a rule that writes a finding into the loan file may be the wrong shape
+  regardless of whether we can detect it. Should the system surface this at all?
+
+### 2. Is an unusual seller credit your call or the underwriter's?
+
+FR-3 now surfaces contracts whose credit terms or side-agreement references merit a look. It routes to
+needs_review and asserts nothing.
+
+- When you see a large or oddly-purposed seller credit, do you act on it, or is it underwriting's?
+- Does a **side agreement** referenced in the contract change your workflow — do you request it?
+- The first derivation disagreed with itself on a routine $3,000 closing-cost credit, one call saying
+  "review it to verify terms align with guidelines". Is that right — should a processor look at every
+  credit, or only unusual ones? I built it as *only unusual ones*; tell me if that is wrong.
+
+### 3. What does a garnishment on a pay stub oblige you to do?
+
+FR-4 was not built — it asks a bank-transaction tag about a pay-stub deduction, and the corpus carries
+zero real garnishments in 2,557 documents.
+
+- Do you see garnishments in practice, and on which document?
+- Does one become a liability in the DTI, a condition, or a conversation with the LO?
+
+### 4. The FHA 90/180-day flip window is now citable — for FHA only
+
+24 CFR 203.37a is verified (GPO, edition 2024-04-01): a resale **90 days or less** after the seller's
+acquisition is **not eligible** for FHA insurance; **91–180 days** with a resale price **100% or more**
+above the seller's purchase price requires a **second appraiser**. The period runs from the seller's
+settlement date to the date the sales contract is executed.
+
+**This resolves TI-6's tier-U rapid-transfer window for FHA files.** Conventional has no codified rule
+— lenders impose one as an overlay.
+
+- Does your shop carry a conventional flip overlay, and what is its window?
+- The regulation exempts **eight** categories, including inherited property, employer/relocation
+  acquisitions, and state/local government agencies. Do those come up?
+
+### 5. What the research could not obtain
+
+- **B3-4.1-02's per-cell IPC table** remains tier U. FR-3 does not test the cap — that is PC-4's
+  function (agency-gated to LP-509). If you want FR-3 to test the limit rather than surface terms for
+  review, the table needs fetching first.
+- **No governing standard exists** for document alteration, recurring-debit patterns or open-ended
+  discrepancy discovery. Fannie's fraud material describes red flags and reporting obligations on the
+  *institution*, not tests for a processor's checklist. Is there a lender-side policy we should encode
+  instead?

@@ -68,6 +68,7 @@ _ACTIVATED = frozenset(
         # LP-497 — AS-4 (reserves adequacy), no-ai-dependency. Its 0/5 blocker measured a tag that is
         # not in its chain; its real gap was the threshold, now tier P from B3-4.1-01. AS-7 stays held.
         "AS-4",
+        "FR-3",  # LP-498
         "CL-1",
         "CR-13",
         "PR-6",
@@ -187,6 +188,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "CR-8",  # LP-490a
         "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
         "DT-7",  # LP-495c
+        "FR-3",  # LP-498 (sorts after DT-7, before ID-*)
         "ID-5",
         "IH-1",
         "IH-2",

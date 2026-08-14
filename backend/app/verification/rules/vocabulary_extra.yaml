@@ -1173,3 +1173,18 @@ tags:
   # generated fact_tags.csv (row 108, `derived`, enum yes|no|unknown), and a tag_id declared in this
   # overlay that already exists in the CSV fails loud by design. It gets a tag_production.yaml entry
   # only.
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-498 — FR-3's judgment OUTPUT tag. Vocabulary only: a judgment rule's output is emitted by the
+  # judgment evaluator, not by a producer, so it gets no tag_production.yaml entry (the same shape as
+  # occupancy.investment_rental_supported and dti.atr_documentation_adequate).
+  # ------------------------------------------------------------------------------------------------- #
+  contract.credits_warrant_review:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Do this contract's seller credits or side-agreement references warrant a processor's review
+      (FR-3 verdict)? A SURFACING judgment, not an accusation: "yes" means a human should look, never
+      that anything improper occurred. "unknown" when the contract's credit and concession fields are
+      absent or unreadable — an absent field is not evidence of a clean contract.
+    produced_by: AI

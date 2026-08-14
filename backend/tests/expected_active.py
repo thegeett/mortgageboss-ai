@@ -75,6 +75,15 @@ from __future__ import annotations
 # one: +txn.is_nsf_or_overdraft, +liab.in_application which is LIVE via CR-1/CR-4, and
 # +stmt.is_reserve_eligible) with fact_tags.csv regenerated. DT-7 activated on the rate LP-495b
 # already measured — 1.0000 over 4 cases, ratify-pending, measured_accuracy null. -> 74.
-EXPECTED_ACTIVE_RULE_COUNT: int = 74
+# LP-498 +FR-3 (unusual seller credits / side agreements) — the ONLY rule in the six-rule fraud
+# cohort whose evidence exists: seller_credit_amount / _purpose / other_concessions_amount /
+# side_agreements_referenced are typed fields on the purchase-contract extractor. Its malformed
+# declaration (`enum: yes | no + detail`, which parsed to the literal "no + detail") was fixed in
+# the xlsx first. FR-1 held (its tag receives extracted values, never a rendering, and the only
+# reshape duplicates LP-474); FR-2 held (no producer either side, 0 loaded title commitments);
+# FR-4 held (a bank-transaction tag asked about a pay-stub deduction); FR-5 held (one transaction
+# per context cannot show a pattern across statements); FR-6 held (would be the first
+# list-producing tag, and open-ended discovery has no closed vocabulary to abstain against). -> 75.
+EXPECTED_ACTIVE_RULE_COUNT: int = 75
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

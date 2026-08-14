@@ -2130,3 +2130,61 @@ PE-3:
     THE CORPUS CANNOT EXERCISE THIS RULE AT ALL: four FHA loan files exist, three carry ZERO
     documents and the fourth carries two, and none carries a purchase contract, appraisal or credit
     report. Every verdict below is proven on constructed scenario cases, not on observed data.
+
+FR-3:
+  status: ratify-pending
+  self_consistency_rate: 1.0000
+  self_consistency_cases: 4
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-14"
+  ships: ratify
+  threshold: null
+  validated: false
+  input_resolves: true
+  measured_accuracy: null
+  load_bearing_ai_tags: [contract.unusual_credits]
+  fp_fn: >-
+    INVERTED FOR THIS COHORT, and the inversion is the point. Everywhere else FN >> FP ("never clear on
+    a missing document"). A fraud-adjacent finding names a person: a false "these terms look unusual"
+    costs a borrower and a processor real time and trust, while a missed one costs a review a human was
+    going to do anyway at underwriting. So FP > FN here, and the rule is built to surface rather than
+    assert — no auto-fire, no threshold, needs_review only, and an unreadable contract abstains instead
+    of being read as clean.
+  rationale: >-
+    THE ONLY RULE IN THE FRAUD COHORT WHOSE EVIDENCE EXISTS (LP-498 Phase A). Its input is a first-class
+    typed field set on the purchase-contract extractor — seller_credit_amount, seller_credit_purpose,
+    other_concessions_amount and side_agreements_referenced — not an inference. The other five are held:
+    FR-1's tag cannot see its subject (an AI group receives extracted values, never a rendering, and the
+    only viable reshape duplicates LP-474's deterministic zero-false-positive consistency layer); FR-2's
+    two inputs have no producer and one is deliberately undeclared (LP-493); FR-4 asks a bank-transaction
+    tag about a pay-stub deduction line; FR-5's declared "pattern across statements" is unanswerable from
+    a context that shows one transaction; FR-6 would be the first list-producing tag in the system.
+    NO THRESHOLD, deliberately. "Side agreement" has none, and the IPC cap is PC-4's question
+    (agency-gated to LP-509) — FR-3 asks whether the terms merit review, not whether a percentage was
+    exceeded, so there is nothing for an expert to sign off and threshold_needs_signoff is false.
+    CORPUS: the loaded corpus has TWO purchase agreements and 0/2 fill on every one of the four fields,
+    so this rule abstains on every stored file today. The raw corpus DOES carry real credits — 13 lines
+    with non-zero amounts — so the signal exists in documents that never reach a loan file. The rate
+    below is therefore measured on CONSTRUCTED cases, and what that does and does not establish is
+    recorded here rather than implied.
+    THE RATE: 1.0000 over 4 constructed cases, 0 disagreements, with a FULL THREE-VALUE SPREAD —
+    "no" (a routine $3,000 closing-cost credit with a stated purpose), "yes" twice by two DIFFERENT
+    routes (a referenced side agreement; a $45,000 credit whose purpose is only "per addendum"), and
+    "unknown" (a contract whose credit fields did not extract). Two "yes" routes deliberately, so the
+    branch does not rest entirely on the side-agreement field. Call 2 re-derives from the same source
+    data with the document's field dict REVERSED, so the prompt is not byte-identical — at temperature
+    0 an identical prompt measures determinism, not consistency (LP-495a).
+    WHAT THE RATE DOES NOT SHOW, and this matters more here than the number: it establishes that the
+    plumbing works and every branch is reachable. It establishes NOTHING about detecting a real unusual
+    credit, because the fixtures' author knows the intended answer — scoring self-authored cases against
+    self-authored logic measures self-consistency, not correctness (ADR-332 / LP-487).
+    THE FIRST DERIVATION SCORED 0.7500 AND THE DISAGREEMENT WAS A PROMPT DEFECT, not model noise —
+    caught by reading the reasoning, which is the LP-495b/DT-7 lesson applied. On the ordinary
+    $3,000 credit one call answered "no" ("routine closing-cost credit, clearly stated purpose") and
+    the other "yes" ("routine credit type BUT should be reviewed to verify terms align with loan
+    guidelines"). The second was answering COMPLIANCE — PC-4's question — not unusualness, and on the
+    commonest real contract that flips the tag to "yes" half the time, which is exactly the
+    false-positive direction this cohort exists to avoid. The prompt now says explicitly that the tag
+    is not asked whether a credit complies, and that "should be verified" is true of every credit and
+    would make the tag say "yes" on every contract. Re-derived to 1.0000 after the fix.

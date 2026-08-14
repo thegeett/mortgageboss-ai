@@ -68,6 +68,9 @@ _FACT_LABELS: dict[str, str] = {
     "condo.fidelity_present_raw": "master policy's fidelity / crime indicator",
     "condo.fidelity_amount": "fidelity / crime coverage amount",
     "condo.reserve_adequacy": "HOA replacement-reserve adequacy",
+    # LP-498 — FR-3. Phrased as what a processor reads, and deliberately non-accusatory.
+    "contract.unusual_credits": "seller credits and side-agreement references on the purchase contract",
+    "contract.credits_warrant_review": "whether the contract's credit terms need a look",
     # LP-497 — AS-4 went live; its couldnt_check reads on this tag.
     "reserves.required_months": "reserve requirement for this occupancy and unit count",
     # LP-496a — program eligibility (PE-1, PE-3).

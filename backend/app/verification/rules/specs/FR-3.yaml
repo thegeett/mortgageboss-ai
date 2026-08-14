@@ -1,0 +1,143 @@
+# FR-3 — Unusual seller credits / side agreements — JUDGMENTAL rule SPEC (LP-498).
+#
+# A seller credit beyond the interested-party-contribution limit is a sales concession: the sales price
+# is adjusted downward by the excess and LTV/CLTV recalculated. A term agreed OUTSIDE the contract —
+# a side agreement — is worse, because nothing in the file prices it. Both are things a processor
+# should see before a file goes to underwriting.
+#
+# THIS RULE SURFACES; IT DOES NOT ACCUSE, and the direction is argued rather than inherited.
+# Every other cohort's principle has been "never clear on a missing document". Here the mirror governs:
+# a fraud-adjacent finding names a person, and a false positive costs a borrower and a processor far
+# more than a missed one costs the lender. So:
+#   - the rule's own question is "should a human look at these terms?", NOT "was there fraud?";
+#   - the producer prompt is explicitly told a seller credit is ORDINARY and not to speculate about
+#     intent or call anything fraudulent;
+#   - the verdict routes to needs_review, which for a judgmental rule is not a default but the only
+#     honest destination — LP-376-B ratifies every judgmental verdict, so there is no `satisfied` path
+#     and no auto-fire. The rule cannot accuse on its own.
+# CO-3, CO-5, RE-1, DT-6, IH-2 and TI-1 all landed here; this makes the same argument on its own facts
+# rather than citing theirs.
+#
+# WHY THIS RULE AND NOT THE OTHER FIVE (LP-498 Phase A): FR-3 is the only rule in the fraud cohort whose
+# evidence exists. The purchase-contract extractor carries seller_credit_amount, seller_credit_purpose,
+# other_concessions_amount and side_agreements_referenced — the side-agreement signal is a first-class
+# typed field, not an inference. FR-1's tag cannot see its subject (an AI group receives extracted
+# values, never a rendering); FR-2's two inputs have no producer and one is deliberately undeclared;
+# FR-4 asks a bank-transaction tag about a pay-stub deduction; FR-5's "pattern across statements" is
+# unanswerable from a context showing one transaction; FR-6 would be the first list-producing tag and
+# needs a mechanism. All five are held.
+#
+# NO THRESHOLD IS ENCODED, AND THAT IS DELIBERATE.
+# "Side agreement" has no guideline threshold — it is a judgment about whether a term exists outside
+# the contract, and inventing a number would be exactly the recalled-threshold failure ADR-361 forbids.
+# The IPC CAP is a different question and a different rule: Fannie B3-4.1-02 sets interested-party
+# contribution limits of 2%-9% by occupancy and LTV, and testing a credit against that cap is PC-4's
+# job, which is agency-gated to LP-509. FR-3 asks whether the TERMS merit review, not whether a
+# percentage was exceeded. When PC-4 lands, the two are complementary: PC-4 measures, FR-3 surfaces.
+#
+# CORPUS: the loaded corpus carries TWO purchase agreements and NEITHER populates any of the four
+# fields (0/2 on all of them). The raw corpus does carry real credits — 13 lines with non-zero amounts
+# ($2,500 x6, $15,000 x3, $1,545 x2, $11,185.99 x2) — so the signal exists in real documents that do
+# not reach a loan file. This rule is therefore built against CONSTRUCTED cases and abstains on every
+# file in the corpus today. Stated here so it is not discovered later.
+
+rule_id: FR-3
+name: Unusual seller credits / side agreements
+category: Fraud
+
+kind: judgmental          # must equal rule_kinds.csv
+numeric_check: false      # must equal rule_kinds.csv — no threshold, by design
+
+criteria: >-
+  When a purchase contract states seller credits or other concessions, or references an agreement
+  outside the contract, a processor should review the terms before the file goes to underwriting. This
+  reads the derived contract.unusual_credits, which describes what the contract SHOWS. A contract whose
+  credit and concession fields are absent or unreadable resolves to couldnt_check — never to "no",
+  which on an unread contract would be a false all-clear. The rule surfaces terms for review; it does
+  not assert that anything improper occurred, and it carries no numeric threshold.
+
+applicability:
+  scope: a purchase contract on the loan file
+  trigger: >-
+    a document of type purchase_agreement carrying the contract.unusual_credits tag. A file with no
+    purchase contract is not_applicable — there are no contract terms to review. A contract whose
+    credit fields did not extract couldnt_checks rather than being read as carrying no credits.
+
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false   # must equal rule_kinds.csv — there is no threshold to sign off
+  values: {}
+  guideline_text: >-
+    Interested party contributions exceeding the applicable limit are sales concessions: the sales
+    price is adjusted downward by the excess and the LTV/CLTV recalculated, and IPCs may not be used
+    for the down payment, reserves, or the borrower's minimum required contribution (Fannie Mae
+    Selling Guide B3-4.1-02). The per-cell IPC limits are NOT encoded here and are not tested by this
+    rule — testing a credit against the cap is PC-4's function. No guideline sets a threshold for what
+    makes a credit or a side agreement worth reviewing; that judgment carries no number.
+
+required_inputs:
+  - name: unusual_credits
+    snapshot_path: 'tags.by_subject["<document>"]["contract.unusual_credits"]'
+    description: >-
+      what the purchase contract shows about seller credits, other concessions and references to
+      agreements outside it (AI, LP-498): "yes" when terms merit a look, "no" when the fields are
+      present and show none, "unknown" when they are absent or unreadable.
+
+subject_enumeration: per_document
+subject_key_fields: [content_id]
+
+evidence_required: >-
+  What the contract actually states — the credit amount and its stated purpose, or the side-agreement
+  reference — inline on the finding, so a processor can judge the terms without reopening the
+  document. The finding must read as "look at this", never as an allegation.
+
+guideline_reference: "Fannie Mae Selling Guide B3-4.1-02 (interested party contributions and sales concessions) — cited for context only; FR-3 tests no limit. Side agreements carry no guideline threshold."
+
+spec_version: 1
+
+judgment:
+  subject: document
+  # SCOPED BY DOCUMENT TYPE, and this was a defect found by running it. The rule enumerates
+  # per_document, so with the predicate on the TAG it produced a couldnt_check row on EVERY document —
+  # 8 of them on LF-6T3N, none a purchase contract. A fraud-adjacent rule reporting "could not check
+  # your contract" against a pay stub is noise at best, and on this cohort's axis it is worse. Scoping
+  # on document_type makes a non-contract document not_applicable, which is what it is.
+  # The unreadable-contract case is still covered, by the GATE rather than by this predicate: the tag
+  # is load-bearing, so an absent or "unknown" value short-circuits to couldnt_check BEFORE any
+  # rule-time model call. An unreadable contract therefore costs nothing and accuses nobody, and a
+  # test asserts the judgment reasoner is never invoked on one.
+  applicability:
+    tag: document.document_type
+    op: eq
+    value: purchase_agreement
+  load_bearing_tags: [contract.unusual_credits]
+  reasoned_over: [contract.unusual_credits]
+  output_tag: contract.credits_warrant_review
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  system_prompt: |
+    You are a senior mortgage loan processor making ONE reasoned judgment: do THIS purchase contract's
+    seller credits or side-agreement references warrant a processor's review before the file goes to
+    underwriting?
+
+    You reason ONLY over the STRUCTURED TAG below — never raw documents. It describes what the contract
+    shows about credits, concessions and references to agreements outside it.
+
+    YOU ARE NOT LOOKING FOR FRAUD, and you must not imply it. "yes" means only that a human should read
+    the terms. It does not mean anything improper happened, and your reasoning must not suggest that it
+    did. Do not speculate about intent. Do not use the words fraud, misrepresentation or scheme.
+
+    A SELLER CREDIT IS ORDINARY. Most purchase contracts carry one, and a routine closing-cost credit
+    needs no review. Answer "yes" when there is something a processor would actually want to look at —
+    a credit whose stated purpose is unclear or unusual, a concession large relative to the
+    transaction, or ANY reference to an agreement outside the contract, because a term the file does
+    not price is the thing this check exists to surface.
+
+    Answer "no" when the contract's terms are ordinary and nothing points outside it.
+
+    BE HONEST. If the tag does not support a judgment, answer "unknown". NEVER guess. An absent or
+    unreadable contract field is NOT evidence of clean terms — it is a reason to answer "unknown".
+    Cite the tag.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT:
+    {"value": "yes|no|unknown", "confidence": <0.0-1.0>, "reasoning": "<why — cite the tag>"}

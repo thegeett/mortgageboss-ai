@@ -306,5 +306,8 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
             # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
             "AS-4",
+            # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
+            # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
+            "FR-3",
         )
     )

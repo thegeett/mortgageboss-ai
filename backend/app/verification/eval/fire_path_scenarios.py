@@ -2331,6 +2331,102 @@ def build_as4_five_units_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-498 — FR-3 (unusual seller credits / side agreements).
+#
+# CONSTRUCTED CASES, and what they establish is narrow. The loaded corpus carries two purchase
+# agreements with 0/2 fill on every credit field, so nothing stored exercises this rule. These cases
+# prove the PLUMBING works and every branch is REACHABLE. They establish NOTHING about detecting a real
+# unusual credit: the author knows the intended answer, so scoring them measures self-consistency, not
+# correctness (ADR-332, and LP-487's amendment). Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_FR3_ORDINARY = UUID("98000000-0000-4000-8000-000000000001")
+_LOAN_FR3_SIDE_AGREEMENT = UUID("98000000-0000-4000-8000-000000000002")
+_LOAN_FR3_LARGE_CREDIT = UUID("98000000-0000-4000-8000-000000000003")
+_LOAN_FR3_FIELDS_ABSENT = UUID("98000000-0000-4000-8000-000000000004")
+_LOAN_FR3_NO_CONTRACT = UUID("98000000-0000-4000-8000-000000000005")
+
+
+def _fr3_contract(content_id: str, **fields: str) -> DocumentEntry:
+    """A purchase agreement carrying only the credit/concession fields the case needs."""
+    return DocumentEntry(
+        content_id=content_id,
+        document_type="purchase_agreement",
+        fields={k: _f(v) for k, v in fields.items()},
+    )
+
+
+def build_fr3_ordinary_credit_snapshot() -> Snapshot:
+    """A routine $3,000 closing-cost credit, purpose stated, nothing outside the contract. The
+    producer should read this as ordinary — the prompt says a seller credit IS ordinary — so the
+    branch under test is "a credit exists and still does not warrant review"."""
+    return _snapshot(
+        _LOAN_FR3_ORDINARY,
+        [
+            _fr3_contract(
+                "98-k-ordinary",
+                seller_credit_amount="3000.00",
+                seller_credit_purpose="buyer's closing costs",
+                other_concessions_amount="0.00",
+                side_agreements_referenced="none",
+            )
+        ],
+    )
+
+
+def build_fr3_side_agreement_snapshot() -> Snapshot:
+    """THE CASE THE RULE EXISTS FOR. A modest credit, but the contract references an agreement OUTSIDE
+    itself — a term the file does not price. Should warrant review regardless of the amount."""
+    return _snapshot(
+        _LOAN_FR3_SIDE_AGREEMENT,
+        [
+            _fr3_contract(
+                "98-k-side",
+                seller_credit_amount="2000.00",
+                seller_credit_purpose="closing costs",
+                other_concessions_amount="0.00",
+                side_agreements_referenced=(
+                    "separate written agreement between buyer and seller regarding post-closing "
+                    "repairs and a further payment, not attached to this contract"
+                ),
+            )
+        ],
+    )
+
+
+def build_fr3_large_unclear_credit_snapshot() -> Snapshot:
+    """A large concession with an unclear purpose and nothing outside the contract — the other route
+    to review, so the two "yes" cases do not both rest on the side-agreement field."""
+    return _snapshot(
+        _LOAN_FR3_LARGE_CREDIT,
+        [
+            _fr3_contract(
+                "98-k-large",
+                seller_credit_amount="45000.00",
+                seller_credit_purpose="per addendum",
+                other_concessions_amount="12000.00",
+                side_agreements_referenced="none",
+            )
+        ],
+    )
+
+
+def build_fr3_fields_absent_snapshot() -> Snapshot:
+    """A purchase agreement whose credit fields did NOT extract. Must be "unknown", never "no": an
+    unread contract is not a clean contract, and this is the branch nearly every real corpus file
+    would take today (0/2 fill on the two stored agreements)."""
+    return _snapshot(
+        _LOAN_FR3_FIELDS_ABSENT,
+        [_fr3_contract("98-k-absent", buyer_name="A Buyer", seller_name="A Seller")],
+    )
+
+
+def build_fr3_no_contract_snapshot() -> Snapshot:
+    """No purchase agreement at all -> the rule is NOT_APPLICABLE. There are no contract terms to
+    review, and a file without a contract must not be surfaced as if there were."""
+    return _snapshot(_LOAN_FR3_NO_CONTRACT, [])
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -2382,6 +2478,11 @@ __all__ = [
     "build_dt6_escrow_double_count_guard_snapshot",
     "build_dt6_short_snapshot",
     "build_far_future_closing_snapshot",
+    "build_fr3_fields_absent_snapshot",
+    "build_fr3_large_unclear_credit_snapshot",
+    "build_fr3_no_contract_snapshot",
+    "build_fr3_ordinary_credit_snapshot",
+    "build_fr3_side_agreement_snapshot",
     "build_ih2_clause_matches_snapshot",
     "build_ih2_clause_mismatch_snapshot",
     "build_ih2_loan_estimate_only_snapshot",
