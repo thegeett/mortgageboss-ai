@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from app.models.loan_file import LoanFile
+from app.schemas.calculators import CalcFindings, CalculatorView, MethodologyNote
 from app.verification.ltv import delivered_percent
 from app.verification.snapshot import calculations_section as cs
 from app.verification.snapshot.calculations_section import (
@@ -116,6 +117,14 @@ def _reserves(*, computed: bool = True) -> NS:
         headline="12 months" if computed else "—",
         status="sufficient" if computed else None,
         program="conventional",
+        # LP-498 review — the STRUCTURED months, which `map_reserves` now projects. AS-4 declares
+        # `months_available: {calc: [reserves, months_available]}` and the mapper emitted only
+        # headline/status/program, so the operand resolved to None and AS-4 couldnt_checked on every
+        # real file. See `test_reserves_projects_months_from_a_real_calculator_view` below — a
+        # SimpleNamespace double is what let the gap survive, so the projection is also pinned against
+        # the real type.
+        months_available=Decimal("12.0") if computed else None,
+        months_required=Decimal("6") if computed else None,
         inputs=[
             _line("reserves.liquid", "Liquid assets", Decimal("40000.00"), "stated"),
             _line("reserves.down", "Down payment", Decimal("290000.00"), "computed"),
@@ -176,6 +185,41 @@ def test_reserves_maps_headline_status_and_inputs() -> None:
     assert entry.value["headline"] == "12 months"
     assert entry.value["status"] == "sufficient"
     assert {line.source for line in entry.breakdown} == {"stated", "computed"}
+
+
+def test_reserves_projects_months_from_a_real_calculator_view() -> None:
+    """LP-498 review — AS-4's OPERAND, pinned against the REAL `CalculatorView`.
+
+    AS-4 declares `months_available: {calc: [reserves, months_available]}`, and `map_reserves` emitted
+    headline / status / program only — so `_calc_operand`'s `entry.value.get("months_available")`
+    returned None and the rule resolved to `couldnt_check` for every subject on every real file. It
+    survived activation because every AS-4 test hand-builds the key and none goes through this mapper.
+
+    The double above is a SimpleNamespace, which cannot catch a field the real schema lacks, so this
+    test constructs an actual `CalculatorView`: if the field is dropped from the schema, this fails to
+    build rather than silently projecting nothing.
+    """
+    view = CalculatorView(
+        calculator="reserves",
+        title="Reserves",
+        computed=True,
+        headline="3.0 months",
+        headline_label="Reserves available",
+        status="insufficient",
+        program="conventional",
+        months_available=Decimal("3.0"),
+        months_required=Decimal("6"),
+        inputs=[],
+        steps=[],
+        formulas=[],
+        methodology=MethodologyNote(starter=True, text="t"),
+        findings=CalcFindings(unresolved=False, open_in_scope_count=0),
+    )
+    entry = map_reserves(view)
+    assert entry is not None
+    # The exact strings AS-4's operand resolver coerces — a Decimal, never the "3.0 months" headline.
+    assert entry.value["months_available"] == "3.0"
+    assert entry.value["months_required"] == "6"
 
 
 # --------------------------------------------------------------------------- #

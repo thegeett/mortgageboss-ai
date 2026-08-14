@@ -21,6 +21,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from app.schemas.calculators import CalcFindings, CalculatorView, MethodologyNote
 from app.verification.eval.fire_path_scenarios import (
     build_as4_five_units_snapshot,
     build_as4_gated_calculation_snapshot,
@@ -32,17 +33,21 @@ from app.verification.eval.fire_path_scenarios import (
     build_as4_second_home_ok_snapshot,
     build_as4_units_unknown_snapshot,
 )
-from app.verification.rule_engine.activation_bars import is_eligible, load_activation_bars
-from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
-from app.verification.rule_engine.result import Verdict
-from app.verification.rules.specs import load_rule_spec
-from app.verification.tag_materialization.derived import (
-    _RESERVE_MAX_RESIDENTIAL_UNITS,
+
+# LP-498 review — the matrix moved to `app.verification.reserves` so the reserves CALCULATOR reads the
+# same cells (the worksheet used an unsourced starter of 2 months and contradicted this rule). The
+# constants are Decimals there rather than strings; the pin below compares them numerically.
+from app.verification.reserves import (
     _RESERVE_MONTHS_INVESTMENT,
     _RESERVE_MONTHS_MULTI_UNIT_PRIMARY,
     _RESERVE_MONTHS_ONE_UNIT_PRIMARY,
     _RESERVE_MONTHS_SECOND_HOME,
+    MAX_RESIDENTIAL_UNITS,
 )
+from app.verification.rule_engine.activation_bars import is_eligible, load_activation_bars
+from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
+from app.verification.rule_engine.result import Verdict
+from app.verification.rules.specs import load_rule_spec
 from app.verification.tag_materialization.producer import materialize_tags
 
 pytestmark = pytest.mark.anyio
@@ -53,6 +58,26 @@ async def _verdict(builder) -> Verdict:
     evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("AS-4",))
     assert len(evaluations) == 1, f"AS-4 is loan-scoped, got {evaluations}"
     return evaluations[0].verdict
+
+
+def _reserves_view(*, months_available: Decimal, months_required: Decimal) -> CalculatorView:
+    """A REAL `CalculatorView`, not a stand-in — so a field the schema lacks fails to build."""
+    return CalculatorView(
+        calculator="reserves",
+        title="Reserves",
+        computed=True,
+        headline=f"{months_available} months",
+        headline_label="Reserves available",
+        status="insufficient",
+        program="conventional",
+        months_available=months_available,
+        months_required=months_required,
+        inputs=[],
+        steps=[],
+        formulas=[],
+        methodology=MethodologyNote(starter=True, text="t"),
+        findings=CalcFindings(unresolved=False, open_in_scope_count=0),
+    )
 
 
 async def _required(builder):
@@ -144,14 +169,51 @@ async def test_above_four_units_abstains() -> None:
 def test_reference_values_match_the_recipe_constants() -> None:
     """The citation and the code cannot drift apart. Every value is tier P from B3-4.1-01 (08/07/2024)."""
     values = load_rule_spec("AS-4").reference_values.values
-    assert values["reserve_months_one_unit_primary"] == _RESERVE_MONTHS_ONE_UNIT_PRIMARY
-    assert values["reserve_months_second_home"] == _RESERVE_MONTHS_SECOND_HOME
-    assert values["reserve_months_multi_unit_primary"] == _RESERVE_MONTHS_MULTI_UNIT_PRIMARY
-    assert values["reserve_months_investment"] == _RESERVE_MONTHS_INVESTMENT
-    assert int(values["reserve_max_residential_units"]) == _RESERVE_MAX_RESIDENTIAL_UNITS
+    assert Decimal(values["reserve_months_one_unit_primary"]) == _RESERVE_MONTHS_ONE_UNIT_PRIMARY
+    assert Decimal(values["reserve_months_second_home"]) == _RESERVE_MONTHS_SECOND_HOME
+    assert (
+        Decimal(values["reserve_months_multi_unit_primary"]) == _RESERVE_MONTHS_MULTI_UNIT_PRIMARY
+    )
+    assert Decimal(values["reserve_months_investment"]) == _RESERVE_MONTHS_INVESTMENT
+    assert int(values["reserve_max_residential_units"]) == MAX_RESIDENTIAL_UNITS
     # The guideline's own numbers, so a future edit to the constants alone fails here too.
-    assert Decimal(_RESERVE_MONTHS_ONE_UNIT_PRIMARY) == 0
-    assert Decimal(_RESERVE_MONTHS_MULTI_UNIT_PRIMARY) == 6
+    assert _RESERVE_MONTHS_ONE_UNIT_PRIMARY == 0
+    assert _RESERVE_MONTHS_MULTI_UNIT_PRIMARY == 6
+
+
+def test_as4_operand_key_is_one_the_mapper_actually_emits() -> None:
+    """LP-498 review — THE CONTRACT BETWEEN AS-4'S SPEC AND THE PROJECTION, which nothing checked.
+
+    AS-4 declares `months_available: {calc: [reserves, months_available]}`. `map_reserves` built its
+    entry as `{"headline": ..., "status": ..., "program": ...}` — no such key — so `_calc_operand`'s
+    `entry.value.get("months_available")` returned None, the operand failed, and AS-4 resolved to
+    `couldnt_check` for EVERY subject on every real file. An investment file with a fully computed
+    reserves view and 3.0 months available reported "could not check" instead of firing.
+
+    Every test in this module (and `_as4_snapshot`) hand-builds the key, so none of them could see it;
+    the ticket's chain trace stopped at "mapped into the snapshot by `map_reserves`" without checking
+    what `map_reserves` emits. This asserts the two agree, in both directions: a spec operand renamed
+    without the mapper, or a mapper key dropped, fails here.
+    """
+    from app.verification.snapshot.calculations_section import map_reserves
+
+    spec = load_rule_spec("AS-4")
+    assert spec.deterministic is not None
+    declared = {
+        operand.calc[1]
+        for operand in spec.deterministic.operands.values()
+        if getattr(operand, "calc", None)
+    }
+    assert declared, "AS-4 no longer declares a calc operand — this pin needs rewriting"
+
+    view = _reserves_view(months_available=Decimal("3.0"), months_required=Decimal("6"))
+    entry = map_reserves(view)
+    assert entry is not None
+    missing = declared - set(entry.value)
+    assert not missing, (
+        f"AS-4 reads calculator keys the reserves projection does not emit: {sorted(missing)} — the "
+        f"operand resolves to None and the rule couldnt_checks on every real file"
+    )
 
 
 def test_as4_is_active_and_carries_no_ai_tag() -> None:

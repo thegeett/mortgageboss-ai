@@ -19,6 +19,7 @@ from pydantic import JsonValue
 
 from app.ai.extraction.parsing import coerce_date
 from app.verification.ltv import LtvInputs, LtvPurpose, compute_ltv, value_basis
+from app.verification.reserves import required_reserve_months
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
@@ -428,13 +429,11 @@ def _app_required_fields_present(
 # The prior deferral said `property.financed_unit_count`'s semantics were "ambiguous for this axis".
 # LP-496a measured it: it reaches the snapshot on 10/19 loan files and is the SUBJECT property's
 # financed unit count, which is the axis B3-4.1-01 keys on. That is the fact this now reads.
-_RESERVE_MONTHS_ONE_UNIT_PRIMARY = "0"
-_RESERVE_MONTHS_SECOND_HOME = "2"
-_RESERVE_MONTHS_MULTI_UNIT_PRIMARY = "6"
-_RESERVE_MONTHS_INVESTMENT = "6"
-# The unit range B3-4.1-01's "two- to four-unit principal residence" row covers. Above 4 units the
-# property is not a 1-4 family residential loan at all and the guide's table does not apply — abstain.
-_RESERVE_MAX_RESIDENTIAL_UNITS = 4
+# LP-498 review — THE MATRIX MOVED TO `app/verification/reserves.py` AND IS NO LONGER DUPLICATED. It
+# was encoded here only, while the reserves CALCULATOR used an unsourced starter of 2 months, so the
+# worksheet and AS-4 could report different requirements for the same file. Both now read the function
+# below. The cells, the abstains and their reasons are unchanged — this recipe is a thin adapter that
+# maps `None` to the tag's `"unknown"`.
 
 
 def _mismo_str(snapshot: Snapshot, key: str) -> str | None:
@@ -565,57 +564,16 @@ def _reserves_required_months(
     Both can only RAISE the requirement, so this figure is a FLOOR: AS-4's `satisfied` means "meets the
     occupancy/unit requirement", never "meets every reserve requirement". AS-4's spec and its finding
     text say so in words.
+
+    LP-498 review — the matrix itself now lives in `app/verification/reserves.py` so the reserves
+    CALCULATOR reads the same cells. This function is the snapshot adapter: read the two MISMO facts,
+    call the shared selector, map an abstain to the tag's `"unknown"`.
     """
-    occupancy = _mismo_str(snapshot, "property.occupancy")
-    if occupancy is None:
-        return _UNKNOWN, "occupancy is unknown — cannot select the reserve requirement"
-    key = occupancy.casefold()
-
-    if key == "investment":
-        return _RESERVE_MONTHS_INVESTMENT, (
-            f"reserve requirement for an investment property: {_RESERVE_MONTHS_INVESTMENT} months "
-            "(Fannie B3-4.1-01, page dated 08/07/2024)"
-        )
-    if key == "second_home":
-        return _RESERVE_MONTHS_SECOND_HOME, (
-            f"reserve requirement for a second home: {_RESERVE_MONTHS_SECOND_HOME} months "
-            "(Fannie B3-4.1-01, page dated 08/07/2024)"
-        )
-    if key != "primary_residence":
-        return _UNKNOWN, f"no encoded reserve requirement for occupancy {occupancy!r}"
-
-    # The primary-residence cell splits on unit count, and the split is 0 vs 6 months.
-    units_raw = _mismo_str(snapshot, "property.financed_unit_count")
-    if units_raw is None:
-        return _UNKNOWN, (
-            "the file states a principal residence but not the financed unit count, and the reserve "
-            "requirement turns on it — none for one unit, 6 months for two to four (Fannie B3-4.1-01). "
-            "Abstaining rather than assuming one unit, which would report a 2-4 unit file as needing "
-            "no reserves"
-        )
-    try:
-        units = int(Decimal(units_raw))
-    except (InvalidOperation, ValueError):
-        return _UNKNOWN, (
-            f"the financed unit count reads {units_raw!r}, which is not a number — the reserve "
-            "requirement for a principal residence turns on it"
-        )
-    if units <= 0:
-        return _UNKNOWN, f"the financed unit count reads {units}, which is not a unit count"
-    if units == 1:
-        return _RESERVE_MONTHS_ONE_UNIT_PRIMARY, (
-            "no minimum reserve requirement for a one-unit principal residence "
-            "(Fannie B3-4.1-01, page dated 08/07/2024)"
-        )
-    if units <= _RESERVE_MAX_RESIDENTIAL_UNITS:
-        return _RESERVE_MONTHS_MULTI_UNIT_PRIMARY, (
-            f"reserve requirement for a {units}-unit principal residence: "
-            f"{_RESERVE_MONTHS_MULTI_UNIT_PRIMARY} months (Fannie B3-4.1-01, page dated 08/07/2024)"
-        )
-    return _UNKNOWN, (
-        f"the property is financed as {units} units, beyond the one- to four-unit residential table "
-        "B3-4.1-01 covers — abstaining rather than applying a requirement the guide does not state"
+    months, reason = required_reserve_months(
+        _mismo_str(snapshot, "property.occupancy"),
+        _mismo_str(snapshot, "property.financed_unit_count"),
     )
+    return (_UNKNOWN if months is None else str(months)), reason
 
 
 def _stmt_nsf_count(
@@ -4662,26 +4620,49 @@ def _program_conforming_eligibility(
     if amount is None:
         return _UNKNOWN, f"{problem} — the conforming limit cannot be checked without it"
 
+    units_raw = _mismo_str(snapshot, "property.financed_unit_count")
+    # LP-498 review — AN ABSENT UNIT COUNT ABSTAINS, and it silently did not. `units` stayed None when
+    # the fact was missing, and the `units is not None and units > 1` guard below therefore did not
+    # fire, so the loan fell through to the ONE-UNIT limits. LP-496a measured this fact reaching the
+    # snapshot on 10 of 19 files, so about half took that path: a 3-unit purchase at $1,400,000 with no
+    # stated unit count fired "jumbo, not deliverable", when the 2026 three-unit high-cost ceiling is
+    # far above it. The comment below explains carefully why a KNOWN multi-unit abstains — the same
+    # uncertainty applies when the count is unknown, and AS-4's sibling recipe already abstains here.
+    if units_raw is None:
+        return _UNKNOWN, (
+            "the file does not state the financed unit count, and the conforming limit depends on it — "
+            "the one-unit values are the only ones verified against FHFA's published release, so "
+            "abstaining rather than assuming one unit, which would report a 2-4 unit file against the "
+            "wrong limit"
+        )
+    try:
+        units = int(Decimal(units_raw))
+    except (InvalidOperation, ValueError):
+        return _UNKNOWN, (
+            f"the financed unit count reads {units_raw!r}, which is not a number — the conforming "
+            "limit depends on the unit count"
+        )
     # The unit count changes the limit. The 2-4 unit values were NOT verified against a primary source
     # (FHFA's release states one-unit figures only; the multi-unit table ships inside a downloadable
     # county file), so a multi-unit loan abstains rather than being judged against an unverified number.
-    units_raw = _mismo_str(snapshot, "property.financed_unit_count")
-    units: int | None = None
-    if units_raw is not None:
-        try:
-            units = int(Decimal(units_raw))
-        except (InvalidOperation, ValueError):
-            return _UNKNOWN, (
-                f"the financed unit count reads {units_raw!r}, which is not a number — the conforming "
-                "limit depends on the unit count"
-            )
-    if units is not None and units > 1:
+    if units > 1:
         return _UNKNOWN, (
             f"the property is financed as {units} units, and the 2-4 unit conforming limits are not "
             "carried — only the one-unit values are verified against FHFA's published release"
         )
 
-    state = (_mismo_str(snapshot, "property.state") or "").upper()
+    # LP-498 review — the same defaulting on the STATE. `(... or "").upper()` made an absent state code
+    # a non-special area, so an Alaska / Hawaii / Guam / USVI file with no stated state was judged
+    # against the national limits and could fire falsely — those areas carry a HIGHER baseline and
+    # ceiling, so the error direction is a spurious "exceeds limit".
+    state_raw = _mismo_str(snapshot, "property.state")
+    if state_raw is None:
+        return _UNKNOWN, (
+            "the file does not state the property's state, and Alaska, Hawaii, Guam and the U.S. "
+            "Virgin Islands carry higher conforming limits than the rest of the country — abstaining "
+            "rather than applying the national limits to a property that may not be subject to them"
+        )
+    state = state_raw.upper()
     special = state in _CONFORMING_SPECIAL_AREA_STATES
     baseline = _CONFORMING_SPECIAL_BASELINE_1_UNIT if special else _CONFORMING_BASELINE_1_UNIT
     ceiling = _CONFORMING_CEILING_1_UNIT if not special else _CONFORMING_SPECIAL_CEILING_1_UNIT
@@ -4737,30 +4718,44 @@ def _fha_min_investment_met(
         )
 
     price_raw = _mismo_str(snapshot, "property.purchase_price")
-    value_raw = _mismo_str(snapshot, "property.valuation_amount") or _mismo_str(
-        snapshot, "property.estimated_value"
-    )
-    if price_raw is None or value_raw is None:
-        missing = "purchase price" if price_raw is None else "property value"
+    # LP-498 review — THE VALUE IS THE APPRAISER'S, NOT THE APPLICATION'S. This read
+    # `property.valuation_amount or property.estimated_value` — both MISMO STATED figures, with
+    # `estimated_value` being the borrower's own estimate off the 1003 — and never consulted
+    # `property.appraised_value`, the tag scoped to the appraisal document. That is the exact fallback
+    # `_conservative_appraised_value`'s docstring records as the bug that made PR-2 answer "the
+    # appraised value supports the purchase price" on a file with no appraisal.
+    #
+    # It matters here because HUD's Adjusted Value is the lesser of price and APPRAISED value, so the
+    # stated figure defeats the rule on precisely the file it exists to catch: price 400,000 with a
+    # 1003 estimate of 400,000 and an appraisal at 360,000 computes an MRI of 14,000 against a 52,000
+    # investment (satisfied), where the real numbers are 12,600 against 12,000 (fired). PE-3's own
+    # how_to_fix tells the processor to "obtain the appraisal (for the property value)" — which could
+    # not change the verdict while the appraisal was not read.
+    #
+    # No appraisal states a value -> ABSTAIN. The Adjusted Value is not computable without it, and a
+    # stated-value substitute is the false-green above.
+    appraised = _appraised_value_from_appraisal(snapshot)
+    if price_raw is None or appraised is None:
+        missing = (
+            "purchase price" if price_raw is None else "an appraisal stating the appraised value"
+        )
         return _UNKNOWN, (
-            f"the file does not state the {missing}, and the Adjusted Value is the lesser of the two — "
-            "it cannot be computed from one"
+            f"the file does not carry {missing}, and the Adjusted Value is the lesser of the purchase "
+            "price and the APPRAISED value — it cannot be computed from one"
         )
     try:
         price = Decimal(price_raw.replace(",", "").replace("$", "").strip())
-        value = Decimal(value_raw.replace(",", "").replace("$", "").strip())
     except (InvalidOperation, ValueError):
-        return _UNKNOWN, (
-            "the purchase price or property value is not a number, so the Adjusted Value cannot be "
-            "computed"
+        return (
+            _UNKNOWN,
+            "the purchase price is not a number, so the Adjusted Value cannot be computed",
         )
-    if price <= 0 or value <= 0:
+    if price <= 0:
         return _UNKNOWN, (
-            "the purchase price or property value is zero or negative, so the Adjusted Value cannot be "
-            "computed"
+            "the purchase price is zero or negative, so the Adjusted Value cannot be computed"
         )
 
-    adjusted_value = min(price, value)
+    adjusted_value = min(price, appraised)
 
     score, score_reason = _fha_minimum_decision_credit_score(snapshot)
     if score is None:
@@ -4785,7 +4780,9 @@ def _fha_min_investment_met(
         )
     investment = adjusted_value - amount
     basis = (
-        "the purchase price" if price <= value else "the property value (below the purchase price)"
+        "the purchase price"
+        if price <= appraised
+        else "the appraised value (below the purchase price)"
     )
     pct = f"{rate * 100:.1f}".rstrip("0").rstrip(".")
     if investment >= required:
@@ -4809,6 +4806,14 @@ def _fha_minimum_decision_credit_score(snapshot: Snapshot) -> tuple[int | None, 
     4000.1: "the Mortgagee must select the lowest MDCS of the Borrower(s) with credit score(s)". Per
     borrower the decision score is the middle of three (or the lower of two); across borrowers the
     lowest of those wins. Abstains on no score at all rather than assuming a tier.
+
+    LP-498 review — THE GRANULARITY IS PER DOCUMENT, NOT PER BORROWER, and the gap is now guarded
+    rather than only described. The loop keys on documents, and the credit-report extractor carries one
+    score triple per document, so "the lowest across borrowers" holds only when every borrower has a
+    score-bearing report. A two-borrower file with a single joint report yields ONE triple: if it is
+    the primary's 700 while the co-borrower sits at 550, PE-3 would apply the 3.5% tier to a file that
+    requires 10% — the assumption this function's own contract says it will never make. So when the
+    file has more borrowers than score-bearing credit reports, it abstains.
     """
     per_document: list[int] = []
     for entry in () if snapshot.documents.absent else snapshot.documents.entries:
@@ -4832,6 +4837,22 @@ def _fha_minimum_decision_credit_score(snapshot: Snapshot) -> tuple[int | None, 
         per_document.append(scores[1] if len(scores) >= 3 else scores[0])
     if not per_document:
         return None, "no credit report on the file states a repository credit score"
+    # The borrower set is the distinct belongs_to refs across the documents — the same derivation the
+    # rule engine's per_borrower enumerator uses, so the two cannot disagree about how many borrowers
+    # the file has.
+    borrowers = {
+        str(ref.borrower_id)
+        for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+        if entry.belongs_to
+        for ref in entry.belongs_to
+    }
+    if len(borrowers) > len(per_document):
+        return None, (
+            f"the file has {len(borrowers)} borrowers but only {len(per_document)} credit "
+            f"{'report states' if len(per_document) == 1 else 'reports state'} a repository score — "
+            "the decision score is the LOWEST across borrowers, and a borrower with no score on file "
+            "could be below the one found, so the tier cannot be selected"
+        )
     return min(per_document), ""
 
 

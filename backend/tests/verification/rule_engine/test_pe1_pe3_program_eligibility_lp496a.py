@@ -24,13 +24,17 @@ from app.verification.eval.fire_path_scenarios import (
     build_pe1_fha_snapshot,
     build_pe1_multi_unit_snapshot,
     build_pe1_no_amount_snapshot,
+    build_pe1_no_state_snapshot,
+    build_pe1_no_unit_count_snapshot,
     build_pe1_within_limit_snapshot,
     build_pe3_conventional_snapshot,
     build_pe3_investment_met_snapshot,
     build_pe3_investment_short_snapshot,
     build_pe3_low_appraisal_snapshot,
     build_pe3_low_credit_tier_snapshot,
+    build_pe3_no_appraisal_snapshot,
     build_pe3_no_credit_score_snapshot,
+    build_pe3_two_borrowers_one_score_snapshot,
 )
 from app.verification.rule_engine.activation_bars import is_eligible, load_activation_bars
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
@@ -135,6 +139,30 @@ async def test_multi_unit_abstains_rather_than_using_an_unverified_limit() -> No
     assert await _verdict("PE-1", build_pe1_multi_unit_snapshot) is Verdict.COULDNT_CHECK
 
 
+async def test_an_absent_unit_count_abstains_rather_than_assuming_one_unit() -> None:
+    """LP-498 review — the abstain above had a hole, and it was the common case.
+
+    `units` stayed None when `property.financed_unit_count` was absent, so the `units > 1` guard did
+    not fire and the loan fell through to the ONE-UNIT limits. LP-496a measured the fact reaching the
+    snapshot on 10 of 19 files, so roughly half took that path: a 3-unit purchase at $1,400,000 with no
+    stated count FIRED "jumbo, not deliverable" against a limit that does not govern it. The same
+    uncertainty that justifies abstaining on a KNOWN 2-4 unit applies when the count is unknown — and
+    AS-4's sibling recipe already abstained here for exactly this reason.
+    """
+    assert await _verdict("PE-1", build_pe1_no_unit_count_snapshot) is Verdict.COULDNT_CHECK
+
+
+async def test_an_absent_state_abstains_rather_than_assuming_a_non_special_area() -> None:
+    """LP-498 review — `(state or "").upper()` made a missing state code a non-special area.
+
+    Alaska, Hawaii, Guam and the U.S. Virgin Islands carry HIGHER limits, so the default could only
+    produce a spurious "exceeds limit". $1,000,000 is the amount that separates the two: it abstains in
+    the band in North Carolina and is below baseline in Alaska, so the state is load-bearing here and
+    must not be guessed.
+    """
+    assert await _verdict("PE-1", build_pe1_no_state_snapshot) is Verdict.COULDNT_CHECK
+
+
 # --------------------------------------------------------------------------- #
 # PE-3 — the FHA minimum required investment
 # --------------------------------------------------------------------------- #
@@ -182,6 +210,41 @@ async def test_the_low_credit_tier_changes_the_requirement() -> None:
     $20,000 investment that SATISFIES at 580+ FIRES here."""
     assert await _verdict("PE-3", build_pe3_low_credit_tier_snapshot) is Verdict.FIRED
     assert await _verdict("PE-3", build_pe3_investment_met_snapshot) is Verdict.SATISFIED
+
+
+async def test_the_property_value_is_the_appraisers_not_the_applications() -> None:
+    """LP-498 review — PE-3 never read the appraisal, and the fixture above could not have shown it.
+
+    It read `property.valuation_amount or property.estimated_value`: both MISMO STATED figures, and
+    `estimated_value` is the borrower's own estimate off the 1003. `property.appraised_value` — the tag
+    scoped to the appraisal document — was never consulted. That is the same fallback
+    `_conservative_appraised_value`'s docstring records as the bug that made PR-2 answer "the appraised
+    value supports the purchase price" on a file with no appraisal.
+
+    It defeats the rule on exactly the file it exists to catch: price $400,000 with a 1003 estimate of
+    $400,000 and an appraisal at $360,000 computes $14,000 required against a $52,000 investment
+    (satisfied), where the real numbers are $12,600 against $12,000 (fired). The low-appraisal fixture
+    could not catch it because it wrote the low value into `property.valuation_amount` — so no appraisal
+    existed on the file at all, and the case "proving" the Adjusted Value basis proved the stated one.
+
+    This snapshot states the MISMO value and carries NO appraisal: it abstains precisely because the
+    appraisal is what is read.
+    """
+    assert await _verdict("PE-3", build_pe3_no_appraisal_snapshot) is Verdict.COULDNT_CHECK
+
+
+async def test_a_borrower_without_a_credit_score_blocks_the_tier() -> None:
+    """LP-498 review — the MDCS is computed per DOCUMENT while its contract is per BORROWER.
+
+    "The lowest MDCS of the Borrower(s)" holds only when every borrower has a score-bearing report, and
+    the credit-report extractor carries one score triple per document. A two-borrower file with a
+    single joint report yields ONE triple; if it is the primary's 700 while an unscored co-borrower
+    sits at 550, the 3.5% tier is applied to a file that requires 10% — the assumption
+    `_fha_minimum_decision_credit_score` says in its own docstring it will never make.
+    """
+    assert (
+        await _verdict("PE-3", build_pe3_two_borrowers_one_score_snapshot) is Verdict.COULDNT_CHECK
+    )
 
 
 async def test_conventional_is_not_applicable() -> None:

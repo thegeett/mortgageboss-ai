@@ -2041,12 +2041,20 @@ _LOAN_PE1_FHA = UUID("96000000-0000-4000-8000-000000000004")
 _LOAN_PE1_NO_AMOUNT = UUID("96000000-0000-4000-8000-000000000005")
 _LOAN_PE1_MULTI_UNIT = UUID("96000000-0000-4000-8000-000000000006")
 _LOAN_PE1_ALASKA_WITHIN = UUID("96000000-0000-4000-8000-000000000007")
+# LP-498 review — the two absent-fact cases PE-1 used to answer instead of abstain.
+_LOAN_PE1_NO_UNITS = UUID("96000000-0000-4000-8000-000000000008")
+_LOAN_PE1_NO_STATE = UUID("96000000-0000-4000-8000-000000000009")
 _LOAN_PE3_MET = UUID("96000000-0000-4000-8000-000000000011")
 _LOAN_PE3_SHORT = UUID("96000000-0000-4000-8000-000000000012")
 _LOAN_PE3_NO_SCORE = UUID("96000000-0000-4000-8000-000000000013")
 _LOAN_PE3_LOW_TIER = UUID("96000000-0000-4000-8000-000000000014")
 _LOAN_PE3_LOW_APPRAISAL = UUID("96000000-0000-4000-8000-000000000015")
 _LOAN_PE3_CONVENTIONAL = UUID("96000000-0000-4000-8000-000000000016")
+# LP-498 review — the appraisal-absent and multi-borrower-one-score cases.
+_LOAN_PE3_NO_APPRAISAL = UUID("96000000-0000-4000-8000-000000000017")
+_LOAN_PE3_TWO_BORROWERS = UUID("96000000-0000-4000-8000-000000000018")
+_PE3_BORROWER_1 = UUID("96000000-0000-4000-8000-0000000000a1")
+_PE3_BORROWER_2 = UUID("96000000-0000-4000-8000-0000000000a2")
 
 
 def _pe_mismo(
@@ -2072,6 +2080,13 @@ def _pe_mismo(
     if value is not None:
         facts["property.valuation_amount"] = _f(value)
     return facts
+
+
+# LP-498 review — PE-3's appraisals reuse LP-492's `_appraisal_doc` (defined above for PR-2), rather
+# than a second helper of the same shape. The fixtures used to put the value in MISMO's
+# `property.valuation_amount` because PE-3 read the MISMO stated values; so the low-appraisal case
+# "proved" the Adjusted Value basis with no appraisal on the file at all, and could not have caught
+# PE-3 never reading one. The value now arrives where an appraisal actually puts it.
 
 
 def _credit_report_doc(
@@ -2144,14 +2159,85 @@ def build_pe1_alaska_within_snapshot() -> Snapshot:
     )
 
 
+def build_pe1_no_unit_count_snapshot() -> Snapshot:
+    """LP-498 review — $1,400,000 conventional with NO stated unit count -> COULDNT_CHECK.
+
+    This used to FIRE. `units` stayed None when the fact was absent, so the `units > 1` abstain did not
+    trigger and the loan fell through to the ONE-UNIT limits: a 3-unit purchase at this amount was
+    reported "jumbo, not deliverable" against a limit that does not apply to it. LP-496a measured the
+    fact reaching the snapshot on 10 of 19 files, so about half of real files took that path.
+    """
+    return _snapshot(_LOAN_PE1_NO_UNITS, [], _pe_mismo("conventional", "1400000.00", state="NC"))
+
+
+def build_pe1_no_state_snapshot() -> Snapshot:
+    """LP-498 review — $1,000,000 conventional with NO stated state -> COULDNT_CHECK.
+
+    The same defaulting on the other axis: `(state or "").upper()` made an absent state a non-special
+    area. This amount is ABOVE the national ceiling band and BELOW Alaska's baseline, so defaulting
+    decided the verdict — the file would have been judged against limits that may not govern it.
+    """
+    return _snapshot(_LOAN_PE1_NO_STATE, [], _pe_mismo("conventional", "1000000.00", units="1"))
+
+
 # --- PE-3 ------------------------------------------------------------------- #
+def build_pe3_no_appraisal_snapshot() -> Snapshot:
+    """LP-498 review — the satisfied case's numbers with NO appraisal on the file -> COULDNT_CHECK.
+
+    PE-3 read `property.valuation_amount or property.estimated_value` — both MISMO STATED figures, the
+    second being the borrower's own 1003 estimate — and never `property.appraised_value`. HUD's
+    Adjusted Value is the lesser of price and APPRAISED value, so a file with no appraisal was answered
+    from the number the application claimed. Its `how_to_fix` says "obtain the appraisal (for the
+    property value)", which could not change the verdict. The MISMO value is still stated here, so this
+    abstains only because the appraisal is what is read.
+    """
+    return _snapshot(
+        _LOAN_PE3_NO_APPRAISAL,
+        [_credit_report_doc("96-cr-noap", "700", "710", "690")],
+        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+    )
+
+
+def build_pe3_two_borrowers_one_score_snapshot() -> Snapshot:
+    """LP-498 review — two borrowers, ONE score-bearing credit report -> COULDNT_CHECK.
+
+    The MDCS is "the lowest across borrowers", but the loop keys on DOCUMENTS and the extractor carries
+    one score triple per document. A joint file whose single report is the primary's 700 would apply
+    the 3.5% tier while an unscored co-borrower could sit at 550 and require 10% — the assumption the
+    function's own contract says it will never make.
+    """
+    return _snapshot(
+        _LOAN_PE3_TWO_BORROWERS,
+        [
+            _credit_report_doc("96-cr-joint", "700", "710", "690"),
+            DocumentEntry(
+                content_id="96-ps-b1",
+                document_type="pay_stub",
+                belongs_to=(BorrowerRef(borrower_id=_PE3_BORROWER_1, name="A. Borrower"),),
+                fields={"gross_pay": _f("5000.00")},
+            ),
+            DocumentEntry(
+                content_id="96-ps-b2",
+                document_type="pay_stub",
+                belongs_to=(BorrowerRef(borrower_id=_PE3_BORROWER_2, name="B. Borrower"),),
+                fields={"gross_pay": _f("4000.00")},
+            ),
+            _appraisal_doc("96-ap-joint", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
+    )
+
+
 def build_pe3_investment_met_snapshot() -> Snapshot:
     """$400,000 price, $400,000 value, $380,000 loan -> a $20,000 investment against $14,000 required
     (3.5% of 400,000 at an MDCS of 700) -> SATISFIED."""
     return _snapshot(
         _LOAN_PE3_MET,
-        [_credit_report_doc("96-cr-ok", "700", "710", "690")],
-        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+        [
+            _credit_report_doc("96-cr-ok", "700", "710", "690"),
+            _appraisal_doc("96-ap-ok", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
     )
 
 
@@ -2159,8 +2245,11 @@ def build_pe3_investment_short_snapshot() -> Snapshot:
     """$400,000 price and value, $390,000 loan -> a $10,000 investment against $14,000 required -> FIRED."""
     return _snapshot(
         _LOAN_PE3_SHORT,
-        [_credit_report_doc("96-cr-short", "700", "710", "690")],
-        _pe_mismo("fha", "390000.00", price="400000.00", value="400000.00"),
+        [
+            _credit_report_doc("96-cr-short", "700", "710", "690"),
+            _appraisal_doc("96-ap-short", "400000.00"),
+        ],
+        _pe_mismo("fha", "390000.00", price="400000.00"),
     )
 
 
@@ -2170,7 +2259,9 @@ def build_pe3_no_credit_score_snapshot() -> Snapshot:
     $20,000 investment clears 3.5% ($14,000) and FAILS 10% ($40,000) — so the assumption would flip the
     verdict. COULDNT_CHECK."""
     return _snapshot(
-        _LOAN_PE3_NO_SCORE, [], _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00")
+        _LOAN_PE3_NO_SCORE,
+        [_appraisal_doc("96-ap-noscore", "400000.00")],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
     )
 
 
@@ -2179,8 +2270,11 @@ def build_pe3_low_credit_tier_snapshot() -> Snapshot:
     FIRES here -> the tier genuinely changes the answer."""
     return _snapshot(
         _LOAN_PE3_LOW_TIER,
-        [_credit_report_doc("96-cr-low", "545", "550", "560")],
-        _pe_mismo("fha", "380000.00", price="400000.00", value="400000.00"),
+        [
+            _credit_report_doc("96-cr-low", "545", "550", "560"),
+            _appraisal_doc("96-ap-low", "400000.00"),
+        ],
+        _pe_mismo("fha", "380000.00", price="400000.00"),
     )
 
 
@@ -2191,8 +2285,11 @@ def build_pe3_low_appraisal_snapshot() -> Snapshot:
     required and FIRES. The catalog's '3.5% of price' would clear a file that fails."""
     return _snapshot(
         _LOAN_PE3_LOW_APPRAISAL,
-        [_credit_report_doc("96-cr-lowap", "700", "710", "690")],
-        _pe_mismo("fha", "348000.00", price="400000.00", value="360000.00"),
+        [
+            _credit_report_doc("96-cr-lowap", "700", "710", "690"),
+            _appraisal_doc("96-ap-lowap", "360000.00"),
+        ],
+        _pe_mismo("fha", "348000.00", price="400000.00"),
     )
 
 
@@ -2200,8 +2297,11 @@ def build_pe3_conventional_snapshot() -> Snapshot:
     """A conventional loan -> FHA's MRI does not apply -> NOT_APPLICABLE."""
     return _snapshot(
         _LOAN_PE3_CONVENTIONAL,
-        [_credit_report_doc("96-cr-conv", "700", "710", "690")],
-        _pe_mismo("conventional", "380000.00", price="400000.00", value="400000.00"),
+        [
+            _credit_report_doc("96-cr-conv", "700", "710", "690"),
+            _appraisal_doc("96-ap-conv", "400000.00"),
+        ],
+        _pe_mismo("conventional", "380000.00", price="400000.00"),
     )
 
 
@@ -2234,7 +2334,14 @@ def _as4_snapshot(
     gated: bool = False,
 ) -> Snapshot:
     """A loan whose reserves calculation is already computed, plus the MISMO facts that select the
-    requirement. ``months_available=None`` with ``gated=True`` is the fail-closed calculator."""
+    requirement. ``months_available=None`` with ``gated=True`` is the fail-closed calculator.
+
+    LP-498 review — THIS FABRICATES THE ENTRY, and that is why AS-4 could ship broken. ``map_reserves``
+    projected headline / status / program only, so ``months_available`` existed on no real snapshot and
+    AS-4 ``couldnt_check``ed on every file — invisible here, because every fixture writes the key by
+    hand. The mapper now emits it, and `test_as4_operand_key_is_one_the_mapper_actually_emits` pins the
+    contract so this fixture cannot drift away from production again.
+    """
     mismo: dict[str, SnapshotField] = {}
     if occupancy is not None:
         mismo["property.occupancy"] = _f(occupancy)
