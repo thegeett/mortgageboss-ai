@@ -55,7 +55,9 @@ _ACTIVATED = frozenset(
         "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474)
         "RE-1",
         # LP-495b — activated on scenario-fixture self-consistency rates.
-        "OC-3",  # LP-495b (DT-7 held on the enum gap)
+        "IN-13",  # LP-495b
+        "IN-14",
+        "OC-3",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -142,9 +144,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # LP-495b +OC-3 +DT-7 — both BUILT this ticket with measured self-consistency rates recorded on
     # their bars, and both HELD: activation hit an unresolved dormant-probe interaction. 9 -> 11 held.
     # LP-495b — OC-3 and DT-7 LEFT the held set, activating on scenario-fixture rates. 11 -> 9.
-    # LP-495b — OC-3 LEFT the held set on a scenario-fixture rate; DT-7 JOINED it, built and measured
-    # but held because its tag enum has no abstain, so a coerced unknown marks the run degraded.
-    assert len(held) == 10 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-495b — OC-3, IN-13 and IN-14 LEFT the held set on scenario-fixture rates; DT-7 JOINED it,
+    # built and measured but held because its tag enum has no abstain, so a coerced unknown marks the
+    # whole run degraded. 9 - 2 + 1 = 8.
+    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -178,6 +181,8 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "IN-10",
         "IN-11",
         "IN-12",
+        "IN-13",  # LP-495b — per-type other-income continuance
+        "IN-14",  # LP-495b — rental income support
         "IN-15",
         "IN-16",
         "IN-3",
@@ -229,11 +234,13 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # LP-495b — THIS ASSERTION ENCODED A STALE BELIEF AND IS CORRECTED, NOT DELETED. It used IN-14 as
     # the needs-producer example on the grounds that occupancy.rental_support "has NO declared producer".
     # LP-418 declared that producer and never updated IN-14's bar, so the example had been wrong for
-    # several tickets — and LP-495b's own ticket inherited the same belief from it. IN-14 is held for a
-    # DIFFERENT reason now (its continuance tag is underived), so it is asserted at its real status.
+    # several tickets — and LP-495b's own ticket inherited the same belief from it. IN-14 is now LIVE on
+    # a scenario-fixture rate, so the held-rule example moved to DT-7, which is held for a reason that is
+    # real and specific: its tag's enum has no abstain value.
     # There is no needs-producer rule left in the table, which is itself worth pinning: if one appears,
     # this assertion tells the next reader the status is reachable rather than vestigial.
-    assert not is_eligible(bars["IN-14"]) and bars["IN-14"].status == "not-calibratable-yet"
+    assert is_eligible(bars["IN-14"]) and bars["IN-14"].status == "ratify-pending"
+    assert not is_eligible(bars["DT-7"]) and bars["DT-7"].status == "not-calibratable-yet"
     assert not any(b.status == "needs-producer" for b in bars.values()), (
         "a needs-producer rule reappeared — give it a named reason here, as IN-14 once had"
     )

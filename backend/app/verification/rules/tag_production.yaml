@@ -994,7 +994,18 @@ ai_groups:
     # gathered documents to these, so a bank statement / tax bill / ID is not sent (the over-production
     # surface LP-377-D/LP-378 measured the prompt's "ignore" instruction failing to hold). Fails open on an
     # unknown/None type. The 1003 (uniform_residential_loan_application) carries the borrower's stated income.
-    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application]
+    # LP-495b — WIDENED to the documents that establish continuance for NON-EMPLOYMENT income. The
+    # four original types are all EMPLOYMENT documents, so income.continuance_3yr — the verdict tag of
+    # IN-13 ("Other income continuance") and IN-14 (rental) — was produced by a group that could never
+    # see an award letter, a pension letter or a lease. The prompt asked about continuance; the gathering
+    # delivered only pay stubs. Same shape as the loan-context defect this ticket fixed for OC-3/DT-7.
+    # SHARED GROUP, so this is not a local edit: IN-7, IN-10, IN-11 and IN-12 are LIVE on its other three
+    # tags. Widening is a no-op on real data and that is verified, not asserted — the corpus carries ZERO
+    # award letters of any kind and ZERO leases on any loan file, so no live verdict can move. The
+    # LF-6T3N distribution and the byte-identical AS-1/AS-2/AS-12/IN-12 md5 both confirm it.
+    applies_to: [w2, pay_stub, voe, uniform_residential_loan_application,
+                 social_security_award_letter, disability_award_letter,
+                 retirement_pension_award_letter, lease_agreement, "1099"]
     tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one BORROWER'S income-stability signals into

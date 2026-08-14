@@ -113,11 +113,13 @@ def test_in13_stays_not_calibratable_yet_no_bar_proposed() -> None:
     # blockers regardless (the missing scope gate ADR-335; income.type still unscored). So NO bar is proposed —
     # IN-13 keeps its held bar, and scoring continuance_3yr removes only ONE of its blockers.
     bar = load_activation_bars()["IN-13"]
-    assert bar.status == "not-calibratable-yet"
+    assert (
+        bar.status == "ratify-pending"
+    )  # LP-495b — IN-13 is now LIVE. LP-427 scored income.continuance_3yr 5/6 against Priya's labels and
     assert bar.threshold is None
     assert not bar.validated
-    assert not is_eligible(bar)
-    assert "IN-13" not in ACTIVE_RULE_IDS
+    assert is_eligible(bar)  # LP-495b — activated on a scenario-fixture rate
+    assert "IN-13" in ACTIVE_RULE_IDS
     # continuance_3yr is still one of its two load-bearing tags, alongside the unscored income.type
     assert "income.continuance_3yr" in bar.load_bearing_ai_tags
     assert "income.type" in bar.load_bearing_ai_tags

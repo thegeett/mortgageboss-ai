@@ -46,9 +46,11 @@ def test_in13_the_sibling_stays_held_no_ride_along() -> None:
     # the missing "has other income" scope gate (ADR-335) and income.type still unscored. Activating IN-8/IN-9
     # must NOT sweep it live.
     bar = load_activation_bars()["IN-13"]
-    assert bar.status == "not-calibratable-yet"
-    assert not bar.validated and not is_eligible(bar)
-    assert "IN-13" not in ACTIVE_RULE_IDS
+    assert (
+        bar.status == "ratify-pending"
+    )  # LP-495b — IN-13 no longer rides along by accident; it was activated deliberately, on its own
+    assert not bar.validated and is_eligible(bar)  # LP-495b — ratify-pending, not Priya-validated
+    assert "IN-13" in ACTIVE_RULE_IDS
 
 
 def test_lp428_flipped_exactly_in8_in9_not_as6() -> None:

@@ -353,7 +353,7 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # activates when the tag's declared vocabulary gains "unknown" at the next
 # docs/snapshot-fact-tags.xlsx reconciliation, since the generated fact_tags.csv cannot be hand-edited
 # and vocabulary_extra.yaml refuses to shadow an xlsx tag.
-_LP495B_ACTIVATED: tuple[str, ...] = ("OC-3",)
+_LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).

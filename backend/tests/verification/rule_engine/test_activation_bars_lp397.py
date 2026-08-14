@@ -39,7 +39,7 @@ def test_the_sign_off_activated_as6() -> None:
 
     assert (
         len(eligible_rule_ids())
-        == 57  # LP-495b +OC-3 (scenario-fixture rate; DT-7 held on the enum gap)  # LP-495a +RE-1/DT-6 (ONE matcher, ADR-375) +LO-2 +OC-1 (ratify-pending)  # LP-493 +PC-8  # LP-492 +PR-2/PR-3/PR-4/PR-5/PR-7  # LP-491 +TI-1/TI-2/TI-6  # LP-490a +CR-1/CR-4/CR-8 (ratify-pending)  # LP-488 +MI-1/MI-4/CO-1/AU-3  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
+        == 59  # LP-495b +IN-13/IN-14/OC-3 (scenario-fixture rate; DT-7 held on the enum gap)  # LP-495a +RE-1/DT-6 (ONE matcher, ADR-375) +LO-2 +OC-1 (ratify-pending)  # LP-493 +PC-8  # LP-492 +PR-2/PR-3/PR-4/PR-5/PR-7  # LP-491 +TI-1/TI-2/TI-6  # LP-490a +CR-1/CR-4/CR-8 (ratify-pending)  # LP-488 +MI-1/MI-4/CO-1/AU-3  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
     )  # +AS-8 +PC-2 +IH-3 +PC-3 +IN-12 +IN-8 +IN-9 +AS-6 +IN-15 +IN-16 +IH-1 (LP-447 — insurance adequacy)
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
 

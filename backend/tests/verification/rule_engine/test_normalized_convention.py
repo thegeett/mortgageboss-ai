@@ -291,8 +291,10 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "LO-2",
             "OC-1",  # LP-495a — ratify-pending (self-consistency 0.9474; tag NOT re-kinded)
             "RE-1",
-            # LP-495b — OC-3 activated on a scenario-fixture rate. DT-7 is BUILT and MEASURED but HELD:
-            # its tag enum has no abstain, so a coerced unknown marks the whole run degraded.
+            # LP-495b — IN-13 (per-type continuance), IN-14 (rental, 75% calibrated) and OC-3, all
+            # on scenario-fixture rates. DT-7 is built and measured but HELD on its enum gap.
+            "IN-13",
+            "IN-14",
             "OC-3",
         )
     )

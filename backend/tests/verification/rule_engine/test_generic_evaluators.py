@@ -174,7 +174,9 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "LO-2",
             "OC-1",  # LP-495a — ratify-pending
             "RE-1",
-            "OC-3",  # LP-495b — investment rental support (DT-7 held on the enum gap)
+            "IN-13",  # LP-495b
+            "IN-14",
+            "OC-3",
             "CR-13",
             "PR-6",
         }

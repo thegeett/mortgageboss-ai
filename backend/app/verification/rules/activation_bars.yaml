@@ -482,7 +482,28 @@ IN-13:
   # NOT a prompt bug. 5/6 on a thin/skewed n (5 yes / 1 no, the negative one row) clears no bar, AND the OTHER
   # load-bearing tag income.type is still unscored — so LP-427 removes ONE blocker (the uncalibrated verdict) but
   # IN-13 stays not-calibratable-yet. Both reasons hold IN-13 independently; the LP-422 rental re-scope is abandoned.
-  status: not-calibratable-yet
+  # LP-495b — ACTIVATED on a scenario-fixture self-consistency rate (ADR-378). Both load-bearing tags
+  # were derived: income.continuance_3yr 1.0000 over 5 cases and income.type 1.0000 over 3 cases, 0
+  # disagreements, us.anthropic.claude-sonnet-4-5-20250929-v1:0, 2026-08-13.
+  # THE PER-TYPE CONTINUANCE TABLE IS THE REAL WORK OF THIS TICKET. IN-13 previously applied ONE blanket
+  # three-year test across every income type; B3-3.4 sets the requirement per type, and an income type
+  # outside the researched table now ABSTAINS rather than being judged against a default it was never
+  # given. The `uncoverable_type` case proves it: a mineral-royalty statement returns unknown, not "no".
+  # A PRODUCER DEFECT WAS FIXED TO MAKE THIS POSSIBLE. income_stability's applies_to was
+  # [w2, pay_stub, voe, uniform_residential_loan_application] — ALL EMPLOYMENT DOCUMENTS — so the group
+  # producing "other income continuance" could never see an award letter, a pension letter or a lease.
+  # Widened; no live verdict moves, because the corpus carries zero of those documents (verified).
+  # WHAT THE RATE DOES NOT SHOW, stated plainly: 4 of the 5 cases abstain, so only ONE is answerable, and
+  # NO "no" was produced by any case. The child-support-ending-soon case — which should be "no" — returns
+  # unknown, because child support has NO catalog document type at all and the letter standing in for it
+  # is outside the group's scope. The negative path is unobserved.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 5
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: ratify
   threshold: null
   validated: false
@@ -505,7 +526,22 @@ IN-14:
   # written and LP-418 declared the producer (tag_production.yaml, `occupancy_rental` AI group) without
   # updating this bar. The stale line is what LP-495b's own ticket inherited its premise from, so it is
   # replaced rather than edited around.
-  status: not-calibratable-yet
+  # LP-495b — ACTIVATED. Both load-bearing tags derived over scenario fixtures: occupancy.rental_support
+  # 1.0000 over 4 cases (full adequate/inadequate/n-a spread) and income.continuance_3yr 1.0000 over 5.
+  # THE 75% FACTOR IS NOW CALIBRATED, not "pending Priya": B3-3.8-01 (page dated 10/08/2025), verified
+  # verbatim, requires gross monthly rent x 75% with the remaining 25% absorbed by vacancy and
+  # maintenance. A researched, cited threshold is calibrated (ADR-361 discipline).
+  # NO RENTAL DOCUMENT REACHES ANY LOAN FILE TODAY — 21 leases sit in the raw corpus and none is
+  # attached — so IN-14 will abstain on live files until one is. Form 1007 and 1025, the market-rent
+  # sources B3-3.8-01 names, have NO catalog type and NO extractor, so that path is unmodellable rather
+  # than merely absent.
+  status: ratify-pending
+  self_consistency_rate: 1.0
+  self_consistency_cases: 5
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-13"
+  input_resolves: true
   ships: ratify
   threshold: null
   validated: false

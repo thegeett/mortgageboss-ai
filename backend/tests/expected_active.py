@@ -52,6 +52,6 @@ from __future__ import annotations
 # no self-consistency rate and no ratification. ⚠️ LO-1 HELD: it needs the list of conditions that REQUIRE
 # an LOE, which is lender- and AUS-driven and enumerated in no document; deriving it from this run's own
 # findings would make it a META-RULE over other rules' output, which nothing in the architecture does. -> 66.
-EXPECTED_ACTIVE_RULE_COUNT: int = 68
+EXPECTED_ACTIVE_RULE_COUNT: int = 70
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

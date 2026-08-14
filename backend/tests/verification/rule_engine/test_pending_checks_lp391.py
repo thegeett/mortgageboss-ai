@@ -140,24 +140,30 @@ async def test_a_blocked_rule_with_no_data_stays_dark_no_fabricated_flag() -> No
 
 
 async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call() -> None:
-    # The judgment path (the reason _discarded_judgment_stub exists): IN-13 is a BLOCKED per_borrower JUDGMENT
-    # rule reading income.continuance_3yr. Borrower A has it → applicable + gate-passes → the stub drives it
-    # to needs_review (a judgment rule ALWAYS reaches needs_review when applicable — never auto) → surfaces as
-    # PENDING. No real model call: evaluate_pending_checks binds the discarded stub for every blocked judgment
-    # rule (no reasoner is passed here). Borrower B has no tag → couldnt_check → DARK. If the judgment evaluator
-    # ever routed an unknown/stubbed answer to couldnt_check, IN-13 would go dark and THIS test would fail.
-    # (IN-7 used to demo this but went live in LP-393-6; IN-13 stays blocked.)
-    snap = _snap({str(_A): {"income.continuance_3yr": _tag("yes")}})
+    # The judgment path (the reason _discarded_judgment_stub exists). LP-495b — the example moved from
+    # IN-13 to DT-7: IN-13 went live on a scenario-fixture rate, and DT-7 is now the only BLOCKED
+    # judgment rule left (held because its tag's enum has no abstain value). IN-7 played this role until
+    # LP-393-6, IN-13 until LP-495b — the demo rule keeps going live, which is the point of the ticket
+    # series rather than a problem with the test.
+    #
+    # DT-7 is LOAN-subject, not per_borrower, so the "A surfaces / B stays dark" pair is proven across
+    # two snapshots instead of two borrowers: the tag present → applicable + gate-passes → the stub
+    # drives it to needs_review (a judgment rule ALWAYS reaches needs_review when applicable, never
+    # auto) → surfaces as PENDING; the tag absent → couldnt_check → DARK. No real model call:
+    # evaluate_pending_checks binds the discarded stub for every blocked judgment rule.
+    snap = _snap({"loan": {"dti.atr_factors_documented": _tag("complete")}})
     pending = await evaluate_pending_checks(snap)
-    in13 = [p for p in pending if p.rule_id == "IN-13"]
-    assert len(in13) == 1 and in13[0].subject_id == str(
-        _A
-    )  # A surfaces; B (couldnt_check) stays dark
-    assert in13[0].verdict is Verdict.PENDING_AUTOMATION
+    dt7 = [p for p in pending if p.rule_id == "DT-7"]
+    assert len(dt7) == 1
+    assert dt7[0].verdict is Verdict.PENDING_AUTOMATION
     assert (
-        in13[0].load_bearing_tags == () and in13[0].verdict_confidence is None
+        dt7[0].load_bearing_tags == () and dt7[0].verdict_confidence is None
     )  # no-leak, same as IN-12
-    assert "manual review" in in13[0].reasoning.lower()
+    assert "manual review" in dt7[0].reasoning.lower()
+
+    # The dark half: no tag → the rule couldnt_checks and never surfaces as pending.
+    dark = await evaluate_pending_checks(_snap({}))
+    assert [p for p in dark if p.rule_id == "DT-7"] == []
 
 
 # --------------------------------------------------------------------------- #
