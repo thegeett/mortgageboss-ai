@@ -301,10 +301,14 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(
                 f"ai group {key!r}: `include_documents` must be a boolean, got {include_docs!r}"
             )
-        if include_docs and body.get("subject") != "loan":
+        # LP-495b review — compare the NORMALIZED `subject`, like every sibling validator above. Reading the raw
+        # YAML value meant `subject: "loan "` passed `subject not in KNOWN_SUBJECTS` (which strips) and was
+        # then rejected here with a misleading message. Fails safe either way; it was simply the one check
+        # in this function not following the pattern.
+        if include_docs and subject != "loan":
             raise DeclarationError(
                 f"ai group {key!r}: `include_documents` is only for a LOAN-subject group (a document or "
-                f"borrower context already gathers documents)"
+                f"borrower context already gathers documents), got subject={subject!r}"
             )
         include_txns = body.get("include_transactions", False)
         if not isinstance(include_txns, bool):
@@ -329,7 +333,9 @@ def load_ai_groups() -> dict[str, AiGroup]:
             context_builder=context_builder,
             tag_ids=tuple(str(t) for t in tags),
             system_prompt=prompt,
-            applies_to=_parse_applies_to(key, subject, body.get("applies_to")),
+            applies_to=_parse_applies_to(
+                key, subject, body.get("applies_to"), include_documents=include_docs
+            ),
             include_borrower_roster=roster,
             include_lists=include_lists,
             list_row_cap=cap,
@@ -341,7 +347,9 @@ def load_ai_groups() -> dict[str, AiGroup]:
     return groups
 
 
-def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | None:
+def _parse_applies_to(
+    key: str, subject: str, raw: object, *, include_documents: bool = False
+) -> frozenset[str] | None:
     """``applies_to`` (LP-377-D): a list of document-type slugs, or absent / ``"all"`` → None (all types).
 
     None is the fail-open default — an omitted or ``all`` declaration runs the group on every document, so a
@@ -353,11 +361,21 @@ def _parse_applies_to(key: str, subject: str, raw: object) -> frozenset[str] | N
         return None
     # `applies_to` names document types, so it is only meaningful for a group that GATES on them
     # (document subject — LP-377-D dispatcher gate) or GATHERS them (borrower subject — LP-385 context
-    # filter). On a loan/transaction group it would silently do nothing, so reject it.
-    if subject not in ("document", "borrower"):
+    # filter, and LP-495b review a LOAN subject that opted into `include_documents`). On any other group it would
+    # silently do nothing, so reject it.
+    # LP-495b review — a loan group WITH `include_documents` gathers documents too, and until now had no way to
+    # narrow them: the set was every document on the file, unbounded, for every such group. `occupancy_
+    # rental` needs leases / Schedule E / an appraisal rent schedule, not the borrower's driver's licence.
+    # A loan group WITHOUT the opt-in still gathers nothing, so `applies_to` on it stays an error.
+    if subject not in ("document", "borrower") and not (subject == "loan" and include_documents):
+        gathers = (
+            " (a loan group gathers documents only with `include_documents`)"
+            if subject == "loan"
+            else ""
+        )
         raise DeclarationError(
             f"ai group {key!r}: `applies_to` is only meaningful for a document- or borrower-subject group "
-            f"(subject={subject!r} does not gate or gather documents) — use 'all' or omit it"
+            f"(subject={subject!r} does not gate or gather documents){gathers} — use 'all' or omit it"
         )
     if not isinstance(raw, list) or not all(isinstance(v, str) and v.strip() for v in raw):
         raise DeclarationError(

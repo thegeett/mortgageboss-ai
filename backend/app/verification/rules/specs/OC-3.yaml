@@ -80,6 +80,23 @@ spec_version: 1
 
 judgment:
   subject: loan
+  # LP-495b review — THE SCOPING IS NOW MACHINE-READABLE, and it was not. The `applicability:` block above states
+  # that "n/a" carries the scoping for a non-investment occupancy, and nothing in the rule engine treats
+  # "n/a" specially: `evaluate_gate` short-circuits on None and "unknown" only, so "n/a" is a present,
+  # non-unknown value that PASSES the gate. OC-3 then made a rule-time model call and returned needs_review
+  # unconditionally — on 22 of 24 stored properties, all primary residences, a ratification-pending finding
+  # asking a processor to ratify rental support on a home. Both this spec's own criteria ("A non-investment
+  # occupancy is not_applicable") and the activation bar ("on today's corpus OC-3 is not_applicable
+  # everywhere") described behaviour the built rule did not have.
+  # `ne n/a` rather than `occupancy.stated eq investment`, deliberately: the predicate must be the tag whose
+  # ABSENCE is also honest. "n/a" -> not_applicable (out of scope, no gate, no AI, no tag); "unknown" or
+  # absent -> couldnt_check, which is the spec's stated "a file that states no occupancy couldnt_checks
+  # rather than being assumed not to be an investment". Predicate == load-bearing tag is the established
+  # IN-15 shape (income.terminated_employment), not a new one.
+  applicability:
+    tag: occupancy.rental_support
+    op: ne
+    value: "n/a"
   load_bearing_tags: [occupancy.rental_support]
   reasoned_over: [occupancy.rental_support, occupancy.stated]
   output_tag: occupancy.investment_rental_supported

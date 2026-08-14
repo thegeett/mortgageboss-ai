@@ -31,6 +31,11 @@ from app.verification.snapshot.traversal import all_transactions
 # A group may raise/lower it (``AiGroup.list_row_cap``) — per-group, so a dense report gets more rows.
 _DEFAULT_LIST_ROW_CAP = 50
 
+# LP-495b review — the default document cap for a LOAN-subject context that opted into `include_documents`. Set
+# above the largest file in the corpus (the densest carries 30 documents, measured) so no live context is
+# truncated today, while a pathological file is bounded and MARKED rather than silently over-sending.
+_DEFAULT_DOCUMENT_CAP = 60
+
 
 @dataclass(frozen=True)
 class ContextOptions:
@@ -60,6 +65,12 @@ class ContextOptions:
     # PC-5's failure shape (LP-493a), caught by printing the context before trusting a rate. Off by
     # default, so `occupancy` (live OC-2's and OC-1's tag) is byte-identical.
     include_documents: bool = False
+    # LP-495b review — how many of the file's documents a loan context serialises before it is capped and MARKED
+    # truncated, the same discipline `list_row_cap` applies to rows. The loan document set is unbounded
+    # (a file can carry any number) and a loan group cannot narrow it with `applies_to` — the declaration
+    # layer rejects that on a loan subject — so the cap is the only bound available. The marker is what
+    # makes the prompts' "answer unknown when the list is truncated" instruction reachable.
+    document_cap: int = _DEFAULT_DOCUMENT_CAP
 
 
 _DEFAULT_CONTEXT_OPTIONS = ContextOptions()
@@ -75,8 +86,19 @@ _UNKNOWN_DOC_TYPE = "unknown"
 # Document types that describe the PROPERTY rather than a borrower, so an absent `belongs_to` is a
 # genuine "file-level", not a failed attribution. ⚠️ A type NOT listed here (including an unclassified
 # document) is never handed to a borrower it was not linked to — see _borrower_context.
+# LP-495b review — `lease_agreement` joins them: a lease on the subject (or a retained) property describes the
+# PROPERTY and its rent, not a borrower, so it typically carries no belongs_to. That is exactly the
+# "file-level, not someone else's" case this set exists for, and it is what lets a lease reach
+# `income_stability` — the group that produces income.continuance_3yr for IN-13 and IN-14. Adding it to
+# that group's applies_to alone did nothing, because gathering happens before the doc-type filter.
 _PROPERTY_LEVEL_DOC_TYPES = frozenset(
-    {"purchase_agreement", "title_commitment", "appraisal", "flood_certification"}
+    {
+        "purchase_agreement",
+        "title_commitment",
+        "appraisal",
+        "flood_certification",
+        "lease_agreement",
+    }
 )
 
 RawField = Field | PiiField
@@ -90,9 +112,10 @@ class SubjectType:
     enumerate: Callable[[Snapshot], list[Subject]]
     read_field: Callable[[object, str], RawField | None]
     # ``applies_to`` (LP-385) = the group's declared document types (or None = all). Only a context that
-    # GATHERS documents (the borrower context) uses it — to filter the gathered set to the group's relevant
-    # doc-types; every other subject ignores it. ``ContextOptions`` (LP-444) carries the group's list /
-    # cap / liabilities opt-ins; the document + borrower builders use them, other subjects ignore them.
+    # GATHERS documents uses it — the borrower context, and (LP-495b review) a LOAN context that opted into
+    # ``include_documents`` — to filter the gathered set to the group's relevant doc-types; every other
+    # subject ignores it. ``ContextOptions`` (LP-444) carries the group's list / cap / liabilities opt-ins;
+    # the document + borrower + loan builders use them, other subjects ignore them.
     build_context: Callable[[object, frozenset[str] | None, ContextOptions], dict[str, object]]
 
 
@@ -182,7 +205,7 @@ def _loan_read_field(raw: object, field: str) -> RawField | None:
 
 
 def _loan_context(
-    raw: object, _applies_to: frozenset[str] | None, opts: ContextOptions = _DEFAULT_CONTEXT_OPTIONS
+    raw: object, applies_to: frozenset[str] | None, opts: ContextOptions = _DEFAULT_CONTEXT_OPTIONS
 ) -> dict[str, object]:
     """The loan subject's context: the file's MISMO facts, plus its DOCUMENTS when the group opts in.
 
@@ -194,25 +217,53 @@ def _loan_context(
 
     Documents are summarised as type + fields — the same shape the borrower context uses — because these
     groups ask WHETHER a document is present and what it states, not for its full text.
+
+    LP-495b review — THE TWO SECTIONS ARE INDEPENDENT AND ARE NOW READ INDEPENDENTLY. This returned ``{}`` whenever
+    ``mismo.absent``, BEFORE the documents branch — and ``MismoSection.absent`` is set by ``_build_section``
+    on ANY exception in ``load_mismo_section`` (a DB error, a savepoint rollback), while the documents
+    section is built separately and may be perfectly healthy. So a run whose MISMO query failed handed
+    ``occupancy_rental`` (live for OC-3) an empty context, the model necessarily answered ``unknown``, and
+    the API call was still paid for. Coupling the documents opt-in to MISMO presence reintroduces the exact
+    PC-5 shape the opt-in was added to remove. Each section now contributes what it has.
     """
-    if not isinstance(raw, Snapshot) or raw.mismo.absent:
-        return {}
-    context: dict[str, object] = {
-        name: _field_value(field) for name, field in raw.mismo.facts.items()
-    }
+    assert isinstance(raw, Snapshot)
+    context: dict[str, object] = {}
+    if not raw.mismo.absent:
+        context.update({name: _field_value(field) for name, field in raw.mismo.facts.items()})
     if opts.include_documents:
         documents: list[dict[str, object]] = []
         if not raw.documents.absent:
-            for entry in raw.documents.entries:
+            # LP-495b review — CAPPED AND MARKED, like every other serialised collection. This loop had no bound
+            # and no truncation marker: a 100-document file sent 100 full field maps, and if the provider
+            # truncated, the group degraded to `unknown` with nothing saying why. `atr_documentation`'s
+            # prompt already tells the model to answer `unknown` "when the document list is truncated" —
+            # an instruction that was unreachable because nothing ever marked truncation. `list_row_cap`
+            # bounds rows INSIDE a list, so the document count needs its own cap; a loan group cannot
+            # narrow the set with `applies_to` either (the declaration layer rejects it on a loan
+            # subject), which is why the bound has to live here.
+            # LP-495b review — the group's declared doc-types narrow the set, FAIL-OPEN exactly like the borrower
+            # context's filter (LP-385): drop only a KNOWN, confident type outside `applies_to`; keep
+            # None / "unknown" (the classifier abstained — never dropped on a guess), and keep everything
+            # when the group declared no `applies_to`.
+            entries = [
+                entry
+                for entry in raw.documents.entries
+                if applies_to is None
+                or entry.document_type in (None, _UNKNOWN_DOC_TYPE)
+                or entry.document_type in applies_to
+            ]
+            for entry in entries[: opts.document_cap]:
                 doc: dict[str, object] = {
                     "document_type": entry.document_type,
                     "fields": {name: _field_value(field) for name, field in entry.fields.items()},
                 }
-                if opts.include_lists and entry.lists:
-                    doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
-                if opts.include_transactions and entry.transactions:
-                    doc["transactions"] = _serialize_transactions(entry, opts.list_row_cap)
                 documents.append(doc)
+            if len(entries) > opts.document_cap:
+                context["documents_truncated"] = {
+                    "truncated": True,
+                    "shown": len(documents),
+                    "total": len(entries),
+                }
         context["documents"] = documents
     return context
 

@@ -46,7 +46,9 @@ def test_a_ratify_pending_bar_with_a_consistency_rate_is_eligible() -> None:
 def test_a_bar_carrying_both_numbers_is_rejected() -> None:
     """⚠️ THE NON-NEGOTIABLE SEPARATION. `measured_accuracy` means a HUMAN said what the right answer
     was; `self_consistency_rate` means the MODEL said the same thing twice. Collapsing them destroys the
-    only signal telling a future reader which kind of number a bar carries."""
+    only signal telling a future reader which kind of number a bar carries.
+
+    LP-495b review — still rejected WITHOUT a declared override. The exception below is the only way past it."""
     with pytest.raises(ActivationBarError, match="cannot carry BOTH"):
         parse_bar("X-2", {**_BASE, "measured_accuracy": 0.9})
 
@@ -102,6 +104,69 @@ def test_a_measured_and_failing_rule_can_never_take_this_path() -> None:
 
 def test_as4_is_still_held() -> None:
     assert "AS-4" not in ACTIVE_RULE_IDS
+
+
+# ======================================================================= #
+# LP-495b review — the declared override: the ONE way a bar may carry both numbers
+# ======================================================================= #
+_OVERRIDE = (
+    "the miss is a named definitional divergence; ratification is the safety. See the ticket."
+)
+
+
+def test_a_declared_override_lets_a_bar_carry_both_numbers_and_activate() -> None:
+    """The guard above had a cheaper escape than it looked. `parse_bar` rejected a bar carrying both
+    numbers, so the ONLY way to record a self-consistency rate on a rule whose tag HAD been measured was
+    to leave `measured_accuracy` null — which the gate then reads as "unmeasured" and lets through. IN-13
+    shipped that way: 5/6 in prose, the field empty. Now the number can be recorded alongside the rate,
+    and getting past the guard costs a written justification instead of a deletion."""
+    bar = parse_bar(
+        "X-9", {**_BASE, "measured_accuracy": 0.833, "measured_accuracy_override": _OVERRIDE}
+    )
+    assert bar.measured_accuracy == 0.833
+    assert bar.self_consistency_rate == 0.95  # stored SEPARATELY — never collapsed into one field
+    assert bar.measured_accuracy_override == _OVERRIDE
+    assert is_eligible(bar)
+
+
+def test_as4s_shape_is_unaffected_because_it_declares_no_override() -> None:
+    """The point of making the override a WRITTEN field: a bar that stays silent about its measurement is
+    held exactly as before. AS-4's 0/5 does not become activatable by this change — someone would have to
+    sit down and argue for it in the file first."""
+    with pytest.raises(ActivationBarError, match="cannot carry BOTH"):
+        parse_bar("X-10", {**_BASE, "measured_accuracy": 0.0})
+
+
+def test_an_override_with_nothing_to_override_is_rejected() -> None:
+    """A dangling override would read as "this bar overrode something" on a bar that measured nothing."""
+    with pytest.raises(ActivationBarError, match="nothing to override"):
+        parse_bar("X-11", {**_BASE, "measured_accuracy_override": _OVERRIDE})
+
+
+def test_an_override_outside_ratify_pending_is_rejected() -> None:
+    """Ratification of every finding is what makes overriding a measurement survivable at all — so the
+    override is meaningless (and dangerous) on any other status."""
+    with pytest.raises(ActivationBarError, match="only to a ratify-pending bar"):
+        parse_bar(
+            "X-12",
+            {
+                **_BASE,
+                "status": "calibratable-now",
+                "threshold": 0.9,
+                "validated": True,
+                "input_resolves": False,  # calibratable-now may not carry it (LP-411)
+                "measured_accuracy": 0.833,
+                "measured_accuracy_override": _OVERRIDE,
+            },
+        )
+
+
+def test_a_blank_override_does_not_count_as_one() -> None:
+    """Whitespace is not a justification — the same discipline `rationale` already enforces."""
+    with pytest.raises(ActivationBarError, match="cannot carry BOTH"):
+        parse_bar(
+            "X-13", {**_BASE, "measured_accuracy": 0.833, "measured_accuracy_override": "   "}
+        )
 
 
 def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:

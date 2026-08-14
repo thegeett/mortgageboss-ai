@@ -209,3 +209,48 @@ def test_dt7_is_built_but_held_on_its_enum_gap() -> None:
         "recorded on its bar"
     )
     assert load_rule_spec("DT-7").judgment is not None  # built, not deleted
+
+
+# ======================================================================= #
+# LP-495b review — the not_applicable branch, which had no path and no test
+# ======================================================================= #
+async def _refuse_to_judge(_context_json: str):
+    raise AssertionError(
+        "OC-3 made a rule-time model call on a non-investment loan — the applicability predicate should "
+        "have scoped it off BEFORE the gate, at no cost"
+    )
+
+
+async def test_a_non_investment_loan_is_not_applicable_and_costs_nothing() -> None:
+    """The branch the whole rule turns on, and it did not exist. OC-3 declared its scoping only in prose:
+    the spec said "a non-investment occupancy is not_applicable" and the bar said "on today's corpus OC-3
+    is not_applicable everywhere", while the built rule had no `judgment.applicability` predicate at all.
+    Nothing in the engine treats "n/a" specially — `evaluate_gate` short-circuits on None and "unknown"
+    only — so "n/a" PASSED the gate, OC-3 made a paid model call, and `_evaluate_subject` returned
+    NEEDS_REVIEW unconditionally. On 22 of the 24 stored properties (all primary residences) that is a
+    ratification-pending finding asking a processor to ratify rental support on a home.
+
+    The judge here RAISES: proving the verdict alone would not prove the call was skipped, and skipping it
+    is half the point."""
+    reasoners = {**stub_materialization_reasoners(), "occupancy_rental": _reasoner("n/a")}
+    snapshot = await materialize_tags(_snapshot("primary_residence"), ai_reasoners=reasoners)
+    evaluations, _tags = await evaluate_rules(
+        snapshot, rule_ids=("OC-3",), judgment_reasoners={"OC-3": _refuse_to_judge}
+    )
+    assert [e.verdict for e in evaluations] == [Verdict.NOT_APPLICABLE]
+
+
+async def test_an_unreadable_support_picture_is_still_couldnt_check_not_not_applicable() -> None:
+    """The §8 line the predicate must not blur: "n/a" means OUT OF SCOPE (Tab 4, not a gap), "unknown"
+    means WE COULD NOT TELL WHETHER IT APPLIES (Tab 1, a gap that blocks). `ne "n/a"` is chosen precisely
+    so the second case keeps couldnt_checking — an unreadable file must never be filed away as "this rule
+    was never relevant"."""
+    assert [e.verdict for e in await _evaluate("unknown")] == [Verdict.COULDNT_CHECK]
+
+
+def test_oc3_declares_the_predicate_rather_than_relying_on_the_value() -> None:
+    """Pinned as a spec property so the prose and the rule cannot drift apart again."""
+    jud = load_rule_spec("OC-3").judgment
+    assert jud is not None and jud.applicability is not None
+    assert jud.applicability.tag == _TAG
+    assert (jud.applicability.op, jud.applicability.value) == ("ne", "n/a")

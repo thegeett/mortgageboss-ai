@@ -41,15 +41,16 @@ def test_in8_in9_are_validated_and_eligible() -> None:
         assert rid in ACTIVE_RULE_IDS
 
 
-def test_in13_the_sibling_stays_held_no_ride_along() -> None:
-    # IN-13 is the other-income-continuance sibling in this family. It has TWO open blockers (LP-423/LP-427):
-    # the missing "has other income" scope gate (ADR-335) and income.type still unscored. Activating IN-8/IN-9
-    # must NOT sweep it live.
+def test_in13_the_sibling_did_not_ride_along_on_lp428() -> None:
+    # IN-13 is the other-income-continuance sibling in this family, and LP-428 left it held: it is NOT in
+    # _LP428_ACTIVATED. It went live later and separately, in LP-495b, on its own ratify-pending bar — which
+    # is what this test now pins. The point survives the status change: activating IN-8/IN-9 swept nothing.
+    from app.verification.rule_engine.registry import _LP428_ACTIVATED
+
+    assert "IN-13" not in _LP428_ACTIVATED
     bar = load_activation_bars()["IN-13"]
-    assert (
-        bar.status == "ratify-pending"
-    )  # LP-495b — IN-13 no longer rides along by accident; it was activated deliberately, on its own
-    assert not bar.validated and is_eligible(bar)  # LP-495b — ratify-pending, not Priya-validated
+    assert bar.status == "ratify-pending"  # LP-495b's own activation, not a ride-along
+    assert not bar.validated and is_eligible(bar)  # ratify-pending, never Priya-validated
     assert "IN-13" in ACTIVE_RULE_IDS
 
 

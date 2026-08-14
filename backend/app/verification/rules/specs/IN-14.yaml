@@ -44,6 +44,19 @@ evidence_required: the rental income's supporting docs + the vacancy/expense adj
 guideline_reference: "Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) — rental income. Supersedes the former B3-3.1-08 citation, which is stale numbering."
 judgment:
   subject: per_borrower
+  # LP-495b review — the same missing predicate OC-3 had, and the same fix. tag_production.yaml claimed
+  # occupancy.rental_support resolving to "n/a" "lets IN-14 reach not_applicable"; no such mapping exists
+  # anywhere in the rule engine. "n/a" is a present, non-unknown value, so it PASSES the gate, and IN-14
+  # then made a rule-time model call and returned a ratification-pending needs_review about rental income
+  # on a file claiming none. IN-14 was partly shielded only because income.continuance_3yr usually resolves
+  # "unknown" and gate leg 2 couldnt_checks first — an accident of the data, not scoping.
+  # The loan-level tag reaches this per-borrower map because `_per_borrower` merges the loan subject's tags
+  # into every borrower's (a borrower's own facts win on a collision); nothing here is borrower-specific,
+  # so the predicate scopes the whole rule off on a file with no rental/investment income.
+  applicability:
+    tag: occupancy.rental_support
+    op: ne
+    value: "n/a"
   load_bearing_tags: [income.continuance_3yr, occupancy.rental_support]
   reasoned_over: [income.continuance_3yr, occupancy.rental_support]
   output_tag: income.rental_income_supportable

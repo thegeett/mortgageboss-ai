@@ -81,14 +81,23 @@ def test_another_borrowers_document_is_still_never_gathered() -> None:
     )
 
 
-def test_only_pc5s_group_declares_the_new_opt_ins() -> None:
+def test_the_opt_ins_stay_a_short_declared_list() -> None:
     """⚠️ THE BYTE-IDENTICAL GUARANTEE, made checkable. Both opt-ins default off, so every other group's
     context is unchanged — which is what lets a shared context-assembly change ship without re-deriving
-    twenty groups. If a future group turns one on, it must re-derive; this test makes that visible."""
+    twenty groups. If a future group turns one on, it must re-derive; this test makes that visible.
+
+    LP-495b review — `income_stability` turned `include_unattributed_documents` on, and that IS a re-derivation
+    obligation, recorded rather than waved through. Why it was needed: a lease describes the PROPERTY and
+    carries no belongs_to, so borrower-scoped gathering dropped it and income.continuance_3yr — IN-13's and
+    IN-14's verdict tag — could never see the document establishing rental continuance. Why it is safe on
+    today's data: the corpus carries ZERO leases on any loan file (measured), and the group's `applies_to`
+    excludes every other property-level type (purchase_agreement, title_commitment, appraisal,
+    flood_certification), so nothing else is added. The four LIVE rules on this group's other tags —
+    IN-7 / IN-10 / IN-11 / IN-12 — see an unchanged context until the first lease arrives."""
     groups = load_ai_groups()
     with_unattributed = {k for k, g in groups.items() if g.include_unattributed_documents}
     with_transactions = {k for k, g in groups.items() if g.include_transactions}
-    assert with_unattributed == {"contract_emd"}
+    assert with_unattributed == {"contract_emd", "income_stability"}
     assert with_transactions == {"contract_emd"}
 
 

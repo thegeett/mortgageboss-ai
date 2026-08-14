@@ -149,9 +149,15 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # RATIFIES every verdict (ratify-pending, ADR-378).
     # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4. FOUR rules activated and no existing
     # verdict moved; none of the four clears on an absence. Any other movement would be a regression.
-    # LP-495b adds OC-3 and DT-7, both LOAN-scoped -> 838. A per-rule diff of the WHOLE distribution
-    # before and after confirms only those two rows appear and every other rule's counts are identical,
-    # so the +2 couldnt_check is the entire movement and it is intended.
+    # LP-495b adds THREE rules, not two, and DT-7 is not among them (it is held on the enum gap): OC-3
+    # LOAN-scoped (+1) and IN-13 + IN-14 PER-BORROWER over LF-6T3N's two borrowers (+4) -> 841. A per-rule
+    # diff of the WHOLE distribution before and after confirms only those rows appear and every other
+    # rule's counts are identical, so the +5 couldnt_check is the entire movement and it is intended.
+    # LP-495b review — OC-3 and IN-14 now declare a `judgment.applicability` predicate on occupancy.rental_support.
+    # The count is unchanged under the keyless stub: the group abstains, so the predicate tag is absent or
+    # "unknown", and an undetermined predicate is couldnt_check (§8) — the same verdict from a different
+    # step. What the predicate changes is the case the stub cannot reach: a tag resolving to "n/a" on a
+    # non-investment file, which now yields not_applicable instead of a paid judgment call.
     # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4 — TI-1 never clears on a missing
     # commitment, which would be a false all-clear on the document that establishes ownership.
     mat = await materialize_tags(

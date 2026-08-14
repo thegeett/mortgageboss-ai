@@ -250,6 +250,21 @@ tags:
   # LP-418 — are the rental-income supporting documents adequate (leases, occupancy)? An AI perception at the
   # LOAN subject (the occupancy group's shape). Unblocks IN-14 (which ships RATIFY — a human ratifies, so its
   # rule does not need this tag calibrated for auto-ship) and OC-3. Fail-closed: n/a when not investment/rental.
+  # LP-495b review — "n/a" IS JUST A VALUE; the SPECS carry the scoping. An earlier note here said "n/a" "lets IN-14
+  # reach not_applicable", describing a mechanism that does not exist: nothing in the rule engine treats
+  # "n/a" specially, `evaluate_gate` short-circuits on None and "unknown" only, so "n/a" passes the gate like
+  # any other present value. OC-3 and IN-14 now each declare a `judgment.applicability` predicate
+  # (occupancy.rental_support ne "n/a") — that is what turns this value into not_applicable.
+  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation) — rule_tags.csv has NO OC-3 rows at all, and no
+  # `IN-14,occupancy.rental_support` row, though fact_tags.csv already names OC-3 as this tag's consumer
+  # and DT-7 has its edge. rule_tags.csv is GENERATED from the "Rule → Tags" sheet of
+  # docs/snapshot-fact-tags.xlsx, and unlike the vocabulary it has NO vocabulary_extra.yaml overlay, so
+  # there is no in-repo fix — the same wall DT-7's missing enum value hits. Behaviourally harmless today:
+  # the projection only validates that a referenced rule exists in rule_kinds.csv, `_ai_groups_for_rules`
+  # derives from spec load_bearing_tags + bar load_bearing_ai_tags, and nothing calls
+  # tags_required_by_rule / rules_requiring_tag. But the projected tag -> rule graph is wrong for both
+  # rules LP-495b activated, so it should be corrected at the next reconciliation:
+  #   OC-3,occupancy.rental_support / OC-3,occupancy.stated / IN-14,occupancy.rental_support
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
   # LP-495b — DT-7's producer. This tag was a vocabulary orphan (fact_tags.csv + rule_tags.csv, no
   # producer anywhere), the ADR-289 shape, and LP-405 recorded it as needs-producer. It now materialises
@@ -1001,11 +1016,28 @@ ai_groups:
     # delivered only pay stubs. Same shape as the loan-context defect this ticket fixed for OC-3/DT-7.
     # SHARED GROUP, so this is not a local edit: IN-7, IN-10, IN-11 and IN-12 are LIVE on its other three
     # tags. Widening is a no-op on real data and that is verified, not asserted — the corpus carries ZERO
-    # award letters of any kind and ZERO leases on any loan file, so no live verdict can move. The
-    # LF-6T3N distribution and the byte-identical AS-1/AS-2/AS-12/IN-12 md5 both confirm it.
+    # award letters of any kind, ZERO leases and ZERO 1099s on any loan file, so no live verdict can move.
+    # The LF-6T3N distribution and the byte-identical AS-1/AS-2/AS-12/IN-12 md5 both confirm it.
+    # LP-495b review — THE 1099 COUNT WAS THE ONE MISSING FROM THAT SENTENCE, and it is the type that mattered
+    # most: unlike an award letter or a lease, a 1099 is a COMMON income document (IN-16's deterministic
+    # rule keys off borrower-attributed w2 / 1099 / pay_stub), so "zero in the corpus" had to be measured
+    # rather than assumed. Measured 2026-08-13: 0 of 100 stored documents are `1099`. THE OBLIGATION THIS
+    # LEAVES: income.has_2yr_history is Priya-validated at 0.9 on the PRE-WIDENING context. The first real
+    # file carrying a borrower-attributed 1099 (or lease, or award letter) feeds a context that validation
+    # never covered, and the fingerprint cache will re-judge rather than reuse. Re-measure has_2yr_history
+    # when one arrives; the 0.9 does not automatically carry across.
+    # LP-495b review — `include_unattributed_documents` IS WHAT MAKES THE LEASE REACH THIS GROUP. Adding
+    # lease_agreement to applies_to alone did nothing: this is a BORROWER-subject group and
+    # `_borrower_context` gathers only documents whose belongs_to resolves to that borrower, so a lease —
+    # which describes the PROPERTY and usually carries no belongs_to — was dropped before applies_to was
+    # ever consulted. The opt-in relaxes that, and `lease_agreement` is now in `_PROPERTY_LEVEL_DOC_TYPES`
+    # so it qualifies as genuinely file-level. Scope of the relaxation: the other property-level types
+    # (purchase_agreement, title_commitment, appraisal, flood_certification) are NOT in this applies_to, so
+    # the doc-type filter still drops them — only unattributed leases are added.
     applies_to: [w2, pay_stub, voe, uniform_residential_loan_application,
                  social_security_award_letter, disability_award_letter,
                  retirement_pension_award_letter, lease_agreement, "1099"]
+    include_unattributed_documents: true
     tags: [income.has_2yr_history, income.is_declining, income.same_line_of_work, income.continuance_3yr]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING one BORROWER'S income-stability signals into

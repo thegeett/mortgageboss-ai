@@ -70,10 +70,14 @@ _DORMANT_EXPECTED = frozenset(
 )
 _LIVE_EXPECTED = frozenset(
     {
-        # LP-495b — both JOINED the live set. OC-3 and DT-7 activated on self-consistency rates
-        # (ADR-378), so a live rule now consumes each group and the normal run materialises it.
-        # occupancy_rental had been dormant since LP-418 declared it; atr_documentation was declared and
-        # activated in the same ticket, so it goes straight to live without ever being dormant.
+        # LP-495b — occupancy_rental JOINED the live set: OC-3 (and IN-14) activated on self-consistency
+        # rates (ADR-378), so a live rule now consumes it and the normal run materialises it. It had been
+        # dormant since LP-418 declared it.
+        # LP-495b review — this note previously said DT-7 joined too and that atr_documentation "goes straight to
+        # live without ever being dormant", while `_DORMANT_EXPECTED` above lists atr_documentation. The
+        # set is right and the sentence was wrong: DT-7 is HELD on its tag's missing abstain value, so its
+        # group is dormant to the LIVE set — it does still run on every file through the pending-check
+        # pass, which is a different path and is recorded on DT-7's bar.
         "occupancy_rental",
         # ⚠️ LP-490a — the four credit groups JOINED the live set: CR-1, CR-4, CR-6, CR-8 and CR-10 went
         # live on `ratify-pending` (ADR-378), so these now run on a live file. credit_inquiries stays

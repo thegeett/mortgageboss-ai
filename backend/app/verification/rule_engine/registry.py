@@ -328,19 +328,19 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # occupancy or an other-income document, so a corpus derivation would have returned the same abstain on
 # every case and pre-rate check 3 would have refused the rate. The constructed cases exercise all three
 # branches of each tag and cost $0.12 for the cohort.
-# IN-13 and IN-14 are BUILT AND HELD, and the reason is specific rather than "no data": their shared
-# income.continuance_3yr tag has not been derived. Its group is BORROWER-subject and gathers only
-# documents ATTRIBUTED to the borrower, so a scenario fixture for it needs borrower-attributed
-# documents — a fixture gap, not a corpus gap, and the honest status until that derivation runs.
-# Both rules' RESEARCH landed this ticket: IN-13 now carries the per-type continuance table (it applied
+# IN-13 AND IN-14 ARE LIVE. The blocker was a PRODUCER, not a fixture gap: their shared
+# income.continuance_3yr tag was produced by a group whose applies_to listed four EMPLOYMENT document
+# types, so it could never see an award letter, a pension letter or a lease. Widening it (tag_production
+# .yaml `income_stability`) let the derivation run; both rates were then measured and recorded on the bars.
+# Both rules' RESEARCH landed in LP-495b: IN-13 now carries the per-type continuance table (it applied
 # one blanket 3-year test across every income type) and IN-14's 75%/25% factor is calibrated from the
 # verified primary instead of "pending Priya". Their stale B3-3.1-08 / B3-3.1-09 citations are corrected.
-# ACTIVATION DEFERRED, NOT ABANDONED. Both rates are measured and recorded on the bars below; the
-# activation itself hit a dormant-probe interaction (test_dormant_probe's set is computed from
-# required_ai_groups, which DOES include both groups when these rules are active, yet the probe still
-# reports them dormant) that was not diagnosed before this session's context ran out. Activating with
-# that unresolved would leave a red suite on a shared branch, which is the failure LP-494 warns about.
-# Flip this tuple to ("DT-7", "OC-3") once the probe interaction is understood; everything else is done.
+# LP-495b review — IN-13 AND IN-14 CARRY A DECLARED BELOW-BAR MEASUREMENT. Their shared income.continuance_3yr
+# scored 5/6 = 0.833 against Priya's labels (LP-427), under the 0.9 its sibling tag was validated at.
+# LP-495b activated them with `measured_accuracy` left null, which bypassed the ratify-pending guard that
+# exists for exactly that case; the number is now on both bars alongside a written
+# `measured_accuracy_override`. The activation is unchanged — what changed is that it is now argued in
+# the open rather than achieved by omission.
 # DT-7 is NOT here, and the reason is the enum gap the ticket flagged in its Critical section.
 # dti.atr_factors_documented is declared enum ["complete","incomplete"] with no abstain. The prompt
 # sanctions "unknown" and ai.py coerces it to an unknown tag — but that coerced tag carries
@@ -353,6 +353,8 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # activates when the tag's declared vocabulary gains "unknown" at the next
 # docs/snapshot-fact-tags.xlsx reconciliation, since the generated fact_tags.csv cannot be hand-edited
 # and vocabulary_extra.yaml refuses to shadow an xlsx tag.
+# HELD IS NOT FREE: DT-7 is a blocked candidate, so its producer `atr_documentation` still materializes on
+# every run through the pending-check pass and can surface a PENDING_AUTOMATION flag. Recorded on its bar.
 _LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
 
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==

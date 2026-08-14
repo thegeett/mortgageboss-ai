@@ -6,13 +6,19 @@ reasoner (a key + non-deterministic), so it is NOT re-run in the suite. These KE
 scaffolding the result rests on: the labels join by (tag_id, subject_id) with nothing dropped; the value
 distribution is 5 yes / 1 no (thin + skewed — the negative rests on ONE row, an AS-6 caveat, NOT the one-sided
 trap); the three CONDITIONAL labels were normalized to `yes` for scoring while Priya's original wording is
-PRESERVED verbatim in the CSV (LP-393-4a — not silently rewritten); her values are within the enum; and NO bar is
-proposed — IN-13 stays not-calibratable-yet on its OTHER blockers, so ACTIVE is unchanged (31).
+PRESERVED verbatim in the CSV (LP-393-4a — not silently rewritten); her values are within the enum.
+
+LP-495b review — WHERE THE 5/6 ENDED UP. LP-427 concluded "no bar proposed, IN-13 stays held"; LP-495b then activated
+IN-13 on a scenario-fixture self-consistency rate with `measured_accuracy` left null, so this score lived only
+in prose while the field the activation gate reads stayed empty. It is now recorded on the bar alongside a
+written `measured_accuracy_override`, and the tests below pin BOTH — the live activation and the fact that
+removing the written justification holds the rule again.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -106,23 +112,37 @@ def test_conditional_labels_normalized_to_yes_with_originals_preserved() -> None
 
 
 # ======================================================================= #
-# No bar proposed — IN-13 stays HELD on its OTHER blockers; ACTIVE unchanged (31)
+# IN-13 is LIVE on ratify-pending, and LP-427's 5/6 is DECLARED as an override on its bar
 # ======================================================================= #
-def test_in13_stays_not_calibratable_yet_no_bar_proposed() -> None:
-    # 5/6 clears no bar, the miss is a definitional case a bar would not fix (ADR-337), and IN-13 has OTHER
-    # blockers regardless (the missing scope gate ADR-335; income.type still unscored). So NO bar is proposed —
-    # IN-13 keeps its held bar, and scoring continuance_3yr removes only ONE of its blockers.
+def test_in13_is_live_with_lp427s_score_declared_as_an_override() -> None:
+    # LP-427's own conclusion was that 5/6 clears no bar and IN-13 stays held. LP-495b activated it anyway,
+    # on a scenario-fixture self-consistency rate (ADR-378) — and left `measured_accuracy` null, which is
+    # what let it past the ratify-pending guard that exists to hold a MEASURED-and-failing rule.
+    # LP-495b review puts the number back on the bar and makes the activation cost a written justification. This
+    # test pins the whole shape, because the tension between the two numbers is the point: a measured 0.833
+    # and a self-consistency 1.0 sitting together, with prose saying which one the decision rests on.
     bar = load_activation_bars()["IN-13"]
-    assert (
-        bar.status == "ratify-pending"
-    )  # LP-495b — IN-13 is now LIVE. LP-427 scored income.continuance_3yr 5/6 against Priya's labels and
+    assert bar.status == "ratify-pending"
     assert bar.threshold is None
     assert not bar.validated
-    assert is_eligible(bar)  # LP-495b — activated on a scenario-fixture rate
+    assert bar.measured_accuracy == pytest.approx(0.833)  # LP-427's 5/6, no longer omitted
+    assert bar.self_consistency_rate == 1.0  # the model agreeing with itself, NOT an accuracy
+    assert (
+        bar.measured_accuracy_override
+    )  # and the reasoning that chose between them is written down
+    assert is_eligible(bar)
     assert "IN-13" in ACTIVE_RULE_IDS
     # continuance_3yr is still one of its two load-bearing tags, alongside the unscored income.type
     assert "income.continuance_3yr" in bar.load_bearing_ai_tags
     assert "income.type" in bar.load_bearing_ai_tags
+
+
+def test_in13_would_be_held_if_the_override_were_removed() -> None:
+    # The guard is still the guard: strip the written override and the same bar is NOT eligible. This is
+    # what stops LP-495b review from being a blanket loosening — an unmeasured rule activates on a rate as before,
+    # a measured-and-failing one activates only with prose attached.
+    bar = load_activation_bars()["IN-13"]
+    assert not is_eligible(replace(bar, measured_accuracy_override=None))
 
 
 def test_no_rule_activation_changed() -> None:

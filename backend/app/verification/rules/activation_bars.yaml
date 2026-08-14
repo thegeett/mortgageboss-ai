@@ -50,6 +50,11 @@
 # HELD: its parsed inputs resolve at the DOCUMENT subject, not the "loan" subject ID-5 reads (a producer/
 # consumer mismatch), so input_resolves is false and the gate holds it — the safety working as designed. The
 # bars persist after activation as the record of WHY each rule went live (or why it was held).
+#
+# LP-495b review — HOW TO READ THE SECTION HEADERS BELOW: a section records where an entry STARTED, not where it is
+# now. `status` on the entry is the only authority. Fifteen bars are now `ratify-pending` (ADR-378) and they
+# sit scattered across every section, because a rule that later gained a producer or a self-consistency rate
+# was re-statused in place rather than moved. Trust the field, not the heading it happens to sit under.
 
 # ===================== calibratable-now (a bar can be set + met) ===================================
 IN-1:
@@ -485,6 +490,13 @@ IN-13:
   # LP-495b — ACTIVATED on a scenario-fixture self-consistency rate (ADR-378). Both load-bearing tags
   # were derived: income.continuance_3yr 1.0000 over 5 cases and income.type 1.0000 over 3 cases, 0
   # disagreements, us.anthropic.claude-sonnet-4-5-20250929-v1:0, 2026-08-13.
+  # LP-495b review — THE 5/6 MEASUREMENT IS NOW ON THE BAR, and it was not before. LP-495b activated this rule
+  # with `measured_accuracy` left null while LP-427's 5/6 = 0.833 sat in this comment block and in the
+  # rationale. That is precisely the state `is_eligible`'s ratify-pending branch calls out as a rule
+  # "measured and failing, not unmeasured" — and the guard was bypassed because the number was never put
+  # in the field. The number is recorded below, and the activation now costs an explicit written
+  # override rather than an omission. The activation DECISION is unchanged; what changed is that a reader
+  # of this bar can see both numbers and the reasoning that chose between them.
   # THE PER-TYPE CONTINUANCE TABLE IS THE REAL WORK OF THIS TICKET. IN-13 previously applied ONE blanket
   # three-year test across every income type; B3-3.4 sets the requirement per type, and an income type
   # outside the researched table now ABSTAINS rather than being judged against a default it was never
@@ -503,6 +515,23 @@ IN-13:
   self_consistency_disagreements: 0
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
+  measured_accuracy: 0.833
+  measured_accuracy_override: >-
+    LP-427 scored income.continuance_3yr at 5/6 = 0.833 against Priya's labels — BELOW the 0.9 its sibling
+    tag income.has_2yr_history was validated at, and this rule activates anyway. The reasoning, stated so a
+    reader can disagree with it: (1) THE SINGLE MISS IS A KNOWN, NAMED DIVERGENCE, not a scatter. The AI
+    hedges to `unknown` on child support where Priya computes `yes` from child-age arithmetic (age 9 vs a
+    termination age -> years-remaining >= 3). It is a candidate DETERMINISTIC rule (ADR-337), not a prompt
+    defect, and it errs toward abstention. (2) THE MISS DIRECTION IS THE SAFE ONE. Every scored error is a
+    hedge to `unknown`, never a wrong verdict — the tag under-claims. A rule reading it abstains rather than
+    asserting. (3) RATIFICATION IS THE WHOLE SAFETY (ADR-378). IN-13 ships `ratify`, so every finding costs a
+    processor's attention and none auto-asserts. The 0.9 bar exists for AUTO-SHIP trust, which this rule does
+    not take. (4) n = 6 IS THIN AND SKEWED (5 yes / 1 no). 0.833 is not a stable estimate of anything; it is
+    one miss on six rows. Held against it: the self-consistency rate is weaker still (see the rate's own
+    caveat below — 4 of 5 cases abstain and no `no` was produced), so neither number is load-bearing on its
+    own and ratification is doing the real work. WHAT WOULD REVERSE THIS: a re-score on a wider labelled set
+    that puts a WRONG VERDICT (not a hedge) in the errors, or the child-support determination moving to a
+    deterministic rule — after which this override should be deleted, not re-argued.
   input_resolves: true
   ships: ratify
   threshold: null
@@ -510,16 +539,23 @@ IN-13:
   load_bearing_ai_tags: [income.continuance_3yr, income.type]
   fp_fn: "FN (counts non-continuing other income) >> FP — judgmental, a human ratifies"
   rationale: >-
-    HELD, NOT re-scoped (LP-423). IN-13 is "Other income continuance" — ALL non-employment income (child
-    support / alimony / pension / award / Social Security / notes / rental), NOT rental alone; gating it on
-    income.has_rental_income (LP-422) would silently narrow it to rental and drop the other five types (a
-    coverage regression — D1 STOP). Its verdict tag income.continuance_3yr is now SCORED (LP-427: 5/6; the one
-    miss is child_support, a definitional divergence the AI hedges on and Priya computes — candidate deterministic
-    rule ADR-337), which removes ONE blocker — but 5/6 on a thin/skewed n clears no bar and the other load-bearing
-    tag income.type is still unscored, so it stays held on calibration regardless. The right gate — a broader
-    "borrower has other income" signal — does not exist (a separate ticket, ADR-335).
+    ACTIVE on ratify-pending (LP-495b), with a DECLARED override of a below-bar measurement (LP-495b review — see
+    measured_accuracy_override). NOT re-scoped (LP-423): IN-13 is "Other income continuance" — ALL
+    non-employment income (child support / alimony / pension / award / Social Security / notes / rental), NOT
+    rental alone; gating it on income.has_rental_income (LP-422) would silently narrow it to rental and drop
+    the other five types (a coverage regression — D1 STOP), and the right gate (a broader "borrower has other
+    income" signal) does not exist (a separate ticket, ADR-335). The per-type continuance table is what LP-495b
+    actually built: B3-3.4 sets the requirement PER TYPE and a type outside the researched table now ABSTAINS
+    rather than being judged against a blanket three-year test it was never given. TWO NUMBERS SIT ON THIS BAR
+    AND THEY DISAGREE IN WEIGHT: income.continuance_3yr is MEASURED at 0.833 (LP-427, 5/6, the one miss a
+    child-support hedge to `unknown`) and self-consistent at 1.0 over 5 constructed cases. The measurement is
+    the stronger evidence and it is below bar; the rule ships anyway because it RATIFIES every finding, and the
+    override records that trade rather than hiding it. income.type remains unscored.
 
-# ===================== needs-producer (the tag does not materialize) ===============================
+# LP-495b review — the `needs-producer` section header stood here with IN-14 as its only entry, and IN-14 has been
+# ratify-pending since LP-495b. The section is empty, so the header is gone rather than left labelling a
+# rule it no longer describes. See the note on the section headers above: an entry's SECTION records where
+# it started, not where it is.
 IN-14:
   # LP-495b — THE PREVIOUS RATIONALE WAS STALE AND IS CORRECTED HERE. It read "occupancy.rental_support
   # has NO declared producer (not in tag_production.yaml) — it does not materialize." That was true when
@@ -535,12 +571,32 @@ IN-14:
   # attached — so IN-14 will abstain on live files until one is. Form 1007 and 1025, the market-rent
   # sources B3-3.8-01 names, have NO catalog type and NO extractor, so that path is unmodellable rather
   # than merely absent.
+  # LP-495b review — IN-14 SHARES income.continuance_3yr WITH IN-13, so LP-427's 5/6 = 0.833 measurement holds it
+  # too, and it is recorded here for the same reason it is recorded there: the number existed and the field
+  # was null. The other load-bearing tag occupancy.rental_support is UNMEASURED (self-consistent at 1.0 over
+  # 4 cases, never labelled by Priya) — so this bar's measurement covers one of its two tags, which the
+  # override says plainly rather than letting a single number imply both.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 5
   self_consistency_disagreements: 0
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
+  measured_accuracy: 0.833
+  measured_accuracy_override: >-
+    The SHARED tag income.continuance_3yr scored 5/6 = 0.833 against Priya's labels (LP-427), below the 0.9
+    its sibling income.has_2yr_history was validated at. The same four reasons recorded on IN-13's override
+    apply unchanged — the single miss is a named child-support hedge to `unknown` (ADR-337) rather than a
+    wrong verdict, the error direction is under-claiming, ratification is the whole safety, and n = 6 is thin
+    and skewed. TWO THINGS ARE SPECIFIC TO IN-14. (1) THE MEASUREMENT COVERS ONE OF TWO TAGS. The other
+    load-bearing tag, occupancy.rental_support, has NEVER been labelled — its 1.0 over 4 constructed cases is
+    a self-consistency rate, not an accuracy, and the 0.833 on this bar must not be read as covering it.
+    (2) THE RULE IS DARK ON TODAY'S CORPUS ANYWAY. No rental document is attached to any loan file (21 leases
+    sit in the raw corpus unattached), so IN-14 abstains on every live file until one is; the override is
+    therefore about what happens when the FIRST rental file arrives, not about verdicts shipping now. WHAT
+    WOULD REVERSE THIS: the same conditions as IN-13, plus a Priya labelling of occupancy.rental_support
+    landing below bar — at which point this bar carries a measurement for a tag with no such reasoning behind
+    it and must be re-argued, not extended.
   input_resolves: true
   ships: ratify
   threshold: null
@@ -548,7 +604,18 @@ IN-14:
   load_bearing_ai_tags: [income.continuance_3yr, occupancy.rental_support]
   fp_fn: "FN (counts unsupported rental income) >> FP — judgmental, a human ratifies every verdict"
   rationale: >-
-    PLACEHOLDER — replaced with the measured rate below.
+    ACTIVE on ratify-pending (LP-495b), with a DECLARED override of a below-bar measurement on its shared
+    continuance tag (LP-495b review — see measured_accuracy_override). THE PRODUCER EXISTS: this bar previously read
+    "occupancy.rental_support has NO declared producer — it does not materialize", which was true when
+    written and stopped being true when LP-418 declared the `occupancy_rental` AI group without updating this
+    entry; that stale line is what LP-495b's own ticket inherited its premise from. Both load-bearing tags
+    were derived over scenario fixtures — occupancy.rental_support 1.0000 over 4 cases (a full
+    adequate/inadequate/n-a spread) and income.continuance_3yr 1.0000 over 5 — and the 75%/25% factor is now
+    CALIBRATED rather than "pending Priya": B3-3.8-01 (page dated 10/08/2025) verified verbatim, a researched
+    and cited threshold (ADR-361 discipline). WHAT THIS RULE CANNOT DO TODAY, stated rather than discovered
+    later: no rental document is attached to any loan file, so IN-14 abstains on every live file; and Form
+    1007 / 1025, the market-rent sources B3-3.8-01 names, have no catalog type and no extractor, so that path
+    is unmodellable rather than merely absent — only the lease path can ever be represented.
 
 # ===================== no-ai-dependency (no AI gate — activation is a wiring/deterministic call) ====
 AS-3:
@@ -1863,10 +1930,6 @@ OC-3:
   # rather than the stored corpus. No loaded loan file carries an investment occupancy, so a corpus
   # derivation would have returned the same abstain on every case and pre-rate check 3 would have
   # refused the rate. The constructed cases exercise all three branches and cost $0.06.
-  # LP-495b — ACTIVATED on a self-consistency rate (ADR-378), derived over CONSTRUCTED scenario cases
-  # rather than the stored corpus. No loaded loan file carries this rule's trigger, so a corpus
-  # derivation would have returned the same abstain on every case and pre-rate check 3 would have
-  # refused the rate. The constructed cases exercise all three branches and cost $0.06.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 4
@@ -1902,7 +1965,6 @@ OC-3:
     properties), so on today's corpus OC-3 is not_applicable everywhere; the raw corpus does carry the
     material (21 lease agreements, lease checks, Verification of Rent) and it is simply not attached.
 DT-7:
-  # LP-495b — ACTIVATED on a self-consistency rate (ADR-378) over constructed cases, as for OC-3.
   # LP-495b — BUILT AND MEASURED, HELD ON THE ENUM GAP. Self-consistency 1.0000 over 4 constructed
   # cases with a full three-value spread (complete / incomplete / unknown), 0 disagreements, model
   # us.anthropic.claude-sonnet-4-5-20250929-v1:0, 2026-08-13. Those numbers are ready to use.
@@ -1943,3 +2005,14 @@ DT-7:
     for the next docs/snapshot-fact-tags.xlsx reconciliation — the generated CSV cannot be hand-edited.
     SCOPE: this rule checks DOCUMENT PRESENCE per factor, not the ability-to-repay determination, which
     is a creditor obligation assessed at underwriting. See the spec header.
+    LP-495b review — "HELD" DOES NOT MEAN "COSTS NOTHING", and this bar previously implied it did. DT-7 has a bar
+    and is not in ACTIVE_RULE_IDS, which makes it a BLOCKED CANDIDATE — so `blocked_candidate_rule_ids()`
+    includes it, `_pending_check_ai_groups()` therefore includes its producer `atr_documentation`, and with
+    `pending_checks_enabled` (ON by default) that group is materialized on EVERY verification run. Two
+    consequences, both intended by LP-391 and neither previously written down here: (1) a real model call
+    over the file's whole document set per run — the `include_documents` loan context, so the largest
+    context in this cohort; the RULE's own judgment is stubbed (`_discarded_judgment_stub`) and costs
+    nothing, but the TAG is not. (2) Where the tag materializes and DT-7 reaches a surfaceable verdict, a
+    PENDING_AUTOMATION flag ships to the processor — "manual review needed", never the uncalibrated verdict.
+    That is the honest-middle behaviour LP-391 was built for and it is left ON deliberately: silence on a
+    file that qualifies reads as "checked, clean". Recorded so the cost is a decision, not a surprise.

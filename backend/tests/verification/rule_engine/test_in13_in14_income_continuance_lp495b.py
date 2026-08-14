@@ -12,6 +12,7 @@ judgment reasoner. A partial seam is not a seam and has cost real money twice.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -76,6 +77,34 @@ def _snapshot(doc_type: str | None = "social_security_award_letter") -> Snapshot
                 "property.occupancy": _f("investment"),
             }
         ),
+        tags=TagsSection.present({}),
+    )
+
+
+def _snapshot_with_unattributed_lease() -> Snapshot:
+    """A pay stub ATTRIBUTED to the borrower (so the borrower is enumerable) plus a lease with NO
+    belongs_to — the shape a property-level lease actually arrives in."""
+    return Snapshot(
+        loan_file_id=UUID("95000000-0000-4000-8000-0000000000c2"),
+        run_id=uuid4(),
+        created_at=_DATE,
+        documents=DocumentsSection.present(
+            [
+                DocumentEntry(
+                    content_id="d1",
+                    document_type="pay_stub",
+                    belongs_to=(BorrowerRef(borrower_id=_BORROWER, name="A. Borrower"),),
+                    fields={"gross_pay": _f("4200.00")},
+                ),
+                DocumentEntry(
+                    content_id="d2",
+                    document_type="lease_agreement",
+                    belongs_to=None,
+                    fields={"monthly_rent": _f("2100.00")},
+                ),
+            ]
+        ),
+        mismo=MismoSection.present({"borrower.1.borrower_id": _f(str(_BORROWER))}),
         tags=TagsSection.present({}),
     )
 
@@ -221,11 +250,65 @@ def test_the_continuance_group_can_see_non_employment_documents() -> None:
         assert doc_type in applies_to, f"{doc_type} cannot reach the continuance group"
 
 
+def test_an_unattributed_lease_actually_reaches_the_continuance_context() -> None:
+    """LP-495b review — MEMBERSHIP IN `applies_to` IS NOT VISIBILITY, and for the lease it was not enough. This is
+    a BORROWER-subject group, and `_borrower_context` gathers only documents whose belongs_to resolves to
+    that borrower — the doc-type filter runs AFTER gathering. A lease describes the PROPERTY and its rent,
+    so it usually carries no belongs_to and was dropped before `applies_to` was ever consulted. IN-14's bar
+    claims this widening is what makes rental continuance visible; the test above asserts only membership,
+    so it could not have caught that. Two things were needed and both are asserted here: the group declares
+    `include_unattributed_documents`, and `lease_agreement` counts as genuinely property-level."""
+    from app.verification.tag_materialization.subjects import _PROPERTY_LEVEL_DOC_TYPES
+
+    group = load_ai_groups()["income_stability"]
+    assert group.include_unattributed_documents is True
+    assert "lease_agreement" in _PROPERTY_LEVEL_DOC_TYPES
+
+    # and end to end: an unattributed lease lands in the borrower's built context.
+    from app.verification.tag_materialization.subjects import ContextOptions, subject_type
+
+    snapshot = _snapshot_with_unattributed_lease()
+    subjects = subject_type("borrower").enumerate(snapshot)
+    assert subjects, "the fixture produced no borrower subject"
+    context = subject_type("borrower").build_context(
+        subjects[0][1],
+        group.applies_to,
+        ContextOptions(include_unattributed_documents=True),
+    )
+    types = [d["document_type"] for d in context["documents"]]  # type: ignore[union-attr]
+    assert "lease_agreement" in types, f"the lease never reached the context: {types}"
+
+
 @pytest.mark.parametrize("rule_id", ["IN-13", "IN-14"])
 def test_both_are_active_on_a_scenario_fixture_rate(rule_id: str) -> None:
     assert rule_id in ACTIVE_RULE_IDS
     bar = load_activation_bars()[rule_id]
     assert bar.status == "ratify-pending"
     assert bar.self_consistency_rate == pytest.approx(1.0)
-    assert bar.measured_accuracy is None  # a rate is not a measurement
     assert is_eligible(bar) and ratifies_every_finding(rule_id)
+
+
+@pytest.mark.parametrize("rule_id", ["IN-13", "IN-14"])
+def test_both_declare_lp427s_below_bar_measurement_rather_than_omitting_it(rule_id: str) -> None:
+    """LP-495b review — the shared tag income.continuance_3yr was MEASURED at 5/6 = 0.833 against Priya's labels
+    (LP-427), below the 0.9 its sibling income.has_2yr_history was validated at. Both rules activated with
+    `measured_accuracy` left null, which is exactly the state `is_eligible`'s ratify-pending branch is
+    written to hold — "a rule whose tag was MEASURED and FAILED is measured-and-failing, not unmeasured".
+    Omitting the number was the only way to record a rate at all (the loader rejected a bar carrying both),
+    so the design made losing it the cheap path. Both numbers now sit on the bar and the activation costs a
+    written justification instead."""
+    bar = load_activation_bars()[rule_id]
+    assert bar.measured_accuracy == pytest.approx(0.833)
+    assert (
+        bar.self_consistency_rate is not None
+    )  # and it is still stored SEPARATELY, never collapsed
+    assert bar.measured_accuracy_override
+    assert "0.833" in bar.measured_accuracy_override or "5/6" in bar.measured_accuracy_override
+
+
+@pytest.mark.parametrize("rule_id", ["IN-13", "IN-14"])
+def test_removing_the_written_override_holds_the_rule_again(rule_id: str) -> None:
+    """The guard is unchanged for every bar that has not written its reasoning down — the override is a
+    declaration requirement, not a loosening. AS-4's 0/5 tag stays held exactly as before."""
+    bar = load_activation_bars()[rule_id]
+    assert not is_eligible(replace(bar, measured_accuracy_override=None))

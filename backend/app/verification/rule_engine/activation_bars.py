@@ -89,6 +89,13 @@ class ActivationBar:
     self_consistency_disagreements: int | None = None
     self_consistency_model: str | None = None
     self_consistency_date: str | None = None
+    # LP-495b review — THE DECLARED OVERRIDE, and the only way a bar may carry BOTH numbers. Written prose, not a
+    # flag: activating a rule whose load-bearing tag was MEASURED BELOW ITS SIBLING'S BAR is a deliberate
+    # product decision, and the decision has to be READABLE where the numbers sit. None (the default) keeps
+    # the LP-490a separation absolute for every other bar — both fields present with no override is still a
+    # load error. `is_eligible` reads it ONLY on the ratify-pending branch, and only to let a bar that has
+    # written its reasoning down proceed; a bar that stays silent about a measurement is still held.
+    measured_accuracy_override: str | None = None
 
 
 def _candidate_rule_ids() -> frozenset[str]:
@@ -225,11 +232,36 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
     # `self_consistency_rate` means THE MODEL SAID THE SAME THING TWICE. Collapsing them destroys the only
     # signal telling a future reader which kind of number a bar carries — so a bar carrying both is
     # rejected at LOAD, not quietly preferred one way at read time.
-    if self_consistency_rate is not None and measured_accuracy is not None:
+    # LP-495b review — the ONE exception, and it is a DECLARATION, not a loosening. A bar may carry both numbers
+    # when it also writes down WHY the measurement does not hold it (`measured_accuracy_override`). The
+    # separation the block above protects is preserved: the two fields still mean different things and are
+    # still stored apart — what changes is that a bar can no longer ACHIEVE eligibility by omitting a
+    # measurement it knows about. Dropping the number was the cheaper path; this makes writing it down the
+    # cheaper path.
+    override = body.get("measured_accuracy_override")
+    if override is not None and not isinstance(override, str):
+        raise ActivationBarError(
+            f"{rule_id}: measured_accuracy_override must be a string (the written reasoning), got "
+            f"{override!r}"
+        )
+    override = override.strip() if isinstance(override, str) else None
+    override = override or None
+    if self_consistency_rate is not None and measured_accuracy is not None and override is None:
         raise ActivationBarError(
             f"{rule_id}: a bar cannot carry BOTH measured_accuracy and self_consistency_rate — one means a "
             f"human labelled the right answer, the other means the model agreed with itself. Keep them "
-            f"apart, or a consistency number will later be read as an accuracy."
+            f"apart, or a consistency number will later be read as an accuracy. To activate DESPITE a "
+            f"measurement, declare measured_accuracy_override with the reasoning — never drop the number."
+        )
+    if override is not None and (self_consistency_rate is None or measured_accuracy is None):
+        raise ActivationBarError(
+            f"{rule_id}: measured_accuracy_override is only meaningful on a bar carrying BOTH a "
+            f"measured_accuracy and a self_consistency_rate — there is nothing to override otherwise"
+        )
+    if override is not None and status != "ratify-pending":
+        raise ActivationBarError(
+            f"{rule_id}: measured_accuracy_override applies only to a ratify-pending bar (status="
+            f"{status}) — ratification of every finding is what makes overriding a measurement survivable"
         )
     if status == "ratify-pending" and self_consistency_rate is None:
         raise ActivationBarError(
@@ -289,6 +321,7 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         self_consistency_date=(
             str(body["self_consistency_date"]) if body.get("self_consistency_date") else None
         ),
+        measured_accuracy_override=override,
     )
 
 
@@ -330,10 +363,19 @@ def is_eligible(bar: ActivationBar) -> bool:
         # disagreement that two agreeing derivations would score 1.0 on precisely because the model is
         # consistently wrong. This clause is what stops a self-consistency rate overriding a real
         # measurement.
+        #
+        # LP-495b review — `measured_accuracy_override` is the ONE way past it, and it is a WRITTEN one. The clause
+        # above had a cheaper escape than it looked: a bar could simply OMIT a measurement it knew about
+        # (`parse_bar` rejected a bar carrying both numbers, so omitting was the only way to record a rate
+        # at all) and the guard would read the rule as unmeasured. IN-13 shipped that way — its
+        # income.continuance_3yr scored 5/6 in LP-427 and the number lived in prose while the field stayed
+        # None. So the number is now recordable ALONGSIDE the rate, and getting past the guard costs a
+        # declared justification instead of a deletion. AS-4 is unaffected: a 0/5 tag with no override
+        # written is still held, exactly as before.
         return (
             bar.input_resolves
             and bar.self_consistency_rate is not None
-            and bar.measured_accuracy is None
+            and (bar.measured_accuracy is None or bar.measured_accuracy_override is not None)
         )
     return False
 
