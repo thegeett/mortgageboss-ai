@@ -71,6 +71,7 @@ function status(findings: VerificationFinding[]): VerificationStatus {
       yellow_count: findings.length,
       green_count: 0,
       total_cost_estimate: null,
+      error_detail: null,
     },
     findings,
     rule_findings: [],

@@ -1,7 +1,7 @@
 """Extractor generator (LP-434) — JSON schema spec → working extractor artifacts.
 
-``docs/schema-specs/NNN-<slug>.json`` describes a document type's extraction schema.
-``docs/schema-specs/_GENERATION_GUIDE.md`` is the authoritative contract for how a
+``app/schema_specs/NNN-<slug>.json`` describes a document type's extraction schema.
+``app/schema_specs/_GENERATION_GUIDE.md`` is the authoritative contract for how a
 spec becomes code; this package implements it.
 
 The load-bearing part is the **validator** (:mod:`.validator`): it applies the

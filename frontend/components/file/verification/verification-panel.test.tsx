@@ -8,6 +8,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const runMutate = vi.fn();
+const useRunVerificationMock = vi.fn(() => ({
+  mutate: runMutate,
+  isPending: false,
+  isError: false,
+}));
 const setAggressionMutate = vi.fn();
 const resolveMutate = vi.fn();
 const updatePreferencesMutate = vi.fn();
@@ -17,7 +22,7 @@ const invalidateQueries = vi.fn();
 
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
-  useRunVerification: () => ({ mutate: runMutate, isPending: false }),
+  useRunVerification: () => useRunVerificationMock(),
   useSetAggression: () => ({ mutate: setAggressionMutate, isPending: false }),
   useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
   useVerificationRuns: () => ({ data: [] }),
@@ -78,6 +83,7 @@ const STATUS: VerificationStatus = {
     yellow_count: 1,
     green_count: 0,
     total_cost_estimate: 0.02,
+    error_detail: null,
   },
   findings: [
     finding({ id: "f-1", message: "Stated income exceeds the documents by 8%.", confidence: 0.82 }),
@@ -334,5 +340,59 @@ describe("VerificationPanel", () => {
     expect(
       screen.getByText(/must be resolved to submit \(at Balanced thoroughness\)/),
     ).toBeDefined();
+  });
+
+  // LP: a FAILED run used to render nowhere — the status was typed and never read, so a run that died
+  // on the worker was indistinguishable from a click that did nothing. These pin the banner.
+  describe("a run that didn't complete", () => {
+    it("names the run's own failure reason, not a generic message", () => {
+      mock({
+        data: {
+          ...STATUS,
+          latest_run: {
+            ...baseRun(),
+            status: "failed",
+            error_detail: "AI cross-source pass failed",
+          },
+        },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      expect(screen.getByRole("alert").textContent).toContain("AI cross-source pass failed");
+      expect(screen.getByText(/Verification didn't complete/)).toBeDefined();
+    });
+
+    it("falls back to a generic reason when the run carries no detail", () => {
+      mock({
+        data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: null } },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      expect(screen.getByRole("alert").textContent).toContain("failed on the worker");
+    });
+
+    it("retry forces past the fingerprint cache", () => {
+      mock({
+        data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: "boom" } },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+      expect(runMutate.mock.calls[0]?.[0]).toBe(true); // force=true, not a plain re-run
+    });
+
+    it("reports a trigger request that never reached the server", () => {
+      useRunVerificationMock.mockReturnValue({
+        mutate: runMutate,
+        isPending: false,
+        isError: true,
+      });
+      mock();
+      render(<VerificationPanel fileId="LF-1" />);
+      expect(screen.getByRole("alert").textContent).toContain("didn't reach the server");
+    });
+
+    it("stays quiet on a completed run", () => {
+      mock();
+      render(<VerificationPanel fileId="LF-1" />);
+      expect(screen.queryByText(/Verification didn't complete/)).toBeNull();
+    });
   });
 });

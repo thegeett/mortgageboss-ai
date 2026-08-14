@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from app.ai.extraction.generator.spec import load_spec
 from app.ai.extraction.generator.validator import validate
+from app.schema_specs import SPECS_DIR as _SPECS
 from app.verification.snapshot.pii import PiiKind
 
-_SPECS = Path(__file__).resolve().parents[3].parent / "docs" / "schema-specs"
 _ALL = sorted(_SPECS.glob("[0-9]*.json"))
 _VALID_KINDS = {k.name for k in PiiKind}
 

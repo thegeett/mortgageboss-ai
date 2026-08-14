@@ -21,8 +21,18 @@ from pathlib import Path
 
 import yaml
 
+from app.schema_specs import SPECS_DIR
+
 _PATH = Path(__file__).with_name("distrusted_fields.yaml")
-_SPECS_DIR = Path(__file__).resolve().parents[4] / "docs" / "schema-specs"
+
+# The specs live INSIDE the package. This used to be ``parents[4] / "docs" / "schema-specs"``, which
+# counted on a ``backend/`` directory that exists in the repo and NOT in the image: the container's
+# package root is ``/app``, so the walk landed on ``/docs/schema-specs``. The backend image is built
+# with ``backend/`` as its context, so a repo-root ``docs/`` was never shipped either — every
+# containerised rule-engine run raised DistrustError on the first ``fields:`` entry because the spec
+# set came back EMPTY. Import the location instead of re-deriving it; ``_schema_fields`` now fails
+# loud, naming the directory, if it is ever unreadable again.
+_SPECS_DIR = SPECS_DIR
 
 
 class DistrustError(Exception):
@@ -49,14 +59,25 @@ def _document() -> dict[str, object]:
 def _schema_fields() -> set[tuple[str, str]]:
     """Every ``(document_type, field)`` the schema specs declare — typed core AND nested-list rows.
 
-    The universe a ``fields:`` entry must name something in. Built from ``docs/schema-specs/*.json``
+    The universe a ``fields:`` entry must name something in. Built from ``app/schema_specs/*.json``
     rather than from parsed declarations, because a distrusted field is a property of the DOCUMENT, and
     the tag that reads it may be derived (IH-1's case) or not exist yet.
+
+    An unreadable spec directory raises HERE, naming the directory. Falling through with an empty set
+    made every ``fields:`` entry look like a typo, so a packaging problem was reported as a rename of
+    the first-listed field — the message that hid this bug in staging for the whole life of the image.
     """
     import json
 
+    specs = sorted(_SPECS_DIR.glob("*.json"))
+    if not specs:
+        raise DistrustError(
+            f"no schema specs found at {_SPECS_DIR} — the spec set is the universe every distrusted "
+            "field is validated against, so an empty one fails EVERY entry. The directory ships "
+            "inside the package; check that it was not dropped from the build or the wheel."
+        )
     pairs: set[tuple[str, str]] = set()
-    for path in sorted(_SPECS_DIR.glob("*.json")):
+    for path in specs:
         payload = json.loads(path.read_text(encoding="utf-8"))
         doc_type = payload.get("document_type")
         if not isinstance(doc_type, str) or not doc_type:

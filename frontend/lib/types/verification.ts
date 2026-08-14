@@ -17,6 +17,10 @@ export interface VerificationRun {
   yellow_count: number;
   green_count: number;
   total_cost_estimate: number | null;
+  /** Why a `failed` run failed, straight from the run. Null on every other status. `?? null` at the
+   * read site: a version-skewed backend that predates the field must degrade to "no reason given",
+   * not blank the panel. */
+  error_detail: string | null;
 }
 
 export interface VerificationFinding {

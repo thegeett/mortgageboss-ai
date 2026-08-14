@@ -138,11 +138,11 @@ def test_catalog_is_comprehensive() -> None:
 
 
 def _spec_document_types() -> set[str]:
-    """Every ``document_type`` declared by a schema spec under docs/schema-specs/."""
+    """Every ``document_type`` declared by a schema spec under app/schema_specs/."""
     import json
-    from pathlib import Path
 
-    specs = Path(__file__).resolve().parents[3] / "docs" / "schema-specs"
+    from app.schema_specs import SPECS_DIR as specs
+
     return {
         json.loads(p.read_text(encoding="utf-8"))["document_type"]
         for p in specs.glob("[0-9]*.json")

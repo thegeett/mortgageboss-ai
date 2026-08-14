@@ -110,6 +110,72 @@ aws bedrock-runtime converse --region us-east-1 \
 
 Sonnet: same command with `--model-id us.anthropic.claude-sonnet-4-5-20250929-v1:0`.
 
+Against **staging** (the worker's account), swap the profile in:
+
+```bash
+export AWS_PROFILE=mbai-staging-admin && aws sso login
+aws sts get-caller-identity --query Account --output text   # 058190633983
+
+AWS_PROFILE=mbai-staging-admin aws bedrock-runtime converse --region us-east-1 \
+  --model-id us.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --messages '[{"role":"user","content":[{"text":"Say OK"}]}]' \
+  --query 'output.message.content[0].text' --output text
+```
+
+### Bedrock model access (the 403 that looks like a code bug)
+
+A model the account has not been granted access to fails with **403** and this message,
+which names IAM but is really about the account's Marketplace subscription:
+
+> Model access is denied due to IAM user or service role is not authorized to perform
+> the required AWS Marketplace actions (`aws-marketplace:ViewSubscriptions`,
+> `aws-marketplace:Subscribe`) to enable access to this model.
+
+The app surfaces it as `ai_call_failed error_type=PermissionDeniedError transient=False`,
+so the pass that needed the model fails while everything on an already-granted model keeps
+working — on 2026-08-14 staging ran Haiku fine while every Sonnet call 403'd. **Check access
+per model before reading it as a bug in the pipeline.**
+
+Check (read-only, per region — the `us.` profile can route to any of the three):
+
+```bash
+export AWS_PROFILE=mbai-staging-admin
+for r in us-east-1 us-east-2 us-west-2; do
+  for m in anthropic.claude-sonnet-4-5-20250929-v1:0 anthropic.claude-haiku-4-5-20251001-v1:0; do
+    printf '%s %s ' "$r" "$m"
+    aws bedrock get-foundation-model-availability --region "$r" --model-id "$m" \
+      --query 'authorizationStatus' --output text
+  done
+done
+```
+
+`AUTHORIZED` everywhere means access is granted and a 403 is coming from somewhere else
+(the task role's `bedrock:InvokeModel*` resources, or entitlement still propagating —
+grants take a couple of minutes to take effect, and the error says so).
+
+Grant it where the status is **not** `AUTHORIZED` — take the offer token, then accept it.
+The model id here is the **base** model, never the `us.` inference-profile id:
+
+```bash
+export AWS_PROFILE=mbai-staging-admin
+MODEL=anthropic.claude-sonnet-4-5-20250929-v1:0   # or anthropic.claude-haiku-4-5-20251001-v1:0
+
+OFFER=$(aws bedrock list-foundation-model-agreement-offers --region us-east-1 \
+  --model-id "$MODEL" --query 'offers[0].offerToken' --output text)
+
+aws bedrock create-foundation-model-agreement --region us-east-1 \
+  --model-id "$MODEL" --offer-token "$OFFER"
+```
+
+Run it once per region you have not granted. Then wait ~2 minutes and re-run the converse
+smoke test above — the console's **Bedrock → Model access** page does the same thing.
+
+Note this is an **account-wide** grant, not a per-role one: the ECS task role only needs
+`bedrock:InvokeModel` / `bedrock:InvokeModelWithResponseStream` on the inference-profile ARN
+plus the underlying foundation-model ARN **in every region the profile can route to**
+(`infra/modules/*` task-role policy). It does not need the `aws-marketplace:*` actions the
+error message names — those are for the principal performing the grant.
+
 ---
 
 ## 3. Extraction bench
@@ -272,4 +338,10 @@ so both checkouts share one output root and run ids resume across them.
 ```bash
 git worktree list
 git worktree remove ~/Geet/project/loan-processing/mbai-bench
+```
+
+## 5. Backend worker ECS log
+
+```bash
+AWS_PROFILE=mbai-staging-admin aws logs tail /ecs/mbai-staging/worker --follow
 ```

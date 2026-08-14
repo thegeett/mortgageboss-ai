@@ -175,7 +175,8 @@ def test_every_wired_generated_extractor_matches_the_sizing_rule() -> None:
     from app.ai.extraction.generator.spec import load_spec
 
     backend = Path(__file__).resolve().parents[2]
-    specs = backend.parent / "docs" / "schema-specs"
+    from app.schema_specs import SPECS_DIR as specs
+
     ext_dir = backend / "app" / "ai" / "extraction"
     by_dt = {json.loads(p.read_text())["document_type"]: p for p in specs.glob("[0-9]*.json")}
     marker = "GENERATED from a schema spec by the LP-434 generator"

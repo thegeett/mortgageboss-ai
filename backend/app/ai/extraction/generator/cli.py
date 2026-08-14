@@ -1,7 +1,7 @@
 """The generator CLI (LP-434).
 
-    python -m app.ai.extraction.generator.cli validate  docs/schema-specs/*.json
-    python -m app.ai.extraction.generator.cli generate  docs/schema-specs/008-w2.json --out-dir /tmp/gen
+    python -m app.ai.extraction.generator.cli validate  app/schema_specs/*.json
+    python -m app.ai.extraction.generator.cli generate  app/schema_specs/008-w2.json --out-dir /tmp/gen
 
 ``validate`` reports pass/refuse per spec and emits nothing. ``generate`` writes ONLY
 under ``--out-dir`` — it never modifies an existing file. For a spec with a shipping

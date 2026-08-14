@@ -50,6 +50,10 @@ interface Consequence {
   tone: "info" | "blocked" | "clear";
 }
 
+/** A run that did not produce findings — either the trigger request never landed (`request`) or the
+ * run reached the worker and failed there (`run`, carrying the run's own reason). */
+type FailedRun = { kind: "request" } | { kind: "run"; detail: string | null };
+
 /** Count of findings shown (in-scope for display) at a given level's cutoff. */
 function shownCount(data: VerificationStatus, level: AggressionLevel): number {
   const cutoff = data.aggression.cutoffs[level];
@@ -112,6 +116,19 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   const [consequence, setConsequence] = useState<Consequence | null>(null);
 
   const dialBusy = setAggression.isPending || updatePreferences.isPending;
+
+  // The two ways "Run verification" can come to nothing, unified into one thing to render. Both were
+  // silent: the trigger POST had no `onError` at all, and a run that reached the worker and FAILED
+  // there was never rendered. Either way the button re-enabled over an unchanged panel.
+  //   - `request` — the POST itself was rejected (offline, 5xx, an expired session). No run exists.
+  //   - `run` — a run was created and the worker failed it; `error_detail` carries the reason.
+  // The request error wins while it is set: it is the more recent event, and it means the click the
+  // processor just made did not land at all.
+  const failedRun: FailedRun | null = run.isError
+    ? { kind: "request" }
+    : data?.latest_run?.status === "failed"
+      ? { kind: "run", detail: data.latest_run.error_detail ?? null }
+      : null;
 
   const pickLevel = useCallback(
     (level: AggressionLevel) => {
@@ -228,10 +245,12 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             activeLevel={activeLevel}
             dialBusy={dialBusy}
             consequence={consequence}
+            failedRun={failedRun}
             onPick={pickLevel}
             onResetToDefault={resetToDefault}
             onSetAsDefault={setAsDefault}
             onDismissConsequence={() => setConsequence(null)}
+            onRetry={() => run.mutate(true)}
           />
         )}
       </CardContent>
@@ -246,20 +265,24 @@ function VerificationBody({
   activeLevel,
   dialBusy,
   consequence,
+  failedRun,
   onPick,
   onResetToDefault,
   onSetAsDefault,
   onDismissConsequence,
+  onRetry,
 }: {
   fileId: string;
   data: VerificationStatus;
   activeLevel: AggressionLevel;
   dialBusy: boolean;
   consequence: Consequence | null;
+  failedRun: FailedRun | null;
   onPick: (level: AggressionLevel) => void;
   onResetToDefault: () => void;
   onSetAsDefault: () => void;
   onDismissConsequence: () => void;
+  onRetry: () => void;
   running: boolean;
 }) {
   // The file-level chrome sits ABOVE the tabs; the governed §8 tabs (1-4) render the rule engine's
@@ -267,7 +290,13 @@ function VerificationBody({
   // behaviour unchanged. The two systems' lists + counts are never merged (LP-375/376).
   return (
     <div className="space-y-4">
-      {data.stale && !running && <StaleBanner />}
+      {/* A FAILED run is the FIRST thing to say. It used to be said nowhere: the status was typed but
+          never rendered, so a run that died on the worker (a dead AI call, a governed pass exhausted
+          after retries) left the button re-enabled over an unchanged panel — indistinguishable from a
+          click that did nothing, which is exactly how it was reported. Ranked above staleness: a run
+          that failed is why the findings are old. */}
+      {failedRun && <FailedRunBanner run={failedRun} onRetry={onRetry} retrying={running} />}
+      {data.stale && !running && !failedRun && <StaleBanner />}
       <NeedsCompleteness fileId={fileId} />
       <RuleFindingsTabs
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
@@ -431,6 +460,60 @@ function SubmitStatus({
     <div className="flex items-center gap-2 text-xs text-success">
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
       <span className="text-gray-600">Clear to submit at {label} thoroughness.</span>
+    </div>
+  );
+}
+
+/**
+ * The verification did not run — say so, say why, and offer the retry.
+ *
+ * The reason is the run's OWN ``error_detail``, not a guess: "AI cross-source pass failed" and
+ * "Rule-engine pass failed after retries" are different operational problems, and a processor
+ * forwarding a screenshot is the fastest route from "the button is broken" to the actual cause. It
+ * degrades to the generic line when the detail is null (an older run, or a version-skewed backend).
+ * Retry forces past the fingerprint cache: the cache is keyed on the last COMPLETED run, so a plain
+ * re-run after a failure is not a cache hit — but forcing also covers the case where the last
+ * completed run's inputs still match, which would otherwise return that stale run and look like
+ * another no-op.
+ */
+function FailedRunBanner({
+  run,
+  onRetry,
+  retrying,
+}: {
+  run: FailedRun;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  const message =
+    run.kind === "request"
+      ? "Couldn't start the verification — the request didn't reach the server. Check your connection and try again."
+      : (run.detail ?? "The verification pass failed on the worker. No findings were produced.");
+
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-sm text-gray-700"
+    >
+      <X className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+      <div className="flex-1 space-y-1.5">
+        <p>
+          <span className="font-medium text-gray-900">Verification didn't complete</span> —{" "}
+          {message}
+        </p>
+        <p className="text-xs text-gray-500">
+          The findings below, if any, are from an earlier run.
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="shrink-0"
+        disabled={retrying}
+        onClick={onRetry}
+      >
+        {retrying ? "Retrying…" : "Try again"}
+      </Button>
     </div>
   );
 }

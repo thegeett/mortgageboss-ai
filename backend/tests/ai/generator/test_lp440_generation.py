@@ -11,9 +11,11 @@ from pathlib import Path
 
 from app.ai.extraction.generator.emitters import emit_pii_registration, max_tokens_for
 from app.ai.extraction.generator.spec import load_spec
+from app.schema_specs import SPECS_DIR
 
 _BACKEND = Path(__file__).resolve().parents[3]
-_SPECS = _BACKEND.parent / "docs" / "schema-specs"
+_SPECS = SPECS_DIR
+
 _EXTRACTION = _BACKEND / "app" / "ai" / "extraction"
 _GEN_MARKER = "GENERATED from a schema spec by the LP-434 generator"
 _METADATA = (

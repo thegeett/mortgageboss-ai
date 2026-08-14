@@ -1,4 +1,4 @@
-"""The schema-spec model + loader (LP-434), per ``docs/schema-specs/_FORMAT.md``.
+"""The schema-spec model + loader (LP-434), per ``app/schema_specs/_FORMAT.md``.
 
 A thin, tolerant wrapper over the raw JSON: it reads only the fields the generator
 needs (``document_type``, ``typed_core``, ``nested_lists``, ``open_questions``,

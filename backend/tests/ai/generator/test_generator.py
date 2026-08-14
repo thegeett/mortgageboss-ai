@@ -34,6 +34,7 @@ from app.ai.extraction.generator.emitters import (
 )
 from app.ai.extraction.generator.spec import TYPE_TO_COERCER, load_spec
 from app.ai.extraction.generator.validator import validate
+from app.schema_specs import SPECS_DIR
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -158,7 +159,7 @@ def test_all_top_ten_pass_after_lp439() -> None:
     # LP-439 applied the final 24 blocking-question answers and remapped the invented PII kinds, taking the
     # validate pass count 70 → 108. Every top-ten spec (indeed every spec) now passes; the nested-heavy
     # top ten that once anchored the refusal set is fully generatable. (test_lp439 pins all 108.)
-    specs_dir = _BACKEND.parent / "docs" / "schema-specs"
+    specs_dir = SPECS_DIR
     for n in range(1, 11):
         matches = list(specs_dir.glob(f"{n:03d}-*.json"))
         assert matches, f"missing spec {n:03d}"
@@ -388,7 +389,7 @@ def test_no_review_metadata_in_generated_code() -> None:
 
 
 def test_diff_mode_reports_additions_and_flags_blocked_pii() -> None:
-    spec = load_spec(_BACKEND.parent / "docs" / "schema-specs" / "008-w2.json")
+    spec = load_spec(SPECS_DIR / "008-w2.json")
     assert spec.is_diff_mode
     report = emit_diff_report(spec)
     assert "employer_address" in report and "ADD" in report

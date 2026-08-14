@@ -18,10 +18,11 @@ from app.ai.extraction.generator.emitters import (
 )
 from app.ai.extraction.generator.spec import load_spec
 from app.ai.extraction.generator.validator import validate
+from app.schema_specs import SPECS_DIR
 from app.verification.snapshot.documents_section import DerivedSpec, ListSpec
 
 _BACKEND = Path(__file__).resolve().parents[3]
-_SPECS = _BACKEND.parent / "docs" / "schema-specs"
+_SPECS = SPECS_DIR
 
 
 def _spec(tmp_path: Path, payload: dict[str, Any]) -> Any:

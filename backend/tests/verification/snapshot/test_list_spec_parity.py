@@ -30,9 +30,8 @@ from pathlib import Path
 
 import pytest
 from app.ai.extraction.generator.spec import load_spec
+from app.schema_specs import SPECS_DIR as _SPECS_DIR
 from app.verification.snapshot.documents_section import _LIST_SPECS
-
-_SPECS_DIR = Path(__file__).resolve().parents[3].parent / "docs" / "schema-specs"
 
 
 def _specs_by_document_type() -> dict[str, Path]:
@@ -48,7 +47,7 @@ def _specs_by_document_type() -> dict[str, Path]:
 
 def test_specs_dir_is_found() -> None:
     """Guard the path derivation — a wrong root would make every parity case vacuously pass."""
-    assert _SPECS_DIR.is_dir(), f"schema-specs not found at {_SPECS_DIR}"
+    assert _SPECS_DIR.is_dir(), f"schema specs not found at {_SPECS_DIR}"
     assert len(_specs_by_document_type()) > 100
 
 
@@ -58,7 +57,7 @@ def test_list_spec_matches_its_json_spec(doc_type: str) -> None:
     specs = _specs_by_document_type()
     spec_path = specs.get(doc_type)
     assert spec_path is not None, (
-        f"{doc_type} is registered in _LIST_SPECS but has no docs/schema-specs entry — "
+        f"{doc_type} is registered in _LIST_SPECS but has no app/schema_specs entry — "
         "the spec is the source of truth, so a registered list with no spec cannot be regenerated"
     )
     declared = {nl.name: nl for nl in load_spec(spec_path).nested_lists}

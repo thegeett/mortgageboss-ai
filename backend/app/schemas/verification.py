@@ -130,6 +130,11 @@ class VerificationRunPublic(BaseModel):
     yellow_count: int
     green_count: int
     total_cost_estimate: float | None
+    #: Why a FAILED run failed. The run marks itself failed with a reason (an un-enqueued pass, a
+    #: dead AI call, a governed pass exhausted after retries), and without this field none of that
+    #: reached the client: a failed run looked to the processor exactly like a run that never
+    #: happened. Null on every non-failed run.
+    error_detail: str | None
 
     @classmethod
     def from_model(cls, run: Verification) -> VerificationRunPublic:
@@ -143,6 +148,7 @@ class VerificationRunPublic(BaseModel):
             yellow_count=run.yellow_count,
             green_count=run.green_count,
             total_cost_estimate=run.total_cost_estimate,
+            error_detail=run.error_detail,
         )
 
 

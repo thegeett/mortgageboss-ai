@@ -14,7 +14,6 @@ Two things are proven here:
 """
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -29,6 +28,7 @@ from app.ai.extraction.identity_document import (
     extract_identity_document,
 )
 from app.models.extraction import ExtractionStatus
+from app.schema_specs import SPECS_DIR
 
 PDF_BYTES = b"%PDF-1.7 dummy identity_document"
 
@@ -44,7 +44,7 @@ _SPEC_FILES = (
     "108-work-visa-ead-card",
     "121-passport",
 )
-_SPECS_DIR = Path(__file__).resolve().parents[3] / "docs" / "schema-specs"
+_SPECS_DIR = SPECS_DIR
 
 
 def _core(value: object, page: int | None = 1, snippet: str | None = "snip") -> dict:
