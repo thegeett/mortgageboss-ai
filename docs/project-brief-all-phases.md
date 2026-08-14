@@ -38,7 +38,8 @@ nobody knows. Almost every hard-won lesson in this project is a corollary of tha
 repo              ~/Geet/project/loan-processing/mortgageboss-ai   (branch: phase3_bucket_2)
 bedrock worktree  ../mbai-bedrock                                  (branch: bedrock_integration)
 
-extraction specs  docs/schema-specs/*.json      ← THE SOURCE OF TRUTH for every extractor (121 files)
+extraction specs  backend/app/schema_specs/*.json   ← THE SOURCE OF TRUTH for every extractor (121 files)
+                    (inside the package so they ship in the image — the loader globs THIS dir only)
 rule specs        backend/app/verification/rules/specs/*.yaml      (45 written, 37 active)
 rule/tag data     backend/app/verification/rules/
                     fact_tags.csv · rule_tags.csv · rule_kinds.csv
@@ -279,7 +280,7 @@ searching for "replacement cost" finds it on all three and can invert the answer
 top 8 documents cover 70 of 133 rules (52%).
 
 ### What LP-434 → LP-475 delivered
-- **121 JSON specs in `docs/schema-specs/`** — the source of truth — plus a **generator with a validator
+- **121 JSON specs in `backend/app/schema_specs/`** — the source of truth — plus a **generator with a validator
   that refuses rather than emitting broken code**, and 91 generated extractors.
 - **+232 typed fields and 9 lists** on top of the original 18 types; **109+ document types** wired
   (was 18); **60+ nested lists** captured.

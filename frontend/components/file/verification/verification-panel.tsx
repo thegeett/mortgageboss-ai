@@ -117,18 +117,40 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
 
   const dialBusy = setAggression.isPending || updatePreferences.isPending;
 
+  // `run.isError` is STICKY — TanStack holds it until the next `mutate` — so read on its own it would
+  // pin the "didn't reach the server" banner for the life of the mount, outranking (and hiding) both a
+  // real run failure and the staleness banner even after the panel had refetched a fresh run. Bound it
+  // to what it actually claims: the failed click is the most recent thing we know only until the server
+  // reports a run we had not seen when it failed — one triggered elsewhere, or a retry that did land.
+  // Stamped during render (the "value from a previous render" pattern), reset once the error clears.
+  const latestRunId = data?.latest_run?.id ?? null;
+  const [runIdAtRequestFailure, setRunIdAtRequestFailure] = useState<string | null | undefined>(
+    undefined,
+  );
+  if (run.isError && runIdAtRequestFailure === undefined) setRunIdAtRequestFailure(latestRunId);
+  if (!run.isError && runIdAtRequestFailure !== undefined) setRunIdAtRequestFailure(undefined);
+  const requestFailed = run.isError && runIdAtRequestFailure === latestRunId;
+
   // The two ways "Run verification" can come to nothing, unified into one thing to render. Both were
   // silent: the trigger POST had no `onError` at all, and a run that reached the worker and FAILED
   // there was never rendered. Either way the button re-enabled over an unchanged panel.
   //   - `request` — the POST itself was rejected (offline, 5xx, an expired session). No run exists.
   //   - `run` — a run was created and the worker failed it; `error_detail` carries the reason.
-  // The request error wins while it is set: it is the more recent event, and it means the click the
+  // The request error wins while it is current: it is the more recent event, and it means the click the
   // processor just made did not land at all.
-  const failedRun: FailedRun | null = run.isError
+  const failedRun: FailedRun | null = requestFailed
     ? { kind: "request" }
     : data?.latest_run?.status === "failed"
       ? { kind: "run", detail: data.latest_run.error_detail ?? null }
       : null;
+
+  // A FAILED run is the one case where a plain re-run is a no-op: the fingerprint cache is keyed on the
+  // last COMPLETED run, so if the inputs have not changed since that run the POST returns it WITHOUT
+  // creating a new one (api/verification.py) — the failed run stays `latest_run`, the banner stays up,
+  // and the panel does not move. That is the "the button does nothing" report this banner exists to
+  // explain, so force past the cache exactly there. A failed *request* never reached the server: no run
+  // was created and nothing about the cache is suspect, so a network blip must not buy a full AI pass.
+  const triggerRun = useCallback(() => run.mutate(failedRun?.kind === "run"), [run, failedRun]);
 
   const pickLevel = useCallback(
     (level: AggressionLevel) => {
@@ -201,12 +223,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button
-            size="sm"
-            className="gap-1.5"
-            disabled={running}
-            onClick={() => run.mutate(false)}
-          >
+          <Button size="sm" className="gap-1.5" disabled={running} onClick={triggerRun}>
             {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             {running ? "Running…" : "Run verification"}
           </Button>
@@ -250,7 +267,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             onResetToDefault={resetToDefault}
             onSetAsDefault={setAsDefault}
             onDismissConsequence={() => setConsequence(null)}
-            onRetry={() => run.mutate(true)}
+            onRetry={triggerRun}
           />
         )}
       </CardContent>
@@ -471,10 +488,10 @@ function SubmitStatus({
  * "Rule-engine pass failed after retries" are different operational problems, and a processor
  * forwarding a screenshot is the fastest route from "the button is broken" to the actual cause. It
  * degrades to the generic line when the detail is null (an older run, or a version-skewed backend).
- * Retry forces past the fingerprint cache: the cache is keyed on the last COMPLETED run, so a plain
- * re-run after a failure is not a cache hit — but forcing also covers the case where the last
- * completed run's inputs still match, which would otherwise return that stale run and look like
- * another no-op.
+ * Retry re-triggers exactly like the header button (see ``triggerRun``): forcing past the fingerprint
+ * cache after a failed RUN, where the last completed run's inputs still matching would otherwise
+ * return that stale run and look like another no-op; a plain re-run after a failed REQUEST, which
+ * created no run and left the cache above suspicion.
  */
 function FailedRunBanner({
   run,

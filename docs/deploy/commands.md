@@ -156,19 +156,25 @@ grants take a couple of minutes to take effect, and the error says so).
 Grant it where the status is **not** `AUTHORIZED` — take the offer token, then accept it.
 The model id here is the **base** model, never the `us.` inference-profile id:
 
+The offer token is per region too, so both calls take the same `$r` — grant and token must not
+come from different regions. Edit the region list down to the ones the check above reported as
+not `AUTHORIZED`:
+
 ```bash
 export AWS_PROFILE=mbai-staging-admin
 MODEL=anthropic.claude-sonnet-4-5-20250929-v1:0   # or anthropic.claude-haiku-4-5-20251001-v1:0
 
-OFFER=$(aws bedrock list-foundation-model-agreement-offers --region us-east-1 \
-  --model-id "$MODEL" --query 'offers[0].offerToken' --output text)
+for r in us-east-1 us-east-2 us-west-2; do
+  OFFER=$(aws bedrock list-foundation-model-agreement-offers --region "$r" \
+    --model-id "$MODEL" --query 'offers[0].offerToken' --output text)
 
-aws bedrock create-foundation-model-agreement --region us-east-1 \
-  --model-id "$MODEL" --offer-token "$OFFER"
+  aws bedrock create-foundation-model-agreement --region "$r" \
+    --model-id "$MODEL" --offer-token "$OFFER"
+done
 ```
 
-Run it once per region you have not granted. Then wait ~2 minutes and re-run the converse
-smoke test above — the console's **Bedrock → Model access** page does the same thing.
+Then wait ~2 minutes and re-run the converse smoke test above — the console's
+**Bedrock → Model access** page does the same thing.
 
 Note this is an **account-wide** grant, not a per-role one: the ECS task role only needs
 `bedrock:InvokeModel` / `bedrock:InvokeModelWithResponseStream` on the inference-profile ARN

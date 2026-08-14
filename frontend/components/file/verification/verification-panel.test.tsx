@@ -378,6 +378,18 @@ describe("VerificationPanel", () => {
       expect(runMutate.mock.calls[0]?.[0]).toBe(true); // force=true, not a plain re-run
     });
 
+    it("the header button forces too after a failed run — a plain re-run returns the cached run", () => {
+      // The cache is keyed on the last COMPLETED run: with the inputs unchanged, a plain re-run returns
+      // that run without creating a new one, so the failed run stays `latest_run` and the panel does not
+      // move — the banner would sit over a button that genuinely does nothing.
+      mock({
+        data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: "boom" } },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      fireEvent.click(screen.getByRole("button", { name: /run verification/i }));
+      expect(runMutate).toHaveBeenCalledWith(true);
+    });
+
     it("reports a trigger request that never reached the server", () => {
       useRunVerificationMock.mockReturnValue({
         mutate: runMutate,
@@ -387,6 +399,38 @@ describe("VerificationPanel", () => {
       mock();
       render(<VerificationPanel fileId="LF-1" />);
       expect(screen.getByRole("alert").textContent).toContain("didn't reach the server");
+    });
+
+    it("retries a failed REQUEST plainly — a network blip must not buy a forced AI pass", () => {
+      // Nothing reached the server, so no run was created and the cache is above suspicion.
+      useRunVerificationMock.mockReturnValue({
+        mutate: runMutate,
+        isPending: false,
+        isError: true,
+      });
+      mock();
+      render(<VerificationPanel fileId="LF-1" />);
+      fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+      expect(runMutate).toHaveBeenCalledWith(false);
+    });
+
+    it("steps aside once a newer run lands — the sticky request error can't pin the banner", () => {
+      // `isError` stays set until the next `mutate`, so a processor who stops retrying would otherwise
+      // be stuck with a wrong, un-dismissable alert that also hides the real state of the file.
+      useRunVerificationMock.mockReturnValue({
+        mutate: runMutate,
+        isPending: false,
+        isError: true,
+      });
+      mock();
+      const { rerender } = render(<VerificationPanel fileId="LF-1" />);
+      expect(screen.getByRole("alert").textContent).toContain("didn't reach the server");
+
+      // A run triggered elsewhere lands (and the file is stale); `isError` is still set.
+      mock({ data: { ...STATUS, latest_run: { ...baseRun(), id: "run-2" }, stale: true } });
+      rerender(<VerificationPanel fileId="LF-1" />);
+      expect(screen.queryByText(/didn't reach the server/)).toBeNull();
+      expect(screen.getByText(/The file changed/)).toBeDefined(); // no longer suppressed
     });
 
     it("stays quiet on a completed run", () => {

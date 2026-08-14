@@ -11,7 +11,8 @@ _2026-08-11. **Read this first when picking the work up in a new chat.**_
 repo              ~/Geet/project/loan-processing/mortgageboss-ai   (branch phase3_bucket_2)
 bedrock worktree  ../mbai-bedrock                                  (branch bedrock_integration)
 
-specs             docs/schema-specs/*.json        ← THE SOURCE OF TRUTH for every extractor
+specs             backend/app/schema_specs/*.json ← THE SOURCE OF TRUTH for every extractor
+                    (moved into the package so they ship in the image; was docs/schema-specs/)
 Priya's rulings   docs/domain/priya-rulings-2026-08.md
 tickets           docs/tickets/LP-*.md
 ADRs              through ADR-372
@@ -86,7 +87,7 @@ a **compensation statement** must reach `compensation_statement` (not `commissio
 ## What was done (LP-434 → LP-475)
 
 ### The extraction build-out
-108 JSON specs in `docs/schema-specs/` (**the source of truth**) · a generator with a validator that
+108 JSON specs in `backend/app/schema_specs/` (**the source of truth**) · a generator with a validator that
 **refuses rather than emitting broken code** · 91 generated extractors · **+232 typed fields and 9 lists**
 added to the original 18 · Tier 2 merged into Tier 1 · the schema/catalog vocabularies reconciled (109 of 109
 resolve).
