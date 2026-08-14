@@ -46,14 +46,14 @@ _CALCULATOR_ITEMS: list[dict[str, str | None]] = [
         "description": "FHA reserves count only this % of vested retirement balances",
         "value": "60",
         "unit": "percent",
-        "citation": "HUD Handbook 4000.1 II.A.4",
+        "citation": "HUD Handbook 4000.1 (rev 08/14/2019, verified) — up to 60% of retirement-account value less existing loans, UNLESS the borrower gives conclusive evidence a higher percentage may be withdrawn. A default, not an absolute cap. Fannie applies no haircut.",
     },
     {
         "item_id": "calc.conforming_loan_limit",
         "description": "FHFA conforming baseline loan limit (max-loan constraint)",
-        "value": "806500",
+        "value": "832750",
         "unit": "usd",
-        "citation": "FHFA conforming limit (2025/26 baseline — changes annually + by county)",
+        "citation": "FHFA, Conforming Loan Limit Values for 2026 (page dated 2025-11-25, verified) — one-unit BASELINE. Varies by county (high-cost ceiling $1,249,125), by unit count, and by delivery year; refreshed each November.",
     },
     {
         "item_id": "calc.required_reserve_months",

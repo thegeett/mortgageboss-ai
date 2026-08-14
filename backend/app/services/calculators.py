@@ -74,8 +74,22 @@ CALCULATORS = ("mortgage_insurance", "self_employed", "reserves", "max_loan")
 # Grounded-starter methodology constants (validate with Priya — these are domain judgment).
 # The MI starters (PMI rate, FHA annual-MIP rate, FHA duration LTV) live in app.services.mi
 # (LP-91) — the single MI source the DTI also consumes.
-_FHA_RETIREMENT_FACTOR = Decimal("0.60")  # LP-84's FHA 60% retirement-reserve haircut
-_CONFORMING_LOAN_LIMIT = Decimal("806500")  # 2025/26 baseline FHFA conforming (starter — verify)
+# VERIFIED (tier P, HUD Handbook 4000.1, read from HUD's hosted PDF 2026-08-13): "The Mortgagee may
+# include up to 60 percent of the value of assets, less any existing loans, from the Borrower's
+# retirement accounts, such as IRAs, thrift savings plans, 401(k) plan, and Keogh accounts, unless the
+# Borrower provides conclusive evidence that a higher percentage may be withdrawn". So 60% is a
+# DEFAULT, not an absolute cap — a borrower with conclusive withdrawal evidence may count more, which
+# the processor can still do through the override line. Fannie applies NO haircut (conventional is
+# 1.00), which is why this factor is program-gated.
+_FHA_RETIREMENT_FACTOR = Decimal("0.60")
+# FHFA, "Conforming Loan Limit Values for 2026", page dated 2025-11-25 (tier P, fetched 2026-08-13):
+# "$832,750, an increase of $26,250 from 2025". WAS 806500 — the 2025 baseline, stale from 2026-01-01.
+# THIS IS THE ONE-UNIT BASELINE ONLY. The real limit varies by COUNTY (up to a $1,249,125 high-cost
+# ceiling), by UNIT COUNT, and by delivery YEAR, and the snapshot carries no county — which is exactly
+# why PE-1 (LP-496a) decides only at the two bounds and ABSTAINS in the band between them rather than
+# comparing against this single number. This constant is the max-loan calculator's manual STARTER line,
+# which a processor overrides per file; it is not, and must not become, a conformance test.
+_CONFORMING_LOAN_LIMIT = Decimal("832750")
 _STARTER_REQUIRED_RESERVE_MONTHS = Decimal("2")
 
 # Asset-type keywords (case-insensitive) — the reserves auto-population (Tier-2 heuristics).
