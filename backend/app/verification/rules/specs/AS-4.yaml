@@ -7,8 +7,12 @@ numeric_check: true
 criteria: >-
   The loan file's reserve-eligible assets, expressed in months of PITIA, must meet the reserve requirement
   for this loan's occupancy/property. Fewer months than required means the file lacks adequate reserves.
-  The requirement is a MATRIX (occupancy × property × units × program) — this encodes the agency-standard
-  occupancy cells; an un-encoded cell (Priya-pending) yields couldnt_check, never a guessed requirement.
+  The requirement is a MATRIX — this encodes B3-4.1-01's occupancy × unit-count cells: none for a
+  one-unit principal residence, 2 months for a second home, and 6 months for a two- to four-unit
+  principal residence or an investment property. An un-encoded cell, an absent occupancy, and a
+  principal residence whose unit count is unknown all yield couldnt_check, never a guessed requirement
+  — for that last cell the answer is 0 or 6 months and nothing between, so a default would decide the
+  verdict rather than inform it.
 applicability:
   scope: the loan file's reserve-eligible assets and its reserve requirement
   trigger: once per loan, comparing reserve months available to months required
@@ -18,18 +22,39 @@ required_inputs:
     description: reserve-eligible assets in months of PITIA (the wired reserves calculator — gated → couldnt_check)
   - name: required_months
     snapshot_path: 'tags.by_subject["loan"]["reserves.required_months"]'
-    description: the required reserve months, selected from occupancy (derived; abstains for Priya-pending cells)
+    description: >-
+      the required reserve months, selected from occupancy AND financed unit count (derived, LP-497;
+      abstains on an unknown occupancy, an unknown unit count for a principal residence, and any
+      property above four units)
 reference_values:
   priya_validated: false
-  threshold_needs_signoff: true
+  # LP-497 — dropped to false. Every encoded cell is TIER P, read from Fannie's own B3-4.1-01 page
+  # (dated 08/07/2024, fetched 2026-08-13). Nothing here is a recalled or secondary figure, so there is
+  # no pending threshold for an expert to sign off; the cells that are NOT encoded abstain rather than
+  # waiting under a bar.
+  threshold_needs_signoff: false
+  values:
+    # A test pins all five against the recipe constants.
+    reserve_months_one_unit_primary: "0"
+    reserve_months_second_home: "2"
+    reserve_months_multi_unit_primary: "6"
+    reserve_months_investment: "6"
+    reserve_max_residential_units: "4"
   guideline_text: >-
-    Fannie Mae Selling Guide B3-4.1-01 — reserve requirements by occupancy/property (e.g. investment 6
-    months, second home 2 months, 1-unit primary 0). The FULL matrix (2-4 units, LTV, multiple financed
-    properties, FHA/VA overlays) is PENDING Priya; un-encoded cells couldnt_check.
+    There is no minimum reserve requirement for one-unit principal residence transactions. A second
+    home requires two months' reserves. A two- to four-unit principal residence, an investment
+    property, or a cash-out refinance with a DTI over 45% requires six months' reserves. Where the
+    borrower owns other financed properties, additional reserves of 2% (1-4 properties), 4% (5-6) or
+    6% (7-10, DU only) of the aggregate unpaid principal balance are required (Fannie Mae Selling
+    Guide B3-4.1-01, Minimum Reserve Requirements, page dated 08/07/2024).
 subject_enumeration: loan
 subject_key_fields:
   - loan
-evidence_required: the reserve months available (from the calculator) vs the months required
+evidence_required: >-
+  The reserve months available (from the calculator) and the months required, WITH the occupancy and
+  unit count that selected the requirement — so a processor can see which B3-4.1-01 cell applied. A
+  `satisfied` must not be read as "every reserve requirement is met": the financed-property overlay is
+  not evaluated (see below), so the finding names what was checked.
 guideline_reference: "Fannie Mae Selling Guide B3-4.1-01 (Minimum Reserve Requirements)."
 spec_version: 1
 deterministic:
@@ -54,4 +79,11 @@ deterministic:
         occupancy/property is correctly applied.
     - verdict: satisfied
       default: true
-      reasoning: reserve months available meet or exceed the {required_months} months required
+      # NOT a blanket all-clear, and the wording is deliberate. B3-4.1-01 also requires reserves of
+      # 2%/4%/6% of aggregate UPB when the borrower owns other financed properties, and 6 months for a
+      # cash-out refinance over 45% DTI. Neither the financed-property count nor the aggregate UPB
+      # reaches the snapshot, so neither overlay is evaluated. Both can only RAISE the requirement, so
+      # this verdict is scoped to what was actually checked.
+      reasoning: >-
+        reserve months available meet or exceed the {required_months} months required for this
+        occupancy and unit count

@@ -802,3 +802,46 @@ false condition.
   ever built, which condition callouts do processors actually see FHA appraisers write?
 - **FHFA's "6 counties moved into high-cost"** figure could not be verified; FHFA's own release states
   only that values rose in "all but 32" counties.
+
+## LP-497 — reserves and NSF (AS-4 / AS-5)
+
+### 1. What were you answering when you labelled the five reserve-eligibility cases `no`?
+
+All five were standard checking/savings accounts, and the model called them reserve-eligible. LP-497
+diagnosed the disagreement as a question mismatch rather than a model error: the prompt asks about
+**account type**, while the `no` appears to mean **"these funds are the down payment / EMD, so they
+are not reserves for this loan"** — which is the funds-to-close rule, and which `compute_reserves`
+already applies at loan level.
+
+- Is that reading right? If so the tag was asking the wrong question and AS-4 no longer depends on it.
+- If it is **not** right — if `no` encoded a lender overlay, or a restriction on those specific
+  accounts — then we have removed a real signal and need to know what it was.
+- More generally: when you assess reserve eligibility, are you judging the **account** or the
+  **remaining balance after closing**?
+
+### 2. Is your NSF tolerance a firm policy value we can encode?
+
+The Selling Guide sets no NSF or overdraft count tolerance — confirmed by research, matching your
+ruling that it is internal policy. AS-7 therefore reports the count and passes no verdict on it.
+
+- Is there a count that triggers a condition in practice (any NSF? three in twelve months?), and does
+  it vary by lender?
+- Does **event type** change it — a returned ACH vs a paid-into-overdraft item vs a returned check?
+- Should an NSF on a **business** account be treated differently from a personal one?
+
+### 3. The FHA retirement factor
+
+`reserves.py` applies a `0.60` factor to retirement assets for FHA and `1.00` for conventional. The
+conventional side matches the guideline (Fannie applies no haircut, confirming your ruling that the
+60/70% figures are not Fannie's). The FHA `0.60` predates this work and carries no citation in code.
+
+- Is 60% the right FHA figure today, and where does it come from?
+
+### 4. What the research could not obtain
+
+- **B3-4.1-01's month counts were fetched** (tier P) — that gap is closed. What is **not** modelled is
+  the 2%/4%/6%-of-aggregate-UPB overlay for other financed properties, because neither the financed-
+  property count nor the aggregate UPB reaches a loan file. How often does a borrower with other
+  financed properties reach you, and where would that count come from?
+- **The cash-out-refinance-over-45%-DTI cell** is likewise not modelled — is that combination common
+  enough to matter?

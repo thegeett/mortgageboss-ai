@@ -27,6 +27,8 @@ from uuid import UUID
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
+    CalculationEntry,
+    CalculationsSection,
     DocumentEntry,
     DocumentsSection,
     MismoSection,
@@ -2203,6 +2205,132 @@ def build_pe3_conventional_snapshot() -> Snapshot:
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-497 — AS-4 (reserves adequacy).
+#
+# CONSTRUCTED CASES. The corpus cannot exercise this rule: only 5 loan files carry a bank statement
+# and the reserves calculator needs a PITI divisor from the DTI calculation, so a corpus run abstains.
+# These pin the cell that carried a RECORDED FALSE-GREEN before this ticket — a 2-4 unit principal
+# residence, which requires 6 months, read as requiring 0 under the old occupancy-only map.
+# Amounts are invented; no borrower PII enters the repo.
+# --------------------------------------------------------------------------- #
+_LOAN_AS4_ONE_UNIT_OK = UUID("97000000-0000-4000-8000-000000000001")
+_LOAN_AS4_MULTI_UNIT_SHORT = UUID("97000000-0000-4000-8000-000000000002")
+_LOAN_AS4_MULTI_UNIT_OK = UUID("97000000-0000-4000-8000-000000000003")
+_LOAN_AS4_UNITS_UNKNOWN = UUID("97000000-0000-4000-8000-000000000004")
+_LOAN_AS4_INVESTMENT_SHORT = UUID("97000000-0000-4000-8000-000000000005")
+_LOAN_AS4_SECOND_HOME_OK = UUID("97000000-0000-4000-8000-000000000006")
+_LOAN_AS4_NO_OCCUPANCY = UUID("97000000-0000-4000-8000-000000000007")
+_LOAN_AS4_GATED_CALC = UUID("97000000-0000-4000-8000-000000000008")
+_LOAN_AS4_FIVE_UNITS = UUID("97000000-0000-4000-8000-000000000009")
+
+
+def _as4_snapshot(
+    loan_id: UUID,
+    *,
+    occupancy: str | None,
+    units: str | None,
+    months_available: str | None,
+    gated: bool = False,
+) -> Snapshot:
+    """A loan whose reserves calculation is already computed, plus the MISMO facts that select the
+    requirement. ``months_available=None`` with ``gated=True`` is the fail-closed calculator."""
+    mismo: dict[str, SnapshotField] = {}
+    if occupancy is not None:
+        mismo["property.occupancy"] = _f(occupancy)
+    if units is not None:
+        mismo["property.financed_unit_count"] = _f(units)
+    reserves = CalculationEntry(
+        value={"months_available": months_available},
+        gated=gated,
+        gate_reason="no PITI divisor — the housing payment is unknown" if gated else None,
+    )
+    return Snapshot(
+        loan_file_id=loan_id,
+        run_id=_RUN,
+        created_at=_FILE_DATE,
+        documents=DocumentsSection.present([]),
+        mismo=MismoSection.present(mismo),
+        calculations=CalculationsSection.present(reserves=reserves),
+        tags=TagsSection.present({}),
+    )
+
+
+def build_as4_one_unit_primary_snapshot() -> Snapshot:
+    """A one-unit principal residence requires NO reserves (B3-4.1-01), so 0.5 months is SATISFIED."""
+    return _as4_snapshot(
+        _LOAN_AS4_ONE_UNIT_OK, occupancy="primary_residence", units="1", months_available="0.5"
+    )
+
+
+def build_as4_multi_unit_primary_short_snapshot() -> Snapshot:
+    """THE CASE THAT WAS A FALSE-GREEN. A 3-unit principal residence requires 6 months; this file has
+    2.0. Under the old occupancy-only map every principal residence required 0, so this read
+    SATISFIED — a real reserve shortfall reported as adequate. It must FIRE."""
+    return _as4_snapshot(
+        _LOAN_AS4_MULTI_UNIT_SHORT,
+        occupancy="primary_residence",
+        units="3",
+        months_available="2.0",
+    )
+
+
+def build_as4_multi_unit_primary_ok_snapshot() -> Snapshot:
+    """The same 3-unit primary with 7.0 months — above the 6 required, so SATISFIED. Pins that the
+    multi-unit cell is a real comparison and not a blanket fire."""
+    return _as4_snapshot(
+        _LOAN_AS4_MULTI_UNIT_OK, occupancy="primary_residence", units="3", months_available="7.0"
+    )
+
+
+def build_as4_units_unknown_snapshot() -> Snapshot:
+    """A principal residence with NO stated unit count. The requirement is 0 or 6 and nothing between,
+    so the answer decides the verdict: 2.0 months clears 0 and fails 6. It must ABSTAIN, not default
+    to one unit — defaulting is exactly the false-green this ticket removed."""
+    return _as4_snapshot(
+        _LOAN_AS4_UNITS_UNKNOWN, occupancy="primary_residence", units=None, months_available="2.0"
+    )
+
+
+def build_as4_investment_short_snapshot() -> Snapshot:
+    """An investment property requires 6 months; 3.0 available -> FIRED."""
+    return _as4_snapshot(
+        _LOAN_AS4_INVESTMENT_SHORT, occupancy="investment", units="1", months_available="3.0"
+    )
+
+
+def build_as4_second_home_ok_snapshot() -> Snapshot:
+    """A second home requires 2 months; 4.0 available -> SATISFIED."""
+    return _as4_snapshot(
+        _LOAN_AS4_SECOND_HOME_OK, occupancy="second_home", units="1", months_available="4.0"
+    )
+
+
+def build_as4_no_occupancy_snapshot() -> Snapshot:
+    """No stated occupancy -> no requirement can be selected -> COULDNT_CHECK."""
+    return _as4_snapshot(_LOAN_AS4_NO_OCCUPANCY, occupancy=None, units="1", months_available="1.0")
+
+
+def build_as4_gated_calculation_snapshot() -> Snapshot:
+    """The reserves calculator is GATED (no PITI divisor), so months_available is null. The rule must
+    abstain rather than read a missing number as zero months and fire."""
+    return _as4_snapshot(
+        _LOAN_AS4_GATED_CALC,
+        occupancy="investment",
+        units="1",
+        months_available=None,
+        gated=True,
+    )
+
+
+def build_as4_five_units_snapshot() -> Snapshot:
+    """Five units is beyond B3-4.1-01's one- to four-unit residential table -> ABSTAIN rather than
+    apply a requirement the guide does not state for it."""
+    return _as4_snapshot(
+        _LOAN_AS4_FIVE_UNITS, occupancy="primary_residence", units="5", months_available="1.0"
+    )
+
+
 __all__ = [
     "EXPECTED_HOA_MONTHLY",
     "EXPECTED_INS_BASIS_ACV",
@@ -2215,6 +2343,15 @@ __all__ = [
     "build_address_match_snapshot",
     "build_address_mismatch_snapshot",
     "build_address_unit_variant_snapshot",
+    "build_as4_five_units_snapshot",
+    "build_as4_gated_calculation_snapshot",
+    "build_as4_investment_short_snapshot",
+    "build_as4_multi_unit_primary_ok_snapshot",
+    "build_as4_multi_unit_primary_short_snapshot",
+    "build_as4_no_occupancy_snapshot",
+    "build_as4_one_unit_primary_snapshot",
+    "build_as4_second_home_ok_snapshot",
+    "build_as4_units_unknown_snapshot",
     "build_au3_approve_ineligible_snapshot",
     "build_au3_approve_without_eligibility_snapshot",
     "build_au3_du_approve_eligible_snapshot",

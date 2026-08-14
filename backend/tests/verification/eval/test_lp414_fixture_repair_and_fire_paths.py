@@ -167,7 +167,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 843
+    assert len(results) == 844
     assert (
         Counter(r.verdict.value for r in results)
         == {
@@ -177,7 +177,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             # confident "not a letter" and read not_applicable. They now abstain, which is what the
             # recipe's own comment and LO-2's spec both promised. The four move OUT of
             # not_applicable and INTO couldnt_check; nothing else changed.
-            "couldnt_check": 287,  # LP-496a +2 — PE-1 and PE-3, both LOAN-scoped and both abstaining on LF-6T3N's undetermined loan program. NEITHER CLEARS ON AN ABSENCE: the fixture states no program, so PE-1 cannot select a conforming limit and PE-3 cannot tell whether FHA's MRI applies. satisfied/fired/needs_review are UNCHANGED at 21/2/4, so the +2 is the entire movement and it is intended.  # LP-495b +5 — OC-3 x1 (loan-scoped) and IN-13 x2 + IN-14 x2 (per-borrower, 2 borrowers); DT-7 held  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 288,  # LP-497 +1 — AS-4, loan-scoped, abstaining because LF-6T3N states no occupancy so no B3-4.1-01 cell can be selected. satisfied/fired/needs_review UNCHANGED at 21/2/4.  # LP-496a +2 — PE-1 and PE-3, both LOAN-scoped and both abstaining on LF-6T3N's undetermined loan program. NEITHER CLEARS ON AN ABSENCE: the fixture states no program, so PE-1 cannot select a conforming limit and PE-3 cannot tell whether FHA's MRI applies. satisfied/fired/needs_review are UNCHANGED at 21/2/4, so the +2 is the entire movement and it is intended.  # LP-495b +5 — OC-3 x1 (loan-scoped) and IN-13 x2 + IN-14 x2 (per-borrower, 2 borrowers); DT-7 held  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 529,  # LP-495a review -4 (see couldnt_check above)  # LP-495a +74 — RE-1 x22 + DT-6 x22 (classified non-statement docs) + LO-2 x30 (no LOE of any type on LF-6T3N)  # +PC-8 x25 (LP-493 — the 25 classified non-contract documents)  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
@@ -201,6 +201,9 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         # tell whether FHA's minimum required investment applies at all.
         "PE-1": "couldnt_check",
         "PE-3": "couldnt_check",
+        # LP-497 — AS-4 abstains: LF-6T3N states no occupancy, so no reserve requirement
+        # cell can be selected. Never satisfied on an absence.
+        "AS-4": "couldnt_check",
         "AS-8": "satisfied",
         "AS-10": "satisfied",
         "PC-7": "satisfied",

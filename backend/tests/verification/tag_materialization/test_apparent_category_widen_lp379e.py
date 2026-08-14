@@ -239,5 +239,8 @@ def test_no_rule_activation_changed() -> None:
             # tier. PE-2 and PE-4 are HELD.
             "PE-1",
             "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
         )
     )

@@ -353,6 +353,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             # abstains on a missing Minimum Decision Credit Score. PE-2 and PE-4 are HELD.
             "PE-1",
             "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -421,6 +424,9 @@ def test_active_set_is_base_plus_lp389() -> None:
             "OC-3",
             "PE-1",  # LP-496a — program eligibility (PE-2 / PE-4 held)
             "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
             "CR-13",
             "PR-6",
         }

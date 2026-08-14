@@ -103,7 +103,12 @@ def test_a_measured_and_failing_rule_can_never_take_this_path() -> None:
 
 
 def test_as4_is_still_held() -> None:
-    assert "AS-4" not in ACTIVE_RULE_IDS
+    # LP-497 — AS-4 is now LIVE, and the belief this line encoded is false. It was held on a 0/5
+    # measurement of stmt.is_reserve_eligible, a tag that is NOT in its chain (the reserves
+    # calculator reads DB assets and the DTI housing line). AS-7 is still held, on the enum
+    # defect LP-495c fixes, so the held-rule intent of this test is carried by AS-7.
+    assert "AS-4" in ACTIVE_RULE_IDS
+    assert "AS-7" not in ACTIVE_RULE_IDS
 
 
 # ======================================================================= #

@@ -61,6 +61,13 @@ from __future__ import annotations
 # assuming the 3.5% tier. PE-2 HELD: `program.fha_case_number` has NO source — no extractor field,
 # no FHA document type among the catalog's 163, and 0 hits across 2,558 raw PDFs. PE-4 HELD: no
 # producer, no cited MPR section, and ZERO appraisals in the corpus (LP-492's 0/2 is now 0/0). -> 72.
-EXPECTED_ACTIVE_RULE_COUNT: int = 72
+# LP-497 +AS-4 (reserves adequacy). It was blocked on a 0/5 measurement of stmt.is_reserve_eligible —
+# a tag NOT in its chain (build_reserves_view sums DB assets and takes its PITI divisor from the DTI
+# calculation). The 0/5 itself was a question mismatch, not a model failure. What it actually lacked
+# was its threshold, now tier P from B3-4.1-01 (08/07/2024), which also closed a recorded false-green:
+# the old occupancy-only map returned 0 for EVERY principal residence, so a 2-4 unit primary needing
+# 6 months read as satisfied. AS-7 is BUILT AND HELD — its enum coerces an honest abstain to a
+# degraded run (LP-495c unfixed), and 2,557 raw PDFs contain no real NSF event. -> 73.
+EXPECTED_ACTIVE_RULE_COUNT: int = 73
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

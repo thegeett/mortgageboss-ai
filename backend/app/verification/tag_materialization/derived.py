@@ -410,17 +410,31 @@ def _app_required_fields_present(
 # per-ACCOUNT, GROUP internally via resolve_accounts (LP-336) and fire-if-ANY (never masking a single
 # account — PIN #1's cousin avoided). Registry entries only; produce_derived_tags is untouched.
 # --------------------------------------------------------------------------- #
-# Agency-standard reserve requirements by occupancy (1-unit PURCHASE), Fannie Selling Guide B3-4.1-01. The
-# full matrix (2-4 units, LTV tiers, multiple financed properties, FHA/VA overlays) is Priya's — an
-# occupancy not in this map ABSTAINS (couldnt_check), never a guessed requirement. priya_validated:false.
+# Fannie Mae Selling Guide B3-4.1-01, Minimum Reserve Requirements — page dated 08/07/2024, TIER P,
+# fetched 2026-08-13 (LP-497). Pinned to AS-4.yaml's reference_values by test.
 #
-# KNOWN UNDER-STATEMENT (LP-323-AS-B review, Priya-pending): this keys on occupancy ONLY. The un-modeled
-# axes (unit count, # of financed properties, LTV) can only RAISE the requirement, so a NON-1-unit or
-# multiple-financed-property PRIMARY gets required=0 here and AS-4 can false-green a real reserve shortfall.
-# Not guarded in code: the reserve-matrix "units" axis is not a clean MISMO fact today (only
-# property.financed_unit_count exists, whose semantics are ambiguous for this axis), so a guard would be a
-# domain guess — deferred to Priya with the rest of the matrix rather than approximated here.
-_RESERVE_MONTHS_BY_OCCUPANCY = {"investment": "6", "second_home": "2", "primary_residence": "0"}
+#   one-unit principal residence ......... none ("There is no minimum reserve requirement")
+#   second home .......................... 2 months
+#   2-4 unit principal residence ......... 6 months
+#   investment property .................. 6 months
+#
+# THE UNIT COUNT IS LOAD-BEARING, AND ITS ABSENCE ABSTAINS. This replaces an occupancy-ONLY map that
+# carried a recorded defect (LP-323-AS-B): it returned 0 for every principal residence, so a 2-4 unit
+# primary — which requires 6 months — read as requiring nothing and AS-4 reported `satisfied` on a real
+# reserve shortfall. A primary residence whose unit count is unknown is therefore the one cell that
+# cannot be defaulted: the answer is either 0 or 6 and nothing in between, so guessing 0 re-creates
+# exactly the false-green this replaces. It abstains instead.
+#
+# The prior deferral said `property.financed_unit_count`'s semantics were "ambiguous for this axis".
+# LP-496a measured it: it reaches the snapshot on 10/19 loan files and is the SUBJECT property's
+# financed unit count, which is the axis B3-4.1-01 keys on. That is the fact this now reads.
+_RESERVE_MONTHS_ONE_UNIT_PRIMARY = "0"
+_RESERVE_MONTHS_SECOND_HOME = "2"
+_RESERVE_MONTHS_MULTI_UNIT_PRIMARY = "6"
+_RESERVE_MONTHS_INVESTMENT = "6"
+# The unit range B3-4.1-01's "two- to four-unit principal residence" row covers. Above 4 units the
+# property is not a 1-4 family residential loan at all and the guide's table does not apply — abstain.
+_RESERVE_MAX_RESIDENTIAL_UNITS = 4
 
 
 def _mismo_str(snapshot: Snapshot, key: str) -> str | None:
@@ -536,22 +550,71 @@ def _housing_insurance_monthly(
 def _reserves_required_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
-    """reserves.required_months — the reserve requirement (months of PITIA) selected from the loan's
-    occupancy (AS-4's threshold, the D1 derived-matrix pattern). ABSTAINS for any occupancy not in the
-    encoded agency-standard cells — the full matrix is Priya's, and a guessed requirement is a silent,
-    permanent error."""
+    """reserves.required_months — the reserve requirement in months of PITIA (AS-4's threshold).
+
+    Selected from occupancy AND unit count per B3-4.1-01. An occupancy outside the encoded cells, an
+    absent occupancy, and a principal residence whose unit count is unknown all ABSTAIN — a guessed
+    requirement is a silent, permanent error, and for the primary-residence cell the guess is between
+    0 and 6 months, which is the difference between clearing a file and catching it.
+
+    WHAT THIS DOES NOT MODEL, stated because `satisfied` means less than it appears to: B3-4.1-01 also
+    requires reserves of 2% / 4% / 6% of the aggregate UPB when the borrower owns 1-4 / 5-6 / 7-10
+    financed properties, and 6 months for a cash-out refinance with DTI over 45%. Neither the financed-
+    property count nor the aggregate UPB reaches the snapshot (`property.is_retained_reo` and
+    `property.retained_pitia` are vocabulary orphans with no recipe), so neither overlay is evaluated.
+    Both can only RAISE the requirement, so this figure is a FLOOR: AS-4's `satisfied` means "meets the
+    occupancy/unit requirement", never "meets every reserve requirement". AS-4's spec and its finding
+    text say so in words.
+    """
     occupancy = _mismo_str(snapshot, "property.occupancy")
     if occupancy is None:
         return _UNKNOWN, "occupancy is unknown — cannot select the reserve requirement"
-    months = _RESERVE_MONTHS_BY_OCCUPANCY.get(occupancy.casefold())
-    if months is None:
-        return (
-            _UNKNOWN,
-            f"no encoded reserve requirement for occupancy {occupancy!r} (Priya-pending)",
+    key = occupancy.casefold()
+
+    if key == "investment":
+        return _RESERVE_MONTHS_INVESTMENT, (
+            f"reserve requirement for an investment property: {_RESERVE_MONTHS_INVESTMENT} months "
+            "(Fannie B3-4.1-01, page dated 08/07/2024)"
         )
-    return (
-        months,
-        f"reserve requirement for {occupancy}: {months} months (Fannie B3-4.1-01, Priya-pending)",
+    if key == "second_home":
+        return _RESERVE_MONTHS_SECOND_HOME, (
+            f"reserve requirement for a second home: {_RESERVE_MONTHS_SECOND_HOME} months "
+            "(Fannie B3-4.1-01, page dated 08/07/2024)"
+        )
+    if key != "primary_residence":
+        return _UNKNOWN, f"no encoded reserve requirement for occupancy {occupancy!r}"
+
+    # The primary-residence cell splits on unit count, and the split is 0 vs 6 months.
+    units_raw = _mismo_str(snapshot, "property.financed_unit_count")
+    if units_raw is None:
+        return _UNKNOWN, (
+            "the file states a principal residence but not the financed unit count, and the reserve "
+            "requirement turns on it — none for one unit, 6 months for two to four (Fannie B3-4.1-01). "
+            "Abstaining rather than assuming one unit, which would report a 2-4 unit file as needing "
+            "no reserves"
+        )
+    try:
+        units = int(Decimal(units_raw))
+    except (InvalidOperation, ValueError):
+        return _UNKNOWN, (
+            f"the financed unit count reads {units_raw!r}, which is not a number — the reserve "
+            "requirement for a principal residence turns on it"
+        )
+    if units <= 0:
+        return _UNKNOWN, f"the financed unit count reads {units}, which is not a unit count"
+    if units == 1:
+        return _RESERVE_MONTHS_ONE_UNIT_PRIMARY, (
+            "no minimum reserve requirement for a one-unit principal residence "
+            "(Fannie B3-4.1-01, page dated 08/07/2024)"
+        )
+    if units <= _RESERVE_MAX_RESIDENTIAL_UNITS:
+        return _RESERVE_MONTHS_MULTI_UNIT_PRIMARY, (
+            f"reserve requirement for a {units}-unit principal residence: "
+            f"{_RESERVE_MONTHS_MULTI_UNIT_PRIMARY} months (Fannie B3-4.1-01, page dated 08/07/2024)"
+        )
+    return _UNKNOWN, (
+        f"the property is financed as {units} units, beyond the one- to four-unit residential table "
+        "B3-4.1-01 covers — abstaining rather than applying a requirement the guide does not state"
     )
 
 

@@ -106,16 +106,18 @@ def test_validation_gate_all_pending_and_signoff_set() -> None:
     # IH-1's went false at LP-447 when it reclassified structural, and PE-1/PE-3 went false here:
     # every one of their values is TIER P, read from FHFA's own 2026 release and HUD Handbook 4000.1
     # this ticket, so there is no pending threshold for an expert to sign off.
+    # LP-497 takes it to 18: AS-4's reserve months are now tier P from B3-4.1-01 (08/07/2024), read
+    # from Fannie's own page, replacing an occupancy-only map whose un-encoded cells were 'Priya-pending'.
     needs = rules_needing_threshold_signoff()
     assert all(rk.kind is RuleKindName.CALCULATIVE for rk in needs)
-    assert len(needs) == 19
+    assert len(needs) == 18
     # The named examples from the architecture summary must be in it.
     ids = {rk.rule_id for rk in needs}
     # PE-1 was removed from this list at LP-496a — its thresholds are tier P and signed off by
     # citation, not pending. It is asserted ABSENT below so the removal is deliberate, not a drop.
     for rid in ("AS-1", "IN-1", "CR-6", "PC-4", "DT-1"):
         assert rid in ids, rid
-    for rid in ("PE-1", "PE-3"):
+    for rid in ("PE-1", "PE-3", "AS-4"):
         assert rid not in ids, (
             f"{rid} must NOT need a threshold sign-off — its values are tier P, cited in its spec's "
             "reference_values and pinned to the recipe constants by test (LP-496a)"

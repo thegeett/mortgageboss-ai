@@ -108,17 +108,35 @@ AS-2:
     apparent_category's 1.0, so the number does not over-read the untested trigger.
 
 AS-4:
-  status: not-calibratable-yet
+  status: no-ai-dependency
   ships: auto
   threshold: null
   validated: false
-  load_bearing_ai_tags: [stmt.is_reserve_eligible]   # via the reserves calculator (months_available)
+  # LP-497 — CORRECTED, and the correction is the reason this rule could activate. The prior bar named
+  # stmt.is_reserve_eligible load-bearing "via the reserves calculator". IT IS NOT IN THIS CHAIN AT ALL:
+  # build_reserves_view sums assets from the DB (_sum_assets / _sum_assets_excluding) and takes its PITI
+  # divisor from the DTI calculator's housing line; reserves.required_months reads MISMO occupancy and
+  # financed unit count. Nothing AI-produced feeds either operand. The tag was blocking a rule it does
+  # not touch — the LP-495b shape (occupancy.rental_support had a producer its own bar denied), inverted.
+  load_bearing_ai_tags: []
+  input_resolves: true
   fp_fn: "FN (clears a file with insufficient reserves) >> FP (a false shortfall -> a human re-checks)"
   rationale: >-
-    the reserves calc is fed by stmt.is_reserve_eligible (AI). LP-390-6: now MEASURED — 0% (0/5, n=5,
-    LP-390-5): the model calls standard checking/savings reserve-eligible where Priya labels 'no' — a
-    SYSTEMATIC domain disagreement (not noise). Blocked now NOT on scoring but on a DOMAIN/PROMPT fix — a
-    Priya-confirmed reserve-eligible definition, then a prompt alignment (its own follow-up). No bar.
+    NO AI tag to measure — the whole chain is deterministic, so the 0/5 that blocked this rule was
+    measuring a tag it never reads. That 0/5 is itself diagnosed rather than inherited (LP-497): the
+    stmt_facts prompt asks about ACCOUNT TYPE ("a normal checking/savings balance"), while Priya was
+    answering whether those funds count as reserves for THIS loan — they do not, because they are the
+    funds to close. Both answers are correct to their own question, which is why the disagreement was
+    systematic rather than noisy, and compute_reserves ALREADY subtracts down payment and closing costs,
+    so the judgment the tag was invented to supply is redundant with arithmetic that is already right.
+    The threshold is TIER P: B3-4.1-01 (page dated 08/07/2024, fetched 2026-08-13) gives every encoded
+    cell — none for a one-unit principal residence, 2 months for a second home, 6 for a two- to four-unit
+    principal residence or an investment property. The prior occupancy-ONLY map carried a recorded
+    false-green (a 2-4 unit primary read as requiring 0); it now abstains when the unit count is unknown.
+    NOT MODELLED, and AS-4's `satisfied` is scoped accordingly: the 2%/4%/6%-of-aggregate-UPB overlay
+    for other financed properties, and the 6-month cash-out-over-45%-DTI cell. Neither the financed-
+    property count nor the aggregate UPB reaches the snapshot. Both can only RAISE the requirement, so
+    the encoded figure is a FLOOR and the rule never under-abstains in the dangerous direction.
 
 OC-1:
   # LP-406-4 — the first Bucket 2 rule, WRITTEN this ticket, HELD here. OC-1 is deterministic (structural), so
@@ -248,11 +266,30 @@ AS-7:
   ships: auto
   threshold: null
   validated: false
-  load_bearing_ai_tags: [txn.is_nsf_or_overdraft]   # via the derived stmt.nsf_count — verify the chain
+  load_bearing_ai_tags: [txn.is_nsf_or_overdraft]   # via the derived stmt.nsf_count — chain VERIFIED (LP-497)
   fp_fn: "FP (a false NSF flag) > FN, low stakes"
   rationale: >-
-    reads the derived stmt.nsf_count, aggregated from txn.is_nsf_or_overdraft (AI), UNSCORED. Blocked on
-    calibration (verify the derived chain when calibrating).
+    Chain VERIFIED end to end (LP-497): txn.is_nsf_or_overdraft (AI, its own statement-scoped txn_nsf
+    group) -> stmt.nsf_count (derived, _stmt_nsf_count) -> AS-7. Both producers exist and the aggregator
+    already abstains rather than reporting 0 when the tag is on no transaction, and when ANY transaction
+    reads "unknown" (a count that could be an undercount is not asserted).
+    HELD FOR TWO INDEPENDENT REASONS, neither of them calibration.
+    (1) THE ENUM DEFECT, unfixed. txn.is_nsf_or_overdraft is declared ["yes","no"] while its prompt
+    offers "unknown", so _build_tag coerces an honest abstain to confidence=None — exactly the marker
+    _scan_tag_degradations matches (value=="unknown" + produced_by==AI + confidence is None) — flipping
+    run.degraded. LP-495c is the fix; as of this ticket only its PLAN doc has landed (68186a1), not the
+    declaration change. Activating now would mark every statement the model cannot read as a BROKEN
+    PIPELINE. Re-check fact_tags.csv before activating.
+    (2) NO TRIGGER EXISTS IN ANY AVAILABLE DATA, measured rather than assumed. The loaded corpus has 10
+    bank statements and 151 transactions with ZERO NSF lines. The raw corpus is stronger evidence: 2,557
+    PDFs scanned by content, 223 files carrying an NSF/overdraft signal, 886 occurrences — and not one
+    is an actual event. They are overdraft-PROTECTION enrollment notices, fee schedules, lease terms and
+    servicing disclosures. The decisive test: 55 "Total Overdraft/NSF Fees" lines carry an amount and
+    EVERY ONE IS $0.00; posted fee lines with a non-zero amount: 0. So this is not an ingestion gap that
+    loading more documents would close.
+    NO TOLERANCE IS ENCODED. Priya ruled NSF an internal policy, not an agency rule, and the research
+    confirms the Selling Guide sets no NSF or overdraft count tolerance. None was invented; AS-7 reports
+    the count, and any tolerance must arrive as a declared lender-policy value.
 
 AS-11:
   # LP-393-5: liquidation_terms re-scored on the LP-393-1 income-scenario fixture — 100% (6/6) after LP-393-4a

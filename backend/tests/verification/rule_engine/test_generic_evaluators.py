@@ -181,6 +181,9 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             # number; no producer and zero corpus appraisals for the condition tag).
             "PE-1",
             "PE-3",
+            # LP-497 — AS-4 (reserves adequacy). Activated after its 0/5 blocker was diagnosed:
+            # stmt.is_reserve_eligible is not in its chain. AS-7 stays HELD on the enum defect.
+            "AS-4",
             "CR-13",
             "PR-6",
         }

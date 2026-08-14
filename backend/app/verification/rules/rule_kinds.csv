@@ -41,7 +41,7 @@ IN-16,Pay-stub-only documentation,Income,structural,deterministic_only,false,tru
 AS-1,Large-deposit sourcing sweep,Assets,calculative,deterministic_bookend+ai,true,,false,true,Each deposit vs income-derived threshold — arithmetic; AI recognizes payroll/transfers + per-deposit subject enum.
 AS-2,Earnest money deposit sourcing,Assets,structural,ai_fuzzy_match,false,false,false,false,Match contract EMD to a debit in verified account — match; sourcing judgment → AI.
 AS-3,Cash-to-close sufficiency,Assets,calculative,deterministic_bookend+ai,true,,false,false,assets vs down+costs+reserves — arithmetic.
-AS-4,Reserves adequacy,Assets,calculative,deterministic_bookend+ai,true,,false,true,reserve-eligible assets in months PITIA vs required — arithmetic; eligibility judgment.
+AS-4,Reserves adequacy,Assets,calculative,deterministic_bookend,true,,false,false,"Reserve-eligible assets in months PITIA vs required. LP-497: evaluation_path drops the +ai half and threshold_needs_signoff drops to false. NO AI tag is in this rule's chain — the reserves calculator reads DB assets and the DTI housing line, and reserves.required_months reads MISMO occupancy + unit count; the activation bar's claim that stmt.is_reserve_eligible is load-bearing was stale (that tag feeds nothing here). Every encoded cell is tier P from B3-4.1-01 (08/07/2024)."
 AS-5,Gift-fund documentation chain,Assets,structural,ai_fuzzy_match,false,false,false,false,Three-link presence (letter/donor/transfer); deposit-match → AI.
 AS-6,Account ownership,Assets,structural,ai_fuzzy_match,false,false,false,false,Holder name vs borrower — tolerant match.
 AS-7,NSF / overdraft flag,Assets,structural,ai_fuzzy_match,false,false,false,false,Detect NSF/overdraft count vs tolerance; ambiguous labels → AI.

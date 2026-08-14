@@ -64,6 +64,9 @@ _ACTIVATED = frozenset(
         # PE-2 and PE-4 are HELD and never reach this set.
         "PE-1",
         "PE-3",
+        # LP-497 — AS-4 (reserves adequacy), no-ai-dependency. Its 0/5 blocker measured a tag that is
+        # not in its chain; its real gap was the threshold, now tier P from B3-4.1-01. AS-7 stays held.
+        "AS-4",
         "CL-1",
         "CR-13",
         "PR-6",
@@ -153,7 +156,8 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # LP-495b — OC-3, IN-13 and IN-14 LEFT the held set on scenario-fixture rates; DT-7 JOINED it,
     # built and measured but held because its tag enum has no abstain, so a coerced unknown marks the
     # whole run degraded. 9 - 2 + 1 = 8.
-    assert len(held) == 8 and not (held & _ACTIVATED)  # every other candidate is held
+    # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
+    assert len(held) == 7 and not (held & _ACTIVATED)  # every other candidate is held
 
 
 def test_eligible_rule_ids_is_sorted_and_matches() -> None:
@@ -162,6 +166,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "AS-11",
         "AS-12",
         "AS-2",
+        "AS-4",  # LP-497
         "AS-6",
         "AS-8",
         "AS-9",
@@ -234,8 +239,14 @@ def test_id5_now_passes_after_the_subject_fix() -> None:
 
 def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     bars = load_activation_bars()
-    # a not-calibratable-yet rule: unmeasured AI tag → held regardless of anything else
-    assert not is_eligible(bars["AS-4"]) and bars["AS-4"].status == "not-calibratable-yet"
+    # a not-calibratable-yet rule: unmeasured AI tag → held regardless of anything else.
+    # LP-497 — this WAS AS-4. It is now live, and the swap to AS-7 is the point rather than a
+    # convenience: AS-4 was never held for this reason. Its bar named stmt.is_reserve_eligible
+    # load-bearing "via the reserves calculator", and that tag is not in its chain at all, so the
+    # 0/5 that held it measured something AS-4 never reads. AS-7 IS held for this reason honestly —
+    # txn.is_nsf_or_overdraft is a real, unscored AI tag in its chain (and its declaration still
+    # coerces an honest abstain into a degraded run until LP-495c lands).
+    assert not is_eligible(bars["AS-7"]) and bars["AS-7"].status == "not-calibratable-yet"
     # AS-5 — LP-390-7 fail-closed proof: not-calibratable-yet + null threshold → held; validated stays false
     # (the loader would REJECT a stray true on it — see test_loader_rejects_validating_a_non_calibratable_rule),
     # so a mis-set flag can never leak AS-5 live even though apparent_category is now measured.

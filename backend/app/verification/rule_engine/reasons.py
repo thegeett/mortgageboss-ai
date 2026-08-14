@@ -68,6 +68,8 @@ _FACT_LABELS: dict[str, str] = {
     "condo.fidelity_present_raw": "master policy's fidelity / crime indicator",
     "condo.fidelity_amount": "fidelity / crime coverage amount",
     "condo.reserve_adequacy": "HOA replacement-reserve adequacy",
+    # LP-497 — AS-4 went live; its couldnt_check reads on this tag.
+    "reserves.required_months": "reserve requirement for this occupancy and unit count",
     # LP-496a — program eligibility (PE-1, PE-3).
     "program.conforming_eligibility": "loan amount against the conforming loan limit",
     "program.fha_min_investment_met": "FHA minimum required investment",

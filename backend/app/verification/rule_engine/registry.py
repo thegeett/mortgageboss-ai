@@ -391,6 +391,35 @@ _LP495B_ACTIVATED: tuple[str, ...] = ("IN-13", "IN-14", "OC-3")
 # a denominator.
 _LP496A_ACTIVATED: tuple[str, ...] = ("PE-1", "PE-3")
 
+# LP-497 — the inert assets specs. AS-4 ACTIVATES; AS-7 is BUILT AND HELD.
+# AS-4 was blocked on a 0/5 measurement of stmt.is_reserve_eligible, and the block was doubly wrong.
+# First, THAT TAG IS NOT IN AS-4's CHAIN: build_reserves_view sums assets from the DB and takes its PITI
+# divisor from the DTI calculator, and reserves.required_months reads MISMO occupancy + unit count —
+# nothing AI-produced feeds either operand. Second, the 0/5 was not a model failure: the stmt_facts
+# prompt asks about ACCOUNT TYPE ("a normal checking/savings balance"), while Priya was answering
+# whether those funds count as reserves for THIS loan — they do not, because they are the funds to
+# close. Both answers are right to their own question, which is why the disagreement was systematic
+# rather than noisy, and compute_reserves already subtracts down payment and closing costs, so the
+# judgment the tag was invented to supply is redundant with arithmetic that was already correct.
+# What AS-4 actually lacked was its THRESHOLD. B3-4.1-01 (page dated 08/07/2024) is now fetched, tier P:
+# none for a one-unit principal residence, 2 months for a second home, 6 for a two- to four-unit primary
+# or an investment property. The prior occupancy-ONLY map carried a recorded false-green — every
+# principal residence required 0, so a 2-4 unit primary needing 6 months read as SATISFIED on a real
+# shortfall. It now reads the unit count and ABSTAINS when a primary's unit count is unknown, because
+# there the answer is 0 or 6 and nothing between.
+# NOT MODELLED, so AS-4's `satisfied` is scoped in its own finding text: the 2%/4%/6%-of-aggregate-UPB
+# overlay for other financed properties, and the 6-month cash-out-over-45%-DTI cell. Neither the
+# financed-property count nor the aggregate UPB reaches the snapshot. Both can only RAISE the
+# requirement, so the encoded figure is a floor and the rule never errs toward clearing.
+# AS-7 IS HELD FOR TWO INDEPENDENT REASONS, neither of them calibration. Its chain is complete and
+# verified (txn_nsf -> _stmt_nsf_count -> AS-7), but (1) txn.is_nsf_or_overdraft is still declared
+# ["yes","no"] while its prompt offers "unknown", so an honest abstain coerces to confidence=None and
+# flags the whole run degraded — LP-495c's fix has NOT landed (68186a1 is its plan doc only); and
+# (2) the trigger does not exist in any available data: 0 NSF lines across the loaded corpus, and in
+# the raw corpus 886 NSF/overdraft mentions across 223 files of which NONE is a real event — 55 fee
+# totals all reading $0.00. No tolerance was invented; the Selling Guide sets none.
+_LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -423,6 +452,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP495A_ACTIVATED,
     *_LP495B_ACTIVATED,
     *_LP496A_ACTIVATED,
+    *_LP497_ACTIVATED,
 )
 
 

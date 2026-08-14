@@ -105,11 +105,16 @@ def test_assets_activation_state() -> None:
     # LP-393-6 activated AS-11 (retirement/stock liquidation terms, auto) — liquidation_terms scored 100% (6/6)
     # on the LP-393-1 fixture after LP-393-4a encoded Priya's precedence rule; she signed off the 0.90 bar.
     # LP-429 activated AS-6 (account ownership) — the first multi-tag rule, Priya signed off the 0.95 bar.
-    for rid in ("AS-9", "AS-10", "AS-2", "AS-12", "AS-11", "AS-6"):
+    # LP-497 activated AS-4 (reserves adequacy). It had been listed as inert "on unscored AI tags",
+    # and that was wrong on the facts: its bar named stmt.is_reserve_eligible load-bearing, but the
+    # reserves calculator sums assets from the DB and takes its PITI divisor from the DTI calculation,
+    # so no AI tag is in its chain. Its real gap was the threshold, now tier P from B3-4.1-01.
+    for rid in ("AS-9", "AS-10", "AS-2", "AS-12", "AS-11", "AS-6", "AS-4"):
         assert rid in ACTIVE_RULE_IDS
     # The rest stay inert: authored + evaluated, not shipped (the LP-333 discipline). AS-3 is calculator-
-    # blocked (no §3B cash-to-close calc); the others rest on unscored AI tags / a design question (AS-5).
-    for rid in ("AS-3", "AS-4", "AS-5", "AS-7"):
+    # blocked (no §3B cash-to-close calc); AS-5 rests on a design question; AS-7 rests on a genuinely
+    # unscored AI tag AND on its declaration coercing an honest abstain into a degraded run (LP-495c).
+    for rid in ("AS-3", "AS-5", "AS-7"):
         assert rid not in ACTIVE_RULE_IDS
 
 
