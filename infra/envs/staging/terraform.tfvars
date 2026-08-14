@@ -155,7 +155,7 @@ image_tag = "staging-3"
 # module. Several worktrees on this machine sit on different branches and
 # `docker build` ships whatever is checked out where it runs — see the variable's
 # description in variables.tf.
-allowed_deploy_branches = ["bedrock_integration"]
+allowed_deploy_branches = ["bedrock_integration", "bedrock_integration_with_rules_staging"]
 
 # Verified in C3: the images are arm64. Fargate defaults to X86_64 and the mismatch
 # fails with `exec format error`, visible only in the CloudWatch log stream.
