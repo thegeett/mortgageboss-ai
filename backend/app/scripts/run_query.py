@@ -42,6 +42,7 @@ import sys
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # A statement is accepted only if it STARTS with SELECT or WITH, after LEADING comments
@@ -221,28 +222,35 @@ async def _run() -> int:
     return 0
 
 
-def _readonly_database_url() -> str:
+def _readonly_database_url() -> URL:
     """The connection URL for the read-only role.
 
     ``QUERY_DATABASE_URL`` wins when set (local testing, and the escape hatch if IAM
     auth is ever unavailable). Otherwise the URL is derived from the task's own
     ``DATABASE_URL`` by swapping in the read-only user and an IAM auth token, so the
     task definition needs no second secret.
+
+    RETURNS A ``URL`` OBJECT, NEVER ``str(url)``. ``URL.__str__`` calls
+    ``render_as_string()``, whose ``hide_password`` defaults to True — so stringifying
+    replaced the IAM token with the literal ``***`` and that is what asyncpg sent. The
+    database answered ``pam_authenticate failed: Permission denied`` / ``PAM
+    authentication failed``, which reads like a rejected IAM token or a missing
+    ``rds-db:connect`` grant and sent this in entirely the wrong direction
+    (docs/findings/query-stage-auth.md). Passing the object to ``create_async_engine``
+    keeps the token intact and removes the round trip that can hide or re-quote it.
     """
     override = os.getenv("QUERY_DATABASE_URL")
     if override:
-        return override
+        return make_url(override)
 
     base = os.getenv("DATABASE_URL")
     if not base:
         raise RuntimeError("Neither QUERY_DATABASE_URL nor DATABASE_URL is set.")
 
-    from sqlalchemy.engine import make_url
-
     url = make_url(base)
     user = os.getenv("QUERY_DB_USER", "mbai_readonly")
     token = _iam_auth_token(host=url.host or "", port=url.port or 5432, user=user)
-    return str(url.set(username=user, password=token))
+    return url.set(username=user, password=token)
 
 
 #: Where the region comes from, in order. ``AWS_REGION`` is what the task definition sets

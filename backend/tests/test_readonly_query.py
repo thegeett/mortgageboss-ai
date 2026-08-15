@@ -335,7 +335,74 @@ def test_never_exposed_columns_are_absent_from_every_view(table: str, column: st
 
 
 # --------------------------------------------------------------------------- #
-# 4. run_query's statement guard (defence in depth, not the control)
+# 4. The connection URL — the IAM token must reach asyncpg intact
+# --------------------------------------------------------------------------- #
+
+#: The shape of a real RDS IAM auth token: a host, then a signed query string carrying
+#: `%2F`, `=`, `+` and `/`. Every one of those is a character a URL round trip can re-quote.
+_FAKE_TOKEN = (
+    "mbai-staging.c45amqau4ov5.us-east-1.rds.amazonaws.com:5432/?Action=connect"
+    "&DBUser=mbai_readonly&X-Amz-Algorithm=AWS4-HMAC-SHA256"
+    "&X-Amz-Credential=ASIA123%2F20260815%2Fus-east-1%2Frds-db%2Faws4_request"
+    "&X-Amz-Signature=ab+cd/ef=gh"
+)
+
+
+def test_readonly_url_carries_the_token_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The token must survive as the password, uncensored and unmangled.
+
+    This is the regression that made the query stage unusable: the function ended with
+    ``str(url.set(password=token))``, and ``URL.__str__`` hides the password by default —
+    so asyncpg was handed the literal ``***``. PostgreSQL answered ``PAM authentication
+    failed``, which looks exactly like a rejected token or a missing ``rds-db:connect``
+    grant, and cost an investigation to tell apart (docs/findings/query-stage-auth.md).
+    """
+    from app.scripts import run_query
+
+    monkeypatch.delenv("QUERY_DATABASE_URL", raising=False)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://mbai_admin:secret@db.example.com:5432/mortgageboss"  # pragma: allowlist secret
+        "?ssl=verify-full",
+    )
+    monkeypatch.setattr(run_query, "_iam_auth_token", lambda **_: _FAKE_TOKEN)
+
+    url = run_query._readonly_database_url()
+
+    assert url.password == _FAKE_TOKEN, "the IAM token was altered on the way to asyncpg"
+    assert url.password != "***", "the token was replaced by the hidden-password marker"
+    assert url.username == "mbai_readonly"
+    assert url.host == "db.example.com", "the token is signed over the host — it must match"
+    assert url.port == 5432
+    assert dict(url.query) == {"ssl": "verify-full"}, "IAM auth requires SSL"
+
+    # And it survives a render/parse cycle, so passing it on as a string stays safe.
+    from sqlalchemy.engine import make_url
+
+    assert make_url(url.render_as_string(hide_password=False)).password == _FAKE_TOKEN
+
+
+def test_readonly_url_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """QUERY_DATABASE_URL is the escape hatch; it must not go near the IAM path."""
+    from app.scripts import run_query
+
+    monkeypatch.setenv(
+        "QUERY_DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/d"
+    )  # pragma: allowlist secret
+    monkeypatch.setattr(
+        run_query,
+        "_iam_auth_token",
+        lambda **_: pytest.fail("the override must not generate an IAM token"),
+    )
+
+    url = run_query._readonly_database_url()
+    assert url.username == "u"
+    assert url.password == "p"  # pragma: allowlist secret
+    assert url.host == "h"
+
+
+# --------------------------------------------------------------------------- #
+# 5. run_query's statement guard (defence in depth, not the control)
 # --------------------------------------------------------------------------- #
 
 

@@ -6,6 +6,21 @@ was applied, no migration was run, and no database was modified.
 
 Investigated 2026-08-15 ~03:38 UTC, against staging image `staging-2d74409`.
 
+> **RESOLUTION (2026-08-15, added after the fixes below were applied).** THREE defects were
+> stacked, each hiding the next. (1) instance IAM auth pending — fixed by
+> `modify-db-instance --apply-immediately`, took effect in under 15s with no reboot and no
+> status change. (2) the role did not exist — fixed by `query-setup`, and the RDS error log
+> later confirmed it verbatim: `DETAIL: Role "mbai_readonly" does not exist.` (3) **a code
+> bug that only became visible once the first two were cleared**: `_readonly_database_url()`
+> returned `str(url.set(password=token))`, and `URL.__str__` hides the password, so asyncpg
+> was sent the literal `***`. See "The third defect" at the end. The fix is in
+> `run_query.py` and ships with the next deploy; a test now pins it.
+>
+> A correction to §"What the error rules out" below: the earlier code review asserted that
+> `str(url.set(password=token))` round-trips a token correctly. It does not, and this
+> document repeated that claim as established. Measured on SQLAlchemy 2.0.50, `str()` yields
+> `***`.
+
 ---
 
 ## DATA
@@ -316,3 +331,110 @@ Three outcomes:
 
 This starts an ECS task, so it is not strictly read-only in the "changes nothing" sense; it
 executes only `SELECT`s and does not write.
+
+---
+
+## The third defect — the token never reached the database
+
+Added after steps 1 and 2 were applied. Both worked; the query still failed, with a
+DIFFERENT error. That change of error is what made the third defect findable.
+
+### DATA
+
+After `modify-db-instance --apply-immediately`, polled every 15s:
+
+```
+[15s] iam=True status=available
+```
+
+`status` never left `available` and `PendingModifiedValues` emptied — applied with no
+reboot and no outage. (The doc previously called this documentation-plus-absent-reboot-flag;
+it is now an observation.)
+
+`./scripts/deploy staging query-setup` then printed:
+
+```
+Provisioned mbai_readonly in staging (database mortgageboss).
+  IAM authentication : enabled
+```
+
+The next `query` run failed with a new error:
+
+```
+Query failed: InvalidAuthorizationSpecificationError: PAM authentication failed for user "mbai_readonly"
+```
+
+RDS `error/postgresql.log.2026-08-15-12`, both failures in sequence:
+
+```
+12:04:37 mbai_readonly@mortgageboss FATAL:  password authentication failed for user "mbai_readonly"
+12:04:37 mbai_readonly@mortgageboss DETAIL:  Role "mbai_readonly" does not exist.
+12:14:39 mbai_readonly@mortgageboss LOG:  pam_authenticate failed: Permission denied
+12:14:39 mbai_readonly@mortgageboss FATAL:  PAM authentication failed for user "mbai_readonly"
+12:14:39 mbai_readonly@mortgageboss DETAIL:  Connection matched file "/rdsdbdata/config/pg_hba.conf"
+                                             line 13: "hostssl    all    +rds_iam    all    pam"
+```
+
+Everything else, checked and correct:
+
+| Check | Result |
+|---|---|
+| `iam simulate-principal-policy` for `rds-db:connect` on the dbuser ARN, as `mbai-staging-api-task` | `allowed` |
+| Permissions boundary on that role | none |
+| `AWS_REGION` / `S3_REGION` / `BEDROCK_REGION` on the migrate task | all `us-east-1` |
+| `DATABASE_URL` host / port / query (password never read) | `mbai-staging.c45amqau4ov5.us-east-1.rds.amazonaws.com` / `5432` / `ssl=verify-full` — matches the RDS endpoint the token is signed over |
+| Role creation SQL | `CREATE ROLE mbai_readonly LOGIN`, no password |
+
+SQLAlchemy 2.0.50, run locally against a token-shaped string:
+
+```
+password visible in str(): False
+contains literal ***     : True
+round-trip exact         : False    -> sent instead: '***'
+render_as_string(hide_password=False) round-trip: True
+URL object keeps token   : True
+```
+
+### INFERENCE
+
+The `pg_hba` line-13 match is the load-bearing observation. `hostssl all +rds_iam all pam`
+matching proves three things at once that no amount of AWS-side checking could: the
+connection **is** SSL, the role **is** a member of `rds_iam`, and instance IAM auth **is**
+live. Steps 1 and 2 both worked. PostgreSQL handed the credential to PAM, and PAM — which
+validates it against AWS — said `Permission denied`.
+
+With IAM allowing the action, the ARN correct, the region correct, and host/port/user
+matching what the token is signed over, the only remaining possibility was that the thing
+being validated was not the token. It was not: `URL.__str__` calls `render_as_string()`,
+whose `hide_password` defaults to True, so `str(url.set(password=token))` yields
+`…://mbai_readonly:***@host…`. asyncpg sent `***`. PAM rejected it, correctly.
+
+**Root cause: `run_query.py` sent the literal string `***` instead of the IAM token.**
+
+Why it read as an AWS problem: `PAM authentication failed` is the signature of a rejected
+token, and every plausible reason for a token to be rejected is on the AWS side. The error
+does not distinguish "your token is invalid" from "what you sent was not a token".
+
+### FIX (applied)
+
+`_readonly_database_url()` now returns a `URL` object, which `create_async_engine` accepts
+directly — no string round trip, so nothing can hide or re-quote the password. The
+`QUERY_DATABASE_URL` override goes through `make_url` for the same return type.
+`render_as_string(hide_password=False)` would also have worked; the object is harder to get
+wrong later.
+
+`test_readonly_url_carries_the_token_verbatim` pins it, asserting on a token-shaped string
+containing `%2F`, `=`, `+` and `/` that the password is neither `***` nor re-quoted, that
+the host and port still match what the token would be signed over, and that `ssl` survives.
+
+This is a code change, so it needs a deploy — the AWS side is now fully correct and needs
+nothing further.
+
+### The lesson worth keeping
+
+Three defects were stacked, and each one masked the next: the instance flag hid the missing
+role, the missing role hid the `***`. Each fix produced a *different* error, and the change
+of error was the signal that the previous layer was genuinely fixed rather than that the
+whole thing was still broken. The RDS error log — not the client error, not CloudWatch —
+was what made the last two distinguishable, because it reports the pg_hba line that matched
+and the reason the role lookup failed. Reach for it earlier next time.
