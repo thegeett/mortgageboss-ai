@@ -15373,3 +15373,95 @@ consumer takes the one its QUESTION requires:
 
 **Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-381 (a number is only readable
 with what it ranged over), ADR-330 (vacuity).
+
+## ADR-384
+
+**A redaction layer that is the last line of defence must match on the SHAPE of a value, not on a list
+of field names. A name list fails open; a shape test fails closed.**
+
+**Context.** C7 gives a read-only query path over the staging database, primarily for the agent. The
+ticket's design called for stripping "the known PII keys" from `extractions.extracted_data`, which
+holds raw SSNs and TINs in plaintext JSON (`employee_ssn` from W-2s, `recipient_tin` from 1099s —
+`borrowers.ssn` is Fernet-encrypted and therefore already safe; almost nothing else is).
+
+The threat here is not the network. A query returning a raw SSN puts it in terminal scrollback, in a
+conversation transcript, and possibly in a result document someone commits. No network control touches
+that path, so the redaction layer *is* the control — which raises the bar for how it may fail.
+
+A key denylist fails open in three ways, all of them live in this codebase. The existing `_PII_FIELDS`
+registry documents the first against itself: *"PII inside a captured LIST row (e.g. a tradeline's
+`account_number_masked`) is NOT routed"*. The second is new fields — 121 schema specs and 99 generated
+extractors sit behind that surface, and a field added tomorrow is on no list written today. The third
+is drift: a second hand-maintained list in a migration will diverge from the first, and the newer,
+less-tested one would be the one standing between an agent and an identifier.
+
+**Decision.** `readonly.scrub()` matches identifier SHAPES over the serialized JSON text — a dashed
+SSN, a spaced SSN, and any bare run of nine or more digits not followed by a decimal. Operating on
+text makes it recursive by construction: it reaches nested list rows and fields that do not exist yet,
+because it never asks what a field is called.
+
+The patterns are lifted verbatim from the LP-209 at-rest guard (`verification/snapshot/persistence.py`)
+and pinned to it by a test. The two defend the same property from opposite sides — the guard refuses to
+WRITE an unmasked identifier, the scrub refuses to RETURN one — and if one is tightened without the
+other, the weaker becomes the real boundary silently.
+
+Columns whose content cannot be salvaged by any redaction are dropped outright rather than scrubbed:
+`documents.full_text` (a W-2's full text contains the SSN verbatim) and `mismo_imports.catch_all` (the
+raw MISMO payload) have no useful projection. Names and street addresses are not digit-shaped, so the
+scrub cannot reach them; those columns are dropped too.
+
+**Consequences.**
+- **Deliberately over-broad.** A legitimate identifier of nine or more digits — an insurance policy
+  number, an un-hyphenated ZIP+4 — is redacted as well. That is the accepted trade, and the same one
+  the at-rest guard already makes.
+- **The debugging signal survives**, which is what makes the trade payable: `6028.02` and `2025-04-04`
+  pass through untouched, so amounts, dates, confidences and JSON structure are all still readable.
+  Proven by test against a real PostgreSQL, not the Python regex engine.
+- **`REVOKE ALL ON SCHEMA public` is the load-bearing line**, not the views. Without it the role reaches
+  base tables directly and every view is decoration. The `search_path` pin is its other half: it is what
+  makes an unqualified `SELECT ... FROM extractions` resolve to the view rather than the table.
+- **Drift is a failing test, not a silent hole.** Every model column must be exposed by its view or
+  named in an explicit exclusion set; a new column fails the suite until someone decides which it is.
+  That guard immediately earned itself — it caught four columns the views referenced that exist in no
+  model and no migration, which would have failed `CREATE VIEW` on first contact with staging.
+
+**Related:** ADR-377 (distrusted fields — the same "a list that resolves to nothing protects nothing"
+reasoning), LP-209 (the at-rest guard whose patterns these are).
+
+## ADR-385
+
+**A capability that must not exist in production cannot be created by a migration. Migrations run
+everywhere; the environment gate has to live somewhere that does not.**
+
+**Context.** C7's read-only query path needs a PostgreSQL login role, `mbai_readonly`. The obvious home
+is the migration that creates the schema and views it reads. But migrations run in every environment by
+construction — that is the point of them — so a `CREATE ROLE` there puts a login role into production,
+which is precisely where this debugging path is not wanted.
+
+Gating inside the migration was rejected: a migration that does different things per environment
+produces databases that report the same `alembic current` while having different schemas, which is a
+worse problem than the one being solved.
+
+**Decision.** Split by what is safe to exist everywhere. The migration creates the `readonly` schema,
+the scrub functions and the views — all of which are inert without a grantee, since a view no one can
+select from grants nothing to anyone. The LOGIN ROLE and its grants move to
+`app/scripts/provision_query_role.py`, run by `./scripts/deploy <env> query-setup`, which refuses any
+environment outside `QUERY_ENVIRONMENTS` (staging).
+
+Three independent gates result, and no single one of them is trusted alone: the deploy stage refuses
+the environment; the role does not exist unless someone deliberately provisioned it; and `rds-db:connect`
+is granted only where Terraform's `db_instance_resource_id` is wired.
+
+**Consequences.**
+- **Production's resting state is "views exist, nothing can read them."** Verified locally: after the
+  migration alone, `0 role, 32 views`.
+- **The migration re-applies grants only if the role already exists**, so the ordering between migrate
+  and query-setup does not matter, and a later migration adding a view cannot leave staging with a view
+  its role cannot read.
+- **The role has no password in any environment.** Authentication is a 15-minute RDS IAM token, so
+  there is no secret to store, rotate or leak — and no way to use the role at all without the IAM grant.
+- **One more stage to run when standing up an environment**, which is the cost of the gate. It is
+  documented in `docs/querying-staging.md` rather than left to be discovered.
+
+**Related:** ADR-384 (what the views may return), the `PROVISIONING_ENVIRONMENTS` idiom in
+`scripts/deploy` that this mirrors.

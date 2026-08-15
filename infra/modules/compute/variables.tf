@@ -437,3 +437,20 @@ variable "cognito_refresh_token_validity_days" {
   type        = number
   default     = 30
 }
+
+variable "db_instance_resource_id" {
+  description = <<-EOT
+    RDS DBI resource id (db-XXXXXXXX), used to build the `rds-db:connect` resource ARN
+    for C7's read-only query role. NOT the instance identifier -- the two look alike and
+    the wrong one fails as "PAM authentication failed", which names neither IAM nor the
+    cause. Empty disables the grant.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "readonly_db_user" {
+  description = "Database role the C7 query path authenticates as. Must match the migration."
+  type        = string
+  default     = "mbai_readonly"
+}

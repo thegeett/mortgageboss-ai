@@ -11,6 +11,10 @@
 # No task role has secretsmanager:GetSecretValue: injection happens before the
 # process exists, so the application never needs to read a secret itself.
 
+# The account the ARNs below are built against. A data source rather than a variable so
+# it cannot be pointed at the wrong account by a mistyped tfvar.
+data "aws_caller_identity" "current" {}
+
 data "aws_iam_policy_document" "ecs_assume" {
   statement {
     effect  = "Allow"
@@ -140,6 +144,23 @@ resource "aws_iam_role" "api_task" {
 
 data "aws_iam_policy_document" "api_task" {
   source_policy_documents = var.enable_execute_command ? [data.aws_iam_policy_document.exec_channels[0].json] : []
+
+  # C7 -- the read-only query path. The migrate task definition runs on THIS role, and the
+  # query stage runs on that task definition, so the grant lands here rather than on a role
+  # of its own. Scoped to ONE database user: it permits authenticating as `mbai_readonly`
+  # (a role with no privileges in schema public) and nothing else. It grants no data access
+  # by itself -- what the connection can read is decided entirely by the grants in the
+  # database, which is where that decision belongs.
+  dynamic "statement" {
+    for_each = var.db_instance_resource_id == "" ? [] : [1]
+
+    content {
+      sid       = "ReadOnlyQueryDbConnect"
+      effect    = "Allow"
+      actions   = ["rds-db:connect"]
+      resources = ["arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.db_instance_resource_id}/${var.readonly_db_user}"]
+    }
+  }
 
   # PutObject AND GetObject. Deliberately NO s3:DeleteObject — StorageBackend.delete()
   # has no call site anywhere in the application, consistent with soft-delete

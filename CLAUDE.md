@@ -100,6 +100,24 @@ new ADR. CI (ruff/mypy/pytest, biome/tsc/build) must stay green; install
 pre-commit hooks for local feedback (see
 [`docs/development-workflow.md`](docs/development-workflow.md)).
 
+## Inspecting staging
+
+**For a question about the deployed database, QUERY IT — do not reason from CloudWatch.**
+
+```bash
+./scripts/deploy staging query -c "select count(*) from loan_files"
+./scripts/deploy staging query path/to/file.sql
+```
+
+One read-only `SELECT` per run, as a one-off ECS task. It connects as a role with **no
+privileges in schema `public`** — only the `readonly.*` views, which drop or scrub every
+column that can carry an identifier. **Raw SSNs and TINs cannot come back this way**, by
+design, so a result is safe to read into a transcript.
+
+Staging only; the stage refuses other environments. What is and is not available, and
+why, is in [`docs/querying-staging.md`](docs/querying-staging.md) — read it before
+concluding that something is missing from the schema.
+
 ## Key docs
 
 - [`docs/README.md`](docs/README.md) — documentation index
@@ -107,3 +125,4 @@ pre-commit hooks for local feedback (see
 - [`docs/glossary.md`](docs/glossary.md) — domain + technical terms
 - [`docs/project-structure.md`](docs/project-structure.md) — repo layout
 - [`decisions.md`](decisions.md) — ADR log
+- [`docs/querying-staging.md`](docs/querying-staging.md) — read-only SQL against staging

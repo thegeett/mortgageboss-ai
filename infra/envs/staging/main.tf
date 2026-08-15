@@ -404,6 +404,10 @@ module "compute" {
 
   ecs_tasks_security_group_id = module.network.ecs_tasks_security_group_id
 
+  # C7 -- lets the migrate task definition (which the `query` stage runs on) obtain an
+  # IAM auth token for the read-only database role. Scoped to that one db user.
+  db_instance_resource_id = module.data.db_instance_resource_id
+
   api_image        = "${local.ecr_repository_urls["api"]}:${var.image_tag}"
   frontend_image   = "${local.ecr_repository_urls["frontend"]}:${var.image_tag}"
   cpu_architecture = var.cpu_architecture

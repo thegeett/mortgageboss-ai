@@ -131,6 +131,12 @@ resource "aws_db_instance" "this" {
   parameter_group_name   = aws_db_parameter_group.this.name
   vpc_security_group_ids = [var.rds_security_group_id]
 
+  # IAM database authentication (C7). Lets a task authenticate as `mbai_readonly` with a
+  # 15-minute token generated from its role, so the read-only query path has no password
+  # stored, rotated or leaked anywhere. The master user is unaffected and still uses its
+  # Secrets Manager password.
+  iam_database_authentication_enabled = true
+
   # Never reachable from the internet.
   publicly_accessible = false
   multi_az            = var.rds_multi_az

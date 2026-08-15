@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user deploy"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -83,6 +83,23 @@ ARGUMENTS
     add-user   Add one user to an existing company, same mechanism. Refuses an
                unknown company slug or an email that is already taken.
 
+    query-setup
+               Create the mbai_readonly role and its grants. Run ONCE per
+               environment, after migrate. Refuses any environment not listed in
+               QUERY_ENVIRONMENTS -- the role does not exist in production and
+               the migration deliberately does not create it.
+
+    query      Run ONE read-only SELECT and print the result. Same one-off task
+               mechanism. Connects as mbai_readonly, which has no privileges in
+               schema public at all -- it sees only the readonly.* views, with
+               PII dropped or scrubbed. Raw SSNs and TINs cannot come back this
+               way. No confirmation prompt: it is read-only and meant to be run
+               repeatedly, including by the agent.
+
+                 ./scripts/deploy staging query path/to/file.sql
+                 ./scripts/deploy staging query -c "select count(*) from loan_files"
+                 ./scripts/deploy staging query -c "..." --max-rows 500
+
     deploy     Ship application code. Derives the image tag from git
                (<env>-<short sha>), refuses a dirty tree or a branch the
                environment's allowed_deploy_branches does not list, builds and
@@ -125,6 +142,11 @@ ASSUME_YES=0
 FORCE=0
 ALLOW_BRANCH=0
 PROFILE_OVERRIDE=""
+# query stage only: the SQL comes from a file (3rd positional) or -c. Never from argv of
+# the TASK -- see stage_query.
+QUERY_FILE=""
+QUERY_SQL_INLINE=""
+QUERY_MAX_ROWS=""
 
 parse_args() {
   local positional=0
@@ -138,11 +160,20 @@ parse_args() {
         [ $# -ge 2 ] || die "--profile needs a value."
         PROFILE_OVERRIDE="$2"; shift ;;
       --profile=*) PROFILE_OVERRIDE="${1#*=}" ;;
+      -c | --command)
+        [ $# -ge 2 ] || die "-c needs a SQL string."
+        QUERY_SQL_INLINE="$2"; shift ;;
+      -c=* | --command=*) QUERY_SQL_INLINE="${1#*=}" ;;
+      --max-rows)
+        [ $# -ge 2 ] || die "--max-rows needs a value."
+        QUERY_MAX_ROWS="$2"; shift ;;
+      --max-rows=*) QUERY_MAX_ROWS="${1#*=}" ;;
       -*) die "Unknown option: $1" "Run ./scripts/deploy --help" ;;
       *)
         positional=$((positional + 1))
         if [ "$positional" = "1" ]; then ENV_NAME="$1"
         elif [ "$positional" = "2" ]; then STAGE="$1"
+        elif [ "$positional" = "3" ] && [ "$STAGE" = "query" ]; then QUERY_FILE="$1"
         else die "Unexpected argument: $1" "Usage: ./scripts/deploy <env> <stage> [options]"
         fi ;;
     esac
@@ -1403,8 +1434,27 @@ require_cognito_enabled() {
 # for the check to mean anything.
 PROVISIONING_ENVIRONMENTS="staging"
 
+# Environments the read-only `query` stage may run against (C7). SEPARATE from
+# PROVISIONING_ENVIRONMENTS so widening one never silently widens the other. Production is
+# deliberately absent: this path returns loan data to a terminal and a transcript, and the
+# masked views make that survivable in staging, not appropriate everywhere.
+QUERY_ENVIRONMENTS="staging"
+
 # Refuse here as well as in the container, so an unintended target dies before it
 # prompts for a password rather than after.
+require_query_environment() {
+  case ",$QUERY_ENVIRONMENTS," in
+    *",$ENV_NAME,"*) return 0 ;;
+  esac
+  die "Refusing: the read-only query stage is not enabled for environment '$ENV_NAME'." \
+    "This stage returns loan data into a terminal, a transcript, and possibly a file" \
+    "someone commits. The views mask identifiers, but the environments it may run" \
+    "against are listed explicitly here rather than taken from the command line." \
+    "Permitted: $QUERY_ENVIRONMENTS." \
+    "To add one, edit QUERY_ENVIRONMENTS in scripts/deploy -- deliberately, in a commit" \
+    "someone reviews."
+}
+
 require_provisioning_environment() {
   case ",$PROVISIONING_ENVIRONMENTS," in
     *",$ENV_NAME,"*) return 0 ;;
@@ -1698,6 +1748,153 @@ stage_add_user() {
 
   run_oneoff_task "add-user" "$request" "$cluster" "$container"
   ok "add-user complete."
+}
+
+# ---------------------------------------------------------------------------
+# query-setup -- provision the read-only role (C7)
+#
+# Separate from `migrate` on purpose. Migrations run everywhere; this role must not
+# exist in production, so it is created by a stage that refuses any environment outside
+# QUERY_ENVIRONMENTS. Run once per environment, after migrate.
+stage_query_setup() {
+  banner "query-setup -- provision the read-only query role in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_query_environment
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef container subnets sgs netcfg request drop_flag
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  drop_flag="${QUERY_SETUP_DROP:-}"
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  action      : ${drop_flag:+DROP the role}${drop_flag:-create/repair the role and its grants}"
+  info "  role        : mbai_readonly (no password; RDS IAM token only)"
+  hr
+  confirm "Proceed?" || die "Aborted. Nothing was run."
+
+  request="$SECRET_TMPDIR/query-setup.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    PQR_ENV="$ENV_NAME" PQR_ALLOWED="$QUERY_ENVIRONMENTS" PQR_DROP="$drop_flag" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.provision_query_role"],
+          environment: [
+            {name:"PROVISION_QUERY_ROLE_ENVIRONMENT",  value: env.PQR_ENV},
+            {name:"PROVISION_QUERY_ROLE_ENVIRONMENTS", value: env.PQR_ALLOWED},
+            {name:"PROVISION_QUERY_ROLE_DROP",         value: env.PQR_DROP}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+
+  run_oneoff_task "query-setup" "$request" "$cluster" "$container"
+  ok "query-setup complete."
+}
+
+# ---------------------------------------------------------------------------
+# query -- read-only SELECT against the deployed database (C7)
+#
+# Same one-off-task mechanism as migrate / bootstrap-admin / add-user: the migrate
+# task definition already has DATABASE_URL injected and lands in the subnet that has
+# the interface endpoints. Nothing new is provisioned and there is no standing cost.
+#
+# The SQL travels in the container ENVIRONMENT, never in the command. A task's argv is
+# readable from `ecs describe-tasks` for about an hour after it stops and the whole
+# RunTask call is recorded in CloudTrail -- the same reason add-user sends a hash.
+#
+# No confirm() call, deliberately. The path is read-only by database grant and is meant
+# to be called repeatedly, including by the agent; a prompt would make it unusable for
+# the consumer it was built for.
+stage_query() {
+  banner "query -- read-only SELECT against '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_query_environment
+  require_outputs "$ENV_DIR"
+
+  local sql
+  if [ -n "$QUERY_SQL_INLINE" ] && [ -n "$QUERY_FILE" ]; then
+    die "Pass EITHER a .sql file or -c, not both."
+  elif [ -n "$QUERY_SQL_INLINE" ]; then
+    sql="$QUERY_SQL_INLINE"
+  elif [ -n "$QUERY_FILE" ]; then
+    [ -f "$QUERY_FILE" ] || die "No such file: $QUERY_FILE"
+    sql=$(cat "$QUERY_FILE") || die "Could not read $QUERY_FILE"
+  else
+    die "Nothing to run." \
+      "Usage: ./scripts/deploy $ENV_NAME query <file.sql>" \
+      "   or: ./scripts/deploy $ENV_NAME query -c \"select ...\""
+  fi
+  [ -n "${sql//[[:space:]]/}" ] || die "The SQL is empty."
+
+  local cluster taskdef container subnets sgs netcfg request
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  connects as : mbai_readonly (readonly.* views only; no access to public)"
+  info "  max rows    : ${QUERY_MAX_ROWS:-100}"
+  hr
+  printf '%s\n' "$sql" | sed 's/^/  /'
+  hr
+
+  request="$SECRET_TMPDIR/query.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    QUERY_SQL="$sql" QUERY_MAX_ROWS="${QUERY_MAX_ROWS:-100}" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.run_query"],
+          environment: [
+            {name:"QUERY_SQL",      value: env.QUERY_SQL},
+            {name:"QUERY_MAX_ROWS", value: env.QUERY_MAX_ROWS}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+
+  run_oneoff_task "query" "$request" "$cluster" "$container"
+  ok "query complete."
   info ""
   info "Remember the matching Cognito user, or they cannot reach the application."
 }
@@ -2770,6 +2967,8 @@ main() {
     status)    stage_status ;;
     bootstrap-admin) stage_bootstrap_admin ;;
     add-user)  stage_add_user ;;
+    query-setup) stage_query_setup ;;
+    query)     stage_query ;;
     deploy)    stage_deploy ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac

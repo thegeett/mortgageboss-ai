@@ -92,3 +92,12 @@ output "log_group_names_by_key" {
 # random_password always does) but nothing surfaces it, so it cannot leak through
 # `terraform output`, a CI log, or a downstream module. The operator assembles
 # DATABASE_URL by hand — see infra/README.md.
+
+# The DBI RESOURCE ID (db-XXXXXXXX...), not the instance identifier. This is the only
+# form `rds-db:connect` accepts in a resource ARN, and the two look similar enough that
+# using the wrong one produces a "PAM authentication failed" that says nothing about IAM.
+# C7's read-only query role authenticates with an IAM token against this id.
+output "db_instance_resource_id" {
+  description = "RDS DBI resource id, for rds-db:connect resource ARNs."
+  value       = aws_db_instance.this.resource_id
+}
