@@ -266,17 +266,19 @@ def test_unparseable_stated_income_item_abstains_never_understates() -> None:
 def test_loan_recipe_unchanged_regression_canary() -> None:
     snap = _snap(
         mismo={
-            "borrower.1.name": _f("Sam"),
+            # LP-509-A2: the real emitted key names (first_name/last_name, address_line).
+            "borrower.1.first_name": _f("Sam"),
+            "borrower.1.last_name": _f("Tan"),
             "borrower.1.ssn": _f("x"),
             "loan.amount": _f("100"),
-            "property.address": _f("1 Main"),
+            "property.address_line": _f("1 Main"),
         }
     )
     # _app_required_fields_present ignores the subject args (LP-332) — logic identical.
     value, _ = _app_required_fields_present(snap, "loan", None)
     assert value == "complete"
     missing_value, _ = _app_required_fields_present(
-        _snap(mismo={"borrower.1.name": _f("Sam")}), "loan", None
+        _snap(mismo={"borrower.1.first_name": _f("Sam")}), "loan", None
     )
     assert missing_value == "incomplete + list"
 

@@ -167,7 +167,12 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
         build_lf6t3n_snapshot(), ai_reasoners=stub_materialization_reasoners()
     )
     results, _ = await evaluate_rules(mat)
-    assert len(results) == 875
+    # LP-509-A3 875 -> 876: IN-3 enumerates PER BORROWER now, and LF-6T3N has two borrowers,
+    # so its single loan-level row becomes two. Both abstain, as the loan-level one did.
+    # LP-509-D1 876 -> 877: IH-9 (hazard policy expired) is live and loan-scoped. LF-6T3N carries no
+    # homeowners binder, so it ABSTAINS here exactly as IH-3 does — a missing binder is an honest gap,
+    # never a cleared one. satisfied/fired/needs_review are unchanged; the +1 is the whole movement.
+    assert len(results) == 877
     assert (
         Counter(r.verdict.value for r in results)
         == {
@@ -177,7 +182,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             # confident "not a letter" and read not_applicable. They now abstain, which is what the
             # recipe's own comment and LO-2's spec both promised. The four move OUT of
             # not_applicable and INTO couldnt_check; nothing else changed.
-            "couldnt_check": 294,  # LP-498 +5 — FR-3 on LF-6T3N's five documents whose type is UNDETERMINED. An unknown predicate abstains and only a definitely-false one is not_applicable (IH-7's fail-closed finding), so an unclassified document is surfaced rather than silently skipped.  # LP-495c +1 — DT-7, loan-scoped, abstaining because the stub returns an honest in-vocabulary "unknown" for dti.atr_factors_documented. THAT ABSTAIN NO LONGER DEGRADES THE RUN: it now carries the model's confidence instead of the coerced None. satisfied/fired/needs_review UNCHANGED at 21/2/4.  # LP-497 +1 — AS-4, loan-scoped, abstaining because LF-6T3N states no occupancy so no B3-4.1-01 cell can be selected. satisfied/fired/needs_review UNCHANGED at 21/2/4.  # LP-496a +2 — PE-1 and PE-3, both LOAN-scoped and both abstaining on LF-6T3N's undetermined loan program. NEITHER CLEARS ON AN ABSENCE: the fixture states no program, so PE-1 cannot select a conforming limit and PE-3 cannot tell whether FHA's MRI applies. satisfied/fired/needs_review are UNCHANGED at 21/2/4, so the +2 is the entire movement and it is intended.  # LP-495b +5 — OC-3 x1 (loan-scoped) and IN-13 x2 + IN-14 x2 (per-borrower, 2 borrowers); DT-7 held  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
+            "couldnt_check": 313,  # LP-509-D1 +1 — IH-9 abstains (LF-6T3N has no homeowners binder).  # LP-509-A3 +1 — IN-3 per-borrower (2 borrowers, both abstaining, replacing 1 loan-level abstain).  # LP-509-A1 +17 — AS-2 x15 (was auto-satisfying) + AS-12 x2 (was calling for a human), both on transactions whose direction the keyless stub leaves undetermined. See the note under the counts below.  # LP-498 +5 — FR-3 on LF-6T3N's five documents whose type is UNDETERMINED. An unknown predicate abstains and only a definitely-false one is not_applicable (IH-7's fail-closed finding), so an unclassified document is surfaced rather than silently skipped.  # LP-495c +1 — DT-7, loan-scoped, abstaining because the stub returns an honest in-vocabulary "unknown" for dti.atr_factors_documented. THAT ABSTAIN NO LONGER DEGRADES THE RUN: it now carries the model's confidence instead of the coerced None. satisfied/fired/needs_review UNCHANGED at 21/2/4.  # LP-497 +1 — AS-4, loan-scoped, abstaining because LF-6T3N states no occupancy so no B3-4.1-01 cell can be selected. satisfied/fired/needs_review UNCHANGED at 21/2/4.  # LP-496a +2 — PE-1 and PE-3, both LOAN-scoped and both abstaining on LF-6T3N's undetermined loan program. NEITHER CLEARS ON AN ABSENCE: the fixture states no program, so PE-1 cannot select a conforming limit and PE-3 cannot tell whether FHA's MRI applies. satisfied/fired/needs_review are UNCHANGED at 21/2/4, so the +2 is the entire movement and it is intended.  # LP-495b +5 — OC-3 x1 (loan-scoped) and IN-13 x2 + IN-14 x2 (per-borrower, 2 borrowers); DT-7 held  # LP-495a +1 — OC-1 (loan-scoped; the keyless stub abstains)  # LP-495a +16 — RE-1 x8 and DT-6 x8 (4 lender-less statements + 4 unclassified docs, each)  # LP-494 +2 — CO-3 and CO-4, both abstaining on the null property_type  # +PC-8 x5 (LP-493 — the 4 unclassified docs + the purchase agreement)  # +PR-3/PR-4/PR-5/PR-7 x4 each (LP-492 — the 4 unclassified docs)  # +PR-2 x1 (LP-492 — LF-6T3N states no loan purpose)  # +TI-2 x4 +TI-6 x4 (LP-491 — the 4 unclassified docs, twice over)  # +TI-1 x4 (LP-491 — the 4 unclassified docs; no title commitment on LF-6T3N)  # +CR-4 x2 +CR-10 x2 (LP-490a — per-borrower, no credit report on LF-6T3N)  # +AU-3 x4 (LP-488 — the 4 unclassified docs; no AUS findings on LF-6T3N)  # +CO-1 x1 (LP-488 — LF-6T3N states no property type)  # +MI-4 x1 (LP-488 — same undetermined program predicate as MI-1)  # +MI-1 x1 (LP-488 — LF-6T3N states no loan program)  # +IH-1 x4 (LP-447); +CL-1/CR-13/PR-6 x1 each (LP-485 — no LE / credit
             # report / appraisal on LF-6T3N, so each abstains rather than clearing); +IH-2 x4 + IH-7 x1
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 554,  # LP-498 +25 — FR-3 is per_document and scoped to purchase_agreement, so every other document is correctly out of scope. A per-rule diff confirms FR-3's rows are the ONLY ones that moved.  # LP-495a review -4 (see couldnt_check above)  # LP-495a +74 — RE-1 x22 + DT-6 x22 (classified non-statement docs) + LO-2 x30 (no LOE of any type on LF-6T3N)  # +PC-8 x25 (LP-493 — the 25 classified non-contract documents)  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
@@ -189,66 +194,87 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             # guard resolved only IH-1's tag. This shift IS the fix landing on the real fixture — an
             # auto-asserted "the ID is valid" on a field with a confirmed wrong value is exactly what
             # ADR-377 exists to stop.
-            "satisfied": 21,
+            # LP-509-A1 satisfied 21 -> 6, needs_review 4 -> 2, couldnt_check 294 -> 311. AS-2 and
+            # AS-12 now declare the SAME `txn.is_money_in` applicability predicate AS-1 has always had.
+            # `per_deposit` enumerates one subject per TRANSACTION, so without it both rules were
+            # evaluating outgoing bill payments — on the real staging file that was 104 of 115
+            # couldnt_check findings, asking "the deposit's source could not be found in the file" of
+            # an ATM fee, a Geico premium and an AT&T bill.
+            #
+            # THE MOVEMENT HERE IS ALL ABSTAIN AND NONE not_applicable, and that is the KEYLESS STUB,
+            # not the fix: `stub_materialization_reasoners()` resolves EVERY AI tag to "unknown", so all
+            # 50 transactions have an UNDETERMINED direction. An undetermined predicate is couldnt_check
+            # and only a definitely-false one is not_applicable (§8) — so nothing can reach
+            # not_applicable on this fixture, which is why 554 is byte-identical.
+            # A per-rule diff confirms AS-2 and AS-12 are the ONLY rows that moved, and that all three
+            # rules now read IDENTICALLY at 50 couldnt_check apiece — AS-1 was ALREADY 50 here. The 15
+            # satisfied and 2 needs_review that disappeared were AS-2 auto-clearing, and AS-12 calling
+            # for a human, on transactions whose direction was never established.
+            "satisfied": 6,
             "fired": 2,  # UNCHANGED
-            "needs_review": 4,
+            "needs_review": 2,
         }
     )
     loan_verdicts = {r.rule_id: r.verdict.value for r in results if r.subject_id == _LOAN}
-    assert loan_verdicts == {
-        # LP-496a — both abstain on LF-6T3N's undetermined loan program, and neither may clear on it:
-        # PE-1 cannot pick a conforming limit without knowing the loan is conventional, and PE-3 cannot
-        # tell whether FHA's minimum required investment applies at all.
-        "PE-1": "couldnt_check",
-        "PE-3": "couldnt_check",
-        # LP-497 — AS-4 abstains: LF-6T3N states no occupancy, so no reserve requirement
-        # cell can be selected. Never satisfied on an absence.
-        "AS-4": "couldnt_check",
-        # LP-495c — DT-7 abstains on LF-6T3N, and this row is the visible half of the fix:
-        # the "unknown" is now IN vocabulary, so the run is not flagged degraded by it.
-        "DT-7": "couldnt_check",
-        "AS-8": "satisfied",
-        "AS-10": "satisfied",
-        "PC-7": "satisfied",
-        "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
-        "IH-3": "couldnt_check",  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
-        # LP-487 — IH-7's applicability predicate (property.type) is UNDETERMINED on LF-6T3N, whose MISMO
-        # states no property type. ⚠️ couldnt_check, NOT not_applicable: an unstated property type must be
-        # surfaced, never silently read as "not a condo".
-        "IH-7": "couldnt_check",
-        # LP-488 — MI-1's applicability predicate (program.type) is UNDETERMINED: LF-6T3N states no loan
-        # program. ⚠️ couldnt_check, never not_applicable — an unstated program is surfaced, not skipped.
-        "MI-1": "couldnt_check",
-        "MI-4": "couldnt_check",  # LP-488 — the FHA side, same undetermined program predicate
-        # LP-492 — PR-2's applicability predicate (loan.purpose) is UNDETERMINED on LF-6T3N, whose MISMO
-        # states no purpose. ⚠️ couldnt_check, never not_applicable — an unstated purpose is surfaced.
-        "PR-2": "couldnt_check",
-        "CO-1": "couldnt_check",  # LP-488 — LF-6T3N states no property type (the condo predicate)
-        # ⚠️ LP-494 — the SAME predicate, and the gap is worth naming: property_type is null on EVERY
-        # stored file, so the whole condo lane (CO-1, CO-3, CO-4, IH-7) abstains on real data today.
-        # That is a data-entry gap, not a rule defect, and it is logged in priya-open-questions.md §16.
-        "CO-3": "couldnt_check",  # LP-494 — fidelity presence; same unstated property type
-        "CO-4": "couldnt_check",  # LP-494 — date-keyed reserve floor; same unstated property type
-        "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
-        # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
-        # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.
-        "CL-1": "couldnt_check",
-        "CR-13": "couldnt_check",
-        "PR-6": "couldnt_check",
-        "ID-6": "fired",
-        "IN-2": "fired",
-        "IN-3": "couldnt_check",
-        "IN-4": "couldnt_check",
-        "OC-2": "couldnt_check",
-        # LP-495a — OC-1 joins OC-2 on the SAME tag. Under the keyless stub the occupancy group
-        # abstains, so both couldnt_check. On a real run OC-1 RATIFIES every verdict (ratify-pending),
-        # so the LP-406-4 double-surface is two ratified prompts, not an auto-assertion racing a
-        # ratification.
-        "OC-1": "couldnt_check",
-        # LP-495b — OC-3 is loan-scoped and abstains under the keyless stub, like OC-1/OC-2. On a
-        # real run it RATIFIES every verdict (ratify-pending).
-        "OC-3": "couldnt_check",
-    }
+    assert (
+        loan_verdicts
+        == {
+            # LP-496a — both abstain on LF-6T3N's undetermined loan program, and neither may clear on it:
+            # PE-1 cannot pick a conforming limit without knowing the loan is conventional, and PE-3 cannot
+            # tell whether FHA's minimum required investment applies at all.
+            "PE-1": "couldnt_check",
+            "PE-3": "couldnt_check",
+            # LP-497 — AS-4 abstains: LF-6T3N states no occupancy, so no reserve requirement
+            # cell can be selected. Never satisfied on an absence.
+            "AS-4": "couldnt_check",
+            # LP-495c — DT-7 abstains on LF-6T3N, and this row is the visible half of the fix:
+            # the "unknown" is now IN vocabulary, so the run is not flagged degraded by it.
+            "DT-7": "couldnt_check",
+            "AS-8": "satisfied",
+            "AS-10": "satisfied",
+            "PC-7": "satisfied",
+            "PC-2": "satisfied",  # LP-407-3 — the contract price matches the 1003 (365000)
+            "IH-3": "couldnt_check",
+            "IH-9": "couldnt_check",  # LP-509-D1 — no binder on LF-6T3N, so no expiration date to read  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
+            # LP-487 — IH-7's applicability predicate (property.type) is UNDETERMINED on LF-6T3N, whose MISMO
+            # states no property type. ⚠️ couldnt_check, NOT not_applicable: an unstated property type must be
+            # surfaced, never silently read as "not a condo".
+            "IH-7": "couldnt_check",
+            # LP-488 — MI-1's applicability predicate (program.type) is UNDETERMINED: LF-6T3N states no loan
+            # program. ⚠️ couldnt_check, never not_applicable — an unstated program is surfaced, not skipped.
+            "MI-1": "couldnt_check",
+            "MI-4": "couldnt_check",  # LP-488 — the FHA side, same undetermined program predicate
+            # LP-492 — PR-2's applicability predicate (loan.purpose) is UNDETERMINED on LF-6T3N, whose MISMO
+            # states no purpose. ⚠️ couldnt_check, never not_applicable — an unstated purpose is surfaced.
+            "PR-2": "couldnt_check",
+            "CO-1": "couldnt_check",  # LP-488 — LF-6T3N states no property type (the condo predicate)
+            # ⚠️ LP-494 — the SAME predicate, and the gap is worth naming: property_type is null on EVERY
+            # stored file, so the whole condo lane (CO-1, CO-3, CO-4, IH-7) abstains on real data today.
+            # That is a data-entry gap, not a rule defect, and it is logged in priya-open-questions.md §16.
+            "CO-3": "couldnt_check",  # LP-494 — fidelity presence; same unstated property type
+            "CO-4": "couldnt_check",  # LP-494 — date-keyed reserve floor; same unstated property type
+            "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
+            # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
+            # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.
+            "CL-1": "couldnt_check",
+            "CR-13": "couldnt_check",
+            "PR-6": "couldnt_check",
+            "ID-6": "fired",
+            "IN-2": "fired",
+            # LP-509-A3: IN-3 is no longer LOAN-scoped, so it has no row in this loan-subject map. Its two
+            # per-borrower rows (both couldnt_check) are asserted in test_as3_and_in3_stay_couldnt_check.
+            "IN-4": "couldnt_check",
+            "OC-2": "couldnt_check",
+            # LP-495a — OC-1 joins OC-2 on the SAME tag. Under the keyless stub the occupancy group
+            # abstains, so both couldnt_check. On a real run OC-1 RATIFIES every verdict (ratify-pending),
+            # so the LP-406-4 double-surface is two ratified prompts, not an auto-assertion racing a
+            # ratification.
+            "OC-1": "couldnt_check",
+            # LP-495b — OC-3 is loan-scoped and abstains under the keyless stub, like OC-1/OC-2. On a
+            # real run it RATIFIES every verdict (ratify-pending).
+            "OC-3": "couldnt_check",
+        }
+    )
 
 
 # ======================================================================= #

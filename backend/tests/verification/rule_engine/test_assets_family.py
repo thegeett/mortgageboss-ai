@@ -365,6 +365,8 @@ async def test_as12_judgment_is_ratification_pending() -> None:
                 "txn.apparent_category": _tag("loan_proceeds"),
                 "txn.has_identified_source": _tag("no"),
                 "txn.counterparty": _tag("Unknown LLC"),
+                # LP-509-A1: AS-12 is now scoped to money-in subjects.
+                "txn.is_money_in": _tag("in"),
             }
         },
     )

@@ -13,7 +13,9 @@ fired); (3) IN-5's exact-match COST property (no AI call).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -38,6 +40,7 @@ from app.verification.tag_materialization.derived import (
     _income_ytd_annualized_shortfall,
     produce_derived_tags,
 )
+from app.verification.tag_materialization.subjects import BorrowerSubject
 
 pytestmark = pytest.mark.anyio
 
@@ -101,25 +104,140 @@ def test_recipe_gap_and_recency_abstain_below_two_or_absent() -> None:
     assert val == "44"  # 2026-07-15 - 2026-06-01
 
 
-def test_recipe_ytd_uses_most_recent_pay_month_across_a_year_boundary() -> None:
-    # LP-323-IN-B review #1: elapsed months = the MOST-RECENT pay date's month (Jan → 1), NOT the max
-    # month number (a Dec paystub's 12). A Dec + Jan pair (a January-collected file) must annualize
-    # ytd/1, not ytd/12 — else the monthly is understated 12x and a false shortfall fires.
+def _ytd_shortfall(snap: Snapshot):
+    """LP-509-A3: the recipe is PER BORROWER now, so it takes the borrower subject."""
+    return _income_ytd_annualized_shortfall(snap, str(_B1), BorrowerSubject(str(_B1), 1, snap))
+
+
+def test_recipe_ytd_uses_the_most_recent_pay_date_across_a_year_boundary() -> None:
+    # LP-323-IN-B review #1: the elapsed period comes from the MOST-RECENT pay date, NOT the largest
+    # month number — a Dec + Feb pair (a file collected in February) must not annualize over
+    # December's 12 months, which would understate the monthly 8x and fire a false shortfall.
+    # LP-509-A3: the elapsed period is now a FRACTION from the day of year, so 15 February is 1.51
+    # months elapsed, not February's "2".
     snap = _snap(
-        docs=[_doc("dec"), _doc("jan")],
+        docs=[_doc("dec"), _doc("feb")],
         by_subject={
             "dec": {"income.pay_date": _parsed("2025-12-31")},  # older; no ytd on this stub
-            "jan": {
-                "income.ytd_gross": _parsed("6000"),
+            "feb": {
+                "income.ytd_gross": _parsed("9060"),
                 "income.documented_monthly": _parsed("6000"),
-                "income.pay_date": _parsed("2026-01-20"),  # most recent → month 1
+                "income.pay_date": _parsed("2026-02-15"),  # most recent → day 46 → 1.51 months
             },
         },
     )
-    value, reason = _income_ytd_annualized_shortfall(snap, "loan", None)
-    assert (
-        value == "0" and "1 month" in reason
-    )  # ytd 6000 / 1 month = 6000/mo = documented → no shortfall
+    value, reason = _ytd_shortfall(snap)
+    # 9060 / 1.5113 = 5995/mo against documented 6000 → essentially no shortfall.
+    assert Decimal(str(value)) < Decimal("0.01")
+    assert "1.51 months elapsed" in reason
+
+
+def test_recipe_ytd_takes_the_latest_stub_never_the_sum() -> None:
+    """LP-509-A3 defect 1 — year-to-date is CUMULATIVE, so summing stubs double-counts.
+
+    LF-WCHG's two stubs read 36,376.62 and 42,404.64 and the recipe used 78,781.26 — exactly their
+    sum, and roughly twice the truth. April's YTD already contains March's.
+    """
+    snap = _snap(
+        docs=[_doc("mar"), _doc("apr")],
+        by_subject={
+            "mar": {
+                "income.ytd_gross": _parsed("36376.62"),
+                "income.documented_monthly": _parsed("13154.00"),
+                "income.pay_date": _parsed("2026-03-06"),
+            },
+            "apr": {
+                "income.ytd_gross": _parsed("42404.64"),
+                "income.documented_monthly": _parsed("13154.00"),
+                "income.pay_date": _parsed("2026-04-04"),
+            },
+        },
+    )
+    value, reason = _ytd_shortfall(snap)
+    assert "42404.64" in reason and "78781.26" not in reason
+    # 42404.64 over 94/30.4375 = 3.09 months is 13,731/mo against 13,154 documented — AHEAD of pace,
+    # so the shortfall is negative and IN-3 cannot fire. The live finding claimed 62.6%.
+    assert Decimal(str(value)) < 0
+
+
+def test_recipe_documented_monthly_is_distinct_never_summed() -> None:
+    """LP-509-A3 defect 2 — `income.documented_monthly` is materialized PER DOCUMENT.
+
+    Summing it read a borrower with four documents as earning four times their income (52,615.42
+    against roughly 13,150/mo). Two stubs from one job carry the SAME monthly figure, so the
+    distinct value is the answer; genuinely conflicting figures abstain rather than over-count.
+    """
+    same = _snap(
+        docs=[_doc("p1"), _doc("p2")],
+        by_subject={
+            "p1": {
+                "income.ytd_gross": _parsed("39000"),
+                "income.documented_monthly": _parsed("13000"),
+                "income.pay_date": _parsed("2026-03-31"),
+            },
+            "p2": {
+                "income.documented_monthly": _parsed("13000"),
+                "income.pay_date": _parsed("2026-03-15"),
+            },
+        },
+    )
+    value, reason = _ytd_shortfall(same)
+    assert "13000" in reason and "26000" not in reason
+    assert Decimal(str(value)) < Decimal("0.01")  # 39000 / 2.96 months ≈ 13,178 vs 13,000
+
+    conflicting = _snap(
+        docs=[_doc("p1"), _doc("p2")],
+        by_subject={
+            "p1": {
+                "income.ytd_gross": _parsed("39000"),
+                "income.documented_monthly": _parsed("13000"),
+                "income.pay_date": _parsed("2026-03-31"),
+            },
+            "p2": {
+                "income.documented_monthly": _parsed("9000"),  # a different figure → ambiguous
+                "income.pay_date": _parsed("2026-03-15"),
+            },
+        },
+    )
+    assert _ytd_shortfall(conflicting)[0] == "unknown"
+
+
+def test_recipe_abstains_too_early_in_the_year_to_annualize() -> None:
+    """LP-509-A3 defect 3's guard — dividing by a fraction of a month multiplies noise.
+
+    A pay date 20 days into the year is 0.66 months elapsed. Whether that YTD looks like a surplus
+    or a 75% shortfall depends mostly on which side of payday the file was pulled, so the honest
+    answer is to abstain rather than to compute a number that means nothing.
+    """
+    snap = _snap(
+        docs=[_doc("jan")],
+        by_subject={
+            "jan": {
+                "income.ytd_gross": _parsed("1000"),
+                "income.documented_monthly": _parsed("6000"),
+                "income.pay_date": _parsed("2026-01-20"),
+            }
+        },
+    )
+    value, reason = _ytd_shortfall(snap)
+    assert value == "unknown" and "too short a period" in reason
+
+
+def test_recipe_reports_the_shortfall_as_a_percentage() -> None:
+    """Processor-facing: the finding used to print `0.6256740894589456855043635497`."""
+    snap = _snap(
+        docs=[_doc("p")],
+        by_subject={
+            "p": {
+                "income.ytd_gross": _parsed("10000"),
+                "income.documented_monthly": _parsed("6000"),
+                "income.pay_date": _parsed("2026-04-30"),
+            }
+        },
+    )
+    _, reason = _ytd_shortfall(snap)
+    assert "%" in reason
+    assert not re.search(r"\d\.\d{6}", reason), f"a raw Decimal leaked into the message: {reason}"
 
 
 def test_recipe_employment_gap_pairs_consecutive_not_spanning_records() -> None:

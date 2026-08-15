@@ -55,6 +55,10 @@ _FACT_LABELS: dict[str, str] = {
     "contract.loan_sales_price": "purchase contract's sale price",  # PC-2 (LP-407-2 / LP-407-3)
     "property.purchase_price": "purchase price stated in the loan file",  # PC-2 (LP-407-3)
     "ins.loan_effective_date": "insurance policy's effective date",  # IH-3 (LP-417)
+    # IH-9 (LP-509-D1). Phrased as the POLICY PERIOD rather than "whether the policy has expired": the
+    # label completes a couldnt_check sentence ("the … could not be determined"), and what the processor
+    # must go and find is the binder's dates, not the verdict.
+    "ins.policy_expired": "insurance policy's coverage period",
     "ins.dwelling_settlement_basis": "dwelling loss-settlement basis",  # IH-1 (LP-447)
     "ins.mortgagee_clause_correct": "mortgagee named on the insurance binder",  # IH-2 (LP-487)
     "ins.condo_master_policy": "condominium project's master insurance policy",  # IH-7 (LP-487)

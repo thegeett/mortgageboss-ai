@@ -341,7 +341,7 @@ def test_as5_gift_chain_scope_and_fire() -> None:
 # ================================================================================================= #
 # AS-2 — EMD sourcing (case 8 label variance) + THE APPROXIMATION PIN
 # ================================================================================================= #
-def _as2_txn(category: str, sourced: str):
+def _as2_txn(category: str, sourced: str, money_in: str | None = "in"):
     txn = TransactionRecord(
         content_id="t1",
         amount=_f("5000"),
@@ -355,24 +355,20 @@ def _as2_txn(category: str, sourced: str):
         belongs_to=(BorrowerRef(borrower_id=_B, name="Sam"),),
         transactions=(txn,),
     )
-    return _det(
-        "AS-2",
-        _snap(
-            docs=[doc],
-            by_subject={
-                "t1": {
-                    "txn.apparent_category": _tag(category),
-                    "txn.has_identified_source": _tag(sourced),
-                }
-            },
-        ),
-    )
+    subject_tags = {
+        "txn.apparent_category": _tag(category),
+        "txn.has_identified_source": _tag(sourced),
+    }
+    # LP-509-A1: `money_in=None` omits the tag entirely, to exercise the absent-predicate branch.
+    if money_in is not None:
+        subject_tags["txn.is_money_in"] = _tag(money_in)
+    return _det("AS-2", _snap(docs=[doc], by_subject={"t1": subject_tags}))
 
 
 def test_as2_fire_and_case8_and_the_approximation_pin() -> None:
     assert (
         _as2_txn("loan_proceeds", "no")[0].verdict is Verdict.FIRED
-    )  # 1: unsourced loan-proceeds outflow
+    )  # 1: unsourced loan-proceeds inflow
     assert _as2_txn("payroll", "yes")[0].verdict is Verdict.SATISFIED  # 2
     # case 8 (the direction=="credit" ORIGIN STORY): the fact-tag pivot's whole point is that an unusually
     # LABELED money-in is ABSTRACTED into txn.apparent_category by the AI — so the rule reads the clean enum
@@ -385,8 +381,26 @@ def test_as2_fire_and_case8_and_the_approximation_pin() -> None:
     # PIN — AS-2 is an APPROXIMATION. The TRUE EMD check is a cross-document MATCH (the contract's EMD
     # amount ↔ a debit in a verified account), which is not cleanly expressible today. This rule
     # approximates it via txn sourcing (fires on an unsourced loan_proceeds inflow) — it does NOT match the
-    # contract amount, does NOT check the direction (an EMD is a DEBIT), and does NOT catch an EMD paid
-    # OUTSIDE the statements. PINNED (a fix ticket: a cross-document match, needs the contract EMD extracted).
+    # contract amount and does NOT catch an EMD paid OUTSIDE the statements. PINNED (a fix ticket: a
+    # cross-document match, needs the contract EMD extracted).
+
+
+def test_as2_is_scoped_to_money_in_lp509_a1() -> None:
+    """LP-509-A1 — `per_deposit` enumerates one subject per TRANSACTION, not per deposit.
+
+    Before the gate, AS-2 asked "the deposit's source could not be found in the file" of every
+    outgoing bill payment in the file — a Geico premium, an AT&T bill, an ATM fee. 104 of the 115
+    couldnt_check findings on LF-WCHG came from this and AS-12 together.
+
+    The §8 honesty contract splits the two non-applying cases, and they must NOT collapse into one:
+    money-OUT is out of scope (not_applicable, never persisted), while an ABSENT direction means we
+    cannot tell whether the rule applies (couldnt_check, a real gap).
+    """
+    assert _as2_txn("loan_proceeds", "no", money_in="out")[0].verdict is Verdict.NOT_APPLICABLE
+    assert _as2_txn("loan_proceeds", "no", money_in=None)[0].verdict is Verdict.COULDNT_CHECK
+    assert _as2_txn("loan_proceeds", "no", money_in="unknown")[0].verdict is Verdict.COULDNT_CHECK
+    # and the in-scope fire is unaffected
+    assert _as2_txn("loan_proceeds", "no", money_in="in")[0].verdict is Verdict.FIRED
 
 
 # ================================================================================================= #
@@ -435,6 +449,8 @@ async def test_as12_armor_provenance_failclosed() -> None:
             "txn.apparent_category": _tag("loan_proceeds"),
             "txn.has_identified_source": _tag("no"),
             "txn.counterparty": _tag("Unknown LLC"),
+            # LP-509-A1: AS-12 is now scoped to money-in subjects.
+            "txn.is_money_in": _tag("in"),
         },
         stub,
     )

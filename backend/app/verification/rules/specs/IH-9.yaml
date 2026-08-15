@@ -1,0 +1,97 @@
+# IH-9 — Hazard insurance policy expired — DETERMINISTIC structural rule SPEC (LP-509-D1).
+#
+# THE FINDING LF-WCHG SHOULD HAVE PRODUCED AND DID NOT. That file carried an ACORD 27 hazard policy with a term
+# of 06/25/2024–06/25/2025 — THIRTEEN MONTHS LAPSED at the time it was being processed — and none of its 162
+# findings mentioned it. It is the single thing a processor would most want to know about the file.
+#
+# WHY NOTHING CAUGHT IT, and why this is a separate rule rather than an outcome added to IH-3. IH-3 was the only
+# rule reading that binder's dates, and it compares the EFFECTIVE date to the CLOSING date. LF-WCHG has no
+# closing date, so IH-3's gate abstained and never reached an outcome — a couldnt_check ABOUT CLOSING silently
+# swallowed a fact that holds regardless of closing. Adding an expiry outcome to IH-3 would have put this
+# conclusion behind that same gate on `contract.loan_closing_date` and reproduced the defect. A conclusion that
+# needs no closing date must not be gated on one, so it gets its own rule with its own gate.
+#
+# ⚠️ COMPARED TO THE FILE DATE, not to closing. The tag resolves against the snapshot's own build date, so the
+# question asked is "is this policy lapsed right now?" — answerable on any file, at any stage of processing.
+#
+# ⚠️ NO binder → COULDNT_CHECK, not not_applicable (the IH-3 D5 reasoning, unchanged): hazard insurance is
+# required on every mortgage, so a missing or unreadable binder is an honest gap, never scope-false. Binders that
+# DISAGREE on the expiration date also abstain — never a silently-picked date.
+#
+# ⚠️ NO threshold and NO AI. `ins.expiration_date` is parsed from the binder's typed core and the comparison is
+# an exact date test, so there is nothing to calibrate and nothing to sign off — the IH-3 / AS-8
+# no-ai-dependency activation path.
+#
+# OVERLAP WITH IH-3 IS DELIBERATE AND NOT DOUBLE-FIRING: IH-3 answers "did cover start too late", IH-9 answers
+# "has cover already ended". They read different dates and can fire independently — a policy can be both
+# effective after closing and, separately, expired.
+
+rule_id: IH-9
+name: Insurance policy expired
+category: Insurance
+
+kind: structural          # must equal rule_kinds.csv (IH-9 = structural, deterministic_only)
+numeric_check: false      # a date comparison, resolved in the tag
+
+criteria: >-
+  The homeowners insurance policy securing the property must not have already expired. The policy's expiration
+  date is compared against the file date — NOT the closing date — so a lapsed policy is reported whether or not
+  the loan has a closing date yet. An expired policy leaves the property uninsured today, which is a condition
+  the processor must clear before submission regardless of the closing timeline. No binder, an unreadable
+  expiration date, or binders that disagree on it → couldnt_check, never a guessed pass.
+
+applicability:
+  scope: the homeowners insurance binder's expiration date against the file date
+  trigger: >-
+    Evaluated once per loan. A file with no homeowners binder couldnt_checks — hazard insurance is required on
+    every mortgage, so a missing binder is an honest gap and not not_applicable. There is no loan-purpose or
+    document scoping that makes this scope-false.
+
+required_inputs:
+  - name: policy_expired
+    snapshot_path: 'tags.by_subject["loan"]["ins.policy_expired"]'
+    description: >-
+      whether the homeowners policy has already expired as at the file date (derived, LP-509-D1) — "yes" when
+      the binder's expiration date precedes the snapshot's build date, "no" when it does not, and "unknown"
+      when no binder states an expiration date or binders disagree on it.
+
+# An exact date comparison carries no numeric threshold, so there is no window for Priya to sign off. Both
+# mirror rule_kinds.csv.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: loan          # the loan-level subject (the derived verdict tag materializes here)
+subject_key_fields: [loan]
+
+evidence_required: >-
+  The policy expiration date and the file date the verdict compared, and how long the policy has been lapsed,
+  inline on the finding — so the processor sees the dates rather than only the conclusion.
+
+guideline_reference: "Fannie Mae Selling Guide B7-3 — hazard insurance coverage must be in force and maintained on the security property."
+
+spec_version: 1
+
+# LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
+# An enum branch via when_tags: the tag IS the yes/no/unknown answer, so there are no operands (the PC-3 shape).
+# "unknown"/absent never reach an outcome — the gate couldnt_checks them first.
+deterministic:
+  load_bearing_tags:
+    - ins.policy_expired
+  gated_tags:
+    - ins.policy_expired
+  operands: {}
+  outcomes:
+    - verdict: fired
+      when_tags:
+        - {tag: ins.policy_expired, op: "eq", value: "yes"}
+      reasoning: >-
+        the homeowners insurance policy on the property has already expired — the property is currently
+        uninsured (the tag's own reasoning states the expiration date and how long it has been lapsed)
+      how_to_fix: >-
+        Obtain the current homeowners insurance policy or a renewal binder showing cover in force, and confirm
+        the premium and mortgagee clause on the replacement.
+    - verdict: satisfied
+      default: true
+      reasoning: >-
+        the homeowners insurance policy has not expired as at the file date

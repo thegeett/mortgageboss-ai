@@ -187,6 +187,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
             # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
             "FR-3",
+            "IH-9",  # LP-509-D1 — hazard policy expired
             # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
             # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
             "DT-7",

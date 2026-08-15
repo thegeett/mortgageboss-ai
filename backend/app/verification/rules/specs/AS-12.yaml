@@ -36,8 +36,13 @@ evidence_required: the deposit pattern and why it suggests (or does not) a borro
 guideline_reference: "Fannie Mae Selling Guide B3-4.2 / B3-6 (source of funds / undisclosed debt)."
 judgment:
   subject: per_deposit
-  load_bearing_tags: [txn.apparent_category, txn.has_identified_source]
+  load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.has_identified_source]
   reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.counterparty]
+  # LP-509-A1: see AS-2. `per_deposit` is per TRANSACTION, so without this the borrowed-funds
+  # judgment was run against every outgoing bill payment in the file. Not in `reasoned_over`: the
+  # predicate has already filtered the subjects the AI sees, so it carries no signal for the
+  # judgment itself. != in → not_applicable; absent/unknown → couldnt_check.
+  applicability: {tag: txn.is_money_in, op: eq, value: in}
   output_tag: as.borrowed_funds
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5

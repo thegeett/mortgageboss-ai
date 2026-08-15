@@ -362,6 +362,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
             # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
             "FR-3",
+            "IH-9",  # LP-509-D1 — hazard policy expired
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -439,6 +440,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
             # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
             "FR-3",
+            "IH-9",  # LP-509-D1 — hazard policy expired
             "CR-13",
             "PR-6",
         }

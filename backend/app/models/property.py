@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -97,6 +97,14 @@ class Property(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     attachment_type: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     construction_method: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     financed_unit_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # --- MISMO project indicators (LP-509-B1) ------------------------------
+    # Stored RAW rather than folded into `property_type` at import, so the classification stays a
+    # derivable decision the tag layer can revisit; the import would otherwise discard the evidence.
+    # NULLABLE AND TRI-STATE: null = the export did not state it, which must abstain and never be
+    # read as false. `in_project` is the decisive condo signal (a condominium is by definition in a
+    # project); `attachment_type` is NOT — Fannie recognises detached condominiums.
+    in_project: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_pud: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="property")

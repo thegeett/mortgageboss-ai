@@ -237,10 +237,16 @@ def test_in2_fire_clean_boundaries_abstention() -> None:
 # IN-3 — YTD consistency (deterministic, loan, derived, 10% tolerance)
 # ================================================================================================= #
 def _in3(shortfall: str | None):
+    # LP-509-A3: IN-3 is PER-BORROWER now (the IN-1 shape above), because the loan-level form summed
+    # a cumulative YTD across stubs and a per-document documented monthly across documents.
     tags = (
-        {"loan": {"income.ytd_annualized_shortfall_pct": _derived(shortfall)}} if shortfall else {}
+        {str(_B1): {"income.ytd_annualized_shortfall_pct": _derived(shortfall)}}
+        if shortfall
+        else {}
     )
-    return evaluate_deterministic_rule(load_rule_spec("IN-3"), _snap(by_subject=tags))
+    return evaluate_deterministic_rule(
+        load_rule_spec("IN-3"), _snap(docs=[_doc("d", borrower=_B1)], by_subject=tags)
+    )
 
 
 def test_in3_fire_clean_boundary_abstention() -> None:

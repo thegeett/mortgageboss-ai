@@ -198,6 +198,8 @@ async def create_loan_file_from_mismo(
         prop.attachment_type = prop_in.attachment_type
         prop.construction_method = prop_in.construction_method
         prop.financed_unit_count = prop_in.financed_unit_count
+        prop.in_project = prop_in.in_project  # LP-509-B1 — the decisive condo signal
+        prop.is_pud = prop_in.is_pud
 
     # 3) Borrowers + their stated income / employers.
     for index, pb in enumerate(parsed.borrowers):

@@ -210,33 +210,124 @@ def _income_documented_shortfall(
     )
 
 
-def _income_ytd_annualized_shortfall(
-    snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
-    """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, loan-level.
+#: Average days per calendar month (365.25 / 12) — the divisor turning a day-of-year into an
+#: elapsed-month FRACTION, so a pay date of 4 April is 3.09 months elapsed rather than 4.
+_DAYS_PER_MONTH = Decimal("30.4375")
 
-    ytd_monthly = total YTD gross / elapsed months (the MOST-RECENT pay date's month number). Fires
-    when the paystub YTD does NOT support the documented monthly (a positive shortfall). Abstains when
-    YTD, a pay date, or documented income is missing/incomplete."""
-    ytd, ytd_present, ytd_unknown = _income_numbers(snapshot, "income.ytd_gross")
-    documented, d_present, d_unknown = _income_numbers(snapshot, "income.documented_monthly")
-    pay_dates = _income_dates(snapshot, "income.pay_date")
-    if not ytd_present or ytd_unknown:
-        return _UNKNOWN, "year-to-date gross is absent or incomplete — cannot annualize"
-    if not pay_dates:
-        return _UNKNOWN, "no pay date — cannot determine the elapsed period for the YTD figure"
+#: Below this many elapsed months a YTD figure is not a usable annualization base: dividing a small
+#: YTD by a fraction of a month multiplies noise (one early-January stub would "annualize" to a
+#: wildly overstated or understated monthly). Abstain instead — never a fabricated shortfall.
+_MIN_ELAPSED_MONTHS = Decimal("1")
+
+
+def _borrower_latest_ytd(
+    snapshot: Snapshot, borrower_id: str
+) -> tuple[Decimal, date | None, bool, bool]:
+    """The borrower's MOST RECENT year-to-date gross → (ytd, its pay date, any_present, any_unknown).
+
+    ⚠️ THE LATEST, NEVER THE SUM. Year-to-date is CUMULATIVE: an April stub's YTD already contains
+    March's. Summing two stubs double-counts every month they share — on LF-WCHG the two stubs read
+    36,376.62 and 42,404.64 and the recipe used 78,781.26, which is exactly their sum and roughly
+    twice the true figure.
+
+    Paired PER DOCUMENT, so the YTD taken is the one belonging to the latest pay date rather than the
+    largest number found anywhere. Two documents sharing the latest pay date but disagreeing on YTD
+    are ambiguous → any_unknown → the caller abstains.
+    """
+    latest: tuple[date, Decimal] | None = None
+    any_present = any_unknown = False
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return Decimal(0), None, any_present, any_unknown
+
+    for entry in _borrower_attributed_documents(snapshot, borrower_id):
+        tags = snapshot.tags.by_subject.get(entry.content_id, {})
+        ytd_tag, date_tag = tags.get("income.ytd_gross"), tags.get("income.pay_date")
+        if ytd_tag is None:
+            continue
+        if str(ytd_tag.value) == _UNKNOWN:
+            any_unknown = True
+            continue
+        # A YTD with no pay date cannot be placed in time, so it can neither be chosen as the latest
+        # nor ruled out as later than the one chosen.
+        if date_tag is None or str(date_tag.value) == _UNKNOWN:
+            any_unknown = True
+            continue
+        pay_date = coerce_date(str(date_tag.value))
+        if pay_date is None:
+            any_unknown = True
+            continue
+        try:
+            value = Decimal(str(ytd_tag.value))
+        except (InvalidOperation, ValueError):
+            any_unknown = True
+            continue
+        any_present = True
+        if latest is None or pay_date > latest[0]:
+            latest = (pay_date, value)
+        elif pay_date == latest[0] and value != latest[1]:
+            any_unknown = True  # two stubs, same pay date, different YTD → cannot choose
+
+    if latest is None:
+        return Decimal(0), None, any_present, any_unknown
+    return latest[1], latest[0], any_present, any_unknown
+
+
+def _income_ytd_annualized_shortfall(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, PER BORROWER.
+
+    LP-509-A3 — THREE STACKED ARITHMETIC DEFECTS, all of which had to go together: fixing any one or
+    two of them left the rule firing on LF-WCHG, a file with no income shortfall at all.
+
+      1. YTD was SUMMED across pay stubs (`_income_numbers`). YTD is cumulative, so that
+         double-counts. Now the LATEST stub's figure (see :func:`_borrower_latest_ytd`).
+      2. `documented_monthly` was SUMMED across documents, and it is materialized PER DOCUMENT — so
+         a borrower with four documents read as four times their income (52,615.42 against someone
+         earning about 13,150/mo). Now the DISTINCT figure, abstaining when documents disagree
+         (:func:`_borrower_documented_monthly`) — the same fix LP-332 applied to IN-1's sibling
+         recipe, which this one never received.
+      3. `elapsed_months` was `max(pay_dates).month`, so a pay date of 4 April counted as four whole
+         months when about 3.1 had passed. Now a real elapsed fraction from the day of year.
+
+    PER BORROWER, mirroring `_income_documented_shortfall` (LP-332, "fixes PIN #1"). A loan-level
+    aggregate both masks one borrower's shortfall behind another's surplus and, as here, invents one
+    out of a mismatch between a summed numerator and a summed denominator.
+    """
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "the YTD shortfall is a per-borrower recipe (needs a borrower subject)"
+
+    documented, d_present, d_unknown = _borrower_documented_monthly(snapshot, subject_id)
+    ytd, pay_date, y_present, y_unknown = _borrower_latest_ytd(snapshot, subject_id)
+
+    if not y_present or y_unknown or pay_date is None:
+        return _UNKNOWN, (
+            f"borrower {subject_id}: year-to-date gross is absent, incomplete, or cannot be placed "
+            "against a pay date — cannot annualize"
+        )
     if not d_present or d_unknown or documented == 0:
-        return _UNKNOWN, "documented monthly income is absent, incomplete, or zero — cannot compare"
-    # The MOST-RECENT pay date's month number is the elapsed YTD period. Use max(pay_dates).month —
-    # NOT max(d.month ...), which across a year boundary (a Dec + Jan paystub) would pick December's
-    # 12 over January's most-recent 1 and understate the monthly figure into a false shortfall.
-    elapsed_months = max(pay_dates).month
-    ytd_monthly = ytd / Decimal(elapsed_months)
+        return _UNKNOWN, (
+            f"borrower {subject_id}: documented monthly income is absent, zero, incomplete, or has "
+            "conflicting figures across documents — cannot compare"
+        )
+
+    # The elapsed portion of the year up to the pay date, as a FRACTION of a month. `timetuple().
+    # tm_yday` is the day of year (4 April = 94), so this is 3.09 months rather than April's "4".
+    elapsed_months = Decimal(pay_date.timetuple().tm_yday) / _DAYS_PER_MONTH
+    if elapsed_months < _MIN_ELAPSED_MONTHS:
+        return _UNKNOWN, (
+            f"borrower {subject_id}: the latest pay date ({pay_date.isoformat()}) is only "
+            f"{elapsed_months:.2f} month(s) into the year — too short a period to annualize a "
+            "year-to-date figure from"
+        )
+
+    ytd_monthly = ytd / elapsed_months
     shortfall = (documented - ytd_monthly) / documented
     return (
         str(shortfall),
-        f"YTD gross {ytd} over {elapsed_months} month(s) = {ytd_monthly:.2f}/mo vs documented "
-        f"{documented}/mo → shortfall {shortfall:.4f}",
+        f"borrower {subject_id}: year-to-date gross {ytd} through {pay_date.isoformat()} "
+        f"({elapsed_months:.2f} months elapsed) = {ytd_monthly:.2f}/mo vs documented "
+        f"{documented}/mo → shortfall {shortfall:.1%} (negative = ahead of pace, not a shortfall)",
     )
 
 
@@ -381,11 +472,20 @@ def _income_days_since_recent_pay(
 # The 1003 fields a complete application must carry (a STARTER set — the authoritative required set
 # incl. Declarations + co-borrower is a Priya/guideline value, LP-323-ID-A §5). Keys are MISMO fact
 # keys; a blank/absent one counts as missing.
+#
+# LP-509-A2: `borrower.1.name` and `property.address` were required here and are emitted BY NOTHING —
+# mismo_section.py emits `first_name`/`middle_name`/`last_name` and `address_line`/`address_line_2`.
+# Two of the four keys could never resolve, so ID-6 fired "the application is incomplete" on EVERY loan
+# file in the system, naming two fields that were in fact present under their real names. The starter
+# set stays a STARTER set: city/state/postal_code are emitted and are deliberately NOT required here,
+# because widening what counts as a complete 1003 is the Priya/guideline decision this comment defers,
+# not a side effect of repairing the key names. Guarded by the fact-key registry test (LP-509-E1).
 _APP_REQUIRED_FIELDS = (
-    "borrower.1.name",
+    "borrower.1.first_name",
+    "borrower.1.last_name",
     "borrower.1.ssn",
     "loan.amount",
-    "property.address",
+    "property.address_line",
 )
 
 
@@ -798,6 +898,73 @@ def _loan_effective_date(
     )
 
 
+def _ins_policy_expired(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """ins.policy_expired — has the homeowners policy already lapsed as at the file date? (LP-509-D1)
+
+    ⚠️ COMPARED TO THE SNAPSHOT'S OWN BUILD DATE, NEVER THE CLOSING DATE, and that is the whole point.
+    LF-WCHG carried an ACORD 27 running 06/25/2024 to 06/25/2025 — thirteen months lapsed at processing,
+    and the single most useful thing anyone could have said about that file. Nothing reported it. The
+    only rule reading those binder dates was IH-3, which compares the EFFECTIVE date to the CLOSING
+    date, so with no closing date on the file it abstained — and a couldnt_check about closing
+    swallowed a fact that is true no matter when closing is.
+
+    Expiry needs no closing date to be established, so this depends on none. A file with no closing
+    date still gets a straight answer.
+
+    Scoped to ``homeowners_insurance`` documents ONLY, for the reason _loan_effective_date documents:
+    ``expiration_date`` is a field name the flood-policy and insurance-quote extractors also emit, and
+    a document tag is scoped by field name rather than document type — so reading it from every subject
+    would let a flood policy's date decide the hazard verdict, or manufacture a false disagreement that
+    suppresses it. FAIL-CLOSED: no binder expiration date, an unparseable one, or binders that DISAGREE
+    → unknown (IH-9 abstains), never a guessed "not expired".
+    """
+    if snapshot.documents.absent:
+        return _UNKNOWN, "no documents in the file — no homeowners insurance binder to read"
+
+    values: dict[date, str] = {}
+    unparseable = False
+    for entry in snapshot.documents.entries:
+        if entry.document_type != "homeowners_insurance":
+            continue
+        tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("ins.expiration_date")
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        raw = str(tag.value)
+        parsed = coerce_date(raw)
+        if parsed is None:
+            unparseable = True
+            continue
+        values[parsed] = raw
+
+    if unparseable and not values:
+        return _UNKNOWN, (
+            "the homeowners insurance binder states an expiration date that could not be read as a "
+            "date — abstaining rather than reading an unreadable date as current cover"
+        )
+    if not values:
+        return _UNKNOWN, "no homeowners insurance binder states an expiration date in the file"
+    if len(values) > 1:
+        return _UNKNOWN, (
+            f"the file's homeowners insurance binders disagree on the expiration date "
+            f"({', '.join(sorted(values.values()))}) — ambiguous"
+        )
+
+    expires_on, raw = next(iter(values.items()))
+    as_at = snapshot.created_at.date()
+    if expires_on < as_at:
+        lapsed_days = (as_at - expires_on).days
+        return "yes", (
+            f"the homeowners insurance policy expired {raw} — {lapsed_days} day(s) before the file "
+            f"date {as_at.isoformat()}, so the property is currently uninsured"
+        )
+    return "no", (
+        f"the homeowners insurance policy runs to {raw}, which is on or after the file date "
+        f"{as_at.isoformat()}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # LP-447 — ins.dwelling_settlement_basis: the homeowners binder's DWELLING loss-settlement basis, normalised
 # to a controlled vocabulary for IH-1 (insurance adequacy, ADR-340 — Priya's replacement-cost-basis ruling,
@@ -922,6 +1089,68 @@ _CORPORATE_SUFFIX_TOKENS: frozenset[str] = frozenset(
 )
 _NAME_PUNCT = re.compile(r"[.,/&'\"()\[\]\-]+")
 
+# LP-509-A4 — CREDIT-BUREAU ABBREVIATIONS, expanded on BOTH sides before comparison.
+#
+# A tradeline's creditor name reaches the application through the bureaus, which truncate it to a
+# fixed-width field: the application stated "UNITED WHSLE MORT" for the servicer whose mortgage
+# statement says "United Wholesale Mortgage, LLC". Normalisation reduced those to
+# ['united','whsle','mort'] and ['united','wholesale','mortgage'] — no equality, no token-prefix, so
+# RE-1 and DT-6 both reported that the file's mortgage was not disclosed on the application, when it
+# is stated plainly. Telling a processor a mortgage may be undisclosed when it is not is the kind of
+# false alarm that costs the whole output its credibility.
+#
+# A TABLE, NOT A DISTANCE FUNCTION. This module's normalisation is deliberately "declared steps only
+# — no stemming, no fuzzy distance, no inference", and that is worth keeping: an edit-distance or
+# consonant-skeleton match would also equate names that merely look alike, and the failure it buys
+# is a FALSE SATISFIED — a genuinely undisclosed mortgage silently matched to an unrelated stated
+# tradeline. Every entry below is a real bureau abbreviation of one specific word, so expansion can
+# only ever make two spellings of the SAME word agree. Extend it when the corpus shows a new one.
+# Kept deliberately SHORT. Anything genuinely ambiguous is left out rather than guessed: "cap"
+# (capital/capitol), "amer" (america/american), "res" (residential/reserve), "nat" and "fin" are all
+# short enough to be a name fragment in their own right, and a wrong expansion here does not cause a
+# missed match — it causes a WRONG one, which lands as `satisfied` and is never re-read. Every entry
+# is an abbreviation seen on real tradeline names.
+#
+# `services`/`servicing` is a CANONICALISATION rather than an expansion: both spellings appear in
+# servicer legal names ("PennyMac Loan Services" vs a statement's "Loan Servicing"), so both sides
+# are folded onto one token. Same purpose — make two spellings of one entity agree.
+_LENDER_ABBREVIATIONS: dict[str, str] = {
+    "whsle": "wholesale",
+    "whlsl": "wholesale",
+    "whls": "wholesale",
+    "mort": "mortgage",
+    "mtg": "mortgage",
+    "mtge": "mortgage",
+    "mtgs": "mortgage",
+    "fincl": "financial",
+    "fncl": "financial",
+    "svc": "servicing",
+    "svcs": "servicing",
+    "svcng": "servicing",
+    "services": "servicing",
+    "natl": "national",
+    "fed": "federal",
+    "assn": "association",
+    "ln": "loan",
+    "lns": "loan",
+    "hm": "home",
+    "bk": "bank",
+    "bnk": "bank",
+    "cu": "credit union",
+}
+
+
+def _expand_lender_abbreviations(tokens: list[str]) -> list[str]:
+    """Bureau abbreviations to their full words (LP-509-A4).
+
+    An entry may expand to two tokens (``cu`` -> ``credit union``), so the result is re-flattened;
+    that keeps the token-prefix rule in :func:`_lender_names_agree` comparing like with like.
+    """
+    out: list[str] = []
+    for token in tokens:
+        out.extend(_LENDER_ABBREVIATIONS.get(token, token).split())
+    return out
+
 
 def _normalise_lender_name(raw: str) -> list[str]:
     """A lender/mortgagee name reduced to comparable tokens. Declared steps only — no stemming, no
@@ -937,7 +1166,11 @@ def _normalise_lender_name(raw: str) -> list[str]:
         if index != -1:
             text = text[:index]
     text = _NAME_PUNCT.sub(" ", text)
-    return [tok for tok in text.split() if tok and tok not in _CORPORATE_SUFFIX_TOKENS]
+    # Expand bureau abbreviations BEFORE dropping corporate suffixes, so an abbreviation that
+    # expands to a suffix token ("bk" -> "bank") is dropped by the same rule as the spelled-out
+    # form — otherwise the two spellings would normalise to different token counts.
+    expanded = _expand_lender_abbreviations([tok for tok in text.split() if tok])
+    return [tok for tok in expanded if tok not in _CORPORATE_SUFFIX_TOKENS]
 
 
 def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
@@ -1188,6 +1421,133 @@ _CONDO_LITIGATION_YES = frozenset({"yes", "y", "true", "pending", "disclosed"})
 # the direction this block's own comment and the vocabulary description forbid ("an unfamiliar answer
 # can never be read as 'no litigation'"). They fall through to the abstain.
 _CONDO_LITIGATION_NO = frozenset({"no", "n", "false", "none"})
+
+
+# --------------------------------------------------------------------------- #
+# LP-509-B1 — property.type, from the STATED type or, failing that, the MISMO project indicators.
+# --------------------------------------------------------------------------- #
+
+# The DB's PropertyType enum -> the tag's declared vocabulary (sfr | condo | pud | 2-4unit |
+# manufactured | coop | unknown). These are two different value spaces and were never reconciled,
+# because `properties.property_type` has been null on every file so far — the passthrough this
+# replaces would have emitted "single_family", a value outside the tag's own enum.
+#
+# `townhouse` and `other` map to NOTHING on purpose. A townhouse may be a condo, a PUD or fee-simple
+# depending on how the project is organised, and that distinction is the whole point of the condo
+# rules — mapping it to any one of them would be a guess that reads as fact.
+_DB_PROPERTY_TYPE_TO_TAG: dict[str, str] = {
+    "single_family": "sfr",
+    "condo": "condo",
+    "multi_family": "2-4unit",
+    "manufactured": "manufactured",
+}
+
+# ConstructionMethodType values that mean a manufactured home, casefolded.
+_MANUFACTURED_CONSTRUCTION = frozenset({"manufactured", "mobilehome", "mobile home"})
+
+
+def _mismo_bool(snapshot: Snapshot, key: str) -> bool | None:
+    """A MISMO indicator as a tri-state. Absent/blank/unparseable -> None (abstain, never False)."""
+    text = _mismo_str(snapshot, key)
+    if text is None:
+        return None
+    lowered = text.strip().casefold()
+    if lowered in {"true", "yes", "y", "1"}:
+        return True
+    if lowered in {"false", "no", "n", "0"}:
+        return False
+    return None
+
+
+def _property_type(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.type — the STATED type, else derived from the MISMO project indicators.
+
+    LF-WCHG's export states an EMPTY PropertyType, so this tag never materialized and CO-1, CO-3,
+    CO-4 and IH-7 each reported "the property type has not been determined" — four findings asking a
+    processor to supply something the file already contains. The same export carries
+    PropertyInProjectIndicator, PUDIndicator, FinancedUnitCount and ConstructionMethodType.
+
+    ⚠️ `in_project` IS THE DECISIVE CONDO SIGNAL, and `attachment_type` is deliberately not used as
+    one. A condominium is by definition a property in a project, so `in_project == false` rules it
+    out. "Detached" does NOT: Fannie Mae recognises DETACHED CONDOMINIUMS, so reading detached as
+    "not a condo" would clear the condo rules on a file they were written for. This was checked
+    specifically rather than assumed.
+
+    FAIL-CLOSED THROUGHOUT. Every branch that cannot decide returns None (the tag is absent and the
+    rules abstain) rather than a default. In particular an `in_project == true` file is NOT called a
+    condo: a co-op and a project PUD are also "in a project", and the indicators alone cannot
+    separate them.
+    """
+    stated = _mismo_str(snapshot, "property.type")
+    if stated:
+        mapped = _DB_PROPERTY_TYPE_TO_TAG.get(stated.strip().casefold())
+        if mapped is not None:
+            return mapped, f"the loan file states a property type of {stated!r}"
+        return None, (
+            f"the loan file states a property type of {stated!r}, which does not correspond to a "
+            "single value in this tag's vocabulary — abstaining rather than choosing one"
+        )
+
+    in_project = _mismo_bool(snapshot, "property.in_project")
+    is_pud = _mismo_bool(snapshot, "property.is_pud")
+    construction = (_mismo_str(snapshot, "property.construction_method") or "").strip().casefold()
+    units_text = _mismo_str(snapshot, "property.financed_unit_count")
+
+    if construction in _MANUFACTURED_CONSTRUCTION:
+        return "manufactured", (
+            f"the loan file states no property type; its construction method ({construction!r}) is a "
+            "manufactured home"
+        )
+    if in_project is None:
+        return None, (
+            "the loan file states no property type, and no project indicator "
+            "(PropertyInProjectIndicator) either — whether this is a condominium cannot be "
+            "determined, and a detached dwelling is not evidence against one"
+        )
+    if in_project:
+        return None, (
+            "the loan file states no property type; it states only that the property IS in a "
+            "project, which a condominium, a co-operative and a project PUD all are — the type "
+            "cannot be narrowed further from the indicators alone"
+        )
+    # Not in a project: a condominium and a co-op are both ruled out.
+    if is_pud:
+        return "pud", (
+            "the loan file states no property type; it is not in a project and is flagged a PUD"
+        )
+    if is_pud is None:
+        return None, (
+            "the loan file states no property type; it is not in a project, but states no PUD "
+            "indicator, so a planned-unit development cannot be ruled out"
+        )
+    units = _to_int_or_none(units_text)
+    if units is None:
+        return None, (
+            "the loan file states no property type; it is neither in a project nor a PUD, but "
+            "states no financed unit count, so a one-unit dwelling cannot be distinguished from a "
+            "2-4 unit property"
+        )
+    if units >= 2:
+        return "2-4unit", (
+            "the loan file states no property type; it is neither in a project nor a PUD and "
+            f"finances {units} units"
+        )
+    return "sfr", (
+        "the loan file states no property type; it is not in a project (so not a condominium or "
+        f"co-op), not a PUD, and finances {units} unit — a single-family residence"
+    )
+
+
+def _to_int_or_none(text: str | None) -> int | None:
+    """A MISMO count as an int; anything unparseable is None (abstain, never a default)."""
+    if text is None:
+        return None
+    try:
+        return int(Decimal(text.strip()))
+    except (ArithmeticError, ValueError):
+        return None
 
 
 def _condo_scope(snapshot: Snapshot) -> tuple[str | None, str]:
@@ -4860,6 +5220,7 @@ _RECIPES: dict[str, Recipe] = {
     "app_required_fields_present": _app_required_fields_present,
     "program_conforming_eligibility": _program_conforming_eligibility,  # LP-496a — PE-1
     "fha_min_investment_met": _fha_min_investment_met,  # LP-496a — PE-3
+    "property_type": _property_type,  # LP-509-B1 — stated, else the MISMO project indicators
     # LP-323-IN-B — the income family's loan-level arithmetic (per-borrower granularity is deferred:
     # the derived producer is loan-only, so these aggregate the file like the DTI calc does — see the
     # LP-323-IN-B doc). Registry entries only; produce_derived_tags is untouched (the wave criterion).
@@ -4872,6 +5233,7 @@ _RECIPES: dict[str, Recipe] = {
     # LP-417 — the loan's homeowners-insurance effective date (promoted from the document-subject
     # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
     "loan_effective_date": _loan_effective_date,
+    "ins_policy_expired": _ins_policy_expired,  # LP-509-D1 — IH-9
     # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised to replacement_cost /
     # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).

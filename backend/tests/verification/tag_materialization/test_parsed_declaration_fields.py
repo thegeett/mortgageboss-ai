@@ -143,6 +143,7 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         property_type="SFR", occupancy_type="Primary", estimated_value=Decimal("1"),
         purchase_price=Decimal("1"), valuation_amount=Decimal("1"), attachment_type="Detached",
         construction_method="SiteBuilt", financed_unit_count=1,
+        in_project=False, is_pud=False,  # LP-509-B1
     )  # fmt: skip
     liab = ns(
         id=uuid4(),

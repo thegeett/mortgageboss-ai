@@ -256,14 +256,50 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
 )
 
 
+def _later_view_redefinitions() -> dict[str, str]:
+    """``{table: view text}`` for views a migration AFTER C7 recreates (LP-509-B1).
+
+    A view is not frozen at C7. A later migration that adds a column has to rebuild the view to
+    expose it, and reading only C7 would then check the drift guard against a definition the
+    database no longer has — reporting the new column as unexposed when it is exposed, or worse,
+    passing while a rebuilt view quietly dropped one.
+
+    Scanned as TEXT across the versions directory rather than by importing: these modules import
+    `alembic.op`, which is only bound inside a migration run. Later revisions win, and among them
+    the last by filename — the versions are date-prefixed, so filename order is apply order.
+    """
+    bodies: dict[str, str] = {}
+    for path in sorted(_MIGRATION.parent.glob("*.py")):
+        if path.name <= _MIGRATION.name:
+            continue
+        # The schema is written either literally or as the `{_SCHEMA}` placeholder of an f-string —
+        # C7 uses the placeholder and so do its successors, and this reads the file as TEXT, so the
+        # placeholder is never substituted. Both spellings are accepted rather than requiring one,
+        # so a migration that follows C7's own style is not silently skipped by this scan.
+        for view in re.findall(
+            r"CREATE VIEW\s+(?:readonly|\{_SCHEMA\})\.\w+\s+AS\s+(SELECT.*?FROM\s+public\.\w+)",
+            path.read_text(encoding="utf-8"),
+            re.DOTALL | re.IGNORECASE,
+        ):
+            match = re.search(r"FROM\s+public\.(\w+)", view)
+            assert match, f"view without a public.<table> source in {path.name}"
+            bodies[match.group(1)] = view
+    return bodies
+
+
 def _view_bodies() -> dict[str, str]:
-    """``{table: the SELECT ... FROM public.<table> text}`` from the shipped migration."""
+    """``{table: the SELECT ... FROM public.<table> text}`` as the database has it TODAY.
+
+    C7 defines the 32 views; a later migration may recreate one, and that later definition is the
+    live one (see :func:`_later_view_redefinitions`).
+    """
     module = _migration_module()
     bodies: dict[str, str] = {}
     for view in module._VIEWS:  # type: ignore[attr-defined]
         match = re.search(r"FROM\s+public\.(\w+)", view)
         assert match, f"view without a public.<table> source: {view[:80]}"
         bodies[match.group(1)] = view
+    bodies.update(_later_view_redefinitions())
     return bodies
 
 

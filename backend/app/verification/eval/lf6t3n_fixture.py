@@ -83,6 +83,14 @@ _BORROWER_MISMO: dict[str, SnapshotField] = {
     # The equivalence test pins this with stubbed reasoners (fixed output), so it proves DETERMINISTIC stability,
     # not that a live occupancy model ignores the added fact.
     "property.purchase_price": _f("365000.00"),
+    # LP-509-A5: the file's loan PURPOSE, which was absent while the file plainly describes a
+    # purchase — it carries a purchase agreement, a sales price and a stated 1003 purchase price
+    # that match at 365000. The omission was the sole reason LP-424 declared `loan.purpose` and then
+    # deferred wiring it to PC-2/PC-3/PC-7: the predicate "would regress LF-6T3N to couldnt_check".
+    # It regressed because the fixture understated itself, not because the predicate was wrong, so
+    # the fixture is corrected here rather than the rules being left unscoped. Stating it keeps
+    # those three rules genuinely exercised on the flagship fixture instead of abstaining.
+    "loan.purpose": _f("purchase"),
 }
 
 # Attribution by the RESOLVED holder name (LP-202: belongs_to is the evidence-based link). A document is

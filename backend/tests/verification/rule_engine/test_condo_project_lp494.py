@@ -242,7 +242,7 @@ def test_the_catalog_edits_are_recorded_and_the_row_count_is_unchanged() -> None
     """Both edits answer LP-487's question — has typed extraction already spent the perception step? — and
     both are visible in the csv rationale rather than being silent."""
     kinds = load_rule_kinds()
-    assert len(kinds) == 135
+    assert len(kinds) == 136  # LP-509-D1 +IH-9 (hazard policy expired)
     co4, co5 = kinds["CO-4"], kinds["CO-5"]
     # CO-4 stays calculative (its threshold needs sign-off) but loses the AI half of the bookend.
     assert co4.kind is RuleKindName.CALCULATIVE

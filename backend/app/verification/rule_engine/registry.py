@@ -462,6 +462,13 @@ _LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
 # nothing distinguishes a real discovery from a fabricated one. Needs a mechanism and an ADR.
 _LP498_ACTIVATED: tuple[str, ...] = ("FR-3",)
 
+# LP-509-D1 — IH-9, the expired-hazard-policy check. Not a refinement of an existing rule but a MISSING one:
+# LF-WCHG's hazard policy was thirteen months lapsed and none of its 162 findings said so, because the only
+# rule reading that binder's dates (IH-3) compares the effective date to the CLOSING date and the file has no
+# closing date — so it abstained, and a couldnt_check about closing swallowed a fact that is true regardless
+# of closing. Same activation shape as IH-3: parsed input, exact compare, no AI, no threshold.
+_LP509_ACTIVATED: tuple[str, ...] = ("IH-9",)
+
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (
@@ -497,6 +504,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP496A_ACTIVATED,
     *_LP497_ACTIVATED,
     *_LP498_ACTIVATED,
+    *_LP509_ACTIVATED,
 )
 
 

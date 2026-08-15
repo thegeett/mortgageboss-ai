@@ -41,21 +41,26 @@ _TAG = "property.address_normalized_match"
 _SPEC = load_rule_spec("PC-3")
 
 
-def _snapshot(match: str | None) -> Snapshot:
+def _tag(value: str, produced_by: TagProducedBy = TagProducedBy.DERIVED) -> Tag:
+    return Tag(
+        value=value,
+        confidence=None,
+        reasoning="fixture",
+        source_facts=(_LOAN,),
+        produced_by=produced_by,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        tag_version=1,
+        stage=TagStage.A,
+    )
+
+
+def _snapshot(match: str | None, purpose: str | None = "purchase") -> Snapshot:
+    # LP-509-A5: PC-3 is scoped purchase-only, so a case that expects it to RUN states a purchase.
     tags: dict[str, dict[str, Tag]] = {}
+    if purpose is not None:
+        tags[_LOAN] = {"loan.purpose": _tag(purpose, TagProducedBy.PARSED)}
     if match is not None:
-        tags[_LOAN] = {
-            _TAG: Tag(
-                value=match,
-                confidence=None,
-                reasoning="fixture",
-                source_facts=(_LOAN,),
-                produced_by=TagProducedBy.DERIVED,
-                tag_role=TagRole.STRUCTURAL_FACT,
-                tag_version=1,
-                stage=TagStage.A,
-            )
-        }
+        tags.setdefault(_LOAN, {})[_TAG] = _tag(match)
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),

@@ -18,6 +18,7 @@ AS-2,contract.emd_sourced
 AS-2,txn.apparent_category
 AS-2,txn.counterparty
 AS-2,txn.has_identified_source
+AS-2,txn.is_money_in
 AS-3,dti.qualifying_income_monthly
 AS-3,income.qualifying_monthly
 AS-3,stmt.ending_balance

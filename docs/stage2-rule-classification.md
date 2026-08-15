@@ -2,7 +2,7 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**135 rules** — calculative 28, structural 65, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/135. Thresholds needing sign-off: 18.
+**136 rules** — calculative 28, structural 66, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/136. Thresholds needing sign-off: 18.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
@@ -39,7 +39,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend | true | — | false | false |
 | PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | false |
 
-## structural (65)
+## structural (66)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -85,6 +85,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | IH-5 | Flood zone determination | Insurance | structural | deterministic_only | false | true | false | false |
 | IH-6 | Flood insurance required/present | Insurance | structural | ai_fuzzy_match | false | false | false | false |
 | IH-7 | Condo master policy | Insurance | structural | deterministic_only | false | true | false | false |
+| IH-9 | Insurance policy expired | Insurance | structural | deterministic_only | false | true | false | false |
 | CO-1 | Condo questionnaire present | Condo | structural | deterministic_only | false | true | false | false |
 | CO-2 | HOA dues in DTI | Condo | structural | deterministic_only | false | true | false | false |
 | CO-3 | Master insurance / fidelity | Condo | structural | deterministic_only | false | true | false | false |

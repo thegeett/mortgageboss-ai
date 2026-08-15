@@ -219,7 +219,12 @@ async def test_as3_and_in3_stay_couldnt_check_even_on_the_plus_fixture() -> None
     # IN-3 is ACTIVE (LP-390-9) but honestly abstains here: documented_monthly (AI) IS produced, but the
     # derived YTD-annualized shortfall has no stated-income/ytd comparison input on the fixture — the same
     # honest couldnt_check as live IN-1, NOT a tag-production failure.
-    assert (await _verdicts(plus, "IN-3"))["loan"] is Verdict.COULDNT_CHECK
+    # LP-509-A3: IN-3 enumerates PER BORROWER now, so the subject key is a borrower id rather than
+    # "loan". Every borrower must abstain — asserted over all of them, not just the first.
+    in3 = await _verdicts(plus, "IN-3")
+    assert in3, "IN-3 produced no subjects at all — the per-borrower enumeration found no borrower"
+    assert "loan" not in in3
+    assert set(in3.values()) == {Verdict.COULDNT_CHECK}
 
 
 # --------------------------------------------------------------------------- #

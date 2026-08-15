@@ -769,6 +769,30 @@ IH-3:
     IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
     (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
 
+IH-9:
+  # LP-509-D1 — the same activation shape as IH-3 directly above, and for the same reasons: the input is a
+  # PARSED binder date (ins.expiration_date, typed-core) promoted to a derived loan verdict, so there is no AI
+  # tag in the chain, and the comparison is EXACT (expired or not, against the file date) so there is no
+  # threshold to sign off. The no-ai-dependency path, eligible on input_resolves alone.
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  input_resolves: true    # verified on the binder scenarios (build_insurance_expired_snapshot / _current_):
+                          # an expiration before the file date -> FIRED, on or after -> SATISFIED, and a file
+                          # with no binder -> COULDNT_CHECK. LF-6T3N carries no binder, so IH-9 abstains there
+                          # (the IH-3 situation exactly).
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    FN is the one that matters and it is what happened: LF-WCHG's policy was THIRTEEN MONTHS lapsed and no
+    finding said so, because the only rule reading that binder's dates needed a closing date the file did not
+    have. FP is a human re-reading one date on a binder. Exact compare, so no tolerance tunes this.
+  rationale: >-
+    no AI load-bearing tag; an exact date comparison (the binder's expiration date vs the snapshot's build
+    date) resolved in the derived tag, with a missing/unreadable/disagreeing binder abstaining rather than
+    clearing. Deliberately NOT an outcome on IH-3: that would gate this conclusion on
+    contract.loan_closing_date, which is precisely the gap that hid it.
+
 IH-1:
   # LP-447 — the second Bucket 3 insurance rule live, unblocked by LP-446. BLOCKED at LP-431 because the dwelling
   # loss-settlement basis was not extracted; LP-446 added the typed-core field, LP-447 normalises it

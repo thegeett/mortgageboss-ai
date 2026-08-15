@@ -293,6 +293,9 @@ def _parse_property(deal: etree._Element, ctx: _Ctx) -> ParsedProperty | None:
         attachment_type=ctx.text(prop, ".//m:AttachmentType"),
         construction_method=ctx.text(prop, ".//m:ConstructionMethodType"),
         financed_unit_count=_to_int(ctx.text(prop, ".//m:FinancedUnitCount")),
+        # LP-509-B1 — the project indicators (see ParsedProperty). Absent element → None → abstain.
+        in_project=_to_bool(ctx.text(prop, ".//m:PropertyInProjectIndicator")),
+        is_pud=_to_bool(ctx.text(prop, ".//m:PUDIndicator")),
     )
     if parsed.estimated_value is None:
         ctx.warnings.append("Subject property is missing an estimated value.")

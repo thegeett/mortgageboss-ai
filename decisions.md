@@ -15465,3 +15465,29 @@ is granted only where Terraform's `db_instance_resource_id` is wired.
 
 **Related:** ADR-384 (what the views may return), the `PROVISIONING_ENVIRONMENTS` idiom in
 `scripts/deploy` that this mirrors.
+
+## ADR-386
+
+**A rule's conclusion must not be gated on an input its conclusion does not need.**
+
+*Context.* LF-WCHG carried a hazard insurance policy that had been expired for thirteen months, and none of
+its 162 findings said so. The only rule reading that binder's dates was IH-3, which compares the policy's
+EFFECTIVE date to the loan's CLOSING date. The file has no closing date, so IH-3's gate resolved to
+`couldnt_check` and no outcome was ever reached. A gap about *closing* silently swallowed a fact that is true
+regardless of closing — and `couldnt_check` is the honest verdict for IH-3's own question, so nothing was
+wrong at the rule level. The defect was that no rule asked the unconditional question.
+
+*Decision.* When a conclusion holds independently of some input, it gets its own rule with its own gate,
+rather than an extra outcome on a rule that needs that input. LP-509-D1 adds IH-9 (has the policy expired, as
+at the file date) beside IH-3 (did cover start late, as at closing). The two read different dates, can fire
+independently, and neither can suppress the other. A test asserts IH-9's tag set contains nothing matching
+`closing`, so re-gating it fails loudly rather than quietly.
+
+*Consequences.* Rules proliferate slightly where one rule with two outcomes would have read more compactly.
+That is the intended trade: gates compose by conjunction, so every input added to a rule is another way for
+its conclusions to go silent, and the silence is invisible — a `couldnt_check` about one input looks exactly
+like a `couldnt_check` about the whole rule. The overlap between IH-3 and IH-9 is deliberate and is not
+double-firing.
+
+*Applies to.* Any rule whose outcomes do not all depend on the same inputs. The tell is an outcome whose
+reasoning never mentions a tag the rule gates on.

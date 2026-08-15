@@ -421,12 +421,16 @@ def test_id6_case13_known_underfire_starter_fieldset() -> None:
     from app.verification.snapshot.fields import Field, FieldSource
     from app.verification.snapshot.model import MismoSection
     from app.verification.tag_materialization.declarations import load_declarations
-    from app.verification.tag_materialization.derived import produce_derived_tags
+    from app.verification.tag_materialization.derived import (
+        _APP_REQUIRED_FIELDS,
+        produce_derived_tags,
+    )
 
+    # LP-509-A2: the required set is IMPORTED, not restated — a local copy of these keys is what
+    # let two names that nothing emits (`borrower.1.name`, `property.address`) survive in the recipe.
     starter = {
-        key: Field.present("x", source=FieldSource.EXTRACTED)
-        for key in ("borrower.1.name", "borrower.1.ssn", "loan.amount", "property.address")
-    }  # the 4 starter fields present; NO Declarations / co-borrower field
+        key: Field.present("x", source=FieldSource.EXTRACTED) for key in _APP_REQUIRED_FIELDS
+    }  # the starter fields present; NO Declarations / co-borrower field
     snap = Snapshot(
         loan_file_id=_LF,
         run_id=uuid4(),

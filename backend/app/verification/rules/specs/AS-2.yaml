@@ -34,10 +34,18 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Earnest money)."
 spec_version: 1
 deterministic:
   load_bearing_tags:
+    - txn.is_money_in
     - txn.has_identified_source
     - txn.apparent_category
   gated_tags:
+    - txn.is_money_in
     - txn.has_identified_source
+  # LP-509-A1: `per_deposit` enumerates one subject per bank-statement TRANSACTION, not per deposit,
+  # so without this the rule asked "the deposit's source could not be found" of a Geico premium, an
+  # AT&T bill and an ATM fee — 57 subjects where 10 are money-in. AS-1 has gated on this since it was
+  # written; AS-2 and AS-12 were the two that never did. != in → not_applicable; absent/unknown →
+  # couldnt_check (the §8 honesty contract: scope-false must never absorb data-missing).
+  applicability: {tag: txn.is_money_in, op: eq, value: in}
   outcomes:
     - verdict: fired
       when_tags:

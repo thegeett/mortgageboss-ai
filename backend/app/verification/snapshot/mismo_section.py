@@ -167,6 +167,11 @@ def build_mismo_section(
         put("property.attachment_type", property_.attachment_type)
         put("property.construction_method", property_.construction_method)
         put("property.financed_unit_count", property_.financed_unit_count)
+        # LP-509-B1 — the project indicators, which decide property.type when the export states
+        # none. `in_project` is the decisive condo signal; attachment_type is not (detached
+        # condominiums exist). Null → the fact is ABSENT, so the derivation abstains.
+        put("property.in_project", property_.in_project)
+        put("property.is_pud", property_.is_pud)
 
     # --- Borrowers (deterministic order: position, then id) ---------------
     for n, borrower in enumerate(

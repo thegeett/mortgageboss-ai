@@ -121,7 +121,12 @@ tags:
   income.history_documentation: {mode: derived, subject: borrower, data: income_history_documentation}
   # LP-422 — the rental analog: Schedule E presence -> a per-borrower rental fact, for IN-13's rental scope.
   income.has_rental_income: {mode: derived, subject: borrower, data: income_has_rental_income}
-  income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
+  # LP-509-A3 — loan -> BORROWER. The loan-level version summed a cumulative YTD across pay stubs and summed a
+  # per-document documented_monthly across documents, then divided by a whole-month count; the three together
+  # invented a 62.6% income shortfall on a file that has none. Per-borrower is also what LP-332 did to the
+  # sibling recipe (income.documented_income_shortfall_pct, directly above) for the same reason — a loan-level
+  # aggregate cannot dedup, because a tag carries no borrower id.
+  income.ytd_annualized_shortfall_pct: {mode: derived, subject: borrower, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
   # LP-366-A — the loan's total STATED income (sum of the borrowers' MISMO income lines). STAGED ahead of
@@ -211,11 +216,21 @@ tags:
   # PUD before they can scope. DESCRIPTIVE — the RAW MISMO value passes through verbatim (produce_parsed_tag),
   # NOT normalised: whether a value "is a condo" is a rule's branch or a later derived tag, never a re-labelling
   # here (tags describe, rules judge). Absent MISMO property.type → the tag is ABSENT (fail closed), never a
-  # default. ⚠️ On the current fixtures MISMO property_type is null on all three files, so the tag is null today
-  # (an honest source-data gap — the appraisal / purchase_agreement extractors DO carry a property_type, but
-  # reading a document source or reconciling across sources is a separate ticket, LP-452 D3). Guarded by LP-450
-  # (`property.type` is in the MISMO loan-key universe).
-  property.type: {mode: parsed, subject: loan, data: property.type}
+  # default. Guarded by LP-450 (`property.type` is in the MISMO loan-key universe).
+  #
+  # LP-509-B1 — NOW `derived`, NOT `parsed`. The note that used to sit here ("on the current fixtures MISMO
+  # property_type is null on all three files, so the tag is null today — an honest source-data gap") turned out
+  # to describe a LIVE DEFECT, not just a fixture limitation: LF-WCHG's real export also states an empty
+  # PropertyType, so CO-1/CO-3/CO-4/IH-7 each reported "the property type has not been determined" — four
+  # findings asking for something the file already carried. The same export states
+  # PropertyInProjectIndicator=false, PUDIndicator=false and FinancedUnitCount=1, which settle it.
+  #
+  # The recipe still prefers the STATED type and only derives when none is stated, so the descriptive
+  # contract above is intact. Two things the passthrough got wrong are also fixed: the DB's PropertyType enum
+  # (single_family/townhouse/…) is a DIFFERENT value space from this tag's declared vocabulary
+  # (sfr/condo/pud/2-4unit/…), so a stated value used to pass through outside its own enum; and `townhouse`
+  # now abstains instead of being emitted as an unclassifiable value.
+  property.type: {mode: derived, subject: loan, data: property_type}
 
   # --- ins.* — IH-3's input (LP-417). The homeowners_insurance binder's effective_date (typed-core) is read
   #     as a DOCUMENT parsed tag (ins.effective_date, in fact_tags.csv), then PROMOTED to loan level
@@ -228,6 +243,21 @@ tags:
   #     the same id.id_expiration leak-guard), never every subject carrying the tag. --------------------------- #
   ins.effective_date: {mode: parsed, subject: document, data: effective_date}
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
+  # --- LP-509-D1 — IH-9's input, the same two-step shape as the effective date directly above. The binder's
+  #     typed-core expiration_date is read as a DOCUMENT parsed tag, then a loan-level DERIVED verdict compares
+  #     it to the snapshot's own build date. ⚠️ Against the FILE DATE, not the closing date: an expired policy
+  #     is expired whether or not a closing date is known, and gating that on one is what hid a 13-month-lapsed
+  #     policy on LF-WCHG behind IH-3's couldnt_check. `expiration_date` is emitted by the flood-policy and
+  #     insurance-quote extractors too, so — exactly like _loan_effective_date — the recipe reads it ONLY from
+  #     homeowners_insurance documents. -------------------------------------------------------------------- #
+  #     ⚠️ SCOPED with document_type, unlike ins.effective_date beside it. An unscoped parsed declaration
+  #     matches a distrusted (document_type, field) pair on FIELD NAME ALONE (distrust.py, deliberately
+  #     conservative) — and `expiration_date` is distrusted on drivers_license, where the extractor
+  #     hallucinated dates on docs 146/294. Unscoped, this tag would inherit a distrust measured on a
+  #     completely different document. Scoping states what it actually reads, and stops the tag
+  #     materializing on a licence or a flood policy at all.
+  ins.expiration_date: {mode: parsed, subject: document, data: expiration_date, document_type: homeowners_insurance}
+  ins.policy_expired: {mode: derived, subject: loan, data: ins_policy_expired}
   # --- LP-447 — IH-1's input. The homeowners binder's DWELLING loss-settlement basis, read from the typed-core
   #     replacement_cost_or_coinsurance_basis field (LP-446) and NORMALISED to a controlled vocabulary
   #     (replacement_cost / actual_cash_value / unknown) by the derived recipe. PER-DOCUMENT (the binder subject,

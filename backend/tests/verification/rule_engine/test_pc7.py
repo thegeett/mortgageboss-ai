@@ -33,21 +33,27 @@ _LOAN = "loan"
 _SPEC = load_rule_spec("PC-7")
 
 
-def _snapshot(days: str | None) -> Snapshot:
+def _loan_tag(value: str, produced_by: TagProducedBy = TagProducedBy.DERIVED) -> Tag:
+    return Tag(
+        value=value,
+        confidence=None,  # derived/parsed, a passthrough
+        reasoning="fixture",
+        source_facts=(_LOAN,),
+        produced_by=produced_by,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        tag_version=1,
+        stage=TagStage.A,
+    )
+
+
+def _snapshot(days: str | None, purpose: str | None = "purchase") -> Snapshot:
+    # LP-509-A5: PC-7 is now scoped purchase-only, so every case that expects it to RUN must state a
+    # purchase. `purpose=None` omits the tag, which is the unstated case (couldnt_check).
     tags: dict[str, dict[str, Tag]] = {}
+    if purpose is not None:
+        tags[_LOAN] = {"loan.purpose": _loan_tag(purpose, TagProducedBy.PARSED)}
     if days is not None:
-        tags[_LOAN] = {
-            "contract.days_until_closing": Tag(
-                value=days,
-                confidence=None,  # derived, a parsed-style passthrough
-                reasoning="fixture",
-                source_facts=(_LOAN,),
-                produced_by=TagProducedBy.DERIVED,
-                tag_role=TagRole.STRUCTURAL_FACT,
-                tag_version=1,
-                stage=TagStage.A,
-            )
-        }
+        tags.setdefault(_LOAN, {})["contract.days_until_closing"] = _loan_tag(days)
     return Snapshot(
         loan_file_id=uuid4(),
         run_id=uuid4(),

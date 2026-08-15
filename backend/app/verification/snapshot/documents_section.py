@@ -207,6 +207,21 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "recipient_tin": (PiiKind.SSN, False),  # 1099 recipient — stored RAW ("TIN/SSN as written")
     "employer_ein": (PiiKind.ACCOUNT, False),  # W-2 employer tax id — masked ****NNNN
     "payer_tin": (PiiKind.ACCOUNT, False),  # 1099 payer tax id — masked ****NNNN
+    # LP-509-C1 — the same reasoning as the two above, applied to the two W-2 fields it had missed.
+    # `state_employer_id` is Box 15's state-issued employer tax id: literally the same kind of value
+    # as `employer_ein`, routinely 9+ digits, and left unrouted. `control_number` is Box d, an
+    # employer-internal payroll id, also commonly a long digit run. NEITHER IS BORROWER PII and
+    # neither is read by any rule (both carry `"rules": []` in `schema_specs/008-w2.json`) — they are
+    # routed for exactly the reason stated above for the tax ids: a 9+ digit run is what the LP-209
+    # at-rest guard treats as a possible unmasked SSN, and masking the value keeps that guard strong
+    # instead of punching an exemption through it. Unrouted, either one refuses the ENTIRE snapshot
+    # persist for any file carrying a W-2 whose box is populated — losing every tag value on the
+    # file, not just the field.
+    # The same sweep found two more of the identical class, both also read by no rule:
+    "state_employer_id": (PiiKind.ACCOUNT, False),  # W-2 Box 15 state tax id — masked ****NNNN
+    "control_number": (PiiKind.ACCOUNT, False),  # W-2 Box d payroll control id — masked ****NNNN
+    "lender_tin": (PiiKind.ACCOUNT, False),  # form_1098 lender tax id — masked ****NNNN
+    "tax_bill_or_account_number": (PiiKind.ACCOUNT, False),  # property_tax_bill — masked ****NNNN
     # LP-443 step 7 — typed-core PII of the first wired batch. NOTE (reported gap): only TOP-LEVEL
     # typed-core fields are routed here; PII inside a captured LIST row (e.g. a tradeline's
     # account_number_masked) is NOT routed — it relies on the prompt masking it, so list-row PII

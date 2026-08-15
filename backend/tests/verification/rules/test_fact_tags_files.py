@@ -56,13 +56,15 @@ def test_desired_state_shape() -> None:
 
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
-    assert len(rules) == 135  # LP-430 +IN-15; LP-433 +IN-16 (pay-stub-only documentation)
+    assert (
+        len(rules) == 136
+    )  # LP-430 +IN-15; LP-433 +IN-16 (pay-stub-only documentation)  # LP-509-D1 +IH-9 (hazard policy expired)
     # LP-430 — +2 overlay (income.terminated_employment + _end_date); LP-433 — +1 (income.history_documentation).
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
     assert (
         len(tags)
-        == 245  # LP-498 +1 (contract.credits_warrant_review; contract.unusual_credits already existed)  # LP-496a +1 (program.conforming_eligibility; PE-3's tag already existed)
+        == 247  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired)  # LP-498 +1 (contract.credits_warrant_review; contract.unusual_credits already existed)  # LP-496a +1 (program.conforming_eligibility; PE-3's tag already existed)
     )  # LP-495b +2 (occupancy.investment_rental_supported, dti.atr_documentation_adequate —
     # OC-3's and DT-7's judgment OUTPUT tags; a judgment output is emitted by the evaluator, so neither
     # gets a tag_production.yaml entry, the same shape as income.other_income_continues)
@@ -97,7 +99,10 @@ def test_desired_state_shape() -> None:
     # (TI-1 pointed at title.parties_match, TI-2 at title.legal_desc_matches, TI-6 at
     # title.rapid_transfer — three live rules wired to dead vocabulary). Same defect the LP-490
     # review fixed for the credit rules, one ticket later.
-    assert len(rule_tags) == 213
+    # LP-509-A1 +1: AS-2 -> txn.is_money_in. The catalog said AS-12 consumed the direction tag and
+    # AS-2 did not, but neither SPEC gated on it — so both evaluated outgoing bill payments as
+    # deposits. Fixing the specs made AS-2's dependency real, so the row is now declared too.
+    assert len(rule_tags) == 214
     # No depends_on authored yet (LP-311 Phase 0): the DAG is empty.
     assert tag_deps == set()
 

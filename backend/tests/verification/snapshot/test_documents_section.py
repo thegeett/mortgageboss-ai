@@ -342,6 +342,55 @@ def test_pii_registry_covers_every_sensitive_extractor_field() -> None:
     assert not missing, f"SENSITIVE extractor fields not PII-routed: {sorted(missing)}"
 
 
+def test_tax_id_and_account_named_fields_are_routed_even_without_the_annotation() -> None:
+    """LP-509-C1 — the SECOND axis, because the guard above can only see what was annotated.
+
+    The guard above asks "was it marked SENSITIVE?". A field nobody thought to mark is invisible to
+    it, and that is how `state_employer_id` (W-2 Box 15 — a state-issued employer tax id, the same
+    kind of value as the `employer_ein` sitting two lines above it in the same extractor) went
+    unrouted, along with `lender_tin` and `tax_bill_or_account_number`.
+
+    Left unrouted, the cost is not a leak — the LP-209 at-rest guard catches it — it is that the
+    guard REFUSES THE WHOLE SNAPSHOT. One populated W-2 box costs the loan file every persisted tag
+    value it has, on every run, permanently. That is the shape of the LP-509 investigation.
+
+    So this asks a question that needs no annotation: does the NAME say it holds a government or
+    institutional identifier? Those are 9+ digits by construction and there is no case for one
+    sitting raw at rest. Deliberately narrow — `_number`/`_id` in general are far too broad
+    (`comp_number`, `permit_number`, `policy_status`) and a broad rule that has to be suppressed
+    everywhere teaches people to suppress it.
+    """
+    import re
+    from pathlib import Path
+
+    from app.verification.snapshot.documents_section import _PII_FIELDS
+
+    identifier_named = re.compile(
+        r"(_ein$|^ein$|_tin$|^tin$|tax_id|taxpayer_id|_ssn$|^ssn$|routing|employer_id$"
+        r"|account_number$)"
+    )
+    decl_re = re.compile(r"\s*([a-z0-9_]+)\s*:\s*TypedField")
+    ext_dir = Path(__file__).resolve().parents[3] / "app" / "ai" / "extraction"
+
+    found: dict[str, str] = {}
+    for path in sorted(ext_dir.glob("*.py")):
+        for line in path.read_text().splitlines():
+            decl = decl_re.match(line)
+            if decl and identifier_named.search(decl.group(1)):
+                found.setdefault(decl.group(1), path.name)
+
+    # Self-check the detector, so a broken regex cannot make this pass by finding nothing.
+    assert {"employer_ein", "payer_tin", "state_employer_id"} <= set(found)
+
+    unrouted = {name: path for name, path in found.items() if name not in _PII_FIELDS}
+    assert not unrouted, (
+        "extractor fields whose NAME says they carry a government/institutional identifier, "
+        f"but which are not PII-routed: {sorted(unrouted.items())}. Add each to _PII_FIELDS "
+        "(PiiKind.ACCOUNT, pre_masked=False) — an unmasked 9+ digit id refuses the entire "
+        "snapshot persist for every file carrying that document."
+    )
+
+
 async def test_absent_field_omitted_present_empty_kept(db_session: AsyncSession) -> None:
     entries, _ = await _section(db_session)
     pay = _by_type(entries, "pay_stub")

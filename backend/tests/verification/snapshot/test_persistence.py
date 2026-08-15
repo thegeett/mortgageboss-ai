@@ -204,6 +204,89 @@ def test_guard_allows_large_decimal_money_but_still_catches_bare_ids() -> None:
         _assert_no_raw_pii('{"ssn": "123-45-6789"}')
 
 
+def test_guard_names_the_offending_path_without_printing_the_value() -> None:
+    """LP-509-C1 — the refusal must say WHERE, and must not become a PII leak of its own.
+
+    LF-WCHG had zero persisted snapshots: every run was refused with "a long bare digit run
+    (unmasked account/SSN) is present" and nothing else. That sentence is true and unactionable —
+    it names no field, no document, no path — so the field responsible could not be identified, and
+    with no snapshot there were no persisted tag values to inspect either. The refusal is correct;
+    being undiagnosable is the defect.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    payload = '{"documents": [{"fields": {"policy_number": {"value": "987654321"}}}]}'
+    with pytest.raises(RawPiiAtRestError) as excinfo:
+        _assert_no_raw_pii(payload)
+
+    message = str(excinfo.value)
+    assert "documents[0].fields.policy_number.value" in message
+    assert "9-digit run" in message
+    # The guard must never log the thing it exists to keep out of the logs.
+    assert "987654321" not in message
+
+
+def test_guard_reports_every_offending_path_not_just_the_first() -> None:
+    """One fix per re-run is a slow way to clear a file that has several unmasked fields."""
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    with pytest.raises(RawPiiAtRestError) as excinfo:
+        _assert_no_raw_pii('{"a": {"acct": "123456789"}, "b": {"ssn": "123-45-6789"}}')
+    message = str(excinfo.value)
+    assert "a.acct" in message and "b.ssn" in message
+
+
+def test_a_uuid_whose_last_group_is_all_digits_does_not_refuse_the_snapshot() -> None:
+    """LP-509-C1 — the defect that made ~1-2% of loan files permanently unpersistable.
+
+    A uuid4's final group is TWELVE hex characters bounded by a hyphen and a quote. About 1 uuid in
+    281 draws twelve decimal digits there, which is exactly the shape of an unmasked account number,
+    and the guard refused the write. `run_id` only cost that run — but `loan_file_id` and the
+    borrower ids are STABLE, so a loan file that drew such a uuid could never persist a snapshot on
+    any run, ever, losing every tag value and observation with it.
+
+    It was a real flake in this very file: the suite failed intermittently on a DIFFERENT test each
+    time, and the path-naming added in this ticket is what identified it — the message pointed
+    straight at `loan_file_id` and `run_id`.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    # The exact shape that was failing. Not synthetic — this is a valid uuid4 layout.
+    _assert_no_raw_pii('{"loan_file_id": "3f2504e0-4f89-41d3-9a0c-030405060708"}')
+    _assert_no_raw_pii('{"run_id": "3f2504e0-4f89-41d3-9a0c-123456789012"}')
+    # ...and matching by SHAPE means it covers a uuid under any key, not a list of blessed names.
+    _assert_no_raw_pii('{"documents": [{"belongs_to": ["3f2504e0-4f89-41d3-9a0c-987654321098"]}]}')
+
+    # A bare digit run of the same length, NOT in uuid shape, is still refused.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii('{"loan_file_id": "123456789012"}')
+    # A uuid is not a hiding place: a dashed SSN embedded in a uuid-length string still fails.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii('{"note": "3f2504e0-4f89-41d3-9a0c-030405060708 ssn 123-45-6789"}')
+
+
+def test_guard_exempts_no_other_key_because_the_derived_ids_do_not_need_it() -> None:
+    """LP-509-C1 — why the structural walk added no allowlist.
+
+    A key-aware scan invites a "these keys are ours, skip them" exemption for `content_id` and
+    `match_hash`. It is not needed and was not added: a content id is LETTER-prefixed (`doc…` /
+    `txn…`) and a match hash is `v1:<hex>`, so in both the digit run is preceded by a word
+    character and `\\b` never opens one. `test_content_ids_never_trip_the_pii_guard` pins the
+    prefix that makes this true.
+
+    Asserted from the other side here — a bare all-digit value under those very key names IS still
+    refused — so that if the prefix ever goes away, the failure is a loud refusal rather than a
+    value quietly waved through by an exemption nobody re-derived.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    _assert_no_raw_pii('{"documents": [{"content_id": "docABC0000000000"}]}')
+    _assert_no_raw_pii('{"match_hash": "v1:abc123456789def"}')
+
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii('{"documents": [{"content_id": "1234567890123456"}]}')
+
+
 async def test_build_persist_load_end_to_end(db_session: AsyncSession) -> None:
     """The durable Stage-1 artifact: LP-208 build → persist → load == built (incl. a masked SSN)."""
     from decimal import Decimal

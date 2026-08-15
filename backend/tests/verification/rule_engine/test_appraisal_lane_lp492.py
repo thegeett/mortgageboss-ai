@@ -233,7 +233,7 @@ def test_pr7_carries_no_model_and_needed_no_catalog_edit() -> None:
     count stays 135."""
     from app.verification.rules.kinds import load_rule_kinds
 
-    assert len(load_rule_kinds()) == 135
+    assert len(load_rule_kinds()) == 136  # LP-509-D1 +IH-9 (hazard policy expired)
     bar = load_activation_bars()["PR-7"]
     assert bar.status == "no-ai-dependency"
     assert bar.load_bearing_ai_tags == () and bar.self_consistency_rate is None

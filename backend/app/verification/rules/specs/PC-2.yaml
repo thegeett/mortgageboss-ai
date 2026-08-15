@@ -84,6 +84,12 @@ deterministic:
   gated_tags:
     - contract.loan_sales_price
     - property.purchase_price
+  # LP-509-A5: PURCHASE-ONLY. A rate/term refinance has no purchase contract, so PC-2 asked a
+  # refinance to reconcile a contract sale price that cannot exist and reported couldnt_check.
+  # `loan.purpose` was declared by LP-424 for exactly this and left unwired for want of a refinance
+  # fixture; LF-WCHG is that file. refinance → not_applicable; purpose unstated → couldnt_check
+  # (unstated is not the same as "not a purchase", and must not be absorbed into scope-false).
+  applicability: {tag: loan.purpose, op: eq, value: purchase}
   operands:
     contract_price: {tag: contract.loan_sales_price}   # decimal (default); the contract's sale price
     file_price: {tag: property.purchase_price}         # decimal (default); the 1003/MISMO purchase price

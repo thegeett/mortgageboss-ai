@@ -84,6 +84,14 @@ from __future__ import annotations
 # FR-4 held (a bank-transaction tag asked about a pay-stub deduction); FR-5 held (one transaction
 # per context cannot show a pattern across statements); FR-6 held (would be the first
 # list-producing tag, and open-ended discovery has no closed vocabulary to abstain against). -> 75.
-EXPECTED_ACTIVE_RULE_COUNT: int = 75
+# LP-509-D1 +IH-9 (hazard policy expired) — a MISSING rule rather than a refinement of an existing one.
+# LF-WCHG's ACORD 27 ran 06/25/2024 to 06/25/2025 and was thirteen months lapsed while the file was being
+# processed; none of its 162 findings said so. IH-3 was the only rule reading that binder's dates and it
+# compares the EFFECTIVE date to the CLOSING date, so on a file with no closing date it abstained — a
+# couldnt_check about closing swallowed a fact true regardless of closing. IH-9 is deliberately a separate
+# rule, not an outcome added to IH-3, because an outcome there would sit behind that same closing-date gate.
+# Activation is the IH-3 path exactly: a parsed binder date, an exact compare, no AI tag in the chain and no
+# threshold, so it is eligible on `no-ai-dependency` alone. -> 76.
+EXPECTED_ACTIVE_RULE_COUNT: int = 76
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

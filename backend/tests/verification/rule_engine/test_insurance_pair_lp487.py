@@ -173,6 +173,52 @@ def test_a_single_token_prefix_is_not_enough() -> None:
     assert not _lender_names_agree(["united"], ["united", "wholesale", "mortgage"])
 
 
+@pytest.mark.parametrize(
+    ("stated", "statement"),
+    [
+        # LF-WCHG, verbatim from the stated liabilities and the mortgage statement.
+        ("UNITED WHSLE MORT", "United Wholesale Mortgage, LLC"),
+        ("ROCKET MTG", "Rocket Mortgage, LLC"),
+        ("WELLS FARGO HM MORT", "Wells Fargo Home Mortgage"),
+        ("FREEDOM MORT", "Freedom Mortgage Corporation"),
+        ("PENNYMAC LN SVCS", "PennyMac Loan Services, LLC"),
+        ("LAKEVIEW LN SVCNG", "Lakeview Loan Servicing, LLC"),
+    ],
+)
+def test_bureau_abbreviated_creditor_names_match_the_servicer_legal_name(
+    stated: str, statement: str
+) -> None:
+    """LP-509-A4 — the false undisclosed-mortgage alarm.
+
+    A tradeline's creditor name reaches the application through the bureaus, which truncate to a
+    fixed-width field. LF-WCHG stated "UNITED WHSLE MORT" for the servicer whose mortgage statement
+    reads "United Wholesale Mortgage, LLC". Those normalised to ['united','whsle','mort'] and
+    ['united','wholesale','mortgage'] — neither equal nor a token-prefix — so RE-1 and DT-6 both
+    reported that the file's mortgage was not disclosed on the application. It is disclosed, on the
+    line directly above the one the rule read.
+    """
+    assert _lender_names_agree(_normalise_lender_name(stated), _normalise_lender_name(statement))
+
+
+def test_abbreviation_expansion_does_not_equate_different_lenders() -> None:
+    """The direction that matters: expansion must not manufacture a match.
+
+    An unmatched mortgage statement is a loud false alarm; a WRONGLY matched one is a silent
+    `satisfied` that clears a genuinely undisclosed mortgage, and nobody re-reads a satisfied. This
+    is why the table is a fixed list of real abbreviations rather than an edit-distance — "whsle"
+    can only ever become "wholesale", so it cannot pull an unrelated name into agreement.
+    """
+    for stated, statement in (
+        ("UNITED WHSLE MORT", "United Shore Financial"),
+        ("MR COOPER", "Rocket Mortgage, LLC"),
+        ("FREEDOM MORT", "United Wholesale Mortgage, LLC"),
+        ("PENNYMAC LN SVCS", "Lakeview Loan Servicing, LLC"),
+    ):
+        assert not _lender_names_agree(
+            _normalise_lender_name(stated), _normalise_lender_name(statement)
+        ), f"{stated!r} must not match {statement!r}"
+
+
 def test_ih2_vocabulary_matches_the_spec() -> None:
     """The spec's reference_values is where the vocabulary is reviewed; the recipe is what runs. Pinned
     identical so they cannot drift — the CR-12 arrangement."""
@@ -285,7 +331,9 @@ def test_ih2_is_deterministic_in_the_catalog() -> None:
     """The LP-487 catalog edit. `structural` + `exact_match=True` is what forces `deterministic_only`;
     the loader rejects the pair being inconsistent, so both cells are pinned here."""
     rule_kinds = load_rule_kinds()
-    assert len(rule_kinds) == 135, "the catalog edit must not change the row count"
+    assert len(rule_kinds) == 136, (
+        "the catalog edit must not change the row count"
+    )  # LP-509-D1 +IH-9
     ih2 = rule_kinds["IH-2"]
     assert ih2.evaluation_path is EvaluationPath.DETERMINISTIC_ONLY
     assert ih2.exact_match is True

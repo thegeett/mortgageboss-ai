@@ -135,16 +135,19 @@ def test_parsed_hash_reads_match_hash_and_nonmatchable_is_absent() -> None:
 # --------------------------------------------------------------------------- #
 def test_derived_recipe_complete_vs_incomplete_vs_absent() -> None:
     decl = load_declarations()["id.app_required_fields_present"]
-    complete = _snapshot(
-        mismo={
-            k: _field("x")
-            for k in ("borrower.1.name", "borrower.1.ssn", "loan.amount", "property.address")
-        }
-    )
+    # LP-509-A2: the required set is IMPORTED, not restated. This test had its own copy of the four
+    # keys, and that copy is precisely why the defect survived — the recipe required
+    # `borrower.1.name` and `property.address`, the snapshot emits neither, and the test built its
+    # "complete" fixture from the same two wrong names, so it went green while ID-6 fired on every
+    # real file. This asserts the recipe's LOGIC; that the keys are ones the snapshot actually emits
+    # is asserted by the fact-key registry test (LP-509-E1), against the real emitter.
+    from app.verification.tag_materialization.derived import _APP_REQUIRED_FIELDS
+
+    complete = _snapshot(mismo={k: _field("x") for k in _APP_REQUIRED_FIELDS})
     out = produce_derived_tags(decl, complete)
     assert out["loan"]["id.app_required_fields_present"].value == "complete"
 
-    incomplete = _snapshot(mismo={"borrower.1.name": _field("x")})
+    incomplete = _snapshot(mismo={_APP_REQUIRED_FIELDS[0]: _field("x")})
     out = produce_derived_tags(decl, incomplete)
     assert out["loan"]["id.app_required_fields_present"].value == "incomplete + list"
     assert out["loan"]["id.app_required_fields_present"].produced_by is TagProducedBy.DERIVED

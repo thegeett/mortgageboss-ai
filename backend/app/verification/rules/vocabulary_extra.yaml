@@ -1188,3 +1188,31 @@ tags:
       that anything improper occurred. "unknown" when the contract's credit and concession fields are
       absent or unreadable — an absent field is not evidence of a clean contract.
     produced_by: AI
+  # ------------------------------------------------------------------------------------------------- #
+  # LP-509-D1 — the EXPIRED-POLICY pair. The finding a processor would most want from LF-WCHG, and the
+  # one the engine did not produce: the file's ACORD 27 hazard policy ran 06/25/2024–06/25/2025 and was
+  # THIRTEEN MONTHS LAPSED at processing. IH-3 was the only rule reading that binder's dates, and it
+  # compares the EFFECTIVE date to the CLOSING date — so with no closing date on the file it abstained,
+  # and a couldnt_check about closing silently swallowed a fact that holds regardless of closing.
+  #
+  # Deliberately NOT folded into IH-3. Adding an expiry outcome there would put it behind IH-3's gate on
+  # `contract.loan_closing_date`, which is exactly the swallowing that hid it: a rule whose conclusion
+  # needs no closing date must not be gated on one.
+  # ------------------------------------------------------------------------------------------------- #
+  ins.expiration_date:
+    entity: doc
+    value_type: date
+    description: >-
+      The homeowners insurance policy's expiration date, read from the binder's typed-core
+      expiration_date. The document-level twin of ins.effective_date; promoted to ins.policy_expired.
+    produced_by: parsed
+  ins.policy_expired:
+    entity: loan
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Has the homeowners insurance policy already expired as at the file date (IH-9)? Compared against
+      the snapshot's own build date, NOT the closing date, so an expired policy is reported whether or
+      not a closing date is known. "unknown" when no binder states an expiration date or binders
+      disagree — never a guessed pass.
+    produced_by: derived

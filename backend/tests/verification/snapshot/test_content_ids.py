@@ -8,6 +8,7 @@ and PII-at-rest safety (ids never trip the persistence guard).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -119,8 +120,10 @@ def test_content_ids_never_trip_the_pii_guard() -> None:
         _sets([_txn() for _ in range(50)]), document_content_id="docABC00000000000"
     )
     assert records is not None
-    ids_blob = " ".join(f'"{t.content_id}"' for t in records)
-    _assert_no_raw_pii(ids_blob)  # raises if any id looked like a raw account/SSN
+    # JSON, because the guard now walks the decoded document to attribute a match to a field
+    # (LP-509-C1) and its one production caller passes `snapshot.model_dump_json()`.
+    _assert_no_raw_pii(json.dumps([t.content_id for t in records]))  # raises if any id looked
+    # like a raw account/SSN
 
 
 # --------------------------------------------------------------------------- #

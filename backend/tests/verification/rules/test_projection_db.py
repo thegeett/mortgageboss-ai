@@ -36,10 +36,12 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     assert await _count(db_session, TagDependency) == 0
 
     # First run inserts everything, removes nothing.
-    assert result.rules.inserted == 135  # LP-430 +IN-15; LP-433 +IN-16
+    assert (
+        result.rules.inserted == 136
+    )  # LP-430 +IN-15; LP-433 +IN-16  # LP-509-D1 +IH-9 (hazard policy expired)
     assert (
         result.tags.inserted
-        == 245  # LP-498 +1 (contract.credits_warrant_review)  # LP-496a +1 (program.conforming_eligibility — PE-3's program.fha_min_investment_met was already in fact_tags.csv)  # LP-495b +2 (OC-3's and DT-7's judgment output tags)  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
+        == 247  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired — IH-9's parsed binder date and its derived loan verdict)  # LP-498 +1 (contract.credits_warrant_review)  # LP-496a +1 (program.conforming_eligibility — PE-3's program.fha_min_investment_met was already in fact_tags.csv)  # LP-495b +2 (OC-3's and DT-7's judgment output tags)  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
         # loe.is_explanation_letter — LO-2's 8-type applicability predicate; loe.completeness)
         # LP-494 (CO-3) +3 (condo.fidelity_present_raw, condo.fidelity_amount, ins.condo_fidelity_coverage); review +2 (condo.units_delinquent_over_60_days — the 60-day COUNT B4-2.2-02's cap is
         # actually stated on, plus the derived condo.delinquent_units_pct built from it; the parsed
@@ -59,7 +61,8 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     # (TI-1 pointed at title.parties_match, TI-2 at title.legal_desc_matches, TI-6 at
     # title.rapid_transfer — three live rules wired to dead vocabulary). Same defect the LP-490
     # review fixed for the credit rules, one ticket later.
-    assert result.rule_tags.inserted == 213
+    # LP-509-A1 +1: AS-2 -> txn.is_money_in (see test_fact_tags_files.test_desired_state_shape).
+    assert result.rule_tags.inserted == 214
     assert result.rules.deleted == result.tags.deleted == 0
 
 
@@ -94,7 +97,7 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
     assert (
         with_spec
-        == 81  # LP-498 +FR-3 (spec written, ACTIVE)  # LP-496a +PE-1/PE-3 (specs written, both ACTIVE)  # LP-495b +OC-3/DT-7 (specs written, both held)  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
+        == 82  # LP-509-D1 +IH-9 (spec written, ACTIVE)  # LP-498 +FR-3 (spec written, ACTIVE)  # LP-496a +PE-1/PE-3 (specs written, both ACTIVE)  # LP-495b +OC-3/DT-7 (specs written, both held)  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
     )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 

@@ -172,10 +172,12 @@ async def test_loan_recipe_unchanged_under_the_reorder() -> None:
         doc_fields={},
         mismo={
             "borrower.1.borrower_id": _f(str(_B)),
-            "borrower.1.name": _f("Sam"),
+            # LP-509-A2: the real emitted key names (first_name/last_name, address_line).
+            "borrower.1.first_name": _f("Sam"),
+            "borrower.1.last_name": _f("Tan"),
             "borrower.1.ssn": _f("x"),
             "loan.amount": _f("100"),
-            "property.address": _f("1 Main"),
+            "property.address_line": _f("1 Main"),
         },
     )
     out = await materialize_tags(complete, only_groups=_NO_AI, only_subjects=_SUBJECTS)

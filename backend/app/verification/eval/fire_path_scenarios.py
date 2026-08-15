@@ -197,6 +197,14 @@ def _snapshot(
     )
 
 
+# LP-509-A5: PC-2/PC-3/PC-7 are now scoped purchase-only, so a scenario that expects one of them to
+# RUN has to state the purpose. Added per-builder rather than as a default in `_snapshot` above:
+# several scenarios here exist precisely to assert the UNSTATED-purpose behaviour
+# (`build_pr2_no_purpose_snapshot`, TI-1's equivalent), and a blanket default would have silently
+# given them a purpose and turned those assertions into tests of nothing.
+_PURCHASE: dict[str, SnapshotField] = {"loan.purpose": _f("purchase")}
+
+
 # --------------------------------------------------------------------------- #
 # AS-8 — a statement BALANCE BREAK (stmt.continuity -> "broken" -> AS-8 fired)
 # --------------------------------------------------------------------------- #
@@ -254,6 +262,7 @@ def build_past_closing_snapshot() -> Snapshot:
                 seller_name="Reese Alvarez",
             )
         ],
+        _PURCHASE,
     )
 
 
@@ -273,6 +282,7 @@ def build_far_future_closing_snapshot() -> Snapshot:
                 seller_name="Reese Alvarez",
             )
         ],
+        _PURCHASE,
     )
 
 
@@ -312,14 +322,22 @@ def build_subject_housing_snapshot() -> Snapshot:
 # (the effective date) + a purchase agreement (the closing date, which contract.loan_closing_date promotes).
 # IH-3 is loan-enumerated; ins.loan_effective_date + contract.loan_closing_date are both loan-level.
 # --------------------------------------------------------------------------- #
-def _binder(cid: str, effective_date: str, *, settlement_basis: str | None = None) -> DocumentEntry:
+def _binder(
+    cid: str,
+    effective_date: str,
+    *,
+    settlement_basis: str | None = None,
+    expiration_date: str = "2027-06-01",
+) -> DocumentEntry:
+    # LP-509-D1 — `expiration_date` is now a parameter (IH-9 reads it). The default is unchanged and
+    # still after _FILE_DATE, so every pre-existing scenario keeps a policy that is in force.
     fields = {
         "carrier_name": "Rivertown Mutual",
         "policy_number": "RM-0001",
         "coverage_amount": "300000.00",
         "annual_premium": "1200.00",
         "effective_date": effective_date,
-        "expiration_date": "2027-06-01",
+        "expiration_date": expiration_date,
     }
     # LP-447 — the dwelling loss-settlement basis (IH-1's input). Omitted by default so the IH-3 scenarios
     # (which read only the effective date) keep byte-identical contexts.
@@ -466,8 +484,13 @@ def _addr_contract(cid: str, property_address: str) -> DocumentEntry:
 
 
 def _subject_mismo(line: str, city: str, state: str, postal: str) -> dict[str, SnapshotField]:
-    """The MISMO SUBJECT-property address (property.address_* — NOT a mailing address)."""
+    """The MISMO SUBJECT-property address (property.address_* — NOT a mailing address).
+
+    Carries the purchase purpose too: every PC-3 scenario below pairs this with a purchase_agreement,
+    and PC-3 is purchase-scoped since LP-509-A5.
+    """
     return {
+        **_PURCHASE,
         "property.address_line": _f(line),
         "property.city": _f(city),
         "property.state": _f(state),
@@ -520,6 +543,9 @@ def build_address_unit_variant_snapshot() -> Snapshot:
         _LOAN_ADDR_UNIT,
         [_addr_contract("95-pa-addr-unit", "789 Birchwood Ln Apt 2, Springfield IL 62711")],
         {
+            # Built inline rather than via _subject_mismo (it needs address_line_2), so the purchase
+            # purpose is spread in explicitly — LP-509-A5.
+            **_PURCHASE,
             "property.address_line": _f("789 Birchwood Ln"),
             "property.address_line_2": _f("Unit 2"),
             "property.city": _f("Springfield"),
@@ -2664,3 +2690,45 @@ __all__ = [
     "build_ti1_second_owner_match_snapshot",
     "build_voe_offer_labeling_snapshot",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# IH-9 (LP-509-D1) — an EXPIRED hazard policy, with and without a closing date.
+#
+# LF-WCHG's ACORD 27 ran 06/25/2024 to 06/25/2025 and was thirteen months lapsed at processing; nothing
+# reported it, because IH-3 (the only rule reading that binder's dates) needs a closing date the file
+# does not have. The second scenario below is that exact shape: a lapsed policy on a file with NO
+# closing date, where IH-3 must still abstain and IH-9 must still fire.
+# --------------------------------------------------------------------------- #
+_LOAN_INS_EXPIRED = UUID("95000000-0000-4000-8000-000000000080")
+_LOAN_INS_EXPIRED_NO_CLOSING = UUID("95000000-0000-4000-8000-000000000081")
+_LOAN_INS_CURRENT = UUID("95000000-0000-4000-8000-000000000082")
+
+
+def build_insurance_expired_snapshot() -> Snapshot:
+    """A hazard policy that lapsed before the file date (2026-07-01) → IH-9 FIRED."""
+    return _snapshot(
+        _LOAN_INS_EXPIRED,
+        [
+            _binder("95-binder-expired", "2024-06-25", expiration_date="2025-06-25"),
+            _contract("95-pa-ins-expired", "2026-07-02"),
+        ],
+    )
+
+
+def build_insurance_expired_no_closing_date_snapshot() -> Snapshot:
+    """THE LF-WCHG SHAPE: the same lapsed policy, on a file with no purchase contract and so no closing
+    date. IH-3 abstains for want of the closing date; IH-9 must fire anyway — expiry does not depend on
+    when closing is, and that independence is the whole reason this is a separate rule."""
+    return _snapshot(
+        _LOAN_INS_EXPIRED_NO_CLOSING,
+        [_binder("95-binder-expired-nc", "2024-06-25", expiration_date="2025-06-25")],
+    )
+
+
+def build_insurance_current_snapshot() -> Snapshot:
+    """A policy still in force at the file date → IH-9 SATISFIED (the must-not-fire direction)."""
+    return _snapshot(
+        _LOAN_INS_CURRENT,
+        [_binder("95-binder-current", "2026-06-01", expiration_date="2027-06-01")],
+    )

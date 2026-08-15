@@ -86,6 +86,9 @@ deterministic:
     - property.address_normalized_match
   gated_tags:
     - property.address_normalized_match
+  # LP-509-A5: PURCHASE-ONLY — see PC-2. There is no purchase contract on a refinance, so there is no
+  # contract address to compare the file's property address against.
+  applicability: {tag: loan.purpose, op: eq, value: purchase}
   # No operands: the verdict is an enum branch via when_tags (the tag is already the yes/no/unknown answer).
   operands: {}
   outcomes:

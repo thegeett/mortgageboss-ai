@@ -93,6 +93,14 @@ class ParsedProperty(BaseModel):
     attachment_type: str | None = None
     construction_method: str | None = None
     financed_unit_count: int | None = None
+    # LP-509-B1 — the two PROJECT indicators, captured because they are what decides the property
+    # TYPE when the export states none (LF-WCHG states an empty PropertyType while carrying both).
+    # `in_project` is the decisive one for condo: a condominium is by definition a property in a
+    # project, so `false` RULES CONDO OUT. AttachmentType alone does not — Fannie recognises detached
+    # condominiums, which is why "Detached" is not read as "not a condo" anywhere below.
+    # Tri-state on purpose: None = the export did not state it (abstain), never a default of false.
+    in_project: bool | None = None
+    is_pud: bool | None = None
 
 
 class ParsedLiability(BaseModel):
