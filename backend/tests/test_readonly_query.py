@@ -129,6 +129,71 @@ async def test_scrub_reaches_unregistered_keys_and_nested_list_rows(
     assert "CITI" in got, "a non-identifier value was redacted"
 
 
+#: JSON documents whose NUMBERS previously took the whole view down. ``scrub(v::text)::json``
+#: rewrote a 9+ digit run inside a number to a bare ``[REDACTED-ID]`` token and the cast back
+#: raised — for the SELECT, not the cell — so one such row anywhere returned nothing at all.
+#: The second element is the value that must still be readable afterwards.
+_JSON_NUMBER_CASES: tuple[tuple[str, str], ...] = (
+    ("a big integer", '{"tokens_used": 123456789}'),
+    ("an epoch-millisecond timestamp", '{"epoch_ms": 1755212345678}'),
+    ("a float repr with 16 fraction digits", '{"confidence": 0.8500000000000001}'),
+    ("a round hundred million", '{"n": 100000000}'),
+    ("a negative identifier-length integer", '{"delta": -123456789}'),
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("label", "payload"), _JSON_NUMBER_CASES)
+async def test_scrub_json_survives_numbers(
+    test_engine: AsyncEngine, label: str, payload: str
+) -> None:
+    """A number in the document must not make the JSON unparseable."""
+    module = _migration_module()
+    async with test_engine.begin() as conn:
+        await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS readonly"))
+        await conn.execute(sa.text(module._SCRUB_FN))  # type: ignore[attr-defined]
+        await conn.execute(sa.text(module._SCRUB_JSON_FN))  # type: ignore[attr-defined]
+        await conn.execute(sa.text(module._SCRUB_JSONB_FN))  # type: ignore[attr-defined]
+
+        for fn, cast in (("scrub_json", "json"), ("scrub_jsonb", "jsonb")):
+            got = await conn.scalar(
+                sa.text(f"SELECT readonly.{fn}(CAST(:v AS {cast}))::text"), {"v": payload}
+            )
+            assert got is not None, f"{label}: {fn} returned NULL"
+
+
+@pytest.mark.asyncio
+async def test_scrub_json_keeps_debugging_numbers_and_redacts_numeric_identifiers(
+    test_engine: AsyncEngine,
+) -> None:
+    """Numbers are kept, EXCEPT an identifier-shaped integer.
+
+    A number cannot hold the marker and stay a number, so a 9+ digit integer becomes the
+    string marker — the redaction the text-based version intended, without the broken JSON.
+    Fractional values are left alone: no identifier is fractional, and the digit-run pattern
+    would otherwise eat the fraction digits of an ordinary float.
+    """
+    module = _migration_module()
+    payload = (
+        '{"cost": 0.02, "confidence": 0.8500000000000001, "tokens": 12345,'
+        ' "tin_as_number": 123456789, "amount": 350000.00}'
+    )
+    async with test_engine.begin() as conn:
+        await conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS readonly"))
+        await conn.execute(sa.text(module._SCRUB_FN))  # type: ignore[attr-defined]
+        await conn.execute(sa.text(module._SCRUB_JSON_FN))  # type: ignore[attr-defined]
+        got = await conn.scalar(
+            sa.text("SELECT readonly.scrub_json(CAST(:v AS json))::text"), {"v": payload}
+        )
+
+    assert got is not None
+    assert "0.8500000000000001" in got, "a float repr was mangled"
+    assert "0.02" in got and "12345" in got, "ordinary numbers must survive"
+    assert "350000.00" in got, "an amount was redacted"
+    assert "123456789" not in got, "a numeric identifier leaked"
+    assert "[REDACTED-ID]" in got
+
+
 def test_scrub_patterns_match_the_at_rest_guard() -> None:
     """The scrub and the LP-209 at-rest guard must agree by construction.
 
@@ -249,12 +314,22 @@ def test_excluded_columns_are_real() -> None:
 
 @pytest.mark.parametrize(("table", "column"), NEVER_EXPOSED)
 def test_never_exposed_columns_are_absent_from_every_view(table: str, column: str) -> None:
-    """The highest-consequence columns, asserted against the whole migration text."""
-    body = _view_bodies().get(table)
-    assert body is not None, f"no readonly view for {table}"
-    select_part = body.split("FROM")[0]
-    assert re.search(rf"\b{re.escape(column)}\b", select_part) is None, (
-        f"{table}.{column} is exposed by the readonly view for {table}. "
+    """The highest-consequence columns, asserted against EVERY view.
+
+    Every one, not just the view sourced from that table: a column reaches a result set
+    through whichever view selects it, so a join, a renamed table or a second view over
+    the same base table would carry it past a per-table check.
+    """
+    bodies = _view_bodies()
+    assert table in bodies, f"no readonly view for {table}"
+
+    exposed_by = [
+        source
+        for source, body in bodies.items()
+        if re.search(rf"\b{re.escape(column)}\b", body.split("FROM")[0]) is not None
+    ]
+    assert not exposed_by, (
+        f"{table}.{column} is exposed by the readonly view(s) for {sorted(exposed_by)}. "
         "This column can carry a raw identifier; it must never be selectable."
     )
 
@@ -277,6 +352,16 @@ def test_never_exposed_columns_are_absent_from_every_view(table: str, column: st
         "/* a block comment */ select 1",
         "with x as (select 1 as n) select n from x",
         "select 1;",  # one trailing semicolon is fine
+        # A ';' inside a string literal or a comment is not a second statement. Reading
+        # the raw text refused these, and the operator had to work around the guard.
+        "select id from findings where message like '%;%'",
+        "-- count things; fast\nselect 1",
+        "select 1 /* a; b */",
+        "select 'it''s here; really' as quoted",
+        # Write VERBS inside a literal or an identifier are equally not writes.
+        "select id from rules where rule_id like '%delete%'",
+        # ...and a column whose name merely starts with one is untouched by \\b.
+        "select created_at, updated_at, deleted_at from findings",
     ],
 )
 def test_validate_sql_accepts_a_single_select(sql: str) -> None:
@@ -298,6 +383,11 @@ def test_validate_sql_accepts_a_single_select(sql: str) -> None:
         "grant select on all tables in schema public to mbai_readonly",
         "select 1; drop table findings",  # a second statement
         "truncate findings",
+        # A data-modifying CTE starts with a legal `with`, so only the verb scan catches it.
+        "with x as (delete from findings returning 1) select * from x",
+        "with x as (insert into findings (id) values (gen_random_uuid()) returning id)"
+        " select * from x",
+        "with x as (update loan_files set status = 'x' returning id) select * from x",
     ],
 )
 def test_validate_sql_refuses_everything_else(sql: str) -> None:

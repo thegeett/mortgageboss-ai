@@ -431,6 +431,12 @@ module "compute" {
     S3_BUCKET       = var.documents_bucket_name
     S3_REGION       = var.aws_region
 
+    # Every boto3 client that is NOT handed an explicit region_name resolves it from
+    # here. Fargate has no instance metadata service, so without this botocore's region
+    # chain ends in NoRegionError — which is how the C7 query task failed: the RDS IAM
+    # token could not be signed and the task died before opening a connection.
+    AWS_REGION = var.aws_region
+
     # ⚠️ REQUIRED for a CMK-encrypted bucket. app/storage/s3.py sends
     # ServerSideEncryption=aws:kms + SSEKMSKeyId ONLY when this is set; unset, it
     # sends AES256 (SSE-S3) instead, which conflicts with the bucket's KMS default.

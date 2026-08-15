@@ -169,8 +169,14 @@ async def _provision(drop: bool) -> int:
     return 0
 
 
+#: Values that mean "yes" for the drop flag. Not ``bool(os.getenv(...))``: that reads
+#: PROVISION_QUERY_ROLE_DROP=0 and =false — the obvious ways to say "no" — as a request to
+#: DROP the role, since any non-empty string is truthy.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
 def main() -> None:
-    drop = bool(os.getenv("PROVISION_QUERY_ROLE_DROP"))
+    drop = os.getenv("PROVISION_QUERY_ROLE_DROP", "").strip().lower() in _TRUTHY
     try:
         sys.exit(asyncio.run(_provision(drop)))
     except SystemExit:

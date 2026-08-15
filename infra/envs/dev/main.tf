@@ -306,6 +306,7 @@ module "compute" {
     STORAGE_BACKEND      = "s3"
     S3_BUCKET            = var.documents_bucket_name
     S3_REGION            = var.aws_region
+    AWS_REGION           = var.aws_region # boto3 clients with no explicit region; Fargate has no IMDS
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
     AI_PROVIDER          = "bedrock"
     BEDROCK_REGION       = var.aws_region

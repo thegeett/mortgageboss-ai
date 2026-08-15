@@ -55,6 +55,26 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 _LEADING_NOISE = re.compile(r"^(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)+", re.DOTALL)
 _ALLOWED_START = re.compile(r"^(select|with)\b", re.IGNORECASE)
 
+# String literals, quoted identifiers and comments, blanked before the structural checks
+# below so a ';' or a keyword INSIDE one is not read as SQL structure. Postgres escapes a
+# quote by doubling it, hence the `''` / `""` alternatives.
+_QUOTED_OR_COMMENT = re.compile(
+    r"'(?:[^']|'')*'"  # 'a literal'
+    r'|"(?:[^"]|"")*"'  # "an identifier"
+    r"|--[^\n]*"  # -- line comment
+    r"|/\*.*?\*/",  # /* block comment */
+    re.DOTALL,
+)
+
+# Verbs that cannot appear anywhere in a genuine read-only statement. The anchored start
+# check above already refuses a statement that BEGINS with one; this catches the form it
+# cannot see — a data-modifying CTE, `with x as (delete from findings returning 1) ...`,
+# which starts with a perfectly legal `with`.
+_WRITE_VERBS = re.compile(
+    r"\b(insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy)\b",
+    re.IGNORECASE,
+)
+
 _MAX_ROWS_DEFAULT = 100
 #: A cell longer than this is truncated in the printed table. A single wide JSON column
 #: can otherwise bury the result — and every printed line lands in CloudWatch.
@@ -81,13 +101,19 @@ def validate_sql(raw: str) -> str:
     case: one TRAILING semicolon is normal and allowed, but a semicolon with anything
     after it means a second statement, which is refused rather than silently truncated
     — silently running only the first half of what someone wrote is worse than an error.
+
+    The structural checks run over a copy with string literals, quoted identifiers and
+    comments blanked out. Reading them raw refuses legitimate queries: ``where message
+    like '%;%'`` is one statement, and ``-- count things; fast`` is a comment.
     """
     sql = raw.strip()
     if not sql:
         raise QueryRefused("QUERY_SQL is empty.")
 
     body = sql.rstrip().rstrip(";").rstrip()
-    if ";" in body:
+    structure = _QUOTED_OR_COMMENT.sub(" ", body)
+
+    if ";" in structure:
         raise QueryRefused(
             "Only a single statement is permitted — found a ';' with content after it. "
             "Run the statements separately."
@@ -98,6 +124,14 @@ def validate_sql(raw: str) -> str:
             "Only a single SELECT (or WITH ... SELECT) is permitted. "
             "This path is read-only by database grant; write statements will also be "
             "rejected by PostgreSQL."
+        )
+
+    write_verb = _WRITE_VERBS.search(structure)
+    if write_verb:
+        raise QueryRefused(
+            f"'{write_verb.group(1).lower()}' is not permitted in a read-only query. "
+            "A WITH clause can carry a data-modifying statement, so the verb is refused "
+            "wherever it appears, not only at the start."
         )
     return body
 
@@ -156,14 +190,22 @@ async def _run() -> int:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_factory() as session:
-            result = await session.execute(text(sql))
+            # STREAMED, not executed: `session.execute` buffers the entire result set
+            # before anything is read from it, so `select * from readonly.snapshot_records`
+            # would materialise every row — each a large scrubbed JSONB document — in the
+            # task just to print the first hundred. A server-side cursor stops at the cap.
+            result = await session.stream(text(sql))
             columns = list(result.keys())
             # +1 so "more rows exist" is detectable without a second count query.
-            rows = result.fetchmany(max_rows + 1)
+            rows: list[tuple[Any, ...]] = []
+            async for row in result:
+                rows.append(tuple(row))
+                if len(rows) > max_rows:
+                    break
             truncated = len(rows) > max_rows
             rows = rows[:max_rows]
 
-            print(render_table(columns, [tuple(r) for r in rows]))
+            print(render_table(columns, rows))
             print()
             if truncated:
                 print(f"({max_rows} rows shown; more exist — raise QUERY_MAX_ROWS to see them)")
@@ -203,6 +245,31 @@ def _readonly_database_url() -> str:
     return str(url.set(username=user, password=token))
 
 
+#: Where the region comes from, in order. ``AWS_REGION`` is what the task definition sets
+#: (infra/envs/*/main.tf); the rest are fallbacks so this keeps working if that variable is
+#: not applied yet — ``S3_REGION`` and ``BEDROCK_REGION`` are both ``var.aws_region``.
+_REGION_VARS = ("AWS_REGION", "AWS_DEFAULT_REGION", "S3_REGION", "BEDROCK_REGION")
+
+
+def _aws_region() -> str:
+    """The region for the RDS control-plane call.
+
+    Passed EXPLICITLY, following the convention the rest of the codebase already uses
+    (``S3_REGION`` -> ``client("s3", region_name=...)``, ``BEDROCK_REGION``). Fargate has
+    no instance metadata service, so botocore's implicit region chain ends in
+    ``NoRegionError`` and the task dies before it opens a connection.
+    """
+    for var in _REGION_VARS:
+        value = os.getenv(var)
+        if value:
+            return value
+    raise RuntimeError(
+        "No AWS region is set — tried " + ", ".join(_REGION_VARS) + ". "
+        "The IAM auth token cannot be signed without one. Set AWS_REGION on the task, "
+        "or use QUERY_DATABASE_URL to bypass IAM auth entirely."
+    )
+
+
 def _iam_auth_token(*, host: str, port: int, user: str) -> str:
     """A 15-minute RDS IAM auth token for ``user``.
 
@@ -212,7 +279,7 @@ def _iam_auth_token(*, host: str, port: int, user: str) -> str:
     import boto3
 
     session = boto3.Session()
-    client = session.client("rds")
+    client = session.client("rds", region_name=_aws_region())
     return str(client.generate_db_auth_token(DBHostname=host, Port=port, DBUsername=user))
 
 

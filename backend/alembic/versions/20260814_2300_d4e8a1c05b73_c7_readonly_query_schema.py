@@ -89,29 +89,104 @@ AS $$
 $$;
 """
 
-# A json-in / json-out convenience wrapper: scrub the serialized form and cast back, so the view
-# still hands back queryable JSON rather than a string.
+# The JSON wrappers WALK the document and scrub only STRING scalars.
+#
+# The obvious implementation — ``scrub(v::text)::json`` — is wrong, and wrong in a way that
+# takes the whole view down rather than one cell. The regex runs over the SERIALIZED document,
+# so it also matches inside NUMBERS, and a scrubbed number is not JSON:
+#
+#     {{"tokens_used": 123456789}}          -> {{"tokens_used": [REDACTED-ID]}}   -> cast fails
+#     {{"epoch_ms": 1755212345678}}         -> cast fails
+#     {{"confidence": 0.8500000000000001}}  -> cast fails  (a float repr, 16 fraction digits)
+#
+# The cast raises for the whole SELECT, so one such row anywhere makes ``select * from
+# readonly.extractions`` (or findings / snapshot_records / observations) return nothing at all.
+# Python float reprs and epoch-millisecond timestamps make that near-certain on real data, which
+# is exactly the data this path exists to inspect.
+#
+# Walking the document also makes the scrub structural rather than textual: it can no longer
+# match across a key/value boundary or mangle the punctuation of the encoding itself.
+#
+# ``json`` and ``jsonb`` get their own recursive implementations rather than one casting to the
+# other, so the json version keeps key order and duplicate keys as stored.
+#
+# LANGUAGE plpgsql, not sql: a ``LANGUAGE sql`` body is validated at CREATE time and cannot
+# reference the function being created, and these are recursive.
 _SCRUB_JSON_FN = f"""
 CREATE OR REPLACE FUNCTION {_SCHEMA}.scrub_json(v json)
 RETURNS json
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 STRICT
 PARALLEL SAFE
 AS $$
-    SELECT {_SCHEMA}.scrub(v::text)::json
+DECLARE
+    result json;
+BEGIN
+    CASE json_typeof(v)
+        WHEN 'object' THEN
+            SELECT coalesce(json_object_agg(key, {_SCHEMA}.scrub_json(value)), '{{}}'::json)
+              INTO result FROM json_each(v);
+        WHEN 'array' THEN
+            SELECT coalesce(json_agg({_SCHEMA}.scrub_json(elem)), '[]'::json)
+              INTO result FROM json_array_elements(v) AS elem;
+        WHEN 'string' THEN
+            -- #>> '{{}}' unwraps the scalar to its TEXT value, so the scrub sees the string
+            -- itself rather than its quoted, escaped form; to_json re-escapes on the way back.
+            result := to_json({_SCHEMA}.scrub(v #>> '{{}}'));
+        WHEN 'number' THEN
+            -- A number cannot be scrubbed in place: the marker is not a number. An
+            -- identifier-shaped INTEGER therefore becomes the string marker, keeping the
+            -- redaction the text version intended without producing invalid JSON.
+            -- Fractional values are left alone: no identifier an extractor emits is
+            -- fractional, and the digit-run pattern would otherwise eat the fraction digits
+            -- of an ordinary float repr such as 0.8500000000000001.
+            IF (v #>> '{{}}') ~ '^\\d{{9,}}$' THEN
+                result := to_json('[REDACTED-ID]'::text);
+            ELSE
+                result := v;
+            END IF;
+        ELSE
+            result := v;
+    END CASE;
+    RETURN result;
+END;
 $$;
 """
 
 _SCRUB_JSONB_FN = f"""
 CREATE OR REPLACE FUNCTION {_SCHEMA}.scrub_jsonb(v jsonb)
 RETURNS jsonb
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 STRICT
 PARALLEL SAFE
 AS $$
-    SELECT {_SCHEMA}.scrub(v::text)::jsonb
+DECLARE
+    result jsonb;
+BEGIN
+    CASE jsonb_typeof(v)
+        WHEN 'object' THEN
+            SELECT coalesce(jsonb_object_agg(key, {_SCHEMA}.scrub_jsonb(value)), '{{}}'::jsonb)
+              INTO result FROM jsonb_each(v);
+        WHEN 'array' THEN
+            SELECT coalesce(jsonb_agg({_SCHEMA}.scrub_jsonb(elem)), '[]'::jsonb)
+              INTO result FROM jsonb_array_elements(v) AS elem;
+        WHEN 'string' THEN
+            result := to_jsonb({_SCHEMA}.scrub(v #>> '{{}}'));
+        WHEN 'number' THEN
+            -- See scrub_json: an identifier-shaped integer becomes the string marker;
+            -- fractional values pass through so float reprs survive intact.
+            IF (v #>> '{{}}') ~ '^\\d{{9,}}$' THEN
+                result := to_jsonb('[REDACTED-ID]'::text);
+            ELSE
+                result := v;
+            END IF;
+        ELSE
+            result := v;
+    END CASE;
+    RETURN result;
+END;
 $$;
 """
 
@@ -409,7 +484,13 @@ _VIEWS: tuple[str, ...] = (
 )
 
 
-def upgrade() -> None:
+def create_readonly_schema() -> None:
+    """Create the schema, the scrub functions and every view.
+
+    Public and separate from ``upgrade`` so a LATER migration can rebuild the views after
+    changing a column they depend on — see ``drop_readonly_schema`` for why that is needed
+    and how to reach these two functions from another revision.
+    """
     op.execute(f"CREATE SCHEMA IF NOT EXISTS {_SCHEMA}")
     op.execute(_SCRUB_FN)
     op.execute(_SCRUB_JSON_FN)
@@ -417,6 +498,40 @@ def upgrade() -> None:
 
     for view in _VIEWS:
         op.execute(view)
+
+
+def drop_readonly_schema() -> None:
+    """Drop the schema and everything in it.
+
+    THESE VIEWS BLOCK COLUMN CHANGES ON THE TABLES BENEATH THEM. PostgreSQL refuses
+    ``ALTER TABLE ... ALTER COLUMN ... TYPE`` and ``DROP COLUMN`` while a view depends on
+    the column ("cannot alter type of a column used by a view or rule"), and these 32 views
+    cover nearly every base table. A migration that changes such a column must drop the
+    views first and recreate them after::
+
+        import importlib.util
+        from pathlib import Path
+
+        _C7 = (Path(__file__).resolve().parent
+               / "20260814_2300_d4e8a1c05b73_c7_readonly_query_schema.py")
+        spec = importlib.util.spec_from_file_location("c7", _C7)
+        c7 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(c7)
+
+        def upgrade() -> None:
+            c7.drop_readonly_schema()
+            ...          # the ALTER / DROP COLUMN
+            c7.create_readonly_schema()
+
+    Loaded by path because a revision filename is not an importable module name. If the
+    column being changed is one a view SELECTS, update the view text HERE in the same
+    change — recreating the old definition over a renamed column fails on the recreate.
+    """
+    op.execute(f"DROP SCHEMA IF EXISTS {_SCHEMA} CASCADE")
+
+
+def upgrade() -> None:
+    create_readonly_schema()
 
     # THE ROLE IS NOT CREATED HERE — and that is the point.
     #
@@ -452,4 +567,4 @@ def downgrade() -> None:
     cluster-scoped role that something else provisioned would reach outside this database.
     ``provision_query_role --drop`` removes it.
     """
-    op.execute(f"DROP SCHEMA IF EXISTS {_SCHEMA} CASCADE")
+    drop_readonly_schema()

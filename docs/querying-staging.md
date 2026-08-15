@@ -43,6 +43,24 @@ LP-209 at-rest guard uses, pinned together by a test so the two cannot drift apa
 It is deliberately over-broad: a legitimate identifier of nine or more digits is
 redacted too. That is the accepted trade.
 
+### How JSON columns are scrubbed
+
+`extracted_data`, `details`, `snapshot_json`, `load_bearing_tags` and the rest come back
+as **JSON, still queryable** — the scrub walks the document rather than its serialized
+text, so it can only ever replace a scalar:
+
+| In the document | Through the view | Why |
+|---|---|---|
+| `"employee_ssn": "123-45-6789"` | `"[REDACTED-ID]"` | A string scalar, scrubbed. |
+| `"account": "4111111111111111"`, at any depth | `"[REDACTED-ID]"` | Nested objects and list rows are walked. |
+| `"tin": 123456789` | `"[REDACTED-ID]"` (a **string**) | A number cannot hold the marker and stay a number, so an identifier-shaped integer changes type. |
+| `"confidence": 0.8500000000000001` | unchanged | Fractional values are never identifiers, and the digit rule would otherwise eat the fraction digits. |
+| `"tokens_used": 12345`, `"amount": 350000.00` | unchanged | Ordinary numbers are the debugging signal. |
+| `"epoch_ms": 1755212345678` | `"[REDACTED-ID]"` | The over-broad trade again: a 9+ digit integer cannot be told apart from an identifier. |
+
+Keys are never touched, so the shape of a document — which fields filled, at what
+confidence — survives intact even where values do not.
+
 **If you ever need a value this path will not return, that is a conversation, not a
 grant.** Adding a base-table grant to make something convenient would silently undo all
 of the above.
@@ -100,16 +118,43 @@ Once, after `migrate`:
 
 Add the environment to `QUERY_ENVIRONMENTS` in `scripts/deploy` first — deliberately, in
 a commit someone reviews. To remove it again: `QUERY_SETUP_DROP=1 ./scripts/deploy <env>
-query-setup`.
+query-setup`. Only `1`, `true`, `yes` or `on` mean drop; anything else, including `0` and
+`false`, provisions as normal.
+
+The task also needs a region: the connection uses an RDS IAM auth token, and signing it
+is an AWS API call. `AWS_REGION` is set on the task definition from `var.aws_region`
+(`infra/envs/*/main.tf`), with `S3_REGION` and `BEDROCK_REGION` as fallbacks. Fargate has
+no instance metadata service, so with none of them set the task fails with `NoRegionError`
+before it reaches the database. `QUERY_DATABASE_URL` bypasses IAM auth entirely and is the
+escape hatch if that is ever the problem.
 
 ## Limits
 
 - **One statement per run.** No semicolon-separated batches. Refused before connecting.
+  A `;` inside a string literal or a comment is not a second statement — the check reads
+  SQL structure, so `where message like '%;%'` and `-- count things; fast` both run.
 - **`SELECT` or `WITH` only.** Enforced by database grant; the script's check is a
-  clearer error message, not the control.
+  clearer error message, not the control. It also refuses a write verb *anywhere* in the
+  statement, not only at the start, because `with x as (delete from … returning 1)
+  select * from x` opens with a perfectly legal `with`.
 - **30-second `statement_timeout`**, and at most 2 concurrent connections for the role.
-- **100 rows** printed by default (`--max-rows` to raise). Every printed line goes to
-  CloudWatch, so a wide query is expensive in log volume as well as tokens.
+- **100 rows** printed by default (`--max-rows` to raise). The cap is applied as the rows
+  arrive, over a server-side cursor, so `select * from readonly.snapshot_records` does not
+  drag every JSONB document into the task to print the first hundred. Every printed line
+  goes to CloudWatch, so a wide query is expensive in log volume as well as tokens.
 - **Latency.** Each run is a container start plus a CloudWatch fetch — tens of seconds.
   It suits a considered question far better than twenty exploratory ones; prefer one
   query that answers the question to a sequence that narrows in on it.
+
+## The views constrain future migrations
+
+The 32 `readonly.*` views cover nearly every base table, and PostgreSQL refuses
+`ALTER TABLE … ALTER COLUMN … TYPE` or `DROP COLUMN` while a view depends on the column:
+`cannot alter type of a column used by a view or rule`. A migration that changes such a
+column has to drop the views, make the change, and recreate them.
+
+The C7 migration exposes `drop_readonly_schema()` and `create_readonly_schema()` for
+exactly that; its `drop_readonly_schema` docstring carries the copy-paste recipe for
+loading them from another revision (by path — a revision filename is not an importable
+module name). If the changed column is one a view SELECTS, edit the view text in the same
+change: recreating the old definition over a renamed column fails on the recreate.

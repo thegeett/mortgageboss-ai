@@ -1748,6 +1748,8 @@ stage_add_user() {
 
   run_oneoff_task "add-user" "$request" "$cluster" "$container"
   ok "add-user complete."
+  info ""
+  info "Remember the matching Cognito user, or they cannot reach the application."
 }
 
 # ---------------------------------------------------------------------------
@@ -1779,7 +1781,11 @@ stage_query_setup() {
 
   hr
   info "  environment : $ENV_NAME"
-  info "  action      : ${drop_flag:+DROP the role}${drop_flag:-create/repair the role and its grants}"
+  # Not one ${x:+a}${x:-b} pair: BOTH expansions fire when x is set (the :- form only
+  # substitutes when x is UNSET or empty), which printed "DROP the role1".
+  local action_desc="create/repair the role and its grants"
+  if [ -n "$drop_flag" ]; then action_desc="DROP the role"; fi
+  info "  action      : $action_desc"
   info "  role        : mbai_readonly (no password; RDS IAM token only)"
   hr
   confirm "Proceed?" || die "Aborted. Nothing was run."
@@ -1895,8 +1901,6 @@ stage_query() {
 
   run_oneoff_task "query" "$request" "$cluster" "$container"
   ok "query complete."
-  info ""
-  info "Remember the matching Cognito user, or they cannot reach the application."
 }
 
 # --------------------------------------------------------------------------- #
