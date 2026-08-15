@@ -22,6 +22,8 @@ mortgage processors. Start here to find your way around.
 | [deployment-runbook.md](deployment-runbook.md)       | `scripts/deploy`: the stage sequence, what each stage does, failure and rollback |
 | [worktree-setup.md](worktree-setup.md)               | Running a second worktree's Docker stack alongside the main one |
 | [deploy/commands.md](deploy/commands.md)             | Command reference: local services, AWS/Bedrock, the extraction bench |
+| [deploy/query-stage.md](deploy/query-stage.md)       | Operating the read-only query stage: IAM auth wiring, enabling it in an environment, reading a failure |
+| [querying-staging.md](querying-staging.md)           | Read-only SQL against staging: what a query returns, the redaction, the limits |
 | [phases/phase-1.md](phases/phase-1.md)               | Ticket-by-ticket phase plan (Epics 1–6)                   |
 | [tickets/](tickets/)                                 | Per-ticket implementation records (`LP-XXX.md`)           |
 

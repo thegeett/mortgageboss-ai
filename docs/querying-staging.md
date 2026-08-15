@@ -121,6 +121,10 @@ a commit someone reviews. To remove it again: `QUERY_SETUP_DROP=1 ./scripts/depl
 query-setup`. Only `1`, `true`, `yes` or `on` mean drop; anything else, including `0` and
 `false`, provisions as normal.
 
+The ordered version of this — the instance attribute, the IAM policy, why `query-setup`
+must come after both, and how to read each failure signature — is
+[`docs/deploy/query-stage.md`](deploy/query-stage.md).
+
 The task also needs a region: the connection uses an RDS IAM auth token, and signing it
 is an AWS API call. `AWS_REGION` is set on the task definition from `var.aws_region`
 (`infra/envs/*/main.tf`), with `S3_REGION` and `BEDROCK_REGION` as fallbacks. Fargate has
