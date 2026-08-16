@@ -23,7 +23,7 @@ from app.ai.extraction.parsing import coerce_date, coerce_decimal
 from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
     missing_document_subject_id,
-    resolve_applicability,
+    resolve_applicabilities,
 )
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
@@ -41,6 +41,7 @@ from app.verification.rules.specs import (
     OutcomeRule,
     RuleSpec,
     TagCondition,
+    _as_conditions,
 )
 from app.verification.snapshot.model import CalculationEntry, Snapshot
 from app.verification.snapshot.tag import Tag
@@ -122,6 +123,11 @@ def _result(
     )
 
 
+def _loan_tags(snapshot: Snapshot) -> Mapping[str, Tag]:
+    """The LOAN subject's tag map ({} when tags are absent) — what a `loan_tag` predicate reads."""
+    return {} if snapshot.tags.absent else snapshot.tags.by_subject.get(LOAN_SUBJECT, {})
+
+
 def _calc_operand(snapshot: Snapshot, calc_name: str, key: str) -> Decimal | None:
     """A calculator value, honoring the LP-318 gated flag (a gated calc is not trustworthy → None)."""
     calculations = snapshot.calculations
@@ -183,7 +189,7 @@ def _resolve_operand(
 
 def _tags_hold(when_tags: tuple[TagCondition, ...], subject_tags: Mapping[str, Tag]) -> bool:
     for cond in when_tags:
-        tag = subject_tags.get(cond.tag)
+        tag = subject_tags.get(cond.tag_id)
         observed = tag.value if tag is not None else None
         holds = (observed == cond.value) if cond.op == "eq" else (observed != cond.value)
         if not holds:
@@ -246,18 +252,21 @@ def evaluate_deterministic_rule(
 
     # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
     # scope-false. Resolved from the declaration — before the loop, so the reason is emitted once.
+    # The missing-document path names ONE document type, and `applicability_expected` validates that a
+    # rule using it declares exactly one predicate (LP-517) — so the conjunction collapses safely here.
+    doc_applic = next(iter(_as_conditions(det.applicability)), None)
     absent_reason = absent_document_couldnt_check(
-        det.applicability,
+        doc_applic,
         det.applicability_expected,
         subjects,
         documents_absent=snapshot.documents.absent,
     )
     if absent_reason is not None:
-        assert det.applicability is not None  # guaranteed when a reason is returned
+        assert doc_applic is not None  # guaranteed when a reason is returned
         return [
             _result(
                 spec,
-                missing_document_subject_id(det.applicability),
+                missing_document_subject_id(doc_applic),
                 Verdict.COULDNT_CHECK,
                 absent_reason,
                 {},
@@ -268,7 +277,9 @@ def evaluate_deterministic_rule(
     for subject_id, subject_tags in subjects:
         # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
-            terminal = resolve_applicability(det.applicability, subject_tags)
+            terminal = resolve_applicabilities(
+                _as_conditions(det.applicability), subject_tags, _loan_tags(snapshot)
+            )
             if terminal is not None:
                 verdict, reason = terminal
                 results.append(_result(spec, subject_id, verdict, reason, subject_tags))

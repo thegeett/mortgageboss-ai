@@ -17,7 +17,7 @@ from app.verification.rule_engine.applicability import (
 )
 from app.verification.rule_engine.gate import evaluate_gate
 from app.verification.rule_engine.reasons import fact_label
-from app.verification.rules.specs import TagCondition
+from app.verification.rules.specs import TagCondition, _as_conditions
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 # A dotted tag id (id.dob), a content-id hash (txn54c6…/doc067c2…), and the raw engine words.
@@ -145,14 +145,15 @@ def test_every_live_rule_reason_tag_has_a_curated_fact_label() -> None:
         tags: set[str] = set()
         if spec.deterministic is not None:
             tags |= set(spec.deterministic.gated_tags)
-            applic = spec.deterministic.applicability
-            if applic is not None and applic.tag != DOC_TYPE_TAG:
-                tags.add(applic.tag)
+            # LP-517: applicability may be a CONJUNCTION — every predicate can produce the reason.
+            for applic in _as_conditions(spec.deterministic.applicability):
+                if applic.tag_id != DOC_TYPE_TAG:
+                    tags.add(applic.tag_id)
         if spec.judgment is not None:
             tags |= set(spec.judgment.load_bearing_tags)
-            applic = spec.judgment.applicability
-            if applic is not None and applic.tag != DOC_TYPE_TAG:
-                tags.add(applic.tag)
+            for applic in _as_conditions(spec.judgment.applicability):
+                if applic.tag_id != DOC_TYPE_TAG:
+                    tags.add(applic.tag_id)
         if spec.consistency is not None:
             tags.add(spec.consistency.gather_tag)
             if spec.consistency.gather_filter is not None:

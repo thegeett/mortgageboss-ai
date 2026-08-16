@@ -135,12 +135,45 @@ class TagCondition(BaseModel):
 
     model_config = {"frozen": True, "extra": "forbid"}
 
-    tag: str = PydField(min_length=1)
+    # Exactly one of `tag` / `loan_tag` (LP-517). `loan_tag` reads the LOAN subject's tag map instead of
+    # the current subject's, mirroring the operand DSL's `loan_tag` — a per-subject rule often scopes on a
+    # LOAN-level fact (AS-2 is per-deposit but applies only on a PURCHASE). Without it the predicate is
+    # absent on every transaction and the rule couldnt_checks all of them, which is worse than unscoped.
+    tag: str | None = PydField(default=None, min_length=1)
+    loan_tag: str | None = PydField(default=None, min_length=1)
     op: str = PydField(pattern="^(eq|ne)$")  # eq | ne (string-value equality)
     value: str = PydField(min_length=1)
 
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> TagCondition:
+        if (self.tag is None) == (self.loan_tag is None):
+            raise ValueError("a TagCondition needs exactly one of `tag` or `loan_tag`")
+        return self
 
-def _check_applicability_expected(expected: bool, applic: TagCondition | None) -> None:
+    @property
+    def tag_id(self) -> str:
+        """The tag this condition reads, whichever subject it lives on."""
+        return self.tag or self.loan_tag or ""
+
+
+def _as_conditions(
+    applic: TagCondition | tuple[TagCondition, ...] | None,
+) -> tuple[TagCondition, ...]:
+    """Normalise the one-or-many `applicability` shape to a tuple (LP-517).
+
+    A single condition stays valid and unchanged — every pre-LP-517 spec is a single condition, and the
+    YAML for one is still `applicability: {tag: ..., op: ..., value: ...}`. A LIST expresses a
+    conjunction: a rule whose scope is two facts (AS-2 is money-IN *and* purchase-only) previously needed
+    a bespoke combined tag, which merged two different abstentions and lost the per-predicate reason.
+    """
+    if applic is None:
+        return ()
+    return applic if isinstance(applic, tuple) else (applic,)
+
+
+def _check_applicability_expected(
+    expected: bool, applic: TagCondition | tuple[TagCondition, ...] | None
+) -> None:
     """Shared validation (LP-330) for ``applicability_expected`` on DeterministicEval / JudgmentEval,
     so they can never diverge. ``applicability_expected`` declares that a MISSING DOCUMENT is a gap, so
     it requires an `applicability` predicate AND that predicate must be the document-type predicate
@@ -148,11 +181,19 @@ def _check_applicability_expected(expected: bool, applic: TagCondition | None) -
     on any other tag would emit a document-framed reason for a non-document concern."""
     if not expected:
         return
-    if applic is None:
+    conditions = _as_conditions(applic)
+    if not conditions:
         raise ValueError(
             "applicability_expected=true requires an `applicability` predicate (it declares WHICH "
             "document is expected)"
         )
+    if len(conditions) != 1:
+        raise ValueError(
+            "applicability_expected=true requires exactly ONE applicability predicate — the "
+            "missing-document resolver names a single document type, so a conjunction has no one "
+            f"document to report as missing (got {len(conditions)})"
+        )
+    applic = conditions[0]
     if applic.tag != DOC_TYPE_TAG:
         raise ValueError(
             f"applicability_expected=true requires a document-type applicability (tag {DOC_TYPE_TAG!r})"
@@ -266,7 +307,7 @@ class DeterministicEval(BaseModel):
 
     load_bearing_tags: tuple[str, ...] = PydField(min_length=1)
     gated_tags: tuple[str, ...] = PydField(min_length=1)  # the gate-required subset
-    applicability: TagCondition | None = None  # a pre-gate per-subject applicability filter
+    applicability: TagCondition | tuple[TagCondition, ...] | None = None  # pre-gate scope filter(s)
     # LP-330: whether the applicability-scoped document is EXPECTED for this file. False (default,
     # LP-329's behavior) → a file with no in-scope subject is not_applicable (§8 Tab 4). True → the
     # document SHOULD exist, so its confident absence is a GAP → couldnt_check (§8 Tab 1, BLOCKS). Only
@@ -356,7 +397,7 @@ class JudgmentEval(BaseModel):
     # → not_applicable (no gate, no AI, no tag — §8 Tab 4); an ABSENT/"unknown" predicate tag →
     # couldnt_check (cannot tell if it applies). Scopes a per_document judgment (e.g. ID-9 → POA docs)
     # so it does not flood couldnt_check across every non-matching document.
-    applicability: TagCondition | None = None
+    applicability: TagCondition | tuple[TagCondition, ...] | None = None
     # LP-330: whether the applicability-scoped document is EXPECTED for this file (see DeterministicEval).
     # False (default) → confidently absent = not_applicable (ID-9's POA: irrelevant when none used).
     # True → confidently absent = couldnt_check (§8 Tab 1). Only meaningful with `applicability`.
@@ -596,8 +637,7 @@ class RuleSpec(BaseModel):
         elif self.judgment is not None:
             applic = self.judgment.applicability
         if (
-            applic is not None
-            and applic.tag == DOC_TYPE_TAG
+            any(c.tag == DOC_TYPE_TAG for c in _as_conditions(applic))
             and self.subject_enumeration != "per_document"
         ):
             raise ValueError(

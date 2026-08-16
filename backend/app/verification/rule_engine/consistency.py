@@ -198,7 +198,7 @@ def _index_borrower_documents(snapshot: Snapshot) -> _DocIndex:
 def _tag_holds(cond: TagCondition, tags: dict[str, Tag]) -> bool:
     """Whether a source's tags satisfy a gather filter — an ABSENT filter tag is a non-match (the
     source is not of the required type, so it is excluded, not counted as disagreeing)."""
-    tag = tags.get(cond.tag)
+    tag = tags.get(cond.tag_id)
     if tag is None:
         return False
     observed = str(tag.value)
@@ -235,7 +235,7 @@ def _borrower_documents(
             continue
         candidate_count += 1
         if gather_filter is not None:
-            filter_tag = source_tags.get(gather_filter.tag)
+            filter_tag = source_tags.get(gather_filter.tag_id)
             # LP-372: an AI-``unknown`` TYPE is ABSENT-FOR-COMPARISON. The source states an address but
             # no determinable TYPE, so — exactly like an ABSENT filter tag (no branch below adds it), and
             # like the gather-tag ``unknown`` above — it is EXCLUDED from the compare and must NOT poison
@@ -426,7 +426,7 @@ async def evaluate_consistency_rule(
                         spec,
                         subject_id,
                         verdict,
-                        f"the {fact_label(con.gather_filter.tag)} could not be established reliably, "  # type: ignore[union-attr]
+                        f"the {fact_label(con.gather_filter.tag_id)} could not be established reliably, "  # type: ignore[union-attr]
                         f"so we cannot tell which documents to compare — {filter_gate.reason}"
                         + excluded_note,
                         gathered,

@@ -33,12 +33,13 @@ from app.core.logging import get_logger
 from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
     missing_document_subject_id,
-    resolve_applicability,
+    resolve_applicabilities,
 )
+from app.verification.rule_engine.deterministic import _loan_tags
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
-from app.verification.rules.specs import JudgmentEval, RuleSpec
+from app.verification.rules.specs import JudgmentEval, RuleSpec, _as_conditions
 from app.verification.snapshot.model import Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
@@ -140,7 +141,7 @@ def _guideline_exempts(jud: JudgmentEval, subject_tags: Mapping[str, Tag], value
     """
     if jud.exempt_when is None:
         return False
-    tag = subject_tags.get(jud.exempt_when.tag)
+    tag = subject_tags.get(jud.exempt_when.tag_id)
     if tag is None or str(tag.value) == "unknown":
         return False
     observed = str(tag.value)
@@ -159,7 +160,7 @@ def _exempt_message(jud: JudgmentEval, subject_tags: Mapping[str, Tag]) -> str:
     clearing rather than a model. The predicate tag's own reasoning carries the specifics (which
     category, and the guide's clause), so it is quoted rather than restated.
     """
-    tag = subject_tags.get(jud.exempt_when.tag) if jud.exempt_when else None
+    tag = subject_tags.get(jud.exempt_when.tag_id) if jud.exempt_when else None
     detail = (tag.reasoning or "").strip() if tag is not None else ""
     return (
         f"no further review is required for this deposit — {detail}"
@@ -233,20 +234,23 @@ async def evaluate_judgment_rule(
 
     # LP-330: an EXPECTED-but-confidently-absent document is a GAP (couldnt_check, §8 Tab 1), not
     # scope-false. (ID-9's POA leaves applicability_expected False → absent = not_applicable, unchanged.)
+    # The missing-document path names ONE document type, and `applicability_expected` validates that a
+    # rule using it declares exactly one predicate (LP-517) — so the conjunction collapses safely here.
+    doc_applic = next(iter(_as_conditions(jud.applicability)), None)
     absent_reason = absent_document_couldnt_check(
-        jud.applicability,
+        doc_applic,
         jud.applicability_expected,
         subjects,
         documents_absent=snapshot.documents.absent,
     )
     if absent_reason is not None:
-        assert jud.applicability is not None
+        assert doc_applic is not None  # guaranteed when a reason is returned
         return [
             JudgmentEvaluation(
                 None,
                 _result(
                     spec,
-                    missing_document_subject_id(jud.applicability),
+                    missing_document_subject_id(doc_applic),
                     Verdict.COULDNT_CHECK,
                     absent_reason,
                     jud.reasoned_over,
@@ -262,7 +266,7 @@ async def evaluate_judgment_rule(
         # bounded-concurrent evaluation preserves per-subject semantics; gather keeps subject order.
         async with sem:
             return await _evaluate_one_subject(
-                spec, jud, subject_id, subject_tags, reason_fn, floor
+                spec, jud, subject_id, subject_tags, reason_fn, floor, _loan_tags(snapshot)
             )
 
     return list(await asyncio.gather(*(_bounded(sid, tags) for sid, tags in subjects)))
@@ -275,6 +279,7 @@ async def _evaluate_one_subject(
     subject_tags: Mapping[str, Tag],
     reason_fn: Reasoner,
     floor: float,
+    loan_tags: Mapping[str, Tag],
 ) -> JudgmentEvaluation:
     """The per-subject judgment armor (§3D) — one subject's applicability → gate → AI → tag →
     ratification-pending verdict. Self-contained so one subject's failure never touches another's."""
@@ -282,7 +287,9 @@ async def _evaluate_one_subject(
     #    nothing (no gate, no AI, no tag). §8: out-of-scope → not_applicable; an absent/"unknown"
     #    predicate → couldnt_check — the two must never collapse.
     if jud.applicability is not None:
-        terminal = resolve_applicability(jud.applicability, subject_tags)
+        terminal = resolve_applicabilities(
+            _as_conditions(jud.applicability), subject_tags, loan_tags
+        )
         if terminal is not None:
             verdict, reason = terminal
             return JudgmentEvaluation(

@@ -115,7 +115,7 @@ def _load_bearing_tag_ids(rule_id: str) -> set[str]:
     if spec.consistency is not None:
         tags = {spec.consistency.gather_tag}
         if spec.consistency.gather_filter is not None:
-            tags.add(spec.consistency.gather_filter.tag)
+            tags.add(spec.consistency.gather_filter.tag_id)
         return tags
     if spec.deterministic is not None:
         return set(spec.deterministic.load_bearing_tags)

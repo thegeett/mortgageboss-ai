@@ -55,7 +55,7 @@ from __future__ import annotations
 import csv
 
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
-from app.verification.rules.specs import Operand, RuleSpec, load_rule_spec
+from app.verification.rules.specs import Operand, RuleSpec, _as_conditions, load_rule_spec
 from app.verification.snapshot.calculations_section import _REQUIRED_DTI_TAGS
 from app.verification.tag_materialization import declarations as _decl
 from app.verification.tag_materialization.declarations import load_declarations, load_vocab_extra
@@ -147,7 +147,8 @@ def _hard_reads(spec: RuleSpec) -> set[str]:
         det = spec.deterministic
         tags |= set(det.load_bearing_tags)
         if det.applicability is not None:
-            tags.add(det.applicability.tag)
+            # LP-517: applicability may be a CONJUNCTION — read every predicate's tag.
+            tags.update(c.tag_id for c in _as_conditions(det.applicability))
         for operand in det.operands.values():
             tags |= _operand_tags(operand)
         for outcome in det.outcomes:
@@ -156,7 +157,7 @@ def _hard_reads(spec: RuleSpec) -> set[str]:
     if spec.judgment is not None:
         tags |= set(spec.judgment.load_bearing_tags)
         if spec.judgment.applicability is not None:
-            tags.add(spec.judgment.applicability.tag)
+            tags.update(c.tag_id for c in _as_conditions(spec.judgment.applicability))
     return tags
 
 

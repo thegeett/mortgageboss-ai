@@ -918,3 +918,13 @@ settlement date to the date the sales contract is executed.
    against.
 4. **Confirm the 50% threshold for AS-12** if the purchase-side materiality test is built. AS-1 already
    uses it and its own spec records it as not yet confirmed.
+
+## LP-517 — AS-1 on a refinance
+
+**Should AS-1 (large-deposit sourcing) run on a refinance at all?** B3-4.2-02 says documentation for
+large deposits is "not required" on a refinance — not prohibited — so this is a policy call, unlike
+AS-2 (earnest money factually cannot exist on a refi, now scoped out). Today AS-1 runs, and on LF-WCHG
+it produced 10 `satisfied` findings.
+
+⚠️ Not merely cosmetic: those cleared only because every deposit was below the threshold. Had one
+exceeded it, **AS-1 would have FIRED on a refinance**, enforcing a documentation duty the guide waives.

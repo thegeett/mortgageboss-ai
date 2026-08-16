@@ -341,7 +341,9 @@ def test_as5_gift_chain_scope_and_fire() -> None:
 # ================================================================================================= #
 # AS-2 — EMD sourcing (case 8 label variance) + THE APPROXIMATION PIN
 # ================================================================================================= #
-def _as2_txn(category: str, sourced: str, money_in: str | None = "in"):
+def _as2_txn(
+    category: str, sourced: str, money_in: str | None = "in", purpose: str | None = "purchase"
+):
     txn = TransactionRecord(
         content_id="t1",
         amount=_f("5000"),
@@ -362,7 +364,12 @@ def _as2_txn(category: str, sourced: str, money_in: str | None = "in"):
     # LP-509-A1: `money_in=None` omits the tag entirely, to exercise the absent-predicate branch.
     if money_in is not None:
         subject_tags["txn.is_money_in"] = _tag(money_in)
-    return _det("AS-2", _snap(docs=[doc], by_subject={"t1": subject_tags}))
+    # LP-517: AS-2 is scoped to PURCHASES as well as money-in (earnest money is a purchase concept),
+    # and the purpose predicate reads the LOAN subject. `purpose=None` omits it — the unstated case.
+    by_subject: dict[str, dict] = {"t1": subject_tags}
+    if purpose is not None:
+        by_subject["loan"] = {"loan.purpose": _tag(purpose)}
+    return _det("AS-2", _snap(docs=[doc], by_subject=by_subject))
 
 
 def test_as2_fire_and_case8_and_the_approximation_pin() -> None:
@@ -401,6 +408,26 @@ def test_as2_is_scoped_to_money_in_lp509_a1() -> None:
     assert _as2_txn("loan_proceeds", "no", money_in="unknown")[0].verdict is Verdict.COULDNT_CHECK
     # and the in-scope fire is unaffected
     assert _as2_txn("loan_proceeds", "no", money_in="in")[0].verdict is Verdict.FIRED
+
+
+def test_as2_is_scoped_to_purchases_lp517() -> None:
+    """LP-517 — earnest money is a PURCHASE concept; a refinance has none.
+
+    LP-509-A5 named this ("AS-2 shares this root cause") and scoped PC-2/PC-3/PC-7 but not AS-2. On the
+    first real file — a refinance — AS-2 produced 10 `satisfied` findings for a check that cannot apply,
+    which is false assurance rather than noise.
+
+    ⚠️ NOT symmetric across the family: B3-4.2-02 waives large-deposit DOCUMENTATION on a refinance but
+    expressly RETAINS the borrowed-funds duty, so AS-12 must NOT be scoped out the same way.
+    """
+    assert _as2_txn("loan_proceeds", "no", purpose="refinance")[0].verdict is Verdict.NOT_APPLICABLE
+    # An UNSTATED purpose cannot tell us whether the rule applies — it abstains, never exempts.
+    assert _as2_txn("loan_proceeds", "no", purpose=None)[0].verdict is Verdict.COULDNT_CHECK
+    # Both predicates must hold: a money-out transaction on a purchase is still out of scope.
+    assert (
+        _as2_txn("loan_proceeds", "no", money_in="out", purpose="purchase")[0].verdict
+        is Verdict.NOT_APPLICABLE
+    )
 
 
 # ================================================================================================= #

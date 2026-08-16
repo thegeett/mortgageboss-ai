@@ -15,7 +15,7 @@ These are completely different, and conflating them would hide a real gap behind
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from app.verification.rule_engine.reasons import document_label, fact_label
 from app.verification.rule_engine.result import Verdict
@@ -30,7 +30,7 @@ def _undetermined_reason(applic: TagCondition, *, present_but_unclear: bool) -> 
     (LP-376-C): a per-DOCUMENT rule (the predicate IS the document type) asks for classification; ANY
     other predicate (e.g. AS-1's ``txn.is_money_in``) names the mortgage FACT it needs, never a document
     action for a non-document fact."""
-    if applic.tag == DOC_TYPE_TAG:
+    if applic.tag_id == DOC_TYPE_TAG:
         verb = "could not be classified" if present_but_unclear else "has not been classified"
         return (
             f"a document in the file {verb} — it may be the {document_label(applic.value)} this "
@@ -38,19 +38,26 @@ def _undetermined_reason(applic: TagCondition, *, present_but_unclear: bool) -> 
         )
     verb = "could not be determined" if present_but_unclear else "has not been determined"
     return (
-        f"the {fact_label(applic.tag)} {verb} — this check needs it to tell whether the rule "
+        f"the {fact_label(applic.tag_id)} {verb} — this check needs it to tell whether the rule "
         "applies here"
     )
 
 
 def resolve_applicability(
-    applic: TagCondition, subject_tags: Mapping[str, Tag]
+    applic: TagCondition,
+    subject_tags: Mapping[str, Tag],
+    loan_tags: Mapping[str, Tag] | None = None,
 ) -> tuple[Verdict, str] | None:
     """``None`` → the rule APPLIES to this subject; otherwise the terminal (verdict, reason).
 
     ABSENT / ``"unknown"`` predicate tag → couldnt_check (cannot tell if it applies); a predicate that
     is DEFINITELY false → not_applicable (out of scope). The predicate holding → the rule applies."""
-    tag = subject_tags.get(applic.tag)
+    # A `loan_tag` condition reads the LOAN subject's map, not this subject's (LP-517). Defaulting
+    # `loan_tags` to empty rather than to `subject_tags` keeps the failure honest: a loan-scoped
+    # predicate on a caller that did not supply them reads ABSENT -> couldnt_check, never accidentally
+    # matching a same-named tag on the subject.
+    source = subject_tags if applic.tag is not None else (loan_tags or {})
+    tag = source.get(applic.tag_id)
     if tag is None:
         return (Verdict.COULDNT_CHECK, _undetermined_reason(applic, present_but_unclear=False))
     if tag.value == _UNKNOWN:
@@ -60,9 +67,41 @@ def resolve_applicability(
         return (
             Verdict.NOT_APPLICABLE,
             f"the rule does not apply to this subject "
-            f"({applic.tag} {applic.op} {applic.value!r} is false)",
+            f"({applic.tag_id} {applic.op} {applic.value!r} is false)",
         )
     return None
+
+
+def resolve_applicabilities(
+    applics: Sequence[TagCondition],
+    subject_tags: Mapping[str, Tag],
+    loan_tags: Mapping[str, Tag] | None = None,
+) -> tuple[Verdict, str] | None:
+    """The same contract as :func:`resolve_applicability`, over a CONJUNCTION of predicates (LP-517).
+
+    A rule's scope is often two facts, not one — AS-2 applies to money-IN transactions AND only on a
+    PURCHASE. Expressing that needed a bespoke combined tag per rule, which merged two different
+    abstentions into one enum and lost the per-predicate reason.
+
+    ⚠️ ORDER OF PRECEDENCE, and it is not "first predicate wins": EVERY predicate is evaluated, then
+
+      * any predicate DEFINITELY FALSE  -> not_applicable. Scope-false beats data-missing: a money-OUT
+        transaction is out of scope for an earnest-money check whether or not the loan purpose is known,
+        so reporting "we could not tell" about it would be false.
+      * else any predicate ABSENT / "unknown" -> couldnt_check, carrying THAT predicate's own reason, so
+        the message still names the fact that is missing.
+      * else -> the rule applies.
+    """
+    undetermined: tuple[Verdict, str] | None = None
+    for applic in applics:
+        terminal = resolve_applicability(applic, subject_tags, loan_tags)
+        if terminal is None:
+            continue
+        if terminal[0] is Verdict.NOT_APPLICABLE:
+            return terminal
+        if undetermined is None:
+            undetermined = terminal
+    return undetermined
 
 
 # The subject_id a missing-document couldnt_check is keyed under — a STABLE identity per (rule, type),
@@ -111,5 +150,6 @@ def absent_document_couldnt_check(
 __all__ = [
     "absent_document_couldnt_check",
     "missing_document_subject_id",
+    "resolve_applicabilities",
     "resolve_applicability",
 ]

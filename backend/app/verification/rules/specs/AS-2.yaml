@@ -45,7 +45,24 @@ deterministic:
   # AT&T bill and an ATM fee — 57 subjects where 10 are money-in. AS-1 has gated on this since it was
   # written; AS-2 and AS-12 were the two that never did. != in → not_applicable; absent/unknown →
   # couldnt_check (the §8 honesty contract: scope-false must never absorb data-missing).
-  applicability: {tag: txn.is_money_in, op: eq, value: in}
+  # LP-517: a CONJUNCTION — money-in AND a purchase. Earnest money is a purchase concept; a refinance
+  # has none, so AS-2 was checking earnest-money sourcing on loans that cannot have any. LP-509-A5 named
+  # this ("AS-2 shares this root cause") and scoped PC-2/PC-3/PC-7 but not AS-2. On the first real file —
+  # a refinance — it produced 10 `satisfied` findings for a check that does not apply, which is false
+  # assurance rather than noise: a processor reading "satisfied" is told earnest-money sourcing was
+  # verified on a loan with no earnest money.
+  #
+  # ⚠️ Refinance scoping is NOT symmetric across the assets family, and the guide is explicit. B3-4.2-02
+  # waives large-deposit DOCUMENTATION on a refinance but expressly RETAINS the borrowed-funds duty:
+  # "the lender remains responsible for ensuring that any borrowed funds, including any related
+  # liability, are considered". So AS-12 (borrowed funds) must NOT be scoped out of refinances — only
+  # the documentation-shaped checks are. Scoping AS-2 out and leaving AS-12 in is the guideline, not an
+  # inconsistency.
+  #
+  # Either predicate DEFINITELY false -> not_applicable; either absent/unknown -> couldnt_check.
+  applicability:
+    - {tag: txn.is_money_in, op: eq, value: in}
+    - {loan_tag: loan.purpose, op: eq, value: purchase}   # LOAN-level: AS-2 is per-deposit
   outcomes:
     - verdict: fired
       when_tags:
