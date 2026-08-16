@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
