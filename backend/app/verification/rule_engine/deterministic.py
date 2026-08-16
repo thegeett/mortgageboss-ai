@@ -191,6 +191,29 @@ def _tags_hold(when_tags: tuple[TagCondition, ...], subject_tags: Mapping[str, T
     return True
 
 
+def _reason_fields(operands: dict[str, Any]) -> dict[str, str]:
+    """The interpolation fields for an outcome's ``reasoning`` template (LP-511).
+
+    Every operand is available as ``{name}`` exactly as before. A DECIMAL operand additionally gets
+    ``{name}_percent``, rendered as a one-decimal percentage.
+
+    WHY: a ratio operand interpolates at FULL Decimal precision, so IN-3's finding read "falls short of
+    documented by 0.6256740894589456855043635497". On the live file that was worse than unreadable — the
+    read-only query path's identifier scrub matched the 9+ digit run and rewrote it to "0.[REDACTED-ID]",
+    so the single number the sentence exists to convey was destroyed on the way to a reader.
+
+    ADDITIVE, so no existing template changes behaviour: a spec that never references ``_percent`` gets
+    exactly the fields it got before. Formatting stays a PRESENTATION concern here and never touches the
+    operand the comparison uses — the verdict is decided on the full-precision value.
+    """
+    fields: dict[str, str] = {}
+    for name, value in operands.items():
+        fields[name] = str(value)
+        if isinstance(value, Decimal):
+            fields[f"{name}_percent"] = f"{value:.1%}"
+    return fields
+
+
 def _outcome_matches(
     outcome: OutcomeRule, subject_tags: Mapping[str, Tag], operands: dict[str, Any]
 ) -> bool:
@@ -314,7 +337,7 @@ def evaluate_deterministic_rule(
         # 4. The ordered outcomes — first match wins (the fire condition via satisfies()).
         for outcome in det.outcomes:
             if _outcome_matches(outcome, subject_tags, operands):
-                reasoning = outcome.reasoning.format(**{k: str(v) for k, v in operands.items()})
+                reasoning = outcome.reasoning.format(**_reason_fields(operands))
                 results.append(
                     _result(
                         spec,

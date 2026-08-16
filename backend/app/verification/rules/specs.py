@@ -322,7 +322,14 @@ class DeterministicEval(BaseModel):
                 fields = _template_fields(outcome.reasoning)
             except ValueError as exc:
                 raise ValueError(f"outcome reasoning template is malformed: {exc}") from exc
-            unknown = fields - operand_names
+            # LP-511: `{name}_percent` is a PRESENTATION companion the evaluator supplies for every
+            # DECIMAL operand (deterministic._reason_fields) — a ratio interpolated raw prints at full
+            # Decimal precision, which is unreadable and (on the read-only query path) gets mangled by
+            # the identifier scrub. It resolves to a real operand, so it is accepted here; the suffix
+            # is stripped before the membership test rather than added to `operand_names`, so a
+            # genuinely unknown `{foo_percent}` still fails loud.
+            referenced = {f.removesuffix("_percent") for f in fields}
+            unknown = referenced - operand_names
             if unknown:
                 raise ValueError(
                     f"outcome reasoning references unknown operand(s) {sorted(unknown)} "

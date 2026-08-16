@@ -9,7 +9,7 @@ its subject. A recipe that cannot compute returns ``("unknown", reason)`` — ho
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import pairwise
@@ -142,7 +142,18 @@ def _borrower_documented_monthly(
     snapshot: Snapshot, borrower_id: str
 ) -> tuple[Decimal, bool, bool]:
     """The borrower's documented monthly income from its OWN documents (belongs_to) → (value,
-    any_present, any_unknown). Only this borrower's documents — one borrower's income never leaks.
+    any_present, any_unknown). Only this borrower's documents — one borrower's income never leaks."""
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return Decimal(0), False, False
+    return _distinct_documented_monthly(
+        snapshot, _borrower_attributed_documents(snapshot, borrower_id)
+    )
+
+
+def _distinct_documented_monthly(
+    snapshot: Snapshot, entries: Sequence[DocumentEntry]
+) -> tuple[Decimal, bool, bool]:
+    """The DISTINCT documented monthly income across ``entries`` → (value, any_present, any_unknown).
 
     income.documented_monthly is a PER-PAYSTUB figure (materialized per document), so the standard two
     recent paystubs from ONE job carry the SAME monthly amount — SUMMING them would double-count and turn
@@ -151,12 +162,15 @@ def _borrower_documented_monthly(
     monthly; MORE than one (variable pay, or a genuine multi-job borrower whose sources need per-employer
     aggregation) → any_unknown → the caller ABSTAINS (couldnt_check), never a summed over-count. Summing
     a true multi-job borrower's sources is a domain follow-on (needs per-employer grouping); until then
-    the honest answer is to abstain, never to mask."""
+    the honest answer is to abstain, never to mask.
+
+    Takes the document SET rather than a borrower id (LP-511) so the per-borrower and loan-level callers
+    share one implementation — the de-duplication rule is the same either way, only the scope differs."""
     values: set[Decimal] = set()
     any_present = any_unknown = False
     if snapshot.tags.absent or snapshot.documents.absent:
         return Decimal(0), any_present, any_unknown
-    for entry in _borrower_attributed_documents(snapshot, borrower_id):
+    for entry in entries:
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.documented_monthly")
         if tag is None:
             continue
@@ -223,7 +237,17 @@ _MIN_ELAPSED_MONTHS = Decimal("1")
 def _borrower_latest_ytd(
     snapshot: Snapshot, borrower_id: str
 ) -> tuple[Decimal, date | None, bool, bool]:
-    """The borrower's MOST RECENT year-to-date gross → (ytd, its pay date, any_present, any_unknown).
+    """The borrower's MOST RECENT year-to-date gross, from its OWN documents (belongs_to)."""
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return Decimal(0), None, False, False
+    return _latest_ytd(snapshot, _borrower_attributed_documents(snapshot, borrower_id))
+
+
+def _latest_ytd(
+    snapshot: Snapshot, entries: Sequence[DocumentEntry]
+) -> tuple[Decimal, date | None, bool, bool]:
+    """The MOST RECENT year-to-date gross across ``entries`` → (ytd, its pay date, any_present,
+    any_unknown).
 
     ⚠️ THE LATEST, NEVER THE SUM. Year-to-date is CUMULATIVE: an April stub's YTD already contains
     March's. Summing two stubs double-counts every month they share — on LF-WCHG the two stubs read
@@ -233,13 +257,16 @@ def _borrower_latest_ytd(
     Paired PER DOCUMENT, so the YTD taken is the one belonging to the latest pay date rather than the
     largest number found anywhere. Two documents sharing the latest pay date but disagreeing on YTD
     are ambiguous → any_unknown → the caller abstains.
+
+    Takes the document SET rather than a borrower id (LP-511), so the per-borrower and loan-level
+    callers share one implementation.
     """
     latest: tuple[date, Decimal] | None = None
     any_present = any_unknown = False
     if snapshot.tags.absent or snapshot.documents.absent:
         return Decimal(0), None, any_present, any_unknown
 
-    for entry in _borrower_attributed_documents(snapshot, borrower_id):
+    for entry in entries:
         tags = snapshot.tags.by_subject.get(entry.content_id, {})
         ytd_tag, date_tag = tags.get("income.ytd_gross"), tags.get("income.pay_date")
         if ytd_tag is None:
@@ -273,7 +300,7 @@ def _borrower_latest_ytd(
 
 
 def _income_ytd_annualized_shortfall(
-    snapshot: Snapshot, subject_id: str, subject_raw: object
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
     """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, PER BORROWER.
 
@@ -290,25 +317,29 @@ def _income_ytd_annualized_shortfall(
       3. `elapsed_months` was `max(pay_dates).month`, so a pay date of 4 April counted as four whole
          months when about 3.1 had passed. Now a real elapsed fraction from the day of year.
 
-    PER BORROWER, mirroring `_income_documented_shortfall` (LP-332, "fixes PIN #1"). A loan-level
-    aggregate both masks one borrower's shortfall behind another's surplus and, as here, invents one
-    out of a mismatch between a summed numerator and a summed denominator.
+    ⚠️ LOAN-SCOPED, not per-borrower — LP-511 reverted that half of A3. Moving it to per_borrower made
+    the rule produce NOTHING on the first real file: the per_borrower enumerator resolves borrowers via
+    documents' `belongs_to`, and on that file the attribution yields no borrower subjects at all (LP-513,
+    which affects IN-1, IN-12..IN-16, ID-5, CR-4 and CR-10 the same way). Per-borrower remains the right
+    end state — a loan aggregate can mask one borrower's shortfall behind another's surplus — but a rule
+    that silently evaluates nothing is worse than one that aggregates. The three arithmetic fixes above
+    are independent of the scope and stand either way.
     """
-    if not isinstance(subject_raw, BorrowerSubject):
-        return _UNKNOWN, "the YTD shortfall is a per-borrower recipe (needs a borrower subject)"
-
-    documented, d_present, d_unknown = _borrower_documented_monthly(snapshot, subject_id)
-    ytd, pay_date, y_present, y_unknown = _borrower_latest_ytd(snapshot, subject_id)
+    entries: Sequence[DocumentEntry] = (
+        () if snapshot.documents.absent else tuple(snapshot.documents.entries)
+    )
+    documented, d_present, d_unknown = _distinct_documented_monthly(snapshot, entries)
+    ytd, pay_date, y_present, y_unknown = _latest_ytd(snapshot, entries)
 
     if not y_present or y_unknown or pay_date is None:
         return _UNKNOWN, (
-            f"borrower {subject_id}: year-to-date gross is absent, incomplete, or cannot be placed "
-            "against a pay date — cannot annualize"
+            "year-to-date gross is absent, incomplete, or cannot be placed against a pay date — "
+            "cannot annualize"
         )
     if not d_present or d_unknown or documented == 0:
         return _UNKNOWN, (
-            f"borrower {subject_id}: documented monthly income is absent, zero, incomplete, or has "
-            "conflicting figures across documents — cannot compare"
+            "documented monthly income is absent, zero, incomplete, or has conflicting figures "
+            "across documents — cannot compare"
         )
 
     # The elapsed portion of the year up to the pay date, as a FRACTION of a month. `timetuple().
@@ -316,7 +347,7 @@ def _income_ytd_annualized_shortfall(
     elapsed_months = Decimal(pay_date.timetuple().tm_yday) / _DAYS_PER_MONTH
     if elapsed_months < _MIN_ELAPSED_MONTHS:
         return _UNKNOWN, (
-            f"borrower {subject_id}: the latest pay date ({pay_date.isoformat()}) is only "
+            f"the latest pay date ({pay_date.isoformat()}) is only "
             f"{elapsed_months:.2f} month(s) into the year — too short a period to annualize a "
             "year-to-date figure from"
         )
@@ -325,7 +356,7 @@ def _income_ytd_annualized_shortfall(
     shortfall = (documented - ytd_monthly) / documented
     return (
         str(shortfall),
-        f"borrower {subject_id}: year-to-date gross {ytd} through {pay_date.isoformat()} "
+        f"year-to-date gross {ytd} through {pay_date.isoformat()} "
         f"({elapsed_months:.2f} months elapsed) = {ytd_monthly:.2f}/mo vs documented "
         f"{documented}/mo → shortfall {shortfall:.1%} (negative = ahead of pace, not a shortfall)",
     )

@@ -26,13 +26,22 @@ reference_values:
   guideline_text: >-
     Fannie Mae Selling Guide B3-3.1 — YTD earnings must support the income used to qualify. NO specific
     numeric tolerance is cited by the guide; the 10% default here is UNSURE and pending Priya.
-# LP-509-A3: loan -> PER BORROWER, matching IN-1. The loan-level form summed a CUMULATIVE year-to-date across
-# pay stubs and a PER-DOCUMENT documented monthly across documents, then divided by a whole-month count — three
-# errors that together reported a 62.6% income shortfall on a file with none. A loan-level aggregate also masks
-# one borrower's real shortfall behind another's surplus (the PIN #1 lesson LP-332 applied to IN-1).
-subject_enumeration: per_borrower
+# LP-509-A3 fixed the ARITHMETIC here (cumulative YTD summed across stubs; a per-document documented monthly
+# summed across documents; a whole-month divisor — three errors that together reported a 62.6% income shortfall
+# on a file with none). It ALSO moved the rule to per_borrower to match IN-1, and LP-511 REVERTED that half.
+#
+# ⚠️ WHY IT IS LOAN-SCOPED AND NOT per_borrower. On the first real file the change made IN-3 produce NOTHING:
+# the per_borrower enumerator resolves borrowers through documents' `belongs_to` attribution, and on LF-WCHG
+# that attribution yields no borrower subjects at all — so did IN-1, IN-12..IN-16, ID-5, CR-4 and CR-10, none
+# of which produced a single finding there (LP-513). Moving IN-3 into that class silently retired a live rule,
+# and left its previous loan-subject finding ORPHANED and displaying pre-fix numbers (LP-512).
+#
+# per_borrower remains the right end state — a loan-level aggregate can mask one borrower's shortfall behind
+# another's surplus (PIN #1) — but it is blocked on LP-513. The arithmetic fix stands either way; only the
+# enumeration reverted.
+subject_enumeration: loan
 subject_key_fields:
-  - borrower
+  - loan
 evidence_required: the YTD-annualized vs documented monthly income and the tolerance the comparison used
 guideline_reference: "Fannie Mae Selling Guide B3-3.1 (General Income Information) — YTD consistency."
 spec_version: 1
@@ -47,12 +56,18 @@ deterministic:
   outcomes:
     - verdict: fired
       when_compare: {op: ">", left: shortfall, right: tolerance}
+      # LP-511: {shortfall_percent}, not {shortfall}. The raw operand is a full-precision Decimal, so this
+      # line read "falls short of documented by 0.6256740894589456855043635497". On the live file it was
+      # worse than ugly: the read-only query path's identifier scrub matched the 9+ digit run and rewrote it
+      # to "0.[REDACTED-ID]", so the one number the sentence exists to convey was destroyed on the way to a
+      # reader. The `_percent` companion is supplied for every Decimal operand (deterministic._reason_fields).
       reasoning: >-
-        the YTD-annualized monthly income falls short of documented by {shortfall}, beyond the
-        {tolerance} tolerance — the documented income is not supported by the pay history
+        the YTD-annualized monthly income falls short of documented by {shortfall_percent}, beyond the
+        {tolerance_percent} tolerance — the documented income is not supported by the pay history
       how_to_fix: >-
         Reconcile the pay history with the documented income — verify the pay frequency and period, and
         reduce the qualifying income to what the YTD supports if needed.
     - verdict: satisfied
       default: true
-      reasoning: the YTD-annualized income supports the documented income within the {tolerance} tolerance
+      reasoning: >-
+        the YTD-annualized income supports the documented income within the {tolerance_percent} tolerance

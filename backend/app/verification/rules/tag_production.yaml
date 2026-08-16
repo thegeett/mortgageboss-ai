@@ -121,12 +121,14 @@ tags:
   income.history_documentation: {mode: derived, subject: borrower, data: income_history_documentation}
   # LP-422 — the rental analog: Schedule E presence -> a per-borrower rental fact, for IN-13's rental scope.
   income.has_rental_income: {mode: derived, subject: borrower, data: income_has_rental_income}
-  # LP-509-A3 — loan -> BORROWER. The loan-level version summed a cumulative YTD across pay stubs and summed a
-  # per-document documented_monthly across documents, then divided by a whole-month count; the three together
-  # invented a 62.6% income shortfall on a file that has none. Per-borrower is also what LP-332 did to the
-  # sibling recipe (income.documented_income_shortfall_pct, directly above) for the same reason — a loan-level
-  # aggregate cannot dedup, because a tag carries no borrower id.
-  income.ytd_annualized_shortfall_pct: {mode: derived, subject: borrower, data: income_ytd_annualized_shortfall}
+  # LP-509-A3 fixed the ARITHMETIC: the loan-level version summed a CUMULATIVE YTD across pay stubs and summed
+  # a PER-DOCUMENT documented_monthly across documents, then divided by a whole-month count; the three together
+  # invented a 62.6% income shortfall on a file that has none. It also moved the tag to `borrower`, and LP-511
+  # reverted THAT half: per_borrower resolves subjects through documents' belongs_to, which yields nothing on
+  # the first real file (LP-513), so the rule silently evaluated nothing at all. Stays `loan` until LP-513 lands
+  # — the de-duplication now happens over the document SET (derived._distinct_documented_monthly /
+  # _latest_ytd), which is scope-independent, so only the enumeration reverted.
+  income.ytd_annualized_shortfall_pct: {mode: derived, subject: loan, data: income_ytd_annualized_shortfall}
   income.max_employment_gap_days: {mode: derived, subject: loan, data: income_max_employment_gap}
   income.days_since_most_recent_pay: {mode: derived, subject: loan, data: income_days_since_recent_pay}
   # LP-366-A — the loan's total STATED income (sum of the borrowers' MISMO income lines). STAGED ahead of

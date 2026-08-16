@@ -89,6 +89,12 @@ ARGUMENTS
                QUERY_ENVIRONMENTS -- the role does not exist in production and
                the migration deliberately does not create it.
 
+    backfill-mismo
+               Fill properties.in_project / is_pud from each file's ORIGINAL MISMO,
+               re-parsed from the retained raw file (LP-510). REPORT ONLY unless
+               BACKFILL_APPLY=1. Only ever fills a NULL, never overwrites, so it is
+               idempotent and a re-run repairs a partial run.
+
     query      Run ONE read-only SELECT and print the result. Same one-off task
                mechanism. Connects as mbai_readonly, which has no privileges in
                schema public at all -- it sees only the readonly.* views, with
@@ -1820,6 +1826,73 @@ stage_query_setup() {
 }
 
 # ---------------------------------------------------------------------------
+# backfill-mismo -- fill properties.in_project / is_pud from each file's ORIGINAL
+# MISMO (LP-510).
+#
+# LP-509-B1 taught the parser to capture PropertyInProjectIndicator / PUDIndicator,
+# which decide property.type when an export states none -- and every export seen so
+# far states none. Import is ONE-SHOT, so a file imported before that change has both
+# columns NULL and re-running verification never re-parses the XML: CO-1/CO-3/CO-4/IH-7
+# keep abstaining on every existing file. This re-parses the retained raw file.
+#
+# REPORT-ONLY by default. It prints exactly what it would change and writes nothing
+# until BACKFILL_APPLY=1, so looking is never the same action as changing.
+stage_backfill_mismo() {
+  banner "backfill-mismo -- property project indicators in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef container subnets sgs netcfg request apply_flag
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  apply_flag="${BACKFILL_APPLY:-}"
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  local action_desc="REPORT ONLY -- nothing is written"
+  if [ -n "$apply_flag" ]; then action_desc="APPLY -- fills NULL columns and commits"; fi
+  info "  action      : $action_desc"
+  info "  fills       : properties.in_project / is_pud, only where NULL"
+  hr
+  if [ -n "$apply_flag" ]; then
+    confirm "Proceed?" || die "Aborted. Nothing was run."
+  fi
+
+  request="$SECRET_TMPDIR/backfill-mismo.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" BF_APPLY="$apply_flag" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.backfill_mismo_property_indicators"],
+          environment: [{name:"BACKFILL_APPLY", value: env.BF_APPLY}]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+
+  run_oneoff_task "backfill-mismo" "$request" "$cluster" "$container"
+  ok "backfill-mismo complete."
+}
+
+# ---------------------------------------------------------------------------
 # query -- read-only SELECT against the deployed database (C7)
 #
 # Same one-off-task mechanism as migrate / bootstrap-admin / add-user: the migrate
@@ -2973,6 +3046,7 @@ main() {
     add-user)  stage_add_user ;;
     query-setup) stage_query_setup ;;
     query)     stage_query ;;
+    backfill-mismo) stage_backfill_mismo ;;
     deploy)    stage_deploy ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac
