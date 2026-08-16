@@ -929,6 +929,73 @@ def _loan_effective_date(
     )
 
 
+# --------------------------------------------------------------------------- #
+# LP-516 — the guide's READILY-IDENTIFIABLE exemption, as a per-transaction fact.
+# --------------------------------------------------------------------------- #
+
+# Fannie Mae Selling Guide B3-4.2-02 (Depository Accounts), page dated 12/14/2022, TIER P:
+#
+#   "If the source of a large deposit is readily identifiable on the account statement(s), such as a
+#    direct deposit from an employer (payroll), the Social Security Administration, or IRS or state
+#    income tax refund, or a transfer of funds between verified accounts, and the source of the deposit
+#    is printed on the statement, the lender does not need to obtain further explanation or
+#    documentation."
+#
+# The guide names four sources. Only ONE of them maps cleanly onto this system's category vocabulary:
+#
+#   payroll                  -> `txn.apparent_category == "payroll"`. Exempted. The guide attaches NO
+#                               further condition to it beyond the source being printed on the
+#                               statement, which is what the category read establishes.
+#   SSA / IRS / state refund -> NO category exists for these. `refund` is in the vocabulary but is
+#                               ambiguous (a merchant refund is not a tax refund), so it is NOT used —
+#                               reading it as a tax refund would be an inference, not a read.
+#   transfer between         -> ⚠️ DELIBERATELY NOT EXEMPTED, and this is the load-bearing decision.
+#   VERIFIED accounts           The guide conditions this one on the counterparty account being
+#                               VERIFIED, and that is NOT establishable here (LP-516-A2):
+#                               `stmt.account_masked` is documented "display only, non-matchable" and a
+#                               transaction's `description` has every 9+-digit identifier redacted, so
+#                               neither side of the match survives. Exempting on
+#                               `apparent_category == "transfer_own"` alone would apply the guide's
+#                               conclusion while dropping its condition.
+#                               On the file this ticket came from, that distinction is real rather than
+#                               theoretical: the own-account transfers arrive from a credit union whose
+#                               statements appear NOWHERE in the file, so those accounts are not
+#                               verified in any sense. A transfer from an account nobody can see is
+#                               close to the definition of where borrowed money enters.
+#                               PRIYA QUESTION (docs/domain/priya-open-questions.md).
+_READILY_IDENTIFIABLE_CATEGORIES = frozenset({"payroll"})
+
+
+def _readily_identifiable_source(
+    snapshot: Snapshot, subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """txn.readily_identifiable_source — is this deposit's source readily identifiable on the statement,
+    in the sense B3-4.2-02 exempts? (LP-516)
+
+    FAIL-CLOSED: an ABSENT or "unknown" category abstains ("unknown"), never silently exempts. Only a
+    confidently-read category in the declared list is "yes"; everything else is an honest "no", which
+    leaves the deposit in scope for the borrowed-funds judgment.
+    """
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags on the file — the deposit's category cannot be read"
+    tag = snapshot.tags.by_subject.get(subject_id, {}).get("txn.apparent_category")
+    if tag is None or str(tag.value) == _UNKNOWN:
+        return _UNKNOWN, (
+            "the deposit's apparent category has not been determined, so whether its source is "
+            "readily identifiable on the statement cannot be decided"
+        )
+    category = str(tag.value)
+    if category in _READILY_IDENTIFIABLE_CATEGORIES:
+        return "yes", (
+            f"the deposit's source is readily identifiable on the statement ({category}) — Fannie "
+            "B3-4.2-02 requires no further explanation for such a source"
+        )
+    return "no", (
+        f"the deposit's category ({category}) is not one B3-4.2-02 treats as a readily identifiable "
+        "source requiring no further explanation"
+    )
+
+
 def _ins_policy_expired(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5265,6 +5332,7 @@ _RECIPES: dict[str, Recipe] = {
     # ins.effective_date), for IH-3 (effective <= closing). Mirrors loan_closing_date + the multi-binder abstain.
     "loan_effective_date": _loan_effective_date,
     "ins_policy_expired": _ins_policy_expired,  # LP-509-D1 — IH-9
+    "readily_identifiable_source": _readily_identifiable_source,  # LP-516 — AS-12
     # LP-447 — the homeowners binder's DWELLING loss-settlement basis, normalised to replacement_cost /
     # actual_cash_value / unknown, for IH-1 (insurance adequacy, ADR-340). Per-document; fails closed on an
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).

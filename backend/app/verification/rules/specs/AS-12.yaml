@@ -37,7 +37,28 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2 / B3-6 (source of funds / 
 judgment:
   subject: per_deposit
   load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.has_identified_source]
-  reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.counterparty]
+  # LP-516: +txn.amount +txn.date. The prompt below asks the model to find "a large round-dollar
+  # deposit" and "funds appearing just before closing" — it was given neither the amount nor the date,
+  # so it was being asked about signals it could not observe. `_build_context` builds the judgment
+  # context from THIS list alone, so adding them here is what puts them in front of the model.
+  # ⚠️ Two of the prompt's three signals, not all three: "proximity to closing" also needs the loan's
+  # closing date (contract.loan_closing_date), which is loan-level and absent on the file this ticket
+  # came from — the same gap that makes IH-3 abstain there.
+  reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.counterparty, txn.amount, txn.date]
+  # LP-516 — Fannie B3-4.2-02's READILY-IDENTIFIABLE exemption, with the guide's own escape hatch.
+  #
+  #   "If the source of a large deposit is readily identifiable on the account statement(s), such as a
+  #    direct deposit from an employer (payroll) ... the lender does not need to obtain further
+  #    explanation or documentation. However, if ... the lender still has questions as to whether the
+  #    funds may have been borrowed, the lender should obtain additional documentation."
+  #
+  # ASK-THEN-SUPPRESS, not scope-before-asking: the model is still consulted on every deposit, and only
+  # a NON-"yes" answer is suppressed. That preserves the second sentence — a readily-identifiable source
+  # the model still flags reaches a human. The clearing is done by the deterministic predicate, so this
+  # is NOT "auto-clearing a confident no": the model's answer can only ever ADD a review, never remove
+  # one. An absent or "unknown" predicate leaves the verdict at needs_review (fail-closed).
+  exempt_when: {tag: txn.readily_identifiable_source, op: eq, value: "yes"}
+  exempt_unless_judgment_in: ["yes"]
   # LP-509-A1: see AS-2. `per_deposit` is per TRANSACTION, so without this the borrowed-funds
   # judgment was run against every outgoing bill payment in the file. Not in `reasoned_over`: the
   # predicate has already filtered the subjects the AI sees, so it carries no signal for the

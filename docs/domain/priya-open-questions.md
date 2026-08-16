@@ -900,3 +900,21 @@ settlement date to the date the sales contract is executed.
   discrepancy discovery. Fannie's fraud material describes red flags and reporting obligations on the
   *institution*, not tests for a processor's checklist. Is there a lender-side policy we should encode
   instead?
+
+## LP-516 — AS-12 borrowed funds
+
+1. **Is a transfer from an UNVERIFIED account exempt?** Fannie B3-4.2-02 exempts "a transfer of funds
+   between **verified** accounts". Nothing in the snapshot can establish that the counterparty account
+   is verified (`stmt.account_masked` is "display only, non-matchable"; a transaction description has
+   every 9+-digit identifier redacted), so today `transfer_own` is NOT exempt and still reaches a human.
+   On LF-WCHG that is 6 findings: $1,000–$3,000 round-dollar transfers from a credit union whose
+   statements appear nowhere in the file. Is that the right call, or should an own-account transfer be
+   exempt regardless of whether the other account is documented?
+2. **A large round-dollar own-account transfer shortly before closing** — does proximity to closing
+   change the answer to (1)?
+3. **What is an acceptable number of ratifications per file?** Not an AS-12 question: nine live judgment
+   rules route EVERY verdict to `needs_review`, so the count scales with the rule set rather than with
+   what is actually wrong on the file. "As few as are real" is not something a rule can be written
+   against.
+4. **Confirm the 50% threshold for AS-12** if the purchase-side materiality test is built. AS-1 already
+   uses it and its own spec records it as not yet confirmed.

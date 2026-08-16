@@ -57,8 +57,11 @@ _MAX_CONCURRENT_SUBJECTS = 8
 
 @dataclass(frozen=True)
 class JudgmentEvaluation:
-    """A judgment rule's output: the rule_judgment tag (None when the AI could not be consulted) +
-    the ALWAYS-ratification-pending evaluation result."""
+    """A judgment rule's output: the rule_judgment tag (None when the AI could not be consulted) + the
+    evaluation result.
+
+    Ratification-pending in every case EXCEPT a declared guideline exemption (LP-516 `exempt_when`),
+    where a deterministic predicate — not the model's answer — clears the finding."""
 
     judgment_tag: Tag | None
     evaluation: RuleEvaluation
@@ -98,6 +101,7 @@ def _result(
     *,
     verdict_confidence: float | None = None,
     extra_load_bearing: tuple[LoadBearingTag, ...] = (),
+    ratification_pending: bool = True,
 ) -> RuleEvaluation:
     """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance).
 
@@ -115,7 +119,52 @@ def _result(
         gated_pending_signoff=True,
         reasoning=reasoning,
         how_to_fix=None,
-        ratification_pending=True,  # a judgment rule NEVER auto-ships
+        # A judgment rule NEVER auto-ships on the model's say-so. The ONE exception is a GUIDELINE
+        # exemption (LP-516 `exempt_when`), where the clearing is done by a deterministic predicate and
+        # the model can only ever ADD a review, never remove one.
+        ratification_pending=ratification_pending,
+    )
+
+
+def _guideline_exempts(jud: JudgmentEval, subject_tags: Mapping[str, Tag], value: str) -> bool:
+    """Does a declared guideline exemption clear this subject? (LP-516)
+
+    True only when the predicate is DEFINITELY satisfied and the model did not object. Three ways to
+    return False, all deliberate:
+
+    * no `exempt_when` declared — the rule has no exemption, the default for every judgment rule;
+    * the predicate tag is ABSENT or ``"unknown"`` — an undetermined fact must never clear a finding
+      (the §8 honesty contract: scope-false and data-missing are different things);
+    * the model's answer is in `exempt_unless_judgment_in` — the guide's own escape hatch, where a
+      readily-identifiable source still warrants review because the lender has questions anyway.
+    """
+    if jud.exempt_when is None:
+        return False
+    tag = subject_tags.get(jud.exempt_when.tag)
+    if tag is None or str(tag.value) == "unknown":
+        return False
+    observed = str(tag.value)
+    holds = (
+        observed == jud.exempt_when.value
+        if jud.exempt_when.op == "eq"
+        else observed != jud.exempt_when.value
+    )
+    return holds and value not in jud.exempt_unless_judgment_in
+
+
+def _exempt_message(jud: JudgmentEval, subject_tags: Mapping[str, Tag]) -> str:
+    """The finding text for an exempted subject — it must name WHY, not merely that it passed.
+
+    A processor reading "satisfied" on a borrowed-funds check is entitled to know the guideline did the
+    clearing rather than a model. The predicate tag's own reasoning carries the specifics (which
+    category, and the guide's clause), so it is quoted rather than restated.
+    """
+    tag = subject_tags.get(jud.exempt_when.tag) if jud.exempt_when else None
+    detail = (tag.reasoning or "").strip() if tag is not None else ""
+    return (
+        f"no further review is required for this deposit — {detail}"
+        if detail
+        else "no further review is required for this deposit under the applicable guideline"
     )
 
 
@@ -314,6 +363,32 @@ async def _evaluate_one_subject(
     # own output) so it never renders twice.
     verdict_provenance = LoadBearingTag(jud.output_tag, value, confidence, reasoning, (subject_id,))
     extra_load_bearing = () if jud.output_tag in jud.reasoned_over else (verdict_provenance,)
+    # LP-516 — THE GUIDELINE EXEMPTION (ask-then-suppress). The model has been asked and answered; if
+    # the guideline says this deposit needs no further review AND the model did not object, the finding
+    # is satisfied rather than sent to a human. The predicate does the clearing, not the model's
+    # confidence — and `exempt_unless_judgment_in` preserves the guide's own escape hatch ("if the
+    # lender still has questions as to whether the funds may have been borrowed ...").
+    #
+    # FAIL-CLOSED: only a DEFINITELY-TRUE predicate exempts. An absent or "unknown" predicate tag leaves
+    # the verdict exactly where it was — needs_review — so an undetermined category can never clear.
+    if _guideline_exempts(jud, subject_tags, value):
+        return JudgmentEvaluation(
+            judgment_tag=tag,
+            evaluation=_result(
+                spec,
+                subject_id,
+                Verdict.SATISFIED,
+                _exempt_message(jud, subject_tags),
+                jud.reasoned_over,
+                subject_tags,
+                verdict_confidence=confidence
+                if confidence is not None
+                else gate.verdict_confidence,
+                extra_load_bearing=extra_load_bearing,
+                ratification_pending=False,
+            ),
+        )
+
     evaluation = _result(
         spec,
         subject_id,

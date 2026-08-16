@@ -361,10 +361,39 @@ class JudgmentEval(BaseModel):
     # False (default) → confidently absent = not_applicable (ID-9's POA: irrelevant when none used).
     # True → confidently absent = couldnt_check (§8 Tab 1). Only meaningful with `applicability`.
     applicability_expected: bool = False
+    # LP-516 — THE GUIDE'S OWN EXEMPTION, WITH ITS OWN ESCAPE HATCH.
+    #
+    # `exempt_when` names a predicate under which the guideline says no further review is required, and
+    # `exempt_unless_judgment_in` names the judgment values that OVERRIDE the exemption. Both are needed
+    # together: Fannie B3-4.2-02 exempts a readily-identifiable source, then adds "however, if ... the
+    # lender still has questions as to whether the funds may have been borrowed, the lender should
+    # obtain additional documentation". The AI is therefore still ASKED (ask-then-suppress), and only a
+    # NEGATIVE answer is suppressed — a positive one still reaches a human.
+    #
+    # ⚠️ This is NOT "auto-clear a confident no". The clearing is done by the GUIDELINE predicate, which
+    # is deterministic; the model's answer can only ever ADD a review, never remove one. A rule that
+    # declares neither field behaves exactly as before — every verdict ratification-pending.
+    exempt_when: TagCondition | None = None
+    exempt_unless_judgment_in: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _applicability_expected_needs_document_applicability(self) -> JudgmentEval:
         _check_applicability_expected(self.applicability_expected, self.applicability)
+        return self
+
+    @model_validator(mode="after")
+    def _exempt_override_requires_a_predicate(self) -> JudgmentEval:
+        """An override list without a predicate exempts nothing and would read as if it did."""
+        if self.exempt_unless_judgment_in and self.exempt_when is None:
+            raise ValueError(
+                "exempt_unless_judgment_in requires an `exempt_when` predicate (it names the judgment "
+                "values that OVERRIDE an exemption; with no exemption there is nothing to override)"
+            )
+        unknown = set(self.exempt_unless_judgment_in) - set(self.value_domain)
+        if unknown:
+            raise ValueError(
+                f"exempt_unless_judgment_in references value(s) outside value_domain: {sorted(unknown)}"
+            )
         return self
 
 

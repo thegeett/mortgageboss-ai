@@ -481,16 +481,25 @@ def test_derived_declaration_accepts_a_non_loan_subject(tmp_path, monkeypatch) -
     d.load_declarations.cache_clear()
 
 
-def test_derived_declaration_on_a_per_row_subject_fails_loud(tmp_path, monkeypatch) -> None:
-    # LP-332 generalized derived production; loan / borrower / document (LP-447) recipes read the subject's
-    # OWN raw object and key under its subject_id — supported. But `transaction` has no recipe (no recipe
-    # reads a TransactionRecord), so a derived tag on it would mis-key garbage — reject it at load.
+def test_derived_declaration_on_an_unsupported_subject_fails_loud(tmp_path, monkeypatch) -> None:
+    """The derived-subject allowlist is enforced at LOAD, so a typo'd or unrecipe'd subject cannot
+    silently mis-key garbage.
+
+    LP-332 generalized derived production to a declared subject; LP-447 added `document`; LP-516 added
+    `transaction` (a per-transaction recipe reads the subject's own TAGS by subject_id, which the
+    producer already supported — it had been excluded only because nothing needed it). The guard itself
+    is unchanged, so this now exercises it with a subject that genuinely has no recipe.
+
+    ⚠️ The cache restoration is in `finally`. It used to trail the `pytest.raises` block, so when this
+    assertion failed the FAKE declarations stayed cached for every later test in the session — one
+    failure became 25, none of them in this file.
+    """
     import app.verification.tag_materialization.declarations as d
 
     bad = tmp_path / "tag_production.yaml"
     bad.write_text(
         "tags:\n"
-        "  x.foo: {mode: derived, subject: transaction, data: app_required_fields_present}\n"
+        "  x.foo: {mode: derived, subject: statement, data: app_required_fields_present}\n"
         "ai_groups: {}\n"
     )
     monkeypatch.setattr(d, "_PRODUCTION_YAML", bad)
@@ -500,12 +509,33 @@ def test_derived_declaration_on_a_per_row_subject_fails_loud(tmp_path, monkeypat
     from app.verification.tag_materialization.derived import KNOWN_RECIPES
     from app.verification.tag_materialization.subjects import KNOWN_CONTEXT_BUILDERS
 
-    with pytest.raises(DeclarationError, match="derived subject 'transaction' is not supported"):
-        d.validate_declarations(
-            known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
+    try:
+        # An entirely unknown subject is caught by the known-subject guard, which runs first.
+        with pytest.raises(DeclarationError, match="is not a known subject"):
+            d.validate_declarations(
+                known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
+            )
+        # And the DERIVED-specific allowlist still bites independently. It is co-extensive with the
+        # subject registry TODAY (every registered subject has a derived recipe path), so it can only be
+        # exercised by narrowing it — but it is what would catch a newly-registered subject type that
+        # nobody wired a derived recipe for, which is the case it exists for.
+        monkeypatch.setattr(d, "_DERIVED_SUBJECTS", frozenset({"loan"}))
+        bad.write_text(
+            "tags:\n"
+            "  x.foo: {mode: derived, subject: transaction, data: app_required_fields_present}\n"
+            "ai_groups: {}\n"
         )
-    d._production_doc.cache_clear()
-    d.load_declarations.cache_clear()
+        d._production_doc.cache_clear()
+        d.load_declarations.cache_clear()
+        with pytest.raises(
+            DeclarationError, match="derived subject 'transaction' is not supported"
+        ):
+            d.validate_declarations(
+                known_recipes=KNOWN_RECIPES, known_context_builders=KNOWN_CONTEXT_BUILDERS
+            )
+    finally:
+        d._production_doc.cache_clear()
+        d.load_declarations.cache_clear()
 
 
 # --------------------------------------------------------------------------- #
