@@ -37,6 +37,44 @@ accounts — and the model said so, confidently, and was overruled by the mechan
 Note this is AFTER the LP-509-A1 fix. Before it, the same rule ran on 57 subjects including ATM fees and
 utility bills. A1 fixed the *scope*; this is about what remains in scope.
 
+## 2b. AS-12 has NO amount threshold — and never sees the amount
+
+`txn.amount` appears in AS-12 only under `subject_key_fields` (it identifies WHICH transaction). It is
+absent from both `load_bearing_tags` and `reasoned_over`, and the spec states "No numeric threshold".
+AS-1, by contrast, gates on `txn.amount`.
+
+**This contradicts the rule's own criteria.** The prompt asks the model to find:
+
+> *"a large round-dollar deposit with no payroll/transfer trace ... or funds appearing just before
+> closing with no source"*
+
+It is asked to judge LARGENESS, ROUND-DOLLAR-NESS and PROXIMITY TO CLOSING, and is handed
+`apparent_category`, `has_identified_source` and `counterparty`. No amount. No date. It cannot observe
+any of the three signals it is being asked for.
+
+The amounts on LF-WCHG:
+
+| | Amounts |
+|---|---|
+| 4 x payroll | $3,298.74, $3,311.48, $3,312.27, $3,356.56 — consistent semi-monthly salary |
+| 6 x own-transfer | $1,000, $2,000 x4, $3,000 — **all round-dollar** |
+
+⚠️ **A threshold would remove NONE of this file's ten findings** (the smallest is $1,000). This is a real
+defect but it is not the lever for the noise in §2 — the category exemption is. Stated explicitly so the
+two are not conflated:
+
+1. **Give the model `txn.amount` and the transaction date** — a CORRECTNESS fix. The rule currently asks
+   a question it has disabled itself from answering, which likely degrades its judgement on a file that
+   does contain a suspicious deposit.
+2. **Add a materiality floor** — a NOISE fix for OTHER files. Needs a number from the domain expert, and
+   probably a relative one: Fannie B3-4.2 frames large deposits relative to the transaction rather than
+   as a fixed dollar figure, so a percentage of the loan amount or of monthly income may be the right
+   shape rather than an absolute.
+
+Note the irony: the six round-dollar transfers are exactly the shape the prompt calls a borrowed-funds
+signal. They are flagged — but not BECAUSE of that signal, since the model cannot see the amounts. They
+are flagged because ratification is unconditional.
+
 ## 3. Why the current design exists (the steelman)
 
 This is not an oversight — it is LP-376-B / ADR-378, deliberately:
