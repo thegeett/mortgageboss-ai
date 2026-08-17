@@ -141,7 +141,11 @@ class TagCondition(BaseModel):
     # absent on every transaction and the rule couldnt_checks all of them, which is worse than unscoped.
     tag: str | None = PydField(default=None, min_length=1)
     loan_tag: str | None = PydField(default=None, min_length=1)
-    op: str = PydField(pattern="^(eq|ne)$")  # eq | ne (string-value equality)
+    # eq | ne (string-value equality). ⚠️ Every evaluator spells this `x if op == "eq" else <ne>`, so a
+    # THIRD operator added here without also giving those sites a shared comparator would be silently
+    # evaluated as `ne` — wrong, and invisible. Widen the pattern and the four call sites together
+    # (consistency.py, deterministic.py, judgment.py, applicability.py).
+    op: str = PydField(pattern="^(eq|ne)$")
     value: str = PydField(min_length=1)
 
     @model_validator(mode="after")
@@ -379,6 +383,83 @@ class DeterministicEval(BaseModel):
         return self
 
 
+class Materiality(BaseModel):
+    """LP-518 — a SIZE floor scoping a judgment rule's subjects, sized per LOAN PURPOSE.
+
+    AS-12 asked its borrowed-funds question of every money-in deposit at any amount, so a $0.03 interest
+    posting produced the same review item as a $20,000 wire. This scopes the rule to deposits big enough
+    for the question to be meaningful, with the floor computed (never hard-coded) as
+    ``fraction x basis`` — e.g. 50% of monthly qualifying income.
+
+    ⚠️ WHY THIS SCOPES BEFORE ASKING, WHERE ``exempt_when`` DELIBERATELY DOES NOT. The two gates sit
+    adjacent on the same rule and resolve opposite ways, so the distinction is load-bearing:
+
+    * ``exempt_when`` is about the deposit's SOURCE. Fannie B3-4.2-02 exempts a readily-identifiable
+      source and then adds "however, if ... the lender still has questions as to whether the funds may
+      have been borrowed, the lender should obtain additional documentation" — so the model must still
+      be ASKED, and only a negative answer is suppressed (LP-516's ask-then-suppress).
+    * ``materiality`` is about the deposit's SIZE, and the guideline's own definition is a SCOPE test:
+      "a large deposit is defined as a single deposit that exceeds 50% of the total monthly qualifying
+      income for the loan." Below the floor it is not a large deposit at all, so there is no obligation
+      to have questions about it and nothing for an escape hatch to preserve. Scoping BEFORE the call is
+      therefore both correct and the entire cost saving.
+
+    §8 HONESTY — the floor must never absorb a data gap, and equally must never MANUFACTURE one. It has
+    exactly two outcomes; couldnt_check is deliberately not among them:
+
+    * observed <= floor, every input resolved (STRICT — the guide says "exceeds") -> not_applicable
+    * observed  > floor                                                           -> in scope
+    * any input unresolved (no purpose, no basis, unreadable amount)              -> in scope, with the
+      finding text saying the floor could not be sized
+
+    The last line is the load-bearing one. A floor is a TRIAGE FILTER this rule adds, not an input its
+    question depends on — "does this deposit suggest borrowed funds?" stays answerable from the
+    transaction tags when nobody can say what 50% of income is. Failing those subjects to couldnt_check
+    would stop asking the model and deliver LESS than before the gate existed.
+
+    The comparison is fixed at strict ``>`` rather than declared, matching the guideline's "exceeds" and
+    AS-1's own hard-fire branch. There is deliberately no ``op`` knob: a spec declaring ``<`` here would
+    invert the gate's meaning while still reading like a floor.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    observed: Operand  # the subject's size (AS-12: the deposit amount)
+    basis: Operand  # what the floor is a fraction OF (AS-12: monthly qualifying income)
+    # loan.purpose value -> a `reference_values.values` key holding the fraction ("50%"). Keys, not
+    # literals, so every threshold on a rule stays in the one place the spec declares thresholds.
+    fraction_by_loan_purpose: dict[str, str] = PydField(min_length=1)
+    purpose_tag: str = "loan.purpose"
+
+    @model_validator(mode="after")
+    def _fractions_are_reference_keys(self) -> Materiality:
+        if any(not key for key in self.fraction_by_loan_purpose.values()):
+            raise ValueError("every fraction_by_loan_purpose entry names a reference_values key")
+        return self
+
+    @model_validator(mode="after")
+    def _operands_are_decimal_tags(self) -> Materiality:
+        """`observed`/`basis` may only be decimal `tag`/`loan_tag` operands.
+
+        The judgment evaluator resolves these WITHOUT a snapshot, so a `calc` operand (which must gate
+        on the snapshot's calculations) or a `reference` one has nowhere to resolve from and would
+        silently read None -> couldnt_check on every subject. A `date` operand is a category error: a
+        floor multiplies a fraction by a magnitude.
+        """
+        for name, operand in (("observed", self.observed), ("basis", self.basis)):
+            if operand.tag is None and operand.loan_tag is None:
+                raise ValueError(
+                    f"materiality `{name}` must be a `tag` or `loan_tag` operand (the judgment "
+                    "evaluator resolves it from the subject/loan tag maps, with no snapshot)"
+                )
+            if operand.type != "decimal":
+                raise ValueError(
+                    f"materiality `{name}` must be a `decimal` operand, got {operand.type!r} "
+                    "(a floor is a fraction of a magnitude)"
+                )
+        return self
+
+
 class JudgmentEval(BaseModel):
     """The machine-readable body of an AI-at-rule-time judgment rule (LP-324 / LP-319 armor)."""
 
@@ -414,8 +495,18 @@ class JudgmentEval(BaseModel):
     # ⚠️ This is NOT "auto-clear a confident no". The clearing is done by the GUIDELINE predicate, which
     # is deterministic; the model's answer can only ever ADD a review, never remove one. A rule that
     # declares neither field behaves exactly as before — every verdict ratification-pending.
-    exempt_when: TagCondition | None = None
+    # LP-518 — a LIST is ANY-HOLDS (alternatives), deliberately the opposite of `applicability` above,
+    # where a list is ALL-HOLD (a conjunction). That asymmetry mirrors the two concepts: a rule's SCOPE
+    # narrows with each added predicate, while an exemption list WIDENS — the guideline itself reads as
+    # alternatives ("a direct deposit from an employer (payroll), the Social Security Administration, or
+    # IRS or state income tax refund, or a transfer of funds between verified accounts"). Fail-closed is
+    # unchanged: a condition whose tag is absent or "unknown" simply does not hold, so an undetermined
+    # category still cannot clear a finding.
+    exempt_when: TagCondition | tuple[TagCondition, ...] | None = None
     exempt_unless_judgment_in: tuple[str, ...] = ()
+    # LP-518 — a per-loan-purpose SIZE floor, applied AFTER `applicability` and BEFORE the gate/AI.
+    # See :class:`Materiality` for why this scopes before asking where `exempt_when` does not.
+    materiality: Materiality | None = None
 
     @model_validator(mode="after")
     def _applicability_expected_needs_document_applicability(self) -> JudgmentEval:
@@ -425,10 +516,16 @@ class JudgmentEval(BaseModel):
     @model_validator(mode="after")
     def _exempt_override_requires_a_predicate(self) -> JudgmentEval:
         """An override list without a predicate exempts nothing and would read as if it did."""
-        if self.exempt_unless_judgment_in and self.exempt_when is None:
+        if self.exempt_unless_judgment_in and not _as_conditions(self.exempt_when):
             raise ValueError(
                 "exempt_unless_judgment_in requires an `exempt_when` predicate (it names the judgment "
                 "values that OVERRIDE an exemption; with no exemption there is nothing to override)"
+            )
+        # An EMPTY list is not None, so it would read as "this rule has an exemption" everywhere while
+        # exempting nothing — the LP-516 failure mode (a gate that looks wired and does nothing).
+        if self.exempt_when is not None and not _as_conditions(self.exempt_when):
+            raise ValueError(
+                "`exempt_when` is an empty list — declare at least one condition, or omit the field"
             )
         unknown = set(self.exempt_unless_judgment_in) - set(self.value_domain)
         if unknown:
@@ -622,6 +719,30 @@ class RuleSpec(BaseModel):
         if set_count > 1:
             raise ValueError(
                 f"spec {self.rule_id}: set exactly one of deterministic / judgment / consistency"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _materiality_fractions_resolve(self) -> RuleSpec:
+        """LP-518 — every fraction key must name a real `reference_values.values` entry.
+
+        A typo'd key resolves to None at eval time, which fail-closes to couldnt_check on EVERY subject
+        — the rule would look like it was working while silently checking nothing. Catch it at LOAD.
+        """
+        materiality = self.judgment.materiality if self.judgment is not None else None
+        if materiality is None:
+            return self
+        missing = sorted(
+            {
+                key
+                for key in materiality.fraction_by_loan_purpose.values()
+                if key not in self.reference_values.values
+            }
+        )
+        if missing:
+            raise ValueError(
+                f"spec {self.rule_id}: materiality references reference_values key(s) {missing} "
+                f"that are not declared (declared: {sorted(self.reference_values.values)})"
             )
         return self
 

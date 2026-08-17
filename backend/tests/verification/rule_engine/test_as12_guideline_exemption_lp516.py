@@ -29,7 +29,7 @@ import pytest
 from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
 from app.verification.rule_engine.result import Verdict
-from app.verification.rules.specs import load_rule_spec
+from app.verification.rules.specs import _as_conditions, load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -74,7 +74,21 @@ class _Reasoner:
         return RuleJudgmentResult(RuleJudgment(self.value, 0.9, "because"), 1, 1, "stub", False)
 
 
-async def _evaluate(category: str, answer: str, *, amount: str = "2000.00"):
+async def _evaluate(
+    category: str,
+    answer: str,
+    *,
+    amount: str = "2000.00",
+    purpose: str | None = "purchase",
+    income: str | None = "2000.00",
+):
+    """One deposit through AS-12.
+
+    LP-518 gave the rule a materiality floor, so the loan tags it sizes the floor from are part of every
+    fixture now: at the defaults the floor is 50% x $2,000 = $1,000 and the $2,000 deposit clears it, so
+    these cases still reach the model and keep testing what LP-516 wrote them to test. `purpose=None` /
+    `income=None` drop a tag to exercise the gate's fail-closed branches.
+    """
     txn = TransactionRecord(
         content_id="t1",
         amount=_f(amount),
@@ -99,7 +113,17 @@ async def _evaluate(category: str, answer: str, *, amount: str = "2000.00"):
                     "txn.is_money_in": _tag("in"),
                     "txn.apparent_category": _tag(category),
                     "txn.has_identified_source": _tag("yes"),
-                }
+                },
+                # LP-518 — the LOAN subject, which the materiality floor reads (loan purpose picks the
+                # fraction, qualifying income is what the fraction is OF).
+                "loan": {
+                    **({"loan.purpose": _tag(purpose)} if purpose is not None else {}),
+                    **(
+                        {"dti.qualifying_income_monthly": _tag(income)}
+                        if income is not None
+                        else {}
+                    ),
+                },
             }
         ),
     )
@@ -181,7 +205,10 @@ def test_as12_declares_the_exemption_and_its_override() -> None:
     assert judgment.exempt_when is not None
     # LP-517: predicates on the category Stage A/B already produces — a derived `transaction`
     # tag would never materialize on a real run (see the spec comment).
-    assert judgment.exempt_when.tag == "txn.apparent_category"
+    # LP-518: now a LIST of alternatives (payroll | interest), so every condition is checked.
+    conditions = _as_conditions(judgment.exempt_when)
+    assert [c.tag for c in conditions] == ["txn.apparent_category"] * len(conditions)
+    assert {c.value for c in conditions} == {"payroll", "interest"}
     assert judgment.exempt_unless_judgment_in == ("yes",)
     assert {"txn.amount", "txn.date"} <= set(judgment.reasoned_over)
 

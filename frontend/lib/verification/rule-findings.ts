@@ -123,16 +123,24 @@ export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
 }
 
 /**
- * Group findings that share the SAME rule + reason (LP-376-C) — so N documents failing one check the same
- * way (e.g. 4 unclassified documents each yielding ID-7's "a document could not be classified…") render as
- * ONE summary row a processor can act on, not N identical lines. Each group keeps its members (the model is
- * untouched — this is a display collapse only), so a reader can expand to WHICH ones. Order is preserved.
+ * Group a tab's findings BY RULE — so N subjects of one check render as ONE summary row a processor can
+ * act on, not N lines. Each group keeps its members (the model is untouched — this is a display collapse
+ * only), so a reader can expand to WHICH ones. Order is preserved.
+ *
+ * LP-376-C keyed this on `rule_id + message`, which collapsed only findings whose text was IDENTICAL.
+ * That works for a deterministic rule (ID-7's 4 unclassified documents all read the same) and does
+ * nothing at all for a JUDGMENT rule: the model writes a distinct sentence per subject, so AS-12's ten
+ * deposits produced ten groups of one and never collapsed. LP-518 keys on the rule alone.
+ *
+ * Callers group WITHIN one outcome bucket (Tab 1 splits by outcome first, and the other tabs are a single
+ * outcome by construction), so a group never mixes an `open` with a `satisfied`. The header must not
+ * assume a shared message — see `CollapsedFindings`, which summarises when the members disagree.
  */
-export function groupBySameReason(findings: RuleFinding[]): RuleFinding[][] {
+export function groupByRule(findings: RuleFinding[]): RuleFinding[][] {
   const groups = new Map<string, RuleFinding[]>();
   const order: string[] = [];
   for (const finding of findings) {
-    const key = `${finding.rule_id} ${finding.message}`;
+    const key = finding.rule_id;
     const existing = groups.get(key);
     if (existing) {
       existing.push(finding);

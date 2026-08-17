@@ -22,11 +22,31 @@ required_inputs:
     snapshot_path: tags.by_subject[<txn content_id>]["txn.counterparty"]
     description: the other party, if visible (context)
 reference_values:
-  priya_validated: false
-  threshold_needs_signoff: false
+  priya_validated: false           # mirrors rule_kinds.csv; no rule in the repo is flipped yet
+  threshold_needs_signoff: false   # LP-518 — both fractions are DECIDED; the decision IS the sign-off
   guideline_text: >-
     Fannie Mae Selling Guide B3-4.2 / B3-6 — undisclosed borrowed funds must be identified and their
-    payment counted in the DTI. The judgment flags a pattern; a human confirms. No numeric threshold.
+    payment counted in the DTI. The judgment flags a pattern; a human confirms.
+  # LP-518 — the MATERIALITY floor as machine data, one fraction per loan purpose. Both are DECIDED (no
+  # pending sign-off), but they have DIFFERENT PROVENANCE and the spec must not blur that:
+  #
+  #  * PURCHASE 50% is the guideline's own figure. B3-4.2-02: "A large deposit is defined as a single
+  #    deposit that exceeds 50% of the total monthly qualifying income for the loan." Quotable.
+  #  * REFINANCE 10% is an OVERLAY with no guideline behind it, chosen deliberately. The same page
+  #    waives large-deposit DOCUMENTATION on a refinance — "Documentation or explanation for large
+  #    deposits is not required; however, the lender remains responsible for ensuring that any borrowed
+  #    funds, including any related liability, are considered" — so the 50% test is precisely the part
+  #    set aside here, and inheriting its height would import a test the guide withdrew. The surviving
+  #    borrowed-funds duty carries NO threshold, so any floor on a refinance is a triage choice; a
+  #    LOWER one is the point, since it is the only test still running on that loan purpose. The
+  #    finding text shows the arithmetic so a processor can judge the number themselves.
+  #
+  # Agencies size this test on DIFFERENT DENOMINATORS, not merely different numbers — Freddie on
+  # eligible assets, FHA on Adjusted Value. Only Fannie's income basis is implementable here because no
+  # fact on any file records the destination investor; do not assume 50% is universal.
+  values:
+    materiality_floor_pct_purchase: "50%"
+    materiality_floor_pct_refinance: "10%"
 subject_enumeration: per_deposit
 subject_key_fields:
   - account
@@ -66,8 +86,41 @@ judgment:
   # `txn.apparent_category` is produced by Stage A/B, so predicating on it directly works and needs no
   # new tag, no vocabulary entry and no widening of the AI scope (txn_stage_a is a required group, so
   # widening it would re-run the Stage-A model on every transaction at real cost).
-  exempt_when: {tag: txn.apparent_category, op: eq, value: payroll}
+  # LP-518 — ALTERNATIVES (any holds → exempt), matching how the guide lists them. `interest` joins
+  # `payroll`: a bank's own interest posting is printed on the statement and readily identifiable by the
+  # same clause, and it is not borrowed funds by construction. It survives the materiality floor below
+  # only on a low-income refinance (a 10% floor of a small income can sit under a month's interest on a
+  # large balance), which is exactly the case where clearing it by CITATION beats clearing it by size.
+  # NOT extended to the guide's other named sources (SSA, IRS/state tax refund): `txn.apparent_category`
+  # has no value for either, so declaring them would be a predicate that never matches.
+  exempt_when:
+    - {tag: txn.apparent_category, op: eq, value: payroll}
+    - {tag: txn.apparent_category, op: eq, value: interest}
   exempt_unless_judgment_in: ["yes"]
+  # LP-518 — the SIZE floor, sized per loan purpose. Runs AFTER `applicability` and BEFORE the gate and
+  # the AI call, so a deposit too small for the borrowed-funds question to mean anything costs nothing.
+  #
+  # ⚠️ THIS SCOPES BEFORE ASKING, WHERE `exempt_when` ABOVE DELIBERATELY DOES NOT. The two sit adjacent
+  # and resolve opposite ways, and the difference is the guideline's, not ours: the readily-identifiable
+  # exemption is about the deposit's SOURCE and the guide attaches an escape hatch to it ("if the lender
+  # still has questions ..."), so the model must be asked. The materiality floor is about the deposit's
+  # SIZE, and the guide's own words are a SCOPE test — "a large deposit is defined as a single deposit
+  # that EXCEEDS 50% of the total monthly qualifying income". Below the floor it is not a large deposit,
+  # so there is nothing for an escape hatch to preserve. Hence strict `>`, matching "exceeds", and
+  # matching AS-1's hard-fire branch on the same guideline.
+  #
+  # §8: below the floor is the ONLY not_applicable, and the gate NEVER produces a couldnt_check. When
+  # the floor cannot be sized — no loan purpose, or no qualifying income — the deposit is reviewed at
+  # any amount exactly as it was before this gate existed, and the finding says so. That path is common,
+  # not a corner case: `dti.qualifying_income_monthly` derives from MISMO STATED income lines and
+  # abstains to "unknown" whenever no import states one. Failing those files to couldnt_check would stop
+  # asking the model altogether and hand the processor less than they had before.
+  materiality:
+    observed: {tag: txn.amount}
+    basis: {loan_tag: dti.qualifying_income_monthly}
+    fraction_by_loan_purpose:
+      purchase: materiality_floor_pct_purchase
+      refinance: materiality_floor_pct_refinance
   # LP-509-A1: see AS-2. `per_deposit` is per TRANSACTION, so without this the borrowed-funds
   # judgment was run against every outgoing bill payment in the file. Not in `reasoned_over`: the
   # predicate has already filtered the subjects the AI sees, so it carries no signal for the

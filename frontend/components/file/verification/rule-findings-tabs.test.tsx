@@ -276,6 +276,67 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
     expect(screen.getByText("March_Statement.pdf")).toBeDefined();
     expect(screen.getByText("April_Statement.pdf")).toBeDefined();
   });
+
+  it("LP-518 — a JUDGMENT rule's differing messages still collapse into one group", () => {
+    // The bug this fixes: grouping keyed on `rule_id + message`, and a judgment rule's message is
+    // written by the MODEL, so it differs per subject. AS-12's ten deposits produced ten groups of one
+    // and never collapsed — the noise a processor actually saw on the first real file.
+    renderTabs(
+      ["$3,300 on 3/2", "$1,000 on 3/14", "$2,400 on 3/28"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "AS-12",
+          evaluation_outcome: "needs_review",
+          subject_key: `txn${i}`,
+          subject_label: label,
+          message: `the AI judged 'no' on deposit ${i} — an AI verdict a human must ratify`,
+        }),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /3 findings/i })).toBeDefined();
+  });
+
+  it("LP-518 — a mixed-message group summarises its SUBJECTS, never one member's message", () => {
+    // Showing `first.message` as the header would attribute one deposit's finding to all three. The
+    // header has to say something true of the whole group.
+    renderTabs(
+      ["$3,300 on 3/2", "$1,000 on 3/14"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "AS-12",
+          evaluation_outcome: "needs_review",
+          subject_key: `txn${i}`,
+          subject_label: label,
+          message: `a distinct model sentence about deposit ${i}`,
+        }),
+      ),
+    );
+
+    const header = screen.getByRole("button", { name: /2 findings/i });
+    expect(within(header).getByText(/\$3,300 on 3\/2, \$1,000 on 3\/14/)).toBeDefined();
+    expect(within(header).queryByText(/a distinct model sentence/)).toBeNull();
+  });
+
+  it("LP-518 — an identical-message group still shows that shared message, not a subject list", () => {
+    // The LP-376-C behaviour must survive: when every member genuinely says the same thing, that
+    // sentence is more useful than a list of filenames.
+    renderTabs(
+      ["March_Statement.pdf", "April_Statement.pdf"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "ID-7",
+          evaluation_outcome: "couldnt_check",
+          subject_key: `doc${i}`,
+          subject_label: label,
+          message: "a document in the file could not be classified",
+        }),
+      ),
+    );
+
+    const header = screen.getByRole("button", { name: /2 findings/i });
+    expect(within(header).getByText(/could not be classified/)).toBeDefined();
+  });
 });
 
 describe("LP-377-C — the stale-findings notice", () => {

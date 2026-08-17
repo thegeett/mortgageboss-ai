@@ -19,7 +19,7 @@ import {
   type TabId,
   attentionGroups,
   bucketRuleFindings,
-  groupBySameReason,
+  groupByRule,
   outcomeMeta,
 } from "@/lib/verification/rule-findings";
 import {
@@ -153,7 +153,7 @@ function OutcomeGroup({
 function GroupedFindingList({ findings }: { findings: RuleFinding[] }) {
   return (
     <div className="space-y-2">
-      {groupBySameReason(findings).map((group) => {
+      {groupByRule(findings).map((group) => {
         const first = group[0];
         if (first === undefined) return null; // never — groups are non-empty by construction
         return group.length === 1 ? (
@@ -175,6 +175,27 @@ const TONE_DOT: Record<OutcomeTone, string> = {
   success: "bg-success",
   muted: "bg-gray-300",
 };
+
+/**
+ * The one line a collapsed group shows before it is expanded.
+ *
+ * When every member says the same thing, that sentence IS the summary (LP-376-C's behaviour, unchanged —
+ * ID-7's 4 unclassified documents still read as their shared reason). When they differ — which is every
+ * JUDGMENT rule, since the model writes a distinct sentence per subject — showing the first member's
+ * message would attribute one deposit's finding to all of them. LP-518 names the subjects instead, which
+ * is true of the whole group and is what a processor triages on.
+ */
+function collapsedSummary(findings: RuleFinding[]): string {
+  const first = findings[0];
+  if (first === undefined) return "";
+  if (findings.every((f) => f.message === first.message)) return first.message;
+  const subjects = findings.map((f) => f.subject_label).filter(Boolean);
+  const shown = subjects.slice(0, 3).join(", ");
+  const rest = subjects.length - 3;
+  return rest > 0
+    ? `${findings.length} findings — ${shown}, and ${rest} more`
+    : `${findings.length} findings — ${shown}`;
+}
 
 function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
   const [open, setOpen] = useState(false);
@@ -200,7 +221,7 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
               {findings.length} findings
             </span>
           </div>
-          <p className="mt-0.5 text-sm text-gray-700">{first.message}</p>
+          <p className="mt-0.5 text-sm text-gray-700">{collapsedSummary(findings)}</p>
         </div>
         <ChevronDown
           className={cn(

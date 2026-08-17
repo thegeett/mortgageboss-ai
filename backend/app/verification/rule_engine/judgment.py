@@ -26,8 +26,10 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 
 from app.ai.client import AIClientError
+from app.ai.extraction.parsing import coerce_decimal
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
 from app.core.logging import get_logger
 from app.verification.rule_engine.applicability import (
@@ -35,11 +37,19 @@ from app.verification.rule_engine.applicability import (
     missing_document_subject_id,
     resolve_applicabilities,
 )
-from app.verification.rule_engine.deterministic import _loan_tags
+from app.verification.rule_engine.deterministic import _loan_tags, _reference_operand
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
+from app.verification.rule_engine.reasons import fact_label
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
-from app.verification.rules.specs import JudgmentEval, RuleSpec, _as_conditions
+from app.verification.rules.specs import (
+    JudgmentEval,
+    Materiality,
+    Operand,
+    RuleSpec,
+    TagCondition,
+    _as_conditions,
+)
 from app.verification.snapshot.model import Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
@@ -127,40 +137,47 @@ def _result(
     )
 
 
-def _guideline_exempts(jud: JudgmentEval, subject_tags: Mapping[str, Tag], value: str) -> bool:
-    """Does a declared guideline exemption clear this subject? (LP-516)
+def _guideline_exempts(
+    jud: JudgmentEval, subject_tags: Mapping[str, Tag], value: str
+) -> TagCondition | None:
+    """Which declared guideline exemption clears this subject, if any? (LP-516; list form LP-518)
 
-    True only when the predicate is DEFINITELY satisfied and the model did not object. Three ways to
-    return False, all deliberate:
+    Returns the MATCHING condition (so the finding text can name it) — never a bare bool, because a
+    processor reading "satisfied" on a borrowed-funds check must be told which exemption did the
+    clearing. Non-None only when a predicate is DEFINITELY satisfied and the model did not object.
+    Four ways to return None, all deliberate:
 
     * no `exempt_when` declared — the rule has no exemption, the default for every judgment rule;
     * the predicate tag is ABSENT or ``"unknown"`` — an undetermined fact must never clear a finding
       (the §8 honesty contract: scope-false and data-missing are different things);
+    * no listed condition holds — the exemptions are ALTERNATIVES (LP-518), so all must miss;
     * the model's answer is in `exempt_unless_judgment_in` — the guide's own escape hatch, where a
       readily-identifiable source still warrants review because the lender has questions anyway.
     """
     if jud.exempt_when is None:
-        return False
-    tag = subject_tags.get(jud.exempt_when.tag_id)
-    if tag is None or str(tag.value) == "unknown":
-        return False
-    observed = str(tag.value)
-    holds = (
-        observed == jud.exempt_when.value
-        if jud.exempt_when.op == "eq"
-        else observed != jud.exempt_when.value
-    )
-    return holds and value not in jud.exempt_unless_judgment_in
+        return None
+    if value in jud.exempt_unless_judgment_in:
+        return None  # the escape hatch fires before any predicate is consulted
+    for condition in _as_conditions(jud.exempt_when):
+        tag = subject_tags.get(condition.tag_id)
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        observed = str(tag.value)
+        if (observed == condition.value) if condition.op == "eq" else (observed != condition.value):
+            return condition
+    return None
 
 
-def _exempt_message(jud: JudgmentEval, subject_tags: Mapping[str, Tag]) -> str:
+def _exempt_message(exemption: TagCondition, subject_tags: Mapping[str, Tag]) -> str:
     """The finding text for an exempted subject — it must name WHY, not merely that it passed.
 
     A processor reading "satisfied" on a borrowed-funds check is entitled to know the guideline did the
     clearing rather than a model. The predicate tag's own reasoning carries the specifics (which
-    category, and the guide's clause), so it is quoted rather than restated.
+    category, and the guide's clause), so it is quoted rather than restated. Takes the condition that
+    ACTUALLY matched (LP-518), not the rule's first one — with alternatives declared, naming the first
+    would attribute the clearing to the wrong exemption.
     """
-    tag = subject_tags.get(jud.exempt_when.tag_id) if jud.exempt_when else None
+    tag = subject_tags.get(exemption.tag_id)
     detail = (tag.reasoning or "").strip() if tag is not None else ""
     return (
         f"no further review is required for this deposit — {detail}"
@@ -201,15 +218,124 @@ def _resolve(
     return judgment.value, judgment.confidence, judgment.reasoning
 
 
-def _verdict_message(value: str, confidence: float | None, floor: float) -> str:
+def _money(value: Decimal) -> str:
+    """A finding-facing dollar amount — thousands-separated, cents only when they are not zero."""
+    cents = value.quantize(Decimal("0.01"))
+    return f"${cents:,.0f}" if cents == cents.to_integral_value() else f"${cents:,.2f}"
+
+
+def _percent(fraction: Decimal) -> str:
+    """A finding-facing percentage. NOT ``Decimal.normalize()`` — that renders 50% as "5E+1"."""
+    return f"{fraction * 100:.2f}".rstrip("0").rstrip(".") + "%"
+
+
+def _decimal_operand(
+    operand: Operand, subject_tags: Mapping[str, Tag], loan_tags: Mapping[str, Tag]
+) -> Decimal | None:
+    """A materiality operand's value, or None (→ couldnt_check). Fail-closed: an absent tag and an
+    unparseable one both yield None, never a fabricated 0 — a 0 basis would put the floor at $0 and
+    scope NOTHING out, which is the opposite of silent but still wrong.
+
+    Narrower than :func:`deterministic._resolve_operand` on purpose: the Materiality validator admits
+    only ``tag`` / ``loan_tag`` decimals, so there is no snapshot to thread and no calc to gate on.
+    """
+    source = subject_tags if operand.tag is not None else loan_tags
+    tag = source.get(operand.tag or operand.loan_tag or "")
+    if tag is None or str(tag.value) == _UNKNOWN:
+        return None
+    return coerce_decimal(tag.value)
+
+
+@dataclass(frozen=True)
+class _Floor:
+    """A resolved materiality floor: EITHER a terminal verdict (only ever ``not_applicable``), OR the
+    note to carry into the finding text. Never both, never neither."""
+
+    terminal: tuple[Verdict, str] | None = None
+    derivation: str | None = None
+
+
+def _resolve_floor(
+    spec: RuleSpec,
+    materiality: Materiality,
+    subject_tags: Mapping[str, Tag],
+    loan_tags: Mapping[str, Tag],
+) -> _Floor:
+    """LP-518 — is this subject big enough for the rule's question to be meaningful?
+
+    TWO outcomes only, and couldnt_check is deliberately not one of them:
+
+    * every input resolved AND the amount fell at or below the floor -> not_applicable (out of scope);
+    * anything else -> the subject PROCEEDS, carrying a note saying whether the floor applied.
+
+    ⚠️ AN UNRESOLVABLE FLOOR MUST NOT MANUFACTURE A GAP. The floor is a triage filter this rule added,
+    not an input its question depends on: "does this deposit suggest borrowed funds?" is still fully
+    answerable from the transaction tags when nobody can say what 50% of income is. Failing the subject
+    to couldnt_check would stop asking the model and hand the processor LESS than they got before this
+    gate existed — the over-conservative pattern LP-515 already tracks elsewhere.
+
+    That is not a corner case. ``dti.qualifying_income_monthly`` derives from MISMO STATED income and
+    abstains to "unknown" whenever no MISMO import states an income line, so a large share of real files
+    reach here with no basis at all. On those, the rule behaves exactly as it did pre-LP-518 and the
+    finding says why the floor did not apply — never silently.
+    """
+    unavailable = (
+        "no materiality floor could be sized for this loan, so it was reviewed at any amount"
+    )
+    purpose_tag = loan_tags.get(materiality.purpose_tag)
+    if purpose_tag is None or str(purpose_tag.value) == _UNKNOWN:
+        return _Floor(
+            derivation=f"{unavailable} ({fact_label(materiality.purpose_tag)} is not established)"
+        )
+    purpose = str(purpose_tag.value)
+    reference_key = materiality.fraction_by_loan_purpose.get(purpose)
+    if reference_key is None:
+        # Unreachable while the map covers loan.purpose's domain (a test asserts totality) — kept so a
+        # widened vocabulary degrades to "reviewed at any amount" rather than silently scoping out.
+        return _Floor(derivation=f"{unavailable} (no floor is declared for a {purpose} loan)")
+    basis_label = fact_label(materiality.basis.tag or materiality.basis.loan_tag or "")
+    fraction = _reference_operand(spec, reference_key)
+    basis = _decimal_operand(materiality.basis, subject_tags, loan_tags)
+    if fraction is None or basis is None:
+        return _Floor(derivation=f"{unavailable} ({basis_label} is not established)")
+    observed = _decimal_operand(materiality.observed, subject_tags, loan_tags)
+    if observed is None:
+        observed_id = materiality.observed.tag or materiality.observed.loan_tag or ""
+        return _Floor(derivation=f"{unavailable} (the {fact_label(observed_id)} could not be read)")
+    # The DERIVATION, not just the number (LP-518): a processor who sees "$1,315 (10% of $13,154
+    # qualifying income)" can judge the threshold itself. A bare floor is unauditable.
+    floor = f"{_money(fraction * basis)} ({_percent(fraction)} of {_money(basis)} {basis_label})"
+    if observed > fraction * basis:  # STRICT — the guideline says "exceeds"
+        return _Floor(derivation=f"{_money(observed)} is above the {floor} materiality floor")
+    return _Floor(
+        terminal=(
+            Verdict.NOT_APPLICABLE,
+            f"{_money(observed)} is at or below the {floor} materiality floor — not a large deposit "
+            "for this loan",
+        )
+    )
+
+
+def _verdict_message(
+    value: str, confidence: float | None, floor: float, derivation: str | None = None
+) -> str:
     """The needs_review MESSAGE — states the VERDICT (LP-376-B), never the raw AI reasoning paragraph
     (which now lives in the provenance, as a load-bearing tag). Engine-internal reasoning ("Tag
-    id.citizenship confirms…") must not leak to a processor as a finding's identity."""
+    id.citizenship confirms…") must not leak to a processor as a finding's identity.
+
+    ``derivation`` (LP-518) appends WHY this subject was in scope — the amount, the floor it cleared,
+    and the arithmetic behind that floor. It is what makes a materiality threshold auditable by the
+    processor reading the finding rather than a number only the spec knows.
+    """
     if value == _UNKNOWN:
-        return "the tags do not support a confident judgment — a human must review"
-    if confidence is not None and confidence < floor:
-        return f"the AI judged '{value}' at low confidence ({confidence} < {floor}) — a human must ratify"
-    return f"the AI judged '{value}' — an AI verdict a human must ratify (it never auto-ships)"
+        verdict = "the tags do not support a confident judgment — a human must review"
+    elif confidence is not None and confidence < floor:
+        verdict = f"the AI judged '{value}' at low confidence ({confidence} < {floor}) — a human must ratify"
+    else:
+        verdict = (
+            f"the AI judged '{value}' — an AI verdict a human must ratify (it never auto-ships)"
+        )
+    return f"{verdict}; {derivation}" if derivation else verdict
 
 
 async def evaluate_judgment_rule(
@@ -296,6 +422,21 @@ async def _evaluate_one_subject(
                 None, _result(spec, subject_id, verdict, reason, jud.reasoned_over, subject_tags)
             )
 
+    # 0.5 Declared MATERIALITY floor (LP-518) — still BEFORE the gate and the AI call, so a deposit too
+    #     small for the question to mean anything costs nothing. Unlike `exempt_when` (which asks first,
+    #     preserving the guide's escape hatch for a readily-identifiable SOURCE), a SIZE floor scopes
+    #     before asking: below it the guideline's own definition says this is not a large deposit, so
+    #     there is no obligation for the model to have an opinion about. See :class:`Materiality`.
+    derivation: str | None = None
+    if jud.materiality is not None:
+        resolved = _resolve_floor(spec, jud.materiality, subject_tags, loan_tags)
+        if resolved.terminal is not None:
+            verdict, reason = resolved.terminal
+            return JudgmentEvaluation(
+                None, _result(spec, subject_id, verdict, reason, jud.reasoned_over, subject_tags)
+            )
+        derivation = resolved.derivation
+
     # 1. Fail-closed gate over the load-bearing structural facts — before any AI call.
     gate = evaluate_gate(
         {tag_id: subject_tags.get(tag_id) for tag_id in jud.load_bearing_tags},
@@ -378,14 +519,15 @@ async def _evaluate_one_subject(
     #
     # FAIL-CLOSED: only a DEFINITELY-TRUE predicate exempts. An absent or "unknown" predicate tag leaves
     # the verdict exactly where it was — needs_review — so an undetermined category can never clear.
-    if _guideline_exempts(jud, subject_tags, value):
+    exemption = _guideline_exempts(jud, subject_tags, value)
+    if exemption is not None:
         return JudgmentEvaluation(
             judgment_tag=tag,
             evaluation=_result(
                 spec,
                 subject_id,
                 Verdict.SATISFIED,
-                _exempt_message(jud, subject_tags),
+                _exempt_message(exemption, subject_tags),
                 jud.reasoned_over,
                 subject_tags,
                 verdict_confidence=confidence
@@ -400,7 +542,7 @@ async def _evaluate_one_subject(
         spec,
         subject_id,
         Verdict.NEEDS_REVIEW,
-        _verdict_message(value, confidence, floor),
+        _verdict_message(value, confidence, floor, derivation),
         jud.reasoned_over,
         subject_tags,
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,
