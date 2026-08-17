@@ -50,6 +50,7 @@ AS-9,Missing pages,Assets,structural,deterministic_only,false,true,false,false,d
 AS-10,Statement recency completeness,Assets,structural,deterministic_only,false,true,false,false,N consecutive months present vs required — count.
 AS-11,Retirement/stock liquidation terms,Assets,calculative,deterministic_bookend+ai,true,,false,true,Vested/usable portion — arithmetic; terms judgment.
 AS-12,Borrowed funds detection,Assets,judgmental,ai_judgment,false,,false,false,Interpret deposit patterns suggesting a loan — judgment. LP-518 gave it a decided materiality floor (50% purchase / 10% refinance of qualifying income); no threshold is pending sign-off.
+AS-13,Repeated same-amount deposits,Assets,calculative,deterministic_bookend+ai,true,,false,false,LP-519 — the split-deposit signal: money-in deposits sharing one exact amount, summed and compared to the large-deposit threshold. Arithmetic over a derived aggregate; the AI leg is txn.apparent_category (which excludes payroll/interest from the scan).
 DT-1,DTI ratio vs limit,DTI,calculative,deterministic_bookend+ai,true,,false,true,back-end DTI vs program limit — the core arithmetic; AI selects inputs.
 DT-2,HOA dues in DTI,DTI,structural,deterministic_only,false,true,false,false,HOA detected → dues in payment? presence in the computation.
 DT-3,Mortgage insurance in DTI,DTI,structural,deterministic_only,false,true,false,false,MI required → in payment? presence (the requirement is calc-driven).

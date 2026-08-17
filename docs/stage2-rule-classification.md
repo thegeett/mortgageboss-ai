@@ -2,11 +2,11 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**136 rules** — calculative 28, structural 66, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/136. Thresholds needing sign-off: 18.
+**137 rules** — calculative 29, structural 66, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 29. Priya-validated: 0/137. Thresholds needing sign-off: 18.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
-## calculative (28)
+## calculative (29)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -24,6 +24,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | AS-3 | Cash-to-close sufficiency | Assets | calculative | deterministic_bookend+ai | true | — | false | false |
 | AS-4 | Reserves adequacy | Assets | calculative | deterministic_bookend | true | — | false | false |
 | AS-11 | Retirement/stock liquidation terms | Assets | calculative | deterministic_bookend+ai | true | — | false | true |
+| AS-13 | Repeated same-amount deposits | Assets | calculative | deterministic_bookend+ai | true | — | false | false |
 | DT-1 | DTI ratio vs limit | DTI | calculative | deterministic_bookend+ai | true | — | false | true |
 | DT-4 | Property taxes estimate | DTI | calculative | deterministic_bookend+ai | true | — | false | false |
 | DT-5 | Insurance premium in DTI | DTI | calculative | deterministic_bookend | true | — | false | false |

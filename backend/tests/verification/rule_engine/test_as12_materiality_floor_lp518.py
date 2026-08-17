@@ -149,7 +149,10 @@ async def test_a_deposit_above_the_purchase_floor_reaches_the_model_and_shows_th
 
     assert evaluation.verdict is Verdict.NEEDS_REVIEW
     assert reasoner.calls == 1
-    assert "$8,000 is above the $5,000 (50% of $10,000 qualifying income)" in evaluation.reasoning
+    assert (
+        "$8,000.00 is above the $5,000.00 (50% of $10,000.00 qualifying income)"
+        in evaluation.reasoning
+    )
 
 
 async def test_the_same_deposit_is_out_on_a_purchase_and_in_on_a_refinance() -> None:
@@ -166,7 +169,7 @@ async def test_the_same_deposit_is_out_on_a_purchase_and_in_on_a_refinance() -> 
     assert on_purchase.verdict is Verdict.NOT_APPLICABLE
     assert on_refinance.verdict is Verdict.NEEDS_REVIEW
     assert reasoner.calls == 1
-    assert "10% of $10,000 qualifying income" in on_refinance.reasoning
+    assert "10% of $10,000.00 qualifying income" in on_refinance.reasoning
 
 
 async def test_the_floor_is_strict_so_a_deposit_exactly_at_it_is_out_of_scope() -> None:

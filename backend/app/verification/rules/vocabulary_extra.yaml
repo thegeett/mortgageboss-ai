@@ -320,6 +320,18 @@ tags:
       Required reserves in months of PITIA, selected from occupancy (AS-4 threshold). Derived; abstains
       ("unknown") for any occupancy/property cell not in the agency-standard map (the full matrix is Priya's).
     produced_by: derived
+  # LP-519 — the split-deposit signal. Groups non-exempt money-in deposits by EXACT amount and reports
+  # the largest group's total; 0 means every in-scope deposit was readable and none repeated. Abstains
+  # rather than undercount (see the recipe).
+  stmt.repeated_money_in_max_total:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The largest total among money-in deposits sharing one exact amount, excluding the readily-identifiable
+      categories (payroll, interest). A numeric string; "unknown" when any in-scope deposit's direction,
+      category or amount is unreadable, or when deposit detection has not run. Loan-level aggregate.
+    produced_by: derived
   stmt.nsf_count:
     entity: loan
     value_type: number

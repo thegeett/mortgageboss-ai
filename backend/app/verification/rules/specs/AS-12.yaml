@@ -128,6 +128,13 @@ judgment:
   applicability: {tag: txn.is_money_in, op: eq, value: in}
   output_tag: as.borrowed_funds
   value_domain: ["yes", "no", "unknown"]
+  # LP-520 — what each answer MEANS. The finding used to read "the AI judged 'yes'", which never states
+  # the question, and here "yes" is the BAD answer — the reverse of what a reader would assume from a
+  # bare value. Must cover every value_domain entry (a partial map is rejected at load).
+  verdict_labels:
+    "yes": this deposit may come from an undisclosed borrowed source
+    "no": this deposit does not appear to come from a borrowed source
+    "unknown": the tags do not support a confident judgment about this deposit's source
   confidence_floor: 0.5
   system_prompt: |
     You are a senior mortgage underwriter making ONE reasoned judgment about a single bank-statement

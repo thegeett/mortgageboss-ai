@@ -707,6 +707,90 @@ def _reserves_required_months(
     return (_UNKNOWN if months is None else str(months)), reason
 
 
+# LP-519 — the deposit categories Fannie B3-4.2-02 treats as readily identifiable, mirroring AS-12's
+# `exempt_when`. They are excluded from the repeat scan for the arithmetic reason LP-518 recorded: a
+# borrower paid the same salary twice a month IS a repeated same-amount deposit, so counting payroll
+# would fire this on essentially every W-2 file and say nothing.
+_REPEAT_SCAN_EXEMPT = frozenset({"payroll", "interest"})
+
+
+def _stmt_repeated_money_in_max_total(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """stmt.repeated_money_in_max_total — the largest TOTAL among money-in deposits sharing one exact
+    amount (AS-13). Groups of one are not repeats and never count.
+
+    WHY THIS SHAPE. A deposit split to stay under a materiality floor shows up as the same amount, more
+    than once — which needs no floor and no counterparty. The obvious alternative ("sum what AS-12's
+    floor scoped out") is NOT buildable: a recipe receives only the snapshot, materialises before any
+    rule runs, and has no access to a spec's reference_values, so it cannot know what floor AS-12
+    applied. Recomputing the floor here would put a threshold in Python and leave two copies to drift.
+
+    ABSTENTION follows :func:`_stmt_nsf_count` exactly, and for the same reason — a wrong 0 here reads
+    as "we looked and there is no pattern":
+
+    * tags absent, or ``txn.is_money_in`` on NO subject -> unknown (detection never ran != none found);
+    * any money-in transaction whose direction, category or amount is unreadable -> unknown, because
+      the largest repeat total would then be a LOWER BOUND and asserting it could under-report.
+
+    A concrete ``0`` means only what it says: every in-scope deposit was readable and no amount repeated.
+    """
+    if snapshot.tags.absent:
+        return _UNKNOWN, "no tags materialized — cannot look for repeated deposits"
+    by_amount: dict[Decimal, int] = {}
+    any_seen = False
+    for tags in snapshot.tags.by_subject.values():
+        direction = tags.get("txn.is_money_in")
+        if direction is None:
+            continue  # not a transaction subject
+        any_seen = True
+        if str(direction.value) == _UNKNOWN:
+            return (
+                _UNKNOWN,
+                "a transaction's direction is unreadable (unknown) — a repeat total computed without "
+                "it could be an undercount, so it cannot be asserted",
+            )
+        if str(direction.value) != "in":
+            continue
+        category = tags.get("txn.apparent_category")
+        if category is None or str(category.value) == _UNKNOWN:
+            return (
+                _UNKNOWN,
+                "a money-in deposit's category is undetermined — it cannot be told apart from an "
+                "exempt payroll/interest credit, so the repeat total cannot be asserted",
+            )
+        if str(category.value) in _REPEAT_SCAN_EXEMPT:
+            continue
+        # `_decimal_or_none` is the module's existing Tag→Decimal helper (defined below): absent,
+        # "unknown" and unparseable all collapse to None, which is exactly the abstain condition here.
+        amount = _decimal_or_none(tags.get("txn.amount"))
+        if amount is None:
+            return (
+                _UNKNOWN,
+                "a money-in deposit's amount is missing or unreadable — the repeat total would be an "
+                "undercount, so it cannot be asserted",
+            )
+        by_amount[amount] = by_amount.get(amount, 0) + 1
+    if not any_seen:
+        return (
+            _UNKNOWN,
+            "no txn.is_money_in tag on any transaction — deposit detection has not run, so the absence "
+            "of a repeated amount cannot be asserted",
+        )
+    repeats = {amount: count for amount, count in by_amount.items() if count >= 2}
+    if not repeats:
+        return (
+            "0",
+            "no non-exempt money-in amount appears more than once across the file's statements",
+        )
+    amount = max(repeats, key=lambda a: a * repeats[a])
+    count = repeats[amount]
+    return (
+        str(amount * count),
+        f"{count} money-in deposits of {amount} each across the file's statements",
+    )
+
+
 def _stmt_nsf_count(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5325,6 +5409,7 @@ _RECIPES: dict[str, Recipe] = {
     "housing_insurance_monthly": _housing_insurance_monthly,
     # LP-323-AS-B — the assets family (registry entries only).
     "reserves_required_months": _reserves_required_months,
+    "stmt_repeated_money_in_max_total": _stmt_repeated_money_in_max_total,  # LP-519
     "stmt_nsf_count": _stmt_nsf_count,
     "stmt_min_account_months": _stmt_min_account_months,
     "cash_to_close_shortfall": _cash_to_close_shortfall,

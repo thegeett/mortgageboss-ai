@@ -557,6 +557,13 @@ class JudgmentEval(BaseModel):
     # LP-518 — a per-loan-purpose SIZE floor, applied AFTER `applicability` and BEFORE the gate/AI.
     # See :class:`Materiality` for why this scopes before asking where `exempt_when` does not.
     materiality: Materiality | None = None
+    # LP-520 — what each answer in `value_domain` MEANS, in words, for the finding text.
+    #
+    # A judgment finding read "the AI judged 'yes'", which never states the QUESTION — and on AS-12 the
+    # polarity is the counterintuitive one ("yes" = this may be borrowed funds, the BAD answer), while
+    # another rule could invert it. The evaluator is generic and has nothing rule-specific to say, so
+    # the spec says it. ADDITIVE: a rule declaring none keeps the raw-value text exactly as before.
+    verdict_labels: dict[str, str] = PydField(default_factory=dict)
 
     @model_validator(mode="after")
     def _applicability_expected_needs_document_applicability(self) -> JudgmentEval:
@@ -578,10 +585,29 @@ class JudgmentEval(BaseModel):
                 "`exempt_when` is an empty list — declare at least one condition, or omit the field"
             )
         reject_loan_tag(_as_conditions(self.exempt_when), "exempt_when")
-        unknown = set(self.exempt_unless_judgment_in) - set(self.value_domain)
-        if unknown:
+        if outside := sorted(set(self.exempt_unless_judgment_in) - set(self.value_domain)):
             raise ValueError(
-                f"exempt_unless_judgment_in references value(s) outside value_domain: {sorted(unknown)}"
+                f"exempt_unless_judgment_in references value(s) outside value_domain: {outside}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _verdict_labels_are_total_over_the_domain(self) -> JudgmentEval:
+        """A declared label map must cover EVERY value in `value_domain`.
+
+        A partial map falls back to the raw value for whatever it omits — which is the exact defect
+        this field exists to remove, reappearing on the rarest verdict, where nobody would notice. An
+        EMPTY map is fine and means "not adopted yet" (the additive default); a partial one is a bug.
+        """
+        if not self.verdict_labels:
+            return self
+        declared, domain = set(self.verdict_labels), set(self.value_domain)
+        if unknown := sorted(declared - domain):
+            raise ValueError(f"verdict_labels has value(s) outside value_domain: {unknown}")
+        if missing := sorted(domain - declared):
+            raise ValueError(
+                f"verdict_labels is missing value(s) {missing} — a partial map silently falls back to "
+                "the raw verdict for those, which is the defect it exists to remove"
             )
         return self
 

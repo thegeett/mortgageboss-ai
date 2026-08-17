@@ -234,9 +234,14 @@ def _resolve(
 
 
 def _money(value: Decimal) -> str:
-    """A finding-facing dollar amount — thousands-separated, cents only when they are not zero."""
-    cents = value.quantize(Decimal("0.01"))
-    return f"${cents:,.0f}" if cents == cents.to_integral_value() else f"${cents:,.2f}"
+    """A finding-facing dollar amount — thousands-separated, ALWAYS to the cent (LP-520).
+
+    Dropping ".00" on a whole amount lost no precision, but it left a reader unable to tell an exact
+    $2,000.00 from a rounded $1,999.87, and on a fraud-adjacent finding that doubt is not worth the
+    tidier line. Only the RENDERING is quantized: `_resolve_floor` compares `observed > fraction * basis`
+    at full Decimal precision, and must keep doing so — never compare the rounded value.
+    """
+    return f"${value.quantize(Decimal('0.01')):,.2f}"
 
 
 def _percent(fraction: Decimal) -> str:
@@ -336,7 +341,11 @@ def _resolve_floor(
 
 
 def _verdict_message(
-    value: str, confidence: float | None, floor: float, derivation: str | None = None
+    value: str,
+    confidence: float | None,
+    floor: float,
+    derivation: str | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> str:
     """The needs_review MESSAGE — states the VERDICT (LP-376-B), never the raw AI reasoning paragraph
     (which now lives in the provenance, as a load-bearing tag). Engine-internal reasoning ("Tag
@@ -345,14 +354,23 @@ def _verdict_message(
     ``derivation`` (LP-518) appends WHY this subject was in scope — the amount, the floor it cleared,
     and the arithmetic behind that floor. It is what makes a materiality threshold auditable by the
     processor reading the finding rather than a number only the spec knows.
+
+    ``labels`` (LP-520) is the spec's `verdict_labels` — what each answer MEANS, in words. Without it
+    the text states a bare domain value ("the AI judged 'yes'") and never the QUESTION, which on a rule
+    whose "yes" is the BAD answer is worse than uninformative. Absent or empty → exactly the previous
+    raw-value wording, so a rule that has not adopted labels is untouched.
     """
+    label = (labels or {}).get(value)
     if value == _UNKNOWN:
-        verdict = "the tags do not support a confident judgment — a human must review"
-    elif confidence is not None and confidence < floor:
-        verdict = f"the AI judged '{value}' at low confidence ({confidence} < {floor}) — a human must ratify"
+        # An `unknown` label reads as a whole statement, not as something the AI "judged".
+        stated = label or "the tags do not support a confident judgment"
+        verdict = f"{stated} — a human must review"
     else:
+        judged = f"that {label}" if label else f"'{value}'"
         verdict = (
-            f"the AI judged '{value}' — an AI verdict a human must ratify (it never auto-ships)"
+            f"the AI judged {judged} at low confidence ({confidence} < {floor}) — a human must ratify"
+            if confidence is not None and confidence < floor
+            else f"the AI judged {judged} — an AI verdict a human must ratify (it never auto-ships)"
         )
     return f"{verdict}; {derivation}" if derivation else verdict
 
@@ -561,7 +579,7 @@ async def _evaluate_one_subject(
         spec,
         subject_id,
         Verdict.NEEDS_REVIEW,
-        _verdict_message(value, confidence, floor, derivation),
+        _verdict_message(value, confidence, floor, derivation, jud.verdict_labels),
         jud.reasoned_over,
         subject_tags,
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,

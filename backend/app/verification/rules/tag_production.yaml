@@ -163,6 +163,10 @@ tags:
   asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}
   asset.usable_value: {mode: ai, subject: document, data: asset_facts}
   reserves.required_months: {mode: derived, subject: loan, data: reserves_required_months}
+  # LP-519 — the largest total among money-in deposits sharing one exact amount (AS-13's input). A
+  # LOAN-subject derived tag, so the generic materialization pass produces it; a `transaction`-subject
+  # derived tag would fall between the generic pass and Stage A/B and never materialize (LP-516/517).
+  stmt.repeated_money_in_max_total: {mode: derived, subject: loan, data: stmt_repeated_money_in_max_total}
   stmt.nsf_count: {mode: derived, subject: loan, data: stmt_nsf_count}
   stmt.min_account_months: {mode: derived, subject: loan, data: stmt_min_account_months}
   calc.cash_to_close: {mode: derived, subject: loan, data: cash_to_close_shortfall}

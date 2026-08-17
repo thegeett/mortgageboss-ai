@@ -1,0 +1,80 @@
+rule_id: AS-13
+name: Repeated same-amount deposits
+category: Assets
+kind: calculative
+numeric_check: true
+criteria: >-
+  Several money-in deposits of the SAME exact amount, taken together, can be as significant as one large
+  deposit — and a deposit split to stay under a per-deposit threshold is invisible to a per-deposit test
+  by construction. This sums the largest same-amount group and compares it to the large-deposit
+  threshold. It SURFACES a pattern for a human; it does not assert that anything is wrong.
+applicability:
+  scope: the loan file's bank-statement deposits, taken together
+  trigger: once per loan, on the largest total of money-in deposits sharing one exact amount
+required_inputs:
+  - name: repeated_total
+    snapshot_path: 'tags.by_subject["loan"]["stmt.repeated_money_in_max_total"]'
+    description: >-
+      The largest total among money-in deposits sharing one exact amount, excluding the
+      readily-identifiable categories (payroll, interest). Derived; "unknown" when any in-scope deposit
+      is unreadable, so the rule abstains rather than under-report. Its reasoning names how many
+      deposits and at what amount — the detail this rule's own message cannot interpolate.
+  - name: monthly_qualifying_income
+    snapshot_path: 'tags.by_subject["loan"]["dti.qualifying_income_monthly"]'
+    description: >-
+      Total monthly qualifying income — what the threshold is a fraction of. Same basis AS-1 and AS-12
+      size their thresholds on, so the three cannot disagree about what "large" means on a file.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false   # LP-519 — the fraction is decided; the decision IS the sign-off
+  # ⚠️ ONE FRACTION, unlike AS-12, and not by preference. A deterministic outcome guard (`when_tags`)
+  # does not resolve a `loan_tag` — LP-518 added a load-time validator rejecting exactly that, because
+  # such a predicate is absent on every subject (an `eq` guard never holds, an `ne` guard always does).
+  # So this rule cannot vary its threshold by loan purpose the way AS-12 does. Threading the loan map
+  # into `deterministic._tags_hold` would lift the restriction and is the natural follow-up.
+  #
+  # 50% is the right single number: the claim here is "these deposits TOGETHER are as significant as one
+  # large deposit", so the guideline's own figure for a large deposit is the honest anchor, and unlike
+  # AS-12's refinance branch it needs no invented second value.
+  values:
+    repeated_deposit_floor_pct: "50%"
+  guideline_text: >-
+    Fannie Mae Selling Guide B3-4.2-02 — "The lender must investigate any indications of borrowed
+    funds", and on a refinance "the lender remains responsible for ensuring that any borrowed funds,
+    including any related liability, are considered". ⚠️ This rule cites THAT duty, not the
+    large-deposit definition on the same page: that test is explicitly per-transaction ("a single
+    deposit that exceeds 50% of the total monthly qualifying income"), and no agency text found
+    requires or describes aggregating across deposits. The 50% figure is borrowed as a sensible
+    magnitude for "significant", not as the application of the large-deposit rule.
+subject_enumeration: loan
+subject_key_fields:
+  - loan
+evidence_required: >-
+  the repeated-deposit total, the threshold it was compared against, and (in the provenance) how many
+  deposits at what amount produced that total
+guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (borrowed-funds duty; aggregation is an overlay)."
+spec_version: 1
+deterministic:
+  load_bearing_tags:
+    - stmt.repeated_money_in_max_total
+    - dti.qualifying_income_monthly
+  gated_tags:
+    - stmt.repeated_money_in_max_total
+  operands:
+    repeated: {tag: stmt.repeated_money_in_max_total}
+    threshold:
+      product:
+        - {reference: repeated_deposit_floor_pct}
+        - {tag: dti.qualifying_income_monthly}
+  outcomes:
+    # NEEDS_REVIEW, never `fired`. Same-amount grouping is a HEURISTIC — it catches $4,000 x 5 and
+    # misses $3,900 / $4,100 / $4,000 — and repeated equal deposits have ordinary explanations (a
+    # standing transfer, a second job paid by a non-payroll method). Asserting a violation on that would
+    # name a person on the strength of a pattern; surfacing it for a human is what the evidence supports.
+    - verdict: needs_review
+      when_compare: {op: ">", left: repeated, right: threshold}
+      reasoning: "money-in deposits repeating one exact amount total {repeated}, above the {threshold} large-deposit threshold — the provenance names how many and at what amount"
+      how_to_fix: "Confirm the source of the repeated deposits. If they come from one party, source them as a single amount (a gift letter, or a transfer from a verified account); if they are unrelated, note that on the file."
+    - verdict: satisfied
+      default: true
+      reasoning: "no repeated same-amount deposit total ({repeated}) reaches the {threshold} large-deposit threshold"
