@@ -93,6 +93,36 @@ Everything else is available, with free text and JSON scrubbed: findings and the
 amounts and dates intact), snapshots, observations, verifications, needs, stated
 financials, and the rule-engine reference tables.
 
+## Running a verification from the terminal
+
+```bash
+./scripts/deploy staging verify LF-WCHG
+```
+
+Enqueues a verification run for one loan file and then **follows the worker log** until it
+finishes, so the deploy → run → read loop never needs the UI. Same one-off task mechanism as
+`query`: the migrate task definition, inside the VPC, with the task role — no token to mint,
+refresh, or paste into a terminal.
+
+Two behaviours worth knowing, both deliberate:
+
+**It forces by default.** The API caches on an *input* fingerprint: when the stated and verified
+data hash the same as the last completed run it returns those findings without re-calling the AI.
+That is right for a user and wrong here, because this loop changes *code*, not inputs — with the
+cache honoured a deploy would hand back the old findings and look like it did nothing. `VERIFY_FORCE=0`
+opts out.
+
+**It supersedes a stuck run, but only a genuinely stuck one.** A `RUNNING` run older than the API's
+own 25-minute threshold is marked failed and replaced; a younger one is left alone and the stage
+refuses, telling you how long is left. The threshold is imported from the API rather than restated, so
+"stuck" has one definition — the one the UI already acts on. That matters because a run six minutes
+into its AI calls looks identical to a wedged one from the outside, and killing it would destroy real
+work and real spend.
+
+The tail follows for 25 minutes (`DEPLOY_VERIFY_TAIL_TIMEOUT_SECONDS`), above the worker's own
+20-minute hard limit, so a run that dies is seen dying rather than abandoned a moment before its
+failure is logged. Ctrl-C stops the tail, not the run.
+
 ## Staging only
 
 The `query` and `query-setup` stages refuse any environment not listed in

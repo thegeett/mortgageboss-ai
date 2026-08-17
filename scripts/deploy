@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo verify"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -28,6 +28,10 @@ STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status boot
 DNS_TIMEOUT_SECONDS="${DEPLOY_DNS_TIMEOUT_SECONDS:-1800}"
 DNS_POLL_SECONDS="${DEPLOY_DNS_POLL_SECONDS:-30}"
 MIGRATE_TIMEOUT_SECONDS="${DEPLOY_MIGRATE_TIMEOUT_SECONDS:-900}"
+# How long `verify` follows the worker before handing the run back. Deliberately ABOVE
+# the worker's own 1200s hard limit, so a run that dies is seen dying rather than being
+# abandoned by the tail a moment before its failure is logged.
+VERIFY_TAIL_TIMEOUT_SECONDS="${DEPLOY_VERIFY_TAIL_TIMEOUT_SECONDS:-1500}"
 
 # How long `secrets` waits for an ElastiCache AUTH token rotation to become
 # effective. Minutes, not seconds -- the cluster applies it node by node.
@@ -89,6 +93,13 @@ ARGUMENTS
                QUERY_ENVIRONMENTS -- the role does not exist in production and
                the migration deliberately does not create it.
 
+    verify <LF-ID>
+               Enqueue a verification run for one loan file and FOLLOW the worker
+               log until it finishes. Forces by default (the API's input-fingerprint
+               cache is right for a user and wrong for a code-change loop) and
+               supersedes a run already stuck past the API's 25-minute threshold.
+               Set VERIFY_FORCE=0 to opt out of forcing.
+
     backfill-mismo
                Fill properties.in_project / is_pud from each file's ORIGINAL MISMO,
                re-parsed from the retained raw file (LP-510). REPORT ONLY unless
@@ -144,6 +155,7 @@ EOF
 
 ENV_NAME=""
 STAGE=""
+STAGE_ARG=""
 ASSUME_YES=0
 FORCE=0
 ALLOW_BRANCH=0
@@ -180,6 +192,7 @@ parse_args() {
         if [ "$positional" = "1" ]; then ENV_NAME="$1"
         elif [ "$positional" = "2" ]; then STAGE="$1"
         elif [ "$positional" = "3" ] && [ "$STAGE" = "query" ]; then QUERY_FILE="$1"
+        elif [ "$positional" = "3" ] && [ "$STAGE" = "verify" ]; then STAGE_ARG="$1"
         else die "Unexpected argument: $1" "Usage: ./scripts/deploy <env> <stage> [options]"
         fi ;;
     esac
@@ -1826,6 +1839,115 @@ stage_query_setup() {
 }
 
 # ---------------------------------------------------------------------------
+# verify -- enqueue a verification run for one loan file, then TAIL the worker
+# until it finishes (LP-523).
+#
+# The rule-engine loop is deploy -> run verification -> read the findings, and the
+# middle step was only reachable by clicking in the UI. Worse, the UI cannot do it
+# while a previous run is stuck RUNNING -- exactly when you most want to re-run.
+#
+# It FORCES by default: the API caches on an INPUT fingerprint, which is right for a
+# user and wrong here, because this loop changes CODE, not inputs. It also supersedes
+# a stuck run on the API's own 25-minute threshold, and refuses on a younger one so it
+# can never kill a pass that is still working.
+#
+# The tail is the point. `run_oneoff_task` only dumps a task's log AFTER it stops, so
+# the enqueue task exits immediately and this follows the WORKER log group live --
+# which is where the AI calls, the retries and the failures actually appear.
+stage_verify() {
+  local target="${STAGE_ARG:-}"
+  [ -n "$target" ] || die "Usage: $0 $ENV_NAME verify <LOAN_FILE_DISPLAY_ID>" \
+    "e.g. $0 $ENV_NAME verify LF-WCHG"
+
+  banner "verify -- run verification for '$target' in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local cluster taskdef container subnets sgs netcfg request group started
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  loan file   : $target"
+  info "  force       : ${VERIFY_FORCE:-1} (re-runs even when the inputs are unchanged)"
+  hr
+
+  # Timestamp BEFORE enqueuing: the tail starts here so no worker line is missed
+  # between the enqueue returning and the follow attaching.
+  started=$(( $(date -u +%s) * 1000 ))
+
+  request="$SECRET_TMPDIR/verify.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    V_FILE="$target" V_FORCE="${VERIFY_FORCE:-}" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.run_verification"],
+          environment: [{name:"VERIFY_LOAN_FILE", value: env.V_FILE},
+                        {name:"VERIFY_FORCE", value: env.V_FORCE}]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+
+  run_oneoff_task "verify" "$request" "$cluster" "$container"
+  [ "${ONEOFF_EXIT_CODE:-1}" = "0" ] || die \
+    "The run was not enqueued (see the log above). Nothing is running."
+
+  group=$(log_group_for worker)
+  hr
+  info "Following the worker -- $group"
+  info "Ctrl-C stops the tail; it does NOT stop the run."
+  hr
+  verify_tail "$group" "$started"
+}
+
+# Follow the worker log until the run reaches a terminal state.
+#
+# `aws logs tail --follow` cannot exit on a pattern, so this polls in windows and
+# stops on the run's own markers: `verification_run_done` (success) or a task-level
+# `raised unexpected` (terminal failure after retries). A retry line is surfaced
+# rather than treated as the end -- a retry means it is still going.
+verify_tail() {
+  local group="$1" since="$2" waited=0 batch
+  while [ "$waited" -lt "$VERIFY_TAIL_TIMEOUT_SECONDS" ]; do
+    batch=$(awsx logs filter-log-events --log-group-name "$group" --start-time "$since" \
+      --query 'events[].message' --output text 2>/dev/null | tr '\t' '\n' || printf '')
+    if [ -n "$batch" ]; then
+      printf '%s\n' "$batch" \
+        | grep -E "ai_call_failed|ai_group_reasoning_done|stage_b_production_done|verification_run_done|retry:|raised unexpected" \
+        | tail -3 | sed 's/^/  /'
+    fi
+    case "$batch" in
+      *verification_run_done*) hr; ok "verification complete."; return 0 ;;
+      *"raised unexpected"*)   hr; die "The run FAILED (see the worker log above)." ;;
+    esac
+    sleep 15
+    waited=$((waited + 15))
+  done
+  warn "Still running after ${VERIFY_TAIL_TIMEOUT_SECONDS}s -- the tail gave up, the run did not."
+  warn "Keep watching:  aws logs tail $group --follow"
+}
+
+# ---------------------------------------------------------------------------
 # backfill-mismo -- fill properties.in_project / is_pud from each file's ORIGINAL
 # MISMO (LP-510).
 #
@@ -3047,6 +3169,7 @@ main() {
     query-setup) stage_query_setup ;;
     query)     stage_query ;;
     backfill-mismo) stage_backfill_mismo ;;
+    verify)         stage_verify ;;
     deploy)    stage_deploy ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac
