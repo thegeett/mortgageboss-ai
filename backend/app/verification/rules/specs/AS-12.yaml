@@ -88,10 +88,15 @@ judgment:
           Obtain the statement for the sending account showing the matching withdrawal. If the funds
           came from elsewhere, get a signed explanation with supporting documents. If they were
           borrowed, the loan must be disclosed and its payment counted in the DTI.
+      # ⚠️ THIS MUST NOT CLAIM THE LINE IS BLANK. `source_strength: none` means no source could be
+      # ESTABLISHED — it is about corroboration, not about whether the description has words in it. The
+      # first wording here said "nothing in it identifies where the money came from" and rendered, on a
+      # real file, directly above a line naming an institution, an account and the borrower. A sentence
+      # that contradicts the quote beside it reads as a system that cannot read.
       none:
         why: >-
-          The statement line reads "{statement_line}", and nothing in it identifies where the money
-          came from.
+          The statement line reads "{statement_line}", but no source for it could be established from
+          the documents on file.
         how_to_fix: >-
           Ask the borrower where this deposit came from and obtain documentation — a statement from the
           sending account, a gift letter, or a signed explanation. If the funds were borrowed, the loan

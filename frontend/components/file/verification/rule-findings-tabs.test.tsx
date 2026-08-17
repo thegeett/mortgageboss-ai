@@ -379,7 +379,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
     expect(screen.getByText(/deposit 1 exceeds the large-deposit threshold/)).toBeDefined();
   });
 
-  it("LP-518 — a needs_review group still starts collapsed", () => {
+  it("LP-522 — collapsed hides the ROW detail, not the action line", () => {
     renderTabs(
       ["$3,300 on 3/2", "$1,000 on 3/14"].map((label, i) =>
         ruleFinding({
@@ -393,10 +393,37 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
       ),
     );
 
-    expect(screen.queryByText(/a distinct model sentence about deposit 0/)).toBeNull();
+    // The ACTION line is now visible per bullet without expanding — that is the point of LP-522, and
+    // it replaces LP-518's "hidden until clicked". What stays hidden is the ROW: how-to-fix, the
+    // guideline, the provenance tags.
+    expect(screen.getByText(/a distinct model sentence about deposit 0/)).toBeDefined();
+    expect(screen.getByText("$3,300 on 3/2")).toBeDefined();
+    expect(screen.queryByText(/How to fix/i)).toBeNull();
     expect(screen.getByRole("button", { name: /2 findings/i }).getAttribute("aria-expanded")).toBe(
       "false",
     );
+  });
+
+  it("LP-522 — identical messages are NOT repeated per bullet", () => {
+    // The regression LP-376-C exists to prevent: four identical lines under a summary whose entire
+    // purpose is to replace them. When members agree, the bullets carry subjects only.
+    const reason = "a document in the file could not be classified";
+    renderTabs(
+      ["March.pdf", "April.pdf", "May.pdf"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "ID-7",
+          evaluation_outcome: "couldnt_check",
+          subject_key: `doc${i}`,
+          subject_label: label,
+          message: reason,
+        }),
+      ),
+    );
+
+    expect(screen.getAllByText(reason)).toHaveLength(1); // the header only
+    expect(screen.getByText("March.pdf")).toBeDefined(); // subjects still listed
+    expect(screen.getByText("May.pdf")).toBeDefined();
   });
 });
 

@@ -177,6 +177,21 @@ const TONE_DOT: Record<OutcomeTone, string> = {
 };
 
 /**
+ * The one-line gist of a finding: its ACTION sentence (LP-522).
+ *
+ * A guidance message is "Action.\n\nWhy…", so the action is the part before the blank line. Falls back
+ * to the first sentence for a rule that has not adopted guidance yet, and to the whole message when it
+ * is a single short one — every judgment rule except AS-12 is still in that state, so the fallback is
+ * the common path today, not an edge case.
+ */
+function actionLine(message: string): string {
+  const [head] = message.split("\n\n");
+  const text = (head ?? message).trim();
+  const stop = text.indexOf(". ");
+  return stop === -1 ? text : text.slice(0, stop + 1);
+}
+
+/**
  * The one line a collapsed group shows before it is expanded.
  *
  * When every member says the same thing, that sentence IS the summary (LP-376-C's behaviour, unchanged —
@@ -210,6 +225,9 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
   const panelId = useId();
   if (first === undefined) return null; // never — the caller only builds this for a non-empty group
   const dot = TONE_DOT[outcomeMeta(first.evaluation_outcome).tone];
+  // Computed once and used by the header AND the bullets — two independent 'do they agree?' checks
+  // would eventually disagree, and the bullets exist precisely to complement whatever the header says.
+  const shared = findings.every((f) => f.message === first.message);
   return (
     <div className="rounded-lg border border-gray-200/70">
       <button
@@ -237,6 +255,38 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
           )}
         />
       </button>
+      {/* LP-522 — every member VISIBLE WITHOUT EXPANDING, one line each, scrolling if long.
+       *
+       * This only became worth doing once the message led with the ACTION: a bullet reading "Document
+       * the source of the $2,000.00 deposit on 3/3" tells a processor what the item is, where the same
+       * bullet reading "the AI judged that…" would have been five identical non-sentences. Expanding
+       * still gives the full row; this is the at-a-glance pass over a rule's whole set.
+       *
+       * Bounded height because a rule's set is not: AS-2 carries 57 findings on one real file. */}
+      {!open && (
+        <ul className="max-h-56 space-y-1 overflow-y-auto border-t border-gray-100 px-3 py-2">
+          {findings.map((finding) => (
+            <li key={finding.id} className="flex gap-2 text-xs leading-relaxed">
+              <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-gray-300" aria-hidden />
+              <span className="min-w-0">
+                {finding.subject_label.length > 0 && (
+                  <span className="font-medium text-gray-700">{finding.subject_label}</span>
+                )}
+                {/* When every member says the SAME thing the header already carries that sentence, so
+                 * repeating it per bullet rebuilds the exact noise LP-376-C removed — four identical
+                 * lines under a summary that exists to replace them. Subjects only, in that case. */}
+                {!shared && (
+                  <span className="text-gray-500">
+                    {finding.subject_label.length > 0 && " — "}
+                    {actionLine(finding.message)}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {open && (
         <div id={panelId} className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-3">
           {findings.map((finding) => (

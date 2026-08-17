@@ -174,13 +174,26 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
           )}
 
           {finding.load_bearing_tags.length > 0 && (
-            <DetailBlock label="Provenance — the tags this verdict rested on">
-              <ul className="space-y-2">
+            // LP-522 — COLLAPSED BY DEFAULT. This is the ratifier's audit trail, not the processor's
+            // reading: on a real AS-12 finding it ran ~400 words of model prose, and the fact a
+            // processor most needed ("no matching withdrawal was found") was the fifth entry down. That
+            // fact is now a sentence in the message itself, so the tags are here to be AUDITED, not
+            // read. It also puts the bare `yes`/`no` verdict chips behind a click — two
+            // opposite-polarity values sat adjacent with no legend, and a skimmed `yes` on a
+            // borrowed-funds check reads as "yes, fine" when it means the opposite.
+            <details className="group">
+              <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600">
+                <span className="group-open:hidden">
+                  Show the {finding.load_bearing_tags.length} tags this verdict rested on
+                </span>
+                <span className="hidden group-open:inline">Hide the tags</span>
+              </summary>
+              <ul className="mt-1.5 space-y-2">
                 {finding.load_bearing_tags.map((tag, index) => (
                   <TagProvenance key={`${tag.tag_id}-${index}`} tag={tag} />
                 ))}
               </ul>
-            </DetailBlock>
+            </details>
           )}
 
           {finding.subject_label.length > 0 && (

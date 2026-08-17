@@ -155,7 +155,7 @@ async def test_the_statement_line_is_quoted_exactly() -> None:
     ("strength", "expected"),
     [
         ("self_asserted", "no matching withdrawal appears in any document on file"),
-        ("none", "nothing in it identifies where the money came from"),
+        ("none", "no source for it could be established from the documents on file"),
         ("verified", "its paper trail is complete"),
         ("intrinsic", "sourced by its own nature"),
     ],
@@ -168,6 +168,20 @@ async def test_the_why_keys_on_the_evidence_not_the_verdict(strength: str, expec
     evaluation = await _evaluate(strength=strength)
 
     assert expected in evaluation.reasoning
+
+
+async def test_the_none_wording_never_contradicts_the_line_it_quotes() -> None:
+    """⚠️ REGRESSION. `source_strength: none` is about CORROBORATION, not about whether the description
+    has words in it. The first wording said "nothing in it identifies where the money came from" and
+    rendered on a real file directly above `Online Transfer From Digital Federal Credit Union Sav
+    xxxx0433 A. Talluri` — a sentence contradicting the quote beside it, which reads as a system that
+    cannot read. Two of that file's five findings looked like this."""
+    line = "Online Transfer From Digital Federal Credit Union Sav xxxx0433 A. Talluri"
+    evaluation = await _evaluate(strength="none", line=line)
+
+    assert f'"{line}"' in evaluation.reasoning
+    assert "nothing in it identifies" not in evaluation.reasoning
+    assert "no source for it could be established" in evaluation.reasoning
 
 
 async def test_an_absent_strength_tag_takes_the_default_rather_than_going_wordless() -> None:
