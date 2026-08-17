@@ -100,6 +100,38 @@ judgment:
   reasoned_over: [dti.atr_factors_documented]
   output_tag: dti.atr_documentation_adequate
   value_domain: ["yes", "no", "unknown"]
+  # LP-522 — action first. ⚠️ THE WORDING MUST NOT DRIFT INTO AN ATR DETERMINATION. Ability-to-repay is
+  # a CREDITOR obligation under Regulation Z, assessed at underwriting; a processor assembling the file
+  # is not the party making it. This rule asks only whether the file CARRIES documents supporting each
+  # factor, and every sentence below says "documents" or "documentation" for that reason.
+  guidance:
+    action:
+      "yes": "Confirm the file documents all eight ability-to-repay factors."
+      "no": "Add the missing ability-to-repay documentation."
+      "unknown": "Establish which ability-to-repay factors the file documents."
+    explain_by: dti.atr_factors_documented
+    explain:
+      incomplete:
+        why: >-
+          At least one of the eight ability-to-repay factors has no supporting document in the file —
+          income, employment, assets, current debts, credit history, monthly payment, mortgage-related
+          obligations, or other loans on the property.
+        how_to_fix: >-
+          Obtain the missing document for each unsupported factor. This is about what the file CARRIES;
+          the ability-to-repay determination itself is the creditor's at underwriting, not a
+          conclusion to record here.
+      # Evidence only — see the note on OC-2's "yes" case. This renders under an `unknown` verdict too.
+      complete:
+        why: Every ability-to-repay factor has a supporting document in the file.
+        how_to_fix: Confirm the documents are the current versions for this loan, and clear this.
+      default:
+        why: >-
+          Which ability-to-repay factors the file documents could not be established, so completeness
+          cannot be asserted either way.
+        how_to_fix: >-
+          Review the file against the eight factors — income, employment, assets, current debts, credit
+          history, monthly payment, mortgage-related obligations, other loans on the property — and
+          obtain whatever is missing.
   confidence_floor: 0.5
   system_prompt: |
     You are a senior mortgage loan processor making ONE reasoned judgment: does this loan file carry the

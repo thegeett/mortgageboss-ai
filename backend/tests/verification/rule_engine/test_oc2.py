@@ -177,7 +177,10 @@ async def test_not_reasonable_judgment_is_needs_review_with_reasoning() -> None:
     # LP-376-B: the MESSAGE states the verdict; the AI's raw reasoning ("second home") lives in the
     # PROVENANCE (a load-bearing tag), NOT the message — engine reasoning must not be a finding's identity.
     assert "second home" not in ev.evaluation.reasoning
-    assert "judged 'no'" in ev.evaluation.reasoning
+    # LP-522: action first. The verdict is not printed as a value — it SELECTS the instruction, and
+    # "no" (the occupancy is not reasonable) is the one that asks for a conflict to be resolved.
+    assert ev.evaluation.reasoning.startswith("Resolve the conflict between the stated occupancy")
+    assert ev.evaluation.how_to_fix is not None
     assert any("second home" in (t.reasoning or "") for t in ev.evaluation.load_bearing_tags)
 
 
@@ -200,9 +203,11 @@ async def test_low_confidence_judgment_is_needs_review() -> None:
     ev = await _evaluate(_occupancy_tags(), stub)
     assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
     assert ev.evaluation.ratification_pending is True
-    assert (
-        "low confidence" in ev.evaluation.reasoning
-    )  # the verdict message names the low confidence
+    # LP-522: the message is action-first now, so the confidence is stated in WORDS rather than as
+    # "0.2 < 0.5" — the numbers live in the provenance. The signal itself is deliberately kept: a
+    # processor does the same work either way, but a RATIFIER weighs an unsure verdict differently.
+    assert ev.evaluation.reasoning.startswith("Confirm the file supports the stated occupancy")
+    assert "low confidence" in ev.evaluation.reasoning
 
 
 async def test_shaky_load_bearing_input_gates_to_needs_review_before_any_ai_call() -> None:
@@ -271,7 +276,9 @@ async def test_malformed_response_is_unknown_needs_review_not_a_default() -> Non
     assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW
     assert ev.judgment_tag is not None and ev.judgment_tag.value == "unknown"
     # A malformed answer → the 'unknown' verdict message (the tags don't support a confident judgment).
-    assert "do not support a confident judgment" in ev.evaluation.reasoning
+    # LP-522: an `unknown` verdict now asks the processor to ESTABLISH the fact, rather than telling
+    # them the tags were insufficient — same information, stated as a task.
+    assert ev.evaluation.reasoning.startswith("Establish whether the stated occupancy")
 
 
 async def test_model_unknown_is_preserved() -> None:

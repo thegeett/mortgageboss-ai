@@ -296,6 +296,7 @@ def _compose(
     reasoned_over: tuple[str, ...],
     statement_line: str | None,
     derivation: str | None,
+    low_confidence: bool = False,
 ) -> tuple[str, str]:
     """(message, how_to_fix) — action first, then why; the fix on its own field (LP-522).
 
@@ -304,7 +305,9 @@ def _compose(
     reason no judgment finding has ever told anyone what to do.
     """
     fields = _guidance_fields(subject_tags, reasoned_over, statement_line)
-    explain_tag = subject_tags.get(guidance.explain_by)
+    # No `explain_by` -> every finding takes `default`, which is the honest shape for a rule with no
+    # evidence axis (CR-8 reasons over no tags at all).
+    explain_tag = subject_tags.get(guidance.explain_by) if guidance.explain_by else None
     case = guidance.explain.get(
         str(explain_tag.value) if explain_tag else "", guidance.explain["default"]
     )
@@ -314,6 +317,12 @@ def _compose(
     # auditability requirement and must not be lost while shortening.
     if derivation:
         why = f"{why} ({derivation})"
+    # LP-522: the guidance path bypasses `_verdict_message`, which took LP-520's low-confidence clause
+    # with it. The ACTION is the same either way — a processor does the same work — but a RATIFIER
+    # weighs the verdict differently when the model was unsure, so the signal is kept rather than lost
+    # in the reframe. Stated in words, not as "0.2 < 0.5"; the numbers are in the provenance.
+    if low_confidence:
+        why = f"{why} The model reached this with low confidence, so weigh it accordingly."
     return f"{action}\n\n{why}", case.how_to_fix.format(**fields)
 
 
@@ -672,7 +681,13 @@ async def _evaluate_one_subject(
     # LP-522 — ACTION FIRST when the rule declares guidance; otherwise LP-520's wording, unchanged.
     if jud.guidance is not None:
         message, fix = _compose(
-            jud.guidance, value, subject_tags, jud.reasoned_over, statement_line, derivation
+            jud.guidance,
+            value,
+            subject_tags,
+            jud.reasoned_over,
+            statement_line,
+            derivation,
+            low_confidence=confidence is not None and confidence < floor,
         )
     else:
         message, fix = (

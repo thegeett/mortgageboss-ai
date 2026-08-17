@@ -553,7 +553,12 @@ class Guidance(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     action: dict[str, str] = PydField(min_length=1)  # verdict value -> imperative headline
-    explain_by: str = PydField(min_length=1)  # the tag whose value selects the case below
+    # OPTIONAL (LP-522 phase 2). `action` is keyed on the VERDICT and `explain` on a TAG, so a rule
+    # whose distinction already lives in its verdicts has no second axis to key on: CR-8's six values
+    # (`one_30_day_late`, `excessive_60_plus`, `not_interpretable`, …) say more than any of the four
+    # tags it reasons over would. Omit it and every finding takes `default`, which is the honest shape
+    # there — not a degenerate one.
+    explain_by: str | None = None
     explain: dict[str, ExplainCase] = PydField(min_length=1)  # tag value -> why + fix
 
     @model_validator(mode="after")
@@ -562,9 +567,15 @@ class Guidance(BaseModel):
         and a finding with no `why` at all is worse than a generic one — it is the wordless card this
         ticket exists to remove."""
         if "default" not in self.explain:
+            named = f"`{self.explain_by}`" if self.explain_by else "the explanatory tag"
             raise ValueError(
-                f"guidance.explain needs a `default` case — `{self.explain_by}` may be absent or carry "
-                "an unanticipated value, and a finding with no explanation is the defect being fixed"
+                f"guidance.explain needs a `default` case — {named} may be absent or carry an "
+                "unanticipated value, and a finding with no explanation is the defect being fixed"
+            )
+        if self.explain_by is None and set(self.explain) != {"default"}:
+            raise ValueError(
+                f"guidance.explain has case(s) {sorted(set(self.explain) - {'default'})} but no "
+                "`explain_by` tag to select them — they could never be reached"
             )
         return self
 
@@ -670,7 +681,7 @@ class JudgmentEval(BaseModel):
             )
         if extra := sorted(set(guidance.action) - set(self.value_domain)):
             raise ValueError(f"guidance.action has verdict(s) outside value_domain: {extra}")
-        if guidance.explain_by not in self.reasoned_over:
+        if guidance.explain_by is not None and guidance.explain_by not in self.reasoned_over:
             raise ValueError(
                 f"guidance.explain_by `{guidance.explain_by}` is not in `reasoned_over` — the evaluator "
                 "reads the subject's tags through that list, so the tag would be absent on every "

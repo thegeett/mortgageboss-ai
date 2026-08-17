@@ -59,6 +59,42 @@ judgment:
   reasoned_over: [occupancy.stated, occupancy.consistent_with_signals, id.current_address_type, property.address_normalized_match]
   output_tag: occupancy.reasonable     # the rule_judgment tag produced
   value_domain: ["yes", "no", "unknown"]     # ALWAYS includes unknown (quoted: YAML reads bare yes/no as bool)
+  # LP-522 — action first, in a processor's language.
+  #
+  # OC-2 asks whether the STATED occupancy is reasonable given what the file shows. Its `no` is the bad
+  # answer, so the actions diverge sharply: a reasonable occupancy needs confirming, an unreasonable one
+  # needs resolving. Occupancy drives pricing, LTV limits and reserve requirements, so the fix says what
+  # is at stake rather than just asking for a document.
+  guidance:
+    action:
+      "yes": "Confirm the file supports the stated occupancy ({stated})."
+      "no": "Resolve the conflict between the stated occupancy ({stated}) and the file's own signals."
+      "unknown": "Establish whether the stated occupancy ({stated}) is supported by the file."
+    explain_by: occupancy.consistent_with_signals
+    explain:
+      "no":
+        why: >-
+          The address and other signals in the file point away from a {stated} occupancy — the borrower's
+          documented address, the subject property's address, or both disagree with what was stated.
+        how_to_fix: >-
+          Confirm with the borrower which property this will be, and correct the 1003 if the stated
+          occupancy is wrong. Occupancy changes pricing, the LTV limit and the reserves required, so a
+          misstatement is not a paperwork error. If the stated occupancy is right, document why the
+          signals differ — a pending move, a recently purchased home, an employment relocation.
+      # ⚠️ EVIDENCE ONLY, no clause about why this is listed. `explain` is keyed on the TAG, so this
+      # same sentence renders under an `unknown` verdict too — a "nothing to worry about here" ending
+      # would then contradict the action above it, which is asking the processor to establish something.
+      # The why says what the file shows; the action says what to do about it.
+      "yes":
+        why: The file's address signals agree with a {stated} occupancy.
+        how_to_fix: Confirm the stated occupancy is what the borrower intends, and clear this.
+      default:
+        why: >-
+          Whether the file's signals agree with a {stated} occupancy could not be established, so the
+          stated occupancy has not been corroborated.
+        how_to_fix: >-
+          Check the borrower's current address on the 1003 against the subject property and any address
+          on the supporting documents, and confirm the intended occupancy with the borrower.
   confidence_floor: 0.5
   system_prompt: |
     You are a senior mortgage underwriter making a REASONED JUDGMENT about ONE question: is the

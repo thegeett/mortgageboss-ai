@@ -203,9 +203,10 @@ async def test_the_materiality_arithmetic_survives_demoted_from_the_headline() -
 
 
 def test_a_rule_without_guidance_is_untouched() -> None:
-    """ADDITIVE — 17 other judgment rules have not been written yet and must keep their current text
-    until each gets domain-accurate wording."""
-    for rule_id in ("OC-2", "CR-8", "DT-7"):
+    """ADDITIVE — the judgment rules not yet written keep their LP-520 text until each gets
+    domain-accurate wording. OC-2 / CR-8 / DT-7 have since been written (LP-522 phase 2, the three that
+    appear on LF-WCHG), so this now checks rules from further down the list."""
+    for rule_id in ("ID-8", "ID-9", "IN-7"):
         judgment = load_rule_spec(rule_id).judgment
         assert judgment is not None
         assert judgment.guidance is None

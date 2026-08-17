@@ -105,6 +105,35 @@ judgment:
     - liab.mortgage_late_60_plus_last_12mo
   output_tag: credit.mortgage_history_assessment
   value_domain: ["acceptable", "one_30_day_late", "multiple_30_day_lates", "excessive_60_plus", "not_interpretable", "unknown"]
+  # LP-522 — action first, one action per verdict.
+  #
+  # ⚠️ NO `explain_by`, and not for want of tags — this rule reasons over four. Its EVIDENCE AXIS IS THE
+  # VERDICT: `acceptable` / `one_30_day_late` / `multiple_30_day_lates` / `excessive_60_plus` /
+  # `not_interpretable` already name the distinction precisely, and keying the `why` on
+  # `liab.payment_status` would be a weaker proxy for what the verdict states outright. So the actions
+  # carry the difference and `default` carries the shared context.
+  #
+  # The verdicts are Priya's own vocabulary (LP-490), and `not_interpretable` is a first-class answer
+  # rather than a failure: she specified that an unreliable payment-history string must reach a human
+  # saying so, not be interpreted anyway.
+  guidance:
+    action:
+      acceptable: "Confirm the mortgage payment history on this liability and clear it."
+      one_30_day_late: "Document the single 30-day late on this mortgage."
+      multiple_30_day_lates: "Document the repeated 30-day lates on this mortgage."
+      excessive_60_plus: "Escalate this mortgage's 60-plus-day delinquency to underwriting."
+      not_interpretable: "Obtain a readable mortgage payment history for this liability."
+      unknown: "Establish this mortgage's payment history."
+    explain:
+      default:
+        why: >-
+          Mortgage payment history drives program eligibility, and the history on the credit report was
+          assessed against the program's tolerance for lates.
+        how_to_fix: >-
+          Check the payment string on the credit report against the mortgage statement or a
+          verification of mortgage. If there are lates, obtain a letter of explanation; if the history
+          cannot be read reliably, request a VOM rather than interpreting it. A 60-plus-day
+          delinquency is an underwriting decision, not a processing one.
   confidence_floor: 0.5
   system_prompt: |
     You are a senior mortgage underwriter making ONE reasoned judgment about a single MORTGAGE tradeline's
