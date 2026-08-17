@@ -43,6 +43,7 @@ from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.reasons import fact_label
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
 from app.verification.rules.specs import (
+    Guidance,
     JudgmentEval,
     Materiality,
     Operand,
@@ -113,6 +114,7 @@ def _result(
     verdict_confidence: float | None = None,
     extra_load_bearing: tuple[LoadBearingTag, ...] = (),
     ratification_pending: bool = True,
+    how_to_fix: str | None = None,
 ) -> RuleEvaluation:
     """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance).
 
@@ -129,7 +131,9 @@ def _result(
         priya_validated=spec.reference_values.priya_validated,
         gated_pending_signoff=True,
         reasoning=reasoning,
-        how_to_fix=None,
+        # LP-522: previously hard-coded None, so NO judgment rule could tell a processor what to
+        # do. A deterministic rule has carried this from its spec since LP-324.
+        how_to_fix=how_to_fix,
         # A judgment rule NEVER auto-ships on the model's say-so. The ONE exception is a GUIDELINE
         # exemption (LP-516 `exempt_when`), where the clearing is done by a deterministic predicate and
         # the model can only ever ADD a review, never remove one.
@@ -231,6 +235,86 @@ def _resolve(
             judgment.reasoning or "the model returned an out-of-domain value — treated as unknown",
         )
     return judgment.value, judgment.confidence, judgment.reasoning
+
+
+def _statement_lines(snapshot: Snapshot) -> dict[str, str]:
+    """content_id -> the transaction's description, exactly as the statement prints it (LP-522).
+
+    Quoting the STATEMENT LINE rather than summarising it is deliberate. It costs no model call and no
+    calibration hold, and it is more useful than a summary would be: a processor can string-match
+    "Online Transfer From Talluri A Way2Save Savings xxxxxx3627" against the actual document. The
+    alternative — producing `txn.source_reference`, which the vocabulary declares for exactly this and
+    nothing produces — buys nicer prose for an AI call per deposit.
+    """
+    if snapshot.documents.absent:
+        return {}
+    return {
+        txn.content_id: text
+        for document in snapshot.documents.entries
+        for txn in (document.transactions or ())
+        if (text := str(txn.description.value or "").strip())
+    }
+
+
+def _guidance_fields(
+    subject_tags: Mapping[str, Tag], reasoned_over: tuple[str, ...], statement_line: str | None
+) -> dict[str, str]:
+    """The placeholders a guidance template may interpolate.
+
+    Keyed by each reasoned-over tag's SHORT name (``txn.amount`` -> ``{amount}``), because a dot inside
+    a format field means attribute access rather than a tag id. Money and dates are rendered for a
+    reader — `$2,000.00` and `3/3`, not `2000.0` and `2025-03-03`. An absent tag renders as its own
+    honest placeholder rather than a blank, so a template referencing it produces a legible sentence
+    instead of a hole.
+    """
+    fields: dict[str, str] = {}
+    for tag_id in reasoned_over:
+        short = tag_id.split(".")[-1]
+        tag = subject_tags.get(tag_id)
+        fields[short] = "not established" if tag is None else str(tag.value)
+    if (amount := _decimal_or_none(subject_tags, "txn.amount")) is not None:
+        fields["amount"] = _money(amount)
+    if (date_text := fields.get("date")) and len(date_text.split("-")) == 3:
+        _year, month, day = date_text.split("-")
+        fields["date"] = f"{int(month)}/{int(day)}"
+    if statement_line is not None:
+        fields["statement_line"] = statement_line
+    return fields
+
+
+def _decimal_or_none(subject_tags: Mapping[str, Tag], tag_id: str) -> Decimal | None:
+    tag = subject_tags.get(tag_id)
+    if tag is None or str(tag.value) == _UNKNOWN:
+        return None
+    return coerce_decimal(tag.value)
+
+
+def _compose(
+    guidance: Guidance,
+    value: str,
+    subject_tags: Mapping[str, Tag],
+    reasoned_over: tuple[str, ...],
+    statement_line: str | None,
+    derivation: str | None,
+) -> tuple[str, str]:
+    """(message, how_to_fix) — action first, then why; the fix on its own field (LP-522).
+
+    The message a processor reads is ACTION + WHY. `how_to_fix` is returned separately because the
+    finding model already has a field for it, which judgment rules previously hard-coded to None — the
+    reason no judgment finding has ever told anyone what to do.
+    """
+    fields = _guidance_fields(subject_tags, reasoned_over, statement_line)
+    explain_tag = subject_tags.get(guidance.explain_by)
+    case = guidance.explain.get(
+        str(explain_tag.value) if explain_tag else "", guidance.explain["default"]
+    )
+    action = guidance.action[value].format(**fields)
+    why = case.why.format(**fields)
+    # LP-518's materiality arithmetic survives, demoted from the headline to the why — it is the
+    # auditability requirement and must not be lost while shortening.
+    if derivation:
+        why = f"{why} ({derivation})"
+    return f"{action}\n\n{why}", case.how_to_fix.format(**fields)
 
 
 def _money(value: Decimal) -> str:
@@ -424,12 +508,21 @@ async def evaluate_judgment_rule(
 
     sem = asyncio.Semaphore(_MAX_CONCURRENT_SUBJECTS)
 
+    lines = _statement_lines(snapshot)
+
     async def _bounded(subject_id: str, subject_tags: Mapping[str, Tag]) -> JudgmentEvaluation:
         # Each subject is self-contained + internally fail-closed (AI errors → couldnt_check), so
         # bounded-concurrent evaluation preserves per-subject semantics; gather keeps subject order.
         async with sem:
             return await _evaluate_one_subject(
-                spec, jud, subject_id, subject_tags, reason_fn, floor, _loan_tags(snapshot)
+                spec,
+                jud,
+                subject_id,
+                subject_tags,
+                reason_fn,
+                floor,
+                _loan_tags(snapshot),
+                lines.get(subject_id),
             )
 
     return list(await asyncio.gather(*(_bounded(sid, tags) for sid, tags in subjects)))
@@ -443,6 +536,7 @@ async def _evaluate_one_subject(
     reason_fn: Reasoner,
     floor: float,
     loan_tags: Mapping[str, Tag],
+    statement_line: str | None = None,
 ) -> JudgmentEvaluation:
     """The per-subject judgment armor (§3D) — one subject's applicability → gate → AI → tag →
     ratification-pending verdict. Self-contained so one subject's failure never touches another's."""
@@ -575,15 +669,26 @@ async def _evaluate_one_subject(
             ),
         )
 
+    # LP-522 — ACTION FIRST when the rule declares guidance; otherwise LP-520's wording, unchanged.
+    if jud.guidance is not None:
+        message, fix = _compose(
+            jud.guidance, value, subject_tags, jud.reasoned_over, statement_line, derivation
+        )
+    else:
+        message, fix = (
+            _verdict_message(value, confidence, floor, derivation, jud.verdict_labels),
+            None,
+        )
     evaluation = _result(
         spec,
         subject_id,
         Verdict.NEEDS_REVIEW,
-        _verdict_message(value, confidence, floor, derivation, jud.verdict_labels),
+        message,
         jud.reasoned_over,
         subject_tags,
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,
         extra_load_bearing=extra_load_bearing,
+        how_to_fix=fix,
     )
     return JudgmentEvaluation(tag, evaluation)
 

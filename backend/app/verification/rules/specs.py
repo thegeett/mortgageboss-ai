@@ -510,6 +510,65 @@ class Materiality(BaseModel):
         return self
 
 
+class ExplainCase(BaseModel):
+    """The WHY and the FIX for one value of a rule's explanatory tag (LP-522)."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    why: str = PydField(min_length=1)
+    how_to_fix: str = PydField(min_length=1)
+
+
+class Guidance(BaseModel):
+    """LP-522 — what a processor should DO, said in their language.
+
+    A judgment finding used to read "the AI judged 'no' — an AI verdict a human must ratify (it never
+    auto-ships); $2,000.00 is above the $1,316.67 (10% of $13,166.67 qualifying income) materiality
+    floor". That explains our engine, not the loan: it never says what to do, and it says the deposit
+    looks fine while sitting in Needs Attention, so a processor cannot tell why it is on their list.
+
+    THREE PARTS, action first:
+
+    * ``action``   — an imperative headline, keyed by the model's VERDICT. "Document the source of …"
+      when the answer was no; "Confirm … is not borrowed funds" when it was yes. The verdict shapes the
+      WORDING rather than being displayed as a bare `yes`/`no` chip beside it (see below).
+    * ``why``      — why this item is in the queue, keyed by an EXPLANATORY TAG rather than the verdict,
+      because the reason varies with the evidence, not the answer.
+    * ``how_to_fix`` — the concrete step, keyed the same way. Carried on the finding's own
+      ``how_to_fix`` field, which judgment rules previously hard-coded to None.
+
+    ⚠️ WHY `why`/`how_to_fix` ARE KEYED ON A TAG AND NOT ON THE VERDICT. A single template has to assume
+    a situation, and assumes wrong. "The statement describes it as …, but no matching withdrawal appears
+    on file" is right for a self-asserted source and FALSE for a deposit with no description at all.
+    Keying on ``explain_by`` (AS-12: `txn.source_strength`, whose four values are derived
+    deterministically) gives one correct sentence per situation instead of one sentence that is wrong in
+    some of them.
+
+    ⚠️ THIS REVERSES LP-376-B ("the message states the VERDICT"), deliberately and at the product owner's
+    direction. For a processor the verdict is the least useful part — especially when it reads "no" and
+    the item is still in their queue. It is not hidden: it selects the action, so a `yes` and a `no`
+    differ in the first six words and in the fix.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    action: dict[str, str] = PydField(min_length=1)  # verdict value -> imperative headline
+    explain_by: str = PydField(min_length=1)  # the tag whose value selects the case below
+    explain: dict[str, ExplainCase] = PydField(min_length=1)  # tag value -> why + fix
+
+    @model_validator(mode="after")
+    def _explain_has_a_fallback(self) -> Guidance:
+        """`default` is REQUIRED. The explanatory tag can be absent or carry a value nobody anticipated,
+        and a finding with no `why` at all is worse than a generic one — it is the wordless card this
+        ticket exists to remove."""
+        if "default" not in self.explain:
+            raise ValueError(
+                f"guidance.explain needs a `default` case — `{self.explain_by}` may be absent or carry "
+                "an unanticipated value, and a finding with no explanation is the defect being fixed"
+            )
+        return self
+
+
 class JudgmentEval(BaseModel):
     """The machine-readable body of an AI-at-rule-time judgment rule (LP-324 / LP-319 armor)."""
 
@@ -564,6 +623,8 @@ class JudgmentEval(BaseModel):
     # another rule could invert it. The evaluator is generic and has nothing rule-specific to say, so
     # the spec says it. ADDITIVE: a rule declaring none keeps the raw-value text exactly as before.
     verdict_labels: dict[str, str] = PydField(default_factory=dict)
+    # LP-522 — action-first finding text. See :class:`Guidance`. Absent → the LP-520 wording, unchanged.
+    guidance: Guidance | None = None
 
     @model_validator(mode="after")
     def _applicability_expected_needs_document_applicability(self) -> JudgmentEval:
@@ -589,6 +650,57 @@ class JudgmentEval(BaseModel):
             raise ValueError(
                 f"exempt_unless_judgment_in references value(s) outside value_domain: {outside}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _guidance_is_total_and_its_templates_resolve(self) -> JudgmentEval:
+        """Three ways guidance can be silently wrong, all caught here.
+
+        A missing verdict falls back to unlabelled text for exactly that answer; an `explain_by` tag the
+        rule never reasons over is absent on every subject, so every finding takes the default; and a
+        stray placeholder raises mid-run, in a Celery task, six minutes into an AI pipeline.
+        """
+        guidance = self.guidance
+        if guidance is None:
+            return self
+        if missing := sorted(set(self.value_domain) - set(guidance.action)):
+            raise ValueError(
+                f"guidance.action is missing verdict(s) {missing} — a partial map leaves those findings "
+                "with no headline, which is the defect this field exists to remove"
+            )
+        if extra := sorted(set(guidance.action) - set(self.value_domain)):
+            raise ValueError(f"guidance.action has verdict(s) outside value_domain: {extra}")
+        if guidance.explain_by not in self.reasoned_over:
+            raise ValueError(
+                f"guidance.explain_by `{guidance.explain_by}` is not in `reasoned_over` — the evaluator "
+                "reads the subject's tags through that list, so the tag would be absent on every "
+                "subject and every finding would silently take the `default` case"
+            )
+        # Placeholders resolve against the SHORT name of each reasoned-over tag (txn.amount -> {amount}),
+        # because a dot inside a format field means attribute access, not a tag id.
+        allowed = {tag_id.split(".")[-1] for tag_id in self.reasoned_over}
+        # `{statement_line}` is not a tag — it is the transaction's description, quoted exactly as the
+        # statement prints it, so a processor can string-match it against the document. Available only
+        # on a per-deposit rule, since nothing else has a transaction to quote.
+        if self.subject == "per_deposit":
+            allowed.add("statement_line")
+        for label, template in (
+            *((f"action[{k}]", v) for k, v in guidance.action.items()),
+            *(
+                (f"explain[{k}].{part}", getattr(case, part))
+                for k, case in guidance.explain.items()
+                for part in ("why", "how_to_fix")
+            ),
+        ):
+            try:
+                fields = _template_fields(template)
+            except ValueError as exc:
+                raise ValueError(f"guidance.{label} is malformed: {exc}") from exc
+            if unknown := sorted(fields - allowed):
+                raise ValueError(
+                    f"guidance.{label} references unknown placeholder(s) {unknown} — available: "
+                    f"{sorted(allowed)} (the short name of each `reasoned_over` tag)"
+                )
         return self
 
     @model_validator(mode="after")

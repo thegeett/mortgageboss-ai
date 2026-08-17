@@ -64,7 +64,60 @@ judgment:
   # ⚠️ Two of the prompt's three signals, not all three: "proximity to closing" also needs the loan's
   # closing date (contract.loan_closing_date), which is loan-level and absent on the file this ticket
   # came from — the same gap that makes IH-3 abstain there.
-  reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.counterparty, txn.amount, txn.date]
+  # LP-522 +txn.source_strength: the tag that says whether the source is a PAPER TRAIL or a CLAIM. It
+  # was already produced (Stage B, derived deterministically from the matched debit) and already
+  # load-bearing on AS-1, but AS-12 neither reasoned over it nor could explain with it — so the fact a
+  # processor most needs ("no matching withdrawal was found") reached them only as a paragraph of model
+  # prose buried in the provenance.
+  reasoned_over: [txn.apparent_category, txn.has_identified_source, txn.source_strength, txn.counterparty, txn.amount, txn.date]
+  # LP-522 — WHAT A PROCESSOR SHOULD DO, in their language. See `Guidance` in specs.py for the shape and
+  # for why `why`/`how_to_fix` key on a TAG while `action` keys on the verdict.
+  guidance:
+    action:
+      "yes": "Confirm the {amount} deposit on {date} is not borrowed funds."
+      "no": "Document the source of the {amount} deposit on {date}."
+      "unknown": "Establish where the {amount} deposit on {date} came from."
+    explain_by: txn.source_strength
+    explain:
+      # The live case on the first real file: the deposit names a source and no matching debit exists.
+      self_asserted:
+        why: >-
+          The statement line reads "{statement_line}", but no matching withdrawal appears in any
+          document on file — so the source rests on what the deposit says about itself.
+        how_to_fix: >-
+          Obtain the statement for the sending account showing the matching withdrawal. If the funds
+          came from elsewhere, get a signed explanation with supporting documents. If they were
+          borrowed, the loan must be disclosed and its payment counted in the DTI.
+      none:
+        why: >-
+          The statement line reads "{statement_line}", and nothing in it identifies where the money
+          came from.
+        how_to_fix: >-
+          Ask the borrower where this deposit came from and obtain documentation — a statement from the
+          sending account, a gift letter, or a signed explanation. If the funds were borrowed, the loan
+          must be disclosed and its payment counted in the DTI.
+      # A matched debit exists, so this is here on SIZE alone — say so, and keep the ask small.
+      verified:
+        why: >-
+          A matching withdrawal was found for this deposit, so its paper trail is complete; it is listed
+          only because of its size.
+        how_to_fix: >-
+          Confirm the sending account belongs to the borrower and is documented in the file. No further
+          sourcing is needed if it is.
+      intrinsic:
+        why: >-
+          This deposit is sourced by its own nature (payroll, interest or dividend) and needs no
+          matching withdrawal; it is listed only because of its size.
+        how_to_fix: Confirm the payer is the borrower's disclosed employer or account. No further sourcing is needed.
+      # REQUIRED. The strength tag can be absent (Stage B did not run) or carry a value added later; a
+      # finding with no explanation is the wordless card this ticket exists to remove.
+      default:
+        why: >-
+          How strongly this deposit's source is evidenced could not be established, so it cannot be
+          treated as traced.
+        how_to_fix: >-
+          Obtain documentation showing where the funds came from — a statement from the sending account,
+          a gift letter, or a signed explanation.
   # LP-516 — Fannie B3-4.2-02's READILY-IDENTIFIABLE exemption, with the guide's own escape hatch.
   #
   #   "If the source of a large deposit is readily identifiable on the account statement(s), such as a
