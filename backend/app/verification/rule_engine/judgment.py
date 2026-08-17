@@ -152,11 +152,21 @@ def _guideline_exempts(
       (the §8 honesty contract: scope-false and data-missing are different things);
     * no listed condition holds — the exemptions are ALTERNATIVES (LP-518), so all must miss;
     * the model's answer is in `exempt_unless_judgment_in` — the guide's own escape hatch, where a
-      readily-identifiable source still warrants review because the lender has questions anyway.
+      readily-identifiable source still warrants review because the lender has questions anyway;
+    * the model's answer is ``"unknown"`` — see below.
+
+    ⚠️ ``"unknown"`` NEVER EXEMPTS, and this is not the same guard as the predicate-tag one above.
+    ``_resolve`` maps a MALFORMED or OFF-DOMAIN model response to ``"unknown"``, so without this a
+    response the parser could not read would fall through to the predicate and ship a SATISFIED finding
+    with ``ratification_pending=False`` — a pass with no human in the loop, produced by an AI failure.
+    Every other AI-failure path in this module (transport error, truncation) returns couldnt_check; this
+    one silently did the opposite. A genuine model "unknown" is caught by the same rule, which is right:
+    the guide's escape hatch turns on the lender still having QUESTIONS, and an unreadable answer is a
+    question, not a clearance.
     """
     if jud.exempt_when is None:
         return None
-    if value in jud.exempt_unless_judgment_in:
+    if value == _UNKNOWN or value in jud.exempt_unless_judgment_in:
         return None  # the escape hatch fires before any predicate is consulted
     for condition in _as_conditions(jud.exempt_when):
         tag = subject_tags.get(condition.tag_id)
@@ -172,18 +182,23 @@ def _exempt_message(exemption: TagCondition, subject_tags: Mapping[str, Tag]) ->
     """The finding text for an exempted subject — it must name WHY, not merely that it passed.
 
     A processor reading "satisfied" on a borrowed-funds check is entitled to know the guideline did the
-    clearing rather than a model. The predicate tag's own reasoning carries the specifics (which
-    category, and the guide's clause), so it is quoted rather than restated. Takes the condition that
-    ACTUALLY matched (LP-518), not the rule's first one — with alternatives declared, naming the first
-    would attribute the clearing to the wrong exemption.
+    clearing rather than a model, AND which exemption did it.
+
+    ⚠️ The MESSAGE IS BUILT FROM THE MATCHED CONDITION'S VALUE, not from the tag's reasoning. Two
+    reasons. First, with alternatives declared (LP-518) both of AS-12's conditions read the same tag, so
+    anything derived from the tag alone renders a payroll clear and an interest clear identically — the
+    condition's `value` is the only thing that distinguishes them. Second, `tag.reasoning` is the
+    Stage-A model's free-text sentence, and `_verdict_message` exists precisely to keep raw AI prose out
+    of a finding's IDENTITY; quoting it here contradicted that in the one place a finding auto-clears.
+    The reasoning is still appended as supporting detail, where its provenance is clear.
     """
     tag = subject_tags.get(exemption.tag_id)
     detail = (tag.reasoning or "").strip() if tag is not None else ""
-    return (
-        f"no further review is required for this deposit — {detail}"
-        if detail
-        else "no further review is required for this deposit under the applicable guideline"
+    cleared = (
+        f"no further review is required for this deposit — its source is readily identifiable on the "
+        f"statement ({fact_label(exemption.tag_id)}: {exemption.value})"
     )
+    return f"{cleared}; {detail}" if detail else cleared
 
 
 def _judgment_tag(
@@ -295,8 +310,12 @@ def _resolve_floor(
         return _Floor(derivation=f"{unavailable} (no floor is declared for a {purpose} loan)")
     basis_label = fact_label(materiality.basis.tag or materiality.basis.loan_tag or "")
     fraction = _reference_operand(spec, reference_key)
+    if fraction is None:
+        # SEPARATE from the basis branch below: blaming an unparseable spec constant on the borrower's
+        # income would put a false statement about the loan in front of a processor.
+        return _Floor(derivation=f"{unavailable} ({reference_key} is not a readable fraction)")
     basis = _decimal_operand(materiality.basis, subject_tags, loan_tags)
-    if fraction is None or basis is None:
+    if basis is None:
         return _Floor(derivation=f"{unavailable} ({basis_label} is not established)")
     observed = _decimal_operand(materiality.observed, subject_tags, loan_tags)
     if observed is None:

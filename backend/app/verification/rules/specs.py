@@ -24,7 +24,9 @@ rule (AS-1); it is generalized in LP-308. Do not treat the shape as final.
 
 from __future__ import annotations
 
+import re
 import string
+from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
 
@@ -128,6 +130,49 @@ class ReferenceValues(BaseModel):
 # spec scoping itself on this tag actually enumerates per_document (else its predicate is always
 # absent → the rule silently never applies). Not a vocabulary tag (never in fact_tags.csv).
 DOC_TYPE_TAG = "document.document_type"
+
+_PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def parse_reference_fraction(raw: str) -> Decimal | None:
+    """A ``reference_values.values`` entry as a number: a trailing ``%`` → a fraction; else a plain
+    Decimal; ``None`` when unusable.
+
+    Lives HERE, beside the data it reads, and is used by BOTH the load-time validator and
+    ``deterministic._reference_operand``. Two copies would be free to drift, and a load guard that
+    accepts what the evaluator later rejects is worse than no guard: it certifies a threshold that
+    silently never applies.
+    """
+    match = _PERCENT.search(raw)
+    if match is not None:
+        return Decimal(match.group(1)) / Decimal(100)
+    try:
+        return Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def reject_loan_tag(conditions: tuple[TagCondition, ...], field: str) -> None:
+    """Fail loud if a `loan_tag` appears where the evaluator reads only the SUBJECT's tag map.
+
+    `loan_tag` (LP-517) is resolved by ``applicability.resolve_applicability`` alone. Every other
+    consumer of a :class:`TagCondition` — ``deterministic._tags_hold`` (``when_tags``),
+    ``consistency._tag_holds`` (``gather_filter``), ``judgment._guideline_exempts`` (``exempt_when``) —
+    does ``subject_tags.get(cond.tag_id)`` with no loan-map fallback. `tag_id` resolves the NAME either
+    way, so such a predicate loads cleanly and is then ABSENT on every subject: an `eq` guard silently
+    never holds and an `ne` guard always does.
+
+    That is the same shape of trap the `op` comment above warns about, and an author copying LP-517's
+    AS-2 applicability pattern into a `when_tags` would fall straight into it. Caught at LOAD until the
+    loan map is threaded into those three sites.
+    """
+    offenders = sorted({c.loan_tag for c in conditions if c.loan_tag is not None})
+    if offenders:
+        raise ValueError(
+            f"`{field}` does not resolve `loan_tag` — {offenders} would be absent on every subject "
+            "(an `eq` guard would never hold, an `ne` guard always would). Use a subject `tag`, or "
+            "scope the rule with `applicability`, which does read the loan map."
+        )
 
 
 class TagCondition(BaseModel):
@@ -302,6 +347,11 @@ class OutcomeRule(BaseModel):
     default: bool = False
     reasoning: str = PydField(min_length=1)
     how_to_fix: str | None = None
+
+    @model_validator(mode="after")
+    def _when_tags_are_subject_tags(self) -> OutcomeRule:
+        reject_loan_tag(self.when_tags, "when_tags")
+        return self
 
 
 class DeterministicEval(BaseModel):
@@ -527,6 +577,7 @@ class JudgmentEval(BaseModel):
             raise ValueError(
                 "`exempt_when` is an empty list — declare at least one condition, or omit the field"
             )
+        reject_loan_tag(_as_conditions(self.exempt_when), "exempt_when")
         unknown = set(self.exempt_unless_judgment_in) - set(self.value_domain)
         if unknown:
             raise ValueError(
@@ -628,6 +679,11 @@ class ConsistencyEval(BaseModel):
     on_cannot_tell: ConsistencyOutcome | None = None
 
     @model_validator(mode="after")
+    def _gather_filter_is_a_subject_tag(self) -> ConsistencyEval:
+        reject_loan_tag(_as_conditions(self.gather_filter), "gather_filter")
+        return self
+
+    @model_validator(mode="after")
     def _judge_matches_mode_and_templates_are_valid(self) -> ConsistencyEval:
         if self.compare_mode == "fuzzy" and self.judge is None:
             raise ValueError("a fuzzy consistency rule needs a `judge` block")
@@ -724,25 +780,32 @@ class RuleSpec(BaseModel):
 
     @model_validator(mode="after")
     def _materiality_fractions_resolve(self) -> RuleSpec:
-        """LP-518 — every fraction key must name a real `reference_values.values` entry.
+        """LP-518 — every fraction key must name a real `reference_values.values` entry AND parse.
 
-        A typo'd key resolves to None at eval time, which fail-closes to couldnt_check on EVERY subject
-        — the rule would look like it was working while silently checking nothing. Catch it at LOAD.
+        Either failure resolves to None at eval time, which degrades EVERY subject to "reviewed at any
+        amount" — the rule would look wired while filtering nothing. Existence is not enough: a value of
+        "fifty percent" is present and unreadable, and disables the floor just as silently as a typo'd
+        key. Both are caught at LOAD.
         """
         materiality = self.judgment.materiality if self.judgment is not None else None
         if materiality is None:
             return self
-        missing = sorted(
-            {
-                key
-                for key in materiality.fraction_by_loan_purpose.values()
-                if key not in self.reference_values.values
-            }
-        )
+        missing, unparseable = [], []
+        for key in sorted(set(materiality.fraction_by_loan_purpose.values())):
+            raw = self.reference_values.values.get(key)
+            if raw is None:
+                missing.append(key)
+            elif parse_reference_fraction(raw) is None:
+                unparseable.append(f"{key}={raw!r}")
         if missing:
             raise ValueError(
                 f"spec {self.rule_id}: materiality references reference_values key(s) {missing} "
                 f"that are not declared (declared: {sorted(self.reference_values.values)})"
+            )
+        if unparseable:
+            raise ValueError(
+                f"spec {self.rule_id}: materiality fraction(s) {unparseable} cannot be read as a "
+                "percentage or decimal — the floor would silently never apply"
             )
         return self
 

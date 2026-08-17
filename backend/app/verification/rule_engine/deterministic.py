@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from app.ai.extraction.parsing import coerce_date, coerce_decimal
@@ -42,6 +42,7 @@ from app.verification.rules.specs import (
     RuleSpec,
     TagCondition,
     _as_conditions,
+    parse_reference_fraction,
 )
 from app.verification.snapshot.model import CalculationEntry, Snapshot
 from app.verification.snapshot.tag import Tag
@@ -140,17 +141,12 @@ def _calc_operand(snapshot: Snapshot, calc_name: str, key: str) -> Decimal | Non
 
 
 def _reference_operand(spec: RuleSpec, key: str) -> Decimal | None:
-    """A reference value: a trailing ``%`` → a fraction; else a plain Decimal. None if unusable."""
+    """A reference value: a trailing ``%`` → a fraction; else a plain Decimal. None if unusable.
+
+    The parsing itself lives in ``specs.parse_reference_fraction`` so the LOAD-time validator that
+    certifies a materiality fraction is readable uses the very same code that reads it here."""
     raw = spec.reference_values.values.get(key)
-    if raw is None:
-        return None
-    match = _PERCENT.search(raw)
-    if match is not None:
-        return Decimal(match.group(1)) / Decimal(100)
-    try:
-        return Decimal(raw)
-    except (InvalidOperation, ValueError):
-        return None
+    return None if raw is None else parse_reference_fraction(raw)
 
 
 def _resolve_operand(

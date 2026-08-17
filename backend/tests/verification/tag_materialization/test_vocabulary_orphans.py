@@ -142,7 +142,7 @@ def _hard_reads(spec: RuleSpec) -> set[str]:
     if spec.consistency is not None:
         tags.add(spec.consistency.gather_tag)
         if spec.consistency.gather_filter is not None:
-            tags.add(spec.consistency.gather_filter.tag)
+            tags.add(spec.consistency.gather_filter.tag_id)
     if spec.deterministic is not None:
         det = spec.deterministic
         tags |= set(det.load_bearing_tags)
@@ -153,7 +153,10 @@ def _hard_reads(spec: RuleSpec) -> set[str]:
             tags |= _operand_tags(operand)
         for outcome in det.outcomes:
             for cond in outcome.when_tags:
-                tags.add(cond.tag)
+                # LP-518: `tag_id`, not `.tag` — a loan_tag condition has `.tag is None`, which would
+                # insert None into a set[str]. (Rejected at load in when_tags now, but the census must
+                # not depend on that to stay type-correct.)
+                tags.add(cond.tag_id)
     if spec.judgment is not None:
         tags |= set(spec.judgment.load_bearing_tags)
         if spec.judgment.applicability is not None:

@@ -272,6 +272,71 @@ def test_a_materiality_naming_an_undeclared_reference_key_fails_at_load() -> Non
         RuleSpec(**body)
 
 
+async def test_an_unreadable_model_answer_never_clears_an_exempt_deposit() -> None:
+    """⚠️ REVIEW FINDING 1 (pre-existing since LP-516, live on staging until this lands).
+
+    `_resolve` maps a MALFORMED or OFF-DOMAIN model response to "unknown". "unknown" is not in
+    `exempt_unless_judgment_in` (which lists only "yes"), so it fell straight through to the predicate:
+    a $20,000 payroll-categorised deposit whose model response could not be parsed shipped as SATISFIED
+    with ratification_pending=False — an AI FAILURE producing a pass with no human in the loop, while
+    every other AI-failure path in the module returns couldnt_check.
+    """
+    evaluation, _ = await _evaluate(amount="20000.00", category="payroll", answer="not-a-verdict")
+
+    assert evaluation.verdict is not Verdict.SATISFIED
+    assert evaluation.verdict is Verdict.NEEDS_REVIEW
+    assert evaluation.ratification_pending is True
+
+
+async def test_the_message_names_which_exemption_cleared_the_deposit() -> None:
+    """⚠️ REVIEW FINDING 4. Both of AS-12's exemptions read the SAME tag, so a message built from the
+    tag alone renders a payroll clear and an interest clear identically. The matched condition's VALUE
+    is the only thing that distinguishes them, and a processor reading "satisfied" on a borrowed-funds
+    check needs to know which one applied."""
+    payroll, _ = await _evaluate(amount="8000.00", category="payroll")
+    interest, _ = await _evaluate(amount="8000.00", category="interest")
+
+    assert payroll.verdict is Verdict.SATISFIED and interest.verdict is Verdict.SATISFIED
+    assert "payroll" in payroll.reasoning and "interest" not in payroll.reasoning
+    assert "interest" in interest.reasoning and "payroll" not in interest.reasoning
+
+
+def test_an_unparseable_fraction_fails_at_load_rather_than_disabling_the_floor() -> None:
+    """⚠️ REVIEW FINDING 3. Key-exists was not enough: "fifty percent" is present and unreadable, and
+    would degrade every subject to "reviewed at any amount" exactly as a typo'd key does. Validated with
+    the SAME parser the evaluator uses (`parse_reference_fraction`), so the guard cannot certify a value
+    the evaluator then rejects."""
+    from app.verification.rules.specs import RuleSpec
+    from pydantic import ValidationError
+
+    body = yaml.safe_load((_SPECS_DIR / "AS-12.yaml").read_text(encoding="utf-8"))
+    body["reference_values"]["values"]["materiality_floor_pct_purchase"] = "fifty percent"
+
+    with pytest.raises(ValidationError, match="cannot be read as a percentage"):
+        RuleSpec(**body)
+
+
+def test_a_loan_tag_is_rejected_where_the_evaluator_would_never_resolve_it() -> None:
+    """⚠️ REVIEW FINDING 2. `loan_tag` is resolved by `applicability` ALONE. In `exempt_when` (and
+    `when_tags`, and `gather_filter`) the evaluator does `subject_tags.get(cond.tag_id)`, so the name
+    resolves and the tag is then absent on every subject — an `eq` guard silently never holds and an
+    `ne` guard always does. Exactly the trap an author would fall into by copying LP-517's AS-2
+    applicability pattern into an exemption."""
+    from app.verification.rules.specs import JudgmentEval, TagCondition
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="does not resolve `loan_tag`"):
+        JudgmentEval(
+            subject="per_deposit",
+            load_bearing_tags=("txn.apparent_category",),
+            reasoned_over=("txn.apparent_category",),
+            output_tag="as.borrowed_funds",
+            value_domain=("yes", "no", "unknown"),
+            system_prompt="x",
+            exempt_when=TagCondition(loan_tag="loan.purpose", op="eq", value="purchase"),
+        )
+
+
 def test_an_empty_exemption_list_fails_at_load() -> None:
     """`exempt_when: []` is not None, so it would read as "this rule has an exemption" at every site
     while exempting nothing — the LP-516 failure mode (a gate that looks wired and does nothing)."""

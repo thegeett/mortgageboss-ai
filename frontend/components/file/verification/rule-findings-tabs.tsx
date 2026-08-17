@@ -189,18 +189,25 @@ function collapsedSummary(findings: RuleFinding[]): string {
   const first = findings[0];
   if (first === undefined) return "";
   if (findings.every((f) => f.message === first.message)) return first.message;
+  // NOT prefixed with the count — the badge two lines up already renders "N findings", and printing it
+  // here too read as "3 findings   3 findings — …".
   const subjects = findings.map((f) => f.subject_label).filter(Boolean);
+  // Every label empty (a subject type the read path could not name) would leave a bare dangling dash,
+  // so fall back to the shared-message form rather than punctuation with nothing after it.
+  if (subjects.length === 0) return first.message;
   const shown = subjects.slice(0, 3).join(", ");
   const rest = subjects.length - 3;
-  return rest > 0
-    ? `${findings.length} findings — ${shown}, and ${rest} more`
-    : `${findings.length} findings — ${shown}`;
+  return rest > 0 ? `${shown}, and ${rest} more` : shown;
 }
 
 function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
   const first = findings[0];
+  // A VIOLATION group starts EXPANDED. LP-518 widened grouping from rule+message to rule alone, which
+  // also swept up `open` findings whose messages genuinely differ per subject — collapsing those hid the
+  // violation text and its how_to_fix behind a click, which is not the noise this set out to remove.
+  // Grouping still applies (one card per rule, as asked); only the default disclosure state differs.
+  const [open, setOpen] = useState(first?.evaluation_outcome === "open");
+  const panelId = useId();
   if (first === undefined) return null; // never — the caller only builds this for a non-empty group
   const dot = TONE_DOT[outcomeMeta(first.evaluation_outcome).tone];
   return (

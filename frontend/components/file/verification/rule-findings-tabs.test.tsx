@@ -337,6 +337,67 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
     const header = screen.getByRole("button", { name: /2 findings/i });
     expect(within(header).getByText(/could not be classified/)).toBeDefined();
   });
+
+  it("LP-518 — the header does not print the count twice", () => {
+    // The badge already renders "N findings"; the summary prefixing it too read as
+    // "3 findings   3 findings — $3,300 on 3/2, …".
+    renderTabs(
+      ["$3,300 on 3/2", "$1,000 on 3/14"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "AS-12",
+          evaluation_outcome: "needs_review",
+          subject_key: `txn${i}`,
+          subject_label: label,
+          message: `a distinct model sentence about deposit ${i}`,
+        }),
+      ),
+    );
+
+    const header = screen.getByRole("button", { name: /2 findings/i });
+    expect(header.textContent?.match(/2 findings/g)).toHaveLength(1);
+  });
+
+  it("LP-518 — a group of OPEN violations starts expanded, never hiding the fix behind a click", () => {
+    // Grouping by rule alone also swept up `open`, whose deterministic messages genuinely differ per
+    // subject. Collapsing those hid the violation text and how_to_fix — not the noise LP-518 targets.
+    renderTabs(
+      ["Deposit A", "Deposit B"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "AS-1",
+          evaluation_outcome: "open",
+          subject_key: `txn${i}`,
+          subject_label: label,
+          message: `deposit ${i} exceeds the large-deposit threshold and is not sourced`,
+        }),
+      ),
+    );
+
+    // No click: both members' text is already on screen.
+    expect(screen.getByText(/deposit 0 exceeds the large-deposit threshold/)).toBeDefined();
+    expect(screen.getByText(/deposit 1 exceeds the large-deposit threshold/)).toBeDefined();
+  });
+
+  it("LP-518 — a needs_review group still starts collapsed", () => {
+    renderTabs(
+      ["$3,300 on 3/2", "$1,000 on 3/14"].map((label, i) =>
+        ruleFinding({
+          id: `rf-${i}`,
+          rule_id: "AS-12",
+          evaluation_outcome: "needs_review",
+          subject_key: `txn${i}`,
+          subject_label: label,
+          message: `a distinct model sentence about deposit ${i}`,
+        }),
+      ),
+    );
+
+    expect(screen.queryByText(/a distinct model sentence about deposit 0/)).toBeNull();
+    expect(screen.getByRole("button", { name: /2 findings/i }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
 });
 
 describe("LP-377-C — the stale-findings notice", () => {

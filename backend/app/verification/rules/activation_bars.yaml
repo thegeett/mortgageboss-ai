@@ -317,8 +317,17 @@ AS-11:
 AS-12:
   # LP-390-5a: both load-bearing AI tags now measured -> calibratable-now. Judgmental -> ships RATIFY, so a
   # human ratifies every verdict regardless of the number (activation_mode returns 'ratify' for ships:ratify);
-  # the threshold is the SURFACING floor. LP-390-7: Priya SIGNED OFF (validated:true); ACTIVE (_LP390_ACTIVATED)
-  # — it surfaces to needs_review for human ratification, never an auto verdict.
+  # the threshold is the SURFACING floor. LP-390-7: Priya SIGNED OFF (validated:true); ACTIVE (_LP390_ACTIVATED).
+  #
+  # ⚠️ CORRECTED, LP-518. This block used to end "never an auto verdict", and since LP-516 that has not been
+  # true of every path. A deposit matching a declared GUIDELINE EXEMPTION (`exempt_when` — payroll, and now
+  # interest) is SATISFIED with ratification_pending=False, so it never reaches a human. That is deliberate:
+  # the clearing is done by a deterministic predicate over `txn.apparent_category`, and the model's answer can
+  # only ADD a review ("yes" overrides the exemption), never remove one. Note what the exempt path therefore
+  # rests on: `txn.apparent_category` measured 100% concrete at n=17 on ONE file. `ships: ratify` still
+  # describes the DEFAULT mode correctly, and the loader guard below (which only rejects `ships: auto` on a
+  # judgmental rule) is unaffected — but nothing yet checks that a rule declaring `exempt_when` predicates on
+  # a MEASURED tag. AS-12 happens to; a future exemption on an unmeasured tag would pass silently.
   status: calibratable-now
   ships: ratify
   threshold: 0.90
