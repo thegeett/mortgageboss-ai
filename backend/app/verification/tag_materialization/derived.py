@@ -24,7 +24,7 @@ from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
-from app.verification.snapshot.traversal import all_list_rows
+from app.verification.snapshot.traversal import all_list_rows, all_transactions
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
     LOAN_SUBJECT,
@@ -711,84 +711,172 @@ def _reserves_required_months(
 # `exempt_when`. They are excluded from the repeat scan for the arithmetic reason LP-518 recorded: a
 # borrower paid the same salary twice a month IS a repeated same-amount deposit, so counting payroll
 # would fire this on essentially every W-2 file and say nothing.
-_REPEAT_SCAN_EXEMPT = frozenset({"payroll", "interest"})
+#
+# `transfer_own` is exempt for the same reason, and it is Stage A's OWN label for "a transfer between
+# the borrower's own accounts". A standing savings-to-checking transfer of one round figure is the most
+# common benign repeated credit there is — the bar's `fp_fn` text names it as a false positive this rule
+# must avoid. AS-12 can leave it unexempted because a model still judges each deposit; this rule asserts
+# the pattern deterministically, so it cannot.
+_REPEAT_SCAN_EXEMPT = frozenset({"payroll", "interest", "transfer_own"})
+
+#: Two deposits of one amount belong to the same SPLIT only if they land within this many days of each
+#: other. A split is CLUSTERED — a sum broken up to stay under a floor arrives over days — while
+#: recurring income of a fixed amount (rent, child support, a non-payroll second job) arrives about a
+#: month apart. Without a window, six monthly $1,800 credits sum to $10,800 and clear a 50% floor on any
+#: income under $21.6k/mo, which accuses a documented income stream of being borrowed funds. 14 days
+#: leaves room for a split spread over a week or two while keeping a monthly cadence out; a fortnightly
+#: one is caught, which is the accepted cost of not doing per-counterparty grouping (txn.counterparty is
+#: produced by nothing today).
+_SPLIT_WINDOW_DAYS = 14
 
 
 def _stmt_repeated_money_in_max_total(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
-    """stmt.repeated_money_in_max_total — the largest TOTAL among money-in deposits sharing one exact
-    amount (AS-13). Groups of one are not repeats and never count.
+    """stmt.repeated_money_in_max_total — the largest TOTAL among money-in deposits that share one exact
+    amount AND cluster within :data:`_SPLIT_WINDOW_DAYS` (AS-13). Groups of one never count.
 
     WHY THIS SHAPE. A deposit split to stay under a materiality floor shows up as the same amount, more
-    than once — which needs no floor and no counterparty. The obvious alternative ("sum what AS-12's
-    floor scoped out") is NOT buildable: a recipe receives only the snapshot, materialises before any
-    rule runs, and has no access to a spec's reference_values, so it cannot know what floor AS-12
-    applied. Recomputing the floor here would put a threshold in Python and leave two copies to drift.
+    than once, over a short span — which needs no floor and no counterparty. The obvious alternative
+    ("sum what AS-12's floor scoped out") is NOT buildable: a recipe receives only the snapshot,
+    materialises before any rule runs, and has no access to a spec's reference_values, so it cannot know
+    what floor AS-12 applied. Recomputing the floor here would put a threshold in Python and leave two
+    copies to drift.
 
-    ABSTENTION follows :func:`_stmt_nsf_count` exactly, and for the same reason — a wrong 0 here reads
-    as "we looked and there is no pattern":
+    THREE THINGS KEEP "SAME AMOUNT" FROM MEANING "ARRANGED". Amount equality alone is a weak signal, and
+    every one of these is a way it is wrong — all three are answerable from facts already on the subject:
+
+    * the CATEGORY, via :data:`_REPEAT_SCAN_EXEMPT` — a payroll, interest or own-account transfer repeats
+      by its nature;
+    * the CADENCE, via :data:`_SPLIT_WINDOW_DAYS` — recurring income repeats monthly, a split repeats
+      over days;
+    * the DOCUMENT, via the (amount, date, description) key below — two uploads of one statement are two
+      documents with two content_ids, so without deduplication a single $9,000 deposit present in both
+      copies becomes a 2-member group totalling $18,000. AS-1 and AS-12 are immune to that (they would
+      emit the same per-deposit finding twice); this rule would turn duplication into a NEW claim about a
+      pattern. Deduplication can in principle merge two genuinely distinct deposits that agree on all
+      three, which under-reports — the right direction for a fraud-adjacent claim, and the direction the
+      bar's `fp_fn` text already chooses.
+
+    ABSTENTION follows :func:`_stmt_nsf_count` — a wrong 0 here reads as "we looked and there is no
+    pattern" — except that an unreadable deposit is weighed rather than fatal:
 
     * tags absent, or ``txn.is_money_in`` on NO subject -> unknown (detection never ran != none found);
-    * any money-in transaction whose direction, category or amount is unreadable -> unknown, because
-      the largest repeat total would then be a LOWER BOUND and asserting it could under-report.
+    * a transaction whose AMOUNT or DATE is unreadable -> unknown. Both are parsed rather than perceived,
+      so this is rare, and without either one the deposit cannot be placed in or out of a cluster.
+    * a transaction whose DIRECTION or CATEGORY is undetermined -> unknown ONLY IF its amount could
+      change the answer, i.e. it matches an in-scope amount or another undetermined one. An unreadable
+      deposit whose amount appears nowhere else cannot form or extend a repeat, so its category is
+      irrelevant and abstaining on it would be theatre. Stage A is told to return ``unknown`` liberally
+      and a real file carries dozens of transactions, so the unbounded form made the tag less likely to
+      be concrete the larger the file got — useless on exactly the files this rule is for.
 
-    A concrete ``0`` means only what it says: every in-scope deposit was readable and no amount repeated.
+    A concrete ``0`` means only what it says: every deposit that could matter was readable, and no
+    non-exempt amount repeats inside the window.
     """
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized — cannot look for repeated deposits"
-    by_amount: dict[Decimal, int] = {}
+
+    # The scan iterates the TAGS, exactly as its neighbours do, so its coverage does not become
+    # conditional on the documents section being readable. Descriptions come from the raw records, which
+    # no tag carries: transaction subjects are keyed by content_id, so one index gives them by subject.
+    # A subject with no matching record (a tags-only snapshot) keeps its description empty and
+    # deduplicates on amount and date alone.
+    descriptions = {
+        record.content_id: str(record.description.value or "")
+        for record in all_transactions(snapshot)
+    }
+    by_amount: dict[Decimal, list[date]] = {}
+    in_scope_keys: set[tuple[Decimal, date, str]] = set()
+    undetermined_keys: set[tuple[Decimal, date, str]] = set()
     any_seen = False
-    for tags in snapshot.tags.by_subject.values():
+
+    for subject_id, tags in snapshot.tags.by_subject.items():
         direction = tags.get("txn.is_money_in")
         if direction is None:
             continue  # not a transaction subject
         any_seen = True
-        if str(direction.value) == _UNKNOWN:
-            return (
-                _UNKNOWN,
-                "a transaction's direction is unreadable (unknown) — a repeat total computed without "
-                "it could be an undercount, so it cannot be asserted",
-            )
-        if str(direction.value) != "in":
-            continue
-        category = tags.get("txn.apparent_category")
-        if category is None or str(category.value) == _UNKNOWN:
-            return (
-                _UNKNOWN,
-                "a money-in deposit's category is undetermined — it cannot be told apart from an "
-                "exempt payroll/interest credit, so the repeat total cannot be asserted",
-            )
-        if str(category.value) in _REPEAT_SCAN_EXEMPT:
-            continue
-        # `_decimal_or_none` is the module's existing Tag→Decimal helper (defined below): absent,
-        # "unknown" and unparseable all collapse to None, which is exactly the abstain condition here.
+
+        # `_decimal_or_none` / `_date_or_none` are the module's Tag→value helpers (defined below):
+        # absent, "unknown" and unparseable all collapse to None.
         amount = _decimal_or_none(tags.get("txn.amount"))
-        if amount is None:
+        day = _date_or_none(tags.get("txn.date"))
+        if amount is None or day is None:
             return (
                 _UNKNOWN,
-                "a money-in deposit's amount is missing or unreadable — the repeat total would be an "
-                "undercount, so it cannot be asserted",
+                "a transaction's amount or date is missing or unreadable — a deposit with neither an "
+                "amount nor a date cannot be placed in or out of a cluster, so no repeat total can be "
+                "asserted",
             )
-        by_amount[amount] = by_amount.get(amount, 0) + 1
+
+        # One deposit, identified by its own content rather than by which upload it arrived in.
+        key = (amount, day, descriptions.get(subject_id, ""))
+
+        category = tags.get("txn.apparent_category")
+        if str(direction.value) == _UNKNOWN or category is None or str(category.value) == _UNKNOWN:
+            undetermined_keys.add(key)
+            continue
+        if str(direction.value) != "in" or str(category.value) in _REPEAT_SCAN_EXEMPT:
+            continue
+        if key in in_scope_keys:
+            continue  # the same deposit, seen again in a duplicate or overlapping statement
+        in_scope_keys.add(key)
+        by_amount.setdefault(amount, []).append(day)
+
     if not any_seen:
         return (
             _UNKNOWN,
             "no txn.is_money_in tag on any transaction — deposit detection has not run, so the absence "
             "of a repeated amount cannot be asserted",
         )
-    repeats = {amount: count for amount, count in by_amount.items() if count >= 2}
-    if not repeats:
+
+    # BOUNDED abstention: only an undetermined deposit whose amount could join or create a group can
+    # change the answer. One that matches nothing is irrelevant however it would have been categorized.
+    undetermined_amounts = [amount for amount, _day, _desc in undetermined_keys]
+    for amount in undetermined_amounts:
+        if amount in by_amount or undetermined_amounts.count(amount) > 1:
+            return (
+                _UNKNOWN,
+                f"a transaction of {amount} has an undetermined direction or category and that amount "
+                "appears on another deposit — it could form or extend a repeat, so the total cannot be "
+                "asserted",
+            )
+
+    best: tuple[Decimal, int] | None = None  # (amount, deposits in its largest cluster)
+    for amount, days in by_amount.items():
+        clustered = _largest_split_cluster(days)
+        if clustered < 2:
+            continue  # one deposit, or repeats too far apart to be a split
+        if best is None or amount * clustered > best[0] * best[1]:
+            best = (amount, clustered)
+
+    if best is None:
         return (
             "0",
-            "no non-exempt money-in amount appears more than once across the file's statements",
+            f"no non-exempt money-in amount repeats within {_SPLIT_WINDOW_DAYS} days across the file's "
+            "statements",
         )
-    amount = max(repeats, key=lambda a: a * repeats[a])
-    count = repeats[amount]
+    amount, clustered = best
     return (
-        str(amount * count),
-        f"{count} money-in deposits of {amount} each across the file's statements",
+        str(amount * clustered),
+        f"{clustered} money-in deposits of {amount} each within {_SPLIT_WINDOW_DAYS} days across the "
+        "file's statements",
     )
+
+
+def _largest_split_cluster(days: list[date]) -> int:
+    """The most deposits of ONE amount that chain together in within-window steps.
+
+    Sorted ascending, each member has to fall within :data:`_SPLIT_WINDOW_DAYS` of the previous one. A
+    sum split over three days gives 3; twelve monthly credits of one rent figure give 1, because no step
+    is inside the window — so they never reach the two-member minimum a repeat requires. A chain rather
+    than a fixed span so a split that dribbles out over three weeks still reads as one cluster.
+    """
+    best = run = 1
+    for earlier, later in pairwise(sorted(days)):
+        run = run + 1 if (later - earlier).days <= _SPLIT_WINDOW_DAYS else 1
+        best = max(best, run)
+    return best
 
 
 def _stmt_nsf_count(
@@ -4342,6 +4430,14 @@ def _decimal_or_none(tag: Tag | None) -> Decimal | None:
         return Decimal(str(tag.value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _date_or_none(tag: Tag | None) -> date | None:
+    """A date tag's value as a ``date``, or None (absent / unknown / unparseable) — the
+    :func:`_decimal_or_none` counterpart, over the same collapse-to-None convention."""
+    if tag is None or str(tag.value) == _UNKNOWN:
+        return None
+    return coerce_date(str(tag.value))
 
 
 def _stmt_continuity(

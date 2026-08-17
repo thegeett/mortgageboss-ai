@@ -316,15 +316,21 @@ AS-11:
 
 AS-13:
   # LP-519 — the split-deposit signal, and a rule whose evidence is ARITHMETIC over a derived aggregate.
-  # Its ONLY AI dependency is txn.apparent_category, read by stmt.repeated_money_in_max_total to exclude
-  # the readily-identifiable categories; that tag scored 100% concrete (n=17, LP-390-5a) — the same
-  # measurement AS-12 activates on. calibratable-now + validated + 1.0 >= 0.90 -> eligible.
+  # TWO AI tags are in the chain, both reached THROUGH stmt.repeated_money_in_max_total (the AS-7
+  # precedent: list the tag the derived aggregate reads, not just the one the spec names):
+  #   * txn.is_money_in — read FIRST, and load-bearing in BOTH directions. A debit mis-tagged `in`
+  #     inflates the total; a deposit mis-tagged `out` drops out of its group and deflates it. 98%
+  #     (n=50, docs/tickets/LP-379-D.md:68).
+  #   * txn.apparent_category — excludes the readily-identifiable categories. 100% concrete (n=17,
+  #     LP-390-5a), the same measurement AS-12 activates on.
+  # measured_accuracy is the WEAKEST of the two, per this file's convention (see AS-2), so 0.98 and not
+  # the 1.0 that only describes the category tag. calibratable-now + validated + 0.98 >= 0.90 -> eligible.
   status: calibratable-now
   ships: auto
   threshold: 0.90
   validated: false           # ⚠️ THE HOLD — see the rationale; flip once AS-13 has run on a real file
-  measured_accuracy: 1.0     # txn.apparent_category, the single AI tag in the chain (n=17, one file)
-  load_bearing_ai_tags: [txn.apparent_category]
+  measured_accuracy: 0.98    # txn.is_money_in, the weakest load-bearing tag in the chain (n=50)
+  load_bearing_ai_tags: [txn.is_money_in, txn.apparent_category]
   fp_fn: >-
     FP > FN, deliberately, and the rule is shaped for it. Repeated equal deposits have ordinary
     explanations — a standing transfer between the borrower's own accounts, a second job paid by a
@@ -334,11 +340,16 @@ AS-13:
     sub-threshold deposits of one split gift produce nothing at all.
   rationale: >-
     NO NEW PERCEPTION. Every input already exists and is produced: txn.is_money_in and
-    txn.apparent_category (Stage A), txn.amount (parsed), dti.qualifying_income_monthly (derived from
-    MISMO stated income). That is what makes this buildable now, where counterparty grouping and FR-5
+    txn.apparent_category (Stage A), txn.amount and txn.date (parsed), the transaction's own
+    PII-redacted description (raw snapshot fact), dti.qualifying_income_monthly (derived from MISMO
+    stated income). That is what makes this buildable now, where counterparty grouping and FR-5
     are not — txn.counterparty, txn.is_recurring and txn.implies_obligation are declared in
     fact_tags.csv and produced by NOTHING (verified across tag_production.yaml, app/ai/tag_production.py
-    and app/services/tag_correlation.py).
+    and app/services/tag_correlation.py). txn.date and the description carry the two discriminators that
+    keep "same amount" from meaning "arranged": a CADENCE test (recurring income repeats monthly, a split
+    repeats over days) and DEDUPLICATION (two uploads of one statement are two documents, so a single
+    deposit would otherwise be counted twice and manufacture a pattern). Neither is a new AI dependency,
+    which is why they do not move measured_accuracy.
     THE THRESHOLD, 50% of monthly qualifying income, is DECIDED and not pending sign-off. It is
     borrowed from B3-4.2-02's large-deposit figure as a sensible magnitude for "significant", NOT as an
     application of that test: the guideline's large-deposit rule is explicitly per-transaction ("a
