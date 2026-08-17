@@ -48,10 +48,29 @@ _OUTCOMES = (
 )
 _PREVIOUS = tuple(v for v in _OUTCOMES if v != "pending_automation")
 
+# ⚠️ THE finding_events NAMES ARE DOUBLE-PREFIXED, AND THAT IS NOT A TYPO. Read from the live schema
+# (pg_constraint), not from LP-316's source: that migration passed an already-prefixed name to
+# `sa.CheckConstraint(name="ck_finding_events_finding_event_from_outcome")` inside `create_table`, and
+# the metadata naming convention `ck_%(table_name)s_%(constraint_name)s` prefixed it AGAIN. The
+# `findings` constraint escaped this because LP-316 created it with raw `ALTER TABLE ... ADD CONSTRAINT`,
+# which the convention never touches.
+#
+# A first version of this migration used the short names and failed on staging with
+# UndefinedObjectError — after the `findings` drop had already run. Alembic's transactional DDL rolled
+# the whole thing back cleanly, which is the only reason that was a non-event. Do not "tidy" these
+# names without renaming the live constraints in the same migration.
 _CONSTRAINTS = (
     ("findings", "ck_findings_evaluationoutcome", "evaluation_outcome"),
-    ("finding_events", "ck_finding_events_finding_event_from_outcome", "from_outcome"),
-    ("finding_events", "ck_finding_events_finding_event_to_outcome", "to_outcome"),
+    (
+        "finding_events",
+        "ck_finding_events_ck_finding_events_finding_event_from_outcome",
+        "from_outcome",
+    ),
+    (
+        "finding_events",
+        "ck_finding_events_ck_finding_events_finding_event_to_outcome",
+        "to_outcome",
+    ),
 )
 
 

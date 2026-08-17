@@ -27,10 +27,15 @@ _VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 
 # The three constraints sharing one outcome list. A finding that cannot TRANSITION to an outcome is as
 # broken as one that cannot be written with it, so all three are guarded.
+# ⚠️ The finding_events names are DOUBLE-PREFIXED, read from the live schema rather than from LP-316's
+# source. That migration passed an already-prefixed name to `sa.CheckConstraint(name=...)` inside
+# `create_table`, and the metadata naming convention prefixed it again. `findings` escaped it because
+# LP-316 created that one with raw ALTER TABLE. Using the source names made LP-521's first deploy fail
+# with UndefinedObjectError.
 _CONSTRAINTS = (
     "ck_findings_evaluationoutcome",
-    "ck_finding_events_finding_event_from_outcome",
-    "ck_finding_events_finding_event_to_outcome",
+    "ck_finding_events_ck_finding_events_finding_event_from_outcome",
+    "ck_finding_events_ck_finding_events_finding_event_to_outcome",
 )
 
 
