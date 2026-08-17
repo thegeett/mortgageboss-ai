@@ -24,12 +24,12 @@ from app.verification.rules.kinds import (
 
 # Phase-0 counts from the xlsx (formalized as-is; the file's "130" title is off by 3).
 _EXPECTED = {
-    RuleKindName.CALCULATIVE: 29,  # LP-519 +AS-13 (repeated same-amount deposits — arithmetic over a derived aggregate)  # LP-447 IH-1 reclassified calculative -> structural (ADR-340, Priya's ruling)
+    RuleKindName.CALCULATIVE: 28,  # LP-447 IH-1 reclassified calculative -> structural (ADR-340, Priya's ruling)
     RuleKindName.STRUCTURAL: 66,  # LP-509-D1 +IH-9 (hazard policy expired — a date compare); LP-494 +CO-5 +CO-3 (was judgmental — its real inputs are typed questionnaire fields); LP-430 +IN-15; LP-433 +IN-16 (deterministic doc checks); LP-447 +IH-1
     RuleKindName.JUDGMENTAL: 27,  # LP-494 -CO-5 -CO-3
     RuleKindName.OUT_OF_SCOPE: 15,
 }
-_TOTAL = 137  # LP-519 +AS-13 (repeated same-amount deposits; INERT — bar held on measurement)  # LP-430 +IN-15; LP-433 +IN-16  # LP-509-D1 +IH-9 (hazard policy expired)
+_TOTAL = 136  # LP-519 AS-13 withdrawn (broke staging twice as an inert rule; see registry.py)  # LP-430 +IN-15; LP-433 +IN-16  # LP-509-D1 +IH-9 (hazard policy expired)
 
 
 def test_all_rules_present_with_expected_counts() -> None:

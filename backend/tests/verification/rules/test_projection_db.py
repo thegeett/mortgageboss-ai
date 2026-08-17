@@ -37,7 +37,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
 
     # First run inserts everything, removes nothing.
     assert (
-        result.rules.inserted == 137
+        result.rules.inserted == 136
     )  # LP-430 +IN-15; LP-433 +IN-16  # LP-509-D1 +IH-9 (hazard policy expired)
     assert (
         result.tags.inserted
@@ -97,7 +97,7 @@ async def test_as1_projects_priya_validated_false_with_spec(db_session: AsyncSes
     # +IH-1 (LP-447 — its spec now exists) = 45; +CL-1/CR-13/PR-6 (LP-485 — specs now exist, all held) = 48.
     assert (
         with_spec
-        == 83  # LP-519 +AS-13 (spec written, INERT — held on measurement)  # LP-509-D1 +IH-9 (spec written, ACTIVE)  # LP-498 +FR-3 (spec written, ACTIVE)  # LP-496a +PE-1/PE-3 (specs written, both ACTIVE)  # LP-495b +OC-3/DT-7 (specs written, both held)  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
+        == 82  # LP-519 AS-13 withdrawn (broke staging twice as an inert rule; see registry.py)  # LP-509-D1 +IH-9 (spec written, ACTIVE)  # LP-498 +FR-3 (spec written, ACTIVE)  # LP-496a +PE-1/PE-3 (specs written, both ACTIVE)  # LP-495b +OC-3/DT-7 (specs written, both held)  # +RE-1/DT-6/LO-2 (LP-495a — all three ACTIVE, deterministic, no ratification)  # +CO-3 (LP-494, un-dropped)  # +CO-4/CO-5 (LP-494, INERT — built against real fields, held until a completed questionnaire exists)  # +PC-5/PC-8 (LP-493)  # +PR-2/PR-3/PR-4/PR-5/PR-7 (LP-492)  # +TI-1/TI-2/TI-6 (LP-491)  # +CR-5/CR-6/CR-8/CR-10 (LP-490, INERT — specs without live rules)
     )  # +CR-1 (LP-490, INERT — a spec exists without the rule being live); +MI-1/MI-4/CO-1/AU-3 (LP-488); +IH-2/IH-7 (LP-487); +CR-12 (LP-486)
 
 

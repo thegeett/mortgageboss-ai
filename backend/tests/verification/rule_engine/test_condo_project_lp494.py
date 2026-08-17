@@ -243,7 +243,7 @@ def test_the_catalog_edits_are_recorded_and_the_row_count_is_unchanged() -> None
     both are visible in the csv rationale rather than being silent."""
     kinds = load_rule_kinds()
     assert (
-        len(kinds) == 137
+        len(kinds) == 136
     )  # LP-519 +AS-13 (repeated same-amount deposits — INERT, bar held on measurement)  # LP-509-D1 +IH-9 (hazard policy expired)
     co4, co5 = kinds["CO-4"], kinds["CO-5"]
     # CO-4 stays calculative (its threshold needs sign-off) but loses the AI half of the bookend.

@@ -25,9 +25,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
-from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
@@ -350,70 +348,30 @@ def test_absent_tags_abstain() -> None:
 
 
 # ------------------------------------------------------------------------------------------------ #
-# AS-13
+# AS-13 IS GONE — the tag is not
 # ------------------------------------------------------------------------------------------------ #
-def _evaluate_as13(repeated: str, income: str = "10000.00"):
-    loan = {_TAG: _tag(repeated), "dti.qualifying_income_monthly": _tag(income)}
-    snapshot = _snapshot(loan=loan)
-    [result] = evaluate_deterministic_rule(load_rule_spec("AS-13"), snapshot)
-    return result
+def test_as13_is_not_in_the_catalog() -> None:
+    """⚠️ AS-13 was WITHDRAWN, not held. As an inert rule whose input resolved on every file it exposed
+    two latent defects in the pending-checks path and broke staging twice: the database could not store
+    `pending_automation` (fixed, LP-521), and `reconcile_evaluation_findings` loads prior findings for
+    ACTIVE rules only — so an inert rule's row is invisible on the SECOND run and collides on the
+    uniqueness index.
 
-
-def test_as13_surfaces_a_repeated_total_above_the_threshold() -> None:
-    """$8,000 of repeats against a $5,000 threshold (50% of $10,000)."""
-    result = _evaluate_as13("8000.00")
-
-    assert result.verdict is Verdict.NEEDS_REVIEW
-    assert "8000.00" in result.reasoning and "5000.00" in result.reasoning
-
-
-def test_as13_never_fires_only_ever_asks() -> None:
-    """⚠️ needs_review, never `fired` (which persists as `open`, a VIOLATION). Repeated equal deposits have ordinary explanations — a standing
-    transfer, a second job paid outside payroll — and this is a fraud-adjacent question where a false
-    accusation costs a borrower real time. The rule surfaces a pattern; a human decides."""
-    assert _evaluate_as13("8000.00").verdict is not Verdict.FIRED
-
-    outcomes = load_rule_spec("AS-13").deterministic
-    assert outcomes is not None
-    assert {o.verdict for o in outcomes.outcomes} == {"needs_review", "satisfied"}
-
-
-def test_as13_is_satisfied_below_the_threshold() -> None:
-    assert _evaluate_as13("3000.00").verdict is Verdict.SATISFIED
-
-
-def test_as13_is_satisfied_when_nothing_repeated() -> None:
-    assert _evaluate_as13("0").verdict is Verdict.SATISFIED
-
-
-def test_as13_abstains_when_the_aggregate_abstained() -> None:
-    """The gate must carry the tag's abstention through — an `unknown` aggregate is a gap, not a pass."""
-    assert _evaluate_as13("unknown").verdict is Verdict.COULDNT_CHECK
-
-
-def test_as13_abstains_when_income_is_unknown() -> None:
-    """No income, no threshold. Fail-closed: never a 0 threshold, which would surface every file."""
-    assert _evaluate_as13("8000.00", income="unknown").verdict is Verdict.COULDNT_CHECK
-
-
-def test_as13_is_deliberately_inert() -> None:
-    """⚠️ THE HOLD, asserted so it cannot be lost. Same-amount grouping is a heuristic that has never
-    run against a real snapshot. Activating on constructed cases alone would repeat LP-516, which
-    shipped on a prediction and did nothing on the real file. Flip the bar's `validated` after a real
-    run — and update this test in the same commit, deliberately."""
-    from app.verification.rule_engine.activation_bars import load_activation_bars
+    The tag below stays because it is harmless and correct; the RULE comes back once the reconciler is
+    fixed with its own tests. This asserts the withdrawal so a half-reinstatement cannot happen quietly.
+    """
+    from app.verification.rules.kinds import kind_for
+    from app.verification.rules.specs import RuleSpecNotFound
 
     assert "AS-13" not in ACTIVE_RULE_IDS
-    bar = load_activation_bars()["AS-13"]
-    assert bar.status == "calibratable-now"
-    assert bar.validated is False
+    assert kind_for("AS-13") is None
+    with pytest.raises(RuleSpecNotFound):
+        load_rule_spec("AS-13")
 
 
-@pytest.mark.parametrize("rule_id", ["AS-1", "AS-12", "AS-13"])
-def test_the_three_deposit_rules_size_on_the_same_income_basis(rule_id: str) -> None:
-    """AS-1 (one large deposit), AS-12 (is this one borrowed) and AS-13 (do several add up) must not
-    disagree about what "large" means on a file, so all three read the same income tag."""
-    spec = load_rule_spec(rule_id)
-    text = spec.model_dump_json()
+def test_the_aggregate_tag_survives_the_withdrawal() -> None:
+    """The tag is declared and produced whether or not a rule reads it — it materializes on every run
+    and nothing consumes it today. That is deliberate: it is the foundation AS-13 returns on."""
+    from app.verification.tag_materialization.declarations import load_declarations
 
-    assert "dti.qualifying_income_monthly" in text
+    assert _TAG in load_declarations()

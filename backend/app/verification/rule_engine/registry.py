@@ -469,20 +469,19 @@ _LP498_ACTIVATED: tuple[str, ...] = ("FR-3",)
 # of closing. Same activation shape as IH-3: parsed input, exact compare, no AI, no threshold.
 _LP509_ACTIVATED: tuple[str, ...] = ("IH-9",)
 
-# LP-519 — AS-13, the split-deposit signal, is DELIBERATELY NOT HERE YET.
+# LP-519 — AS-13 (the split-deposit signal) was WITHDRAWN from the catalog, not merely held.
 #
-# LP-518's per-deposit materiality floor closed the noise problem and opened a gap: a $20,000 gift split
-# into five $4,000 transfers is five sub-threshold deposits and produces nothing. A per-deposit rule
-# cannot see that by construction (the LP-498 wall), so AS-13 reads a LOAN-subject derived aggregate
-# (stmt.repeated_money_in_max_total, grouped by exact amount) and compares it to the large-deposit
-# threshold. The spec, the tag and its tests all exist.
+# Its derived tag (`stmt.repeated_money_in_max_total`) and tests remain; the spec, the rule_kinds row and
+# the activation bar are gone. As an INERT rule whose input resolved on EVERY file, AS-13 exposed two
+# latent defects in the pending-checks path and broke staging twice:
 #
-# ⚠️ IT IS HELD ON MEASUREMENT, not on machinery. Its bar is `calibratable-now` with `validated: false`,
-# so the eligibility gate correctly refuses it. Same-amount grouping is a HEURISTIC and the rule has
-# never run against a real snapshot — activating it would assert a sign-off on behaviour nobody has
-# observed, which is exactly how LP-516 shipped a gate that did nothing on a real file. Every other rule
-# in this set was measured first and activated second. Flip `validated` once it has run.
-
+#   1. the database could not store `pending_automation` at all (fixed, LP-521); and
+#   2. `reconcile_evaluation_findings` loads a file's prior findings for ACTIVE rules only, so an inert
+#      rule's row is invisible on the SECOND run and collides on uq_findings_loan_file_rule_subject.
+#
+# The second is UNFIXED and sits on the path that writes every finding, so it was not something to patch
+# under incident pressure. Reinstate AS-13 once that fix lands with its own tests — and it will still
+# need a real run before its bar's `validated` flips, which is what the hold always said.
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 ACTIVE_RULE_IDS: tuple[str, ...] = (

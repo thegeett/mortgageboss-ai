@@ -57,7 +57,7 @@ def test_desired_state_shape() -> None:
     # rule_kinds.csv is 133 rules; the vocabulary is 143 xlsx tags + 1 hand-added overlay tag
     # (id.poa_acceptable LP-329, id.residency_eligible LP-331) = 145.
     assert (
-        len(rules) == 137
+        len(rules) == 136
     )  # LP-430 +IN-15; LP-433 +IN-16 (pay-stub-only documentation)  # LP-509-D1 +IH-9 (hazard policy expired)
     # LP-430 — +2 overlay (income.terminated_employment + _end_date); LP-433 — +1 (income.history_documentation).
     # LP-447 +1 (ins.dwelling_settlement_basis — the IH-1 basis tag, a vocabulary_extra overlay).

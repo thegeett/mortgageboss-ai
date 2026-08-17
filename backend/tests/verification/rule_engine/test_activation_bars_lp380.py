@@ -56,8 +56,7 @@ def test_the_honest_activation_state_is_reported() -> None:
     # The calibratable-now STATUS count is unchanged by activation (a signed-off bar keeps its status, only
     # moving unvalidated -> validated). AS-6 (LP-429) is now among the validated calibratable-now bars.
     assert (
-        by["calibratable-now"]
-        == 15  # LP-519 +AS-13 (its only AI tag is measured; held on `validated`)
+        by["calibratable-now"] == 14  # LP-519 AS-13 withdrawn (see registry.py)
     )  # +IN-6 (LP-406-3b) +IN-12 (LP-423) +IN-8 +IN-9 (LP-426/LP-428) +AS-6 (LP-397/LP-429) — all now validated
     assert by.get("not-calibratable-yet", 0) >= 1 and by.get("no-ai-dependency", 0) >= 1
     assert (

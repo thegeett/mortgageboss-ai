@@ -163,7 +163,7 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
     # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6. NOTE: there is now NO
     # blocked JUDGMENT rule at all; test_pending_checks_lp391 asserts that and simulates one.
-    assert len(held) == 7 and not (
+    assert len(held) == 6 and not (
         held & _ACTIVATED
     )  # LP-519 +AS-13 — calibratable-now, validated:false  # every other candidate is held
 

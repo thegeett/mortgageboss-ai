@@ -116,7 +116,7 @@ def test_ti1_is_deterministic_in_the_catalog() -> None:
     """The LP-491 catalog edit. `structural` + `exact_match=True` forces `deterministic_only`; the loader
     rejects the pair being inconsistent, so both cells are pinned."""
     rule_kinds = load_rule_kinds()
-    assert len(rule_kinds) == 137, (
+    assert len(rule_kinds) == 136, (
         "the catalog edit must not change the row count"
     )  # LP-509-D1 +IH-9
     assert rule_kinds["TI-1"].evaluation_path is EvaluationPath.DETERMINISTIC_ONLY
