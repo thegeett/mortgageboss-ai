@@ -351,6 +351,27 @@ def test_declared_subjects_are_all_materialized() -> None:
     """
     from app.services.verification_run import _MATERIALIZED_SUBJECTS
 
+    # ⚠️ LP-517: the `transaction` exemption is checked PER TAG, not per subject. Exempting the whole
+    # subject is what let LP-516 ship a derived `transaction` tag that materialized in tests and never on
+    # a real run — the generic pass skips the subject, and Stage A/B only knows the tags it hardcodes. A
+    # NEW transaction-subject declaration is therefore NOT covered by "a dedicated producer writes them".
+    # A KNOWN pre-existing instance, recorded rather than hidden: `txn.is_nsf_or_overdraft` declares
+    # subject `transaction` with its own AI group (`txn_nsf`), which Stage A/B does not run and the
+    # generic pass skips — so it is absent on every real file. No LIVE consequence today because its only
+    # consumer (AS-7) is built-and-held, but AS-7 would activate into silence. Remove this entry by
+    # producing the tag in Stage A/B, or by adding `transaction` to _MATERIALIZED_SUBJECTS — which today
+    # would also re-run the txn_stage_a model on every transaction, so it is not free.
+    known_unproduced = {"txn.is_nsf_or_overdraft"}
+    stage_ab_tags = _PRODUCED_OUTSIDE_DECLARATIONS | known_unproduced
+    for tag_id, decl in load_declarations().items():
+        if decl.subject in _SUBJECTS_MATERIALIZED_ELSEWHERE:
+            assert tag_id in stage_ab_tags, (
+                f"{tag_id!r} declares subject {decl.subject!r}, which the generic materialization pass "
+                f"SKIPS (_MATERIALIZED_SUBJECTS) — and Stage A/B does not produce it either, so it would "
+                "be absent on every real file while materializing fine in tests. Either produce it in "
+                "Stage A/B, or predicate on a tag that already exists."
+            )
+
     declared = {decl.subject for decl in load_declarations().values()}
     unmaterialized = declared - _MATERIALIZED_SUBJECTS - _SUBJECTS_MATERIALIZED_ELSEWHERE
     assert not unmaterialized, (

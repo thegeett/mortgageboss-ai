@@ -41,7 +41,7 @@ async def test_projection_counts_match_files(db_session: AsyncSession) -> None:
     )  # LP-430 +IN-15; LP-433 +IN-16  # LP-509-D1 +IH-9 (hazard policy expired)
     assert (
         result.tags.inserted
-        == 248  # LP-516 +1 (txn.readily_identifiable_source — AS-12's guideline-exemption fact)  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired — IH-9's parsed binder date and its derived loan verdict)  # LP-498 +1 (contract.credits_warrant_review)  # LP-496a +1 (program.conforming_eligibility — PE-3's program.fha_min_investment_met was already in fact_tags.csv)  # LP-495b +2 (OC-3's and DT-7's judgment output tags)  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
+        == 247  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired — IH-9's parsed binder date and its derived loan verdict)  # LP-498 +1 (contract.credits_warrant_review)  # LP-496a +1 (program.conforming_eligibility — PE-3's program.fha_min_investment_met was already in fact_tags.csv)  # LP-495b +2 (OC-3's and DT-7's judgment output tags)  # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher, ADR-375;
         # loe.is_explanation_letter — LO-2's 8-type applicability predicate; loe.completeness)
         # LP-494 (CO-3) +3 (condo.fidelity_present_raw, condo.fidelity_amount, ins.condo_fidelity_coverage); review +2 (condo.units_delinquent_over_60_days — the 60-day COUNT B4-2.2-02's cap is
         # actually stated on, plus the derived condo.delinquent_units_pct built from it; the parsed

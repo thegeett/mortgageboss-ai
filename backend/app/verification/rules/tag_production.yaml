@@ -14,10 +14,6 @@ tags:
   txn.amount: {mode: parsed, subject: transaction, data: amount}
   txn.date: {mode: parsed, subject: transaction, data: date}
   txn.is_money_in: {mode: ai, subject: transaction, data: txn_stage_a}
-  # LP-516 — AS-12's scoping fact: is the deposit's source readily identifiable on the statement, in the
-  # sense B3-4.2-02 exempts? DERIVED from txn.apparent_category (declared per-transaction, so it is
-  # produced after the AI stage that sets the category — the tag_production ordering contract).
-  txn.readily_identifiable_source: {mode: derived, subject: transaction, data: readily_identifiable_source}
   txn.apparent_category: {mode: ai, subject: transaction, data: txn_stage_a}
   # LP-418 — is this transaction an NSF / overdraft / returned item? An AI perception of the description (its own
   # group, not txn_stage_a, so it is scoped to depository statements). Unblocks stmt.nsf_count → AS-7. AS-7 auto-

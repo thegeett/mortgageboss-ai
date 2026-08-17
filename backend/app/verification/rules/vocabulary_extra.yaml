@@ -1216,21 +1216,3 @@ tags:
       not a closing date is known. "unknown" when no binder states an expiration date or binders
       disagree — never a guessed pass.
     produced_by: derived
-  # ------------------------------------------------------------------------------------------------- #
-  # LP-516 — AS-12's scoping fact. Fannie B3-4.2-02 exempts a deposit whose source is READILY
-  # IDENTIFIABLE on the statement (payroll, SSA, IRS/state tax refund, or a transfer between VERIFIED
-  # accounts) from needing further explanation. Only `payroll` maps cleanly onto this system's category
-  # vocabulary; `transfer_own` is deliberately NOT exempt because the guide conditions it on the
-  # counterparty account being VERIFIED and nothing in the snapshot can establish that (LP-516-A2 —
-  # stmt.account_masked is "display only, non-matchable" and a transaction description has every
-  # 9+-digit identifier redacted). See derived._READILY_IDENTIFIABLE_CATEGORIES for the full reasoning.
-  # ------------------------------------------------------------------------------------------------- #
-  txn.readily_identifiable_source:
-    entity: transaction
-    value_type: enum
-    allowed_values: ["yes", "no", "unknown"]
-    description: >-
-      Is this deposit's source readily identifiable on the account statement in the sense Fannie
-      B3-4.2-02 exempts from further explanation (today: a payroll direct deposit)? "unknown" when the
-      deposit's category has not been determined — an undetermined category never silently exempts.
-    produced_by: derived

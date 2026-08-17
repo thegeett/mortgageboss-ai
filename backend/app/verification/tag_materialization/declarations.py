@@ -55,10 +55,7 @@ _LIABILITY_CONTEXT_SUBJECTS = frozenset({"borrower", "liability"})
 # LP-486 — ``liability`` joins the derived subjects. The LP-483 family already supplies enumerate /
 # read_field / context; only this allowlist blocked a per-liability recipe. The producer is generic (it
 # passes each subject's raw object through), and each recipe asserts its own raw type.
-# LP-516 added "transaction". The exclusion was never technical — the producer enumerates the subject
-# registry generically and `transaction` has been a registered subject type all along; the note simply
-# recorded that no recipe read one yet. `txn.readily_identifiable_source` now does.
-_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document", "liability", "transaction"})
+_DERIVED_SUBJECTS = frozenset({"loan", "borrower", "document", "liability"})
 
 
 class DeclarationError(Exception):
@@ -474,9 +471,10 @@ def validate_declarations(
         # LP-332: derived recipes run for a declared subject (the producer enumerates the subject registry,
         # like parsed/ai). Supported subjects are in _DERIVED_SUBJECTS — loan, borrower, and (LP-447) document
         # (a per-document recipe reads its own DocumentEntry, keyed under content_id; the producer handles
-        # this and each recipe asserts its raw type). LP-516 added `transaction`: a per-transaction recipe
-        # reads the subject's own TAGS by subject_id rather than the TransactionRecord, which the producer
-        # already supported — the subject was excluded only because nothing had needed it.
+        # this and each recipe asserts its raw type). `transaction` stays unsupported: NOT because the
+        # producer cannot enumerate it, but because the live orchestrator's `_MATERIALIZED_SUBJECTS`
+        # excludes that subject (Stage A/B owns the txn.* tags), so a derived tag declared for it would
+        # materialize in tests and never on a real run — LP-516 shipped exactly that and had to revert.
         if decl.mode is ProductionMode.DERIVED:
             if decl.subject not in _DERIVED_SUBJECTS:
                 raise DeclarationError(

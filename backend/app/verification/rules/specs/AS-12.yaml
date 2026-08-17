@@ -57,7 +57,16 @@ judgment:
   # the model still flags reaches a human. The clearing is done by the deterministic predicate, so this
   # is NOT "auto-clearing a confident no": the model's answer can only ever ADD a review, never remove
   # one. An absent or "unknown" predicate leaves the verdict at needs_review (fail-closed).
-  exempt_when: {tag: txn.readily_identifiable_source, op: eq, value: "yes"}
+  # ⚠️ Predicates on txn.apparent_category DIRECTLY, not on a derived tag. LP-516 first introduced
+  # `txn.readily_identifiable_source` for this and it NEVER MATERIALIZED on a real run: the generic
+  # materialization pass is scoped by `_MATERIALIZED_SUBJECTS`, which excludes `transaction` because
+  # Stage A/B produces the txn.* tags through its own dedicated producer. A NEW transaction-subject
+  # declaration therefore falls between the two — skipped by the generic pass, unknown to Stage A/B.
+  # Measured on staging: all four payroll deposits answered "no" and none was exempted.
+  # `txn.apparent_category` is produced by Stage A/B, so predicating on it directly works and needs no
+  # new tag, no vocabulary entry and no widening of the AI scope (txn_stage_a is a required group, so
+  # widening it would re-run the Stage-A model on every transaction at real cost).
+  exempt_when: {tag: txn.apparent_category, op: eq, value: payroll}
   exempt_unless_judgment_in: ["yes"]
   # LP-509-A1: see AS-2. `per_deposit` is per TRANSACTION, so without this the borrowed-funds
   # judgment was run against every outgoing bill payment in the file. Not in `reasoned_over`: the

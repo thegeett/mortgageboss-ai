@@ -179,7 +179,9 @@ def test_as12_declares_the_exemption_and_its_override() -> None:
     judgment = _AS12.judgment
     assert judgment is not None
     assert judgment.exempt_when is not None
-    assert judgment.exempt_when.tag == "txn.readily_identifiable_source"
+    # LP-517: predicates on the category Stage A/B already produces — a derived `transaction`
+    # tag would never materialize on a real run (see the spec comment).
+    assert judgment.exempt_when.tag == "txn.apparent_category"
     assert judgment.exempt_unless_judgment_in == ("yes",)
     assert {"txn.amount", "txn.date"} <= set(judgment.reasoned_over)
 
