@@ -31,9 +31,10 @@ from functools import cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ValidationError, model_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from pydantic import Field as PydField
 
+from app.documents.catalog import is_cataloged
 from app.verification.rules.kinds import RuleKind, RuleKindName, kind_for
 from app.verification.rules.schema import Operator
 
@@ -969,7 +970,43 @@ class RuleSpec(BaseModel):
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)
+    # LP-541 — the document TYPES this rule's inputs come from, so a `couldnt_check` can be sorted into
+    # "request this document" versus "read the document you already have". Those are different jobs for
+    # a processor: one becomes an outbound request to the borrower, the other is desk work.
+    #
+    # READ-TIME CLASSIFICATION ONLY. Nothing in evaluation reads this — no verdict, gate, outcome or tag
+    # depends on it, so a wrong entry mis-sorts a card and can never change a conclusion. That is the
+    # whole reason it is safe to author by hand.
+    #
+    # `None` means NOT YET DECLARED and is distinct from `[]`, which means "this rule reads no document"
+    # (a computed LTV, a MISMO-only field). Without that distinction an un-annotated rule would be
+    # indistinguishable from one that needs nothing, and the grouping would silently under-report —
+    # the same failure as a badge that only covers the cases we happen to know.
+    #
+    # ⚠️ A LIST OF ALTERNATIVE GROUPS, not a flat list, and the first version got this wrong. Each inner
+    # group is "ANY ONE of these will do"; every group must be satisfied. IN-8 accepts a written OR a
+    # verbal VOE, while CR-6 needs the credit report AND a closing date — flattened, both read the same,
+    # and CR-6 classified as "read what is here" on a file whose credit report is absent, purely because
+    # the Closing Disclosure was present. The distinction is the whole point of the field.
+    requires_documents: tuple[tuple[str, ...], ...] | None = None
     spec_version: int = PydField(ge=1)
+
+    @field_validator("requires_documents")
+    @classmethod
+    def _known_document_types(
+        cls, value: tuple[tuple[str, ...], ...] | None
+    ) -> tuple[tuple[str, ...], ...] | None:
+        """Every slug must be in the document catalog — a typo fails at LOAD, not as a card that
+        quietly never matches a document and reports the file as missing something it holds."""
+        if value is None:
+            return None
+        unknown = [slug for group in value for slug in group if not is_cataloged(slug)]
+        if unknown:
+            raise ValueError(f"requires_documents names uncataloged document type(s): {unknown}")
+        if any(not group for group in value):
+            raise ValueError("an empty alternative group can never be satisfied — omit it instead")
+        return value
+
     # LP-324/325 — the machine-readable evaluation body. Exactly one matches the kind: deterministic
     # for calculative/(structural), judgment for judgmental, consistency for a cross-source structural
     # rule, NEITHER for out_of_scope (nothing evaluates).

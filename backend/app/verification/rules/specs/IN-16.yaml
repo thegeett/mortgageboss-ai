@@ -35,6 +35,12 @@ subject_key_fields:
 evidence_required: >-
   whether the borrower's income history is documented by a W-2 or 1099, or only by pay stubs
 guideline_reference: "Fannie Mae Selling Guide B3-3.1 (income documentation); Priya B12 (LP-393-6)."
+# LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
+# into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
+# one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
+requires_documents:
+  - [pay_stub, w2]
+
 spec_version: 1
 deterministic:
   # LP-433: NO document-type applicability — the rule enumerates per BORROWER and reads the derived

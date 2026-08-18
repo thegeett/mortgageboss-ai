@@ -122,6 +122,12 @@ evidence_required: >-
 
 guideline_reference: "A borrower's letter of explanation must identify what is being explained and when, and must be signed by the borrower, for an underwriter to rely on it as the borrower's statement of record."
 
+# LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
+# into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
+# one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
+requires_documents:
+  - [letter_of_explanation]
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to

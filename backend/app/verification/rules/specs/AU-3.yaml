@@ -97,6 +97,12 @@ evidence_required: >-
 
 guideline_reference: "The automated underwriting decision governs documentation and deliverability; Desktop Underwriter reports Approve/Eligible and Loan Product Advisor reports Accept, and an approval found ineligible cannot be delivered as underwritten."
 
+# LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
+# into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
+# one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
+requires_documents:
+  - [aus_findings]
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to

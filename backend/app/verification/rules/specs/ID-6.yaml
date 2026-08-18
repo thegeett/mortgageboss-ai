@@ -30,6 +30,12 @@ guideline_reference: >-
   Application completeness — the 1003 (Uniform Residential Loan Application) required-field set. The
   authoritative required set (incl. Declarations + co-borrower) is a lender/investor documentation
   standard; LP-326 ships a STARTER set pending Priya's confirmation.
+# LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
+# into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
+# one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
+requires_documents:
+  - [uniform_residential_loan_application]
+
 spec_version: 1
 deterministic:
   load_bearing_tags:

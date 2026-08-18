@@ -56,6 +56,13 @@ evidence_required: >-
   `satisfied` must not be read as "every reserve requirement is met": the financed-property overlay is
   not evaluated (see below), so the finding names what was checked.
 guideline_reference: "Fannie Mae Selling Guide B3-4.1-01 (Minimum Reserve Requirements)."
+# LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
+# into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
+# one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
+requires_documents:
+  - [bank_statement]
+  - [retirement_account, brokerage_statement, investment_account]
+
 spec_version: 1
 deterministic:
   load_bearing_tags:
