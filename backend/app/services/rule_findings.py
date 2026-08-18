@@ -100,6 +100,8 @@ def _details(result: RuleEvaluation) -> dict[str, object]:
         # The public schema reads THIS rather than re-deriving a judgment-only approximation.
         "ratification_pending": result.ratification_pending,
         "how_to_fix": result.how_to_fix,
+        # LP-535 — kept out of `message` deliberately, so the composer cannot drop it (see result.py).
+        "derivation": result.derivation,
         "source_strength": _source_strength(result),
         # Duplicated into details ONLY so LP-93's finding_identity() (which reads details.subject_key)
         # keeps working alongside the new indexed column. Both are written from the SAME

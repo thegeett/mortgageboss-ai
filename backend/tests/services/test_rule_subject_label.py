@@ -135,3 +135,13 @@ def test_a_liability_reads_as_a_debt_not_as_an_unrecognised_item() -> None:
 def test_an_unrecognised_shape_still_falls_to_the_honest_floor() -> None:
     """Adding a branch must not remove the floor — the next unforeseen shape needs it just as much."""
     assert resolve_subject_label("wat:xyz", ()) == "an item in this file"
+
+
+def test_a_missing_expected_document_is_named_rather_than_generic() -> None:
+    """LP-330's absent-document subject IS the missing document, so its type is the whole identity.
+    IN-8 and ID-7 shipped as "an item in this file" when the file could have said which document."""
+    assert resolve_subject_label("missing:voe", ()) == "VOE (not in the file)"
+    assert (
+        resolve_subject_label("missing:title_commitment", ())
+        == "title commitment (not in the file)"
+    )

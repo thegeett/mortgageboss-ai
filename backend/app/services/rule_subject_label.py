@@ -22,11 +22,17 @@ from typing import Any
 from uuid import UUID
 
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+from app.verification.rule_engine.reasons import document_label
 from app.verification.snapshot.content_id import DOC_PREFIX, LIABILITY_PREFIX, TXN_PREFIX
 
 # An account subject key (LP-336) is ``account:<institution>:<masked>`` — display-safe by construction, but
 # no ACTIVE rule enumerates per_account yet, so an honest generic suffices until one does.
 _ACCOUNT_PREFIX = "account:"
+
+# LP-330's missing-EXPECTED-document subject: ``missing:<document type>``. The subject IS the absent
+# document, so its type is the whole identity and reads better than any generic — IN-8 and ID-7 shipped
+# as "an item in this file" when the file could have named the VOE and the title commitment outright.
+_MISSING_PREFIX = "missing:"
 
 _ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 
@@ -108,6 +114,8 @@ def resolve_subject_label(
     if subject_key.startswith(DOC_PREFIX):
         # A document content-id → its filename; absent (removed / re-extracted since the run) → honest.
         return document_filenames.get(subject_key) or "a document no longer in this file"
+    if subject_key.startswith(_MISSING_PREFIX):
+        return f"{document_label(subject_key[len(_MISSING_PREFIX) :])} (not in the file)"
     if subject_key.startswith(LIABILITY_PREFIX):
         # LP-531 — NOT the creditor's name, because no caller can reach it yet. A liability's holder
         # lives in the snapshot's tradeline / MISMO rows, and the read path builds no equivalent of

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 import yaml
@@ -61,10 +62,21 @@ def test_no_user_facing_string_carries_a_warning_emoji() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "phrase",
-    ["this check", "the rule engine", "the system", "abstain", "couldnt_check", "not_applicable"],
+# ⚠️ PATTERNS, NOT PHRASES — LP-534. The first version listed "this check" and IH-9 shipped "the check
+# cannot tell which coverage period applies": the same sentence, a different article, and the guard read
+# clean. Anything matching here names the software where the loan file belongs.
+_MACHINERY = (
+    r"\b(this|the) check\b",
+    r"\bthe (rule )?engine\b",
+    r"\bthe system\b",
+    r"\bthe extractor\b",
+    r"\babstain",
+    r"\bcouldnt_check\b",
+    r"\bnot_applicable\b",
 )
+
+
+@pytest.mark.parametrize("phrase", _MACHINERY)
 def test_no_user_facing_string_describes_the_machinery(phrase: str) -> None:
     """A processor is told what to do about a DOCUMENT. "this check abstains rather than choosing one"
     describes our control flow, which they can neither act on nor verify.
@@ -72,7 +84,9 @@ def test_no_user_facing_string_describes_the_machinery(phrase: str) -> None:
     This is the same failure the composer's ``machinery_talk`` guard catches on the way out (LP-528/529)
     — caught here at the source, where a human wrote it, rather than only in a generation."""
     offenders = [
-        (rule, field) for rule, field, text in _user_facing_strings() if phrase in text.lower()
+        (rule, field)
+        for rule, field, text in _user_facing_strings()
+        if re.search(phrase, text.lower())
     ]
 
     assert not offenders, f"{phrase!r} describes the software, not the loan file: {offenders}"
@@ -136,7 +150,7 @@ def test_no_generated_reason_describes_the_machinery(module: str) -> None:
     offenders = [
         (module.rsplit("/", 1)[-1], line, text.strip()[:60])
         for line, text in _literals(root / module)
-        if any(phrase in text.lower() for phrase in ("this check", "the rule engine", "the system"))
+        if any(re.search(phrase, text.lower()) for phrase in _MACHINERY[:4])
     ]
 
     assert not offenders, (

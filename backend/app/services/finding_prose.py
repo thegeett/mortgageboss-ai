@@ -15,6 +15,7 @@ in the judgment evaluator. Concurrency is bounded the same way that evaluator bo
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Mapping
 from uuid import UUID
 
@@ -96,6 +97,30 @@ async def _store(db: AsyncSession, key: str, composition: Composition) -> None:
     )
 
 
+def _with_derivation(message: str, finding: Finding) -> str:
+    """Re-attach the materiality arithmetic the template carried, if the composition lost it.
+
+    ⚠️ NOT LEFT TO THE MODEL, and the first composed run is why. The derivation is an auditability
+    requirement — a processor who sees "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly
+    qualifying income) materiality floor" can argue with the threshold; one who sees "exceeds the
+    materiality threshold" cannot. Of five AS-12 findings, the model dropped the clause entirely from
+    four and kept only the bare number in the fifth.
+
+    That is not a prompt failure to fix by asking harder. A composer whose job is to shorten will keep
+    shortening, and a requirement that survives only when a generation happens to honour it is not a
+    requirement. Appended rather than enforced-by-rejection so the improved prose is kept too.
+    """
+    details = finding.details or {}
+    derivation = details.get("derivation")
+    if not isinstance(derivation, str) or not derivation:
+        return message
+    # Already stated in full (the fraction AND the basis, not just the resulting floor) → leave it.
+    fraction_and_basis = re.search(r"\d+% of ", derivation)
+    if fraction_and_basis and fraction_and_basis.group() in message:
+        return message
+    return f"{message} ({derivation}.)"
+
+
 async def compose_findings(
     db: AsyncSession,
     findings: list[Finding],
@@ -147,7 +172,7 @@ async def compose_findings(
         composition = cache.get(keys.get(finding.id, ""))
         if composition is None:
             continue  # rejected, failed, or not summarizable — the template stands
-        finding.message = composition.message
+        finding.message = _with_derivation(composition.message, finding)
         changed += 1
 
     logger.info(

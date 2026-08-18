@@ -69,6 +69,14 @@ class RuleEvaluation:
     )
     reasoning: str
     how_to_fix: str | None
+    # LP-535 — the materiality arithmetic that put this subject in scope ("$2,000.00 is above the
+    # $1,316.67 (10% of $13,166.70 monthly qualifying income) materiality floor"), carried STRUCTURALLY
+    # rather than only folded into `reasoning`. It is an AUDITABILITY requirement: a processor who can
+    # see the threshold's derivation can judge the threshold itself, and a bare floor cannot be argued
+    # with. The composer rewrites `reasoning` freely, and on the first composed run it dropped this
+    # clause from four of five AS-12 findings — so a field it cannot paraphrase away is the only way
+    # the requirement actually holds.
+    derivation: str | None = None
     # LP-319/325: True marks a verdict an AI produced that a human must confirm before it ships. A
     # deterministic rule (AS-1) leaves it False. OC-2's judgment PATH forces every verdict to
     # needs_review — so for it, ratification-pending only ever reaches needs_review / couldnt_check.

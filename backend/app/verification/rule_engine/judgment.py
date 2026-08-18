@@ -115,6 +115,7 @@ def _result(
     extra_load_bearing: tuple[LoadBearingTag, ...] = (),
     ratification_pending: bool = True,
     how_to_fix: str | None = None,
+    derivation: str | None = None,
 ) -> RuleEvaluation:
     """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance).
 
@@ -138,6 +139,7 @@ def _result(
         # exemption (LP-516 `exempt_when`), where the clearing is done by a deterministic predicate and
         # the model can only ever ADD a review, never remove one.
         ratification_pending=ratification_pending,
+        derivation=derivation,
     )
 
 
@@ -704,6 +706,7 @@ async def _evaluate_one_subject(
         verdict_confidence=confidence if confidence is not None else gate.verdict_confidence,
         extra_load_bearing=extra_load_bearing,
         how_to_fix=fix,
+        derivation=derivation,
     )
     return JudgmentEvaluation(tag, evaluation)
 

@@ -81,8 +81,8 @@ deterministic:
   # wording holds whichever gated input was the missing one.
   couldnt_check_fix: >-
     Confirm which homeowners policy is currently in force and upload its declarations page showing the
-    coverage period. If a renewal was uploaded alongside the policy it replaces, both are read and the
-    check cannot tell which coverage period applies.
+    coverage period. If a renewal was uploaded alongside the policy it replaces, both are still in
+    the file, and which coverage period is the current one cannot be told from them.
   load_bearing_tags:
     - ins.policy_expired
   gated_tags:

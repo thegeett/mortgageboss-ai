@@ -23,6 +23,7 @@ from app.ai.finding_prose import (
     _parse,
     unsupported_numbers,
 )
+from app.models.finding import Finding
 
 _SUMMARY = FactSummary(
     rule_name="Insurance adequacy",
@@ -242,3 +243,76 @@ def test_naming_the_software_as_an_actor_is_still_rejected() -> None:
         "The AI judged it.",
     ):
         assert machinery_talk(Composition(action="Do it.", why=phrase)), phrase
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-535 — a requirement the composer was free to delete
+# --------------------------------------------------------------------------------------------- #
+def test_the_materiality_derivation_survives_a_composition_that_dropped_it() -> None:
+    """⚠️ FOUND ON THE SECOND COMPOSED RUN. LP-518 puts the arithmetic in the finding on purpose: a
+    processor who reads "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly qualifying income)
+    materiality floor" can argue with the threshold; one who reads "exceeds the materiality threshold"
+    can only take it on faith.
+
+    The composer deleted it from FOUR of five AS-12 findings and kept only the bare number in the fifth.
+    That is a composer doing its job — it was asked to shorten — which is exactly why the requirement
+    cannot live in the prose it is allowed to rewrite."""
+    from app.services.finding_prose import _with_derivation
+
+    derivation = (
+        "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly qualifying income) floor"
+    )
+    finding = Finding(
+        loan_file_id=None,
+        rule_id="AS-12",
+        message="",
+        subject_key="txn1",
+        load_bearing_tags=[],
+        details={"derivation": derivation},
+    )
+
+    restored = _with_derivation(
+        "Obtain the statement. It exceeds the materiality threshold.", finding
+    )
+
+    assert "10% of $13,166.70" in restored
+
+
+def test_a_composition_that_kept_the_derivation_is_not_given_it_twice() -> None:
+    """Appending unconditionally would print the arithmetic twice on every composition that honoured
+    it — a fix that reads as a bug."""
+    from app.services.finding_prose import _with_derivation
+
+    derivation = (
+        "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly qualifying income) floor"
+    )
+    finding = Finding(
+        loan_file_id=None,
+        rule_id="AS-12",
+        message="",
+        subject_key="txn1",
+        load_bearing_tags=[],
+        details={"derivation": derivation},
+    )
+    kept = "At $2,000.00 it is above the 10% of $13,166.70 monthly qualifying income floor."
+
+    assert _with_derivation(kept, finding) == kept
+
+
+def test_a_finding_with_no_derivation_is_untouched() -> None:
+    """Most rules have no materiality floor at all; none of them should grow a trailing clause."""
+    from app.services.finding_prose import _with_derivation
+
+    finding = Finding(
+        loan_file_id=None,
+        rule_id="IH-1",
+        message="",
+        subject_key="doc1",
+        load_bearing_tags=[],
+        details={},
+    )
+
+    assert (
+        _with_derivation("Obtain the declarations page.", finding)
+        == "Obtain the declarations page."
+    )
