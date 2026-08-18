@@ -86,8 +86,8 @@ deterministic:
   couldnt_check_fix: >-
     Upload the Closing Disclosure or settlement statement carrying the closing date, so the policy's
     effective date can be compared with it. If more than one homeowners policy is in the file, confirm
-    which is in force: two policies with different effective dates leave this check unable to tell
-    which one governs.
+    which is in force: two policies with different effective dates leave it unclear which one
+    governs at closing.
   load_bearing_tags:
     - ins.loan_effective_date
     - contract.loan_closing_date

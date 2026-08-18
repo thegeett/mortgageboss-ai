@@ -41,7 +41,7 @@ deterministic:
   couldnt_check_fix: >-
     Obtain a written or verbal verification of employment for each employer whose income is used for
     qualifying, and upload it. Pay stubs and W-2s evidence income but do not verify current employment
-    status, which is what this check needs.
+    status, which is what the file is missing.
   load_bearing_tags:
     - income.voe_present
   gated_tags:

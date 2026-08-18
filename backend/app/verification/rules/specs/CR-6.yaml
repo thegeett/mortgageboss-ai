@@ -136,8 +136,8 @@ deterministic:
   couldnt_check_fix: >-
     Upload the tri-merge credit report. Seasoning runs from the date of a bankruptcy, foreclosure,
     short sale or deed-in-lieu to the closing date, so both the report and a closing date are needed.
-    ⚠️ If the borrower has no derogatory events the report shows that too — this check will not assume
-    a clean history from a missing document, which is why it abstains rather than passing.
+    Upload it even if you expect a clean history: a report showing no derogatory events is
+    what establishes that, and its absence is not evidence of it.
   load_bearing_tags:
     - credit.derogatory_months_elapsed
     - liab.derogatory_type

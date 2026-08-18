@@ -87,10 +87,14 @@ def test_cr6_refuses_to_read_a_missing_report_as_a_clean_history() -> None:
     that run said `liab.derogatory_type = none` was "based on absence of information rather than
     confirmation of clean status". A processor reading four CR-6 abstentions could reasonably assume
     the borrower simply has no derogatory events; the fix says explicitly that the check will not make
-    that assumption, so the abstention is not mistaken for a pass."""
+    that assumption, so the abstention is not mistaken for a pass.
+
+    Asserted as a PROPERTY, not a phrase: LP-530 reworded this fix out of the engine's voice ("this check
+    will not assume") into the processor's, and a test that pins wording blocks a wording fix while
+    proving nothing about meaning."""
     fix = _fix("CR-6")
 
-    assert "will not assume" in fix
+    assert "absence is not evidence" in fix
     assert "clean history" in fix
 
 

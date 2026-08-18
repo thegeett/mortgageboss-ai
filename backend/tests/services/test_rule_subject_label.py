@@ -116,3 +116,22 @@ def test_no_label_ever_contains_a_content_id_uuid_or_dotted_tag() -> None:
         assert not _DOTTED_TAG.search(_FILE_EXT.sub("", label)), (
             f"a dotted tag leaked into {label!r}"
         )
+
+
+# ------------------------------------------------------------------------------------------------ #
+# LP-531 — the subject shape that had no branch
+# ------------------------------------------------------------------------------------------------ #
+def test_a_liability_reads_as_a_debt_not_as_an_unrecognised_item() -> None:
+    """⚠️ FOUND ON A REAL FILE. `per_liability` rules have existed since LP-480 and no branch here ever
+    matched their key shape, so every one of their findings fell to the unrecognised-key floor. LF-WCHG
+    shipped FOUR CR-6 findings whose subject read "an item in this file" — which tells a processor
+    neither what the item is, nor that the four rows are four different debts.
+
+    The floor did its job (it never printed `lia7a033a46ec70cc10`). It was simply never reached on
+    purpose, and an honest fallback for an unforeseen shape is not an answer for a foreseen one."""
+    assert resolve_subject_label("lia7a033a46ec70cc10", ()) == "a debt on this file"
+
+
+def test_an_unrecognised_shape_still_falls_to_the_honest_floor() -> None:
+    """Adding a branch must not remove the floor — the next unforeseen shape needs it just as much."""
+    assert resolve_subject_label("wat:xyz", ()) == "an item in this file"

@@ -51,9 +51,9 @@ deterministic:
   # wording holds whichever gated input was the missing one.
   couldnt_check_fix: >-
     Upload the borrower's most recent pay stub showing year-to-date gross and the pay period, so the
-    annualised figure can be compared with the income stated on the application. ⚠️ Where several
-    documents state different figures for the same employer, this check abstains rather than choosing
-    one — reconcile them, or note which is correct.
+    annualised figure can be compared with the income stated on the application. Where several
+    documents state different figures for the same employer, reconcile them or note which one is
+    correct.
   load_bearing_tags:
     - income.ytd_annualized_shortfall_pct
   gated_tags:
