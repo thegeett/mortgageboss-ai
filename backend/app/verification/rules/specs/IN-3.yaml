@@ -46,6 +46,14 @@ evidence_required: the YTD-annualized vs documented monthly income and the toler
 guideline_reference: "Fannie Mae Selling Guide B3-3.1 (General Income Information) — YTD consistency."
 spec_version: 1
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the borrower's most recent pay stub showing year-to-date gross and the pay period, so the
+    annualised figure can be compared with the income stated on the application. ⚠️ Where several
+    documents state different figures for the same employer, this check abstains rather than choosing
+    one — reconcile them, or note which is correct.
   load_bearing_tags:
     - income.ytd_annualized_shortfall_pct
   gated_tags:

@@ -66,6 +66,13 @@ spec_version: 1
 # satisfied. An "unknown" age coerces to None → couldnt_check via the gate, so a file with no credit report
 # can never read as "the credit report is current" (never clear on a missing document).
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the tri-merge credit report showing its pull date, and the Closing Disclosure carrying the
+    closing date. A credit report is only valid for a limited window measured to closing, so an
+    undated report or an unknown closing date leaves the window uncheckable.
   load_bearing_tags:
     - credit.report_age_months_at_closing
   gated_tags:

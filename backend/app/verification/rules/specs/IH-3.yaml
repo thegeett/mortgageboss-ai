@@ -80,6 +80,14 @@ spec_version: 1
 # operand coerces to None → couldnt_check (the gate catches it, over gated_tags). ONE fired outcome (effective
 # strictly AFTER closing), reason interpolates BOTH dates so the processor sees the gap.
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the Closing Disclosure or settlement statement carrying the closing date, so the policy's
+    effective date can be compared with it. If more than one homeowners policy is in the file, confirm
+    which is in force: two policies with different effective dates leave this check unable to tell
+    which one governs.
   load_bearing_tags:
     - ins.loan_effective_date
     - contract.loan_closing_date

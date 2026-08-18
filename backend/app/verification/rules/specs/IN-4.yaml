@@ -31,6 +31,14 @@ evidence_required: the largest employment gap in days and the window the compari
 guideline_reference: "Fannie Mae Selling Guide B3-3.1-01/02 (Employment/Income history)."
 spec_version: 1
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload employment documentation carrying START and END dates for each position in the two-year
+    history — a written verification of employment, or pay stubs and W-2s that establish the dates. A
+    gap is the distance between two dated records; undated ones cannot establish continuity either
+    way.
   load_bearing_tags:
     - income.max_employment_gap_days
   gated_tags:

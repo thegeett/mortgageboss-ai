@@ -130,6 +130,14 @@ deterministic:
     tag: liab.is_derogatory
     op: eq
     value: "yes"
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the tri-merge credit report. Seasoning runs from the date of a bankruptcy, foreclosure,
+    short sale or deed-in-lieu to the closing date, so both the report and a closing date are needed.
+    ⚠️ If the borrower has no derogatory events the report shows that too — this check will not assume
+    a clean history from a missing document, which is why it abstains rather than passing.
   load_bearing_tags:
     - credit.derogatory_months_elapsed
     - liab.derogatory_type

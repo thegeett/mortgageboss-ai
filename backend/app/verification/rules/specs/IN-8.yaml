@@ -35,6 +35,13 @@ deterministic:
   # A VOE is expected for the file (a conservative default — see the Priya list); its confident absence
   # is a GAP → couldnt_check (LP-330), never not_applicable.
   applicability_expected: true
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Obtain a written or verbal verification of employment for each employer whose income is used for
+    qualifying, and upload it. Pay stubs and W-2s evidence income but do not verify current employment
+    status, which is what this check needs.
   load_bearing_tags:
     - income.voe_present
   gated_tags:

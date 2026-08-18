@@ -44,6 +44,14 @@ deterministic:
   # in file", §8 Tab 1, BLOCKS) — NOT not_applicable. Fixes the live false-green. Encoded
   # UNCONDITIONALLY (no loan-purpose tag exists to make it purchase-only — see LP-330's Priya list).
   applicability_expected: true
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the title commitment or preliminary title report showing how title is, or will be, vested.
+    Vesting has to be reconciled with the borrower's marital status on the 1003 — in several states a
+    non-borrowing spouse has rights that change how title must read — and no document in the file
+    states it.
   load_bearing_tags:
     - id.title_vesting_consistent
   gated_tags:

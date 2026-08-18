@@ -64,6 +64,13 @@ spec_version: 1
 # default satisfied. "unknown" on the tag coerces the operand to None → couldnt_check via the gate, so a
 # missing loan estimate can never read as "the lock is fine" (never clear on a missing document).
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the rate-lock confirmation showing the lock expiration date, and the Closing Disclosure or
+    settlement statement carrying the closing date. Both are needed: whether a lock survives to closing
+    is the distance between two dates, and neither can be inferred from the other.
   load_bearing_tags:
     - rate_lock.days_to_closing
   gated_tags:

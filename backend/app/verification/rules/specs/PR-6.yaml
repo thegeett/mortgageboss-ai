@@ -87,6 +87,14 @@ spec_version: 1
 # first. An "unknown" age coerces to None → couldnt_check via the gate, so a file with no appraisal can
 # never read as "the appraisal is current" (never clear on a missing document).
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Upload the appraisal report showing its effective date, and the Closing Disclosure carrying the
+    closing date. An appraisal's validity is measured from its effective date to closing, so a missing
+    date on either side leaves the window uncheckable — and an appraisal too old at closing needs an
+    update or a new report, which is far cheaper to discover now than at underwriting.
   load_bearing_tags:
     - property.appraisal_age_months_at_closing
   gated_tags:

@@ -76,6 +76,13 @@ spec_version: 1
 # An enum branch via when_tags: the tag IS the yes/no/unknown answer, so there are no operands (the PC-3 shape).
 # "unknown"/absent never reach an outcome — the gate couldnt_checks them first.
 deterministic:
+  # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
+  # so without this the finding named a missing fact and stopped there. Static per rule, so the
+  # wording holds whichever gated input was the missing one.
+  couldnt_check_fix: >-
+    Confirm which homeowners policy is currently in force and upload its declarations page showing the
+    coverage period. If a renewal was uploaded alongside the policy it replaces, both are read and the
+    check cannot tell which coverage period applies.
   load_bearing_tags:
     - ins.policy_expired
   gated_tags:
