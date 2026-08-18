@@ -11,6 +11,7 @@
  * pass, never Tab 2/4. Tab 3 ≠ Tab 4 (the subject left vs never relevant). `needs_review` ≠ `open` (a
  * ratification-pending judgment is not a violation) — same tab, the detail says which.
  */
+import { humanize } from "@/lib/format";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
 export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
@@ -205,4 +206,24 @@ export function awaitedDocuments(findings: RuleFinding[]): string[] {
     for (const name of finding.missing_documents) seen.add(name);
   }
   return [...seen];
+}
+
+/**
+ * LP-550 — the processor-facing name for a rule's category.
+ *
+ * The engine's categories come from the vocabulary spreadsheet and are engineering/domain taxonomy,
+ * not display copy. One of them is "Fraud" — the family FR-1..FR-6 sits in — and it must not reach a
+ * processor's screen. A recurring debit that is not on the 1003 is almost always a paperwork omission;
+ * labelling it FRAUD accuses the borrower of a crime on the strength of a check that, by its own
+ * activation bar, "surfaces rather than asserts" and cannot even see the disclosed debts.
+ *
+ * The internal category is unchanged — it is the domain expert's artifact, and grouping, filtering and
+ * the specs all still key on it. Only the word shown changes.
+ */
+const RULE_CATEGORY_LABELS: Record<string, string> = {
+  fraud: "Anomaly",
+};
+
+export function ruleCategoryLabel(category: string): string {
+  return RULE_CATEGORY_LABELS[category.toLowerCase()] ?? humanize(category);
 }

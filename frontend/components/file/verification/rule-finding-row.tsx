@@ -15,7 +15,7 @@
 import { humanize } from "@/lib/format";
 import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
-import { type OutcomeTone, outcomeMeta } from "@/lib/verification/rule-findings";
+import { type OutcomeTone, outcomeMeta, ruleCategoryLabel } from "@/lib/verification/rule-findings";
 import { ChevronDown, Gavel } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -108,7 +108,7 @@ export function RuleLabel({ finding }: { finding: RuleFinding }) {
       {finding.rule_name !== null && (
         <span className="text-xs font-semibold text-gray-800">{finding.rule_name}</span>
       )}
-      <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
+      <span className="text-[11px] text-gray-400">{ruleCategoryLabel(finding.category)}</span>
       {/* LP-542 — the missing-document marker OUTSIDE Couldn't check, where the request/read split
        *  already carries it. DT-7 is the case that needs it: it lands in NEEDS REVIEW saying every
        *  ability-to-repay factor is documented, while the credit report it declares is not on the
