@@ -18,9 +18,11 @@ import {
   type OutcomeTone,
   type TabId,
   attentionGroups,
+  awaitedDocuments,
   bucketRuleFindings,
   groupByRule,
   outcomeMeta,
+  splitByMissingDocument,
 } from "@/lib/verification/rule-findings";
 import {
   Archive,
@@ -142,8 +144,49 @@ function OutcomeGroup({
         <span className="text-xs tabular-nums text-gray-400">{findings.length}</span>
         <span className="text-xs text-gray-400">— {meta.blurb}</span>
       </div>
-      <GroupedFindingList findings={findings} />
+      {outcome === "couldnt_check" ? (
+        <MissingVsPresent findings={findings} />
+      ) : (
+        <GroupedFindingList findings={findings} />
+      )}
     </section>
+  );
+}
+
+/**
+ * LP-541 — inside Couldn't check, separate the documents to GO AND GET from the ones to GO AND READ.
+ *
+ * Only this bucket is split. A violation or a ratification is already one kind of job; a couldnt_check
+ * is two wearing the same clothes, and on a real file the split was 6 to request against 5 to read.
+ *
+ * The sub-headers name the documents rather than counting them, because "Waiting on: credit report,
+ * appraisal, rate lock agreement, VOE, title commitment" is a request a processor can send in one go,
+ * where five separate cards are five separate errands. Rendered only when BOTH sides are non-empty —
+ * a single header over the whole bucket adds a level of nesting and says nothing.
+ */
+function MissingVsPresent({ findings }: { findings: RuleFinding[] }) {
+  const { missing, present } = splitByMissingDocument(findings);
+  if (missing.length === 0 || present.length === 0) {
+    return <GroupedFindingList findings={findings} />;
+  }
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-gray-500">
+          Not in the file — request these ({missing.length})
+          <span className="ml-1 font-normal text-gray-400">
+            waiting on {awaitedDocuments(missing).join(", ")}
+          </span>
+        </p>
+        <GroupedFindingList findings={missing} />
+      </div>
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-gray-500">
+          In the file — read or clarify these ({present.length})
+        </p>
+        <GroupedFindingList findings={present} />
+      </div>
+    </div>
   );
 }
 

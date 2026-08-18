@@ -19,6 +19,7 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
     id: overrides.id ?? "rf-1",
     rule_id: overrides.rule_id ?? "ID-4",
     rule_name: overrides.rule_name ?? "Current address consistency",
+    missing_documents: overrides.missing_documents ?? [],
     evaluation_outcome: overrides.evaluation_outcome ?? "couldnt_check",
     status: overrides.status ?? "yellow",
     category: overrides.category ?? "identity",
@@ -449,5 +450,50 @@ describe("LP-377-C — the stale-findings notice", () => {
 describe("every outcome maps to a governed tab", () => {
   it.each(OUTCOMES)("routes %s without crashing", (outcome) => {
     expect(() => renderTabs([ruleFinding({ evaluation_outcome: outcome })])).not.toThrow();
+  });
+});
+
+describe("LP-541 — request vs read inside Couldn't check", () => {
+  // Two jobs wearing the same clothes: "request the credit report" leaves the processor's desk, while
+  // "the binder does not state a loss-settlement basis" is something to go and read. On a real file the
+  // split was 6 against 5, and mixed together they triaged identically.
+  const missing = ruleFinding({
+    id: "m1",
+    rule_id: "CR-13",
+    rule_name: "Credit report validity at closing",
+    evaluation_outcome: "couldnt_check",
+    missing_documents: ["credit report"],
+  });
+  const present = ruleFinding({
+    id: "p1",
+    rule_id: "IH-1",
+    rule_name: "Insurance adequacy",
+    evaluation_outcome: "couldnt_check",
+    missing_documents: [],
+  });
+
+  it("names the documents to request rather than only counting them", () => {
+    renderTabs([missing, present]);
+
+    // One request a processor can send in one go, not N separate errands.
+    expect(screen.getByText(/waiting on credit report/i)).toBeDefined();
+    expect(screen.getByText(/request these \(1\)/i)).toBeDefined();
+    expect(screen.getByText(/read or clarify these \(1\)/i)).toBeDefined();
+  });
+
+  it("does NOT split when every finding is on one side", () => {
+    // A single header over the whole bucket adds nesting and says nothing.
+    renderTabs([present]);
+
+    expect(screen.queryByText(/request these/i)).toBeNull();
+  });
+
+  it("puts an unclassifiable finding with 'read', never with 'nothing is missing'", () => {
+    // `missing_documents` is empty both for "nothing missing" and for a retired rule we cannot
+    // classify. Landing in `present` asks a processor to LOOK; the other side would assert an absence
+    // we have not established.
+    renderTabs([missing, { ...present, rule_name: null }]);
+
+    expect(screen.getByText(/read or clarify these \(1\)/i)).toBeDefined();
   });
 });

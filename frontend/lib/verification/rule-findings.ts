@@ -174,3 +174,35 @@ export function attentionGroups(
 // borrower / "Loan-level") and arrives on `finding.subject_label`. The former frontend `ruleSubjectChip`
 // (which guessed a chip from the load-bearing tags and could only ever show an amount, never a document's
 // name) is retired — one mechanism, in the one place with DB access, so a row names its subject honestly.
+
+/**
+ * LP-541 — split a bucket into findings whose DOCUMENT IS MISSING and findings whose document is here
+ * but does not answer the question.
+ *
+ * These are different jobs. "Request the credit report" is an outbound ask that leaves the processor's
+ * desk; "the binder does not state a dwelling loss-settlement basis" is something to go and read. Mixed
+ * together they triage identically, which is how a bucket of fifteen becomes fifteen things to read
+ * rather than two things to do.
+ *
+ * `missing_documents` is empty both for "nothing is missing" and for a retired rule that cannot be
+ * classified. Both land in `present` — which asks a processor to look, rather than telling them nothing
+ * is missing when we do not know.
+ */
+export function splitByMissingDocument(findings: RuleFinding[]): {
+  missing: RuleFinding[];
+  present: RuleFinding[];
+} {
+  return {
+    missing: findings.filter((f) => f.missing_documents.length > 0),
+    present: findings.filter((f) => f.missing_documents.length === 0),
+  };
+}
+
+/** The distinct documents a set of findings is waiting on, in first-seen order — the sub-header's list. */
+export function awaitedDocuments(findings: RuleFinding[]): string[] {
+  const seen = new Set<string>();
+  for (const finding of findings) {
+    for (const name of finding.missing_documents) seen.add(name);
+  }
+  return [...seen];
+}

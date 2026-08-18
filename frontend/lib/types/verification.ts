@@ -112,6 +112,10 @@ export interface RuleFinding {
   how_to_fix: string | null;
   confidence: number;
   resolution_status: string;
+  /** The documents this rule needs that the file does NOT hold, already readable ("credit report",
+   *  "VOE"). Empty means every required document is present, so the gap is in what a document SAYS
+   *  rather than whether it exists — a different job, and the basis for the request/review split. */
+  missing_documents: string[];
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */

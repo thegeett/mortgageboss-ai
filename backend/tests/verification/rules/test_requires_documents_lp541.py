@@ -11,6 +11,7 @@ mis-sorts a card and can never change a conclusion. That is what makes hand-auth
 from __future__ import annotations
 
 import pytest
+from app.schemas.verification import _missing_documents
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.rules.specs import RuleSpec, load_rule_spec
 
@@ -72,3 +73,55 @@ def test_groups_are_all_required_so_a_second_document_cannot_mask_a_missing_firs
     are indistinguishable, and the field exists precisely to tell them apart."""
     assert _missing("CR-6", {"closing_disclosure"}) == [("credit_report",)]
     assert _missing("CR-6", {"credit_report", "closing_disclosure"}) == []
+
+
+# --------------------------------------------------------------------------------------------- #
+# THE READ-PATH CLASSIFICATION
+# --------------------------------------------------------------------------------------------- #
+_LFWCHG = {
+    "drivers_license",
+    "w2",
+    "pay_stub",
+    "bank_statement",
+    "homeowners_insurance",
+    "property_tax_bill",
+    "mortgage_statement",
+    "uscis_notice_of_action",
+    "lender_dashboard_screenshot",
+    "form_1098",
+    "closing_disclosure",
+}
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "expected"),
+    [
+        # Absent — a processor has to go and GET these.
+        ("CR-6", ["credit report"]),
+        ("CR-13", ["credit report"]),
+        ("PR-6", ["appraisal"]),
+        ("CL-1", ["rate lock agreement"]),
+        ("IN-8", ["VOE"]),
+        ("ID-7", ["title commitment"]),
+        # Present — the document is here and does not answer the question. Desk work, not a request.
+        ("IH-1", []),
+        ("IH-3", []),
+        ("IN-3", []),
+        ("IN-4", []),
+    ],
+)
+def test_the_real_file_classifies_the_way_a_human_reads_it(
+    rule_id: str, expected: list[str]
+) -> None:
+    """The document set is LF-WCHG's actual inventory. Every one of these was couldnt_check on that run
+    and read identically on the card; six were a request and five were something to go and read.
+
+    The labels are the READABLE forms — "VOE", not "voe" — because they are what the sub-header prints
+    and what a processor puts in an email."""
+    assert _missing_documents(load_rule_spec(rule_id), _LFWCHG) == expected
+
+
+def test_an_unclassifiable_rule_reports_nothing_missing_rather_than_guessing() -> None:
+    """A retired rule has no spec, so it cannot be classified. Reporting `[]` puts it with "read what is
+    here", which asks a processor to LOOK — the other side would assert an absence we never established."""
+    assert _missing_documents(None, _LFWCHG) == []

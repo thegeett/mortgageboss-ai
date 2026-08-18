@@ -294,7 +294,7 @@ async def _build_status(
     doc_rows = (
         await db.execute(
             only_active(
-                select(Document.id, Document.original_filename).where(
+                select(Document.id, Document.original_filename, Document.document_type).where(
                     Document.loan_file_id == loan_file.id
                 ),
                 Document,
@@ -302,6 +302,9 @@ async def _build_status(
         )
     ).all()
     document_names: dict[UUID, str] = {row.id: row.original_filename for row in doc_rows}
+    # LP-541 — the document TYPES the file actually holds, off the SAME query (no extra round trip), so
+    # a couldnt_check can be sorted into "request this document" vs "read the one that is already here".
+    documents_on_file: set[str] = {row.document_type for row in doc_rows if row.document_type}
 
     # LP-377-B — the processor-facing SUBJECT LABEL for each governed finding (a filename / amount /
     # borrower / "Loan-level"), resolved read-time per subject TYPE so a row names its subject, never a
@@ -333,6 +336,7 @@ async def _build_status(
                     borrower_names=borrower_names,
                     document_filenames=document_filenames,
                 ),
+                documents_on_file=documents_on_file,
             )
             for f in rule_findings
         ],

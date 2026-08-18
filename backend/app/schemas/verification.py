@@ -18,6 +18,7 @@ from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
+from app.verification.rule_engine.reasons import document_label
 from app.verification.rules.specs import RuleSpec, load_rule_spec
 
 
@@ -221,6 +222,23 @@ class FindingPublic(BaseModel):
         )
 
 
+def _missing_documents(spec: RuleSpec | None, on_file: set[str]) -> list[str]:
+    """Which of the rule's declared document groups NO document on the file satisfies (LP-541).
+
+    Each declared group is a set of ALTERNATIVES — a written or a verbal VOE both close IN-8's gap — so
+    a group is missing only when the file holds none of its members. Every group must be satisfied,
+    which is what keeps a present Closing Disclosure from masking an absent credit report on CR-6.
+
+    The label is the group's FIRST member: the canonical form the processor should ask for, where the
+    rest are the substitutes we would also accept.
+    """
+    if spec is None or spec.requires_documents is None:
+        return []
+    return [
+        document_label(group[0]) for group in spec.requires_documents if not set(group) & on_file
+    ]
+
+
 class RuleFindingPublic(BaseModel):
     """One GOVERNED rule-engine finding (LP-316/375) — a DISTINCT shape from :class:`FindingPublic`.
 
@@ -265,9 +283,21 @@ class RuleFindingPublic(BaseModel):
     how_to_fix: str | None
     confidence: float
     resolution_status: str
+    # LP-541 — the documents this rule needs that the file does NOT hold, already readable ("credit
+    # report", "VOE"). Empty means every required document is present, so the gap is in what a document
+    # SAYS rather than in whether it exists — a different job for a processor, and the basis for
+    # splitting Couldn't check into "request these" and "read these".
+    #
+    # Also empty for a retired rule with no spec, which cannot be classified. That is safe here: the
+    # unclassifiable case falls in with "read what is here", which asks a processor to look rather than
+    # to assume nothing is missing. Every ACTIVE rule declares its documents (test-enforced), so this
+    # only affects findings whose rule no longer exists.
+    missing_documents: list[str]
 
     @classmethod
-    def from_model(cls, finding: Finding, *, subject_label: str) -> RuleFindingPublic:
+    def from_model(
+        cls, finding: Finding, *, subject_label: str, documents_on_file: set[str] | None = None
+    ) -> RuleFindingPublic:
         details = finding.details or {}
         spec = _rule_spec(
             finding.rule_id
@@ -302,6 +332,7 @@ class RuleFindingPublic(BaseModel):
             else None,
             confidence=finding.confidence,
             resolution_status=finding.resolution_status.value,
+            missing_documents=_missing_documents(spec, documents_on_file or set()),
         )
 
 
