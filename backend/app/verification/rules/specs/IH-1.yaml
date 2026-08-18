@@ -105,11 +105,20 @@ deterministic:
   # binders: neither states a Coverage A settlement basis — the only loss-settlement endorsement on
   # either is HQ-290, which covers PERSONAL PROPERTY. So the ask is not "read it again", it is "get the
   # document that states it", and the wording says which document that is.
+  # LP-525 — facts from the binder itself, for the WORDING only. Never inputs: no verdict turns on
+  # them, they are not gated, and they are not load-bearing. Verified against LF-WCHG's two binders —
+  # `coverage_amount` holds $577,000 / $601,000 and `forms_and_endorsements` holds HQ-220 / HQ-290 /
+  # HQ-208, which is the context a processor needs to see that the finding is about Coverage A and the
+  # only settlement endorsement present is about Coverage C.
+  subject_facts:
+    coverage_a: {field: coverage_amount, money: true}
+    endorsements: {list: forms_and_endorsements, item: code_or_label, limit: 4}
   couldnt_check_fix: >-
-    Obtain the declarations page or coverage form for the policy's current term showing the Coverage A
-    (dwelling) loss-settlement basis, or written confirmation from the carrier. A binder often states a
-    loss-settlement basis only for personal property (Coverage C), which is a different coverage and
-    does not establish how a dwelling loss is settled.
+    The binder shows Coverage A of {coverage_a} with endorsements {endorsements}, but none of them
+    states how a DWELLING loss is settled. Obtain the declarations page or coverage form for the
+    policy's current term showing the Coverage A loss-settlement basis, or written confirmation from
+    the carrier. Note that a "Personal Property Replacement Cost Loss Settlement" endorsement covers
+    contents (Coverage C) and does not establish how a dwelling loss is settled.
   load_bearing_tags:
     - ins.dwelling_settlement_basis
   gated_tags:

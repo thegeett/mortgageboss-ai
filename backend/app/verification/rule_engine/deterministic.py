@@ -40,11 +40,13 @@ from app.verification.rules.specs import (
     Operand,
     OutcomeRule,
     RuleSpec,
+    SubjectFact,
     TagCondition,
     _as_conditions,
     parse_reference_fraction,
 )
-from app.verification.snapshot.model import CalculationEntry, Snapshot
+from app.verification.snapshot.fields import Field
+from app.verification.snapshot.model import CalculationEntry, DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
@@ -183,6 +185,55 @@ def _resolve_operand(
     return None  # unreachable (the Operand validator guarantees exactly one source)
 
 
+def _documents_by_id(snapshot: Snapshot) -> dict[str, DocumentEntry]:
+    """content_id -> the document, so a per-document rule can reach its own subject's facts."""
+    if snapshot.documents.absent:
+        return {}
+    return {entry.content_id: entry for entry in snapshot.documents.entries}
+
+
+def _fact_value(entry: DocumentEntry, fact: SubjectFact) -> str | None:
+    """One declared subject fact, rendered for a message — or None when the document does not have it."""
+    if fact.field is not None:
+        field = entry.fields.get(fact.field)
+        if not isinstance(field, Field) or not field.is_present or field.value is None:
+            return None
+        if fact.money and (amount := coerce_decimal(field.value)) is not None:
+            # ⚠️ Cents only when the SOURCE has them. This deliberately differs from LP-520's
+            # always-cents rule for AS-12's materiality floor, and the difference is the purpose: a
+            # floor is a COMPUTED comparison a processor judges, so "$2,000" must be distinguishable
+            # from a rounded "$1,999.87". This is a QUOTE from a document — a binder stating Coverage A
+            # of $577,000 should read back as $577,000, not as a more precise figure than it printed.
+            cents = amount.quantize(Decimal("0.01"))
+            return f"${cents:,.0f}" if cents == cents.to_integral_value() else f"${cents:,.2f}"
+        return str(field.value).strip() or None
+    rows = entry.lists.get(fact.list or "", ())
+    values = [
+        text
+        for row in rows
+        if isinstance(cell := row.fields.get(fact.item or ""), Field)
+        and cell.is_present
+        and (text := str(cell.value or "").strip())
+    ]
+    if not values:
+        return None
+    shown = ", ".join(values[: fact.limit])
+    return shown if len(values) <= fact.limit else f"{shown} and {len(values) - fact.limit} more"
+
+
+def _subject_facts(
+    declared: Mapping[str, SubjectFact], entry: DocumentEntry | None
+) -> dict[str, str]:
+    """Every declared fact, resolved for this subject.
+
+    An unresolved fact renders as "not stated" rather than a blank: a sentence with a hole in it reads
+    as a bug, where "Coverage A of not stated" reads as what it is — a document that does not say.
+    """
+    if entry is None:
+        return dict.fromkeys(declared, "not stated")
+    return {name: _fact_value(entry, fact) or "not stated" for name, fact in declared.items()}
+
+
 def _tags_hold(when_tags: tuple[TagCondition, ...], subject_tags: Mapping[str, Tag]) -> bool:
     for cond in when_tags:
         tag = subject_tags.get(cond.tag_id)
@@ -270,6 +321,9 @@ def evaluate_deterministic_rule(
         ]
 
     results: list[RuleEvaluation] = []
+    # Built once: a per-document rule's subject_id IS its document's content_id, so this is how a
+    # message reaches facts the tag layer deliberately dropped (LP-525).
+    documents = _documents_by_id(snapshot)
     for subject_id, subject_tags in subjects:
         # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
@@ -296,8 +350,15 @@ def evaluate_deterministic_rule(
                     subject_tags,
                     verdict_confidence=gate.verdict_confidence,
                     # LP-524 — the gate runs BEFORE any outcome, so this is the only place a
-                    # couldn't-check finding can be told what would resolve it.
-                    how_to_fix=det.couldnt_check_fix,
+                    # couldn't-check finding can be told what would resolve it. LP-525 interpolates the
+                    # subject document's own facts into it (wording only — never a verdict input).
+                    how_to_fix=(
+                        det.couldnt_check_fix.format(
+                            **_subject_facts(det.subject_facts, documents.get(subject_id))
+                        )
+                        if det.couldnt_check_fix
+                        else None
+                    ),
                 )
             )
             continue

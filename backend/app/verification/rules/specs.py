@@ -378,7 +378,25 @@ class DeterministicEval(BaseModel):
     # document would supply it. Declared here rather than per-outcome because the gate has no outcome to
     # attach it to, and the ask is the same whichever gated tag was missing: get the document.
     couldnt_check_fix: str | None = None
+    # LP-525 — facts from the subject's own document, for the WORDING only. See :class:`SubjectFact`.
+    subject_facts: dict[str, SubjectFact] = PydField(default_factory=dict)
     confidence_floor: float = 0.5
+
+    @model_validator(mode="after")
+    def _couldnt_check_fix_placeholders_resolve(self) -> DeterministicEval:
+        """A stray placeholder raises at format time — mid-run, inside a Celery task. Caught at LOAD."""
+        if self.couldnt_check_fix is None:
+            return self
+        try:
+            fields = _template_fields(self.couldnt_check_fix)
+        except ValueError as exc:
+            raise ValueError(f"couldnt_check_fix is malformed: {exc}") from exc
+        if unknown := sorted(fields - set(self.subject_facts)):
+            raise ValueError(
+                f"couldnt_check_fix references unknown placeholder(s) {unknown} — declare them in "
+                f"`subject_facts` (declared: {sorted(self.subject_facts)})"
+            )
+        return self
 
     @model_validator(mode="after")
     def _applicability_expected_needs_document_applicability(self) -> DeterministicEval:
@@ -515,6 +533,43 @@ class Materiality(BaseModel):
                     f"materiality `{name}` must be a `decimal` operand, got {operand.type!r} "
                     "(a floor is a fraction of a magnitude)"
                 )
+        return self
+
+
+class SubjectFact(BaseModel):
+    """One fact from the SUBJECT'S OWN DOCUMENT, named for a message template (LP-525).
+
+    A rule sees only its tags, which is why IH-1's finding could say "the binder does not state a
+    dwelling loss-settlement basis" and NOT "…on a policy with Coverage A of $577,000 and a Specified
+    Additional Amount for Coverage A endorsement". Those facts are in the snapshot, one step away from
+    the rule that most needs them: the tag layer deliberately narrows a document to the few values a
+    rule DECIDES on, and everything else — the context that makes a finding legible — is dropped.
+
+    This is the narrow channel back: a spec names the extra facts it wants for its WORDING, and they
+    reach the template only. ⚠️ They are NOT inputs — no verdict may turn on them. A fact declared here
+    is never gated, never compared, never part of `load_bearing_tags`; if a rule needs to DECIDE on a
+    value it must be a tag, with the gate and the distrust layer behind it.
+
+    Exactly one source:
+
+    * ``field`` — a scalar from ``DocumentEntry.fields`` (an extracted typed value).
+    * ``list`` + ``item`` — the named LP-437 list, taking ``item`` from each row.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    field: str | None = None
+    list: str | None = None
+    item: str | None = None  # the row field to take, required with `list`
+    limit: int = PydField(default=4, ge=1)  # rows to name before "and N more"
+    money: bool = False  # render as $1,234.56
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> SubjectFact:
+        if (self.field is None) == (self.list is None):
+            raise ValueError("a SubjectFact sets exactly one of `field` or `list`")
+        if (self.list is None) != (self.item is None):
+            raise ValueError("`list` requires `item` (which row field to take), and vice versa")
         return self
 
 
