@@ -451,6 +451,17 @@ module "compute" {
 
     AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(var.ai_requests_per_minute_bedrock)
 
+    # LP-527 — the finding COMPOSER. After the verdicts are decided, a model rewrites each
+    # finding's TEXT from a fixed fact summary; it cannot introduce a fact (every number in
+    # the output must appear in the input, checked deterministically), and any failure falls
+    # back to the template the rule already wrote. It touches `message` and nothing else, so
+    # turning it off returns the previous wording with no other effect.
+    #
+    # ⚠️ It rewrites EVERY finding on a file at once — a bad prompt degrades the whole queue
+    # rather than one rule. Enabled here on staging to be READ against the templates before it
+    # goes anywhere else.
+    FINDING_PROSE_ENABLED = "true"
+
     # ⚠️ REDIS_URL IS NOT HERE. redis_auth_enabled is true in this environment, so
     # the URL carries an AUTH token and is a CREDENTIAL — it is injected from the
     # redis-url secret in secret_arns below.
