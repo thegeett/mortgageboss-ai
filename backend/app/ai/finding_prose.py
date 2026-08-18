@@ -59,6 +59,10 @@ RULES, all mandatory:
   is missing ("the file does not contain a credit report"), not what the software cannot do.
   ⚠️ The problem text you are given is written for engineers and often reads impersonally. Do not
   mirror that register: rewrite it as something a person does about a document.
+- Do NOT state or paraphrase a materiality threshold ("exceeds the materiality threshold", "is above
+  the floor"). The exact arithmetic is appended to your text automatically, so writing your own version
+  says the same thing twice, once vaguely and once precisely. Say what to obtain and why the source
+  matters; leave the size of the deposit to the appended clause.
 - Plain sentences. No markdown, no bullet points, no headings.
 - Keep the whole thing under 60 words."""
 

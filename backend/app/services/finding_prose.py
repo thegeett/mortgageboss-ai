@@ -118,7 +118,10 @@ def _with_derivation(message: str, finding: Finding) -> str:
     fraction_and_basis = re.search(r"\d+% of ", derivation)
     if fraction_and_basis and fraction_and_basis.group() in message:
         return message
-    return f"{message} ({derivation}.)"
+    # Its own sentence, NOT parenthesised: the derivation already contains a bracketed clause
+    # ("the $1,316.67 (10% of $13,166.67 qualifying income) materiality floor"), and wrapping it
+    # produced nested parentheses on every AS-12 finding of the run that introduced this.
+    return f"{message} Threshold: {derivation}."
 
 
 async def compose_findings(

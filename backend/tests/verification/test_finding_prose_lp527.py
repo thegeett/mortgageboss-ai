@@ -152,6 +152,17 @@ def test_the_summary_carries_no_field_the_prompt_cannot_use() -> None:
 # --------------------------------------------------------------------------------------------- #
 # THE PROMPT'S OWN CONTRACT
 # --------------------------------------------------------------------------------------------- #
+def test_the_prompt_tells_the_model_not_to_restate_the_threshold() -> None:
+    """The append guarantees the arithmetic; it cannot stop the model ALSO writing its own vaguer
+    version, and the first run with it live said the same thing twice — "exceeds the materiality
+    threshold" immediately before the exact figure. The guarantee and the tidiness are separate
+    problems, and only the tidiness is safe to solve with a prompt."""
+    from app.ai.finding_prose import SYSTEM_PROMPT
+
+    assert "materiality threshold" in SYSTEM_PROMPT
+    assert "appended to your text automatically" in SYSTEM_PROMPT
+
+
 def test_the_prompt_forbids_the_two_things_that_would_undo_this() -> None:
     """Belt and braces with the deterministic check: the prompt says not to invent facts and not to
     mention the machinery. The check enforces the first; nothing but the prompt enforces the second,
@@ -276,6 +287,9 @@ def test_the_materiality_derivation_survives_a_composition_that_dropped_it() -> 
     )
 
     assert "10% of $13,166.70" in restored
+    # Its own sentence — the derivation already carries a bracketed clause, so wrapping it in another
+    # pair produced nested parentheses on every AS-12 finding of the run that introduced this.
+    assert "((" not in restored and f"({derivation}" not in restored
 
 
 def test_a_composition_that_kept_the_derivation_is_not_given_it_twice() -> None:
