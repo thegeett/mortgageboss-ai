@@ -161,9 +161,13 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # built and measured but held because its tag enum has no abstain, so a coerced unknown marks the
     # whole run degraded. 9 - 2 + 1 = 8.
     # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
-    # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6. NOTE: there is now NO
-    # blocked JUDGMENT rule at all; test_pending_checks_lp391 asserts that and simulates one.
-    assert len(held) == 6 and not (
+    # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6.
+    # LP-547 — FR-5 JOINED it, 6 -> 7: built (the first rule that reads money OUT), held because its
+    # judgment has no measured self-consistency and `txn.apparent_category`'s ability to tell a creditor
+    # payment from a utility — the one distinction it rests on — is unscored. It is also once again the
+    # case that a blocked JUDGMENT rule exists, which test_pending_checks_lp391 now asserts directly
+    # instead of only simulating.
+    assert len(held) == 7 and not (
         held & _ACTIVATED
     )  # LP-519 +AS-13 — calibratable-now, validated:false  # every other candidate is held
 

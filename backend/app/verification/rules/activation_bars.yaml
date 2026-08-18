@@ -261,6 +261,55 @@ AS-6:
     NOT ownership-checked at all (its own ticket — widen stmt_facts' applicability). Validating this bar ACTIVATES
     the rule (LP-393-6 coupling) — the sign-off IS the activation.
 
+FR-5:
+  # LP-547 — BUILT, HELD ON MEASUREMENT. The blocker this file recorded for FR-5 is GONE: "its declared
+  # 'pattern across statements' is unanswerable from a context that shows one transaction" was true of
+  # an AI group, and LP-546 answered it with a deterministic producer that sees the whole snapshot. So
+  # `txn.is_recurring` is now a COUNT — no model, no calibration round, no per-transaction call.
+  #
+  # WHAT REMAINS UNMEASURED is the rule's own judgment, and one input it leans on. `txn.apparent_category`
+  # is an AI tag and `debt_payment` is one of its twelve values; nothing has scored how reliably it tells
+  # a creditor payment from a utility or a subscription, which is the single distinction this rule rests
+  # on. A self-consistency round over constructed cases with a full three-value spread is the same gate
+  # every other judgment rule passed, and it has not been run.
+  #
+  # ⚠️ THE MEASUREMENT WILL NOT SETTLE THE THING THAT MATTERS MOST. On the only corpus that carries bank
+  # statements (ONE loan file, LP-543) every recurring creditor payment is already disclosed on the 1003,
+  # so this rule would fire four times and add nothing. That is a statement about one compliant borrower,
+  # not about the rule — a debt that is undisclosed is by construction absent from the file we would
+  # measure against. Do not read a quiet result on that corpus as evidence the rule is unnecessary.
+  # `not-calibratable-yet`, NOT `ratify-pending`: the gate is explicit that a ratify-pending bar needs a
+  # measured self_consistency_rate, and this has none. Claiming the readier status would have described
+  # the rule as further along than it is.
+  status: not-calibratable-yet
+  ships: ratify
+  threshold: null
+  validated: false
+  load_bearing_ai_tags: [txn.apparent_category]
+  fp_fn: >-
+    FP > FN, INVERTED FOR THIS COHORT and following FR-3's bar. A fraud-adjacent finding names a person:
+    a false "this looks like an undisclosed obligation" costs a borrower and a processor real time and
+    trust, while a missed one costs a review a human was going to do at underwriting anyway. So the rule
+    surfaces rather than asserts — needs_review only, never fired, and an unreadable payee abstains
+    instead of being read as clean.
+  rationale: >-
+    THE ONLY RULE THAT READS MONEY OUT. All three active transaction rules scope `txn.is_money_in eq in`,
+    so on the file that exposed this 41 withdrawals were never looked at while 10 deposits produced five
+    findings. A debt visible only as a recurring bank debit — a private or family loan, a rent-to-own,
+    anything not reported to the bureaus — is invisible today, and it is the category most likely to be
+    undisclosed.
+    IT CANNOT SEE THE DISCLOSED DEBTS, AND ITS WORDING SAYS SO. `_build_context` hands a judgment rule the
+    SUBJECT's tags and nothing else, so the file's stated liabilities are out of reach from a transaction
+    subject. The rule therefore asks what it can answer — is this recurring payment to an apparent creditor
+    shaped like a monthly obligation — and asks the PROCESSOR to reconcile it against the 1003. The prompt
+    forbids the words undisclosed, unreported and hidden for that reason. Closing the gap properly needs a
+    loan-level tag carrying the payee-versus-stated-liability comparison, which is a vocabulary addition
+    and therefore the domain expert's call.
+    NO THRESHOLD, deliberately. A recurring $40 debit is a subscription and a recurring $450 debit is a car
+    payment, but unlike the deposit floor there is no agency text to derive the line from, so the rule
+    surfaces every recurring creditor payment and the ratifying human weighs an amount already in front of
+    them.
+
 AS-7:
   status: not-calibratable-yet
   ships: auto

@@ -1,0 +1,172 @@
+# FR-5 — Recurring undisclosed debit — AI JUDGMENT rule SPEC (LP-547). BUILDS INERT.
+#
+# THE GAP IT CLOSES. Nothing in the engine reads money OUT. All three active transaction rules scope
+# `txn.is_money_in eq in`, so on the one file with statements 41 withdrawals were never looked at while
+# 10 deposits produced five findings. A debt visible only as a recurring bank debit — a private or
+# family loan, a rent-to-own, anything not reported to the bureaus — is invisible today, and that is
+# the category most likely to be undisclosed.
+#
+# WHY IT COULD NOT BE BUILT BEFORE, and what changed. activation_bars recorded: "FR-5's declared
+# 'pattern across statements' is unanswerable from a context that shows one transaction." True of an AI
+# group; LP-546 answered it with a DETERMINISTIC producer that sees the whole snapshot, so recurrence
+# is now a count rather than a perception — no model call, no calibration round.
+#
+# ⚠️ IT CANNOT SEE THE APPLICATION'S DISCLOSED DEBTS, AND ITS WORDING SAYS SO. `_build_context` gives a
+# judgment rule the SUBJECT's tags and nothing else, so the file's stated liabilities are out of reach
+# from a transaction subject. This rule therefore asks the question it can answer — "is this recurring
+# payment to an apparent creditor a monthly obligation?" — and asks the PROCESSOR to check it against
+# the 1003. It must never claim a debt is undisclosed; it does not know.
+#
+# ⚠️ `txn.implies_obligation` IS DELIBERATELY NOT READ, though rule_tags.csv still lists it against
+# FR-5. Its declared question — "does this debit imply an undisclosed monthly obligation" — IS this
+# rule's question. Producing a tag to ask it and then a rule to ask it again is the DT-7 shape: an AI
+# tag restated by an AI judgment, two layers where neither checks the other. The row stays because
+# rule_tags.csv is generated from the vocabulary spreadsheet and is the domain expert's artifact to
+# change; this spec simply does not consume it, which is visible in `load_bearing_tags`.
+#
+# ⚠️ FP > FN HERE, inverted from the rest of the engine, following FR-3's bar. A fraud-adjacent finding
+# names a person: a false "this looks undisclosed" costs a borrower and a processor real time and
+# trust, while a missed one costs a review a human was going to do at underwriting anyway. So it
+# surfaces rather than asserts — needs_review only, never fired, and an unreadable payee abstains
+# instead of being read as clean.
+
+rule_id: FR-5
+name: Recurring undisclosed debit
+category: Fraud
+
+kind: judgmental          # must equal rule_kinds.csv (FR-5 = judgmental, ai_judgment)
+numeric_check: false      # no threshold — see below
+
+criteria: >-
+  A payment that leaves the account on a recurring monthly basis and is directed at an apparent
+  creditor may be a monthly obligation the application does not disclose, which would understate the
+  debt-to-income ratio. This rule surfaces such a payment for a human to reconcile against the
+  liabilities on the 1003. It does NOT decide whether the obligation is disclosed — the file's stated
+  liabilities are not reachable from a transaction subject — so every verdict is a review, never an
+  assertion.
+
+applicability:
+  scope: >-
+    A bank-statement transaction that is money OUT, is categorised as a payment to an apparent
+    creditor, and recurs across two or more months.
+  trigger: >-
+    Evaluated once per transaction. A money-IN transaction, a non-creditor payment (a utility, a
+    merchant, a transfer) and a one-off payment are all OUT OF SCOPE — not_applicable, not a gap.
+    An undetermined direction, category or recurrence is data-missing → couldnt_check.
+
+required_inputs:
+  - name: is_money_in
+    snapshot_path: 'tags.by_subject[<txn>]["txn.is_money_in"]'
+    description: The direction of funds — this rule reads only "out".
+  - name: apparent_category
+    snapshot_path: 'tags.by_subject[<txn>]["txn.apparent_category"]'
+    description: >-
+      What the transaction is, from its description (AI, Stage A). "debt_payment" is a payment to an
+      apparent CREDITOR — a card issuer, a mortgage servicer, an auto/student/personal loan.
+  - name: is_recurring
+    snapshot_path: 'tags.by_subject[<txn>]["txn.is_recurring"]'
+    description: >-
+      Whether this payee appears in two or more DISTINCT MONTHS across the file's statements (derived,
+      LP-546 — a count, not a judgment).
+
+# No threshold, deliberately. A recurring $40 debit is a streaming subscription and a recurring $450
+# debit is a car payment, but where that line sits is a domain call with no agency text behind it —
+# unlike the deposit floor, which the guide defines. Rather than invent one, the rule surfaces every
+# recurring creditor payment and lets the ratifying human weigh the amount, which is in front of them.
+reference_values:
+  priya_validated: false
+  threshold_needs_signoff: false
+
+subject_enumeration: per_deposit    # one subject per bank-statement transaction (not deposits only)
+subject_key_fields: [account, date, amount]
+
+evidence_required: >-
+  The payee, the amount, how many months it recurs across, and the transaction date — inline on the
+  finding, so the ratifier can match it against the 1003 without opening the statement.
+
+guideline_reference: "Fannie Mae Selling Guide B3-6 (all monthly obligations must be included in the debt-to-income ratio; undisclosed debt)."
+
+# LP-541 — its inputs come from bank statements.
+requires_documents:
+  - [bank_statement]
+
+spec_version: 1
+
+judgment:
+  subject: per_deposit
+  # ⚠️ THREE PREDICATES, ALL REQUIRED (LP-517 conjunction). Direction alone would ask the model about
+  # every withdrawal on the file; category alone would ask about a one-off card payment, which is
+  # ordinary. The rule is about the INTERSECTION — a creditor payment that repeats.
+  applicability:
+    - {tag: txn.is_money_in, op: eq, value: out}
+    - {tag: txn.apparent_category, op: eq, value: debt_payment}
+    - {tag: txn.is_recurring, op: eq, value: "yes"}
+  applicability_expected: false   # a file with no bank statement is AS-10's gap, not this rule's
+  load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring]
+  # `_build_context` builds the model's context from THIS list alone, and each entry carries the tag's
+  # own REASONING — which is where the payee name lives ("Citi (Citibank) is a credit card issuer ...")
+  # and where the recurrence count lives ("this payee appears in 3 different months"). The amount and
+  # date are added so the model can weigh size and timing rather than being asked about signals it
+  # cannot observe (the LP-516 lesson on AS-12).
+  reasoned_over: [txn.apparent_category, txn.is_recurring, txn.amount, txn.date]
+  output_tag: fraud.recurring_debit_reviewed
+  value_domain: ["yes", "no", "unknown"]
+  confidence_floor: 0.5
+  guidance:
+    action:
+      "yes": "Check the {amount} recurring payment on {date} against the liabilities on the 1003."
+      "no": "Confirm the {amount} recurring payment on {date} needs no entry on the 1003."
+      "unknown": "Establish what the {amount} recurring payment on {date} is for."
+    explain_by: txn.is_recurring
+    explain:
+      # Evidence only, no clause about why this is listed — this same sentence renders under an
+      # `unknown` verdict, where a reassuring ending would contradict the action above it (the OC-2 note).
+      "yes":
+        why: >-
+          This payment leaves the account on a recurring monthly basis and its description points at a
+          creditor rather than a merchant or a utility.
+        how_to_fix: >-
+          Match it to a liability on the 1003. If it is already there, confirm the monthly payment
+          agrees with what the statement shows. If it is not, obtain the account details and add it —
+          an undisclosed monthly obligation understates the debt-to-income ratio. If it is not a debt
+          at all (a subscription, an insurance premium, a transfer), note that and clear this.
+      default:
+        why: >-
+          Whether this payment recurs could not be established from the file's statements, so it is
+          not known whether it represents a monthly obligation.
+        how_to_fix: >-
+          Obtain the statements covering the months either side of this payment, so a recurring
+          obligation can be told from a one-off payment.
+  system_prompt: |
+    You are a senior mortgage loan processor making ONE reasoned judgment about ONE bank transaction:
+    does this recurring payment look like a MONTHLY OBLIGATION that belongs on the application's
+    liability list?
+
+    You reason ONLY over the STRUCTURED TAGS handed to you below — never raw documents. They tell you
+    what the payment is (from its description), how many months it recurs across, its amount and its
+    date.
+
+    YOU CANNOT SEE THE APPLICATION'S DISCLOSED LIABILITIES, and you must not pretend otherwise. NEVER
+    say a debt is undisclosed, unreported or hidden — you have no way to know, and this is a
+    fraud-adjacent check where a false accusation costs a borrower real trust. Judge only whether the
+    payment has the SHAPE of a monthly obligation; a human reconciles it against the 1003.
+
+    Answer "yes" when the payee and the regularity together look like a debt being serviced — a card
+    issuer, a mortgage servicer, an auto/student/personal loan, a lease, a finance company.
+
+    Answer "no" when the regularity is better explained as something that is not a debt: a utility, an
+    insurance premium, a subscription, a rent payment to a landlord, a transfer to the borrower's own
+    account, a recurring purchase.
+
+    Answer "unknown" when the description is too sparse to tell what the payee is. An unreadable payee
+    is "unknown", NEVER "no" — a payee you cannot identify is not evidence that it is not a debt.
+
+    Give a confidence (0.0-1.0) reflecting genuine certainty, and reasoning that cites the specific tag
+    values you relied on and names the payee you read from them.
+
+    STRICT OUTPUT — return ONLY a JSON OBJECT (no markdown fences, no prose before or after):
+    {
+      "value": "yes|no|unknown",
+      "confidence": <0.0-1.0>,
+      "reasoning": "<why — name the payee, the recurrence, and what they together imply>"
+    }
