@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useId, useState } from "react";
-import { RuleFindingRow } from "./rule-finding-row";
+import { RuleFindingRow, RuleLabel } from "./rule-finding-row";
 
 interface TabDef {
   id: TabId;
@@ -240,8 +240,7 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
         <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-mono text-xs font-semibold text-gray-800">{first.rule_id}</span>
-            <span className="text-[11px] text-gray-400">{humanize(first.category)}</span>
+            <RuleLabel finding={first} />
             <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
               {findings.length} findings
             </span>

@@ -90,6 +90,10 @@ export interface RuleFindingTag {
 export interface RuleFinding {
   id: string;
   rule_id: string;
+  /** The rule's own name from its spec ("ATR documentation completeness"). Null only for a retired
+   *  rule with no spec file, in which case the id stands alone. Shown WITH the id, never instead of
+   *  it — the id is what a processor quotes when escalating and what every ticket calls the rule. */
+  rule_name: string | null;
   evaluation_outcome: EvaluationOutcome;
   status: "red" | "yellow" | "green";
   category: string;

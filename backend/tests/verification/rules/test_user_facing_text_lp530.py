@@ -157,3 +157,33 @@ def test_no_generated_reason_describes_the_machinery(module: str) -> None:
         "a generated finding message describes the software rather than the loan file — it is what "
         f"a processor reads AND what the composer is asked to rewrite: {offenders}"
     )
+
+
+# ------------------------------------------------------------------------------------------------ #
+# LP-538 — a rule identifies itself by NAME, not only by id
+# ------------------------------------------------------------------------------------------------ #
+def test_every_rule_that_can_produce_a_finding_has_a_name_to_show() -> None:
+    """A processor cannot know that "DT-7" means ATR documentation completeness, or that "CR-6" means
+    derogatory seasoning. The findings payload now carries the spec's own name beside the id.
+
+    This holds for every FUTURE rule by construction rather than by vigilance: `RuleSpec.name` is
+    `str = PydField(min_length=1)`, so a spec with no name (or an empty one) fails to load and the rule
+    cannot run at all. The test pins the two things that make that guarantee reach the UI — that every
+    active rule HAS a spec, and that no spec's name is blank — because a rule active without a spec file
+    would resolve `rule_name` to None and silently fall back to the bare id."""
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+    from app.verification.rules.specs import load_rule_spec
+
+    spec_ids = {path.stem for path in _SPECS_DIR.glob("*.yaml")}
+
+    assert not set(ACTIVE_RULE_IDS) - spec_ids, (
+        "an active rule has no spec, so it has no name to show"
+    )
+    assert all(load_rule_spec(rule_id).name.strip() for rule_id in sorted(spec_ids))
+
+
+def test_the_findings_payload_actually_carries_the_name() -> None:
+    """The guarantee above is worthless if the schema drops it — this is the wire."""
+    from app.schemas.verification import RuleFindingPublic
+
+    assert "rule_name" in RuleFindingPublic.model_fields

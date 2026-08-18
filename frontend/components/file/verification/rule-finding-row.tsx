@@ -93,6 +93,26 @@ function DetailBlock({ label, children }: { label: string; children: React.React
   );
 }
 
+/**
+ * The rule's identity line: NAME first, id kept beside it.
+ *
+ * "DT-7" identifies a rule to us and tells a processor nothing — they cannot know it means ATR
+ * documentation completeness without opening the spec. The name leads because it is what the row is
+ * about; the id stays because it is what a processor quotes when they escalate, what every ticket and
+ * spec file calls the rule, and what makes a screenshot answerable.
+ */
+export function RuleLabel({ finding }: { finding: RuleFinding }) {
+  return (
+    <>
+      <span className="font-mono text-[11px] text-gray-400">{finding.rule_id}</span>
+      {finding.rule_name !== null && (
+        <span className="text-xs font-semibold text-gray-800">{finding.rule_name}</span>
+      )}
+      <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
+    </>
+  );
+}
+
 export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
   const [expanded, setExpanded] = useState(false);
   const meta = outcomeMeta(finding.evaluation_outcome);
@@ -115,8 +135,7 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
         <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", tone.dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-mono text-xs font-semibold text-gray-800">{finding.rule_id}</span>
-            <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
+            <RuleLabel finding={finding} />
             {chip.length > 0 && (
               <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
                 {chip}

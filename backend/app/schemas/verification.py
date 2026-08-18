@@ -238,6 +238,11 @@ class RuleFindingPublic(BaseModel):
 
     id: UUID
     rule_id: str
+    # LP-538 — the rule's own name from its SPEC. "DT-7" identifies a rule to US and tells a processor
+    # nothing; "ATR documentation completeness" tells them what was checked without opening anything.
+    # Sent alongside the id rather than instead of it: the id is what a processor quotes when they
+    # escalate, and what every ticket, spec file and this codebase calls the rule.
+    rule_name: str | None
     evaluation_outcome: (
         str  # open | satisfied | needs_review | couldnt_check | no_longer_applies — the tab
     )
@@ -270,6 +275,8 @@ class RuleFindingPublic(BaseModel):
         return cls(
             id=finding.id,
             rule_id=finding.rule_id,
+            # None only for a retired/legacy rule_id with no spec file — the UI falls back to the id.
+            rule_name=spec.name if spec is not None else None,
             # Guaranteed present by the caller's ``evaluation_outcome IS NOT NULL`` filter; empty only if a
             # future caller passes a legacy finding (which would not belong here).
             evaluation_outcome=(

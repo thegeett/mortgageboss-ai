@@ -18,6 +18,7 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
   return {
     id: overrides.id ?? "rf-1",
     rule_id: overrides.rule_id ?? "ID-4",
+    rule_name: overrides.rule_name ?? "Current address consistency",
     evaluation_outcome: overrides.evaluation_outcome ?? "couldnt_check",
     status: overrides.status ?? "yellow",
     category: overrides.category ?? "identity",
