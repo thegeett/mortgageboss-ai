@@ -183,6 +183,12 @@ class Settings(BaseSettings):
     # scales with the blocked-rule count. Gated so a cost-sensitive deployment can turn the whole pass off
     # with no redeploy; ON by default (the honest-surfacing behavior the live/persisted snapshot is unaffected by).
     pending_checks_enabled: bool = True
+    # LP-527 — the finding COMPOSER (a model rewrites each finding's text from a fixed fact summary).
+    # ⚠️ OFF BY DEFAULT, deliberately. It rewrites EVERY finding on a file at once, so a bad prompt
+    # degrades the whole queue rather than one rule, and nothing about its output has been read on a
+    # real run yet. Everything shipped unmeasured today caused an incident; this one turns on when
+    # someone chooses to compare it against the templates, which is one env var.
+    finding_prose_enabled: bool = False
 
     # JWT / Auth
     jwt_secret_key: str = Field(

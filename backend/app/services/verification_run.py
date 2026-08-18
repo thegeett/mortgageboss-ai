@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
+from app.services.finding_prose import compose_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
 from app.services.tag_correlation import (
     Reasoner as StageBReasoner,
@@ -181,11 +182,21 @@ def _pending_check_ai_groups() -> frozenset[str]:
 
 logger = get_logger(__name__)
 
+
 # The rule → finding-category map (which area of the file each rule concerns), a display lookup only.
 # The set of rules that RAN is the registry's ACTIVE_RULE_IDS (the single source of truth) — NOT this
 # map — so reconciliation's evaluated_rule_ids can never drift from what actually evaluated (a drift
 # would drop a rule's priors and mint-collide on the uniqueness index). An unmapped rule falls back to
 # a default category (cosmetic); a missing category never breaks reconciliation.
+# LP-527 — rule_id -> the rule's human NAME, for the composer's fact summary. Read from the catalogue
+# (rule_kinds.csv, the single gate of record) rather than restated here: a finding that named a rule
+# differently from the catalogue would be a second source of truth for what a check is called.
+def _rule_names() -> dict[str, str]:
+    from app.verification.rules.kinds import load_rule_kinds
+
+    return {rule_id: rk.name for rule_id, rk in load_rule_kinds().items()}
+
+
 _RULE_CATEGORY: dict[str, FindingCategory] = {
     "AS-1": FindingCategory.ASSETS,
     "OC-2": FindingCategory.PROPERTY,
@@ -578,6 +589,16 @@ async def run_verification(
         retire_eligible_rule_ids=_retire_eligible_rules(snapshot),
     )
     findings = reconciliation.detected
+
+    # LP-527 — the composer: rewrite the findings' TEXT from a fixed fact summary. Deliberately here,
+    # after the verdicts are decided and persisted: it touches `message` and nothing else, so a total
+    # failure of this pass leaves a fully correct run whose findings read as the templates wrote them.
+    # Off unless `finding_prose_enabled`.
+    if settings.finding_prose_enabled and findings:
+        try:
+            await compose_findings(db, findings, rule_names=_rule_names())
+        except Exception as exc:
+            logger.warning("finding_prose_pass_failed", error=type(exc).__name__)
 
     # Reproducibility: persist the frozen snapshot (best-effort — a persistence hiccup degrades, it
     # does not fail the run). Idempotent by run_id.
