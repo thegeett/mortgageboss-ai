@@ -23,9 +23,32 @@ from enum import StrEnum
 
 from app.verification.rule_engine.reasons import fact_label
 from app.verification.rules.distrust import distrusted_tag_ids
-from app.verification.snapshot.tag import Tag
+from app.verification.snapshot.tag import Tag, TagProducedBy
 
 _UNKNOWN = "unknown"
+
+
+# A reasoning string long enough to be a written explanation rather than a label. Crude on purpose and
+# stated as such: fixtures and terse producers carry things like "parsed" or "fixture-labeled", and
+# promoting one of those to a processor's screen is worse than the generic sentence it replaced. The
+# real fix is the composer layer; this is the floor under it.
+_SENTENCE_MIN_CHARS = 25
+
+
+def _authored_sentence(tag: Tag) -> str:
+    """A tag's own reasoning when it is fit to BE the finding's message, else "".
+
+    Two conditions, both necessary:
+
+    * ``produced_by`` is DERIVED — a recipe's sentence is authored code, reviewed and stable. A PARSED
+      passthrough often has no explanation to give, and an AI tag's is model prose of unpredictable
+      length written for a different audience (the 400-word paragraph that made AS-12's card unreadable).
+    * it reads as a sentence, not a label — see ``_SENTENCE_MIN_CHARS``.
+    """
+    if tag.produced_by is not TagProducedBy.DERIVED:
+        return ""
+    reasoning = (tag.reasoning or "").strip()
+    return reasoning if len(reasoning) >= _SENTENCE_MIN_CHARS and " " in reasoning else ""
 
 
 class GateStatus(StrEnum):
@@ -90,10 +113,24 @@ def evaluate_gate(
             )
     for tag_id, tag in load_bearing.items():
         if tag is not None and tag.value == _UNKNOWN:
+            # LP-524 — PREFER THE TAG'S OWN REASONING. A recipe that abstains has already written why,
+            # carefully and specifically ("the binder does not state a dwelling loss-settlement basis"),
+            # and this line used to discard it for a generic "present but unclear" — which tells a
+            # processor nothing and, worse, sounds like a reading failure when the fact simply is not in
+            # the document.
+            #
+            # ⚠️ ONLY a NON-AI tag's reasoning. A derived or parsed tag's sentence is authored code,
+            # reviewable and stable. An AI tag's is model prose of unpredictable length written for a
+            # different audience — the 400-word paragraph that made AS-12's card unreadable. Those keep
+            # the generic wording until the composer layer can summarise them.
+            authored = _authored_sentence(tag)
             return GateResult(
                 GateStatus.COULDNT_CHECK,
-                f"the {fact_label(tag_id)} could not be read from the documents "
-                "(it is present but unclear)",
+                authored
+                or (
+                    f"the {fact_label(tag_id)} could not be read from the documents "
+                    "(it is present but unclear)"
+                ),
                 None,
             )
     # LP-508 / ADR-377 — the fifth defence. Ordered AFTER absent/"unknown" (a missing value is a more

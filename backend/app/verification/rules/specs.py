@@ -370,6 +370,14 @@ class DeterministicEval(BaseModel):
     applicability_expected: bool = False
     operands: dict[str, Operand] = PydField(default_factory=dict)
     outcomes: tuple[OutcomeRule, ...] = PydField(min_length=1)
+    # LP-524 — the fix for a COULDN'T-CHECK, which no rule could carry before.
+    #
+    # `how_to_fix` lives on an OUTCOME, and the gate short-circuits before any outcome runs — so every
+    # "we could not check this" finding reached a processor with no action at all. On the first real
+    # file that was 15 of 25 items in the queue: each one names a missing fact and none says which
+    # document would supply it. Declared here rather than per-outcome because the gate has no outcome to
+    # attach it to, and the ask is the same whichever gated tag was missing: get the document.
+    couldnt_check_fix: str | None = None
     confidence_floor: float = 0.5
 
     @model_validator(mode="after")

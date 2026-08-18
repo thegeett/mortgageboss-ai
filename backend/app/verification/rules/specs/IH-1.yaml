@@ -100,6 +100,16 @@ deterministic:
     tag: document.document_type
     op: eq
     value: homeowners_insurance
+  # LP-524 — what to DO when the basis cannot be read. The gate short-circuits before any outcome, so
+  # without this the finding named a missing fact and stopped there. Verified against LF-WCHG's two
+  # binders: neither states a Coverage A settlement basis — the only loss-settlement endorsement on
+  # either is HQ-290, which covers PERSONAL PROPERTY. So the ask is not "read it again", it is "get the
+  # document that states it", and the wording says which document that is.
+  couldnt_check_fix: >-
+    Obtain the declarations page or coverage form for the policy's current term showing the Coverage A
+    (dwelling) loss-settlement basis, or written confirmation from the carrier. A binder often states a
+    loss-settlement basis only for personal property (Coverage C), which is a different coverage and
+    does not establish how a dwelling loss is settled.
   load_bearing_tags:
     - ins.dwelling_settlement_basis
   gated_tags:

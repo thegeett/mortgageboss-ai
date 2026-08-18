@@ -295,6 +295,9 @@ def evaluate_deterministic_rule(
                     gate.reason or "",
                     subject_tags,
                     verdict_confidence=gate.verdict_confidence,
+                    # LP-524 — the gate runs BEFORE any outcome, so this is the only place a
+                    # couldn't-check finding can be told what would resolve it.
+                    how_to_fix=det.couldnt_check_fix,
                 )
             )
             continue
