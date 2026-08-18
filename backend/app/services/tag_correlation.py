@@ -48,6 +48,7 @@ from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRe
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions as _all_transactions
 from app.verification.snapshot.traversal import field_value as _val
+from app.verification.tag_materialization.derived import txn_is_recurring
 
 logger = structlog.get_logger(__name__)
 
@@ -351,6 +352,47 @@ def _sourcing_tag(
         tag_version=_TAG_VERSION,
         stage=TagStage.B,
     )
+
+
+_TAG_IS_RECURRING = "txn.is_recurring"
+
+
+def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
+    """Produce ``txn.is_recurring`` for every transaction — DETERMINISTIC, no model, no reasoner.
+
+    ⚠️ WHY THIS IS A STAGE AND NOT A DECLARATION. `txn.is_recurring` has been declared in the vocabulary
+    since it was written, with FR-5 and CR-1 as consumers, and produced by nothing. The generic
+    materialization pass SKIPS the `transaction` subject, and Stage A/B only produces the tags it names
+    — so a `mode: derived` declaration alone materializes in tests and never on a real run, which is the
+    exact trap `test_declared_subjects_are_all_materialized` was written to catch. Its docstring names
+    the two ways out; this is the first ("produce it in Stage A/B"). The second — adding `transaction`
+    to `_MATERIALIZED_SUBJECTS` — would re-run the txn_stage_a model on every transaction, so it is not
+    free and is not the right trade for a tag that needs no model at all.
+
+    ⚠️ AND WHY IT NEEDED NO MODEL. `activation_bars` records FR-5 as blocked because "its declared
+    'pattern across statements' is unanswerable from a context that shows one transaction". That is
+    true of an AI group — the transaction context builder sends one transaction — and simply not true
+    here: this sees the whole snapshot. Recurrence is a COUNT, decidable from the text, identical on
+    every run, with no calibration round. The JUDGMENT that count feeds stays with the rule.
+
+    Runs AFTER Stage A so it sits with the other transaction tags, though it consumes none of them.
+    """
+    if snapshot.tags.absent:
+        return snapshot  # Stage A never ran; a tags layer that is absent stays absent.
+    by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
+    for txn in _all_transactions(snapshot):
+        value, reasoning = txn_is_recurring(snapshot, txn.content_id, None)
+        by_subject.setdefault(txn.content_id, {})[_TAG_IS_RECURRING] = Tag(
+            value=value,
+            confidence=None,  # derived: a count is not a probability, and a fabricated one would read as one
+            reasoning=reasoning,
+            source_facts=(txn.content_id,),
+            produced_by=TagProducedBy.DERIVED,
+            tag_role=TagRole.STRUCTURAL_FACT,
+            tag_version=_TAG_VERSION,
+            stage=TagStage.B,
+        )
+    return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
 async def produce_stage_b_sourcing_tags(

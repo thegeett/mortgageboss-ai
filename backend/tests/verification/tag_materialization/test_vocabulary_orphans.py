@@ -74,6 +74,10 @@ _PRODUCED_OUTSIDE_DECLARATIONS: frozenset[str] = frozenset(
         "txn.is_money_in",  # Stage A — AI
         "txn.apparent_category",  # Stage A — AI
         "txn.has_identified_source",  # Stage B (services/tag_correlation.py) — the sourcing judge
+        # LP-546 — its own deterministic stage between A and B (produce_recurrence_tags). NOT a
+        # generic-pass declaration: the declaration layer writes `derived` recipes for
+        # borrower/document/liability/loan only, and the generic pass skips `transaction` anyway.
+        "txn.is_recurring",  # recurrence stage — derived, model-free
     }
 )
 

@@ -4440,6 +4440,84 @@ def _date_or_none(tag: Tag | None) -> date | None:
     return coerce_date(str(tag.value))
 
 
+# --------------------------------------------------------------------------------------------- #
+# LP-546 — txn.is_recurring: the "pattern across statements" question, answered deterministically
+# --------------------------------------------------------------------------------------------- #
+# ⚠️ THIS TAG WAS DECLARED AND UNPRODUCED SINCE THE VOCABULARY WAS WRITTEN, and the reason is recorded
+# in activation_bars: "FR-5's declared 'pattern across statements' is unanswerable from a context that
+# shows one transaction." That is true of an AI group — the transaction context builder sends ONE
+# transaction — and it is not true here. A derived producer receives the whole snapshot, so it can see
+# every transaction on the file, which is exactly what recurrence requires.
+#
+# ⚠️ DERIVED, NOT AI, AND THAT IS THE POINT. Whether the same payee appears in two different months is
+# a COUNT, not a judgment: it is decidable from the text, identically on every run, with no calibration
+# round and no per-transaction model call. The judgment FR-5 needs — does a recurring debit to an
+# undisclosed party imply an obligation — stays with the rule, where an expert can weigh it.
+_RECURRENCE_MIN_MONTHS = 2
+
+# Digit runs vary between occurrences of the SAME obligation (a statement reference, a confirmation
+# number, a masked card), so they are stripped before grouping. Descriptions arrive with 9+-digit
+# identifiers already redacted at rest, which leaves shorter runs like a 4-digit suffix.
+_DIGITS = re.compile(r"\d+")
+_NON_WORD = re.compile(r"[^A-Z ]+")
+# ⚠️ THE REDACTION MARKER MUST GO FIRST, and it is not cosmetic. Descriptions have 9+-digit identifiers
+# replaced with "[REDACTED-ID]" at rest, so one occurrence of an obligation can carry the marker where
+# the next carries a short reference the redactor left alone. Stripping only digits left
+# "UNITEDWHOLESALE LOAN PAYMT REDACTED ID" against "UNITEDWHOLESALE LOAN PAYMT" — the same monthly
+# mortgage payment, in two groups, recurring in neither.
+_BRACKETED = re.compile(r"\[[^\]]*\]")
+
+
+def _payee_key(description: str) -> str:
+    """A description reduced to the part that is stable across occurrences of the same obligation."""
+    stripped = _BRACKETED.sub(" ", description.upper())
+    collapsed = _NON_WORD.sub(" ", _DIGITS.sub(" ", stripped))
+    return " ".join(collapsed.split())
+
+
+def txn_is_recurring(
+    snapshot: Snapshot, subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """txn.is_recurring — does this transaction's payee appear in two or more DISTINCT MONTHS?
+
+    Months, not occurrences. Two charges from the same merchant three days apart are a shopping habit;
+    the same payee in two different months is the shape a monthly obligation makes, which is the only
+    shape FR-5 is asking about. It also survives the statement boundary: a file carries a month or two
+    per statement, so counting occurrences would let one busy month masquerade as a pattern.
+
+    "unknown" when the transaction has no readable description or no date — absent is not "no" (§8), and
+    a payee we cannot name cannot be matched against one we can.
+    """
+    subject = next(
+        (txn for txn in all_transactions(snapshot) if txn.content_id == subject_id), None
+    )
+    if subject is None:
+        return _UNKNOWN, "the transaction is not present in this snapshot"
+    description = str(subject.description.value or "")
+    if not description or not _payee_key(description):
+        return (
+            _UNKNOWN,
+            "the transaction carries no readable description, so its payee cannot be matched",
+        )
+    key = _payee_key(description)
+    months = {
+        (parsed.year, parsed.month)
+        for txn in all_transactions(snapshot)
+        if _payee_key(str(txn.description.value or "")) == key
+        and (parsed := coerce_date(str(txn.date.value or ""))) is not None
+    }
+    if not months:
+        return (
+            _UNKNOWN,
+            "no dated transaction carries this payee, so recurrence cannot be established",
+        )
+    if len(months) >= _RECURRENCE_MIN_MONTHS:
+        return "yes", (
+            f"this payee appears in {len(months)} different months across the file's statements"
+        )
+    return "no", "this payee appears in only one month across the file's statements"
+
+
 def _stmt_continuity(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5517,6 +5595,8 @@ _RECIPES: dict[str, Recipe] = {
     "credit_report_age_months": _credit_report_age_months,
     "appraisal_age_months": _appraisal_age_months,
     "stmt_continuity": _stmt_continuity,
+    # LP-546 — recurrence is a COUNT over the file's transactions, not a per-transaction judgment.
+    "txn_is_recurring": txn_is_recurring,
     "income_employer_coverage": _income_employer_coverage,
     # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for
     # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable. LP-422 extended

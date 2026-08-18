@@ -45,6 +45,7 @@ from app.services.tag_correlation import (
 )
 from app.services.tag_correlation import (
     SourcingCache,
+    produce_recurrence_tags,
     produce_stage_b_sourcing_tags,
 )
 from app.services.tag_production import (
@@ -261,6 +262,14 @@ class VerificationRun:
     @property
     def degraded(self) -> bool:
         return bool(self.degradations)
+
+
+async def _recurrence_stage(snapshot: Snapshot) -> Snapshot:
+    """LP-546 — the recurrence pass is PURE and SYNCHRONOUS; this only meets `_run_stage`'s awaitable
+    contract. Kept sync in its own module so it is testable without an event loop, and so nothing about
+    it suggests it does I/O — it reads the snapshot it was handed and returns a new one."""
+    result: Snapshot = produce_recurrence_tags(snapshot)
+    return result
 
 
 async def _run_stage(
@@ -520,6 +529,15 @@ async def run_verification(
             lambda s: produce_stage_a_transaction_tags(
                 s, reasoner=reasoners.stage_a, cache=caches.stage_a
             ),
+            snapshot,
+            degradations,
+        )
+        # 2b. LP-546 — recurrence, DETERMINISTIC and model-free. Sits with the transaction tags because
+        #     the generic pass skips the `transaction` subject; see produce_recurrence_tags for why a
+        #     declaration alone would materialize in tests and never on a real run.
+        snapshot = await _run_stage(
+            "recurrence",
+            _recurrence_stage,
             snapshot,
             degradations,
         )
