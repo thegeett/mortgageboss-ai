@@ -39,6 +39,7 @@ _ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 # The transaction tags a deposit label reads (parsed, always present on an AS-1 finding's provenance).
 _AMOUNT_TAG = "txn.amount"
 _DATE_TAG = "txn.date"
+_DIRECTION_TAG = "txn.is_money_in"
 
 
 def _tag_value(load_bearing_tags: Sequence[Mapping[str, Any]], tag_id: str) -> str | None:
@@ -72,13 +73,24 @@ def _short_date(raw: str) -> str:
 
 
 def _deposit_label(load_bearing_tags: Sequence[Mapping[str, Any]]) -> str:
-    """A per-deposit subject label from its inline tags: *"Deposit of $20,000 on 3/27"* (generalising
-    LP-376's amount chip). Degrades honestly — amount then amount-only then "a deposit" — never a hash."""
+    """A per-transaction subject label from its inline tags: *"Deposit of $20,000 on 3/27"* (generalising
+    LP-376's amount chip). Degrades honestly — amount then amount-only then a generic — never a hash.
+
+    ⚠️ DIRECTION-AWARE, AND IT WAS NOT. Every transaction subject was labelled a DEPOSIT, which was true
+    while only money-IN rules enumerated them (AS-1, AS-2, AS-12 all scope `txn.is_money_in eq in`).
+    FR-5 is the first rule that reads money OUT, and it would have called a $3,286.21 mortgage payment
+    "Deposit of $3,286.21" — a label that contradicts the finding printed beside it.
+
+    An UNKNOWN or absent direction reads "a transaction", not "a deposit": guessing the direction of a
+    subject is exactly the fabrication the label layer exists to avoid.
+    """
+    direction = _tag_value(load_bearing_tags, _DIRECTION_TAG)
+    noun = {"in": "Deposit", "out": "Payment"}.get(direction or "")
     amount = _tag_value(load_bearing_tags, _AMOUNT_TAG)
-    if amount is None:
-        return "a deposit"
+    if amount is None or noun is None:
+        return {"in": "a deposit", "out": "a payment"}.get(direction or "", "a transaction")
     date = _tag_value(load_bearing_tags, _DATE_TAG)
-    label = f"Deposit of {_money(amount)}"
+    label = f"{noun} of {_money(amount)}"
     return f"{label} on {_short_date(date)}" if date is not None else label
 
 

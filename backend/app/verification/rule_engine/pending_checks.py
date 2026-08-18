@@ -59,13 +59,29 @@ def blocked_candidate_rule_ids() -> tuple[str, ...]:
     return tuple(sorted(rid for rid in load_activation_bars() if rid not in active))
 
 
-def _to_pending(evaluation: RuleEvaluation, rule_name: str) -> RuleEvaluation:
-    """Convert a blocked rule's (untrusted) verdict into a manual-review flag. The would-be verdict, its
-    confidence, and its load-bearing tag VALUES are DISCARDED (no leak) — only the fact that the rule is
-    applicable survives, as a Needs-Attention flag naming the scope, never the judgment."""
+# The subject a collapsed flag is keyed under. A pending flag says "THIS FILE has something in scope",
+# which is a statement about the file — so it is keyed at the loan, once, whatever the rule enumerates.
+_FILE_SUBJECT = "loan"
+
+
+def _to_pending(evaluation: RuleEvaluation, rule_name: str, in_scope: int) -> RuleEvaluation:
+    """Convert a blocked rule's (untrusted) verdict into ONE manual-review flag for the whole rule.
+
+    The would-be verdict, its confidence, and its load-bearing tag VALUES are DISCARDED (no leak) — only
+    the fact that the rule is applicable survives, as a Needs-Attention flag naming the scope, never the
+    judgment.
+
+    ⚠️ ONE FLAG PER RULE, NOT ONE PER SUBJECT. This shipped per-subject and the first per-TRANSACTION
+    blocked rule (FR-5) put SEVEN identical rows in front of a processor, each saying the same nothing:
+    "something is in scope, the check is not active, review it manually." A loan-level rule made that
+    one line; a per-transaction rule makes it N, and N copies of a sentence that carries no finding is
+    noise that trains a reader to skip the whole tab — including the live findings beside it.
+    The signal LP-391 exists to send is "this FILE has something in scope, and nothing looked at it".
+    That is worth saying once, with a count.
+    """
     return RuleEvaluation(
         rule_id=evaluation.rule_id,
-        subject_id=evaluation.subject_id,
+        subject_id=_FILE_SUBJECT,
         verdict=Verdict.PENDING_AUTOMATION,
         verdict_confidence=None,
         load_bearing_tags=(),  # NEVER carry the uncalibrated tag values that drove the discarded verdict
@@ -73,13 +89,21 @@ def _to_pending(evaluation: RuleEvaluation, rule_name: str) -> RuleEvaluation:
         priya_validated=False,
         gated_pending_signoff=False,
         reasoning=(
-            f"manual review needed — this file has something in scope for the '{rule_name}' check, but "
+            f"manual review needed — {_scope_phrase(in_scope)} in scope for the '{rule_name}' check, but "
             "that automated check is not active yet (its judgment is not calibrated). A processor must "
             "review it manually; the system has NOT judged it."
         ),
         how_to_fix="Review this item manually — the automated check is pending calibration, not a pass/fail.",
         ratification_pending=False,
     )
+
+
+def _scope_phrase(in_scope: int) -> str:
+    """How many subjects the blocked rule found — a COUNT is the one thing a collapsed flag can honestly
+    add over "something is in scope", and it tells a processor how much manual work this is."""
+    if in_scope <= 1:
+        return "this file has something"
+    return f"this file has {in_scope} items"
 
 
 async def evaluate_pending_checks(
@@ -112,11 +136,20 @@ async def evaluate_pending_checks(
         confidence_floor=confidence_floor,
         rule_ids=blocked,
     )
-    pending: list[RuleEvaluation] = []
+    # Collapsed per rule, in first-seen order so the output is deterministic across runs.
+    surfaceable: dict[str, list[RuleEvaluation]] = {}
     for evaluation in results:
-        if evaluation.verdict in _SURFACEABLE:
-            pending.append(_to_pending(evaluation, load_rule_spec(evaluation.rule_id).name))
-    return pending
+        # `pending_surface: false` (LP-549) — the rule declares that its APPLICABILITY carries no signal,
+        # so a flag saying "something is in scope" would report normality as a finding.
+        if (
+            evaluation.verdict in _SURFACEABLE
+            and load_rule_spec(evaluation.rule_id).pending_surface
+        ):
+            surfaceable.setdefault(evaluation.rule_id, []).append(evaluation)
+    return [
+        _to_pending(group[0], load_rule_spec(rule_id).name, len(group))
+        for rule_id, group in surfaceable.items()
+    ]
 
 
 __all__ = ["blocked_candidate_rule_ids", "evaluate_pending_checks"]

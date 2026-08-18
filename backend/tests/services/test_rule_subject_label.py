@@ -21,8 +21,15 @@ _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 _FILE_EXT = re.compile(r"\.(?:pdf|jpe?g|png|tiff?|heic|docx?|txt|csv)$", re.IGNORECASE)
 
 
-def _amount_tags(amount: str = "20000.00", date: str | None = "2026-03-27"):
+def _amount_tags(
+    amount: str = "20000.00", date: str | None = "2026-03-27", direction: str | None = "in"
+):
+    # LP-549 — the DIRECTION is what makes "Deposit" the right noun, and it is genuinely present on a
+    # real finding: `txn.is_money_in` is load-bearing on AS-1 and AS-12, the two rules whose findings
+    # carry a transaction subject today. Omitting it here modelled a finding that does not exist.
     tags = [{"tag_id": "txn.amount", "value": amount}]
+    if direction is not None:
+        tags.append({"tag_id": "txn.is_money_in", "value": direction})
     if date is not None:
         tags.append({"tag_id": "txn.date", "value": date})
     return tags
@@ -85,8 +92,25 @@ def test_borrower_gone_reads_honestly_not_a_uuid() -> None:
     assert bid not in label
 
 
-def test_deposit_without_an_amount_reads_a_deposit() -> None:
-    assert resolve_subject_label("txnabc123", []) == "a deposit"
+def test_a_money_OUT_transaction_is_not_called_a_deposit() -> None:
+    """⚠️ THE BUG FR-5 EXPOSED. Every transaction subject was labelled a DEPOSIT, which held while only
+    money-IN rules enumerated them (AS-1, AS-2 and AS-12 all scope `txn.is_money_in eq in`). FR-5 is the
+    first rule that reads money OUT, and it would have printed "Deposit of $3,286.21" beside a finding
+    about a mortgage PAYMENT — a label contradicting the sentence next to it."""
+    assert (
+        resolve_subject_label("txnabc123", _amount_tags(amount="3286.21", direction="out"))
+        == "Payment of $3,286.21 on 3/27"
+    )
+
+
+def test_an_unknown_direction_reads_neither() -> None:
+    """Guessing a subject's direction is exactly the fabrication this layer exists to avoid."""
+    assert resolve_subject_label("txnabc123", _amount_tags(direction=None)) == "a transaction"
+
+
+def test_a_transaction_with_no_tags_claims_neither_direction_nor_amount() -> None:
+    """It used to read "a deposit" — an assertion about direction made from no evidence at all."""
+    assert resolve_subject_label("txnabc123", []) == "a transaction"
 
 
 def test_null_subject_key_does_not_crash() -> None:

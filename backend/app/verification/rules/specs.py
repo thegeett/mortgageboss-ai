@@ -989,6 +989,18 @@ class RuleSpec(BaseModel):
     # and CR-6 classified as "read what is here" on a file whose credit report is absent, purely because
     # the Closing Disclosure was present. The distinction is the whole point of the field.
     requires_documents: tuple[tuple[str, ...], ...] | None = None
+    # LP-549 — may a BLOCKED build of this rule surface an LP-391 manual-review flag?
+    #
+    # LP-391's flag says "this file has something in scope and nothing looked at it", which is a real
+    # signal when applicability is itself uncommon — DT-7's "this file has ATR documentation", CO-1's
+    # "this file has a condo". It is NOT a signal when applicability describes something every file
+    # has. FR-5 matches money-out payments to a creditor that recur monthly; that is a mortgage, a card
+    # and a utility autopay — present on essentially every file with statements. Surfacing it says only
+    # "this borrower pays bills", seven times, above the findings that mean something.
+    #
+    # DECLARED, NOT BRANCHED: the pending pass takes no rule-id list, so a rule states this about
+    # itself. Defaults True — every existing rule is unchanged.
+    pending_surface: bool = True
     spec_version: int = PydField(ge=1)
 
     @field_validator("requires_documents")

@@ -90,6 +90,14 @@ guideline_reference: "Fannie Mae Selling Guide B3-6 (all monthly obligations mus
 requires_documents:
   - [bank_statement]
 
+# LP-549 — do NOT surface an LP-391 manual-review flag while this rule is blocked. Its applicability —
+# a recurring money-out payment to an apparent creditor — is a mortgage, a credit card and a utility
+# autopay, i.e. essentially every file with bank statements. On the first real run it put SEVEN
+# identical "review this manually" rows above the findings that had actually concluded something. The
+# flag is worth showing when being in scope is itself unusual; here it only says the borrower pays
+# bills. Until the rule can judge, silence is the honest output.
+pending_surface: false
+
 spec_version: 1
 
 judgment:

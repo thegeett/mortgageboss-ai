@@ -120,7 +120,11 @@ async def test_a_blocked_rule_that_reaches_a_verdict_surfaces_pending_never_the_
     )
     pending = await evaluate_pending_checks(snap)
     as5 = [p for p in pending if p.rule_id == "AS-5"]
-    assert len(as5) == 1 and as5[0].subject_id == "giftA"  # the gift-letter document surfaces
+    # LP-549 — keyed at the LOAN, not the subject that matched. A pending flag says "this FILE has
+    # something in scope and nothing looked at it", which is a statement about the file; keying it per
+    # subject put SEVEN identical rows in front of a processor the first time a per-TRANSACTION rule was
+    # blocked. Still exactly one flag, which is what this assertion was really protecting.
+    assert len(as5) == 1 and as5[0].subject_id == "loan"
     flag = as5[0]
     # THE NO-LEAK GUARANTEE: the would-be 'fired' is discarded — never shipped.
     assert flag.verdict is Verdict.PENDING_AUTOMATION
