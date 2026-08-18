@@ -425,3 +425,74 @@ def test_a_long_reasoning_is_capped() -> None:
     )
 
     assert len(next(iter(summarize(finding, rule_name="ATR").evidence.values()))) <= _EVIDENCE_LIMIT
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-542 — the action must stay inside the request the rule actually makes
+# --------------------------------------------------------------------------------------------- #
+def _finding(rule_id: str, message: str, fix: str) -> Finding:
+    return Finding(
+        loan_file_id=None,
+        rule_id=rule_id,
+        message=message,
+        subject_key="loan",
+        load_bearing_tags=[],
+        details={"how_to_fix": fix},
+    )
+
+
+def test_an_action_asking_for_a_document_the_rule_never_asked_for_is_rejected() -> None:
+    """⚠️ FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
+    occupancy is what the borrower intends". Once LP-537 handed the composer the tag reasoning — which
+    contains "no purchase contract states a property address" — it rewrote the ACTION as "Obtain a
+    purchase contract that states the property address".
+
+    LF-WCHG is a REFINANCE. There is no purchase contract and there never will be, so a processor was
+    sent after a document that cannot exist. The `why` was right to name the gap; the action has to stay
+    inside the request the rule makes. Evidence is context, not a shopping list."""
+    from app.services.finding_prose import summarize, unrequested_documents
+
+    oc2 = _finding(
+        "OC-2",
+        "the file's address signals agree with a primary occupancy",
+        "Confirm the stated occupancy is what the borrower intends, and clear this.",
+    )
+
+    unrequested = unrequested_documents(
+        oc2,
+        summarize(oc2, rule_name="Occupancy reasonableness"),
+        "Obtain a purchase contract that states the property address.",
+    )
+
+    assert unrequested == {"purchase_agreement"}
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "fix", "action"),
+    [
+        # Asking for a document the rule DECLARES is the normal case and must never be rejected.
+        ("CR-6", "Upload the tri-merge credit report.", "Obtain the tri-merge credit report."),
+        # A document the rule's own TEMPLATE offers is fair game even if the rule does not declare it —
+        # IN-4 suggests a verification of employment while declaring only pay stubs and W-2s, and
+        # echoing its own suggestion is faithful, not invention.
+        (
+            "IN-4",
+            "Upload employment documentation — a written verification of employment, or pay stubs.",
+            "Obtain a written verification of employment or pay stubs.",
+        ),
+        # The template action itself, unchanged.
+        (
+            "OC-2",
+            "Confirm the stated occupancy is what the borrower intends.",
+            "Confirm the file supports the stated occupancy.",
+        ),
+    ],
+)
+def test_a_legitimate_request_is_not_rejected(rule_id: str, fix: str, action: str) -> None:
+    """A guard that fires on correct output is worse than the leak it prevents — the fallback is silent
+    and reads as the feature not working."""
+    from app.services.finding_prose import summarize, unrequested_documents
+
+    finding = _finding(rule_id, "a gap", fix)
+
+    assert unrequested_documents(finding, summarize(finding, rule_name=rule_id), action) == set()

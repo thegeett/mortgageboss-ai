@@ -109,6 +109,16 @@ export function RuleLabel({ finding }: { finding: RuleFinding }) {
         <span className="text-xs font-semibold text-gray-800">{finding.rule_name}</span>
       )}
       <span className="text-[11px] text-gray-400">{humanize(finding.category)}</span>
+      {/* LP-542 — the missing-document marker OUTSIDE Couldn't check, where the request/read split
+       *  already carries it. DT-7 is the case that needs it: it lands in NEEDS REVIEW saying every
+       *  ability-to-repay factor is documented, while the credit report it declares is not on the
+       *  file. Without this the contradiction is only visible to someone who opens the provenance.
+       *  Inside couldnt_check this would repeat the sub-header, so it is suppressed there. */}
+      {finding.evaluation_outcome !== "couldnt_check" && finding.missing_documents.length > 0 && (
+        <span className="rounded bg-warning/10 px-1.5 py-px text-[11px] font-medium text-warning">
+          not in the file: {finding.missing_documents.join(", ")}
+        </span>
+      )}
     </>
   );
 }

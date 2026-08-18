@@ -52,6 +52,9 @@ RULES, all mandatory:
 - Use ONLY facts present in the summary. Never introduce a number, date, document name, party, year or
   amount that is not there. If a detail would help and is absent, leave it out.
 - "action" is what the processor should DO, in the imperative: "Obtain the...", "Confirm that...".
+- The action must make THE SAME REQUEST as "suggested_fix". Sharpen its wording, name the document it
+  names — but never ask for a document or a step it does not ask for. "evidence" is context for the
+  "why"; it is NOT a list of things to request. A document mentioned there may not exist for this loan.
 - "why" explains why this is in their queue, in plain language a processor uses. Name the specific
   document or fact when the summary gives it.
 - When "evidence" is present it is what the check actually relied on. USE IT: name those documents and

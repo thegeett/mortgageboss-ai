@@ -497,3 +497,34 @@ describe("LP-541 — request vs read inside Couldn't check", () => {
     expect(screen.getByText(/read or clarify these \(1\)/i)).toBeDefined();
   });
 });
+
+describe("LP-542 — the missing-document marker outside Couldn't check", () => {
+  it("flags a needs_review finding whose required document is absent", () => {
+    // DT-7 is the case. It says every ability-to-repay factor is documented while the credit report it
+    // declares is not on the file — a contradiction otherwise visible only in the provenance card.
+    renderTabs([
+      ruleFinding({
+        id: "dt7",
+        rule_id: "DT-7",
+        rule_name: "ATR documentation completeness",
+        evaluation_outcome: "needs_review",
+        missing_documents: ["credit report"],
+      }),
+    ]);
+
+    expect(screen.getByText(/not in the file: credit report/i)).toBeDefined();
+  });
+
+  it("does NOT repeat the marker inside Couldn't check", () => {
+    // That bucket is already split into request-these and read-these; a per-row chip would say it twice.
+    renderTabs([
+      ruleFinding({
+        id: "cr13",
+        evaluation_outcome: "couldnt_check",
+        missing_documents: ["credit report"],
+      }),
+    ]);
+
+    expect(screen.queryByText(/not in the file: credit report/i)).toBeNull();
+  });
+});

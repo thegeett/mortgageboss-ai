@@ -222,7 +222,18 @@ class FindingPublic(BaseModel):
         )
 
 
-def _missing_documents(spec: RuleSpec | None, on_file: set[str]) -> list[str]:
+# Documents that only exist on a PURCHASE. A refinance has no purchase contract and never will, so
+# reporting one as "not in the file" sends a processor after something unobtainable — the same mistake
+# the composer made with OC-2's action, in a different place.
+#
+# Kept as one list rather than a per-group `only_when_purpose` key in 76 specs: the property belongs to
+# the DOCUMENT (a purchase agreement is purchase-only wherever it appears), not to any rule that reads it.
+_PURCHASE_ONLY = frozenset({"purchase_agreement", "earnest_money_receipt", "emd_withdrawal_proof"})
+
+
+def _missing_documents(
+    spec: RuleSpec | None, on_file: set[str], *, loan_purpose: str | None = None
+) -> list[str]:
     """Which of the rule's declared document groups NO document on the file satisfies (LP-541).
 
     Each declared group is a set of ALTERNATIVES — a written or a verbal VOE both close IN-8's gap — so
@@ -234,9 +245,12 @@ def _missing_documents(spec: RuleSpec | None, on_file: set[str]) -> list[str]:
     """
     if spec is None or spec.requires_documents is None:
         return []
-    return [
-        document_label(group[0]) for group in spec.requires_documents if not set(group) & on_file
-    ]
+    groups = spec.requires_documents
+    if loan_purpose == "refinance":
+        # Only when EVERY alternative is purchase-only. A group offering a purchase contract OR
+        # something else still has an obtainable member, so it stays.
+        groups = tuple(group for group in groups if not set(group) <= _PURCHASE_ONLY)
+    return [document_label(group[0]) for group in groups if not set(group) & on_file]
 
 
 class RuleFindingPublic(BaseModel):
@@ -296,7 +310,12 @@ class RuleFindingPublic(BaseModel):
 
     @classmethod
     def from_model(
-        cls, finding: Finding, *, subject_label: str, documents_on_file: set[str] | None = None
+        cls,
+        finding: Finding,
+        *,
+        subject_label: str,
+        documents_on_file: set[str] | None = None,
+        loan_purpose: str | None = None,
     ) -> RuleFindingPublic:
         details = finding.details or {}
         spec = _rule_spec(
@@ -332,7 +351,9 @@ class RuleFindingPublic(BaseModel):
             else None,
             confidence=finding.confidence,
             resolution_status=finding.resolution_status.value,
-            missing_documents=_missing_documents(spec, documents_on_file or set()),
+            missing_documents=_missing_documents(
+                spec, documents_on_file or set(), loan_purpose=loan_purpose
+            ),
         )
 
 

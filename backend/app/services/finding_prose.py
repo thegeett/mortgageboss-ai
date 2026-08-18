@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping
+from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,10 +31,13 @@ from app.models.finding import Finding
 from app.models.finding_prose import FindingProse
 from app.models.loan_file import LoanFile
 from app.services.rule_subject_label import resolve_subject_label
-from app.verification.rule_engine.reasons import fact_label
+from app.verification.rule_engine.reasons import document_label, fact_label
+from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
 from app.verification.snapshot.documents_section import document_filenames_by_content_id
 
 logger = get_logger(__name__)
+
+_SPEC_DIR = Path(__file__).resolve().parents[1] / "verification/rules/specs"
 
 # The same bound the judgment evaluator uses: enough to keep the pass short, low enough that a large
 # file cannot burst into a hundred simultaneous calls and trip a rate limit.
@@ -120,6 +125,80 @@ def summarize(
     )
 
 
+# Every document type any rule declares, as the readable label a composition would print. Bounded to
+# what rules actually ask for (about 40 of the catalog's 163), which keeps this from matching ordinary
+# words — the catalog also contains "custom" and "survey".
+def _declared_document_labels() -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for spec_path in sorted(_SPEC_DIR.glob("*.yaml")):
+        try:
+            spec = load_rule_spec(spec_path.stem)
+        except RuleSpecNotFound:  # pragma: no cover - the glob came from the directory
+            continue
+        for group in spec.requires_documents or ():
+            for slug in group:
+                labels[slug] = document_label(slug).lower()
+    return labels
+
+
+# What a MODEL calls these documents, where that differs from the catalog slug. Small and targeted on
+# purpose: the guard's job is to catch a composition asking for something the rule never asked for, and
+# "purchase contract" for `purchase_agreement` is exactly the miss that let OC-2's impossible ask
+# through on the first attempt. Aliases only make the guard see MORE, never less — a rule whose own
+# template names the document still passes, because the template is parsed with the same aliases.
+_ALIASES: dict[str, tuple[str, ...]] = {
+    "purchase_agreement": ("purchase contract", "sales contract", "purchase and sale agreement"),
+    "credit_report": ("tri-merge report", "tri merge report"),
+    "voe": ("verification of employment",),
+    "appraisal": ("appraisal report",),
+    "rate_lock_agreement": ("rate lock", "rate-lock", "rate lock confirmation"),
+    "title_commitment": ("title report",),
+    "uniform_residential_loan_application": ("1003",),
+}
+
+
+@lru_cache(maxsize=1)
+def _document_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    return tuple(
+        (slug, re.compile("|".join(rf"\b{re.escape(name)}\b" for name in names)))
+        for slug, names in (
+            (slug, (label, *_ALIASES.get(slug, ())))
+            for slug, label in _declared_document_labels().items()
+        )
+    )
+
+
+def documents_named(text: str) -> set[str]:
+    """Which declared document types this text asks for, by their readable names."""
+    lowered = text.lower()
+    return {slug for slug, pattern in _document_patterns() if pattern.search(lowered)}
+
+
+def unrequested_documents(finding: Finding, summary: FactSummary, action: str) -> set[str]:
+    """Documents the ACTION asks for that neither the rule nor its own template ever asked for.
+
+    ⚠️ FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
+    occupancy is what the borrower intends". After LP-537 gave the composer the tag reasoning — which
+    included "no purchase contract states a property address" — it rewrote the action as "Obtain a
+    purchase contract that states the property address". LF-WCHG is a REFINANCE. There is no purchase
+    contract and there never will be, so a processor was sent after a document that cannot exist.
+
+    The `why` was right to name that gap; the ACTION is what must stay inside the request the rule
+    actually makes. Evidence is context, not a shopping list.
+
+    Allowed: what the rule DECLARES it reads, plus anything its own template problem/fix already names
+    (IN-4's fix offers a verification of employment that IN-4 does not declare, and saying so is
+    faithful). Deliberately NOT the evidence text — that is the leak this closes.
+    """
+    try:
+        spec = load_rule_spec(finding.rule_id)
+    except RuleSpecNotFound:
+        return set()  # a retired rule declares nothing; do not invent a constraint for it
+    declared = {slug for group in spec.requires_documents or () for slug in group}
+    template = documents_named(f"{summary.problem} {summary.fix or ''}")
+    return documents_named(action) - declared - template
+
+
 async def _cached(db: AsyncSession, keys: list[str]) -> dict[str, Composition]:
     if not keys:
         return {}
@@ -197,6 +276,7 @@ async def compose_findings(
         for finding in findings
         if finding.message
     }
+    by_id = {finding.id: finding for finding in findings}
     keys = {fid: summary.cache_key() for fid, summary in summaries.items()}
     cache = await _cached(db, list(dict.fromkeys(keys.values())))
 
@@ -209,9 +289,21 @@ async def compose_findings(
                 return finding_id, await compose(summaries[finding_id])
 
         for finding_id, composition in await asyncio.gather(*(_one(fid) for fid in misses)):
-            if composition is not None:
-                cache[keys[finding_id]] = composition
-                await _store(db, keys[finding_id], composition)
+            if composition is None:
+                continue
+            finding = by_id[finding_id]
+            if unrequested := unrequested_documents(
+                finding, summaries[finding_id], composition.action
+            ):
+                # The template stands — it asks for something achievable.
+                logger.warning(
+                    "finding_prose_rejected_unrequested_document",
+                    rule_id=finding.rule_id,
+                    documents=sorted(unrequested),
+                )
+                continue
+            cache[keys[finding_id]] = composition
+            await _store(db, keys[finding_id], composition)
 
     changed = 0
     for finding in findings:

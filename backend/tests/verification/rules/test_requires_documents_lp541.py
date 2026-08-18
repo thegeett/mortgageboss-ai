@@ -125,3 +125,25 @@ def test_an_unclassifiable_rule_reports_nothing_missing_rather_than_guessing() -
     """A retired rule has no spec, so it cannot be classified. Reporting `[]` puts it with "read what is
     here", which asks a processor to LOOK — the other side would assert an absence we never established."""
     assert _missing_documents(None, _LFWCHG) == []
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-542 — a purchase-only document is not "missing" from a refinance
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize("rule_id", ["PC-2", "PC-3", "FR-3"])
+def test_a_purchase_only_document_is_not_reported_missing_on_a_refinance(rule_id: str) -> None:
+    """⚠️ THE SAME MISTAKE AS OC-2'S IMPOSSIBLE ASK, in a different place. A refinance has no purchase
+    contract and never will, so "waiting on purchase agreement" sends a processor after something
+    unobtainable. Latent when this shipped — no purchase-scoped rule was couldnt_check on the file that
+    exposed it — which is exactly why it is pinned rather than left to be found later."""
+    assert _missing_documents(load_rule_spec(rule_id), set(), loan_purpose="purchase")
+    assert _missing_documents(load_rule_spec(rule_id), set(), loan_purpose="refinance") == []
+
+
+def test_a_group_with_an_obtainable_alternative_survives_on_a_refinance() -> None:
+    """Only a group whose EVERY alternative is purchase-only is dropped. PR-2 wants an appraisal and a
+    purchase agreement as separate groups — the appraisal is obtainable on a refinance and must stay,
+    or the rule would silently stop reporting a document it genuinely needs."""
+    assert _missing_documents(load_rule_spec("PR-2"), set(), loan_purpose="refinance") == [
+        "appraisal"
+    ]

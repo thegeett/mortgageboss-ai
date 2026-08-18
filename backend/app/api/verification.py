@@ -337,6 +337,7 @@ async def _build_status(
                     document_filenames=document_filenames,
                 ),
                 documents_on_file=documents_on_file,
+                loan_purpose=loan_file.loan_purpose.value if loan_file.loan_purpose else None,
             )
             for f in rule_findings
         ],
