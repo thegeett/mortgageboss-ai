@@ -48,7 +48,10 @@ from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRe
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions as _all_transactions
 from app.verification.snapshot.traversal import field_value as _val
-from app.verification.tag_materialization.derived import txn_is_recurring
+from app.verification.tag_materialization.derived import (
+    txn_is_recurring,
+    txn_stated_liability_match,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -355,6 +358,7 @@ def _sourcing_tag(
 
 
 _TAG_IS_RECURRING = "txn.is_recurring"
+_TAG_LIABILITY_MATCH = "txn.stated_liability_match"
 
 
 def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
@@ -381,17 +385,23 @@ def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
         return snapshot  # Stage A never ran; a tags layer that is absent stays absent.
     by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
     for txn in _all_transactions(snapshot):
-        value, reasoning = txn_is_recurring(snapshot, txn.content_id, None)
-        by_subject.setdefault(txn.content_id, {})[_TAG_IS_RECURRING] = Tag(
-            value=value,
-            confidence=None,  # derived: a count is not a probability, and a fabricated one would read as one
-            reasoning=reasoning,
-            source_facts=(txn.content_id,),
-            produced_by=TagProducedBy.DERIVED,
-            tag_role=TagRole.STRUCTURAL_FACT,
-            tag_version=_TAG_VERSION,
-            stage=TagStage.B,
-        )
+        for tag_id, produce in (
+            (_TAG_IS_RECURRING, txn_is_recurring),
+            (_TAG_LIABILITY_MATCH, txn_stated_liability_match),
+        ):
+            value, reasoning = produce(snapshot, txn.content_id, None)
+            by_subject.setdefault(txn.content_id, {})[tag_id] = Tag(
+                value=value,
+                # derived: a count and a name comparison are not probabilities, and a fabricated
+                # confidence would read as one.
+                confidence=None,
+                reasoning=reasoning,
+                source_facts=(txn.content_id,),
+                produced_by=TagProducedBy.DERIVED,
+                tag_role=TagRole.STRUCTURAL_FACT,
+                tag_version=_TAG_VERSION,
+                stage=TagStage.B,
+            )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 

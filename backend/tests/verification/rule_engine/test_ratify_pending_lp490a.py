@@ -212,6 +212,9 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
         # LP-498 — FR-3; its ratification proof is in test_fr3_seller_credits_lp498.py::
         # test_every_verdict_carries_ratification, which runs the real evaluator with BOTH seams.
         "FR-3",
+        # LP-551 — FR-5; its ratification proof is in test_fr5_recurring_debit_lp551.py::
+        # test_every_fr5_verdict_carries_ratification, which runs the real evaluator.
+        "FR-5",
     }
     on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
     assert on_status == _EXPECTED_RATIFY_PENDING, (

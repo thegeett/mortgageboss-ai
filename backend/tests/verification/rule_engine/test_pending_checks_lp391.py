@@ -173,14 +173,12 @@ async def test_a_blocked_JUDGMENT_rule_surfaces_through_the_stub_no_api_call(
         for rid in pc.blocked_candidate_rule_ids()
         if (k := kind_for(rid)) is not None and k.kind is RuleKindName.JUDGMENTAL
     ]
-    # LP-547 — THIS IS NOW REAL, as the assertion above asked to be told. FR-5 is a judgment rule that
-    # is built and blocked (not-calibratable-yet: its judgment has no measured self-consistency, and
-    # `txn.apparent_category`'s ability to tell a creditor payment from a utility is unscored). So the
-    # simulation below is no longer the only way to exercise this path — but it is kept, because it
-    # pins the behaviour for DT-7's shape specifically and would otherwise silently stop covering
-    # anything the day FR-5 activates.
-    assert "FR-5" in still_blocked_judgment, (
-        "FR-5 should be a blocked judgment candidate — if it activated, this test needs another"
+    # LP-547 made this real for one ticket — FR-5 was a built-but-blocked judgment rule — and LP-551
+    # activated it, which is exactly the case the message below anticipates. The blocked set is now
+    # AS-3 / AS-5 / AS-7 / CO-5 / CR-5 / PC-5, none of them judgmental, so the simulation is once again
+    # the only way to exercise this path.
+    assert still_blocked_judgment == [], (
+        "a blocked judgment rule exists again — prefer it over the simulation below and update this test"
     )
 
     monkeypatch.setattr(pc, "ACTIVE_RULE_IDS", tuple(r for r in ACTIVE_RULE_IDS if r != "DT-7"))

@@ -220,8 +220,10 @@ def test_fr3_is_active_on_a_measured_self_consistency_rate() -> None:
     )
 
 
-def test_the_other_five_fraud_rules_are_held() -> None:
+def test_the_other_four_fraud_rules_are_held() -> None:
     """Each is held for a reason established in Phase A. This fails if one is activated without that
     reason being addressed."""
-    for rule_id in ("FR-1", "FR-2", "FR-4", "FR-5", "FR-6"):
+    # LP-551 — FR-5 LEFT this list: two deterministic tags (txn.is_recurring, then
+    # txn.stated_liability_match) removed both its blocker and its noise, and it activated.
+    for rule_id in ("FR-1", "FR-2", "FR-4", "FR-6"):
         assert rule_id not in ACTIVE_RULE_IDS, f"{rule_id} activated — see LP-498 Phase A"

@@ -4518,6 +4518,157 @@ def txn_is_recurring(
     return "no", "this payee appears in only one month across the file's statements"
 
 
+# --------------------------------------------------------------------------------------------- #
+# LP-551 — txn.stated_liability_match: does this payment's payee appear on the 1003?
+# --------------------------------------------------------------------------------------------- #
+# THE INPUT THAT TURNS FR-5 FROM A LIST INTO A FINDING. Without it FR-5 matches every recurring
+# payment to a creditor — a mortgage, a card, a utility autopay — which is every file, so it would ask
+# a processor to check the borrower's ordinary bills forever. With it the rule fires only on a payee
+# that matches NOTHING disclosed, which on LF-WCHG is zero findings.
+#
+# ⚠️ BY PAYEE, NEVER BY AMOUNT, and LF-WCHG proves why. Citi is debited $3,122.77 a month against a
+# disclosed $49.00 — and the $49 is CORRECT: the borrower pays the card in full, and Fannie uses the
+# MINIMUM payment for a revolving account in the DTI. An amount comparison would fire a fraud-adjacent
+# finding on a borrower doing exactly the right thing, on the first real file it ever saw.
+#
+# ⚠️ NOT `borrower_name_matching`, deliberately. That matcher is built for PEOPLE — nickname maps
+# (Bob/Robert), "Last, First" reordering, generational suffixes. Pointing it at institutions would
+# apply nickname logic to lenders. This is a small purpose-built comparison instead, and the
+# difference is stated here so the next reader does not "fix" it by reusing the wrong tool.
+
+# Words that carry no identity: every lender has them, so leaving them in makes unrelated payees look
+# alike ("X BANK PAYMENT" vs "Y BANK PAYMENT" share two of three tokens).
+_GENERIC_PAYEE_WORDS = frozenset(
+    {
+        "ACH",
+        "AUTOPAY",
+        "AUTO",
+        "PAY",
+        "PAYMENT",
+        "PAYMT",
+        "PMT",
+        "BILL",
+        "BILLPAY",
+        "XFER",
+        "TRANSFER",
+        "INST",
+        "ONLINE",
+        "WEB",
+        "EPAY",
+        "E",
+        "DEBIT",
+        "DRAFT",
+        "RECURRING",
+        "BANK",
+        "CREDIT",
+        "UNION",
+        "CARD",
+        "CO",
+        "COM",
+        "CORP",
+        "INC",
+        "LLC",
+        "NA",
+        "USA",
+        "THE",
+        "OF",
+        "AND",
+        "SVC",
+        "SVCS",
+        "SERVICES",
+        "FINANCIAL",
+        "LOAN",
+        "MORT",
+        "MORTGAGE",
+    }
+)
+_MIN_TOKEN = 4  # below this a shared token is a coincidence, not an identity
+
+
+def _payee_tokens(raw: str) -> list[str]:
+    """A payee reduced to identity-bearing tokens: no digits, no punctuation, no generic finance words."""
+    return [t for t in _payee_key(raw).split() if t not in _GENERIC_PAYEE_WORDS]
+
+
+def _tokens_relate(left: str, right: str) -> bool:
+    """Do two identity tokens plausibly name the same institution?
+
+    Equality, or one a PREFIX of the other — which is the shape abbreviation actually takes on a
+    statement: "UNITED WHSLE MORT" on the 1003 against "UNITEDWHOLESALE LOAN PAYMT" on the statement
+    share no whole token, and only the prefix test relates them.
+    """
+    if len(left) < _MIN_TOKEN or len(right) < _MIN_TOKEN:
+        return False
+    return left == right or left.startswith(right) or right.startswith(left)
+
+
+def txn_stated_liability_match(
+    snapshot: Snapshot, subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """txn.stated_liability_match — exact / probable / none / unknown.
+
+    ⚠️ "unknown" IS LOAD-BEARING, not a courtesy value. An application that states NO liabilities must
+    not read as "nothing matched": that would fire FR-5 on every payment the borrower makes, on the
+    files with the least information. Absent is not none (the §8 contract).
+    """
+    subject = next(
+        (txn for txn in all_transactions(snapshot) if txn.content_id == subject_id), None
+    )
+    if subject is None:
+        return _UNKNOWN, "the transaction is not present in this snapshot"
+    payee = _payee_tokens(str(subject.description.value or ""))
+    if not payee:
+        return (
+            _UNKNOWN,
+            "the transaction names no payee, so it cannot be compared with the application",
+        )
+
+    holders = [
+        row["holder_name"]
+        for row in _stated_liabilities_all(snapshot)
+        if str(row.get("holder_name") or "").strip()
+    ]
+    if not holders:
+        return (
+            _UNKNOWN,
+            "the application states no liability holder to compare this payment against",
+        )
+
+    for holder in holders:
+        tokens = _payee_tokens(holder)
+        if tokens and tokens == payee:
+            return "exact", f"the payee matches the stated liability '{holder}'"
+    for holder in holders:
+        tokens = _payee_tokens(holder)
+        if any(_tokens_relate(a, b) for a in payee for b in tokens):
+            return "probable", f"the payee resembles the stated liability '{holder}'"
+    return "none", (
+        f"no liability on the application resembles this payee "
+        f"({len(holders)} stated liabilities compared)"
+    )
+
+
+def _stated_liabilities_all(snapshot: Snapshot) -> list[dict[str, str]]:
+    """Every stated MISMO liability row, unfiltered by type — the comparison set.
+
+    `_stated_mortgage_liabilities` filters to mortgages for RE-1/DT-6; this comparison must see a card,
+    an installment loan and a HELOC too, since those are exactly the recurring debits FR-5 reads.
+    """
+    if snapshot.mismo.absent:
+        return []
+    rows: dict[str, dict[str, str]] = {}
+    for key, field in snapshot.mismo.facts.items():
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != "liability":
+            continue
+        _, index, name = parts
+        value = field.value if isinstance(field, Field) and field.is_present else None
+        if value is None or not str(value).strip():
+            continue
+        rows.setdefault(index, {})[name] = str(value).strip()
+    return [row for _, row in sorted(rows.items(), key=lambda kv: (len(kv[0]), kv[0]))]
+
+
 def _stmt_continuity(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5597,6 +5748,7 @@ _RECIPES: dict[str, Recipe] = {
     "stmt_continuity": _stmt_continuity,
     # LP-546 — recurrence is a COUNT over the file's transactions, not a per-transaction judgment.
     "txn_is_recurring": txn_is_recurring,
+    "txn_stated_liability_match": txn_stated_liability_match,
     "income_employer_coverage": _income_employer_coverage,
     # LP-418 — a DETERMINISTIC per-borrower self-employment signal (promotes the measured income.type), for
     # IN-12. No new AI, no calibration round (the win). "no" lets IN-12 reach not_applicable. LP-422 extended

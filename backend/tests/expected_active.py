@@ -92,6 +92,17 @@ from __future__ import annotations
 # rule, not an outcome added to IH-3, because an outcome there would sit behind that same closing-date gate.
 # Activation is the IH-3 path exactly: a parsed binder date, an exact compare, no AI tag in the chain and no
 # threshold, so it is eligible on `no-ai-dependency` alone. -> 76.
-EXPECTED_ACTIVE_RULE_COUNT: int = 76
+# LP-551 — FR-5, THE FIRST RULE THAT READS MONEY OUT. Every other transaction rule scopes
+# `txn.is_money_in eq in`, so on the file that drove this 41 withdrawals were never looked at while 10
+# deposits produced five findings. A debt visible only as a recurring bank debit — a private or family
+# loan, a rent-to-own, anything not reported to the bureaus — was invisible.
+#
+# Two deterministic tags unblocked it, neither costing a model call: `txn.is_recurring` (LP-546) answers
+# the "pattern across statements" question the old bar called unanswerable, as a COUNT; and
+# `txn.stated_liability_match` (LP-551) compares the payee against the 1003, so the rule fires only on a
+# recurring creditor payment matching NOTHING disclosed rather than listing the borrower's bills.
+# Activated ratify-pending on a self-consistency rate measured against the context it ships with, so a
+# human signs every finding. -> 77.
+EXPECTED_ACTIVE_RULE_COUNT: int = 77
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]

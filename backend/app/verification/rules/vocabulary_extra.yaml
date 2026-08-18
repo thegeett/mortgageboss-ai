@@ -1228,3 +1228,21 @@ tags:
       not a closing date is known. "unknown" when no binder states an expiration date or binders
       disagree — never a guessed pass.
     produced_by: derived
+
+  # LP-551 — the input that turns FR-5 from a list into a finding. Without it FR-5 matches every
+  # recurring payment to a creditor (a mortgage, a card, an autopay) — true of every file — so it would
+  # ask a processor to check the borrower's ordinary bills forever.
+  #
+  # GRADED, not yes/no. On LF-WCHG two of four matches are unmistakable and two are inferences
+  # ("PAYPAL INST XFER APPLE.COM BILL" against "APPLE CARD/GS BANK USA" is a guess), and the cost of a
+  # wrong weak match is a MISSED undisclosed debt. A binary tag forces that call inside the producer
+  # where it is invisible; four values put it in the spec where it is declared and re-tunable.
+  #
+  # "unknown" is load-bearing: an application stating NO liabilities must not read as "nothing
+  # matched", which would fire the rule on every payment on the files with the least information.
+  txn.stated_liability_match:
+    entity: transaction
+    value_type: enum
+    allowed_values: ["exact", "probable", "none", "unknown"]
+    description: Does this payment's payee match a liability stated on the application (FR-5)?
+    produced_by: derived

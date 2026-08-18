@@ -64,7 +64,7 @@ def test_desired_state_shape() -> None:
     # LP-453 +2 (credit.tradeline_count + credit.tradeline_monthly_payment_total — the tradelines consumer).
     assert (
         len(tags)
-        == 248  # LP-519 +1 (stmt.repeated_money_in_max_total — AS-13's split-deposit aggregate)  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired)  # LP-498 +1 (contract.credits_warrant_review; contract.unusual_credits already existed)  # LP-496a +1 (program.conforming_eligibility; PE-3's tag already existed)
+        == 249  # LP-551 +1 (txn.stated_liability_match — FR-5's payee-vs-1003 comparison, via the hand-editable overlay)  # LP-519 +1 (stmt.repeated_money_in_max_total — AS-13's split-deposit aggregate)  # LP-509-D1 +2 (ins.expiration_date + ins.policy_expired)  # LP-498 +1 (contract.credits_warrant_review; contract.unusual_credits already existed)  # LP-496a +1 (program.conforming_eligibility; PE-3's tag already existed)
     )  # LP-495b +2 (occupancy.investment_rental_supported, dti.atr_documentation_adequate —
     # OC-3's and DT-7's judgment OUTPUT tags; a judgment output is emitted by the evaluator, so neither
     # gets a tag_production.yaml entry, the same shape as income.other_income_continues)

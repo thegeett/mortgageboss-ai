@@ -19,7 +19,8 @@ import pytest
 from app.verification.rules.specs import JudgmentEval, load_rule_spec
 from pydantic import ValidationError
 
-_RULES = ("AS-12", "OC-2", "DT-7", "CR-8")
+# LP-551 — FR-5 was authored WITH guidance, so it joins the written set rather than the untouched one.
+_RULES = ("AS-12", "OC-2", "DT-7", "CR-8", "FR-5")
 
 
 @pytest.mark.parametrize("rule_id", _RULES)

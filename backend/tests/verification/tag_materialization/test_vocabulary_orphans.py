@@ -78,6 +78,7 @@ _PRODUCED_OUTSIDE_DECLARATIONS: frozenset[str] = frozenset(
         # generic-pass declaration: the declaration layer writes `derived` recipes for
         # borrower/document/liability/loan only, and the generic pass skips `transaction` anyway.
         "txn.is_recurring",  # recurrence stage — derived, model-free
+        "txn.stated_liability_match",  # same stage (LP-551) — derived, model-free
     }
 )
 

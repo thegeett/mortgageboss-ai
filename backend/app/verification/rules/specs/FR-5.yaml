@@ -90,14 +90,6 @@ guideline_reference: "Fannie Mae Selling Guide B3-6 (all monthly obligations mus
 requires_documents:
   - [bank_statement]
 
-# LP-549 — do NOT surface an LP-391 manual-review flag while this rule is blocked. Its applicability —
-# a recurring money-out payment to an apparent creditor — is a mortgage, a credit card and a utility
-# autopay, i.e. essentially every file with bank statements. On the first real run it put SEVEN
-# identical "review this manually" rows above the findings that had actually concluded something. The
-# flag is worth showing when being in scope is itself unusual; here it only says the borrower pays
-# bills. Until the rule can judge, silence is the honest output.
-pending_surface: false
-
 spec_version: 1
 
 judgment:
@@ -109,14 +101,19 @@ judgment:
     - {tag: txn.is_money_in, op: eq, value: out}
     - {tag: txn.apparent_category, op: eq, value: debt_payment}
     - {tag: txn.is_recurring, op: eq, value: "yes"}
+    # LP-551 — the predicate that makes this a finding rather than a list of the borrower's bills.
+    # `exact` and `probable` are OUT OF SCOPE (not_applicable), not a gap: a payment that matches a
+    # disclosed liability is the application working. `unknown` is neither, so it reaches couldnt_check
+    # through the applicability resolver — an application stating no liabilities is a gap, not a pass.
+    - {tag: txn.stated_liability_match, op: eq, value: none}
   applicability_expected: false   # a file with no bank statement is AS-10's gap, not this rule's
-  load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring]
+  load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring, txn.stated_liability_match]
   # `_build_context` builds the model's context from THIS list alone, and each entry carries the tag's
   # own REASONING — which is where the payee name lives ("Citi (Citibank) is a credit card issuer ...")
   # and where the recurrence count lives ("this payee appears in 3 different months"). The amount and
   # date are added so the model can weigh size and timing rather than being asked about signals it
   # cannot observe (the LP-516 lesson on AS-12).
-  reasoned_over: [txn.apparent_category, txn.is_recurring, txn.amount, txn.date]
+  reasoned_over: [txn.apparent_category, txn.is_recurring, txn.stated_liability_match, txn.amount, txn.date]
   output_tag: fraud.recurring_debit_reviewed
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
@@ -154,10 +151,13 @@ judgment:
     what the payment is (from its description), how many months it recurs across, its amount and its
     date.
 
-    YOU CANNOT SEE THE APPLICATION'S DISCLOSED LIABILITIES, and you must not pretend otherwise. NEVER
-    say a debt is undisclosed, unreported or hidden — you have no way to know, and this is a
-    fraud-adjacent check where a false accusation costs a borrower real trust. Judge only whether the
-    payment has the SHAPE of a monthly obligation; a human reconciles it against the 1003.
+    You are told that this payee matches NO liability on the application — that comparison was already
+    made deterministically, by name, before you were asked. Your job is NOT to re-check it.
+
+    STILL DO NOT ACCUSE. A payee that matches nothing may be a subscription, an insurance premium, rent,
+    or a liability recorded under a different trading name. NEVER say a debt is undisclosed, unreported
+    or hidden; say what the payment looks like and let a human reconcile it. This is a fraud-adjacent
+    check, and a false accusation costs a borrower real trust.
 
     Answer "yes" when the payee and the regularity together look like a debt being serviced — a card
     issuer, a mortgage servicer, an auto/student/personal loan, a lease, a finance company.

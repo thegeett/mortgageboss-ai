@@ -455,8 +455,13 @@ _LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
 # FR-4 HELD — it asks a BANK-TRANSACTION tag (txn.implies_obligation) about a PAY-STUB fact. A
 # garnishment is a deduction line, and the corpus has zero real ones (4 strict hits: a bank's account
 # agreement and a tax-relief firm's service menu).
-# FR-5 HELD — _txn_context serialises FOUR fields for ONE transaction, so txn.is_recurring's declared
-# "pattern across statements" is unanswerable at that scope.
+# FR-5 ACTIVATED (LP-551) — the hold above was true of an AI GROUP and not of a derived producer, which
+# receives the whole snapshot: LP-546 answered "pattern across statements" as a COUNT, with no model and
+# no calibration round. It stayed held even then, because a rule matching every recurring creditor
+# payment lists the borrower's mortgage, card and autopay on every file. LP-551 added the comparison
+# that makes it a finding — `txn.stated_liability_match`, also derived — so it now fires ONLY on a
+# recurring creditor payment whose payee matches nothing on the 1003. On the file that drove this, that
+# is zero findings.
 # FR-6 HELD — it would be the first list-producing tag in the system (five tags declare value_type
 # list; none has a producer), and open-ended discovery has no closed vocabulary to abstain against, so
 # nothing distinguishes a real discovery from a fabricated one. Needs a mechanism and an ADR.
@@ -468,6 +473,12 @@ _LP498_ACTIVATED: tuple[str, ...] = ("FR-3",)
 # closing date — so it abstained, and a couldnt_check about closing swallowed a fact that is true regardless
 # of closing. Same activation shape as IH-3: parsed input, exact compare, no AI, no threshold.
 _LP509_ACTIVATED: tuple[str, ...] = ("IH-9",)
+
+# LP-551 — FR-5, the first rule that reads money OUT. Every other transaction rule scopes
+# `txn.is_money_in eq in`, so a debt visible only as a recurring bank debit — a private or family loan,
+# a rent-to-own, anything not reported to the bureaus — was invisible. Activated on a self-consistency
+# rate (ratify-pending), so it ratifies every finding: a human signs each, and it can never auto-assert.
+_LP551_ACTIVATED: tuple[str, ...] = ("FR-5",)
 
 # LP-519 — AS-13 (the split-deposit signal) was WITHDRAWN from the catalog, not merely held.
 #
@@ -517,6 +528,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP496A_ACTIVATED,
     *_LP497_ACTIVATED,
     *_LP498_ACTIVATED,
+    *_LP551_ACTIVATED,
     *_LP509_ACTIVATED,
 )
 

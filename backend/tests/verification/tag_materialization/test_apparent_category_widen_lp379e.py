@@ -142,7 +142,10 @@ def test_only_lp390_7_rules_read_apparent_category_live() -> None:
     # the INTENDED live consumers. No OTHER live rule reads it, so the LP-379-E widening still cannot silently
     # change an UNINTENDED live verdict. (AS-2's trigger is loan_proceeds — an original enum value, unaffected
     # by the widening; AS-12 is judgmental — a human ratifies every verdict.)
-    assert set(readers) == {"AS-2", "AS-12"}
+    # LP-551 — FR-5 JOINED them, and it is the first consumer of a money-OUT value. It reads
+    # `debt_payment`, which the LP-379-E widening did not touch (an original enum value), and it is
+    # judgmental — a human ratifies every verdict — so the equivalence this test protects still holds.
+    assert set(readers) == {"AS-2", "AS-12", "FR-5"}
 
 
 def test_as1_does_not_read_apparent_category() -> None:
@@ -248,6 +251,7 @@ def test_no_rule_activation_changed() -> None:
             # LP-498 — FR-3, the fraud cohort's one survivor: its evidence is a first-class typed
             # field set on the purchase contract. FR-1/2/4/5/6 are held (see registry).
             "FR-3",
+            "FR-5",
             "IH-9",  # LP-509-D1 — hazard policy expired
         )
     )

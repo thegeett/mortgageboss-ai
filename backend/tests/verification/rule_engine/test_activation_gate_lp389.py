@@ -71,6 +71,7 @@ _ACTIVATED = frozenset(
         # not in its chain; its real gap was the threshold, now tier P from B3-4.1-01. AS-7 stays held.
         "AS-4",
         "FR-3",  # LP-498
+        "FR-5",  # LP-551 — the first rule that reads money OUT
         "CL-1",
         "CR-13",
         "PR-6",
@@ -162,12 +163,10 @@ def test_exactly_the_eligible_candidates_pass() -> None:
     # whole run degraded. 9 - 2 + 1 = 8.
     # LP-497 — AS-4 LEFT the held set (its blocker measured a tag not in its chain), so 8 -> 7.
     # LP-495c — DT-7 LEFT it too, on the enum reconciliation, so 7 -> 6.
-    # LP-547 — FR-5 JOINED it, 6 -> 7: built (the first rule that reads money OUT), held because its
-    # judgment has no measured self-consistency and `txn.apparent_category`'s ability to tell a creditor
-    # payment from a utility — the one distinction it rests on — is unscored. It is also once again the
-    # case that a blocked JUDGMENT rule exists, which test_pending_checks_lp391 now asserts directly
-    # instead of only simulating.
-    assert len(held) == 7 and not (
+    # LP-547 — FR-5 JOINED it, 6 -> 7, built but unmeasured.
+    # LP-551 — and LEFT it again, 7 -> 6, once it had both the comparison tag that makes it a finding
+    # and a self-consistency rate measured against the context it actually ships with.
+    assert len(held) == 6 and not (
         held & _ACTIVATED
     )  # LP-519 +AS-13 — calibratable-now, validated:false  # every other candidate is held
 
@@ -197,6 +196,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
         "DT-7",  # LP-495c
         "FR-3",  # LP-498 (sorts after DT-7, before ID-*)
+        "FR-5",  # LP-551
         "ID-5",
         "IH-1",
         "IH-2",

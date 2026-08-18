@@ -278,10 +278,20 @@ FR-5:
   # so this rule would fire four times and add nothing. That is a statement about one compliant borrower,
   # not about the rule — a debt that is undisclosed is by construction absent from the file we would
   # measure against. Do not read a quiet result on that corpus as evidence the rule is unnecessary.
-  # `not-calibratable-yet`, NOT `ratify-pending`: the gate is explicit that a ratify-pending bar needs a
-  # measured self_consistency_rate, and this has none. Claiming the readier status would have described
-  # the rule as further along than it is.
-  status: not-calibratable-yet
+  # LP-551 — MEASURED AND ACTIVATED. Held at not-calibratable-yet until it had a rate; it now has one,
+  # taken AFTER `txn.stated_liability_match` joined the judgment context. The earlier 1.0000 (LP-547,
+  # same cases, no comparison tag) is NOT the number recorded here: adding a predicate changes what
+  # reaches the model, and carrying a rate measured against a different context forward is the
+  # stale-number habit LP-496a exists to warn about. Both runs agreed 5/5; only the second describes
+  # the rule as it ships.
+  status: ratify-pending
+  self_consistency_rate: 1.0000
+  self_consistency_cases: 5
+  self_consistency_disagreements: 0
+  self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  self_consistency_date: "2026-08-18"
+  input_resolves: true
+  measured_accuracy: null
   ships: ratify
   threshold: null
   validated: false
