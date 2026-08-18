@@ -417,8 +417,7 @@ def evaluate_deterministic_rule(
                     spec,
                     subject_id,
                     Verdict.COULDNT_CHECK,
-                    "this check could not run — a value it needs could not be determined from "
-                    "the file's data",
+                    "a value needed here could not be determined from the file's data",
                     subject_tags,
                     verdict_confidence=gate.verdict_confidence,
                 )

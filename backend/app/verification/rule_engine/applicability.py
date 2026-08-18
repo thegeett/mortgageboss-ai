@@ -33,13 +33,13 @@ def _undetermined_reason(applic: TagCondition, *, present_but_unclear: bool) -> 
     if applic.tag_id == DOC_TYPE_TAG:
         verb = "could not be classified" if present_but_unclear else "has not been classified"
         return (
-            f"a document in the file {verb} — it may be the {document_label(applic.value)} this "
-            "check needs; classify it so the check can run"
+            f"a document in the file {verb} — it may be the {document_label(applic.value)} needed "
+            "here; identify what it is"
         )
-    verb = "could not be determined" if present_but_unclear else "has not been determined"
+    verb = "does not clearly establish" if present_but_unclear else "does not establish"
     return (
-        f"{fact_phrase(applic.tag_id)} {verb} — this check needs it to tell whether the rule "
-        "applies here"
+        f"the file {verb} {fact_phrase(applic.tag_id)}, so it is not known whether this "
+        "requirement applies here"
     )
 
 
@@ -142,8 +142,8 @@ def absent_document_couldnt_check(
     # LP-376-C: name the document + the action (this good sentence is only reached when NO document is
     # unclassified — otherwise it is correctly suppressed above, since an untyped doc might BE this one).
     return (
-        f"no {document_label(applic.value)} is in the file — this check needs one; request it "
-        "from the borrower or originator"
+        f"no {document_label(applic.value)} is in the file — request one from the borrower "
+        "or originator"
     )
 
 

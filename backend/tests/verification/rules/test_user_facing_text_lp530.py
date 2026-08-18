@@ -20,6 +20,9 @@ at the source rather than only at the output.
 
 from __future__ import annotations
 
+import ast
+import pathlib
+
 import pytest
 import yaml
 from app.verification.rules.specs import _SPECS_DIR
@@ -73,3 +76,70 @@ def test_no_user_facing_string_describes_the_machinery(phrase: str) -> None:
     ]
 
     assert not offenders, f"{phrase!r} describes the software, not the loan file: {offenders}"
+
+
+# ------------------------------------------------------------------------------------------------ #
+# LP-533 — THE HALF LP-530 MISSED, and the reason it missed it
+# ------------------------------------------------------------------------------------------------ #
+# LP-530 scanned YAML spec fields and I reported the register problem as fixed. It was not: a
+# finding's `message` — the HEADLINE a processor reads, and the `problem` the composer is asked to
+# rewrite — is built in PYTHON, not authored in YAML. Nine such strings said "this check".
+#
+# Two of them were on screen at the time, in the exact findings I was explaining:
+#
+#   CR-6  "... could not be determined — THIS CHECK NEEDS IT to tell whether the rule applies here"
+#   IN-8  "... which is what THIS CHECK needs"
+#
+# A guard scoped to one authoring surface reads as a guard on the topic. This scans the other one.
+_REASON_MODULES = (
+    "app/verification/rule_engine/applicability.py",
+    "app/verification/rule_engine/gate.py",
+    "app/verification/rule_engine/deterministic.py",
+    "app/verification/rule_engine/judgment.py",
+    "app/verification/rule_engine/reasons.py",
+    "app/verification/tag_materialization/derived.py",
+)
+
+_DOCSTRING_HOLDERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _literals(module: pathlib.Path) -> list[tuple[int, str]]:
+    """Every string LITERAL in the module, minus docstrings.
+
+    Docstrings are excluded deliberately: they are written for us and use the machinery vocabulary
+    freely and correctly. What ships to a processor is the literals."""
+    tree = ast.parse(module.read_text())
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, _DOCSTRING_HOLDERS):
+            body = getattr(node, "body", [])
+            first = body[0] if body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                docstrings.add(id(first.value))
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+
+
+@pytest.mark.parametrize("module", _REASON_MODULES)
+def test_no_generated_reason_describes_the_machinery(module: str) -> None:
+    """The same standard as the YAML guard, on the surface that actually produced the finding text."""
+    root = pathlib.Path(__file__).resolve().parents[3]
+    offenders = [
+        (module.rsplit("/", 1)[-1], line, text.strip()[:60])
+        for line, text in _literals(root / module)
+        if any(phrase in text.lower() for phrase in ("this check", "the rule engine", "the system"))
+    ]
+
+    assert not offenders, (
+        "a generated finding message describes the software rather than the loan file — it is what "
+        f"a processor reads AND what the composer is asked to rewrite: {offenders}"
+    )

@@ -126,7 +126,13 @@ def test_id5_unparseable_date_is_couldnt_check_never_silently_coerced() -> None:
     # epoch/0 (which would fire or pass wrongly).
     (r,) = _id5(expiration="not-a-date", closing="2026-05-01")
     assert r.verdict is Verdict.COULDNT_CHECK
-    assert "could not run" in r.reasoning  # LP-376-C: no "operand" in user text
+    # LP-376-C's property, asserted directly rather than through a proxy phrase: the message names
+    # the missing VALUE in the file's terms, and never the engine's own vocabulary. LP-533 reworded
+    # this line out of the machinery register ("this check could not run"), which a pinned phrase
+    # would have blocked while proving nothing about what the sentence says.
+    assert "could not be determined" in r.reasoning
+    assert "operand" not in r.reasoning
+    assert "this check" not in r.reasoning
 
 
 # --------------------------------------------------------------------------- #

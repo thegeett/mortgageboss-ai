@@ -108,7 +108,7 @@ def evaluate_gate(
         if tag is None:
             return GateResult(
                 GateStatus.COULDNT_CHECK,
-                f"{fact_phrase(tag_id)} could not be found in the file — this check needs it",
+                f"{fact_phrase(tag_id)} could not be found in the file",
                 None,
             )
     for tag_id, tag in load_bearing.items():
@@ -149,8 +149,8 @@ def evaluate_gate(
         if (tag is not None or (distrust_tag_ids is not None and present)) and tag_id in distrusted:
             return GateResult(
                 GateStatus.NEEDS_REVIEW,
-                f"{fact_phrase(tag_id)} comes from a field the extractor has read wrongly before, so "
-                "this check was not decided automatically — a human should confirm the value",
+                f"{fact_phrase(tag_id)} comes from a field that has been read wrongly before, so "
+                "it was not accepted automatically — confirm the value against the document",
                 None,
                 ratification_pending=True,
             )

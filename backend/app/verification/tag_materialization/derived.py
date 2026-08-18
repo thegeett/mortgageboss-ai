@@ -3620,7 +3620,7 @@ def _file_counterparty(snapshot: Snapshot) -> tuple[list[list[str]], str]:
             return [], "the file states no borrower name to compare the vested owner with"
         parties = [_normalise_party_name(name) for name in names]
         return [p for p in parties if p], (f"the borrower(s) ({', '.join(repr(x) for x in names)})")
-    return [], f"the loan purpose {purpose!r} is not one this check knows how to scope"
+    return [], f"the loan purpose {purpose!r} is not one with a defined set of parties to compare"
 
 
 def _borrower_display_names(snapshot: Snapshot) -> list[str]:
@@ -5110,7 +5110,7 @@ def _income_history_documentation(
             f"borrower {subject_id}: income is evidenced only by pay stubs (no W-2 or 1099 attributed)"
         )
     return "no_pay_stubs", (
-        f"borrower {subject_id}: no pay stubs attributed — no pay-stub-only history for this check"
+        f"borrower {subject_id}: no pay stubs attributed, so there is no pay-stub-only history"
     )
 
 
