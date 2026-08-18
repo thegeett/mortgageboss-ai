@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.finding_prose import Composition, FactSummary, compose
+from app.ai.finding_prose import IDENTIFIER, Composition, FactSummary, compose
 from app.core.logging import get_logger
 from app.models.finding import Finding
 from app.models.finding_prose import FindingProse
@@ -37,6 +37,41 @@ logger = get_logger(__name__)
 # The same bound the judgment evaluator uses: enough to keep the pass short, low enough that a large
 # file cannot burst into a hundred simultaneous calls and trip a rate limit.
 _MAX_CONCURRENT = 8
+
+
+# A tag's reasoning is a paragraph, and a finding can rest on six of them (AS-12). Capped so a verbose
+# tag cannot crowd the rest of the prompt out; cut at a sentence boundary where one is near the limit,
+# because a mid-enumeration cut ("(i) … (ii) … (iii") reads as if the check only looked at three things.
+_EVIDENCE_LIMIT = 600
+
+
+def _evidence(reasoning: str) -> str | None:
+    """One tag's reasoning, made fit for a processor: identifiers stripped, length capped.
+
+    ⚠️ TRANSLATED, NOT DELETED, and the first attempt got this wrong. Several tag prompts REQUIRE the
+    model to cite the tags it used by id ("cite the SPECIFIC tags you relied on (by their tag id)"), so
+    this text reliably contains `occupancy.consistent_with_signals` and MISMO paths like
+    `declaration.intenttooccupytype`. That is right for a tag's own provenance and wrong in front of a
+    processor (LP-377-B), and a composer handed one copies it faithfully — LP-528's content-id leak in
+    a new place.
+
+    Deleting them mangled the sentence: OC-2's "The single borrower's `declaration.intenttooccupytype`
+    is 'Yes'" became "The single borrower's is 'Yes'", which loses the subject — and the subject was
+    the whole point, because it shows the model corroborated the stated occupancy with the borrower's
+    OWN declaration of it. Erasing the identifier erased the thing a ratifier most needs to see.
+    `fact_label` already renders a known tag in a processor's words and degrades an unknown path to its
+    humanised last segment, so it is a substitution, never a hole.
+    """
+    text = " ".join(IDENTIFIER.sub(lambda m: fact_label(m.group()), reasoning).split())
+    if not text:
+        return None
+    if len(text) <= _EVIDENCE_LIMIT:
+        return text
+    window = text[:_EVIDENCE_LIMIT]
+    sentence_end = window.rfind(". ")
+    if sentence_end > _EVIDENCE_LIMIT // 2:
+        return window[: sentence_end + 1]
+    return window[: window.rfind(" ")] + "…"
 
 
 def summarize(
@@ -63,6 +98,13 @@ def summarize(
         for tag in (finding.load_bearing_tags or [])
         if tag.get("tag_id") and tag.get("value") not in (None, "")
     }
+    evidence = {}
+    for tag in finding.load_bearing_tags or []:
+        reasoning = tag.get("reasoning")
+        if tag.get("tag_id") and isinstance(reasoning, str) and reasoning.strip():
+            trimmed = _evidence(reasoning)
+            if trimmed:
+                evidence[fact_label(str(tag["tag_id"]))] = trimmed
     details = finding.details or {}
     return FactSummary(
         rule_name=rule_name,
@@ -71,6 +113,7 @@ def summarize(
             finding.load_bearing_tags or [],
             document_filenames=document_filenames,
         ),
+        evidence=evidence,
         problem=finding.message,
         fix=details.get("how_to_fix") if isinstance(details.get("how_to_fix"), str) else None,
         facts=facts,

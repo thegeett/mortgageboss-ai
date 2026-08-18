@@ -330,3 +330,98 @@ def test_a_finding_with_no_derivation_is_untouched() -> None:
         _with_derivation("Obtain the declarations page.", finding)
         == "Obtain the declarations page."
     )
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-537 — the evidence a ratifier is being asked to countersign
+# --------------------------------------------------------------------------------------------- #
+def _judgment_finding(rule_id: str, tags: list[dict[str, str]]) -> Finding:
+    return Finding(
+        loan_file_id=None,
+        rule_id=rule_id,
+        message="x",
+        subject_key="loan",
+        load_bearing_tags=tags,
+        details={},
+    )
+
+
+def test_the_tags_own_reasoning_reaches_the_composer() -> None:
+    """⚠️ WHY DT-7 SHIPPED A BARE ASSERTION. The summary carried the VALUE ("complete") and dropped the
+    tag's reasoning, which is the sentence naming the documents. The model wrote "Every ability-to-repay
+    factor has a supporting document in the file" because a bare conclusion was all it was given.
+
+    DT-7 and OC-2 are ratification items — a human is asked to countersign an AI verdict on a tag with
+    no measured accuracy, and that ratification is the ONLY reason either rule is allowed to run
+    (activation_bars: "OC-2 never needed the tag CALIBRATED" because a human signs each). A
+    countersignature on a conclusion whose basis is hidden is not a control, it is a click."""
+    from app.services.finding_prose import summarize
+
+    finding = _judgment_finding(
+        "DT-7",
+        [
+            {
+                "tag_id": "dti.atr_factors_documented",
+                "value": "complete",
+                "reasoning": "W-2s for 2023 and 2024, pay stubs from March 2025, bank statements.",
+            }
+        ],
+    )
+
+    evidence = summarize(finding, rule_name="ATR").evidence
+
+    assert "pay stubs from March 2025" in " ".join(evidence.values())
+
+
+def test_an_identifier_in_the_reasoning_is_translated_not_deleted() -> None:
+    """⚠️ THE REGRESSION THE FIRST ATTEMPT SHIPPED. Tag prompts REQUIRE citing tags by id, so reasoning
+    is full of `occupancy.consistent_with_signals` and MISMO paths. Deleting them turned OC-2's
+
+        "The single borrower's declaration.intenttooccupytype is 'Yes'"
+
+    into "The single borrower's is 'Yes'" — which loses the subject, and the subject WAS the point: it
+    shows the model corroborated the stated occupancy with the borrower's own declaration of it. That
+    circularity is exactly what a ratifier is there to catch, and erasing the identifier erased it."""
+    from app.services.finding_prose import summarize
+
+    finding = _judgment_finding(
+        "OC-2",
+        [
+            {
+                "tag_id": "occupancy.consistent_with_signals",
+                "value": "yes",
+                "reasoning": "The borrower's declaration.intenttooccupytype is 'Yes'.",
+            }
+        ],
+    )
+
+    text = " ".join(summarize(finding, rule_name="Occupancy").evidence.values())
+
+    assert "declaration.intenttooccupytype" not in text  # never the raw path
+    assert "intenttooccupytype" in text  # but the subject survives
+    assert "borrower's is" not in text  # the hole the first version left
+
+
+def test_a_tag_id_in_the_OUTPUT_is_rejected() -> None:
+    """The strip is on the way in; this is the way out. Belt and braces, because the model also sees
+    the rule name and could construct one — and LP-377-B's rule is about what a processor READS."""
+    from app.ai.finding_prose import leaked_identifiers
+
+    leaked = Composition(
+        action="Confirm it.", why="The occupancy.consistent_with_signals tag says yes."
+    )
+
+    assert leaked_identifiers(leaked) == {"occupancy.consistent_with_signals"}
+    assert leaked_identifiers(Composition(action="Obtain the W-2.", why="It is missing.")) == set()
+
+
+def test_a_long_reasoning_is_capped() -> None:
+    """A finding can rest on six tags (AS-12). Uncapped, one verbose tag crowds out the rest."""
+    from app.services.finding_prose import _EVIDENCE_LIMIT, summarize
+
+    finding = _judgment_finding(
+        "DT-7",
+        [{"tag_id": "dti.atr_factors_documented", "value": "complete", "reasoning": "x " * 800}],
+    )
+
+    assert len(next(iter(summarize(finding, rule_name="ATR").evidence.values()))) <= _EVIDENCE_LIMIT

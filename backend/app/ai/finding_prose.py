@@ -54,6 +54,9 @@ RULES, all mandatory:
 - "action" is what the processor should DO, in the imperative: "Obtain the...", "Confirm that...".
 - "why" explains why this is in their queue, in plain language a processor uses. Name the specific
   document or fact when the summary gives it.
+- When "evidence" is present it is what the check actually relied on. USE IT: name those documents and
+  facts in the "why" so the reader can check the conclusion instead of taking it on trust. A finding
+  asking someone to confirm something must show them what they are confirming.
 - Never mention the AI, the rule engine, rule ids, tags, confidence, or that a check "could not run".
   Describe the loan file, not the software. In particular NEVER write "the system" — say what the FILE
   is missing ("the file does not contain a credit report"), not what the software cannot do.
@@ -76,6 +79,11 @@ class FactSummary:
     problem: str  # the template message — what the engine concluded
     fix: str | None  # the template fix — what it asked for
     facts: dict[str, str] = field(default_factory=dict)  # load-bearing tag label -> value
+    # LP-537 — the tag's OWN reasoning, per load-bearing tag. A value alone is a conclusion; this is
+    # what the conclusion rested on ("W-2s for 2023 and 2024, pay stubs from March 2025, ..."). DT-7
+    # and OC-2 shipped a bare assertion for exactly this reason: the summary carried "complete" and
+    # dropped the sentence naming the documents, so the model had nothing specific to write.
+    evidence: dict[str, str] = field(default_factory=dict)
     guideline: str | None = None
 
     def to_json(self) -> str:
@@ -85,6 +93,7 @@ class FactSummary:
             "problem": self.problem,
             "suggested_fix": self.fix,
             "facts": self.facts,
+            "evidence": self.evidence,
             "guideline": self.guideline,
         }
         return json.dumps({k: v for k, v in payload.items() if v}, sort_keys=True)
@@ -151,6 +160,19 @@ def machinery_talk(composition: Composition) -> set[str]:
     return {phrase for phrase in _MACHINERY if phrase in text}
 
 
+# A dotted lowercase identifier — a tag id ("occupancy.consistent_with_signals") or a MISMO path
+# ("declaration.intenttooccupytype"). Tag reasoning is written for engineers and is REQUIRED by several
+# prompts to cite tags by id, so the evidence text is full of them. They are stripped on the way in and
+# rejected on the way out: the strip keeps the model from seeing them, and the check catches the case
+# where it produced one anyway.
+IDENTIFIER = re.compile(r"\b[a-z][a-z_]{2,}\.[a-z][a-z_.]{2,}[a-z]\b")
+
+
+def leaked_identifiers(composition: Composition) -> set[str]:
+    """Tag ids or MISMO paths in the output — LP-377-B's rule, applied to generated text."""
+    return set(IDENTIFIER.findall(composition.message))
+
+
 def _parse(text: str) -> Composition | None:
     """Defensive parse — a malformed response is a rejected composition, never a partial one."""
     start, end = text.find("{"), text.rfind("}")
@@ -201,6 +223,9 @@ async def compose(summary: FactSummary) -> Composition | None:
     if machinery := machinery_talk(composition):
         logger.warning("finding_prose_rejected_machinery_talk", phrases=sorted(machinery))
         return None
+    if leaked := leaked_identifiers(composition):
+        logger.warning("finding_prose_rejected_identifier", count=len(leaked))
+        return None
     return composition
 
 
@@ -209,6 +234,7 @@ __all__ = [
     "Composition",
     "FactSummary",
     "compose",
+    "leaked_identifiers",
     "machinery_talk",
     "unsupported_numbers",
 ]
