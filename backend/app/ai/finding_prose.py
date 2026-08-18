@@ -55,7 +55,10 @@ RULES, all mandatory:
 - "why" explains why this is in their queue, in plain language a processor uses. Name the specific
   document or fact when the summary gives it.
 - Never mention the AI, the rule engine, rule ids, tags, confidence, or that a check "could not run".
-  Describe the loan file, not the software.
+  Describe the loan file, not the software. In particular NEVER write "the system" — say what the FILE
+  is missing ("the file does not contain a credit report"), not what the software cannot do.
+  ⚠️ The problem text you are given is written for engineers and often reads impersonally. Do not
+  mirror that register: rewrite it as something a person does about a document.
 - Plain sentences. No markdown, no bullet points, no headings.
 - Keep the whole thing under 60 words."""
 
@@ -122,13 +125,18 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
 # still wrote "The system cannot verify derogatory seasoning requirements" on the first real run — a
 # processor does not care what the system can do, only what the file is missing. Enforced rather than
 # requested, because a prompt instruction is a hope and a check is a guarantee.
+# ⚠️ NARROW ON PURPOSE — only phrases that name the SOFTWARE AS AN ACTOR.
+#
+# "this check" and "could not be determined" were on this list and are not: both appear in our own
+# TEMPLATE messages, which the model receives as its `problem` input, so banning them would reject a
+# faithful composition for echoing its source. (They never actually fired — every rejection on the
+# first composed run was "the system" — so this is a correctness fix, not a regression fix.)
 _MACHINERY = (
     "the system",
     "the rule engine",
-    "this check",
-    "the check ",
-    "could not be determined",
+    "the engine",
     "the ai ",
+    "this software",
     "automated check",
 )
 

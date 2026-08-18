@@ -213,3 +213,32 @@ def test_the_summary_never_carries_a_raw_content_id() -> None:
     summary = summarize(finding, rule_name="DTI", document_filenames={})
 
     assert "doc7031677534131285" not in summary.to_json()
+
+
+def test_echoing_our_own_template_wording_is_not_machinery_talk() -> None:
+    """ "this check" and "could not be determined" appear in the TEMPLATE messages the model receives as
+    its `problem` input, so banning them would reject a faithful composition for echoing its source.
+
+    (I first blamed them for CR-6 x4 and PR-6 falling back to templates on a real run. The logs said
+    otherwise — every rejection was "the system" — so this pins a correctness property rather than a
+    regression, and the real cause is addressed in the prompt.)"""
+    from app.ai.finding_prose import machinery_talk
+
+    echoed = Composition(
+        action="Upload the tri-merge credit report.",
+        why="Whether this account carries a derogatory mark could not be determined from the file.",
+    )
+
+    assert machinery_talk(echoed) == set()
+
+
+def test_naming_the_software_as_an_actor_is_still_rejected() -> None:
+    """The narrowing must not let the original leak back through."""
+    from app.ai.finding_prose import machinery_talk
+
+    for phrase in (
+        "The system cannot verify it.",
+        "The rule engine could not run.",
+        "The AI judged it.",
+    ):
+        assert machinery_talk(Composition(action="Do it.", why=phrase)), phrase
