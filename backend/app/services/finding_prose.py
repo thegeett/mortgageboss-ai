@@ -15,6 +15,7 @@ in the judgment evaluator. Concurrency is bounded the same way that evaluator bo
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from uuid import UUID
 
 from sqlalchemy import select
@@ -25,7 +26,10 @@ from app.ai.finding_prose import Composition, FactSummary, compose
 from app.core.logging import get_logger
 from app.models.finding import Finding
 from app.models.finding_prose import FindingProse
+from app.models.loan_file import LoanFile
+from app.services.rule_subject_label import resolve_subject_label
 from app.verification.rule_engine.reasons import fact_label
+from app.verification.snapshot.documents_section import document_filenames_by_content_id
 
 logger = get_logger(__name__)
 
@@ -34,12 +38,24 @@ logger = get_logger(__name__)
 _MAX_CONCURRENT = 8
 
 
-def summarize(finding: Finding, *, rule_name: str) -> FactSummary:
+def summarize(
+    finding: Finding,
+    *,
+    rule_name: str,
+    borrower_names: Mapping[str, str] | None = None,
+    document_filenames: Mapping[str, str] | None = None,
+) -> FactSummary:
     """The ONLY input a composition may draw on — assembled from the finding, never from the snapshot.
 
     Deliberately narrow. A composer that could reach the whole snapshot would be free to mention facts
     the rule never considered, and a processor reading a finding is entitled to assume the sentence
     describes what the check actually looked at.
+
+    ⚠️ THE SUBJECT IS THE RESOLVED LABEL, NEVER `subject_key`. A first version passed the key, and the
+    model faithfully wrote it into user-facing text: "the retained property on doc7031677534131285",
+    "for liability lia7a033a46ec70cc10". LP-377-B exists to keep that hash away from a processor, and
+    the read path already had `resolve_subject_label` for it — the composer just has to use the same
+    resolver, with the same maps, so a finding cannot read one way in the list and another in its text.
     """
     facts = {
         fact_label(str(tag.get("tag_id", ""))): str(tag.get("value", ""))
@@ -49,7 +65,11 @@ def summarize(finding: Finding, *, rule_name: str) -> FactSummary:
     details = finding.details or {}
     return FactSummary(
         rule_name=rule_name,
-        subject=str(finding.subject_key or "this loan file"),
+        subject=resolve_subject_label(
+            finding.subject_key,
+            finding.load_bearing_tags or [],
+            document_filenames=document_filenames,
+        ),
         problem=finding.message,
         fix=details.get("how_to_fix") if isinstance(details.get("how_to_fix"), str) else None,
         facts=facts,
@@ -77,15 +97,32 @@ async def _store(db: AsyncSession, key: str, composition: Composition) -> None:
 
 
 async def compose_findings(
-    db: AsyncSession, findings: list[Finding], *, rule_names: dict[str, str]
+    db: AsyncSession,
+    findings: list[Finding],
+    *,
+    rule_names: dict[str, str],
+    loan_file_id: UUID,
 ) -> int:
     """Rewrite what can be rewritten; leave the rest exactly as the templates wrote it.
 
     Returns how many findings were changed. Never raises: a composition pass that fails must not fail a
     verification run whose verdicts are already correct and already persisted.
     """
+    # The SAME map the read path builds, so a finding cannot name its subject one way in the list and
+    # another inside its own text. Only loaded when a document-subject finding exists — most files have
+    # none, and this is a reshape of every document.
+    document_filenames: Mapping[str, str] = {}
+    if any((finding.subject_key or "").startswith("doc") for finding in findings):
+        loan_file = await db.get(LoanFile, loan_file_id)
+        if loan_file is not None:
+            document_filenames = await document_filenames_by_content_id(db, loan_file)
+
     summaries = {
-        finding.id: summarize(finding, rule_name=rule_names.get(finding.rule_id, finding.rule_id))
+        finding.id: summarize(
+            finding,
+            rule_name=rule_names.get(finding.rule_id, finding.rule_id),
+            document_filenames=document_filenames,
+        )
         for finding in findings
         if finding.message
     }

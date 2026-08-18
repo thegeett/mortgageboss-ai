@@ -118,6 +118,27 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
     return _numbers_in(composition.message) - source
 
 
+# Phrases that describe the SOFTWARE rather than the loan file. The prompt forbids them and a model
+# still wrote "The system cannot verify derogatory seasoning requirements" on the first real run — a
+# processor does not care what the system can do, only what the file is missing. Enforced rather than
+# requested, because a prompt instruction is a hope and a check is a guarantee.
+_MACHINERY = (
+    "the system",
+    "the rule engine",
+    "this check",
+    "the check ",
+    "could not be determined",
+    "the ai ",
+    "automated check",
+)
+
+
+def machinery_talk(composition: Composition) -> set[str]:
+    """Phrases naming the software instead of the loan file."""
+    text = composition.message.lower()
+    return {phrase for phrase in _MACHINERY if phrase in text}
+
+
 def _parse(text: str) -> Composition | None:
     """Defensive parse — a malformed response is a rejected composition, never a partial one."""
     start, end = text.find("{"), text.rfind("}")
@@ -165,7 +186,17 @@ async def compose(summary: FactSummary) -> Composition | None:
         # NOT logged with the text — the count and the fact of rejection are the signal.
         logger.warning("finding_prose_rejected_unsupported_numbers", count=len(invented))
         return None
+    if machinery := machinery_talk(composition):
+        logger.warning("finding_prose_rejected_machinery_talk", phrases=sorted(machinery))
+        return None
     return composition
 
 
-__all__ = ["SYSTEM_PROMPT", "Composition", "FactSummary", "compose", "unsupported_numbers"]
+__all__ = [
+    "SYSTEM_PROMPT",
+    "Composition",
+    "FactSummary",
+    "compose",
+    "machinery_talk",
+    "unsupported_numbers",
+]

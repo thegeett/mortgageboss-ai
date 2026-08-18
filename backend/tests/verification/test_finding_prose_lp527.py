@@ -160,3 +160,56 @@ def test_the_prompt_forbids_the_two_things_that_would_undo_this() -> None:
     assert "Never introduce a number" in SYSTEM_PROMPT
     assert "Never mention the AI" in SYSTEM_PROMPT
     assert "imperative" in SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-528 — the two leaks the FIRST REAL COMPOSED RUN exposed
+# --------------------------------------------------------------------------------------------- #
+def test_machinery_talk_is_rejected() -> None:
+    """⚠️ FOUND ON A REAL RUN. The prompt forbids mentioning the software and the model wrote "The
+    system cannot verify derogatory seasoning requirements" anyway, four times. A processor does not
+    care what the system can do — only what the file is missing. A prompt instruction is a hope; this
+    is the guarantee."""
+    from app.ai.finding_prose import machinery_talk
+
+    leaked = Composition(
+        action="Upload the credit report.",
+        why="The system cannot verify seasoning without it.",
+    )
+
+    assert machinery_talk(leaked) == {"the system"}
+
+
+def test_ordinary_prose_is_not_mistaken_for_machinery_talk() -> None:
+    """The banned list must not fire on a good sentence, or every composition falls back and the
+    feature is off in all but name."""
+    from app.ai.finding_prose import machinery_talk
+
+    good = Composition(
+        action="Obtain the declarations page for the policy.",
+        why="The binder never states how a dwelling loss is settled.",
+    )
+
+    assert machinery_talk(good) == set()
+
+
+def test_the_summary_never_carries_a_raw_content_id() -> None:
+    """⚠️ THE OTHER REAL-RUN LEAK. A first version passed `subject_key` — a content-id hash — and the
+    model faithfully wrote it into user-facing text: "the retained property on doc7031677534131285",
+    "for liability lia7a033a46ec70cc10". LP-377-B exists to keep that away from a processor, and the
+    read path already had `resolve_subject_label`; the composer now uses the same resolver."""
+    from app.models.finding import Finding
+    from app.services.finding_prose import summarize
+
+    finding = Finding(
+        loan_file_id=None,
+        rule_id="DT-6",
+        message="the application states a lower monthly payment",
+        subject_key="doc7031677534131285",
+        load_bearing_tags=[],
+        details={},
+    )
+
+    summary = summarize(finding, rule_name="DTI", document_filenames={})
+
+    assert "doc7031677534131285" not in summary.to_json()

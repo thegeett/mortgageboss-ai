@@ -596,7 +596,12 @@ async def run_verification(
     # Off unless `finding_prose_enabled`.
     if settings.finding_prose_enabled and findings:
         try:
-            await compose_findings(db, findings, rule_names=_rule_names())
+            await compose_findings(
+                db,
+                findings,
+                rule_names=_rule_names(),
+                loan_file_id=loan_file_id,
+            )
         except Exception as exc:
             logger.warning("finding_prose_pass_failed", error=type(exc).__name__)
 
