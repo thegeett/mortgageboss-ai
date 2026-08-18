@@ -182,8 +182,61 @@ def fact_label(tag_id: str) -> str:
     return stem.replace("_", " ").strip() or tag_id
 
 
+# Leading words that make a label a QUESTION rather than a noun — "whether this account carries a
+# derogatory mark", "is the borrower a first-time buyer". Over 8 labels read this way, and a message
+# builder that prepends "the " to one produces "the whether this account carries a derogatory mark",
+# which shipped to a processor on the first real run.
+_QUESTION_OPENERS = (
+    "whether",
+    "is ",
+    "are ",
+    "does ",
+    "do ",
+    "has ",
+    "have ",
+    "can ",
+    "will ",
+    "did ",
+)
+
+
+def fact_phrase(tag_id: str) -> str:
+    """A fact label ready to drop into a sentence — "the credit report date", "whether this account…".
+
+    :func:`fact_label` returns the label alone; callers then wrote ``f"the {fact_label(x)}"``, which is
+    right for a noun phrase and ungrammatical for a question phrase. This decides which, so the call
+    sites stop guessing.
+    """
+    label = fact_label(tag_id)
+    return label if label.lower().startswith(_QUESTION_OPENERS) else f"the {label}"
+
+
+# Document-type slugs whose English name is an ACRONYM — `voe` must not read as "voe". Small and
+# explicit: the generic underscore-to-space rule is right for everything else, and a slug that is a
+# word ("title commitment", "appraisal") must not be uppercased.
+_DOCUMENT_ACRONYMS = {
+    "voe": "VOE",
+    "voa": "VOA",
+    "vom": "VOM",
+    "voi": "VOI",
+    "w2": "W-2",
+    "w9": "W-9",
+    "hud1": "HUD-1",
+    "cd": "Closing Disclosure",
+    "le": "Loan Estimate",
+    "poa": "power of attorney",
+    "hoa": "HOA",
+    "mismo": "MISMO",
+}
+
+
 def document_label(doc_type: str) -> str:
-    """A classifier document-type slug → its English name (``title_commitment`` → "title commitment")."""
+    """A classifier document-type slug → its English name (``title_commitment`` → "title commitment").
+
+    An ACRONYM slug is mapped explicitly (``voe`` → "VOE"): the underscore-to-space rule produced "no voe
+    is in the file", which reads as a typo to the processor being asked for one."""
+    if (acronym := _DOCUMENT_ACRONYMS.get(doc_type.strip().lower())) is not None:
+        return acronym
     return doc_type.replace("_", " ").strip() or doc_type
 
 
@@ -192,4 +245,4 @@ def enum_label(value: str) -> str:
     return value.replace("_", " ").strip() or value
 
 
-__all__ = ["document_label", "enum_label", "fact_label"]
+__all__ = ["document_label", "enum_label", "fact_label", "fact_phrase"]

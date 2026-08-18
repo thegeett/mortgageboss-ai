@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from app.verification.rule_engine.reasons import document_label, fact_label
+from app.verification.rule_engine.reasons import document_label, fact_phrase
 from app.verification.rule_engine.result import Verdict
 from app.verification.rules.specs import DOC_TYPE_TAG, TagCondition
 from app.verification.snapshot.tag import Tag
@@ -38,7 +38,7 @@ def _undetermined_reason(applic: TagCondition, *, present_but_unclear: bool) -> 
         )
     verb = "could not be determined" if present_but_unclear else "has not been determined"
     return (
-        f"the {fact_label(applic.tag_id)} {verb} — this check needs it to tell whether the rule "
+        f"{fact_phrase(applic.tag_id)} {verb} — this check needs it to tell whether the rule "
         "applies here"
     )
 

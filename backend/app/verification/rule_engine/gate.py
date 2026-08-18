@@ -21,7 +21,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.verification.rule_engine.reasons import fact_label
+from app.verification.rule_engine.reasons import fact_phrase
 from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.snapshot.tag import Tag, TagProducedBy
 
@@ -108,7 +108,7 @@ def evaluate_gate(
         if tag is None:
             return GateResult(
                 GateStatus.COULDNT_CHECK,
-                f"the {fact_label(tag_id)} could not be found in the file — this check needs it",
+                f"{fact_phrase(tag_id)} could not be found in the file — this check needs it",
                 None,
             )
     for tag_id, tag in load_bearing.items():
@@ -128,7 +128,7 @@ def evaluate_gate(
                 GateStatus.COULDNT_CHECK,
                 authored
                 or (
-                    f"the {fact_label(tag_id)} could not be read from the documents "
+                    f"{fact_phrase(tag_id)} could not be read from the documents "
                     "(it is present but unclear)"
                 ),
                 None,
@@ -149,7 +149,7 @@ def evaluate_gate(
         if (tag is not None or (distrust_tag_ids is not None and present)) and tag_id in distrusted:
             return GateResult(
                 GateStatus.NEEDS_REVIEW,
-                f"the {fact_label(tag_id)} comes from a field the extractor has read wrongly before, so "
+                f"{fact_phrase(tag_id)} comes from a field the extractor has read wrongly before, so "
                 "this check was not decided automatically — a human should confirm the value",
                 None,
                 ratification_pending=True,

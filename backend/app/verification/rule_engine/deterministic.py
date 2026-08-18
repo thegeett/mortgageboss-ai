@@ -234,6 +234,20 @@ def _subject_facts(
     return {name: _fact_value(entry, fact) or "not stated" for name, fact in declared.items()}
 
 
+def _fix_for(det: DeterministicEval, entry: DocumentEntry | None) -> str | None:
+    """The rule's couldnt-check fix, with the subject's facts filled in.
+
+    ⚠️ USED BY ALL THREE couldnt_check PATHS. There are three — the fail-closed gate, the applicability
+    resolver, and the confidently-absent-document check — and LP-524 wired only the gate. On the first
+    real run that left 6 of 15 abstentions with no action at all (CR-6 x4 via applicability, ID-7 and
+    IN-8 via absent-document), while the other 9 had one. One helper, three call sites, so a fourth path
+    is a compile-time thought rather than a silent omission.
+    """
+    if det.couldnt_check_fix is None:
+        return None
+    return det.couldnt_check_fix.format(**_subject_facts(det.subject_facts, entry))
+
+
 def _tags_hold(when_tags: tuple[TagCondition, ...], subject_tags: Mapping[str, Tag]) -> bool:
     for cond in when_tags:
         tag = subject_tags.get(cond.tag_id)
@@ -317,6 +331,8 @@ def evaluate_deterministic_rule(
                 Verdict.COULDNT_CHECK,
                 absent_reason,
                 {},
+                # LP-526 — no document means no subject facts to quote, but the ASK is the same.
+                how_to_fix=_fix_for(det, None),
             )
         ]
 
@@ -332,7 +348,22 @@ def evaluate_deterministic_rule(
             )
             if terminal is not None:
                 verdict, reason = terminal
-                results.append(_result(spec, subject_id, verdict, reason, subject_tags))
+                results.append(
+                    _result(
+                        spec,
+                        subject_id,
+                        verdict,
+                        reason,
+                        subject_tags,
+                        # LP-526 — only a COULDNT_CHECK gets a fix. A not_applicable subject is out of
+                        # scope and is never persisted, so asking for a document there would be noise.
+                        how_to_fix=(
+                            _fix_for(det, documents.get(subject_id))
+                            if verdict is Verdict.COULDNT_CHECK
+                            else None
+                        ),
+                    )
+                )
                 continue
 
         # 2. The generic fail-closed gate over the declared gated tags.
@@ -352,13 +383,7 @@ def evaluate_deterministic_rule(
                     # LP-524 — the gate runs BEFORE any outcome, so this is the only place a
                     # couldn't-check finding can be told what would resolve it. LP-525 interpolates the
                     # subject document's own facts into it (wording only — never a verdict input).
-                    how_to_fix=(
-                        det.couldnt_check_fix.format(
-                            **_subject_facts(det.subject_facts, documents.get(subject_id))
-                        )
-                        if det.couldnt_check_fix
-                        else None
-                    ),
+                    how_to_fix=_fix_for(det, documents.get(subject_id)),
                 )
             )
             continue
