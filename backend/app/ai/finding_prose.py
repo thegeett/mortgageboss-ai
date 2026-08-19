@@ -52,6 +52,11 @@ RULES, all mandatory:
 - Use ONLY facts present in the summary. Never introduce a number, date, document name, party, year or
   amount that is not there. If a detail would help and is absent, leave it out.
 - "action" is what the processor should DO, in the imperative: "Obtain the...", "Confirm that...".
+- ⚠️ UNLESS "already_resolved" is true. Then NOTHING IS BEING ASKED FOR — this check passed. Write the
+  "action" as a STATEMENT of what is already true ("The March pay stub covers the required period.",
+  "This payment is on the application's liability list."). NEVER begin it with Obtain, Confirm, Verify,
+  Review, Check, Upload, Provide or Request: a task that is already done reads as work not done, and a
+  processor closing a passing item should finish it knowing the file is in order.
 - The action must make THE SAME REQUEST as "suggested_fix". Sharpen its wording, name the document it
   names — but never ask for a document or a step it does not ask for. "evidence" is context for the
   "why"; it is NOT a list of things to request. A document mentioned there may not exist for this loan.
@@ -87,6 +92,12 @@ class FactSummary:
     # and OC-2 shipped a bare assertion for exactly this reason: the summary carried "complete" and
     # dropped the sentence naming the documents, so the model had nothing specific to write.
     evidence: dict[str, str] = field(default_factory=dict)
+    # LP-552 — is this finding a PASS? Without it the composer wrote "Confirm that ..." on a satisfied
+    # finding, because the prompt asks for an imperative and nothing said the work was already done.
+    # A processor closing a green item should finish the line feeling the file is in order, not be
+    # handed a task that has been completed. NOT the verdict enum: the summary still carries no engine
+    # vocabulary, only the one fact that changes how a sentence should read.
+    settled: bool = False
     guideline: str | None = None
 
     def to_json(self) -> str:
@@ -97,6 +108,7 @@ class FactSummary:
             "suggested_fix": self.fix,
             "facts": self.facts,
             "evidence": self.evidence,
+            "already_resolved": self.settled,
             "guideline": self.guideline,
         }
         return json.dumps({k: v for k, v in payload.items() if v}, sort_keys=True)
@@ -176,6 +188,16 @@ def leaked_identifiers(composition: Composition) -> set[str]:
     return set(IDENTIFIER.findall(composition.message))
 
 
+# Imperatives that turn a PASS into a chore. Only checked on a settled finding — everywhere else these
+# are exactly the words an action should start with.
+_ASKING = ("obtain", "confirm", "verify", "review", "check", "upload", "provide", "request", "get ")
+
+
+def asks_for_work(composition: Composition) -> bool:
+    """Does this action ask for something, when nothing is being asked for?"""
+    return composition.action.strip().lower().startswith(_ASKING)
+
+
 def _parse(text: str) -> Composition | None:
     """Defensive parse — a malformed response is a rejected composition, never a partial one."""
     start, end = text.find("{"), text.rfind("}")
@@ -229,6 +251,10 @@ async def compose(summary: FactSummary) -> Composition | None:
     if leaked := leaked_identifiers(composition):
         logger.warning("finding_prose_rejected_identifier", count=len(leaked))
         return None
+    if summary.settled and asks_for_work(composition):
+        # The template stands — it already states the pass rather than asking for it.
+        logger.warning("finding_prose_rejected_asking_on_a_pass")
+        return None
     return composition
 
 
@@ -236,6 +262,7 @@ __all__ = [
     "SYSTEM_PROMPT",
     "Composition",
     "FactSummary",
+    "asks_for_work",
     "compose",
     "leaked_identifiers",
     "machinery_talk",

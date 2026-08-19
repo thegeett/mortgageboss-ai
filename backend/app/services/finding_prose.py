@@ -119,6 +119,9 @@ def summarize(
             document_filenames=document_filenames,
         ),
         evidence=evidence,
+        # LP-552 — a satisfied finding is a PASS, and must not be rewritten into a task.
+        settled=finding.evaluation_outcome is not None
+        and finding.evaluation_outcome.value == "satisfied",
         problem=finding.message,
         fix=details.get("how_to_fix") if isinstance(details.get("how_to_fix"), str) else None,
         facts=facts,

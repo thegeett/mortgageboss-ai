@@ -101,12 +101,36 @@ judgment:
     - {tag: txn.is_money_in, op: eq, value: out}
     - {tag: txn.apparent_category, op: eq, value: debt_payment}
     - {tag: txn.is_recurring, op: eq, value: "yes"}
-    # LP-551 — the predicate that makes this a finding rather than a list of the borrower's bills.
-    # `exact` and `probable` are OUT OF SCOPE (not_applicable), not a gap: a payment that matches a
-    # disclosed liability is the application working. `unknown` is neither, so it reaches couldnt_check
-    # through the applicability resolver — an application stating no liabilities is a gap, not a pass.
-    - {tag: txn.stated_liability_match, op: eq, value: none}
   applicability_expected: false   # a file with no bank statement is AS-10's gap, not this rule's
+  # ⚠️ THE DISCLOSURE COMPARISON IS AN OUTCOME, NOT A SCOPE TEST, and the first version had it wrong.
+  # `not_applicable` means the rule is irrelevant to this loan's NATURE — AS-2's earnest money on a
+  # refinance, where no earnest money exists. A recurring creditor payment that turns out to be on the
+  # 1003 is not that: the rule APPLIED, looked at it, and found nothing wrong. That is `satisfied`, and
+  # putting it in `applicability` made the rule silent on a file it had genuinely checked.
+  #
+  # `exempt_when` is the mechanism for exactly this — a DETERMINISTIC predicate does the clearing, and
+  # the model can only ever ADD a review, never remove one (ADR-336). So a disclosed payment now shows
+  # as a pass that names which liability it matched, instead of vanishing.
+  #
+  # BOTH `exact` AND `probable` clear. A probable match is an inference, and exempting on it can
+  # silence a real finding — but this cohort's bar is FP > FN (FR-3): a false "this looks undisclosed"
+  # names a person and costs real trust, where a missed one costs a review a human does at underwriting
+  # anyway. The grading is not wasted: the satisfied message says whether the payee MATCHED or merely
+  # RESEMBLED, so a tightening later needs no new tag.
+  exempt_when:
+    - {tag: txn.stated_liability_match, op: eq, value: exact}
+    - {tag: txn.stated_liability_match, op: eq, value: probable}
+  # Nothing the model can answer overrides a disclosed payee: it IS on the application. (Contrast
+  # AS-12, where the guide attaches its own escape hatch to the readily-identifiable exemption.) An
+  # `unknown` judgment still never exempts — that guard lives in `_guideline_exempts`.
+  exempt_unless_judgment_in: []
+  # ⚠️ A PASS READS AS A PASS. No "confirm", no "verify", no "obtain" — this payment has already been
+  # reconciled against the application, and a processor closing it should finish the line knowing the
+  # file is in order rather than being handed a task that is already done. "{value}" is `exact` or
+  # `probable`, so the sentence is honest about how strong the match was without asking for anything.
+  exempt_message: >-
+    This recurring payment is already accounted for — its payee is on the application's liability list
+    ({value} match), so there is no undisclosed obligation here.
   load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring, txn.stated_liability_match]
   # `_build_context` builds the model's context from THIS list alone, and each entry carries the tag's
   # own REASONING — which is where the payee name lives ("Citi (Citibank) is a credit card issuer ...")

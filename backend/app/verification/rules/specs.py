@@ -688,6 +688,14 @@ class JudgmentEval(BaseModel):
     # category still cannot clear a finding.
     exempt_when: TagCondition | tuple[TagCondition, ...] | None = None
     exempt_unless_judgment_in: tuple[str, ...] = ()
+    # LP-552 — the sentence a CLEARED subject carries. Declared per rule because the reason differs:
+    # AS-12 clears on a deposit's source being readily identifiable, FR-5 on a payment already being on
+    # the application, and one hardcoded sentence told a processor the wrong thing about the other.
+    #
+    # ⚠️ IT IS A PASS, SO IT READS AS ONE. No "obtain", "confirm", "verify" or "review" — a processor
+    # reading a satisfied finding should close it feeling the file is in order, not be handed a task
+    # that has already been done. `{value}` interpolates the matched condition's value.
+    exempt_message: str | None = None
     # LP-518 — a per-loan-purpose SIZE floor, applied AFTER `applicability` and BEFORE the gate/AI.
     # See :class:`Materiality` for why this scopes before asking where `exempt_when` does not.
     materiality: Materiality | None = None

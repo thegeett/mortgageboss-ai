@@ -184,7 +184,9 @@ def _guideline_exempts(
     return None
 
 
-def _exempt_message(exemption: TagCondition, subject_tags: Mapping[str, Tag]) -> str:
+def _exempt_message(
+    exemption: TagCondition, subject_tags: Mapping[str, Tag], declared: str | None = None
+) -> str:
     """The finding text for an exempted subject — it must name WHY, not merely that it passed.
 
     A processor reading "satisfied" on a borrowed-funds check is entitled to know the guideline did the
@@ -201,8 +203,12 @@ def _exempt_message(exemption: TagCondition, subject_tags: Mapping[str, Tag]) ->
     tag = subject_tags.get(exemption.tag_id)
     detail = (tag.reasoning or "").strip() if tag is not None else ""
     cleared = (
-        f"no further review is required for this deposit — its source is readily identifiable on the "
-        f"statement ({fact_label(exemption.tag_id)}: {exemption.value})"
+        declared.format(value=exemption.value)
+        if declared
+        else (
+            f"no further review is required for this deposit — its source is readily identifiable on "
+            f"the statement ({fact_label(exemption.tag_id)}: {exemption.value})"
+        )
     )
     return f"{cleared}; {detail}" if detail else cleared
 
@@ -669,7 +675,7 @@ async def _evaluate_one_subject(
                 spec,
                 subject_id,
                 Verdict.SATISFIED,
-                _exempt_message(exemption, subject_tags),
+                _exempt_message(exemption, subject_tags, jud.exempt_message),
                 jud.reasoned_over,
                 subject_tags,
                 verdict_confidence=confidence

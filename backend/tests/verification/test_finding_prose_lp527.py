@@ -496,3 +496,52 @@ def test_a_legitimate_request_is_not_rejected(rule_id: str, fix: str, action: st
     finding = _finding(rule_id, "a gap", fix)
 
     assert unrequested_documents(finding, summarize(finding, rule_name=rule_id), action) == set()
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-552 — a PASS must not be rewritten into a task
+# --------------------------------------------------------------------------------------------- #
+def test_an_imperative_on_a_settled_finding_is_rejected() -> None:
+    """⚠️ A SATISFIED FINDING WAS BEING HANDED BACK AS WORK. The composer rewrites every finding, and
+    the prompt asks for an imperative action — so a check that PASSED came back as "Confirm that ...".
+
+    A processor closing a green item should finish the line knowing the file is in order. Being asked
+    to obtain something that is already there reads as work outstanding, and it erodes the one signal a
+    satisfied finding exists to give."""
+    from app.ai.finding_prose import asks_for_work
+
+    for action in (
+        "Confirm the payment appears on the application.",
+        "Verify the pay stub covers the period.",
+        "Obtain the declarations page.",
+        "Review this item.",
+    ):
+        assert asks_for_work(Composition(action=action, why="It is present.")), action
+
+
+def test_a_statement_of_what_is_already_true_passes() -> None:
+    """The shape a settled finding should take: it reports, it does not request."""
+    from app.ai.finding_prose import asks_for_work
+
+    for action in (
+        "This payment is on the application's liability list.",
+        "The March pay stub covers the required period.",
+        "Coverage A is settled on a replacement-cost basis.",
+    ):
+        assert not asks_for_work(Composition(action=action, why="Evidence.")), action
+
+
+def test_the_summary_says_whether_the_finding_is_a_pass() -> None:
+    """The composer cannot write a pass correctly without knowing it is one — and it is the one fact
+    about the finding (not about the engine) that changes how the sentence must read."""
+    settled = FactSummary(
+        rule_name="Recurring undisclosed debit",
+        subject="a payment",
+        problem="this payment is already on the application's liability list",
+        fix=None,
+        settled=True,
+    )
+
+    assert "already_resolved" in settled.to_json()
+    # ...and an unsettled one does not carry the flag at all, so every existing cache key is unchanged.
+    assert "already_resolved" not in _SUMMARY.to_json()

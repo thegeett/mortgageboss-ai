@@ -224,7 +224,12 @@ def test_a_rule_without_an_exemption_still_ratifies_every_verdict() -> None:
         if (spec := load_rule_spec(rule_id)).judgment is not None
         and spec.judgment.exempt_when is not None
     ]
-    assert exempting == ["AS-12"], (
+    # LP-551 — FR-5 JOINED, deliberately and for the same reason. A recurring creditor payment that
+    # turns out to be ON the 1003 is the rule applying and finding nothing wrong — a pass, not a scope
+    # exclusion — and `exempt_when` is what turns a deterministic predicate into a `satisfied` a human
+    # never has to ratify. The invariant this test protects is unchanged: the clearing is done by a
+    # PREDICATE, and the model can only ever add a review, never remove one.
+    assert exempting == ["AS-12", "FR-5"], (
         "only AS-12 declares a guideline exemption; another judgment rule gaining one silently would "
         f"change what ratification means across the engine (found: {exempting})"
     )

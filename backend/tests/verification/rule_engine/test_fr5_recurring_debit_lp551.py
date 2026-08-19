@@ -120,26 +120,43 @@ def test_fr5_is_live() -> None:
 # THE SCOPING — what makes it a finding rather than a list of the borrower's bills
 # --------------------------------------------------------------------------------------------- #
 @pytest.mark.parametrize("match", ["exact", "probable"])
-async def test_a_payment_matching_a_disclosed_liability_is_out_of_scope(match: str) -> None:
-    """⚠️ THE WHOLE POINT. Without this predicate FR-5 matches every recurring creditor payment — a
-    mortgage, a card, an autopay — which is true of every file, so it would ask a processor to check
-    the borrower's ordinary bills forever. On LF-WCHG all four recurring payees match a stated
-    liability, so the correct output there is NOTHING.
+async def test_a_payment_matching_a_disclosed_liability_is_SATISFIED(match: str) -> None:
+    """⚠️ SATISFIED, NOT not_applicable — and the first version had this wrong.
 
-    `not_applicable`, not `satisfied`: the payment being disclosed means the rule never applied to it,
-    which is different from having judged it clean."""
+    `not_applicable` means the rule is irrelevant to this loan's NATURE: AS-2's earnest money on a
+    refinance, where no earnest money exists. A recurring creditor payment that turns out to be on the
+    1003 is not that. The rule APPLIED, looked at it, and found nothing wrong — which is a verdict.
+
+    Putting the comparison in `applicability` made FR-5 silent on a file it had genuinely checked: all
+    four of LF-WCHG's recurring payees are disclosed, so the rule examined seven transactions and
+    reported nothing at all. It now reports four passes that name the liability each matched."""
     evaluations = await _evaluate(_snapshot(match=match))
 
-    assert all(e.verdict is Verdict.NOT_APPLICABLE for e in evaluations)
+    assert evaluations and all(e.verdict is Verdict.SATISFIED for e in evaluations)
+    # The exemption clears DETERMINISTICALLY, so no human is asked to ratify a pass a predicate made.
+    assert all(e.ratification_pending is False for e in evaluations)
 
 
-async def test_an_application_with_no_liabilities_abstains_rather_than_firing() -> None:
-    """⚠️ §8, AND THE MOST DANGEROUS BRANCH. "unknown" means we could not compare — the application
-    states no liabilities at all. Reading that as "matches nothing" would fire this rule on EVERY
-    payment the borrower makes, on precisely the files carrying the least information."""
+async def test_the_pass_names_the_liability_it_matched() -> None:
+    """A processor reading "satisfied" on a fraud-adjacent check is entitled to know WHAT cleared it —
+    a deterministic predicate, and which one — rather than trusting that something did."""
+    evaluations = await _evaluate(_snapshot(match="exact"))
+
+    assert "stated_liability_match" not in evaluations[0].reasoning  # never the raw tag id
+    assert "exact" in evaluations[0].reasoning
+
+
+async def test_an_application_with_no_liabilities_abstains_rather_than_clearing() -> None:
+    """⚠️ "unknown" MUST NOT EXEMPT, and the FAIL-CLOSED GATE is what stops it — not the exemption.
+
+    The comparison tag is load-bearing, so an "unknown" value short-circuits to couldnt_check before
+    the judgment runs at all. That is the §8 answer and a stronger guarantee than the exemption could
+    give: "we could not compare" is a GAP, not a pass and not a review. Treating it as a match would
+    hand back a silent all-clear on every recurring creditor payment, on precisely the files carrying
+    the least information."""
     evaluations = await _evaluate(_snapshot(match="unknown"))
 
-    assert all(e.verdict is Verdict.COULDNT_CHECK for e in evaluations)
+    assert evaluations and all(e.verdict is Verdict.COULDNT_CHECK for e in evaluations)
 
 
 async def test_a_one_off_creditor_payment_is_out_of_scope() -> None:
