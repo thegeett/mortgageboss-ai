@@ -167,7 +167,7 @@ export function RuleFindingRow({
             )}
             {finding.ratification_pending && (
               <span className="inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-px text-[11px] font-medium text-info">
-                <Gavel className="h-2.5 w-2.5" /> Ratification pending
+                <Gavel className="h-2.5 w-2.5" /> Awaiting sign-off
               </span>
             )}
           </div>
@@ -211,8 +211,8 @@ export function RuleFindingRow({
           {finding.ratification_pending && (
             <p className="flex items-start gap-1.5 rounded-md border border-info/30 bg-info/5 px-2.5 py-2 text-xs text-gray-600">
               <Gavel className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
-              This is a judgment (AI) verdict awaiting human ratification — it is not an
-              auto-shipped conclusion, and it is not a violation.
+              This is a judgment (AI) verdict awaiting your sign-off — it is not an auto-shipped
+              conclusion, and it is not a violation.
             </p>
           )}
 

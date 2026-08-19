@@ -209,7 +209,7 @@ describe("the provenance card — the reasoning IS the product", () => {
     expect(screen.getByText(/from the rule spec/i)).toBeDefined();
   });
 
-  it("marks a needs_review finding as ratification-pending — not a violation", () => {
+  it("marks a needs_review finding as awaiting sign-off — not a violation", () => {
     renderTabs([
       ruleFinding({
         evaluation_outcome: "needs_review",
@@ -217,7 +217,8 @@ describe("the provenance card — the reasoning IS the product", () => {
         message: "occupancy is reasonable",
       }),
     ]);
-    expect(screen.getAllByText(/ratification pending/i).length).toBeGreaterThan(0);
+    // LP-581 — "ratification" was the engine's word (ADR-336), not a processor's.
+    expect(screen.getAllByText(/awaiting sign-off/i).length).toBeGreaterThan(0);
   });
 
   it("has NO §10 action affordances on tabs 1-4 (Accept risk / Request docs / Override / Note — LP-377)", () => {

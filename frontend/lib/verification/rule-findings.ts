@@ -81,7 +81,8 @@ export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
   },
   needs_review: {
     label: "Needs review",
-    blurb: "A judgment awaiting human ratification — not a violation.",
+    // LP-581 — plain English: "ratification" is the engine's word (ADR-336), not a processor's.
+    blurb: "A judgment awaiting your sign-off — not a violation.",
     tone: "info",
   },
   pending_automation: {

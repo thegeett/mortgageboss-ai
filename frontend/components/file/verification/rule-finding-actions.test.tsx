@@ -78,15 +78,15 @@ describe("Apply confirms before it writes (LP-577)", () => {
 });
 
 describe("which actions appear, and why", () => {
-  it("offers Ratify on an AI judgment awaiting a signature", () => {
+  it("offers Sign off on an AI judgment awaiting a signature", () => {
     // The act ADR-336's safety story rests on. Until LP-560 the only way to clear one of these was
     // Override, so every agreement was filed as a rejection.
     render(<RuleFindingActions finding={finding()} onAct={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Ratify" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Sign off" })).toBeDefined();
   });
 
-  it("does NOT offer Ratify on a deterministic verdict", () => {
+  it("does NOT offer Sign off on a deterministic verdict", () => {
     // Signing a verdict that was never a judgment records a review that did not happen.
     render(
       <RuleFindingActions
@@ -95,7 +95,7 @@ describe("which actions appear, and why", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Ratify" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign off" })).toBeNull();
   });
 
   it("does NOT offer Apply when the rule declares no change", () => {
@@ -141,7 +141,7 @@ describe("which actions appear, and why", () => {
     );
 
     expect(screen.getByRole("button", { name: "Undo" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Ratify" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign off" })).toBeNull();
   });
 });
 

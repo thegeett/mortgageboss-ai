@@ -133,9 +133,18 @@ export function RuleFindingActions({
               onClick={() => onAct({ kind: "ratify", findingId: finding.id })}
               // The verb matters: this records agreement with the AI's judgment, where Override
               // records that it was wrong. They were the same button until LP-560.
-              title="Confirm you reviewed this judgment and agree"
+              title="Record that you reviewed this judgment and agree — nothing on the loan changes"
             >
-              Ratify
+              {/* LP-581 — "Ratify" is not a word a mortgage processor uses; it came from the engine's
+                  calibration model (ADR-336), not from the domain. What the action DOES is record
+                  that a person reviewed an AI judgment and agreed — it changes no data at all, and
+                  its entire value is that the verdict now carries a name. That is a sign-off.
+
+                  "Agree" was the other candidate and pairs neatly against Override, but the status
+                  text has to match the button ("Awaiting sign-off" reads; "Agreement pending" does
+                  not), so one word covers both. The wire action stays `ratify` — this is display
+                  text, not a contract change. */}
+              Sign off
             </Button>
           )}
           {finding.can_apply && (
