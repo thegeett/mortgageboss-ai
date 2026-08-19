@@ -190,3 +190,68 @@ async def test_unauthenticated_is_401(client: AsyncClient) -> None:
         json={"holder_name": "X"},
     )
     assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# LP-571 — the payoff exclusion's write path
+# --------------------------------------------------------------------------- #
+
+
+async def test_marking_a_liability_paid_off_stamps_processor_provenance(
+    auth_client: AsyncClient, raw_bytes: bytes
+) -> None:
+    """The one write path a processor has for the DTI payoff exclusion.
+
+    Provenance is stamped SERVER-SIDE and never taken from the client: `payoff_source` distinguishes
+    "the 1003 said so" from "a processor said so", and the DTI derives the excluded line's wording
+    from it. A caller able to set it could label their own judgement as the export's.
+    """
+    file_id = await _import(auth_client, raw_bytes)
+    liab = (await _financials(auth_client, file_id))["liabilities"][0]
+    assert liab["paid_off_at_closing"] is None  # the export's `false` lands as "not established"
+
+    resp = await auth_client.patch(
+        f"{V1}/stated-liabilities/{liab['id']}",
+        json={"paid_off_at_closing": True, "payoff_source": "mismo_payoff"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["paid_off_at_closing"] is True
+    assert resp.json()["payoff_source"] == "processor", "a client must not be able to claim MISMO"
+
+
+async def test_retracting_a_payoff_clears_the_provenance(
+    auth_client: AsyncClient, raw_bytes: bytes
+) -> None:
+    """Stale provenance would outlive the claim it described — a liability reading "not paid off"
+    while still carrying `payoff_source=processor` is an audit trail for a decision since reversed.
+    """
+    file_id = await _import(auth_client, raw_bytes)
+    liab = (await _financials(auth_client, file_id))["liabilities"][0]
+    await auth_client.patch(
+        f"{V1}/stated-liabilities/{liab['id']}", json={"paid_off_at_closing": True}
+    )
+
+    resp = await auth_client.patch(
+        f"{V1}/stated-liabilities/{liab['id']}", json={"paid_off_at_closing": False}
+    )
+
+    assert resp.json()["paid_off_at_closing"] is False
+    assert resp.json()["payoff_source"] is None
+
+
+async def test_an_untouched_liability_keeps_its_null(
+    auth_client: AsyncClient, raw_bytes: bytes
+) -> None:
+    """A PATCH that does not mention the flag must not write one. `exclude_unset` makes the update
+    partial, so editing an unrelated field leaves "not established" intact — the difference between
+    nobody having judged the debt and somebody having judged it retained."""
+    file_id = await _import(auth_client, raw_bytes)
+    liab = (await _financials(auth_client, file_id))["liabilities"][0]
+
+    resp = await auth_client.patch(
+        f"{V1}/stated-liabilities/{liab['id']}", json={"holder_name": "Renamed"}
+    )
+
+    assert resp.json()["holder_name"] == "Renamed"
+    assert resp.json()["paid_off_at_closing"] is None

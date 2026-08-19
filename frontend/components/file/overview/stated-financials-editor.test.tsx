@@ -54,6 +54,8 @@ function financials(): StatedFinancials {
         monthly_payment: "4263.00",
         unpaid_balance: "582417.00",
         holder_name: "NR/SMS/CAL",
+        paid_off_at_closing: null,
+        payoff_source: null,
       },
     ],
     assets: [{ id: "ast1", asset_type: "GiftOfCash", value: "56000.00", holder_name: "Relative" }],
@@ -82,6 +84,38 @@ describe("StatedFinancialsEditor", () => {
       { kind: "stated-liabilities", id: "liab1", body: { monthly_payment: "4000.00" } },
       expect.anything(),
     );
+  });
+
+  it("marks a liability paid off at closing, sending only that field", () => {
+    // LP-571 — the write path for the DTI payoff exclusion, and the reason it exists: on a
+    // refinance the mortgage being replaced was charged twice, once as the new PITI and once as
+    // this liability. LF-WCHG read 58.59% instead of 34.39% because of it.
+    render(<StatedFinancialsEditor fileId="LF-1" data={financials()} />);
+
+    fireEvent.click(screen.getByLabelText(/paid off at closing/i));
+    for (const b of screen.getAllByRole("button", { name: /save/i })) fireEvent.click(b);
+
+    expect(updateRow).toHaveBeenCalledWith(
+      {
+        kind: "stated-liabilities",
+        id: "liab1",
+        body: { paid_off_at_closing: true },
+      },
+      expect.anything(),
+    );
+  });
+
+  it("never sends payoff_source — the server stamps provenance", () => {
+    // A client able to set it could label its own judgement as the export's, which is exactly the
+    // distinction the DTI line's wording is derived from.
+    render(<StatedFinancialsEditor fileId="LF-1" data={financials()} />);
+
+    fireEvent.click(screen.getByLabelText(/paid off at closing/i));
+    for (const b of screen.getAllByRole("button", { name: /save/i })) fireEvent.click(b);
+
+    const call = updateRow.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(call?.[0].body).not.toHaveProperty("payoff_source");
   });
 
   it("does not fire a save when nothing changed", () => {

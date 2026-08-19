@@ -39,6 +39,8 @@ function financials(overrides: Partial<StatedFinancials> = {}): StatedFinancials
         monthly_payment: "4263.00",
         unpaid_balance: "582417.00",
         holder_name: "NR/SMS/CAL",
+        paid_off_at_closing: null,
+        payoff_source: null,
       },
     ],
     assets: [{ id: "ast1", asset_type: "GiftOfCash", value: "56000.00", holder_name: "Relative" }],

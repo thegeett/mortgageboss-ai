@@ -24,6 +24,14 @@ export interface StatedLiability {
   monthly_payment: string | null;
   unpaid_balance: string | null;
   holder_name: string | null;
+  /** LP-571 — does this obligation survive closing? The mortgage a refinance pays off, a departing
+   * residence being sold, a debt cleared to qualify: each must leave the back-end DTI, because DTI
+   * measures what is owed AFTER the loan funds. Only `true` excludes the payment; `null` means
+   * nobody has established it and the debt keeps counting. */
+  paid_off_at_closing: boolean | null;
+  /** Who established it — `mismo_payoff` / `mismo_exclusion` / `processor`. Stamped server-side and
+   * never sent by the client, so a processor's judgement cannot be labelled as the export's. */
+  payoff_source: string | null;
 }
 
 export interface StatedAsset {

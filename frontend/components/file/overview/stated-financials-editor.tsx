@@ -16,6 +16,12 @@ const LIABILITY_FIELDS: FieldDef[] = [
   { key: "monthly_payment", label: "Monthly", kind: "money" },
   { key: "unpaid_balance", label: "Balance", kind: "money" },
   { key: "holder_name", label: "Holder", kind: "text" },
+  // LP-571 — the only write path for the DTI payoff exclusion. Ticking it drops the payment out of
+  // the back-end ratio (the row goes struck-through on the DTI card, "not counted"), so on a
+  // refinance the mortgage being replaced stops being charged alongside the new PITI. The server
+  // stamps the provenance; the client never sends it. Untouched rows send nothing, so a liability
+  // nobody has judged keeps its honest `null` rather than being written as "retained".
+  { key: "paid_off_at_closing", label: "Paid off at closing?", kind: "bool" },
 ];
 const ASSET_FIELDS: FieldDef[] = [
   { key: "asset_type", label: "Type", kind: "text" },
@@ -167,6 +173,7 @@ export function StatedFinancialsEditor({
               monthly_payment: l.monthly_payment ?? "",
               unpaid_balance: l.unpaid_balance ?? "",
               holder_name: l.holder_name ?? "",
+              paid_off_at_closing: l.paid_off_at_closing ?? false,
             }}
             onSave={(c) => updateRow("stated-liabilities", l.id, c)}
             onRemove={() => removeRow("stated-liabilities", l.id)}
