@@ -91,6 +91,13 @@ class NoteRequest(BaseModel):
     note: str = Field(min_length=1)
 
 
+class BulkRequestDocsRequest(BaseModel):
+    """LP-562 — request every document a set of findings is waiting on, in one action."""
+
+    finding_ids: list[UUID]
+    note: str | None = None
+
+
 class RatifyRequest(BaseModel):
     """LP-560 — the (optional) note on a ratification.
 

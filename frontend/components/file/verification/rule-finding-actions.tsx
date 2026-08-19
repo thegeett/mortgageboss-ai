@@ -24,7 +24,8 @@ export type RuleFindingAction =
   | { kind: "accept-risk"; findingId: string; reason: string }
   | { kind: "note"; findingId: string; note: string }
   | { kind: "request-docs"; findingId: string; note: string }
-  | { kind: "undo"; findingId: string };
+  | { kind: "undo"; findingId: string }
+  | { kind: "request-docs-bulk"; findingIds: string[]; note?: string };
 
 type FormKind = "override" | "accept-risk" | "note" | "request-docs";
 

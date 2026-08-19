@@ -26,10 +26,11 @@ from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.finding_impact import FindingImpactPreview
-from app.schemas.verification import (
+from app.schemas.verification import (  # noqa: F401 — _missing_documents/_rule_spec are the same
     AcceptRiskRequest,
     AggressionPublic,
     AggressionUpdate,
+    BulkRequestDocsRequest,
     FindingPublic,
     NoteRequest,
     OverrideRequest,
@@ -38,6 +39,10 @@ from app.schemas.verification import (
     RuleFindingPublic,
     VerificationRunPublic,
     VerificationStatusPublic,
+    # helpers the row renders with, so the button and the card can never disagree about what is
+    # still outstanding.
+    _missing_documents,
+    _rule_spec,
 )
 from app.services.aggression import active_cutoff, resolve_aggression_level
 from app.services.cross_source import (

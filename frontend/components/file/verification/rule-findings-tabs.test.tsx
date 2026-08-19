@@ -9,7 +9,8 @@ import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
  * REASONING + the spec's guideline; and there are NO §10 actions on tabs 1-4 (LP-377).
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RuleFindingAction } from "./rule-finding-actions";
 import { RuleFindingsTabs } from "./rule-findings-tabs";
 
 afterEach(cleanup);
@@ -44,9 +45,15 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
   };
 }
 
-function renderTabs(ruleFindings: RuleFinding[], legacyCount = 0, ruleFindingsStale = false) {
+function renderTabs(
+  ruleFindings: RuleFinding[],
+  legacyCount = 0,
+  ruleFindingsStale = false,
+  onAct?: (action: RuleFindingAction) => void,
+) {
   return render(
     <RuleFindingsTabs
+      onAct={onAct}
       ruleFindings={ruleFindings}
       ruleFindingsStale={ruleFindingsStale}
       legacyCount={legacyCount}
@@ -527,5 +534,39 @@ describe("LP-542 — the missing-document marker outside Couldn't check", () => 
     ]);
 
     expect(screen.queryByText(/not in the file: credit report/i)).toBeNull();
+  });
+});
+
+describe("LP-562 — one click requests every outstanding document", () => {
+  it("sends every finding in the request group, and names how many documents", () => {
+    // Nine cards and five typed asks become one click. The count is DOCUMENTS, not findings, because
+    // that is what the processor is about to ask the borrower for — four CR-6 rows want one report.
+    const onAct = vi.fn();
+    const missingA = ruleFinding({
+      id: "a",
+      rule_id: "CR-6",
+      evaluation_outcome: "couldnt_check",
+      missing_documents: ["credit report"],
+    });
+    const missingB = ruleFinding({
+      id: "b",
+      rule_id: "CR-13",
+      evaluation_outcome: "couldnt_check",
+      missing_documents: ["credit report"],
+    });
+    const present = ruleFinding({
+      id: "c",
+      rule_id: "IH-1",
+      evaluation_outcome: "couldnt_check",
+      missing_documents: [],
+    });
+
+    renderTabs([missingA, missingB, present], 0, false, onAct);
+    screen.getByRole("button", { name: /request all 1/i }).click();
+
+    expect(onAct).toHaveBeenCalledWith({
+      kind: "request-docs-bulk",
+      findingIds: ["a", "b"],
+    });
   });
 });

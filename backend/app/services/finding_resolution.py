@@ -38,6 +38,7 @@ from app.models.needs_item import (
     NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemPriority,
+    NeedsItemStatus,
 )
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
@@ -410,6 +411,87 @@ _STATUS_TO_PRIORITY = {
     FindingStatus.RED: NeedsItemPriority.BLOCKING,
     FindingStatus.YELLOW: NeedsItemPriority.STANDARD,
 }
+
+
+async def request_documents_in_bulk(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    by_document: dict[str, list[Finding]],
+    actor_user_id: UUID,
+    note: str | None = None,
+) -> list[NeedsItem]:
+    """Create ONE needs item per DOCUMENT, from many findings at once (LP-562).
+
+    ONE PER DOCUMENT, NOT ONE PER FINDING, and that is the whole reason this exists rather than a loop
+    over `request_docs_for_finding`. On the file that prompted it, nine findings wanted five distinct
+    documents — four CR-6 rows all want the same tri-merge credit report, and CR-13 wants it again in
+    different words. Requesting per finding would put nine items on the needs list for five documents,
+    five of them near-duplicate credit-report asks whose titles are whole finding messages.
+
+    The title is the DOCUMENT, not the finding's prose: a needs list is read as a shopping list, and
+    "Credit report" is what a processor puts in an email. Which rules are waiting on it goes in the
+    description, where it explains the ask without becoming the ask.
+
+    ALREADY-REQUESTED DOCUMENTS ARE SKIPPED. A second click must not produce a second copy — a
+    duplicate request is worse than no button, because the borrower gets asked twice for one thing.
+    """
+    existing = {
+        row.needs_type
+        for row in (
+            (
+                await db.execute(
+                    only_active(
+                        select(NeedsItem).where(
+                            NeedsItem.loan_file_id == loan_file.id,
+                            NeedsItem.status == NeedsItemStatus.PENDING,
+                        ),
+                        NeedsItem,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if row.needs_type
+    }
+
+    created: list[NeedsItem] = []
+    for document, findings in by_document.items():
+        slug = document.strip().lower().replace(" ", "_")
+        if not slug or slug in existing:
+            continue
+        rules = ", ".join(sorted({f.rule_id for f in findings}))
+        first = findings[0]
+        item = await create_needs_item(
+            db,
+            loan_file_id=loan_file.id,
+            title=document[:200],
+            needs_type=slug,
+            origin=NeedsItemOrigin.FINDING,
+            priority=_STATUS_TO_PRIORITY.get(first.status, NeedsItemPriority.STANDARD),
+            disposition=NeedsItemDisposition.CONFIRMED,
+            description=note,
+            # NOT `source_finding_id`: that column's foreign key points at `document_findings`, a
+            # different table, so it cannot reference a verification finding. The linkage a request can
+            # carry is therefore textual — the rule ids in `reasoning` — and `request_docs_for_finding`
+            # has the same limit for the same reason.
+            reasoning=f"Requested from verification findings: {rules}",
+        )
+        existing.add(slug)
+        created.append(item)
+
+    if created:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.FINDING_RESOLVED,
+            summary=f"Requested {len(created)} document(s) from verification findings",
+            actor_user_id=actor_user_id,
+            detail={"documents": [item.title for item in created]},
+        )
+    await db.flush()
+    return created
 
 
 async def request_docs_for_finding(

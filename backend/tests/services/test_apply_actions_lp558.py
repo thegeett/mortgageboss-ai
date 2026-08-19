@@ -213,12 +213,14 @@ async def test_undo_restores_the_exact_prior_payment(db_session: AsyncSession) -
 # --------------------------------------------------------------------------------------------- #
 # LP-560 — Ratify: the act ratification_pending promises and nothing could perform
 # --------------------------------------------------------------------------------------------- #
-async def _judgment_finding(db: AsyncSession, loan_file, *, pending: bool = True) -> Finding:
+async def _judgment_finding(
+    db: AsyncSession, loan_file, *, pending: bool = True, subject: str = "lia1"
+) -> Finding:
     finding = Finding(
         loan_file_id=loan_file.id,
         rule_id="DT-6",
         message="the application understates this payment",
-        subject_key="lia1",
+        subject_key=subject,
         load_bearing_tags=[],
         status=FindingStatus.YELLOW,
         category=FindingCategory.CREDIT,
@@ -293,3 +295,74 @@ async def test_the_note_is_optional_where_an_override_reason_is_required(
 
     assert finding.resolution_status is FindingResolutionStatus.RATIFIED
     assert finding.resolution_note is None
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-562 — bulk document request: one item per DOCUMENT, not per finding
+# --------------------------------------------------------------------------------------------- #
+async def test_four_findings_wanting_one_document_create_one_needs_item(
+    db_session: AsyncSession,
+) -> None:
+    """The whole reason this exists rather than a loop over the per-finding action. On the real file
+    nine findings want five documents — the four CR-6 rows all want the same tri-merge credit report,
+    and CR-13 wants it again in different words. Requesting per finding would put five near-duplicate
+    credit-report asks on the needs list, each titled with a whole finding message."""
+    from app.services.finding_resolution import request_documents_in_bulk
+
+    loan_file, actor = await _loan_file(db_session)
+    # Four different debts, as CR-6's four rows on the real file are — the unique constraint on
+    # (file, rule, subject) is what makes that the only valid shape.
+    findings = [await _judgment_finding(db_session, loan_file, subject=f"lia{n}") for n in range(4)]
+
+    created = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"credit report": findings},
+        actor_user_id=actor,
+    )
+
+    assert len(created) == 1
+    # The title is the DOCUMENT, not the finding's prose — a needs list is read as a shopping list.
+    assert created[0].title == "credit report"
+    assert "DT-6" in (created[0].reasoning or "")
+
+
+async def test_a_second_click_does_not_ask_the_borrower_twice(db_session: AsyncSession) -> None:
+    """A duplicate request is worse than no button: the borrower gets asked twice for one document,
+    and the needs list stops being a reliable statement of what is outstanding."""
+    from app.services.finding_resolution import request_documents_in_bulk
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+    await request_documents_in_bulk(
+        db_session, loan_file=loan_file, by_document={"appraisal": [finding]}, actor_user_id=actor
+    )
+
+    again = await request_documents_in_bulk(
+        db_session, loan_file=loan_file, by_document={"appraisal": [finding]}, actor_user_id=actor
+    )
+
+    assert again == []
+
+
+async def test_distinct_documents_each_get_their_own_item(db_session: AsyncSession) -> None:
+    """Five documents, five items — the deduplication is per DOCUMENT, never a blanket one-per-click."""
+    from app.services.finding_resolution import request_documents_in_bulk
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+
+    created = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={
+            "credit report": [finding],
+            "appraisal": [finding],
+            "rate lock agreement": [finding],
+            "VOE": [finding],
+            "title commitment": [finding],
+        },
+        actor_user_id=actor,
+    )
+
+    assert len(created) == 5

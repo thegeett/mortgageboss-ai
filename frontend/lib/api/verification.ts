@@ -135,9 +135,20 @@ type Resolution =
   // override reason is required: ratifying agrees with what the finding already says.
   | { kind: "ratify"; findingId: string; note?: string }
   | { kind: "request-docs"; findingId: string; note: string }
-  | { kind: "undo"; findingId: string }; // reverse a resolution (LP-98)
+  | { kind: "undo"; findingId: string } // reverse a resolution (LP-98)
+  // LP-562 — request every document a GROUP of findings is waiting on, as ONE needs item per
+  // DOCUMENT. Nine findings on the real file want five documents; a loop over the per-finding
+  // action would put five near-duplicate credit-report asks on the needs list.
+  | { kind: "request-docs-bulk"; findingIds: string[]; note?: string };
 
 async function resolveFinding(identifier: string, action: Resolution): Promise<VerificationStatus> {
+  if (action.kind === "request-docs-bulk") {
+    const res = await apiClient.post<VerificationStatus>(
+      `${API_V1}/loan-files/${identifier}/findings/request-docs`,
+      { finding_ids: action.findingIds, note: action.note ?? null },
+    );
+    return res.data;
+  }
   const base = `${API_V1}/loan-files/${identifier}/findings/${action.findingId}`;
   let body: Record<string, string> = {};
   if (action.kind === "override") body = { reason: action.reason };

@@ -10,6 +10,7 @@
  * structurally empty (those subjects aren't persisted) and says so honestly rather than being dropped.
  */
 
+import { Button } from "@/components/ui/button";
 import { humanize } from "@/lib/format";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
@@ -187,12 +188,32 @@ function MissingVsPresent({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <p className="text-xs font-medium text-gray-500">
-          Not in the file — request these ({missing.length})
-          <span className="ml-1 font-normal text-gray-400">
-            waiting on {awaitedDocuments(missing).join(", ")}
-          </span>
-        </p>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <p className="text-xs font-medium text-gray-500">
+            Not in the file — request these ({missing.length})
+            <span className="ml-1 font-normal text-gray-400">
+              waiting on {awaitedDocuments(missing).join(", ")}
+            </span>
+          </p>
+          {/* LP-562 — the list IS the request. Nine cards and five typed asks become one click, and
+              the request is deduplicated per DOCUMENT so the borrower is never asked twice for the
+              same thing. This is the single biggest saving available on the tab, and the data for it
+              was already on screen. */}
+          {onAct !== undefined && (
+            <Button
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() =>
+                onAct({
+                  kind: "request-docs-bulk",
+                  findingIds: missing.map((finding) => finding.id),
+                })
+              }
+            >
+              Request all {awaitedDocuments(missing).length}
+            </Button>
+          )}
+        </div>
         <GroupedFindingList findings={missing} onAct={onAct} />
       </div>
       <div className="space-y-2">
