@@ -362,6 +362,8 @@ tags:
   # by bureau (clean Y/N on one, free text on another) and the recipe recognises a CLOSED vocabulary,
   # abstaining on anything else. A parsed passthrough would emit out-of-domain values silently.
   liab.is_disputed: {mode: derived, subject: liability, data: liability_dispute_status}
+  # LP-556 — the subject LABEL's source for a per-liability finding (see vocabulary_extra.yaml).
+  liab.creditor_name: {mode: derived, subject: liability, data: liability_creditor_name}
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report

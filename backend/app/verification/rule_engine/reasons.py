@@ -158,6 +158,7 @@ _FACT_LABELS: dict[str, str] = {
     "txn.has_identified_source": "deposit's source",
     # LP-546/551 — FR-5's two deterministic inputs. Both are phrased as QUESTIONS, so `fact_phrase`
     # returns them without an article ("the whether ..." was the LP-526 bug).
+    "liab.creditor_name": "the account holder on this liability",  # LP-556
     "txn.is_recurring": "whether this payment recurs across months",
     "txn.stated_liability_match": "whether this payee matches a liability on the application",
     "txn.source_strength": "deposit's source strength",

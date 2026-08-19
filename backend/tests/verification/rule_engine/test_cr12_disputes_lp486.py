@@ -193,6 +193,12 @@ def test_cr12_does_not_touch_dti_treatment() -> None:
     """Priya's scope boundary: CR-12 flags a dispute for review; whether the debt leaves DTI is the
     agency liability rule's call, not this rule's."""
     spec = load_rule_spec("CR-12")
-    assert spec.deterministic.load_bearing_tags == ("liab.is_disputed",)
+    assert (
+        spec.deterministic.load_bearing_tags
+        == (
+            "liab.creditor_name",  # LP-556 — names WHICH debt the finding is about (provenance, not gated)
+            "liab.is_disputed",
+        )
+    )
     body = (spec.criteria + " " + (spec.reference_values.guideline_text or "")).lower()
     assert "does not decide" in body or "detection only" in body

@@ -1246,3 +1246,18 @@ tags:
     allowed_values: ["exact", "probable", "none", "unknown"]
     description: Does this payment's payee match a liability stated on the application (FR-5)?
     produced_by: derived
+
+  # LP-556 — WHICH DEBT a per-liability finding is about. Four active rules enumerate per_liability
+  # (CR-1, CR-6, CR-8, CR-12) and every finding they produce reads "a debt on this file", because the
+  # label layer has no name to use. On the real file CR-6 shipped FOUR identical rows: a processor could
+  # not tell which account each concerned, nor that they were four different accounts.
+  #
+  # Carried INLINE as provenance, like the amount and date on a transaction subject (LP-555), so the
+  # read path needs no snapshot. Scrubbed at production, because a bureau prints account numbers inside
+  # the creditor field and this tag exists to be rendered.
+  liab.creditor_name:
+    entity: liability
+    value_type: string
+    allowed_values: null
+    description: The account holder this liability names, for a finding's subject label (CR-1/6/8/12).
+    produced_by: derived

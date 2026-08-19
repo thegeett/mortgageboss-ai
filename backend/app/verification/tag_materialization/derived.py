@@ -2870,6 +2870,51 @@ def _normalise_vocab(raw: str) -> str:
     return _WS.sub(" ", raw).strip().casefold()
 
 
+# --------------------------------------------------------------------------------------------- #
+# LP-556 — liab.creditor_name: which debt a per-liability finding is about
+# --------------------------------------------------------------------------------------------- #
+# Four active rules enumerate per_liability (CR-1, CR-6, CR-8, CR-12) and every one of their findings
+# reads "a debt on this file", because the label layer has no name to use. On the real file CR-6 shipped
+# FOUR identical rows — a processor could not tell which account each was about, or that they were four
+# different accounts rather than one repeated.
+#
+# The AS-12 fix (LP-554/555) is the precedent: an identifying value the finding carries INLINE, as
+# provenance, so the read path needs no snapshot. `liab.is_disputed` proves the shape for this subject.
+#
+# ⚠️ SCRUBBED, NOT RAW. A bureau prints an account number inside the creditor field often enough that
+# the liability CONTEXT builder routes every list value through `_scrub_list_value` for exactly this
+# reason. A tag whose whole purpose is to be RENDERED to a processor must not be the one place that
+# skips it.
+_CREDITOR_NAME_MAX = 60  # a label, not a paragraph — a bureau string can run long
+
+
+def liability_creditor_name(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """liab.creditor_name — the account holder this liability names, for the finding's subject label.
+
+    Resolved through the CANONICAL alias map, never a raw column: a tradeline calls it `creditor_name`
+    and a MISMO stated liability calls it `holder_name`, and reading either directly would abstain on
+    half the subjects (the ADR-376 lesson `liab.is_disputed` records).
+    """
+    # LAZY, for the same init-order reason `liab.is_disputed` imports LiabilityRow lazily.
+    from app.verification.rule_engine.enumerators import LiabilityRow
+    from app.verification.tag_materialization.subjects import _scrub_list_value
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return _UNKNOWN, "not a liability subject"
+    field = subject_type("liability").read_field(subject_raw, "creditor_name")
+    if field is None or not field.is_present:
+        return _UNKNOWN, "this liability names no holder"
+    value = field.display if isinstance(field, PiiField) else field.value
+    if value is None or not str(value).strip():
+        return _UNKNOWN, "this liability names no holder"
+    scrubbed = str(_scrub_list_value(str(value))).strip()
+    if not scrubbed:
+        return _UNKNOWN, "this liability's holder resolved to nothing once scrubbed"
+    return scrubbed[:_CREDITOR_NAME_MAX], f"the account is held by {scrubbed[:_CREDITOR_NAME_MAX]}"
+
+
 def _liability_dispute_status(
     _snapshot: Snapshot, _subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5739,7 +5784,8 @@ _RECIPES: dict[str, Recipe] = {
     "stmt_min_account_months": _stmt_min_account_months,
     "cash_to_close_shortfall": _cash_to_close_shortfall,
     # LP-410 — the derived-producer wave (unblocks PC-7 / AS-8 / IN-6; tags describe, rules judge).
-    "liability_dispute_status": _liability_dispute_status,  # LP-486 / ADR-376
+    "liability_dispute_status": _liability_dispute_status,
+    "liability_creditor_name": liability_creditor_name,  # LP-556  # LP-486 / ADR-376
     "contract_days_until_closing": _contract_days_until_closing,
     # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Descriptive numbers only.
     "rate_lock_days_to_closing": _rate_lock_days_to_closing,

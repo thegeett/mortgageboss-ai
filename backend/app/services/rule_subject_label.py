@@ -40,6 +40,7 @@ _ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 _AMOUNT_TAG = "txn.amount"
 _DATE_TAG = "txn.date"
 _DIRECTION_TAG = "txn.is_money_in"
+_CREDITOR_TAG = "liab.creditor_name"
 
 
 def _tag_value(load_bearing_tags: Sequence[Mapping[str, Any]], tag_id: str) -> str | None:
@@ -136,6 +137,12 @@ def resolve_subject_label(
     if subject_key.startswith(_MISSING_PREFIX):
         return f"{document_label(subject_key[len(_MISSING_PREFIX) :])} (not in the file)"
     if subject_key.startswith(LIABILITY_PREFIX):
+        # LP-556 — the creditor, carried inline like a transaction's amount. CR-6 shipped four findings
+        # reading "a debt on this file", which told a processor neither which account each concerned nor
+        # that they were four different accounts. Degrades to the generic when the liability names no
+        # holder (a MISMO row with no holder_name is a real case the enumerator already flags).
+        if (creditor := _tag_value(load_bearing_tags, _CREDITOR_TAG)) is not None:
+            return creditor
         # LP-531 — NOT the creditor's name, because no caller can reach it yet. A liability's holder
         # lives in the snapshot's tradeline / MISMO rows, and the read path builds no equivalent of
         # `document_filenames_by_content_id` for them. Naming the TYPE of thing is still strictly better

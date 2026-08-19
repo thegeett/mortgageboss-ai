@@ -101,6 +101,9 @@ deterministic:
     op: eq
     value: credit_report_reported
   load_bearing_tags:
+    # LP-556 — provenance only, NOT gated: it names WHICH debt this finding is about. Gating on it
+    # would make a liability with no holder name abstain instead of being evaluated.
+    - liab.creditor_name
     - liab.in_application
   gated_tags:
     - liab.in_application

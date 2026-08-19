@@ -146,6 +146,9 @@ deterministic:
     Upload it even if you expect a clean history: a report showing no derogatory events is
     what establishes that, and its absence is not evidence of it.
   load_bearing_tags:
+    # LP-556 — provenance only, NOT gated: it names WHICH debt this finding is about. Gating on it
+    # would make a liability with no holder name abstain instead of being evaluated.
+    - liab.creditor_name
     - credit.derogatory_months_elapsed
     - liab.derogatory_type
   gated_tags:

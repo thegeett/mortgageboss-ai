@@ -97,7 +97,7 @@ judgment:
     tag: liab.is_mortgage
     op: eq
     value: "yes"
-  load_bearing_tags: [liab.is_mortgage, liab.structured_history_confident]
+  load_bearing_tags: [liab.is_mortgage, liab.structured_history_confident, liab.creditor_name]  # LP-556 — names WHICH debt (provenance only, not gated)
   reasoned_over:
     - liab.is_mortgage
     - liab.structured_history_confident
