@@ -839,8 +839,10 @@ class JudgmentEval(BaseModel):
             )
         return self
 
-    # LP-563 — the structured change this rule's finding declares (see ApplySpec).
-    apply: ApplySpec | None = None
+    # LP-564 — DELIBERATELY ABSENT. Only the deterministic evaluator resolves an apply; a judgment
+    # rule declaring one would load cleanly, pass the action-name guard, and silently produce no
+    # apply block at all. Wiring it through is a real option — AS-12 and FR-5 both want one — but a
+    # field that validates and does nothing is the worse of the two states.
 
 
 # --------------------------------------------------------------------------- #

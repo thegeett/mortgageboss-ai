@@ -366,3 +366,79 @@ async def test_distinct_documents_each_get_their_own_item(db_session: AsyncSessi
     )
 
     assert len(created) == 5
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-564 — the guards a code review found missing
+# --------------------------------------------------------------------------------------------- #
+async def test_apply_refuses_a_finding_that_did_not_fire(db_session: AsyncSession) -> None:
+    """The worst of the review's findings. `_result` is the single constructor for all eight verdict
+    paths, so resolving an apply unconditionally put one on every outcome — including CR-1's DEFAULT,
+    a couldnt_check reading "this debt could not be matched against the application's stated
+    liabilities". Its fields resolve there perfectly well, so the finding that says it COULD NOT TELL
+    offered a primary Apply that would insert a liability the 1003 may already carry.
+
+    The UI hid it on `satisfied` only, and the endpoint had no verdict check at all — so the button
+    being absent was the only thing standing between an abstention and a duplicated debt."""
+    from app.models.finding import EvaluationOutcome
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(
+        db_session, loan_file, {"action": "correct_purchase_price", "value": "1"}
+    )
+    finding.evaluation_outcome = EvaluationOutcome.COULDNT_CHECK
+    await db_session.flush()
+
+    with pytest.raises(CannotApplyError):
+        await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+
+async def test_apply_refuses_a_second_time(db_session: AsyncSession) -> None:
+    """Applying twice runs the change twice — two liabilities, one `applied_record` — and Undo then
+    reverses half of it, leaving a phantom debt in the DTI permanently."""
+    loan_file, actor = await _loan_file(db_session)
+    prop = Property(loan_file_id=loan_file.id, purchase_price=Decimal("500000.00"))
+    db_session.add(prop)
+    await db_session.flush()
+    finding = await _finding(
+        db_session, loan_file, {"action": "correct_purchase_price", "value": "525000.00"}
+    )
+    await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+    with pytest.raises(CannotApplyError):
+        await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+
+async def test_a_bulk_request_marks_the_findings(db_session: AsyncSession) -> None:
+    """Without the mark, every row still offered "Request ..." as though nothing had happened — and a
+    second click asks the borrower again, which is the failure the per-document dedupe exists to
+    prevent, reached by another route."""
+    from app.services.finding_resolution import request_documents_in_bulk
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+
+    await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"credit report": [finding]},
+        actor_user_id=actor,
+    )
+
+    assert finding.details["docs_requested"] is True
+
+
+async def test_undo_survives_a_malformed_id_in_the_applied_record(
+    db_session: AsyncSession,
+) -> None:
+    """The two new reversers called `UUID(raw_id)` bare, unlike `_correct_income` which wraps it, so a
+    malformed id raised out of `undo_finding` as a 500 instead of the record the caller expects."""
+    from app.services.finding_resolution import _restore_liability_payment
+
+    loan_file, _ = await _loan_file(db_session)
+
+    record = await _restore_liability_payment(
+        db_session, loan_file=loan_file, record={"liability_id": "not-a-uuid", "from": "1"}
+    )
+
+    assert record["applied"] is False

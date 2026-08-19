@@ -97,7 +97,12 @@ def test_every_declared_apply_names_an_action_the_engine_can_perform() -> None:
     }
     for path in sorted(pathlib.Path("app/verification/rules/specs").glob("*.yaml")):
         document = yaml.safe_load(path.read_text())
-        for block in ("deterministic", "judgment"):
-            declared = (document.get(block) or {}).get("apply")
-            if declared:
-                assert declared["action"] in known, f"{path.stem}: {declared['action']}"
+        # LP-564 — `deterministic` ONLY. A judgment rule cannot declare an apply (the field is gone),
+        # and scanning both blocks was how a judgment `apply:` would have passed CI while producing
+        # nothing — the guard would have vouched for a declaration the engine never reads.
+        declared = (document.get("deterministic") or {}).get("apply")
+        if declared:
+            assert declared["action"] in known, f"{path.stem}: {declared['action']}"
+        assert "apply" not in (document.get("judgment") or {}), (
+            f"{path.stem}: a judgment rule declared an apply, which no evaluator resolves"
+        )

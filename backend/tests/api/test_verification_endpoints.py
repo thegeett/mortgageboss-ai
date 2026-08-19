@@ -922,3 +922,51 @@ async def test_a_recent_running_run_is_left_alone(client: AsyncClient, db: Async
         await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
     ).json()
     assert body["latest_run"]["status"] == "running"
+
+
+async def test_bulk_request_docs_route_exists_and_creates_one_item_per_document(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-564 — THE TEST THAT WAS MISSING, and its absence is why LP-562 shipped a 404.
+
+    That ticket delivered the service, the schema and the button, and the endpoint's edit silently did
+    not apply. Every test covered the SERVICE, so the suite stayed green while the button posted to a
+    route that did not exist. A collection route also cannot be reached by the per-finding tests, since
+    it has three path segments where they have four.
+    """
+    from app.models.finding import (
+        EvaluationOutcome,
+        Finding,
+        FindingCategory,
+        FindingStatus,
+    )
+    from sqlalchemy import select
+
+    company, _user, token = await _user_and_token(db, slug="bulk", email="b@bulk.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # Two findings from a rule that needs a credit report; one document, so one needs item.
+    for subject in ("lia1", "lia2"):
+        db.add(
+            Finding(
+                loan_file_id=loan_file.id,
+                rule_id="CR-6",
+                message="the file does not establish whether this account carries a derogatory mark",
+                subject_key=subject,
+                load_bearing_tags=[],
+                status=FindingStatus.YELLOW,
+                category=FindingCategory.CREDIT,
+                confidence=1.0,
+                evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+                details={},
+            )
+        )
+    await db.commit()
+
+    findings = (await db.execute(select(Finding).where(Finding.rule_id == "CR-6"))).scalars().all()
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/request-docs",
+        headers=_auth(token),
+        json={"finding_ids": [str(f.id) for f in findings]},
+    )
+
+    assert resp.status_code == 200, resp.text

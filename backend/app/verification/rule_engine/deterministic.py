@@ -85,7 +85,9 @@ def _resolve_apply(
             resolved[name] = value.literal
             continue
         tag = subject_tags.get(value.tag or "")
-        if tag is None or tag.value is None or str(tag.value).strip() in ("", "unknown"):
+        # Case-insensitive: "Unknown" is the same abstain as "unknown", and letting a capitalised
+        # one through would write the literal string into a money or name column.
+        if tag is None or tag.value is None or str(tag.value).strip().lower() in ("", "unknown"):
             return None
         resolved[name] = str(tag.value)
     return resolved
@@ -132,7 +134,17 @@ def _result(
         verdict=verdict,
         verdict_confidence=verdict_confidence,
         load_bearing_tags=_load_bearing(spec.deterministic, subject_tags),
-        apply=_resolve_apply(spec.deterministic.apply, subject_tags),
+        # LP-564 — ONLY A FIRED VERDICT. `_result` is the single constructor for all eight paths, so
+        # resolving unconditionally put an apply block on every outcome. CR-1's DEFAULT outcome is a
+        # couldnt_check reading "this debt could not be matched against the application's stated
+        # liabilities" — and its fields resolve there perfectly well, so the finding that says it could
+        # not tell offered a primary Apply button that would insert a StatedLiability for a debt that
+        # may already be on the 1003. A duplicated debt and an inflated DTI, off an abstention.
+        apply=(
+            _resolve_apply(spec.deterministic.apply, subject_tags)
+            if verdict is Verdict.FIRED
+            else None
+        ),
         threshold_used=threshold_used,
         priya_validated=spec.reference_values.priya_validated,
         gated_pending_signoff=not spec.reference_values.priya_validated,

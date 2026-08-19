@@ -30,7 +30,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
-from app.models.finding import Finding, FindingResolutionStatus, FindingStatus
+from app.models.finding import (
+    EvaluationOutcome,
+    Finding,
+    FindingResolutionStatus,
+    FindingStatus,
+)
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import (
@@ -60,6 +65,21 @@ async def apply_finding(
     records what was applied on ``applied_record``, sets the resolution trail, and
     fires the recompute hook. Logs a ``FINDING_RESOLVED`` activity.
     """
+    # LP-564 — the write path guards itself. The UI hides Apply on a satisfied finding, but
+    # POST .../apply had no verdict check at all, so the button being absent was the only thing
+    # stopping a structured change against a passing or abstaining verdict.
+    if finding.evaluation_outcome is not None and finding.evaluation_outcome is not (
+        EvaluationOutcome.OPEN
+    ):
+        raise CannotApplyError(
+            f"only a fired finding can be applied — this one is {finding.evaluation_outcome.value}"
+        )
+    # And only once: applying twice runs `add_liability` twice, leaving two StatedLiability rows while
+    # `applied_record` remembers one. Undo would then reverse half of it and leave a phantom debt in
+    # the DTI permanently.
+    if finding.resolution_status is not FindingResolutionStatus.OPEN:
+        raise CannotApplyError(f"finding is already {finding.resolution_status.value}")
+
     applied_record = await _incorporate_into_structured_data(
         db, finding=finding, loan_file=loan_file
     )
@@ -257,7 +277,12 @@ async def ratify_finding(
     system and has to say why; ratifying agrees with what is already written on the finding, and
     demanding a second explanation of it would be friction on the common path — the path we want taken.
     """
-    if not finding.details or not finding.details.get("ratification_pending"):
+    # LP-564 — the SAME helper the API renders `ratification_pending` from. Gating on the details key
+    # alone disagreed with the card for any finding persisted before that key existed: the row showed a
+    # Ratify button (the helper falls back to the judgment heuristic) and the click 409'd.
+    from app.schemas.verification import _ratification_pending, _rule_spec
+
+    if not _ratification_pending(finding, _rule_spec(finding.rule_id)):
         raise CannotRatifyError(
             "this finding is not awaiting ratification — only an AI judgment can be ratified"
         )
@@ -430,8 +455,8 @@ async def request_documents_in_bulk(
     five of them near-duplicate credit-report asks whose titles are whole finding messages.
 
     The title is the DOCUMENT, not the finding's prose: a needs list is read as a shopping list, and
-    "Credit report" is what a processor puts in an email. Which rules are waiting on it goes in the
-    description, where it explains the ask without becoming the ask.
+    "Credit report" is what a processor puts in an email. Which rules are waiting on it goes in
+    `reasoning`; the caller's own note, if any, goes in `description`.
 
     ALREADY-REQUESTED DOCUMENTS ARE SKIPPED. A second click must not produce a second copy — a
     duplicate request is worse than no button, because the borrower gets asked twice for one thing.
@@ -480,6 +505,11 @@ async def request_documents_in_bulk(
         )
         existing.add(slug)
         created.append(item)
+        # Mark every contributing finding, exactly as the per-finding path does. Without this the rows
+        # still offered "Request ..." as though nothing had happened, and a second click would ask the
+        # borrower again — the failure the dedupe above exists to prevent, reached by another route.
+        for contributor in findings:
+            contributor.details = {**(contributor.details or {}), "docs_requested": True}
 
     if created:
         await log_activity(
@@ -657,8 +687,19 @@ async def _restore_liability_payment(
     raw_id, prior = record.get("liability_id"), _to_money(record.get("from"))
     if not isinstance(raw_id, str):
         return {"action": "restore_liability_payment", "applied": False}
-    liability = await db.get(StatedLiability, UUID(raw_id))
-    if liability is None or liability.loan_file_id != loan_file.id:
+    try:
+        liability_id = UUID(raw_id)
+    except ValueError:
+        # A malformed id must return the record the caller expects, not raise a 500 out of undo.
+        return {"action": "restore_liability_payment", "applied": False}
+    liability = await db.get(StatedLiability, liability_id)
+    # `deleted_at` matters: a liability soft-deleted between Apply and Undo would otherwise have the
+    # prior payment written onto a dead row and be reported as success.
+    if (
+        liability is None
+        or liability.deleted_at is not None
+        or liability.loan_file_id != loan_file.id
+    ):
         return {"action": "restore_liability_payment", "applied": False}
     liability.monthly_payment = prior  # `from` may legitimately have been null
     await db.flush()
@@ -675,8 +716,12 @@ async def _restore_property_money(
     raw_id, prior = record.get("property_id"), _to_money(record.get("from"))
     if not isinstance(raw_id, str):
         return {"action": f"restore_{column}", "applied": False}
-    prop = await db.get(Property, UUID(raw_id))
-    if prop is None or prop.loan_file_id != loan_file.id:
+    try:
+        property_id = UUID(raw_id)
+    except ValueError:
+        return {"action": f"restore_{column}", "applied": False}
+    prop = await db.get(Property, property_id)
+    if prop is None or prop.deleted_at is not None or prop.loan_file_id != loan_file.id:
         return {"action": f"restore_{column}", "applied": False}
     setattr(prop, column, prior)
     await db.flush()

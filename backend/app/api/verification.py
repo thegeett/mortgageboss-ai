@@ -26,7 +26,7 @@ from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.finding_impact import FindingImpactPreview
-from app.schemas.verification import (  # noqa: F401 — _missing_documents/_rule_spec are the same
+from app.schemas.verification import (
     AcceptRiskRequest,
     AggressionPublic,
     AggressionUpdate,
@@ -62,6 +62,7 @@ from app.services.finding_resolution import (
     override_finding,
     ratify_finding,
     request_docs_for_finding,
+    request_documents_in_bulk,
     undo_finding,
 )
 from app.services.loan_files import get_loan_file
@@ -465,6 +466,60 @@ async def apply_finding_endpoint(
         # alternative shipped for a while: a finding marked APPLIED over a loan file nothing was
         # written to, and a DTI the processor trusted that had not moved.
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.post("/{identifier}/findings/request-docs", response_model=VerificationStatusPublic)
+async def bulk_request_docs_endpoint(
+    identifier: str,
+    payload: BulkRequestDocsRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> VerificationStatusPublic:
+    """Request every document a set of findings is waiting on — ONE needs item per DOCUMENT (LP-562).
+
+    A COLLECTION route, deliberately: it acts on many findings, so there is no single `finding_id` to
+    key it on. LP-562 shipped the service, the schema and the button but not this, and the button
+    404'd — the whole path had no API test, only service tests.
+
+    The grouping is computed here because this is where the file's documents are already known, and it
+    uses the SAME `_missing_documents` the row renders, so the button and the card can never disagree
+    about what is still outstanding.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+
+    doc_rows = (
+        await db.execute(
+            only_active(
+                select(Document.document_type).where(Document.loan_file_id == loan_file.id),
+                Document,
+            )
+        )
+    ).all()
+    on_file = {row.document_type for row in doc_rows if row.document_type}
+    purpose = loan_file.loan_purpose.value if loan_file.loan_purpose else None
+
+    by_document: dict[str, list[Finding]] = {}
+    for finding_id in payload.finding_ids:
+        finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+        if finding is None:
+            continue
+        for document in _missing_documents(
+            _rule_spec(finding.rule_id), on_file, loan_purpose=purpose
+        ):
+            by_document.setdefault(document, []).append(finding)
+
+    await request_documents_in_bulk(
+        db,
+        loan_file=loan_file,
+        by_document=by_document,
+        actor_user_id=current_user.id,
+        note=payload.note,
+    )
     await db.commit()
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)

@@ -182,7 +182,10 @@ function MissingVsPresent({
   onAct?: (action: RuleFindingAction) => void;
 }) {
   const { missing, present } = splitByMissingDocument(findings);
-  if (missing.length === 0 || present.length === 0) {
+  // LP-564 — gated on `missing` ALONE. Requiring both sides made the button vanish in exactly the
+  // case it exists for: a file where every couldnt_check finding is waiting on a document has an
+  // empty `present`, which is the maximum-saving case, not the one to skip.
+  if (missing.length === 0) {
     return <GroupedFindingList findings={findings} onAct={onAct} />;
   }
   return (
@@ -216,12 +219,16 @@ function MissingVsPresent({
         </div>
         <GroupedFindingList findings={missing} onAct={onAct} />
       </div>
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-gray-500">
-          In the file — read or clarify these ({present.length})
-        </p>
-        <GroupedFindingList findings={present} onAct={onAct} />
-      </div>
+      {/* An empty read-side is now reachable (see the gate above) and must not print a header over
+          nothing. The request side is what the split exists for; this half is the remainder. */}
+      {present.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-500">
+            In the file — read or clarify these ({present.length})
+          </p>
+          <GroupedFindingList findings={present} onAct={onAct} />
+        </div>
+      )}
     </div>
   );
 }

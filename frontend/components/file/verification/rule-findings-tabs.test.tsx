@@ -570,3 +570,26 @@ describe("LP-562 — one click requests every outstanding document", () => {
     });
   });
 });
+
+describe("LP-564 — the bulk button survives its own best case", () => {
+  it("still renders when EVERY finding is waiting on a document", () => {
+    // The early return required both sides to be non-empty, so a file where every couldnt_check
+    // finding needs a document — the maximum-saving case its own docstring cites — lost the button.
+    renderTabs(
+      [
+        ruleFinding({
+          id: "a",
+          evaluation_outcome: "couldnt_check",
+          missing_documents: ["credit report"],
+        }),
+      ],
+      0,
+      false,
+      vi.fn(),
+    );
+
+    expect(screen.getByRole("button", { name: /request all 1/i })).toBeDefined();
+    // ...and no header over an empty read-side.
+    expect(screen.queryByText(/read or clarify these/i)).toBeNull();
+  });
+});
