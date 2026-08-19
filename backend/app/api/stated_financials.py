@@ -119,6 +119,17 @@ def _remove_detail(section: str, values: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+def _stamp_payoff_source(row: StatedLiability) -> None:
+    """LP-569 review — provenance is stamped here, never accepted from the client.
+
+    `payoff_source` distinguishes "the 1003 said so" from "a processor said so", and the DTI derives
+    the line's wording from it. A caller able to set it directly could label their own judgement as
+    the export's. Cleared when the flag is not True, so a retracted payoff does not leave stale
+    provenance behind.
+    """
+    row.payoff_source = "processor" if row.paid_off_at_closing is True else None
+
+
 @router.post(
     "/loan-files/{file_identifier}/stated-liabilities",
     response_model=StatedLiabilityPublic,
@@ -133,6 +144,7 @@ async def add_stated_liability(
     if loan_file is None:
         raise _NOT_FOUND
     row = StatedLiability(loan_file_id=loan_file.id, **body.model_dump())
+    _stamp_payoff_source(row)
     db.add(row)
     await db.flush()
     await _audit(
@@ -156,6 +168,7 @@ async def update_stated_liability(
     if row is None:
         raise _NOT_FOUND
     changes = _apply_update(row, body)
+    _stamp_payoff_source(row)
     await db.flush()
     await _audit(
         db,

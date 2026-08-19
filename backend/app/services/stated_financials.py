@@ -106,6 +106,8 @@ async def get_stated_financials(
             monthly_payment=row.monthly_payment,
             unpaid_balance=row.unpaid_balance,
             holder_name=row.holder_name,
+            paid_off_at_closing=row.paid_off_at_closing,
+            payoff_source=row.payoff_source,
         )
         for row in (
             await db.scalars(

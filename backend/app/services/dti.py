@@ -138,6 +138,19 @@ async def _auto_income_lines(db: AsyncSession, loan_file_id: UUID) -> list[_Auto
     return lines
 
 
+# LP-569 review — the two MISMO indicators do NOT mean the same thing, and collapsing them into one
+# reason put words in the export's mouth. `LiabilityPayoffStatusIndicator` says the obligation is
+# retired at closing; `LiabilityExclusionIndicator` says omit it from liability totals (paid by
+# another party, a duplicate trade line). Both keep the payment out of the ratio, but a line reading
+# "paid off at closing" on the strength of an exclusion flag asserts a payoff the file never stated.
+_EXCLUSION_REASONS = {
+    "mismo_payoff": "paid off at closing",
+    "mismo_exclusion": "excluded from liabilities per the application",
+    "processor": "paid off at closing",
+}
+_DEFAULT_EXCLUSION_REASON = "not counted"
+
+
 async def _auto_debt_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLine]:
     """Stated liabilities, itemized per liability (each monthly obligation)."""
     stmt = only_active(
@@ -164,7 +177,9 @@ async def _auto_debt_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLi
                 liab.monthly_payment,
                 "stated",
                 excluded_reason=(
-                    "paid off at closing" if liab.paid_off_at_closing is True else None
+                    _EXCLUSION_REASONS.get(liab.payoff_source or "", _DEFAULT_EXCLUSION_REASON)
+                    if liab.paid_off_at_closing is True
+                    else None
                 ),
             )
         )
@@ -346,6 +361,13 @@ def _to_items(
     for auto in autos:
         override = overrides.get(auto.key)
         effective = override if override is not None else (auto.auto or Decimal(0))
+        # LP-569 review — AN OVERRIDE RE-INCLUDES THE LINE. The exclusion is a claim about the file
+        # ("this debt is retired at closing"); a processor who overrides the line is disputing that
+        # claim, and the endpoint already accepts, persists and audits the override. Dropping it
+        # from the math anyway meant the figure was echoed back while the DTI never moved, with no
+        # way to re-include a debt wrongly flagged. Same precedent as the fail-closed housing gate:
+        # "an override on the line clears the gate (a processor-supplied figure is trusted)".
+        excluded = auto.excluded_reason is not None and override is None
         items.append(
             DtiLineItem(
                 key=auto.key,
@@ -364,14 +386,14 @@ def _to_items(
                     override is None
                     and (auto.unknown or (auto.auto is None and auto.key in _REQUIRED_HOUSING_KEYS))
                 ),
-                excluded=auto.excluded_reason is not None,
-                excluded_reason=auto.excluded_reason,
+                excluded=excluded,
+                excluded_reason=auto.excluded_reason if excluded else None,
             )
         )
         # LP-568: the ITEM is still emitted (a processor must see the line and why it dropped
         # out — a debt that silently vanishes is worse than one counted wrongly), but it never
         # reaches the engine, so it cannot enter a total.
-        if auto.excluded_reason is None:
+        if not excluded:
             engine_lines.append(DtiLine(key=auto.key, label=auto.label, amount=effective))
     return items, engine_lines
 

@@ -103,8 +103,10 @@ class StatedLiability(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # including five mortgages, so ``false`` is "not stated", not "retained". Treating it as
     # authoritative would silently suppress the question on every file.
     #
-    # Excluding wrongly UNDERSTATES the DTI and can pass a loan that should fail, so nothing
-    # sets this from a heuristic — only the source document or a human.
+    # Excluding wrongly UNDERSTATES the DTI and can pass a loan that should fail, so nothing sets
+    # this from a heuristic — only the source document (a MISMO `true`) or a processor through
+    # `StatedLiabilityInput`. `payoff_source` is stamped server-side and never accepted from the
+    # client, so a caller cannot label their own judgement as the export's.
     paid_off_at_closing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Provenance for the flag above — who established it (``mismo`` / ``processor``). Kept
     # separate from the value so "excluded because the 1003 said so" and "excluded because a

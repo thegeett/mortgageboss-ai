@@ -48,15 +48,33 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Drop the view first: the columns below cannot be dropped while it depends on them.
+    # LP-569 review — this path MUST drop and recreate; `CREATE OR REPLACE VIEW` cannot be used to
+    # go back. PostgreSQL only lets a replace APPEND columns ("ERROR: cannot drop columns from
+    # view"), so replacing an 11-column view with the 9-column original aborts the migration on its
+    # first statement. And even skipping it, both `drop_column`s would fail while the view still
+    # SELECTs those columns.
+    #
+    # Dropping loses the grant that `CREATE OR REPLACE` preserves, so the re-grant below is
+    # required on THIS path specifically — without it the read-only role silently loses access to
+    # the table after a rollback. Same shape as LP-509-B1.
+    op.execute("DROP VIEW IF EXISTS readonly.stated_liabilities")
+    op.drop_column("stated_liabilities", "payoff_source")
+    op.drop_column("stated_liabilities", "paid_off_at_closing")
     op.execute(
         """
-        CREATE OR REPLACE VIEW readonly.stated_liabilities AS
+        CREATE VIEW readonly.stated_liabilities AS
         SELECT id, loan_file_id, liability_type, monthly_payment, unpaid_balance,
                readonly.scrub(holder_name) AS holder_name,
                created_at, updated_at, deleted_at
         FROM public.stated_liabilities
         """
     )
-    op.drop_column("stated_liabilities", "payoff_source")
-    op.drop_column("stated_liabilities", "paid_off_at_closing")
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mbai_readonly') THEN
+                EXECUTE 'GRANT SELECT ON readonly.stated_liabilities TO mbai_readonly';
+            END IF;
+        END
+        $$;
+    """)

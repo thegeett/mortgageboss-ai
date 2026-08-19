@@ -67,7 +67,7 @@ async def test_a_paid_off_mortgage_leaves_the_back_end_ratio(db_session: AsyncSe
         db_session,
         "payoff",
         [
-            _liability("3000", paid_off_at_closing=True, payoff_source="mismo"),
+            _liability("3000", paid_off_at_closing=True, payoff_source="mismo_payoff"),
             StatedLiability(liability_type="Revolving", monthly_payment=Decimal("100")),
         ],
     )
@@ -83,7 +83,9 @@ async def test_the_excluded_line_is_still_shown_with_its_reason(db_session: Asyn
     """A debt that silently VANISHES is worse than one counted wrongly — the processor loses the
     ability to see it was considered at all. The line stays, carrying its real amount, flagged."""
     loan_file = await _file_with(
-        db_session, "shown", [_liability("3000", paid_off_at_closing=True, payoff_source="mismo")]
+        db_session,
+        "shown",
+        [_liability("3000", paid_off_at_closing=True, payoff_source="mismo_payoff")],
     )
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
@@ -158,3 +160,70 @@ async def test_the_lf_wchg_numbers_reproduce(db_session: AsyncSession) -> None:
     assert calc.monthly_debts == Decimal("109.00")
     # 3,186.00 of debt removed; what remains is exactly the three cards.
     assert sum(i.amount for i in calc.debt_items if i.excluded) == Decimal("3186.00")
+
+
+async def test_an_override_re_includes_an_excluded_debt(db_session: AsyncSession) -> None:
+    """LP-569 review — the exclusion is a CLAIM about the file; overriding the line disputes it.
+
+    The override endpoint already accepted, persisted and audited a figure on an excluded line, and
+    the UI keeps the pencil on every row — but the math ignored it. A processor who believes the
+    mortgage is actually being retained entered the real payment, saw it echoed back, and watched
+    the DTI not move, with no way to re-include the debt.
+    """
+    from app.schemas.dti import DtiOverrideInput
+    from app.services.dti import set_dti_override
+
+    loan_file = await _file_with(
+        db_session,
+        "reinclude",
+        [_liability("3000", paid_off_at_closing=True, payoff_source="mismo_payoff")],
+    )
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    (item,) = calc.debt_items
+    assert item.excluded is True and calc.monthly_debts == Decimal("0.00")
+
+    from app.core.security import hash_password
+    from app.models import User, UserRole
+
+    actor = User(
+        company_id=loan_file.company_id,
+        email="p@reinclude.com",
+        hashed_password=hash_password("x"),
+        first_name="P",
+        last_name="R",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db_session.add(actor)
+    await db_session.flush()
+    await set_dti_override(
+        db_session,
+        loan_file=loan_file,
+        field_key=item.key,
+        data=DtiOverrideInput(amount=Decimal("3186.00")),
+        actor_user_id=actor.id,
+    )
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    (item,) = calc.debt_items
+    assert item.excluded is False, "an override must re-include the line"
+    assert item.excluded_reason is None
+    assert calc.monthly_debts == Decimal("3186.00")
+
+
+async def test_an_exclusion_indicator_does_not_claim_a_payoff(db_session: AsyncSession) -> None:
+    """LP-569 review — MISMO's exclusion indicator means "omit from liability totals" (paid by
+    another party, a duplicate trade line), NOT "retired at closing". Both keep the payment out of
+    the ratio, but the line must not assert a payoff the export never stated."""
+    loan_file = await _file_with(
+        db_session,
+        "exclusion",
+        [_liability("3000", paid_off_at_closing=True, payoff_source="mismo_exclusion")],
+    )
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    (item,) = calc.debt_items
+    assert item.excluded is True
+    assert item.excluded_reason == "excluded from liabilities per the application"
+    assert "paid off" not in (item.excluded_reason or "")

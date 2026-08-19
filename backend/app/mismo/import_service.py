@@ -233,8 +233,14 @@ async def create_loan_file_from_mismo(
                 paid_off_at_closing=(
                     True if (liab.payoff_status or liab.exclusion_indicator) else None
                 ),
+                # LP-569 review — WHICH indicator fired is recorded, not just that one did. The
+                # two mean different things (retired at closing vs omit from totals), and the DTI
+                # line's wording is derived from this, so collapsing them to "mismo" produced an
+                # audit trail asserting a payoff the export never stated. Payoff wins when both.
                 payoff_source=(
-                    "mismo" if (liab.payoff_status or liab.exclusion_indicator) else None
+                    "mismo_payoff"
+                    if liab.payoff_status
+                    else ("mismo_exclusion" if liab.exclusion_indicator else None)
                 ),
             )
         )

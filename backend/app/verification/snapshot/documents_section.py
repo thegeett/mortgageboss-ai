@@ -230,7 +230,15 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "co_borrower_ssn": (PiiKind.SSN, False),  # credit_report — stored RAW
     "social_security_number_masked": (PiiKind.SSN, True),  # certificate_of_eligibility — pre-masked
     "loan_number_masked": (PiiKind.ACCOUNT, True),  # verification_of_mortgage — pre-masked
-    "policy_number": (PiiKind.ACCOUNT, True),  # homeowner_s_insurance_quote — pre-masked
+    # LP-570 — THIS ENTRY IS RIGHT FOR ONE DOCUMENT TYPE AND WRONG FOR ANOTHER, and the registry
+    # is keyed by field NAME alone so it cannot tell them apart. Four types declare
+    # `policy_number`, and their prompts disagree: flood_insurance_policy says "Mask the policy
+    # number" (pre-masked, correct), while homeowners_insurance asks for "the policy number" plain
+    # — so a RAW number is routed through `PiiField.pre_masked`, which truncates it to last-4 with
+    # match_hash=None. That is both a lossy display AND a non-joinable key: exactly the LP-461 bug
+    # described on `loan_number` below. Left as-is deliberately: correcting it means doc-type-aware
+    # routing, and flipping the flag globally would break the flood case in the other direction.
+    "policy_number": (PiiKind.ACCOUNT, True),
     # LP-565 — an Assessor's Parcel Number is identifier-shaped (9+ digits) and was passing through
     # RAW, which is one of the values refusing every snapshot write on staging: 22 completed runs,
     # 0 persisted. It is a public-record identifier rather than borrower PII, but the at-rest guard
@@ -351,8 +359,24 @@ _SCRUB_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {
     # PII (a policy status reads "Active"; a tax year reads "2025"), so `_PII_FIELDS` would be the
     # wrong home: masking the whole value to ****9012 destroys the signal AND hides the defect. This
     # scrub keeps the wording and redacts only the leaked run, which is what these fields need.
+    # LP-569 — CLOSE THE CLASS, NOT THE INSTANCE. `policy_status` is the same free-text field on
+    # FOUR policy types and `tax_year` the same year field on NINE document types; an extraction
+    # defect on any one of them refuses the whole loan file's snapshot. Registering only the two
+    # observed leaking on LF-WCHG would have left eleven loaded guns. `test_every_declaring_doc_type_is_registered`
+    # fails if a new extractor declares either field without appearing here.
     "homeowners_insurance": frozenset({"policy_status"}),
+    "flood_insurance_policy": frozenset({"policy_status"}),
+    "life_insurance_policy": frozenset({"policy_status"}),
+    "homeowner_s_insurance_quote": frozenset({"policy_status"}),
     "property_tax_bill": frozenset({"tax_year"}),
+    "property_tax_bill_non_subject": frozenset({"tax_year"}),
+    "form_1098": frozenset({"tax_year"}),
+    "1099": frozenset({"tax_year"}),
+    "transcripts_of_1099": frozenset({"tax_year"}),
+    "k1_statement": frozenset({"tax_year"}),
+    "k_1_shareholder_profit_and_loss_transcripts": frozenset({"tax_year"}),
+    "tax_return": frozenset({"tax_year"}),
+    "w2": frozenset({"tax_year"}),
     # LP-466 — a wire memo instructs "reference file/loan number …"; a bare ≥9-digit file number embedded
     # there would trip the at-rest guard. Scrub the 9+-digit run (the memo wording survives) as a backstop.
     "wire_instructions": frozenset({"reference_or_memo"}),
@@ -411,12 +435,23 @@ def build_document_fields(
         scalar = _scalar(value)
         if scalar is None:  # nested/non-scalar — not surfaced here
             continue
-        if isinstance(scalar, str) and key in _SCRUB_FREE_TEXT_FIELDS.get(
-            document_type or "", frozenset()
-        ):
-            scalar = _DESC_REDACT.sub(
-                _REDACTED, scalar
-            )  # scrub an embedded SSN/account run (LP-445)
+        if key in _SCRUB_FREE_TEXT_FIELDS.get(document_type or "", frozenset()):
+            # LP-569 — scrub the value's TEXT FORM, not just a `str` instance. The gate used to be
+            # `isinstance(scalar, str)`, which made this a no-op for the field it was added for:
+            # `property_tax_bill.tax_year` is `TypedField[int]` parsed with `coerce_int`, so a leaked
+            # run arrives as the INT 202520261234 and walked straight past. The whole loan file then
+            # lost its snapshot at the at-rest guard — the exact failure LP-566 set out to prevent,
+            # surfacing further from its cause.
+            #
+            # Only REPLACE when the scrub actually changed something, so a clean numeric keeps
+            # its declared type — tax_year 2025 stays the int 2025, while a 9+-digit run becomes
+            # the redacted string. Losing the int on a value that was never a year is the correct
+            # trade. (Do not open a line with "# type:" here: mypy reads that as a PEP 484 type
+            # comment and fails the file with a syntax error, which is how this one was found.)
+            as_text = scalar if isinstance(scalar, str) else str(scalar)
+            redacted = _DESC_REDACT.sub(_REDACTED, as_text)  # embedded SSN/account run (LP-445)
+            if redacted != as_text:
+                scalar = redacted
         fields[key] = Field.present(scalar, source=_EXTRACTED, confidence=confidence)
 
     # ``asserted_name`` — a stable, doc-type-agnostic alias of the RAW borrower-name

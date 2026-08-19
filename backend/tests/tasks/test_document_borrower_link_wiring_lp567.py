@@ -15,6 +15,7 @@ the thing that was missing: that running the PIPELINE produces links at all.
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 from app.ai.classification import ClassificationResult
@@ -177,3 +178,44 @@ async def test_a_re_extraction_replaces_the_links_rather_than_accumulating(
     await pipeline.reprocess_document_extraction(db_session, doc)
 
     assert [link.borrower_id for link in await _links(db_session, doc.id)] == [second.id]
+
+
+async def test_a_failed_re_extraction_does_not_wipe_correct_links(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-569 — the review finding. `assign_document_borrower_links` DELETEs before it looks for
+    names, so a call that SUCCEEDS while finding nothing commits the wipe; only an exception rolls
+    back. A FAILED extraction is all-null data, so it takes exactly that path.
+
+    Concretely: a pay stub correctly linked to Jordan is reprocessed (a retry, or an LP-44 type
+    override), extraction fails, and the link is destroyed before the FAILED branch is even
+    reached. Absence of data is not a determination that the document names nobody (§8).
+    """
+    from app.ai.extraction.pay_stub import PayStubExtraction
+
+    doc = await _setup_document(db_session)
+    borrower = await _add_borrower(db_session, doc.loan_file_id, "Jordan", "Reyes")
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch, ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x")
+    )
+    _patch_extract(monkeypatch, _paystub_for("Jordan Reyes"))
+    await pipeline._process_document(db_session, str(doc.id))
+    assert [link.borrower_id for link in await _links(db_session, doc.id)] == [borrower.id]
+
+    # The re-extraction reads nothing at all.
+    _patch_extract(
+        monkeypatch,
+        PayStubExtractionResult(
+            data=PayStubExtraction(),
+            status=ExtractionStatus.FAILED,
+            confidence=0.0,
+            reasoning="unreadable",
+        ),
+    )
+    monkeypatch.setattr(pipeline, "_tier3_analyze", AsyncMock(return_value=None))
+    await pipeline.reprocess_document_extraction(db_session, doc)
+
+    assert [link.borrower_id for link in await _links(db_session, doc.id)] == [borrower.id], (
+        "a failed re-extraction destroyed a correct borrower link"
+    )

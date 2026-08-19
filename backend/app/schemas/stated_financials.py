@@ -34,6 +34,12 @@ class StatedLiabilityPublic(BaseModel):
     monthly_payment: Decimal | None
     unpaid_balance: Decimal | None
     holder_name: str | None
+    # LP-569 review — READABLE, so the UI can show why a debt left the DTI, and WRITABLE on the
+    # input below so a processor can say so. Without the write path the flag was settable only by a
+    # MISMO `true`, which the real export never carries — the mechanism would have been inert on
+    # exactly the file whose 58.59% → 34.39% correction motivated it.
+    paid_off_at_closing: bool | None
+    payoff_source: str | None
 
 
 class StatedAssetPublic(BaseModel):
@@ -78,6 +84,10 @@ class StatedLiabilityInput(BaseModel):
     monthly_payment: Decimal | None = None
     unpaid_balance: Decimal | None = None
     holder_name: str | None = None
+    # Only True excludes the payment from the DTI; None means "not established" and keeps it
+    # counted. `payoff_source` is NOT accepted from the client — it is provenance, and the route
+    # stamps it, so a caller cannot claim the export said something it did not.
+    paid_off_at_closing: bool | None = None
 
 
 class StatedAssetInput(BaseModel):

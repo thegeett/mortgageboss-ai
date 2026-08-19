@@ -284,13 +284,20 @@ function LineRow({
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-gray-700">{item.label}</span>
         <span className="text-[11px] text-gray-400">
-          {item.overridden ? (
-            <span className="text-primary">
-              overridden · auto {formatMoneyPrecise(item.auto_amount)}
-            </span>
-          ) : item.excluded ? (
+          {/* LP-569 review — this chain and the amount-styling chain below MUST test in the same
+              order. They disagreed (overridden→excluded→unknown here, unknown→excluded→overridden
+              there), so a row that was both rendered struck through with a caption reading
+              "overridden", and the reason never appeared — the silently-vanishing debt the
+              exclusion was built to prevent. An override now re-includes the line, so the two are
+              mutually exclusive at the source; keeping the order identical stops a future change
+              from re-opening the gap. */}
+          {item.excluded ? (
             <span className="text-gray-500">
               not counted — {item.excluded_reason ?? "excluded"}
+            </span>
+          ) : item.overridden ? (
+            <span className="text-primary">
+              overridden · auto {formatMoneyPrecise(item.auto_amount)}
             </span>
           ) : item.unknown ? (
             <span className="text-warning">
@@ -347,16 +354,17 @@ function LineRow({
             }}
             className={cn(
               "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.unknown
-                ? "font-medium text-warning"
-                : item.excluded
-                  ? "font-medium text-gray-400 line-through"
-                  : item.overridden
-                    ? "font-semibold text-primary"
+              // Same order as the caption chain above — see the note there.
+              item.excluded
+                ? "font-medium text-gray-400 line-through"
+                : item.overridden
+                  ? "font-semibold text-primary"
+                  : item.unknown
+                    ? "font-medium text-warning"
                     : "font-medium text-gray-900",
             )}
           >
-            {item.unknown ? "Unknown" : formatMoneyPrecise(item.amount)}
+            {item.unknown && !item.excluded ? "Unknown" : formatMoneyPrecise(item.amount)}
             <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
           </button>
           {item.overridden && (

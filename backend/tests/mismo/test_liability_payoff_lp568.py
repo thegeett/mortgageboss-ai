@@ -104,6 +104,6 @@ async def test_only_a_true_indicator_sets_the_stored_flag(db_session) -> None:
     )
     flagged = [r for r in rows if r.paid_off_at_closing is True]
     assert len(flagged) == 1
-    assert flagged[0].payoff_source == "mismo"
+    assert flagged[0].payoff_source == "mismo_payoff"  # LP-569: WHICH indicator fired
     # The other nine carried `false` — they must be NULL, not False.
     assert all(r.paid_off_at_closing is None for r in rows if r not in flagged)

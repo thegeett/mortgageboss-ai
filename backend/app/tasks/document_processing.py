@@ -418,38 +418,51 @@ async def _extract_branch(
         confidence_source=confidence_source,
     )
 
-    # LP-567 — attribute the document to its borrower(s) HERE, while the extraction that
-    # asserts the name is the current one. The snapshot's ``belongs_to`` reads
-    # ``document_borrower_links``, and until this call the producer had no caller outside a
-    # dev script: staging ran with 0 of 16 documents attributed, so every per-borrower rule
-    # saw a file whose documents belonged to nobody. Placed before the branches below so it
-    # covers the completed, low-confidence and failed paths alike, and so a type override
-    # re-linking through ``reprocess_document_extraction`` gets it for free.
+    # LP-567 — attribute the document to its borrower(s) HERE, while the extraction that asserts
+    # the name is the current one. The snapshot's ``belongs_to`` reads ``document_borrower_links``,
+    # and until this call the producer had no caller outside a dev script: staging ran with 0 of 16
+    # documents attributed, so every per-borrower rule saw a file whose documents belonged to
+    # nobody. Placed before the branches below so a type override re-linking through
+    # ``reprocess_document_extraction`` gets it for free.
     #
-    # SAVEPOINT, as the snapshot builder does: matching is deterministic and additive, and a
-    # DB error inside it must never cost the document the extraction that just succeeded. The
-    # rollback also undoes the linker's opening DELETE, so a failure leaves the PREVIOUS
-    # version's links standing rather than wiping them — stale beats absent, and the log names
-    # the document so it is findable.
-    try:
-        async with db.begin_nested():
-            links = await assign_document_borrower_links(db, document)
-    except Exception as exc:
-        logger.warning(
-            "document_borrower_link_failed",
+    # LP-569 — SKIPPED ON A FAILED EXTRACTION, and the savepoint is not what protects this. The
+    # linker opens with an unconditional DELETE and only then looks for names, so a call that
+    # SUCCEEDS while finding nothing commits the wipe — only an exception rolls it back. A FAILED
+    # extraction is exactly that path: all-null data, `asserted_names_for` returns [], and a pay
+    # stub correctly linked to a borrower loses that link on a retry or a type override.
+    #
+    # A FAILED extraction is an ABSENCE OF DATA, not a determination that the document names nobody
+    # (§8). The service's "a re-match is authoritative" is right for a genuine re-match — a document
+    # retyped to something with no name field SHOULD lose its links — so the guard belongs here, at
+    # the call site that knows nothing was read, not in the service.
+    if result.status is ExtractionStatus.FAILED:
+        logger.info(
+            "document_borrower_link_skipped",
             document_id=str(document.id),
-            error_type=type(exc).__name__,
+            reason="extraction_failed",
         )
     else:
-        # Zero links is a legitimate outcome, not a failure: the type asserts no name
-        # (closing_disclosure, form_1098), or the asserted name matches nobody above
-        # threshold. Logged with the count so the two are distinguishable in CloudWatch.
-        logger.info(
-            "document_borrower_linked",
-            document_id=str(document.id),
-            document_type=document.document_type,
-            link_count=len(links),
-        )
+        # SAVEPOINT, as the snapshot builder does: matching is deterministic and additive, and a DB
+        # error inside it must never cost the document the extraction that just succeeded.
+        try:
+            async with db.begin_nested():
+                links = await assign_document_borrower_links(db, document)
+        except Exception as exc:
+            logger.warning(
+                "document_borrower_link_failed",
+                document_id=str(document.id),
+                error_type=type(exc).__name__,
+            )
+        else:
+            # Zero links is a legitimate outcome, not a failure: the type asserts no name
+            # (closing_disclosure, form_1098), or the asserted name matches nobody above
+            # threshold. Logged with the count so the two are distinguishable in CloudWatch.
+            logger.info(
+                "document_borrower_linked",
+                document_id=str(document.id),
+                document_type=document.document_type,
+                link_count=len(links),
+            )
 
     if result.status == ExtractionStatus.FAILED:
         # Genuinely EMPTY (derive_status: nothing read → FAILED; PARTIAL keeps its fields and never lands
