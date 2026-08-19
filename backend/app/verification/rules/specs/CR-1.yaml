@@ -104,7 +104,19 @@ deterministic:
     # LP-556 — provenance only, NOT gated: it names WHICH debt this finding is about. Gating on it
     # would make a liability with no holder name abstain instead of being evaluated.
     - liab.creditor_name
+    - liab.monthly_payment  # LP-563 — what Apply writes into the DTI (provenance, not gated)
     - liab.in_application
+  # LP-563 — what Apply writes: the undisclosed liability, added to the application. This is the
+  # canonical interlock example — a debt the file carries and the 1003 does not, so the DTI recomputes
+  # HIGHER once it lands, which is the conservative direction every apply moves.
+  #
+  # `holder_name` names WHICH debt (LP-556's tag) and `monthly_payment` is what the DTI reads. A
+  # subject missing either resolves to no apply at all rather than creating a debt with no payment.
+  apply:
+    action: add_liability
+    fields:
+      holder_name: {tag: liab.creditor_name}
+      monthly_payment: {tag: liab.monthly_payment}
   gated_tags:
     - liab.in_application
   operands: {}

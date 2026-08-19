@@ -77,6 +77,10 @@ class RuleEvaluation:
     # clause from four of five AS-12 findings — so a field it cannot paraphrase away is the only way
     # the requirement actually holds.
     derivation: str | None = None
+    # LP-563 — the structured change this finding declares, resolved for THIS subject. `None` when the
+    # rule declares none, or when a value it needs is absent — a half-resolved change must never reach
+    # the loan, so the button simply does not appear.
+    apply: dict[str, str] | None = None
     # LP-319/325: True marks a verdict an AI produced that a human must confirm before it ships. A
     # deterministic rule (AS-1) leaves it False. OC-2's judgment PATH forces every verdict to
     # needs_review — so for it, ratification-pending only ever reaches needs_review / couldnt_check.

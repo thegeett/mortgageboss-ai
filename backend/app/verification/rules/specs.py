@@ -259,6 +259,36 @@ def _check_applicability_expected(
 KNOWN_OPERAND_TYPES = frozenset({"decimal", "date"})
 
 
+class ApplyValue(BaseModel):
+    """One field of an apply spec: a TAG to read, or a LITERAL. Exactly one (validated)."""
+
+    tag: str | None = None
+    literal: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> ApplyValue:
+        if (self.tag is None) == (self.literal is None):
+            raise ValueError("an apply value needs exactly one of `tag` or `literal`")
+        return self
+
+
+class ApplySpec(BaseModel):
+    """LP-563 — the structured change a finding declares, so Apply can write it into the loan.
+
+    Apply is the only action that changes the LOAN rather than the finding, so what it writes has to be
+    declared as DATA on the rule rather than inferred at the point of clicking. The fields are resolved
+    per subject from that subject's tags.
+
+    A value the subject does not carry means NO apply block is emitted at all. A half-resolved change
+    is the dangerous shape: a `correct_purchase_price` with no price would either write a null over a
+    real figure or be silently skipped, and the second is what the LP-558 `applied: False` defect
+    already was. Absent means the button does not appear.
+    """
+
+    action: str
+    fields: dict[str, ApplyValue] = PydField(default_factory=dict)
+
+
 class Operand(BaseModel):
     """A declared OPERAND SOURCE — where a comparison value comes from (tag / reference / calc /
     a product of operands). Exactly one source key is set (validated).
@@ -458,6 +488,9 @@ class DeterministicEval(BaseModel):
                     f"(operands: {sorted(operand_names)})"
                 )
         return self
+
+    # LP-563 — the structured change this rule's finding declares (see ApplySpec).
+    apply: ApplySpec | None = None
 
 
 class Materiality(BaseModel):
@@ -805,6 +838,9 @@ class JudgmentEval(BaseModel):
                 "the raw verdict for those, which is the defect it exists to remove"
             )
         return self
+
+    # LP-563 — the structured change this rule's finding declares (see ApplySpec).
+    apply: ApplySpec | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -36,6 +36,7 @@ from app.verification.rule_engine.result import (
 from app.verification.rules.schema import compare_values
 from app.verification.rules.specs import (
     KNOWN_OPERAND_TYPES,
+    ApplySpec,
     DeterministicEval,
     Operand,
     OutcomeRule,
@@ -65,6 +66,29 @@ _COERCERS: dict[str, Callable[[Any], Any]] = {
 # Drift guard: the coercer registry must cover EXACTLY the types specs validate against at load, so a
 # declared-but-unhandled type fails loud at import rather than as an uncaught KeyError mid-run.
 assert set(_COERCERS) == KNOWN_OPERAND_TYPES, "operand coercers drifted from KNOWN_OPERAND_TYPES"
+
+
+def _resolve_apply(
+    spec: ApplySpec | None, subject_tags: Mapping[str, Tag]
+) -> dict[str, str] | None:
+    """Resolve a declared apply into concrete values for THIS subject (LP-563).
+
+    Returns None when any declared field is unresolvable. That is the whole safety of it: a
+    `correct_purchase_price` with no price would write a null over a real figure, and a partially
+    filled `add_liability` would create a debt with no payment. Absent means no button.
+    """
+    if spec is None:
+        return None
+    resolved: dict[str, str] = {"action": spec.action}
+    for name, value in spec.fields.items():
+        if value.literal is not None:
+            resolved[name] = value.literal
+            continue
+        tag = subject_tags.get(value.tag or "")
+        if tag is None or tag.value is None or str(tag.value).strip() in ("", "unknown"):
+            return None
+        resolved[name] = str(tag.value)
+    return resolved
 
 
 def _load_bearing(
@@ -108,6 +132,7 @@ def _result(
         verdict=verdict,
         verdict_confidence=verdict_confidence,
         load_bearing_tags=_load_bearing(spec.deterministic, subject_tags),
+        apply=_resolve_apply(spec.deterministic.apply, subject_tags),
         threshold_used=threshold_used,
         priya_validated=spec.reference_values.priya_validated,
         gated_pending_signoff=not spec.reference_values.priya_validated,

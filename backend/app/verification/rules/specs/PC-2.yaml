@@ -87,6 +87,17 @@ deterministic:
   load_bearing_tags:
     - contract.loan_sales_price
     - property.purchase_price
+  # LP-563 — what Apply writes. THE CONTRACT IS THE AUTHORITY ON PRICE: PC-2 compares the price the
+  # purchase contract states against the one the application carries, and a mismatch means the
+  # application is wrong, not the contract. Writing it the other way would edit the document's figure
+  # to match a data-entry error — so the direction here is the whole correctness of the action.
+  #
+  # The property is 1:1 with the loan file, so there is nothing to disambiguate: unlike a liability,
+  # no business key is needed to find the row.
+  apply:
+    action: correct_purchase_price
+    fields:
+      value: {tag: contract.loan_sales_price}
   gated_tags:
     - contract.loan_sales_price
     - property.purchase_price
