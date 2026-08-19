@@ -93,7 +93,7 @@ def test_borrower_gone_reads_honestly_not_a_uuid() -> None:
 
 
 def test_a_money_OUT_transaction_is_not_called_a_deposit() -> None:
-    """⚠️ THE BUG FR-5 EXPOSED. Every transaction subject was labelled a DEPOSIT, which held while only
+    """THE BUG FR-5 EXPOSED. Every transaction subject was labelled a DEPOSIT, which held while only
     money-IN rules enumerated them (AS-1, AS-2 and AS-12 all scope `txn.is_money_in eq in`). FR-5 is the
     first rule that reads money OUT, and it would have printed "Deposit of $3,286.21" beside a finding
     about a mortgage PAYMENT — a label contradicting the sentence next to it."""
@@ -104,7 +104,7 @@ def test_a_money_OUT_transaction_is_not_called_a_deposit() -> None:
 
 
 def test_no_direction_still_names_the_amount_and_date() -> None:
-    """⚠️ THE REGRESSION THE FIRST VERSION SHIPPED. Requiring the direction before printing anything
+    """THE REGRESSION THE FIRST VERSION SHIPPED. Requiring the direction before printing anything
     collapsed EVERY AS-12 subject to "a transaction": their inline tags come from `reasoned_over`, which
     excludes `txn.is_money_in` on purpose (LP-509-A1 — the applicability predicate has already filtered
     the subjects, so it carries no signal for the model).
@@ -154,7 +154,7 @@ def test_no_label_ever_contains_a_content_id_uuid_or_dotted_tag() -> None:
 # LP-531 — the subject shape that had no branch
 # ------------------------------------------------------------------------------------------------ #
 def test_a_liability_reads_as_a_debt_not_as_an_unrecognised_item() -> None:
-    """⚠️ FOUND ON A REAL FILE. `per_liability` rules have existed since LP-480 and no branch here ever
+    """FOUND ON A REAL FILE. `per_liability` rules have existed since LP-480 and no branch here ever
     matched their key shape, so every one of their findings fell to the unrecognised-key floor. LF-WCHG
     shipped FOUR CR-6 findings whose subject read "an item in this file" — which tells a processor
     neither what the item is, nor that the four rows are four different debts.

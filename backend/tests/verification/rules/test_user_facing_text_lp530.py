@@ -8,8 +8,8 @@ convention, and it is fine.
 It reached the second kind. CR-6 and IN-3 shipped a fix that opened a sentence with a warning sign in
 front of a processor:
 
-    "... so both the report and a closing date are needed. ⚠️ If the borrower has no derogatory events
-     the report shows that too — this check will not assume a clean history ..."
+    "... so both the report and a closing date are needed. [warning sign] If the borrower has no
+     derogatory events the report shows that too — this check will not assume a clean history ..."
 
 Two things are wrong with it and only one is the emoji. The sentence is also written in the engine's
 own voice — "this check will not assume", "this check abstains rather than choosing one" — which tells
@@ -52,9 +52,11 @@ def _user_facing_strings() -> list[tuple[str, str, str]]:
 
 
 def test_no_user_facing_string_carries_a_warning_emoji() -> None:
-    """⚠️ THE EXACT SHAPE THAT SHIPPED — and note that this docstring may carry one, because a
+    """THE EXACT SHAPE THAT SHIPPED — and note that this docstring may carry one, because a
     docstring is read by us. The assertion is about the other kind of text."""
-    offenders = [(rule, field) for rule, field, text in _user_facing_strings() if "⚠️" in text]
+    offenders = [
+        (rule, field) for rule, field, text in _user_facing_strings() if "\u26a0\ufe0f" in text
+    ]
 
     assert not offenders, (
         "a warning emoji reached text a loan processor reads — write the caveat as a plain "
@@ -62,7 +64,7 @@ def test_no_user_facing_string_carries_a_warning_emoji() -> None:
     )
 
 
-# ⚠️ PATTERNS, NOT PHRASES — LP-534. The first version listed "this check" and IH-9 shipped "the check
+# PATTERNS, NOT PHRASES — LP-534. The first version listed "this check" and IH-9 shipped "the check
 # cannot tell which coverage period applies": the same sentence, a different article, and the guard read
 # clean. Anything matching here names the software where the loan file belongs.
 _MACHINERY = (
@@ -240,7 +242,7 @@ def test_every_transaction_rule_carries_the_amount_and_date_that_identify_its_su
     four of them had passed and five needed review, it read as though the SAME transaction were sitting
     in two buckets at once. AS-2 had the same gap and produces 57 subjects on a real file.
 
-    ⚠️ ASSERTED ON `load_bearing_tags` / `reasoned_over`, NEVER ON `gated_tags`. Those are the
+    ASSERTED ON `load_bearing_tags` / `reasoned_over`, NEVER ON `gated_tags`. Those are the
     provenance lists; the gate is separate. Gating on an amount or a date would make a transaction
     missing either one ABSTAIN instead of being evaluated — a far worse fix than the problem.
     `txn.source_strength` on AS-1 is the standing precedent for carrying a tag without gating it.

@@ -175,7 +175,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # homeowners binder, so it ABSTAINS here exactly as IH-3 does — a missing binder is an honest gap,
     # never a cleared one. satisfied/fired/needs_review are unchanged; the +1 is the whole movement.
     # LP-551 876 -> 926: FR-5 is live and per-TRANSACTION, so LF-6T3N's 50 transactions each get a row.
-    # ⚠️ ALL FIFTY ABSTAIN HERE, AND THAT IS THE HARNESS, NOT THE RULE. This path runs `materialize_tags`
+    # ALL FIFTY ABSTAIN HERE, AND THAT IS THE HARNESS, NOT THE RULE. This path runs `materialize_tags`
     # only — the generic pass — which does not run Stage A or the LP-546 recurrence stage, so none of
     # FR-5's four predicates has a tag to read. An absent predicate is data-missing, so the resolver
     # correctly returns couldnt_check rather than guessing (§8).

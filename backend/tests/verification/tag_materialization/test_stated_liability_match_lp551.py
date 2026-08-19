@@ -4,7 +4,7 @@ The input that turns FR-5 from a list into a finding. Without it FR-5 matches ev
 to a creditor — a mortgage, a card, an autopay — which is true of every file, so it would ask a
 processor to check the borrower's ordinary bills forever.
 
-⚠️ THE FIXTURES ARE LF-WCHG'S REAL PAYEES AND ITS REAL 1003, not constructed pairs. Every abbreviation
+THE FIXTURES ARE LF-WCHG'S REAL PAYEES AND ITS REAL 1003, not constructed pairs. Every abbreviation
 below is one a bank actually printed, and two of the four matches are inferences rather than obvious —
 which is the whole reason the tag is graded instead of yes/no.
 """
@@ -104,7 +104,7 @@ def test_a_payee_on_no_liability_is_none() -> None:
 # §8 — absent is not none
 # --------------------------------------------------------------------------------------------- #
 def test_an_application_with_no_liabilities_is_unknown_not_none() -> None:
-    """⚠️ LOAD-BEARING. "none" means we compared and nothing matched. If the application states no
+    """LOAD-BEARING. "none" means we compared and nothing matched. If the application states no
     liabilities there was nothing to compare against, and calling that "none" would fire FR-5 on EVERY
     payment the borrower makes — on precisely the files carrying the least information."""
     assert _match("CARVANA PAYMENT", stated=[]) == "unknown"

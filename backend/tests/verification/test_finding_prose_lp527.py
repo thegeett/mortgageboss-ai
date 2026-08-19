@@ -260,7 +260,7 @@ def test_naming_the_software_as_an_actor_is_still_rejected() -> None:
 # LP-535 — a requirement the composer was free to delete
 # --------------------------------------------------------------------------------------------- #
 def test_the_materiality_derivation_survives_a_composition_that_dropped_it() -> None:
-    """⚠️ FOUND ON THE SECOND COMPOSED RUN. LP-518 puts the arithmetic in the finding on purpose: a
+    """FOUND ON THE SECOND COMPOSED RUN. LP-518 puts the arithmetic in the finding on purpose: a
     processor who reads "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly qualifying income)
     materiality floor" can argue with the threshold; one who reads "exceeds the materiality threshold"
     can only take it on faith.
@@ -347,7 +347,7 @@ def _judgment_finding(rule_id: str, tags: list[dict[str, str]]) -> Finding:
 
 
 def test_the_tags_own_reasoning_reaches_the_composer() -> None:
-    """⚠️ WHY DT-7 SHIPPED A BARE ASSERTION. The summary carried the VALUE ("complete") and dropped the
+    """WHY DT-7 SHIPPED A BARE ASSERTION. The summary carried the VALUE ("complete") and dropped the
     tag's reasoning, which is the sentence naming the documents. The model wrote "Every ability-to-repay
     factor has a supporting document in the file" because a bare conclusion was all it was given.
 
@@ -374,7 +374,7 @@ def test_the_tags_own_reasoning_reaches_the_composer() -> None:
 
 
 def test_an_identifier_in_the_reasoning_is_translated_not_deleted() -> None:
-    """⚠️ THE REGRESSION THE FIRST ATTEMPT SHIPPED. Tag prompts REQUIRE citing tags by id, so reasoning
+    """THE REGRESSION THE FIRST ATTEMPT SHIPPED. Tag prompts REQUIRE citing tags by id, so reasoning
     is full of `occupancy.consistent_with_signals` and MISMO paths. Deleting them turned OC-2's
 
         "The single borrower's declaration.intenttooccupytype is 'Yes'"
@@ -442,7 +442,7 @@ def _finding(rule_id: str, message: str, fix: str) -> Finding:
 
 
 def test_an_action_asking_for_a_document_the_rule_never_asked_for_is_rejected() -> None:
-    """⚠️ FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
+    """FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
     occupancy is what the borrower intends". Once LP-537 handed the composer the tag reasoning — which
     contains "no purchase contract states a property address" — it rewrote the ACTION as "Obtain a
     purchase contract that states the property address".
@@ -502,7 +502,7 @@ def test_a_legitimate_request_is_not_rejected(rule_id: str, fix: str, action: st
 # LP-552 — a PASS must not be rewritten into a task
 # --------------------------------------------------------------------------------------------- #
 def test_an_imperative_on_a_settled_finding_is_rejected() -> None:
-    """⚠️ A SATISFIED FINDING WAS BEING HANDED BACK AS WORK. The composer rewrites every finding, and
+    """A SATISFIED FINDING WAS BEING HANDED BACK AS WORK. The composer rewrites every finding, and
     the prompt asks for an imperative action — so a check that PASSED came back as "Confirm that ...".
 
     A processor closing a green item should finish the line knowing the file is in order. Being asked
@@ -532,7 +532,7 @@ def test_a_statement_of_what_is_already_true_passes() -> None:
 
 
 def test_the_prompt_asks_a_pass_to_read_as_a_completion_not_a_negative() -> None:
-    """⚠️ NOT ASKING FOR WORK IS ONLY HALF OF IT. The satisfied wordings the rules ship are neutral
+    """NOT ASKING FOR WORK IS ONLY HALF OF IT. The satisfied wordings the rules ship are neutral
     engine-voiced fragments — "every account has at least the required 12 months of statements", "the
     gift documentation chain is complete". They pass the imperative guard and still tell a processor
     nothing about how solid the file is; twenty-eight of them scan as noise rather than reassurance.

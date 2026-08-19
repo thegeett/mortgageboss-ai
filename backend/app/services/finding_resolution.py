@@ -62,7 +62,7 @@ async def apply_finding(
     applied_record = await _incorporate_into_structured_data(
         db, finding=finding, loan_file=loan_file
     )
-    # ⚠️ AN APPLY THAT CHANGED NOTHING MUST NOT CLOSE THE FINDING. Every handler returns
+    # AN APPLY THAT CHANGED NOTHING MUST NOT CLOSE THE FINDING. Every handler returns
     # `applied: False` when it could not perform its change — a typo'd action name, a target row that
     # is gone, an unparseable amount. Before LP-558 the finding was marked APPLIED regardless, so a
     # processor saw "resolved" over a loan file nothing had been written to, and the DTI they were
@@ -548,12 +548,12 @@ async def _correct_liability_payment(
 ) -> dict[str, Any]:
     """Raise a stated liability's monthly payment to the figure the documents show (DT-6).
 
-    ⚠️ TARGETED BY HOLDER NAME, NOT BY A ROW ID, and that is forced rather than chosen. A governed
+    TARGETED BY HOLDER NAME, NOT BY A ROW ID, and that is forced rather than chosen. A governed
     rule works on the SNAPSHOT — its subjects are content-ids (LP-312), never `stated_liabilities`
     primary keys — so it cannot name a DB row the way the legacy cross-source findings can. The holder
     is the business key both sides already share.
 
-    ⚠️ EXACTLY ONE MATCH, OR NOTHING. Two liabilities from the same holder (a card and a HELOC with the
+    EXACTLY ONE MATCH, OR NOTHING. Two liabilities from the same holder (a card and a HELOC with the
     same bank) are indistinguishable here, and picking either would silently edit the wrong debt. An
     ambiguous match declines and the processor edits it by hand.
     """

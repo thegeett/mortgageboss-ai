@@ -11,20 +11,20 @@
 # group; LP-546 answered it with a DETERMINISTIC producer that sees the whole snapshot, so recurrence
 # is now a count rather than a perception — no model call, no calibration round.
 #
-# ⚠️ IT CANNOT SEE THE APPLICATION'S DISCLOSED DEBTS, AND ITS WORDING SAYS SO. `_build_context` gives a
+# IT CANNOT SEE THE APPLICATION'S DISCLOSED DEBTS, AND ITS WORDING SAYS SO. `_build_context` gives a
 # judgment rule the SUBJECT's tags and nothing else, so the file's stated liabilities are out of reach
 # from a transaction subject. This rule therefore asks the question it can answer — "is this recurring
 # payment to an apparent creditor a monthly obligation?" — and asks the PROCESSOR to check it against
 # the 1003. It must never claim a debt is undisclosed; it does not know.
 #
-# ⚠️ `txn.implies_obligation` IS DELIBERATELY NOT READ, though rule_tags.csv still lists it against
+# `txn.implies_obligation` IS DELIBERATELY NOT READ, though rule_tags.csv still lists it against
 # FR-5. Its declared question — "does this debit imply an undisclosed monthly obligation" — IS this
 # rule's question. Producing a tag to ask it and then a rule to ask it again is the DT-7 shape: an AI
 # tag restated by an AI judgment, two layers where neither checks the other. The row stays because
 # rule_tags.csv is generated from the vocabulary spreadsheet and is the domain expert's artifact to
 # change; this spec simply does not consume it, which is visible in `load_bearing_tags`.
 #
-# ⚠️ FP > FN HERE, inverted from the rest of the engine, following FR-3's bar. A fraud-adjacent finding
+# FP > FN HERE, inverted from the rest of the engine, following FR-3's bar. A fraud-adjacent finding
 # names a person: a false "this looks undisclosed" costs a borrower and a processor real time and
 # trust, while a missed one costs a review a human was going to do at underwriting anyway. So it
 # surfaces rather than asserts — needs_review only, never fired, and an unreadable payee abstains
@@ -94,7 +94,7 @@ spec_version: 1
 
 judgment:
   subject: per_deposit
-  # ⚠️ THREE PREDICATES, ALL REQUIRED (LP-517 conjunction). Direction alone would ask the model about
+  # THREE PREDICATES, ALL REQUIRED (LP-517 conjunction). Direction alone would ask the model about
   # every withdrawal on the file; category alone would ask about a one-off card payment, which is
   # ordinary. The rule is about the INTERSECTION — a creditor payment that repeats.
   applicability:
@@ -102,7 +102,7 @@ judgment:
     - {tag: txn.apparent_category, op: eq, value: debt_payment}
     - {tag: txn.is_recurring, op: eq, value: "yes"}
   applicability_expected: false   # a file with no bank statement is AS-10's gap, not this rule's
-  # ⚠️ THE DISCLOSURE COMPARISON IS AN OUTCOME, NOT A SCOPE TEST, and the first version had it wrong.
+  # THE DISCLOSURE COMPARISON IS AN OUTCOME, NOT A SCOPE TEST, and the first version had it wrong.
   # `not_applicable` means the rule is irrelevant to this loan's NATURE — AS-2's earnest money on a
   # refinance, where no earnest money exists. A recurring creditor payment that turns out to be on the
   # 1003 is not that: the rule APPLIED, looked at it, and found nothing wrong. That is `satisfied`, and
@@ -124,7 +124,7 @@ judgment:
   # AS-12, where the guide attaches its own escape hatch to the readily-identifiable exemption.) An
   # `unknown` judgment still never exempts — that guard lives in `_guideline_exempts`.
   exempt_unless_judgment_in: []
-  # ⚠️ A PASS READS AS A PASS. No "confirm", no "verify", no "obtain" — this payment has already been
+  # A PASS READS AS A PASS. No "confirm", no "verify", no "obtain" — this payment has already been
   # reconciled against the application, and a processor closing it should finish the line knowing the
   # file is in order rather than being handed a task that is already done. "{value}" is `exact` or
   # `probable`, so the sentence is honest about how strong the match was without asking for anything.

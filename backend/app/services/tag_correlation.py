@@ -364,7 +364,7 @@ _TAG_LIABILITY_MATCH = "txn.stated_liability_match"
 def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
     """Produce ``txn.is_recurring`` for every transaction — DETERMINISTIC, no model, no reasoner.
 
-    ⚠️ WHY THIS IS A STAGE AND NOT A DECLARATION. `txn.is_recurring` has been declared in the vocabulary
+    WHY THIS IS A STAGE AND NOT A DECLARATION. `txn.is_recurring` has been declared in the vocabulary
     since it was written, with FR-5 and CR-1 as consumers, and produced by nothing. The generic
     materialization pass SKIPS the `transaction` subject, and Stage A/B only produces the tags it names
     — so a `mode: derived` declaration alone materializes in tests and never on a real run, which is the
@@ -373,7 +373,7 @@ def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
     to `_MATERIALIZED_SUBJECTS` — would re-run the txn_stage_a model on every transaction, so it is not
     free and is not the right trade for a tag that needs no model at all.
 
-    ⚠️ AND WHY IT NEEDED NO MODEL. `activation_bars` records FR-5 as blocked because "its declared
+    AND WHY IT NEEDED NO MODEL. `activation_bars` records FR-5 as blocked because "its declared
     'pattern across statements' is unanswerable from a context that shows one transaction". That is
     true of an AI group — the transaction context builder sends one transaction — and simply not true
     here: this sees the whole snapshot. Recurrence is a COUNT, decidable from the text, identical on

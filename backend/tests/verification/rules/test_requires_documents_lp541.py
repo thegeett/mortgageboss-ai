@@ -4,7 +4,7 @@ A `couldnt_check` today reads the same whether the document is absent or present
 those are different jobs: one becomes an outbound request to the borrower, the other is desk work.
 On LF-WCHG the split is 6 rules to request against 5 to read, and nothing in the UI distinguished them.
 
-⚠️ READ-TIME CLASSIFICATION ONLY. No verdict, gate, outcome or tag reads this field, so a wrong entry
+READ-TIME CLASSIFICATION ONLY. No verdict, gate, outcome or tag reads this field, so a wrong entry
 mis-sorts a card and can never change a conclusion. That is what makes hand-authored data safe here.
 """
 
@@ -17,7 +17,7 @@ from app.verification.rules.specs import RuleSpec, load_rule_spec
 
 
 def test_every_active_rule_declares_its_documents() -> None:
-    """⚠️ COMPLETENESS IS THE WHOLE POINT. A partial declaration is worse than none: the UI would show
+    """COMPLETENESS IS THE WHOLE POINT. A partial declaration is worse than none: the UI would show
     "request this" on the rules we happened to annotate and nothing on the rest, and a processor reads
     an absent marker as "not a missing document" rather than as "not yet classified".
 
@@ -66,7 +66,7 @@ def test_alternatives_within_a_group_are_interchangeable() -> None:
 
 
 def test_groups_are_all_required_so_a_second_document_cannot_mask_a_missing_first() -> None:
-    """⚠️ THE MODELLING ERROR, PINNED. A flat list made CR-6 read as "read what is here" on LF-WCHG —
+    """THE MODELLING ERROR, PINNED. A flat list made CR-6 read as "read what is here" on LF-WCHG —
     a file with NO credit report — purely because the Closing Disclosure it also needs was present.
 
     CR-6 needs the report AND a closing date; IN-8 needs a written OR a verbal VOE. Flattened, the two
@@ -132,7 +132,7 @@ def test_an_unclassifiable_rule_reports_nothing_missing_rather_than_guessing() -
 # --------------------------------------------------------------------------------------------- #
 @pytest.mark.parametrize("rule_id", ["PC-2", "PC-3", "FR-3"])
 def test_a_purchase_only_document_is_not_reported_missing_on_a_refinance(rule_id: str) -> None:
-    """⚠️ THE SAME MISTAKE AS OC-2'S IMPOSSIBLE ASK, in a different place. A refinance has no purchase
+    """THE SAME MISTAKE AS OC-2'S IMPOSSIBLE ASK, in a different place. A refinance has no purchase
     contract and never will, so "waiting on purchase agreement" sends a processor after something
     unobtainable. Latent when this shipped — no purchase-scoped rule was couldnt_check on the file that
     exposed it — which is exactly why it is pinned rather than left to be found later."""

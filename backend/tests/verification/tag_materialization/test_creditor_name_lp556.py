@@ -63,7 +63,7 @@ def test_a_liability_with_no_holder_abstains_rather_than_inventing_one() -> None
 # THE PII PROPERTY — this tag exists to be RENDERED
 # --------------------------------------------------------------------------------------------- #
 def test_an_account_number_inside_the_creditor_field_is_scrubbed() -> None:
-    """⚠️ A BUREAU PRINTS ACCOUNT NUMBERS INSIDE THE CREDITOR FIELD often enough that the liability
+    """A BUREAU PRINTS ACCOUNT NUMBERS INSIDE THE CREDITOR FIELD often enough that the liability
     CONTEXT builder routes every list value through the scrubber for exactly this reason. A tag whose
     whole purpose is to reach a processor's screen must not be the one place that skips it."""
     scrubbed = _name(holder_name="CHASE CARD 4111111111111111")

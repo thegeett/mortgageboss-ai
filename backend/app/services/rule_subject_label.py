@@ -77,7 +77,7 @@ def _deposit_label(load_bearing_tags: Sequence[Mapping[str, Any]]) -> str:
     """A per-transaction subject label from its inline tags: *"Deposit of $20,000 on 3/27"* (generalising
     LP-376's amount chip). Degrades honestly — amount then amount-only then a generic — never a hash.
 
-    ⚠️ DIRECTION-AWARE, AND IT WAS NOT. Every transaction subject was labelled a DEPOSIT, which was true
+    DIRECTION-AWARE, AND IT WAS NOT. Every transaction subject was labelled a DEPOSIT, which was true
     while only money-IN rules enumerated them (AS-1, AS-2, AS-12 all scope `txn.is_money_in eq in`).
     FR-5 is the first rule that reads money OUT, and it would have called a $3,286.21 mortgage payment
     "Deposit of $3,286.21" — a label that contradicts the finding printed beside it.
@@ -89,7 +89,7 @@ def _deposit_label(load_bearing_tags: Sequence[Mapping[str, Any]]) -> str:
     amount = _tag_value(load_bearing_tags, _AMOUNT_TAG)
     if amount is None:
         return {"in": "a deposit", "out": "a payment"}.get(direction or "", "a transaction")
-    # ⚠️ THE AMOUNT AND DATE IDENTIFY THE SUBJECT; THE NOUN ONLY DRESSES IT. A first version required
+    # THE AMOUNT AND DATE IDENTIFY THE SUBJECT; THE NOUN ONLY DRESSES IT. A first version required
     # the direction before it would print either, and AS-12's findings do not carry
     # `txn.is_money_in` — their inline tags come from `reasoned_over`, which excludes the applicability
     # predicate on purpose (LP-509-A1: it has already filtered the subjects, so it carries no signal).

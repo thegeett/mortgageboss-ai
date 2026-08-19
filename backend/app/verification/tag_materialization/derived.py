@@ -2881,7 +2881,7 @@ def _normalise_vocab(raw: str) -> str:
 # The AS-12 fix (LP-554/555) is the precedent: an identifying value the finding carries INLINE, as
 # provenance, so the read path needs no snapshot. `liab.is_disputed` proves the shape for this subject.
 #
-# ⚠️ SCRUBBED, NOT RAW. A bureau prints an account number inside the creditor field often enough that
+# SCRUBBED, NOT RAW. A bureau prints an account number inside the creditor field often enough that
 # the liability CONTEXT builder routes every list value through `_scrub_list_value` for exactly this
 # reason. A tag whose whole purpose is to be RENDERED to a processor must not be the one place that
 # skips it.
@@ -4488,13 +4488,13 @@ def _date_or_none(tag: Tag | None) -> date | None:
 # --------------------------------------------------------------------------------------------- #
 # LP-546 — txn.is_recurring: the "pattern across statements" question, answered deterministically
 # --------------------------------------------------------------------------------------------- #
-# ⚠️ THIS TAG WAS DECLARED AND UNPRODUCED SINCE THE VOCABULARY WAS WRITTEN, and the reason is recorded
+# THIS TAG WAS DECLARED AND UNPRODUCED SINCE THE VOCABULARY WAS WRITTEN, and the reason is recorded
 # in activation_bars: "FR-5's declared 'pattern across statements' is unanswerable from a context that
 # shows one transaction." That is true of an AI group — the transaction context builder sends ONE
 # transaction — and it is not true here. A derived producer receives the whole snapshot, so it can see
 # every transaction on the file, which is exactly what recurrence requires.
 #
-# ⚠️ DERIVED, NOT AI, AND THAT IS THE POINT. Whether the same payee appears in two different months is
+# DERIVED, NOT AI, AND THAT IS THE POINT. Whether the same payee appears in two different months is
 # a COUNT, not a judgment: it is decidable from the text, identically on every run, with no calibration
 # round and no per-transaction model call. The judgment FR-5 needs — does a recurring debit to an
 # undisclosed party imply an obligation — stays with the rule, where an expert can weigh it.
@@ -4505,7 +4505,7 @@ _RECURRENCE_MIN_MONTHS = 2
 # identifiers already redacted at rest, which leaves shorter runs like a 4-digit suffix.
 _DIGITS = re.compile(r"\d+")
 _NON_WORD = re.compile(r"[^A-Z ]+")
-# ⚠️ THE REDACTION MARKER MUST GO FIRST, and it is not cosmetic. Descriptions have 9+-digit identifiers
+# THE REDACTION MARKER MUST GO FIRST, and it is not cosmetic. Descriptions have 9+-digit identifiers
 # replaced with "[REDACTED-ID]" at rest, so one occurrence of an obligation can carry the marker where
 # the next carries a short reference the redactor left alone. Stripping only digits left
 # "UNITEDWHOLESALE LOAN PAYMT REDACTED ID" against "UNITEDWHOLESALE LOAN PAYMT" — the same monthly
@@ -4571,12 +4571,12 @@ def txn_is_recurring(
 # a processor to check the borrower's ordinary bills forever. With it the rule fires only on a payee
 # that matches NOTHING disclosed, which on LF-WCHG is zero findings.
 #
-# ⚠️ BY PAYEE, NEVER BY AMOUNT, and LF-WCHG proves why. Citi is debited $3,122.77 a month against a
+# BY PAYEE, NEVER BY AMOUNT, and LF-WCHG proves why. Citi is debited $3,122.77 a month against a
 # disclosed $49.00 — and the $49 is CORRECT: the borrower pays the card in full, and Fannie uses the
 # MINIMUM payment for a revolving account in the DTI. An amount comparison would fire a fraud-adjacent
 # finding on a borrower doing exactly the right thing, on the first real file it ever saw.
 #
-# ⚠️ NOT `borrower_name_matching`, deliberately. That matcher is built for PEOPLE — nickname maps
+# NOT `borrower_name_matching`, deliberately. That matcher is built for PEOPLE — nickname maps
 # (Bob/Robert), "Last, First" reordering, generational suffixes. Pointing it at institutions would
 # apply nickname logic to lenders. This is a small purpose-built comparison instead, and the
 # difference is stated here so the next reader does not "fix" it by reusing the wrong tool.
@@ -4652,7 +4652,7 @@ def txn_stated_liability_match(
 ) -> tuple[JsonValue, str]:
     """txn.stated_liability_match — exact / probable / none / unknown.
 
-    ⚠️ "unknown" IS LOAD-BEARING, not a courtesy value. An application that states NO liabilities must
+    "unknown" IS LOAD-BEARING, not a courtesy value. An application that states NO liabilities must
     not read as "nothing matched": that would fire FR-5 on every payment the borrower makes, on the
     files with the least information. Absent is not none (the §8 contract).
     """

@@ -273,7 +273,7 @@ FR-5:
   # on. A self-consistency round over constructed cases with a full three-value spread is the same gate
   # every other judgment rule passed, and it has not been run.
   #
-  # ⚠️ THE MEASUREMENT WILL NOT SETTLE THE THING THAT MATTERS MOST. On the only corpus that carries bank
+  # THE MEASUREMENT WILL NOT SETTLE THE THING THAT MATTERS MOST. On the only corpus that carries bank
   # statements (ONE loan file, LP-543) every recurring creditor payment is already disclosed on the 1003,
   # so this rule would fire four times and add nothing. That is a statement about one compliant borrower,
   # not about the rule — a debt that is undisclosed is by construction absent from the file we would

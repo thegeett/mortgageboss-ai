@@ -53,7 +53,7 @@ _EVIDENCE_LIMIT = 600
 def _evidence(reasoning: str) -> str | None:
     """One tag's reasoning, made fit for a processor: identifiers stripped, length capped.
 
-    ⚠️ TRANSLATED, NOT DELETED, and the first attempt got this wrong. Several tag prompts REQUIRE the
+    TRANSLATED, NOT DELETED, and the first attempt got this wrong. Several tag prompts REQUIRE the
     model to cite the tags it used by id ("cite the SPECIFIC tags you relied on (by their tag id)"), so
     this text reliably contains `occupancy.consistent_with_signals` and MISMO paths like
     `declaration.intenttooccupytype`. That is right for a tag's own provenance and wrong in front of a
@@ -180,7 +180,7 @@ def documents_named(text: str) -> set[str]:
 def unrequested_documents(finding: Finding, summary: FactSummary, action: str) -> set[str]:
     """Documents the ACTION asks for that neither the rule nor its own template ever asked for.
 
-    ⚠️ FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
+    FOUND ON A REAL FILE, AND IT WAS UNACHIEVABLE. OC-2's template fix says "Confirm the stated
     occupancy is what the borrower intends". After LP-537 gave the composer the tag reasoning — which
     included "no purchase contract states a property address" — it rewrote the action as "Obtain a
     purchase contract that states the property address". LF-WCHG is a REFINANCE. There is no purchase
@@ -225,7 +225,7 @@ async def _store(db: AsyncSession, key: str, composition: Composition) -> None:
 def _with_derivation(message: str, finding: Finding) -> str:
     """Re-attach the materiality arithmetic the template carried, if the composition lost it.
 
-    ⚠️ NOT LEFT TO THE MODEL, and the first composed run is why. The derivation is an auditability
+    NOT LEFT TO THE MODEL, and the first composed run is why. The derivation is an auditability
     requirement — a processor who sees "$2,000.00 is above the $1,316.67 (10% of $13,166.70 monthly
     qualifying income) materiality floor" can argue with the threshold; one who sees "exceeds the
     materiality threshold" cannot. Of five AS-12 findings, the model dropped the clause entirely from

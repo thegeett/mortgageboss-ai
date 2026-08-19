@@ -160,7 +160,7 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
 # still wrote "The system cannot verify derogatory seasoning requirements" on the first real run — a
 # processor does not care what the system can do, only what the file is missing. Enforced rather than
 # requested, because a prompt instruction is a hope and a check is a guarantee.
-# ⚠️ NARROW ON PURPOSE — only phrases that name the SOFTWARE AS AN ACTOR.
+# NARROW ON PURPOSE — only phrases that name the SOFTWARE AS AN ACTOR.
 #
 # "this check" and "could not be determined" were on this list and are not: both appear in our own
 # TEMPLATE messages, which the model receives as its `problem` input, so banning them would reject a

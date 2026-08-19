@@ -692,7 +692,7 @@ class JudgmentEval(BaseModel):
     # AS-12 clears on a deposit's source being readily identifiable, FR-5 on a payment already being on
     # the application, and one hardcoded sentence told a processor the wrong thing about the other.
     #
-    # ⚠️ IT IS A PASS, SO IT READS AS ONE. No "obtain", "confirm", "verify" or "review" — a processor
+    # IT IS A PASS, SO IT READS AS ONE. No "obtain", "confirm", "verify" or "review" — a processor
     # reading a satisfied finding should close it feeling the file is in order, not be handed a task
     # that has already been done. `{value}` interpolates the matched condition's value.
     exempt_message: str | None = None
@@ -991,7 +991,7 @@ class RuleSpec(BaseModel):
     # indistinguishable from one that needs nothing, and the grouping would silently under-report —
     # the same failure as a badge that only covers the cases we happen to know.
     #
-    # ⚠️ A LIST OF ALTERNATIVE GROUPS, not a flat list, and the first version got this wrong. Each inner
+    # A LIST OF ALTERNATIVE GROUPS, not a flat list, and the first version got this wrong. Each inner
     # group is "ANY ONE of these will do"; every group must be satisfied. IN-8 accepts a written OR a
     # verbal VOE, while CR-6 needs the credit report AND a closing date — flattened, both read the same,
     # and CR-6 classified as "read what is here" on a file whose credit report is absent, purely because

@@ -5,7 +5,7 @@ unanswerable from a context that shows one transaction."* That is true of an AI 
 context builder sends ONE transaction — and simply not true of a deterministic producer, which receives
 the whole snapshot.
 
-⚠️ SO IT NEEDS NO MODEL. Whether the same payee appears in two different months is a COUNT: decidable
+SO IT NEEDS NO MODEL. Whether the same payee appears in two different months is a COUNT: decidable
 from the text, identical on every run, no calibration round, no per-transaction call. The JUDGMENT that
 count feeds — does a recurring debit to an undisclosed party imply an obligation — stays with the rule,
 where an expert can weigh it.
@@ -65,7 +65,7 @@ def _value(snapshot: Snapshot, content_id: str) -> str:
 # THE NORMALISATION, WHERE THE REAL DATA BITES
 # --------------------------------------------------------------------------------------------- #
 def test_the_redaction_marker_does_not_split_one_obligation_into_two() -> None:
-    """⚠️ CAUGHT ON REAL DESCRIPTIONS, and it is not cosmetic. A 9+-digit identifier is replaced with
+    """CAUGHT ON REAL DESCRIPTIONS, and it is not cosmetic. A 9+-digit identifier is replaced with
     "[REDACTED-ID]" at rest, so ONE occurrence of a monthly mortgage payment can carry the marker while
     the next carries a short reference the redactor left alone. Stripping digits alone left
 
@@ -99,7 +99,7 @@ def test_the_same_payee_in_two_months_is_recurring() -> None:
 
 
 def test_two_charges_in_ONE_month_are_not_recurring() -> None:
-    """⚠️ MONTHS, NOT OCCURRENCES, DELIBERATELY. Two charges from the same merchant three days apart are
+    """MONTHS, NOT OCCURRENCES, DELIBERATELY. Two charges from the same merchant three days apart are
     a shopping habit; the same payee in two different months is the shape a monthly obligation makes,
     which is the only shape FR-5 asks about. Counting occurrences would let one busy month masquerade as
     a pattern — and on a file carrying one or two statements, that is the common case."""

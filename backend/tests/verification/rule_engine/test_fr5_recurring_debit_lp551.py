@@ -4,7 +4,7 @@ FR-5 is the FIRST rule that reads money OUT. Every other transaction rule scopes
 `txn.is_money_in eq in`, so a debt visible only as a recurring bank debit — a private or family loan,
 a rent-to-own, anything not reported to the bureaus — was invisible.
 
-⚠️ IT ACTIVATED ON A SELF-CONSISTENCY RATE, NOT ON MEASURED ACCURACY, so ratification is the entire
+IT ACTIVATED ON A SELF-CONSISTENCY RATE, NOT ON MEASURED ACCURACY, so ratification is the entire
 safety substitute (ADR-378): every finding it produces must carry `ratification_pending`, or an
 unmeasured judgment ships with no human in the loop. That is what the first test proves.
 """
@@ -121,7 +121,7 @@ def test_fr5_is_live() -> None:
 # --------------------------------------------------------------------------------------------- #
 @pytest.mark.parametrize("match", ["exact", "probable"])
 async def test_a_payment_matching_a_disclosed_liability_is_SATISFIED(match: str) -> None:
-    """⚠️ SATISFIED, NOT not_applicable — and the first version had this wrong.
+    """SATISFIED, NOT not_applicable — and the first version had this wrong.
 
     `not_applicable` means the rule is irrelevant to this loan's NATURE: AS-2's earnest money on a
     refinance, where no earnest money exists. A recurring creditor payment that turns out to be on the
@@ -147,7 +147,7 @@ async def test_the_pass_names_the_liability_it_matched() -> None:
 
 
 async def test_an_application_with_no_liabilities_abstains_rather_than_clearing() -> None:
-    """⚠️ "unknown" MUST NOT EXEMPT, and the FAIL-CLOSED GATE is what stops it — not the exemption.
+    """ "unknown" MUST NOT EXEMPT, and the FAIL-CLOSED GATE is what stops it — not the exemption.
 
     The comparison tag is load-bearing, so an "unknown" value short-circuits to couldnt_check before
     the judgment runs at all. That is the §8 answer and a stronger guarantee than the exemption could

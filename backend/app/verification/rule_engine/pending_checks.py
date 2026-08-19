@@ -71,7 +71,7 @@ def _to_pending(evaluation: RuleEvaluation, rule_name: str, in_scope: int) -> Ru
     the fact that the rule is applicable survives, as a Needs-Attention flag naming the scope, never the
     judgment.
 
-    ⚠️ ONE FLAG PER RULE, NOT ONE PER SUBJECT. This shipped per-subject and the first per-TRANSACTION
+    ONE FLAG PER RULE, NOT ONE PER SUBJECT. This shipped per-subject and the first per-TRANSACTION
     blocked rule (FR-5) put SEVEN identical rows in front of a processor, each saying the same nothing:
     "something is in scope, the check is not active, review it manually." A loan-level rule made that
     one line; a per-transaction rule makes it N, and N copies of a sentence that carries no finding is
