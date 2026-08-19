@@ -54,6 +54,20 @@ tags:
   # mortgage being replaced is paid off at closing, so counting its payment alongside the new
   # housing payment charges the same property twice. Both tags DESCRIBE; DT-8 judges, and neither
   # decides WHICH mortgage is being refinanced — that question goes to a processor.
+  # LP-575 — DT-6's SCOPE. Once the liability a statement matches is marked paid off at closing,
+  # DT-6's remedy (raise the stated payment to the full PITIA) is the wrong branch: the obligation
+  # does not survive closing, so the two figures stop mattering for the ratio. Scope, not an outcome —
+  # calling it `satisfied` would be a false all-clear on figures that genuinely disagree.
+  reo.statement_liability_paid_off:
+    entity: doc
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Is the stated mortgage liability this statement matched marked as paid off at closing? Read from
+      the ONE matcher (ADR-375) so DT-6 cannot be scoped by a different pairing than its payment
+      comparison used. "unknown" when the statement matched no single liability, which keeps DT-6 in
+      scope to resolve its own couldnt_check.
+    produced_by: derived
   liab.stated_is_mortgage:
     entity: liability
     value_type: enum

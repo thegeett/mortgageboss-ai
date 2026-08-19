@@ -107,10 +107,18 @@ spec_version: 1
 deterministic:
   # ⚠️ A DOCUMENT-TYPE APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487) — identical to RE-1's, because
   # both rules read the same matcher over the same documents.
+  # LP-575 — TWO conditions now. The second scopes DT-6 OUT once the liability this statement
+  # matches is marked paid off at closing: the remedy below is "raise the stated payment to the full
+  # PITIA", which is right only where the obligation SURVIVES closing. On a refinance the subject
+  # lien does not — DT-8 asks about that — and a processor told to raise a payment AND to remove it
+  # is being given two contradictory instructions about one debt.
+  #
+  # `ne yes`, deliberately: "no" AND "unknown" both keep the rule in scope. An unmatched statement
+  # has no marking to read, and an abstain must never be laundered into a scope exclusion (§8) — it
+  # stays in scope and resolves to DT-6's own couldnt_check.
   applicability:
-    tag: document.document_type
-    op: eq
-    value: mortgage_statement
+    - {tag: document.document_type, op: eq, value: mortgage_statement}
+    - {tag: reo.statement_liability_paid_off, op: ne, value: "yes"}
   # ⚠️ FALSE DELIBERATELY — a missing mortgage statement is not a gap (see RE-1.yaml).
   applicability_expected: false
   load_bearing_tags:

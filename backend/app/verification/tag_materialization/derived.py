@@ -4107,6 +4107,11 @@ class _StatementMatch(NamedTuple):
     stated_payment: Decimal | None
     statement_payment: Decimal | None
     statement_escrow: Decimal | None
+    # LP-575 — the MATCHED liability's payoff marking, carried here rather than re-derived. ADR-375's
+    # whole point is that one matcher answers every question about the same pair; a second lookup
+    # could pair the statement with a different liability than DT-6's comparison used. Defaulted so
+    # the abstaining branches (which have no matched liability) are unchanged.
+    stated_paid_off: str | None = None
 
 
 def _entry_decimal(entry: DocumentEntry, field_name: str) -> Decimal | None:
@@ -4286,6 +4291,7 @@ def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _Statement
         stated_payment,
         statement_payment,
         statement_escrow,
+        matches[0].get("paid_off_at_closing"),
     )
 
 
@@ -4313,6 +4319,49 @@ def _reo_statement_disclosure(
     if match.outcome == "unmatched":
         return "undisclosed", match.reason
     return _UNKNOWN, match.reason
+
+
+def _reo_statement_liability_paid_off(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """reo.statement_liability_paid_off — is the liability THIS statement matched marked as retired at
+    closing? (LP-575, DT-6's scope)
+
+    DT-6 asks whether the application's stated payment covers the servicer's billed PITIA, and its
+    remedy is to RAISE the stated figure to the full payment. That remedy is right only where the
+    obligation survives closing. On a refinance the subject property's lien does not: it is paid off,
+    and DT-8 is the rule that asks about it. Once someone has answered that question, DT-6 must stop
+    recommending the opposite — a processor told to raise a payment AND to remove it is being given
+    two contradictory instructions about one debt.
+
+    So this is DT-6's SCOPE, not an outcome. `not_applicable` means the rule is irrelevant to the
+    subject's nature (§8), and a statement for a loan being retired is exactly that — the stated and
+    billed figures still disagree and always will, they simply stop mattering for the ratio. Calling
+    it `satisfied` would be a false all-clear.
+
+    Reads the ONE matcher (ADR-375), so DT-6 cannot end up scoped by a different pairing than the one
+    its payment comparison used. Per mortgage statement; DECLINES on any other subject.
+    """
+    if not isinstance(subject_raw, DocumentEntry):
+        return None, "not a document subject"
+    if (subject_raw.document_type or "") != _REO_STATEMENT_DOC_TYPE:
+        return None, "not a mortgage statement"
+    match = _reo_match_statement(snapshot, subject_raw)
+    if match.outcome != "matched":
+        # An unmatched or ambiguous statement has no liability whose marking could be read. `unknown`
+        # keeps DT-6 IN scope, where it resolves to its own couldnt_check — an abstain must not be
+        # laundered into a scope exclusion (§8).
+        return _UNKNOWN, "this statement was not matched to exactly one stated mortgage liability"
+    marked = (match.stated_paid_off or "").strip().casefold() == "true"
+    return (
+        ("yes" if marked else "no"),
+        (
+            "the stated liability this statement matches is marked paid off at closing, so its "
+            "payment no longer belongs in the debt-to-income ratio at all"
+            if marked
+            else "the stated liability this statement matches is not marked paid off at closing"
+        ),
+    )
 
 
 def _reo_statement_payment_coverage(
@@ -5868,6 +5917,8 @@ _RECIPES: dict[str, Recipe] = {
     "liability_creditor_name": liability_creditor_name,  # LP-556  # LP-486 / ADR-376
     # LP-573 — DT-8's two inputs. Both DECLINE on a credit-report tradeline: the type question is
     # ADR-353's open-vocabulary classification, and a tradeline carries no payoff marking at all.
+    # LP-575 — DT-6's scope, off the SAME matcher as its payment comparison (ADR-375).
+    "reo_statement_liability_paid_off": _reo_statement_liability_paid_off,
     "liability_stated_is_mortgage": _liability_stated_is_mortgage,
     "liability_payoff_marked": _liability_payoff_marked,
     "contract_days_until_closing": _contract_days_until_closing,

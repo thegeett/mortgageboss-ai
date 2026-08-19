@@ -355,6 +355,7 @@ tags:
   # against allowed_values (see the liab.account_type note above), and both of these constrain an
   # open source value to a closed enum: MISMO's LiabilityType to yes/no, and a nullable boolean to
   # yes/no. Producing them parsed would ship "MortgageLoan" and "True" as tag values.
+  reo.statement_liability_paid_off: {mode: derived, subject: document, data: reo_statement_liability_paid_off}
   liab.stated_is_mortgage: {mode: derived, subject: liability, data: liability_stated_is_mortgage}
   liab.payoff_marked: {mode: derived, subject: liability, data: liability_payoff_marked}
   # LP-485 — the date-compare family. The two parsed dates are document_type-SCOPED so an unrelated

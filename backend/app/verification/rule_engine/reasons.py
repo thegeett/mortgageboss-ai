@@ -162,6 +162,11 @@ _FACT_LABELS: dict[str, str] = {
     # LP-573 (DT-8) — these read to a PROCESSOR, so they name the application's own fact rather than
     # the tag. A couldnt_check on either means the file does not say what kind of debt this is, or
     # whether anyone has already answered the payoff question.
+    # LP-575 — DT-6's scope tag. A couldnt_check citing it means the statement could not be paired
+    # with one stated liability, so nothing could be read about that debt's payoff either way.
+    "reo.statement_liability_paid_off": (
+        "whether the liability this statement matches is marked as paid off at closing"
+    ),
     "liab.stated_is_mortgage": "the type the application states for this liability",
     "liab.payoff_marked": "whether this obligation is marked as paid off at closing",
     "txn.is_recurring": "whether this payment recurs across months",
