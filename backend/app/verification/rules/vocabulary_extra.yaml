@@ -58,6 +58,25 @@ tags:
   # DT-6's remedy (raise the stated payment to the full PITIA) is the wrong branch: the obligation
   # does not survive closing, so the two figures stop mattering for the ratio. Scope, not an outcome —
   # calling it `satisfied` would be a false all-clear on figures that genuinely disagree.
+  # LP-576 — DT-6's Apply: which liability to raise, and to what. Both come from the ONE matcher
+  # (ADR-375), so the Apply cannot edit a different liability than the payment comparison used.
+  reo.statement_matched_holder:
+    entity: doc
+    value_type: string
+    allowed_values: null
+    description: >-
+      The holder of the stated mortgage liability this statement matched — DT-6's Apply target. A
+      governed rule's subjects are content ids, never DB primary keys, so the holder is the business
+      key both sides share. "unknown" when the statement matched no single liability.
+    produced_by: derived
+  reo.statement_billed_payment:
+    entity: doc
+    value_type: number
+    allowed_values: null
+    description: >-
+      The servicer's TOTAL monthly payment from this statement — the figure DT-6's Apply writes onto
+      the stated liability. Already the PITIA; escrow is a PORTION of it and is never added to it.
+    produced_by: derived
   reo.statement_liability_paid_off:
     entity: doc
     value_type: enum

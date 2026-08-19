@@ -125,6 +125,24 @@ deterministic:
     - reo.statement_payment_coverage
   gated_tags:
     - reo.statement_payment_coverage
+  # LP-576 — DT-6 could tell a processor to raise the stated payment and could not do it for them:
+  # `correct_liability_payment` had been implemented, tested and given an undo, and declared by NO
+  # spec. This wires it up.
+  #
+  # BOTH FIELDS COME FROM THE ONE MATCHER (ADR-375). The holder is the Apply's target because a
+  # governed rule's subjects are content ids, never `stated_liabilities` primary keys; taking it from
+  # the matcher means the Apply cannot edit a DIFFERENT liability than the comparison used. If either
+  # field is unresolvable the resolver drops the whole apply — the correct outcome on a statement
+  # that matched nothing, not a gap.
+  #
+  # ⚠️ THE VALUE IS THE STATEMENT'S `monthly_payment`, WHICH IS ALREADY THE PITIA. Escrow is a
+  # PORTION of it, never an addend — the header's single most important correctness point. An Apply
+  # that summed them would write an inflated payment straight onto the loan and overstate the DTI.
+  apply:
+    action: correct_liability_payment
+    fields:
+      holder_name: {tag: reo.statement_matched_holder}
+      monthly_payment: {tag: reo.statement_billed_payment}
   operands: {}
   outcomes:
     - verdict: satisfied

@@ -4112,6 +4112,11 @@ class _StatementMatch(NamedTuple):
     # could pair the statement with a different liability than DT-6's comparison used. Defaulted so
     # the abstaining branches (which have no matched liability) are unchanged.
     stated_paid_off: str | None = None
+    # LP-576 — the matched liability's HOLDER, so DT-6's Apply can target the row it just compared
+    # against. A governed rule's subjects are content ids, never DB primary keys, so the holder is
+    # the business key — and taking it from the matcher means the Apply cannot edit a different
+    # liability than the comparison used.
+    stated_holder: str | None = None
 
 
 def _entry_decimal(entry: DocumentEntry, field_name: str) -> Decimal | None:
@@ -4292,6 +4297,7 @@ def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _Statement
         statement_payment,
         statement_escrow,
         matches[0].get("paid_off_at_closing"),
+        holder or None,
     )
 
 
@@ -4319,6 +4325,52 @@ def _reo_statement_disclosure(
     if match.outcome == "unmatched":
         return "undisclosed", match.reason
     return _UNKNOWN, match.reason
+
+
+def _reo_statement_matched_holder(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """reo.statement_matched_holder — WHICH stated liability this statement matched (LP-576).
+
+    DT-6's Apply target. Only resolves on a `matched` outcome: with no single matched liability there
+    is no row to raise, and the apply resolver drops the whole block when a field is unresolvable —
+    which is the correct outcome, not a gap.
+    """
+    if not isinstance(subject_raw, DocumentEntry):
+        return None, "not a document subject"
+    if (subject_raw.document_type or "") != _REO_STATEMENT_DOC_TYPE:
+        return None, "not a mortgage statement"
+    match = _reo_match_statement(snapshot, subject_raw)
+    if match.outcome != "matched" or not match.stated_holder:
+        return _UNKNOWN, "this statement was not matched to exactly one stated mortgage liability"
+    return (
+        match.stated_holder,
+        f"this statement matches the liability held by {match.stated_holder}",
+    )
+
+
+def _reo_statement_billed_payment(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """reo.statement_billed_payment — the servicer's TOTAL monthly payment (LP-576).
+
+    The figure DT-6's Apply writes onto the stated liability. THIS IS ALREADY THE PITIA and is NOT
+    added to `escrow_amount` — the extractor defines `monthly_payment` as "the total monthly payment
+    (principal+interest+escrow)" and `escrow_amount` as the PORTION within it. Summing them is the
+    mistake DT-6's own spec header calls its single most important correctness point, and an Apply
+    that did it would write an inflated payment straight onto the loan.
+    """
+    if not isinstance(subject_raw, DocumentEntry):
+        return None, "not a document subject"
+    if (subject_raw.document_type or "") != _REO_STATEMENT_DOC_TYPE:
+        return None, "not a mortgage statement"
+    match = _reo_match_statement(snapshot, subject_raw)
+    if match.statement_payment is None:
+        return _UNKNOWN, "this statement states no total monthly payment"
+    return (
+        str(match.statement_payment),
+        f"the servicer bills {match.statement_payment} in total each month",
+    )
 
 
 def _reo_statement_liability_paid_off(
@@ -5919,6 +5971,9 @@ _RECIPES: dict[str, Recipe] = {
     # ADR-353's open-vocabulary classification, and a tradeline carries no payoff marking at all.
     # LP-575 — DT-6's scope, off the SAME matcher as its payment comparison (ADR-375).
     "reo_statement_liability_paid_off": _reo_statement_liability_paid_off,
+    # LP-576 — DT-6's Apply target and value, both off the SAME matcher as its comparison.
+    "reo_statement_matched_holder": _reo_statement_matched_holder,
+    "reo_statement_billed_payment": _reo_statement_billed_payment,
     "liability_stated_is_mortgage": _liability_stated_is_mortgage,
     "liability_payoff_marked": _liability_payoff_marked,
     "contract_days_until_closing": _contract_days_until_closing,

@@ -134,15 +134,26 @@ def _result(
         verdict=verdict,
         verdict_confidence=verdict_confidence,
         load_bearing_tags=_load_bearing(spec.deterministic, subject_tags),
-        # LP-564 — ONLY A FIRED VERDICT. `_result` is the single constructor for all eight paths, so
-        # resolving unconditionally put an apply block on every outcome. CR-1's DEFAULT outcome is a
+        # LP-564 — NOT ON EVERY OUTCOME. `_result` is the single constructor for all eight paths, so
+        # resolving unconditionally put an apply block on every one. CR-1's DEFAULT outcome is a
         # couldnt_check reading "this debt could not be matched against the application's stated
         # liabilities" — and its fields resolve there perfectly well, so the finding that says it could
         # not tell offered a primary Apply button that would insert a StatedLiability for a debt that
         # may already be on the 1003. A duplicated debt and an inflated DTI, off an abstention.
+        #
+        # LP-576 — BUT `needs_review` BELONGS, and restricting to FIRED alone was an over-correction
+        # that made DT-8's Apply unreachable. A rule that can never fire — DT-6 and DT-8 both, by
+        # design, because their question is "which branch is this?" rather than "here is a defect" —
+        # surfaces `needs_review`, and the Apply IS the human's answer to it. Without this, the
+        # remediation those rules exist to offer had no button.
+        #
+        # The three excluded verdicts are excluded for one reason each: `couldnt_check` is an
+        # ABSTENTION (the CR-1 trap above), `satisfied` has nothing to remediate, and
+        # `not_applicable` is out of scope. Only a verdict that asserts something actionable about
+        # the subject may carry an apply.
         apply=(
             _resolve_apply(spec.deterministic.apply, subject_tags)
-            if verdict is Verdict.FIRED
+            if verdict in (Verdict.FIRED, Verdict.NEEDS_REVIEW)
             else None
         ),
         threshold_used=threshold_used,
