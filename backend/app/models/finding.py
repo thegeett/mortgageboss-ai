@@ -97,6 +97,14 @@ class FindingResolutionStatus(StrEnum):
     OPEN = "open"
     APPLIED = "applied"
     OVERRIDDEN = "overridden"
+    # LP-560 — a human REVIEWED an AI judgment and AGREED with it. Distinct from OVERRIDDEN, which
+    # dismisses a finding as wrong, and from APPLIED, which changes the loan.
+    #
+    # This is the act ADR-336's whole safety story rests on: an uncalibrated judgment rule is allowed
+    # to run BECAUSE `ratification_pending` promises a person signs each verdict. Until now there was
+    # no way to perform it — the only route to clearing one was Override, so every agreement was
+    # recorded as a rejection and the control could not be audited at all.
+    RATIFIED = "ratified"
     RESOLVED = "resolved"
     ACCEPTED_RISK = "accepted_risk"
     WAIVED = "waived"

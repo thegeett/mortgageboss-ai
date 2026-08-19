@@ -33,6 +33,7 @@ from app.schemas.verification import (
     FindingPublic,
     NoteRequest,
     OverrideRequest,
+    RatifyRequest,
     RequestDocsRequest,
     RuleFindingPublic,
     VerificationRunPublic,
@@ -48,11 +49,13 @@ from app.services.finding_blocking import open_in_scope_findings
 from app.services.finding_impact import has_apply_spec, preview_finding_apply
 from app.services.finding_resolution import (
     CannotApplyError,
+    CannotRatifyError,
     CannotUndoError,
     accept_risk_finding,
     add_finding_note,
     apply_finding,
     override_finding,
+    ratify_finding,
     request_docs_for_finding,
     undo_finding,
 )
@@ -456,6 +459,36 @@ async def apply_finding_endpoint(
         # LP-558 — the change did not happen, so the finding stays OPEN and the caller is told. The
         # alternative shipped for a while: a finding marked APPLIED over a loan file nothing was
         # written to, and a DTI the processor trusted that had not moved.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(loan_file)
+    return await _build_status(db, loan_file=loan_file, user=current_user)
+
+
+@router.post("/{identifier}/findings/{finding_id}/ratify", response_model=VerificationStatusPublic)
+async def ratify_finding_endpoint(
+    identifier: str,
+    finding_id: UUID,
+    payload: RatifyRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> VerificationStatusPublic:
+    """Record that a human reviewed an AI judgment and AGREED with it (LP-560).
+
+    Changes no structured data. What changes is that the verdict now carries a person's name — the
+    thing `ratification_pending` promises and that, until now, nothing could perform. The note is
+    optional; Override's reason is required because it contradicts the system, where this agrees with
+    what the finding already says.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
+    if finding is None:
+        raise _FINDING_NOT_FOUND
+    try:
+        await ratify_finding(db, finding=finding, actor_user_id=current_user.id, note=payload.note)
+    except CannotRatifyError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(loan_file)

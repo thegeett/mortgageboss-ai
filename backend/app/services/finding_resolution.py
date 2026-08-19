@@ -207,6 +207,14 @@ async def accept_risk_finding(
     return finding
 
 
+class CannotRatifyError(Exception):
+    """A finding that is not awaiting ratification cannot be ratified (LP-560).
+
+    Ratification means "I reviewed the AI's judgment and agree". A deterministic verdict was never a
+    judgment, so signing it would record a review that did not happen and make the audit trail claim
+    more than it can support."""
+
+
 class CannotApplyError(Exception):
     """An apply that could not perform its structured change (LP-558).
 
@@ -225,7 +233,56 @@ _UNDOABLE = (
     FindingResolutionStatus.APPLIED,
     FindingResolutionStatus.OVERRIDDEN,
     FindingResolutionStatus.ACCEPTED_RISK,
+    # LP-560 — a ratification is a signature, and a signature given in error has to be retractable.
+    # It made no data change, so reversing it is the OVERRIDDEN path: flip back to OPEN.
+    FindingResolutionStatus.RATIFIED,
 )
+
+
+async def ratify_finding(
+    db: AsyncSession,
+    *,
+    finding: Finding,
+    actor_user_id: UUID,
+    note: str | None = None,
+) -> Finding:
+    """Record that a human reviewed an AI judgment and AGREED with it (LP-560).
+
+    Changes NO structured data — the loan is unchanged and no ratio moves. What changes is that the
+    verdict now carries a person's name, which is the only thing that made shipping an uncalibrated
+    judgment rule defensible in the first place.
+
+    The note is OPTIONAL, deliberately, where Override's reason is required. Overriding contradicts the
+    system and has to say why; ratifying agrees with what is already written on the finding, and
+    demanding a second explanation of it would be friction on the common path — the path we want taken.
+    """
+    if not finding.details or not finding.details.get("ratification_pending"):
+        raise CannotRatifyError(
+            "this finding is not awaiting ratification — only an AI judgment can be ratified"
+        )
+    if finding.resolution_status is not FindingResolutionStatus.OPEN:
+        raise CannotRatifyError(f"finding is already {finding.resolution_status.value}")
+
+    finding.resolution_status = FindingResolutionStatus.RATIFIED
+    finding.resolved_by_user_id = actor_user_id
+    finding.resolved_at = utcnow()
+    if note and note.strip():
+        finding.resolution_note = note.strip()
+
+    await log_activity(
+        db,
+        loan_file_id=finding.loan_file_id,
+        activity_type=ActivityType.FINDING_RESOLVED,
+        summary=f"Finding {finding.rule_id} ratified",
+        actor_user_id=actor_user_id,
+        detail={
+            "finding_id": str(finding.id),
+            "rule_id": finding.rule_id,
+            "resolution": FindingResolutionStatus.RATIFIED.value,
+        },
+    )
+    await db.flush()
+    return finding
 
 
 async def undo_finding(
@@ -242,7 +299,8 @@ async def undo_finding(
       added liability is removed, or the corrected income restored to its prior value — EXACTLY,
       not approximated. The DTI/LTV then recompute back (they read the structured data live), and
       the recompute hook marks verification stale so the (now un-applied) issue re-detects.
-    * **OVERRIDDEN** / **ACCEPTED_RISK** → just flip back to OPEN (they made no data change — an
+    * **OVERRIDDEN** / **ACCEPTED_RISK** / **RATIFIED** → just flip back to OPEN (they made no data
+      change — an
       override dismissed it; accept-risk acknowledged it).
 
     The finding returns to **OPEN** and its resolution trail is cleared. Audited

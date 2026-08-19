@@ -208,3 +208,88 @@ async def test_undo_restores_the_exact_prior_payment(db_session: AsyncSession) -
 
     assert liability.monthly_payment == Decimal("3186.00")
     assert finding.resolution_status is FindingResolutionStatus.OPEN
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-560 — Ratify: the act ratification_pending promises and nothing could perform
+# --------------------------------------------------------------------------------------------- #
+async def _judgment_finding(db: AsyncSession, loan_file, *, pending: bool = True) -> Finding:
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="DT-6",
+        message="the application understates this payment",
+        subject_key="lia1",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.CREDIT,
+        confidence=1.0,
+        details={"ratification_pending": pending},
+    )
+    db.add(finding)
+    await db.flush()
+    return finding
+
+
+async def test_ratifying_records_who_agreed_without_touching_the_loan(
+    db_session: AsyncSession,
+) -> None:
+    """The gap this closes. Nine findings on the real file say "a human must confirm" — the sentence
+    that lets an uncalibrated judgment rule run at all — and the only way to clear one was OVERRIDE,
+    which records a dismissal. Every agreement was being filed as a rejection.
+
+    Ratify changes NO structured data. What changes is that the verdict carries a person's name."""
+    from app.services.finding_resolution import ratify_finding
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+
+    await ratify_finding(db_session, finding=finding, actor_user_id=actor)
+
+    assert finding.resolution_status is FindingResolutionStatus.RATIFIED
+    assert finding.resolved_by_user_id == actor
+    assert finding.applied_record is None  # nothing was written to the loan
+
+
+async def test_a_deterministic_finding_cannot_be_ratified(db_session: AsyncSession) -> None:
+    """Ratification means "I reviewed the AI's judgment and agree". A deterministic verdict was never
+    a judgment, so signing it would record a review that did not happen — an audit trail claiming more
+    than it can support. Override is the right verb for disagreeing with one of those."""
+    from app.services.finding_resolution import CannotRatifyError, ratify_finding
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file, pending=False)
+
+    with pytest.raises(CannotRatifyError):
+        await ratify_finding(db_session, finding=finding, actor_user_id=actor)
+
+    assert finding.resolution_status is FindingResolutionStatus.OPEN
+
+
+async def test_a_ratification_can_be_taken_back(db_session: AsyncSession) -> None:
+    """A signature given in error has to be retractable. It made no data change, so Undo is the
+    Override path — flip back to OPEN — and the finding returns to the queue."""
+    from app.services.finding_resolution import ratify_finding
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+    await ratify_finding(db_session, finding=finding, actor_user_id=actor)
+
+    await undo_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+    assert finding.resolution_status is FindingResolutionStatus.OPEN
+
+
+async def test_the_note_is_optional_where_an_override_reason_is_required(
+    db_session: AsyncSession,
+) -> None:
+    """Overriding contradicts the system and must say why. Ratifying agrees with what the finding
+    already states, and demanding a second explanation is friction on the path we want taken."""
+    from app.services.finding_resolution import ratify_finding
+
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _judgment_finding(db_session, loan_file)
+
+    await ratify_finding(db_session, finding=finding, actor_user_id=actor, note=None)
+
+    assert finding.resolution_status is FindingResolutionStatus.RATIFIED
+    assert finding.resolution_note is None

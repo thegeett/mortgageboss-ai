@@ -91,6 +91,16 @@ class NoteRequest(BaseModel):
     note: str = Field(min_length=1)
 
 
+class RatifyRequest(BaseModel):
+    """LP-560 — the (optional) note on a ratification.
+
+    Optional where Override's reason is REQUIRED, and the asymmetry is deliberate: overriding
+    contradicts the system and has to say why, while ratifying agrees with what the finding already
+    states. Demanding a second explanation would be friction on the path we want taken."""
+
+    note: str | None = None
+
+
 class AcceptRiskRequest(BaseModel):
     """Acknowledge a finding as an accepted risk (LP-88) — an optional rationale.
 

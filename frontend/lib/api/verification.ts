@@ -130,6 +130,10 @@ type Resolution =
   | { kind: "override"; findingId: string; reason: string }
   | { kind: "note"; findingId: string; note: string }
   | { kind: "accept-risk"; findingId: string; reason: string }
+  // LP-560 — a human reviewed an AI judgment and AGREED. Distinct from override (which dismisses
+  // it as wrong) and from apply (which changes the loan). The note is optional, where an
+  // override reason is required: ratifying agrees with what the finding already says.
+  | { kind: "ratify"; findingId: string; note?: string }
   | { kind: "request-docs"; findingId: string; note: string }
   | { kind: "undo"; findingId: string }; // reverse a resolution (LP-98)
 
@@ -140,12 +144,13 @@ async function resolveFinding(identifier: string, action: Resolution): Promise<V
   else if (action.kind === "note") body = { note: action.note };
   else if (action.kind === "accept-risk") body = { reason: action.reason };
   else if (action.kind === "request-docs") body = { note: action.note };
+  else if (action.kind === "ratify" && action.note) body = { note: action.note };
   const res = await apiClient.post<VerificationStatus>(`${base}/${action.kind}`, body);
   return res.data;
 }
 
 /**
- * Resolve a finding (Apply / Override / Note / Accept-risk / Request-docs). The endpoint
+ * Resolve a finding (Apply / Ratify / Override / Note / Accept-risk / Request-docs). The endpoint
  * returns the re-filtered status (updated findings + blocking); APPLY also changes the
  * structured data (refresh DTI/LTV — the recompute interlock); Request-docs creates a
  * needs item (refresh the needs list).
