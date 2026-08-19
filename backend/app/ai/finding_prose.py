@@ -52,11 +52,18 @@ RULES, all mandatory:
 - Use ONLY facts present in the summary. Never introduce a number, date, document name, party, year or
   amount that is not there. If a detail would help and is absent, leave it out.
 - "action" is what the processor should DO, in the imperative: "Obtain the...", "Confirm that...".
-- ⚠️ UNLESS "already_resolved" is true. Then NOTHING IS BEING ASKED FOR — this check passed. Write the
-  "action" as a STATEMENT of what is already true ("The March pay stub covers the required period.",
-  "This payment is on the application's liability list."). NEVER begin it with Obtain, Confirm, Verify,
-  Review, Check, Upload, Provide or Request: a task that is already done reads as work not done, and a
-  processor closing a passing item should finish it knowing the file is in order.
+- UNLESS "already_resolved" is true. Then NOTHING IS BEING ASKED FOR — this check PASSED, and the
+  two halves change meaning:
+    * "action" becomes the RESULT, written as a short positive statement in the processor's terms —
+      what is in order, and settled. "Reserves are fully documented." "Employment is verified for the
+      full two-year history." "This payment is on the application's liability list."
+    * "why" becomes the EVIDENCE that settles it, in the same plain language.
+  NEVER begin the action with Obtain, Confirm, Verify, Review, Check, Upload, Provide or Request. A
+  task that is already done reads as work outstanding, and it wastes the one signal a passing finding
+  exists to give.
+  Write it so a processor reading it feels the file is SOLID on this point — not merely that a check
+  ran. Say what holds, not what was not found: "The two-year employment history is continuous", not
+  "no employment gap was detected".
 - The action must make THE SAME REQUEST as "suggested_fix". Sharpen its wording, name the document it
   names — but never ask for a document or a step it does not ask for. "evidence" is context for the
   "why"; it is NOT a list of things to request. A document mentioned there may not exist for this loan.
@@ -68,7 +75,7 @@ RULES, all mandatory:
 - Never mention the AI, the rule engine, rule ids, tags, confidence, or that a check "could not run".
   Describe the loan file, not the software. In particular NEVER write "the system" — say what the FILE
   is missing ("the file does not contain a credit report"), not what the software cannot do.
-  ⚠️ The problem text you are given is written for engineers and often reads impersonally. Do not
+  The problem text you are given is written for engineers and often reads impersonally. Do not
   mirror that register: rewrite it as something a person does about a document.
 - Do NOT state or paraphrase a materiality threshold ("exceeds the materiality threshold", "is above
   the floor"). The exact arithmetic is appended to your text automatically, so writing your own version

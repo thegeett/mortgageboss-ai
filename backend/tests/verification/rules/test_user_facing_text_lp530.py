@@ -187,3 +187,43 @@ def test_the_findings_payload_actually_carries_the_name() -> None:
     from app.schemas.verification import RuleFindingPublic
 
     assert "rule_name" in RuleFindingPublic.model_fields
+
+
+# ------------------------------------------------------------------------------------------------ #
+# LP-553 — a PASS says what holds, never what was absent
+# ------------------------------------------------------------------------------------------------ #
+_ABSENCE_PHRASING = (
+    r"\bstates no\b",
+    r"\bshows no\b",
+    r"\bfound no\b",
+    r"\bwith no\b",
+    r"\bhas not\b",
+    r"\bwas not\b",
+    r"\bdid not\b",
+    r"\bnothing\b",
+)
+
+
+def test_no_satisfied_outcome_is_phrased_as_an_absence() -> None:
+    """A satisfied finding is the only reassurance a processor gets, and it has to read like one.
+
+    "the homeowners insurance policy has not expired" and "the credit report states no consumer
+    dispute" are accurate and land like a near-miss. Said positively — "the policy is in force", "this
+    tradeline is reported clean" — the same fact tells a processor the file is SOLID on that point.
+
+    Pinned on the TEMPLATE rather than left to the composer. The composer rewrites every finding and is
+    told to do this, but a prompt is a hope: a rejected or failed composition falls back to the template
+    on any file, so the floor has to be right on its own.
+    """
+    offenders = []
+    for path in sorted(_SPECS_DIR.glob("*.yaml")):
+        document = yaml.safe_load(path.read_text())
+        for outcome in (document.get("deterministic") or {}).get("outcomes") or []:
+            if outcome.get("verdict") != "satisfied":
+                continue
+            text = " ".join(str(outcome.get("reasoning", "")).split()).lower()
+            for pattern in _ABSENCE_PHRASING:
+                if re.search(pattern, text):
+                    offenders.append((path.stem, pattern, text[:70]))
+
+    assert not offenders, f"a passing check is phrased as an absence: {offenders}"

@@ -80,7 +80,7 @@ judgment:
     with the loan file and ordinary for conventional financing. You reason ONLY over the structured
     values given.
 
-    ⚠️ YOU HAVE NO ALLOW-LIST, deliberately — eligible types are programme-specific and none was
+    YOU HAVE NO ALLOW-LIST, deliberately — eligible types are programme-specific and none was
     supplied. Do NOT invent one. Judge consistency and obvious risk only:
     - "eligible" — the two types agree (wording may differ: "Condominium" and "Condominium Unit" are the
       same thing) and the type is an ordinary residential kind: single family, condominium, townhouse,
@@ -91,7 +91,7 @@ judgment:
     - "ineligible" — reserve this for a type that is plainly not residential real property at all.
     - "unknown" — either type is missing or you cannot tell what the appraiser means.
 
-    ⚠️ WORDING DIFFERENCES ARE NOT DISAGREEMENTS. The appraiser writes free text; the file uses a fixed
+    WORDING DIFFERENCES ARE NOT DISAGREEMENTS. The appraiser writes free text; the file uses a fixed
     list. "Condominium Unit" against "condo" is a match, not a finding.
 
     BE HONEST. "unknown" and "needs_review" are correct, expected answers. Cite the values.

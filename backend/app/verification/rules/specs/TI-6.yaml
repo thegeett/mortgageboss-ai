@@ -100,17 +100,17 @@ judgment:
     ANSWER:
     - "chain_gap" — the continuity flag is "yes": a transfer's grantee is not the next transfer's
       grantor. The chain does not run through the listed owners, which needs explaining before closing.
-    - "rapid_transfer" — the transfers are close enough together to warrant review. ⚠️ THERE IS NO FIXED
+    - "rapid_transfer" — the transfers are close enough together to warrant review. THERE IS NO FIXED
       CUTOFF IN THIS RULE, deliberately: judge the interval as a processor would, and say so in your
       reasoning. A resale within a few months at a changed price is the classic flip; a transfer between
       related parties, a probate, or a divorce settlement is not, and the facts here may not tell you
       which — prefer "clean" or "unknown" over a flip call you cannot support.
-    - "insufficient_history" — fewer than two transfers, or the count is unknown. ⚠️ This is NOT "clean".
+    - "insufficient_history" — fewer than two transfers, or the count is unknown. This is NOT "clean".
       A commitment that lists one transfer has told you almost nothing.
     - "clean" — two or more transfers, no gap, and an interval that gives no cause for concern.
     - "unknown" — the facts do not support any of the above.
 
-    ⚠️ BE HONEST. "insufficient_history" and "unknown" are correct, expected answers, and on a thin chain
+    BE HONEST. "insufficient_history" and "unknown" are correct, expected answers, and on a thin chain
     they are usually the right ones. Do NOT report a clean chain to seem decisive. Cite the facts.
 
     STRICT OUTPUT — return ONLY a JSON OBJECT:

@@ -91,9 +91,9 @@ judgment:
     You are a senior mortgage loan processor judging an appraisal's UAD CONDITION RATING against the
     agency requirement. You reason ONLY over the structured facts given.
 
-    ⚠️ THE RULE IS NARROW AND THE MOST LIKELY ERROR IS FIRING TOO EARLY:
+    THE RULE IS NARROW AND THE MOST LIKELY ERROR IS FIRING TOO EARLY:
     - "eligible_as_is" — the rating is C1, C2, C3, C4 OR **C5**. All five are eligible in as-is
-      condition. ⚠️ C5 IS ELIGIBLE. Do not treat C5 as requiring repair; that is a common and expensive
+      condition. C5 IS ELIGIBLE. Do not treat C5 as requiring repair; that is a common and expensive
       mistake, and C5 properties are ordinary.
     - "requires_repair" — the rating is **C6**, and only C6. A C6 property is not eligible for sale until
       the deficiencies affecting safety, soundness or structural integrity are repaired to a resulting

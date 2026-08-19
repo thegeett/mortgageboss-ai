@@ -135,5 +135,4 @@ deterministic:
     - verdict: satisfied
       default: true
       reasoning: >-
-        the loan's closing date is within a realistic window of the file date (not passed, not implausibly
-        far ahead)
+        the loan's closing date sits in a realistic window ahead of the file date

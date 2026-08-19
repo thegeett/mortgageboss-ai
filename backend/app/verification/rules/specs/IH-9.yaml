@@ -107,4 +107,4 @@ deterministic:
     - verdict: satisfied
       default: true
       reasoning: >-
-        the homeowners insurance policy has not expired as at the file date
+        the homeowners insurance policy is in force as at the file date

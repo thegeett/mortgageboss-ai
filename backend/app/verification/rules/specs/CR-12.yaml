@@ -125,7 +125,7 @@ deterministic:
       when_tags:
         - {tag: liab.is_disputed, op: eq, value: "no"}
       reasoning: >-
-        the credit report states no consumer dispute on this tradeline
+        this tradeline is reported clean — the credit report shows it undisputed
     - verdict: couldnt_check
       # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
       # couldnt_check before this body runs, so this branch should be unreachable — but a `satisfied`

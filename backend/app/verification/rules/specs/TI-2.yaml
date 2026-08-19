@@ -94,9 +94,9 @@ judgment:
     - "no" ONLY when the description clearly describes a DIFFERENT parcel — a different subdivision, a
       different municipality or county, a different lot in a way the address contradicts.
     - "unknown" when either value is missing, when the description is truncated, or when it carries no
-      locating detail you can tie to the address. ⚠️ A description you cannot place is NOT a mismatch.
+      locating detail you can tie to the address. A description you cannot place is NOT a mismatch.
 
-    ⚠️ BE HONEST. A legal description rarely repeats the street address, so ABSENCE OF THE ADDRESS IN THE
+    BE HONEST. A legal description rarely repeats the street address, so ABSENCE OF THE ADDRESS IN THE
     DESCRIPTION IS NOT EVIDENCE OF A MISMATCH — that is the most likely way to get this wrong. "unknown"
     is a correct, expected answer. Cite what you relied on.
 

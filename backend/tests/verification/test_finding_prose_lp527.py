@@ -531,6 +531,24 @@ def test_a_statement_of_what_is_already_true_passes() -> None:
         assert not asks_for_work(Composition(action=action, why="Evidence.")), action
 
 
+def test_the_prompt_asks_a_pass_to_read_as_a_completion_not_a_negative() -> None:
+    """⚠️ NOT ASKING FOR WORK IS ONLY HALF OF IT. The satisfied wordings the rules ship are neutral
+    engine-voiced fragments — "every account has at least the required 12 months of statements", "the
+    gift documentation chain is complete". They pass the imperative guard and still tell a processor
+    nothing about how solid the file is; twenty-eight of them scan as noise rather than reassurance.
+
+    So the prompt asks for the RESULT in the processor's terms, and for what HOLDS rather than what was
+    not found — "the two-year employment history is continuous", never "no employment gap was
+    detected". Verified against the real model: that fragment came back as "The two-year employment
+    history is continuous with no gaps.
+    """
+    from app.ai.finding_prose import SYSTEM_PROMPT
+
+    assert "already_resolved" in SYSTEM_PROMPT
+    assert "what HOLDS" in SYSTEM_PROMPT or "what holds" in SYSTEM_PROMPT
+    assert "SOLID" in SYSTEM_PROMPT
+
+
 def test_the_summary_says_whether_the_finding_is_a_pass() -> None:
     """The composer cannot write a pass correctly without knowing it is one — and it is the one fact
     about the finding (not about the engine) that changes how the sentence must read."""

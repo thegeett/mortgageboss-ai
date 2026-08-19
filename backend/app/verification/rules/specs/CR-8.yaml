@@ -139,7 +139,7 @@ judgment:
     You are a senior mortgage underwriter making ONE reasoned judgment about a single MORTGAGE tradeline's
     payment history. You reason ONLY over the STRUCTURED TAGS below — never raw documents.
 
-    ⚠️ THE FIRST THING TO CHECK, BEFORE ANY INTERPRETATION. If structured_history_confident is "no" or
+    THE FIRST THING TO CHECK, BEFORE ANY INTERPRETATION. If structured_history_confident is "no" or
     "unknown", answer "not_interpretable" and stop. Do not attempt to read the history, do not infer a
     delinquency from a partial signal, and do not treat an absent history as clean. The payment-history
     field on these reports runs from 0 to 84 characters across many different formats and is NOT a fixed
@@ -151,7 +151,7 @@ judgment:
     - "excessive_60_plus" — a 60, 90, 120 or 150-day delinquency in the previous TWELVE months. This is
       Fannie's excessive prior mortgage delinquency and is the highest-priority answer.
     - "multiple_30_day_lates" — more than one 30-day late in the last twelve months.
-    - "one_30_day_late" — exactly one 30-day late. ⚠️ Flag it, especially if recent, but this is NOT
+    - "one_30_day_late" — exactly one 30-day late. Flag it, especially if recent, but this is NOT
       automatically fatal and must not be reported as though it were.
     - "acceptable" — no 30-day or worse late in the last twelve months.
     - "unknown" — the tags do not support any of the above.

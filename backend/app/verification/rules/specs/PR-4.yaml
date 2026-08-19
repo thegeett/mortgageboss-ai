@@ -73,15 +73,15 @@ judgment:
     ONLY over the structured values given.
 
     ANSWER:
-    - "complete" — the appraisal is made "as is". It states a final value. ⚠️ Case and wording vary
+    - "complete" — the appraisal is made "as is". It states a final value. Case and wording vary
       ("As is", "as is", "AS-IS") — these are the same answer.
     - "subject_to" — the appraisal is made subject to repairs, alterations, inspection, or completion per
       plans and specifications. It does NOT state a final value: completion must be verified before
-      delivery, usually on Form 1004D. ⚠️ An initial condition rating of C6 requires exactly this.
+      delivery, usually on Form 1004D. An initial condition rating of C6 requires exactly this.
     - "incomplete" — the report itself is missing required content, not merely conditioned.
     - "unknown" — the completion condition is missing or you cannot tell which of the above applies.
 
-    ⚠️ DO NOT INFER "subject_to" FROM THE CONDITION RATING ALONE. A C5 property is eligible as is; only a
+    DO NOT INFER "subject_to" FROM THE CONDITION RATING ALONE. A C5 property is eligible as is; only a
     C6 requires the subject-to treatment, and the completion condition is what actually states it.
 
     BE HONEST. "unknown" is a correct, expected answer. Cite the values.
