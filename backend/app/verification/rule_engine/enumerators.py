@@ -51,7 +51,16 @@ _CREDIT_REPORT_DOC_TYPE = "credit_report"
 _TRADELINES_LIST_NAME = "tradelines"
 # The MISMO liability identity, in the projection's own field order. There is NO account number anywhere
 # in the MISMO chain (parser → model → snapshot), so this is the whole of the available identity.
-_MISMO_LIABILITY_FIELDS = ("type", "monthly_payment", "unpaid_balance", "holder_name")
+# The fields that DEFINE a stated liability's identity — hashed into its subject id. Adding to this
+# tuple re-keys every liability subject on every file and orphans their findings, so it is frozen
+# unless that is the intent.
+_MISMO_LIABILITY_ID_FIELDS = ("type", "monthly_payment", "unpaid_balance", "holder_name")
+# LP-572 — the fields GATHERED for a row, which is a superset. A parsed producer reads facts that
+# describe a liability without identifying it (`paid_off_at_closing`: a processor marking a debt
+# retired at closing must not change which subject it is). The docstring below already promised this
+# separation — "the hashed values projection is unchanged, so ids are stable" — it just had one
+# tuple doing both jobs.
+_MISMO_LIABILITY_FIELDS = (*_MISMO_LIABILITY_ID_FIELDS, "paid_off_at_closing")
 
 Subject = tuple[str, Mapping[str, Tag]]
 Enumerator = Callable[[Snapshot], list[Subject]]
@@ -434,7 +443,7 @@ def _mismo_liabilities(
     ordered = sorted(rows, key=lambda i: (len(i), i))  # numeric-ish, deterministic
     return [
         (
-            {f: rows[i].get(f) for f in _MISMO_LIABILITY_FIELDS},
+            {f: rows[i].get(f) for f in _MISMO_LIABILITY_ID_FIELDS},
             f"liability.{i}",
             raw_rows.get(i, {}),
         )

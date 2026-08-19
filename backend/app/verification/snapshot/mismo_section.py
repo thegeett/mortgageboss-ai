@@ -241,6 +241,11 @@ def build_mismo_section(
         put(f"{lkey}.monthly_payment", liability.monthly_payment)
         put(f"{lkey}.unpaid_balance", liability.unpaid_balance)
         put(f"{lkey}.holder_name", liability.holder_name)
+        # LP-572 — whether this obligation survives closing (LP-568). Projected so a rule can see
+        # that a debt has ALREADY been excluded and stop asking. Deliberately NOT part of the
+        # liability subject's identity hash: see `_MISMO_LIABILITY_ID_FIELDS` in enumerators.py —
+        # flagging a payoff must not re-key the subject and orphan its existing findings.
+        put(f"{lkey}.paid_off_at_closing", liability.paid_off_at_closing)
 
     for k, asset in enumerate(sorted(_active(assets), key=lambda x: str(x.id)), start=1):
         akey = f"asset.{k}"

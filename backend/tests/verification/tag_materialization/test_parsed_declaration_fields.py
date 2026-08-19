@@ -152,6 +152,7 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         monthly_payment=Decimal("1"),
         unpaid_balance=Decimal("1"),
         holder_name="h",
+        paid_off_at_closing=None,  # LP-572 — projected, but not part of the identity hash
     )
     asset = ns(
         id=uuid4(), is_deleted=False, asset_type="Checking", value=Decimal("1"), holder_name="h"
