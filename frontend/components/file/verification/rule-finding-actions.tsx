@@ -1,5 +1,6 @@
 "use client";
 
+import { ViewFixDialog } from "@/components/file/verification/view-fix-dialog";
 import { Button } from "@/components/ui/button";
 import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
@@ -65,11 +66,16 @@ export function RuleFindingActions({
   finding,
   onAct,
   pending = false,
+  fileId,
 }: {
   finding: RuleFinding;
   onAct: (action: RuleFindingAction) => void;
   pending?: boolean;
+  // LP-577 — needed for the before/after preview. Optional so a caller that has not threaded it
+  // through degrades to the direct Apply rather than losing the button entirely.
+  fileId?: string;
 }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [form, setForm] = useState<FormKind | null>(null);
   const [text, setText] = useState("");
 
@@ -137,8 +143,15 @@ export function RuleFindingActions({
               variant={canRatify ? "outline" : "default"}
               className="h-7 px-2 text-xs"
               disabled={pending}
-              onClick={() => onAct({ kind: "apply", findingId: finding.id })}
-              title="Write this correction into the loan — the DTI and LTV recompute"
+              // LP-577 — Apply WRITES TO THE LOAN and moves an underwriting number: on DT-8 the
+              // back-end DTI swings from 58.59% to 34.39%, the difference between a file that fails
+              // most conventional overlays and one that passes. It opens the itemized before/after
+              // first, so a processor confirms a figure rather than discovers it. Undo exists, but a
+              // wrong Apply nobody notices is not something Undo helps with.
+              onClick={() =>
+                fileId ? setPreviewOpen(true) : onAct({ kind: "apply", findingId: finding.id })
+              }
+              title="Review the before/after impact, then write this correction into the loan"
             >
               Apply
             </Button>
@@ -223,6 +236,22 @@ export function RuleFindingActions({
             </Button>
           </div>
         </div>
+      )}
+      {/* LP-577 — the itemized before/after (LP-97's dialog, which already computed exactly this
+          for the legacy findings and was simply unreachable from here). Confirming inside it runs
+          the real Apply. */}
+      {fileId && finding.can_apply && (
+        <ViewFixDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          fileId={fileId}
+          finding={finding}
+          onApply={() => {
+            setPreviewOpen(false);
+            onAct({ kind: "apply", findingId: finding.id });
+          }}
+          busy={pending}
+        />
       )}
     </div>
   );

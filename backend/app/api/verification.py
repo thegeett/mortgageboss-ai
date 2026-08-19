@@ -438,9 +438,17 @@ async def preview_finding_apply_endpoint(
             detail="This finding declares no structured change to preview.",
         )
     # No commit — the dry-run's savepoint is rolled back inside; nothing persists.
-    return await preview_finding_apply(
-        db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id
-    )
+    try:
+        return await preview_finding_apply(
+            db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id
+        )
+    except CannotApplyError as exc:
+        # LP-577 — the dry-run runs the REAL `apply_finding`, so it raises on exactly what the write
+        # path raises on: an ambiguous target (two liabilities from the same servicer), a target that
+        # is gone, a finding already resolved. Unhandled, the PREVIEW 500'd — so the one flow whose
+        # job is to tell a processor "this cannot be applied, and why" was the flow that crashed on
+        # it. A 409 carries the reason to the dialog.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/{identifier}/findings/{finding_id}/apply", response_model=VerificationStatusPublic)

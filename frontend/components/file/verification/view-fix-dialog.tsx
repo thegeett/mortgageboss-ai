@@ -106,22 +106,38 @@ function DtiImpact({ before, after }: { before: DtiCalculation; after: DtiCalcul
       {after.debt_items.map((item) => {
         const isNew = !beforeKeys.has(item.key);
         const prior = before.debt_items.find((b) => b.key === item.key);
+        // LP-577 — A REMOVAL IS NOT A DISAPPEARANCE. An excluded debt (the mortgage a refinance
+        // pays off) stays in `debt_items` carrying its real amount and simply stops being summed,
+        // so keying only on "is this line new" rendered it as UNCHANGED while the total dropped —
+        // a processor would see the number move with no line explaining why. It reads as a
+        // removal: struck through, counting 0.
+        const removed = item.excluded === true && prior?.excluded !== true;
         return (
           <Row
             key={item.key}
             label={
               <span className="flex items-center gap-1">
-                {item.label}
+                <span className={removed ? "line-through text-gray-400" : undefined}>
+                  {item.label}
+                </span>
                 {isNew && (
                   <span className="rounded bg-primary/10 px-1 text-[9px] font-semibold text-primary">
                     NEW
                   </span>
                 )}
+                {removed && (
+                  <span className="rounded bg-gray-100 px-1 text-[9px] font-semibold text-gray-500">
+                    REMOVED
+                  </span>
+                )}
               </span>
             }
             beforeVal={isNew ? "0" : (prior?.amount ?? "0")}
-            afterVal={item.amount}
-            highlight={isNew}
+            // Not `item.amount`: the line keeps its real figure, but it contributes nothing to the
+            // total now, and showing the old number beside an unchanged-looking row is what hid
+            // the removal in the first place.
+            afterVal={removed ? "0" : item.amount}
+            highlight={isNew || removed}
           />
         );
       })}
@@ -173,7 +189,10 @@ export function ViewFixDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fileId: string;
-  finding: VerificationFinding;
+  // LP-577 — the ID is the ONLY field this dialog reads, and typing the prop as the legacy
+  // `VerificationFinding` kept the governed rule findings (a different type) out of a preview that
+  // works for them unchanged. Narrowed to what is actually used, so both finding families reach it.
+  finding: { id: string };
   onApply: () => void;
   busy?: boolean;
 }) {

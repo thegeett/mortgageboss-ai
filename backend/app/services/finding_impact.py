@@ -43,6 +43,19 @@ def _summarize_change(finding: Finding) -> str:
         return f"Add to monthly debts: {who} — ${spec.get('monthly_payment')}/mo"
     if action == "correct_income":
         return f"Correct stated income to ${spec.get('monthly_amount')}/mo"
+    # LP-577 — the remaining four actions fell through to "Apply: correct_liability_payment", which
+    # tells a processor nothing about what is about to change on their loan. Every action reduces to
+    # ADD / REMOVE / REPLACE, and the summary now says which, on what, and to what.
+    if action == "exclude_liability_paid_off":
+        who = spec.get("holder_name") or "this obligation"
+        return f"Remove from monthly debts: {who} — paid off at closing"
+    if action == "correct_liability_payment":
+        who = spec.get("holder_name") or "this obligation"
+        return f"Replace the monthly payment for {who} with ${spec.get('monthly_payment')}/mo"
+    if action == "correct_purchase_price":
+        return f"Replace the purchase price with ${spec.get('value')}"
+    if action == "correct_valuation":
+        return f"Replace the property valuation with ${spec.get('value')}"
     return f"Apply: {action}"
 
 

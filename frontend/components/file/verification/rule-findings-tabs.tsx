@@ -114,9 +114,12 @@ function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; bod
 function AttentionTab({
   findings,
   onAct,
+  fileId,
 }: {
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   if (findings.length === 0) {
     return (
@@ -131,7 +134,13 @@ function AttentionTab({
   return (
     <div className="space-y-5">
       {groups.map(({ outcome, findings: groupFindings }) => (
-        <OutcomeGroup key={outcome} outcome={outcome} findings={groupFindings} onAct={onAct} />
+        <OutcomeGroup
+          key={outcome}
+          outcome={outcome}
+          findings={groupFindings}
+          onAct={onAct}
+          fileId={fileId}
+        />
       ))}
     </div>
   );
@@ -141,10 +150,13 @@ function OutcomeGroup({
   outcome,
   findings,
   onAct,
+  fileId,
 }: {
   outcome: EvaluationOutcome;
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   const meta = outcomeMeta(outcome);
   return (
@@ -155,9 +167,9 @@ function OutcomeGroup({
         <span className="text-xs text-gray-400">— {meta.blurb}</span>
       </div>
       {outcome === "couldnt_check" ? (
-        <MissingVsPresent findings={findings} onAct={onAct} />
+        <MissingVsPresent findings={findings} onAct={onAct} fileId={fileId} />
       ) : (
-        <GroupedFindingList findings={findings} onAct={onAct} />
+        <GroupedFindingList findings={findings} onAct={onAct} fileId={fileId} />
       )}
     </section>
   );
@@ -177,16 +189,19 @@ function OutcomeGroup({
 function MissingVsPresent({
   findings,
   onAct,
+  fileId,
 }: {
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   const { missing, present } = splitByMissingDocument(findings);
   // LP-564 — gated on `missing` ALONE. Requiring both sides made the button vanish in exactly the
   // case it exists for: a file where every couldnt_check finding is waiting on a document has an
   // empty `present`, which is the maximum-saving case, not the one to skip.
   if (missing.length === 0) {
-    return <GroupedFindingList findings={findings} onAct={onAct} />;
+    return <GroupedFindingList findings={findings} onAct={onAct} fileId={fileId} />;
   }
   return (
     <div className="space-y-4">
@@ -217,7 +232,7 @@ function MissingVsPresent({
             </Button>
           )}
         </div>
-        <GroupedFindingList findings={missing} onAct={onAct} />
+        <GroupedFindingList findings={missing} onAct={onAct} fileId={fileId} />
       </div>
       {/* An empty read-side is now reachable (see the gate above) and must not print a header over
           nothing. The request side is what the split exists for; this half is the remainder. */}
@@ -226,7 +241,7 @@ function MissingVsPresent({
           <p className="text-xs font-medium text-gray-500">
             In the file — read or clarify these ({present.length})
           </p>
-          <GroupedFindingList findings={present} onAct={onAct} />
+          <GroupedFindingList findings={present} onAct={onAct} fileId={fileId} />
         </div>
       )}
     </div>
@@ -239,9 +254,12 @@ function MissingVsPresent({
 function GroupedFindingList({
   findings,
   onAct,
+  fileId,
 }: {
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -249,9 +267,9 @@ function GroupedFindingList({
         const first = group[0];
         if (first === undefined) return null; // never — groups are non-empty by construction
         return group.length === 1 ? (
-          <RuleFindingRow key={first.id} finding={first} onAct={onAct} />
+          <RuleFindingRow key={first.id} finding={first} onAct={onAct} fileId={fileId} />
         ) : (
-          <CollapsedFindings key={first.id} findings={group} onAct={onAct} />
+          <CollapsedFindings key={first.id} findings={group} onAct={onAct} fileId={fileId} />
         );
       })}
     </div>
@@ -310,9 +328,12 @@ function collapsedSummary(findings: RuleFinding[]): string {
 function CollapsedFindings({
   findings,
   onAct,
+  fileId,
 }: {
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   const first = findings[0];
   // A VIOLATION group starts EXPANDED. LP-518 widened grouping from rule+message to rule alone, which
@@ -387,7 +408,7 @@ function CollapsedFindings({
       {open && (
         <div id={panelId} className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-3">
           {findings.map((finding) => (
-            <RuleFindingRow key={finding.id} finding={finding} />
+            <RuleFindingRow key={finding.id} finding={finding} fileId={fileId} />
           ))}
         </div>
       )}
@@ -398,12 +419,15 @@ function CollapsedFindings({
 function FindingList({
   findings,
   onAct,
+  fileId,
 }: {
   findings: RuleFinding[];
   onAct?: (action: RuleFindingAction) => void;
+  /** LP-577 — threaded to the row so Apply opens its before/after preview. */
+  fileId?: string;
 }) {
   // Also collapsed by reason (LP-376-C) — e.g. AS-1's 15 identical "deposit sourced" satisfied rows.
-  return <GroupedFindingList findings={findings} onAct={onAct} />;
+  return <GroupedFindingList findings={findings} onAct={onAct} fileId={fileId} />;
 }
 
 export function RuleFindingsTabs({
@@ -412,12 +436,16 @@ export function RuleFindingsTabs({
   legacyCount,
   legacy,
   onAct,
+  fileId,
 }: {
   ruleFindings: RuleFinding[];
   /** LP-377-C: the latest run's rule engine did not complete — these findings are from an earlier run. */
   ruleFindingsStale?: boolean;
   legacyCount: number;
   legacy: ReactNode;
+  /** LP-577 — threaded through to the Apply preview. Optional: without it Apply still works, it
+   *  just skips the before/after dialog rather than the button vanishing. */
+  fileId?: string;
   /** LP-561 — resolve a governed finding. Optional so a read-only caller (a test, a print view) can
    *  render the tabs without the action bar appearing at all. */
   onAct?: (action: RuleFindingAction) => void;
@@ -469,7 +497,9 @@ export function RuleFindingsTabs({
       <TabStrip tabs={tabs} active={active} onPick={setActive} />
 
       <div role="tabpanel">
-        {active === "attention" && <AttentionTab findings={buckets.attention} onAct={onAct} />}
+        {active === "attention" && (
+          <AttentionTab findings={buckets.attention} onAct={onAct} fileId={fileId} />
+        )}
 
         {active === "satisfied" &&
           (buckets.satisfied.length > 0 ? (
@@ -478,7 +508,7 @@ export function RuleFindingsTabs({
                 {OUTCOME_META.satisfied.blurb} These ran and passed — visible so you know a rule was
                 actually checked, not silently skipped.
               </p>
-              <FindingList findings={buckets.satisfied} onAct={onAct} />
+              <FindingList findings={buckets.satisfied} onAct={onAct} fileId={fileId} />
             </div>
           ) : (
             <EmptyState
@@ -490,7 +520,7 @@ export function RuleFindingsTabs({
 
         {active === "no_longer_applies" &&
           (buckets.no_longer_applies.length > 0 ? (
-            <FindingList findings={buckets.no_longer_applies} onAct={onAct} />
+            <FindingList findings={buckets.no_longer_applies} onAct={onAct} fileId={fileId} />
           ) : (
             <EmptyState
               icon={<History className="h-8 w-8" />}

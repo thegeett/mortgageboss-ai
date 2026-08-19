@@ -128,12 +128,15 @@ export function RuleFindingRow({
   finding,
   onAct,
   pending = false,
+  fileId,
 }: {
   finding: RuleFinding;
   onAct?: (action: RuleFindingAction) => void;
   /** LP-564 — a mutation is in flight. Without it the buttons stayed live, and double-clicking Apply
    *  ran the change twice: two liabilities, one `applied_record`, and an Undo that reverses half. */
   pending?: boolean;
+  /** LP-577 — passed to the action bar so Apply can open its before/after preview. */
+  fileId?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = outcomeMeta(finding.evaluation_outcome);
@@ -251,7 +254,7 @@ export function RuleFindingRow({
           list of twenty-five is the one that needs no navigation. */}
       {onAct !== undefined && (
         <div className="px-3 pb-2.5">
-          <RuleFindingActions finding={finding} onAct={onAct} pending={pending} />
+          <RuleFindingActions finding={finding} onAct={onAct} pending={pending} fileId={fileId} />
         </div>
       )}
     </div>

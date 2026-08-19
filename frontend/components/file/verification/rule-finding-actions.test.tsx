@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { RuleFinding } from "@/lib/types/verification";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuleFindingActions } from "./rule-finding-actions";
 
@@ -28,6 +28,44 @@ function finding(overrides: Partial<RuleFinding> = {}): RuleFinding {
     ...overrides,
   };
 }
+
+vi.mock("@/components/file/verification/view-fix-dialog", () => ({
+  ViewFixDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="view-fix-dialog">before/after</div> : null,
+}));
+
+describe("Apply confirms before it writes (LP-577)", () => {
+  // Apply WRITES TO THE LOAN and moves an underwriting number — on DT-8 the back-end DTI swings
+  // from 58.59% to 34.39%. It must show the itemized before/after first, so a processor confirms a
+  // figure rather than discovers it. Undo exists, but it does not help with a wrong Apply nobody
+  // noticed.
+  it("opens the before/after preview instead of applying immediately", () => {
+    const onAct = vi.fn();
+    render(
+      <RuleFindingActions finding={finding({ can_apply: true })} onAct={onAct} fileId="LF-1" />,
+    );
+
+    // fireEvent, not .click(): a raw DOM click does not flush the React state update that opens
+    // the dialog, so the assertion below would fail on a component that works.
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(screen.getByTestId("view-fix-dialog")).toBeDefined();
+    expect(onAct).not.toHaveBeenCalled(); // nothing written yet
+  });
+
+  it("applies directly when no fileId is threaded, rather than losing the button", () => {
+    // The prop is optional so a caller that has not threaded it degrades to the old behaviour —
+    // which is worse than the preview, but far better than an Apply button that does nothing. That
+    // silent-nothing is exactly what a required prop would have produced here, because TypeScript
+    // is satisfied by an optional prop that no call site passes.
+    const onAct = vi.fn();
+    render(<RuleFindingActions finding={finding({ can_apply: true })} onAct={onAct} />);
+
+    screen.getByRole("button", { name: "Apply" }).click();
+
+    expect(onAct).toHaveBeenCalledWith({ kind: "apply", findingId: "f1" });
+  });
+});
 
 describe("which actions appear, and why", () => {
   it("offers Ratify on an AI judgment awaiting a signature", () => {

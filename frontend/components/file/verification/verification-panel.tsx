@@ -320,6 +320,7 @@ function VerificationBody({
       {data.stale && !running && !failedRun && <StaleBanner />}
       <NeedsCompleteness fileId={fileId} />
       <RuleFindingsTabs
+        fileId={fileId}
         onAct={(action) => resolveRuleFinding.mutate(action)}
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
