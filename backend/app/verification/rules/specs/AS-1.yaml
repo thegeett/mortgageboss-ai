@@ -111,7 +111,9 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Depository Accounts) �
 deterministic:
   # Provenance (inline on every verdict). source_strength refines a sourced verdict but is NOT gated
   # (LP-314a: provenance-only; its absence must never force couldnt_check).
-  load_bearing_tags: [txn.is_money_in, txn.amount, txn.has_identified_source, txn.source_strength]
+  # LP-555 +txn.date — provenance only (not gated): with an amount but no date, two deposits of the
+  # same size on the same account were indistinguishable in the list.
+  load_bearing_tags: [txn.is_money_in, txn.amount, txn.has_identified_source, txn.source_strength, txn.date]
   gated_tags: [txn.is_money_in, txn.amount, txn.has_identified_source]
 
   # Applicability from the AI-resolved TAG (the direction== bug cannot recur): != in → not_applicable;

@@ -43,6 +43,14 @@ deterministic:
     - txn.is_money_in
     - txn.has_identified_source
     - txn.apparent_category
+    # LP-555 — PROVENANCE ONLY, deliberately NOT in `gated_tags`. The read path builds a transaction
+    # subject's label from its inline tags, and without an amount every finding on this rule reads
+    # "a transaction" — AS-12 shipped nine distinct deposits as nine identical rows that way, and four
+    # passes and five reviews looked like the same item in two buckets. Gating on them instead would be
+    # the wrong fix: a transaction with no parsed date would then ABSTAIN rather than be evaluated.
+    # `txn.source_strength` on AS-1 is the precedent — carried for provenance, never gated.
+    - txn.amount
+    - txn.date
   gated_tags:
     - txn.is_money_in
     - txn.has_identified_source

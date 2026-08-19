@@ -227,3 +227,40 @@ def test_no_satisfied_outcome_is_phrased_as_an_absence() -> None:
                     offenders.append((path.stem, pattern, text[:70]))
 
     assert not offenders, f"a passing check is phrased as an absence: {offenders}"
+
+
+# ------------------------------------------------------------------------------------------------ #
+# LP-555 — a finding must carry enough to tell it apart from its siblings
+# ------------------------------------------------------------------------------------------------ #
+def test_every_transaction_rule_carries_the_amount_and_date_that_identify_its_subject() -> None:
+    """The read path builds a transaction subject's label from the tags a finding carries INLINE. With
+    no amount it reads "a transaction", and a rule with many subjects becomes a wall of identical rows.
+
+    That is not hypothetical. AS-12 shipped nine distinct deposits as nine identical lines — and because
+    four of them had passed and five needed review, it read as though the SAME transaction were sitting
+    in two buckets at once. AS-2 had the same gap and produces 57 subjects on a real file.
+
+    ⚠️ ASSERTED ON `load_bearing_tags` / `reasoned_over`, NEVER ON `gated_tags`. Those are the
+    provenance lists; the gate is separate. Gating on an amount or a date would make a transaction
+    missing either one ABSTAIN instead of being evaluated — a far worse fix than the problem.
+    `txn.source_strength` on AS-1 is the standing precedent for carrying a tag without gating it.
+    """
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+
+    unlabelled = []
+    for path in sorted(_SPECS_DIR.glob("*.yaml")):
+        document = yaml.safe_load(path.read_text())
+        if path.stem not in ACTIVE_RULE_IDS or document.get("subject_enumeration") != "per_deposit":
+            continue
+        deterministic = document.get("deterministic") or {}
+        judgment = document.get("judgment") or {}
+        carried = set(deterministic.get("load_bearing_tags") or []) | set(
+            judgment.get("reasoned_over") or []
+        )
+        if missing := {"txn.amount", "txn.date"} - carried:
+            unlabelled.append((path.stem, sorted(missing)))
+
+    assert not unlabelled, (
+        "these rules' findings cannot be told apart in the list — add the tag to `load_bearing_tags` "
+        f"(or `reasoned_over`), NOT to `gated_tags`: {unlabelled}"
+    )
