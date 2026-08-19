@@ -347,6 +347,12 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
 # document_type; keep in sync with the spec's promoted free-text fields.
 _SCRUB_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {
     "credit_report": frozenset({"ssn_alert_status", "address_usage_alert"}),
+    # LP-566 — a STATUS and a YEAR carrying a 9+-digit run. Both are extraction defects rather than
+    # PII (a policy status reads "Active"; a tax year reads "2025"), so `_PII_FIELDS` would be the
+    # wrong home: masking the whole value to ****9012 destroys the signal AND hides the defect. This
+    # scrub keeps the wording and redacts only the leaked run, which is what these fields need.
+    "homeowners_insurance": frozenset({"policy_status"}),
+    "property_tax_bill": frozenset({"tax_year"}),
     # LP-466 — a wire memo instructs "reference file/loan number …"; a bare ≥9-digit file number embedded
     # there would trip the at-rest guard. Scrub the 9+-digit run (the memo wording survives) as a backstop.
     "wire_instructions": frozenset({"reference_or_memo"}),
