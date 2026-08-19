@@ -4,6 +4,7 @@ import { ViewFixDialog } from "@/components/file/verification/view-fix-dialog";
 import { Button } from "@/components/ui/button";
 import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
+import { Wrench } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -151,9 +152,29 @@ export function RuleFindingActions({
               onClick={() =>
                 fileId ? setPreviewOpen(true) : onAct({ kind: "apply", findingId: finding.id })
               }
-              title="Review the before/after impact, then write this correction into the loan"
+              title={
+                fileId
+                  ? "See the before/after impact — nothing is written until you confirm"
+                  : "Write this correction into the loan — the DTI and LTV recompute"
+              }
             >
-              Apply
+              {/* LP-580 — THE LABEL MUST MATCH THE CONSEQUENCE. "Apply" reads as "do it now", and
+                  this opens a dry-run preview instead — so the most consequential word in the UI was
+                  on the button that changes nothing. The legacy finding card already settled this
+                  convention ("View fix" opens the impact dialog, "Apply fix" inside it commits); the
+                  rule findings simply had not followed it, leaving the same word meaning two
+                  different things in the two lists.
+
+                  Conditional, because the FALLBACK path genuinely does apply on click: with no
+                  fileId there is no preview to open, and labelling that "View fix" would be the same
+                  lie in the opposite direction. */}
+              {fileId ? (
+                <>
+                  <Wrench className="h-3 w-3" /> View fix
+                </>
+              ) : (
+                "Apply"
+              )}
             </Button>
           )}
           {canRequest && (

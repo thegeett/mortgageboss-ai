@@ -47,10 +47,20 @@ describe("Apply confirms before it writes (LP-577)", () => {
 
     // fireEvent, not .click(): a raw DOM click does not flush the React state update that opens
     // the dialog, so the assertion below would fail on a component that works.
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // LP-580 — labelled "View fix", not "Apply": the button opens a dry-run and writes nothing, so
+    // the label has to say so. The dialog's own "Apply fix" is the one that commits.
+    fireEvent.click(screen.getByRole("button", { name: /View fix/i }));
 
     expect(screen.getByTestId("view-fix-dialog")).toBeDefined();
     expect(onAct).not.toHaveBeenCalled(); // nothing written yet
+  });
+
+  it('still reads "Apply" on the fallback path, where it really does apply', () => {
+    // The label tracks the CONSEQUENCE, not the component. With no preview to open, the click
+    // writes to the loan — calling that "View fix" would be the same lie in the other direction.
+    render(<RuleFindingActions finding={finding({ can_apply: true })} onAct={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
   it("applies directly when no fileId is threaded, rather than losing the button", () => {
