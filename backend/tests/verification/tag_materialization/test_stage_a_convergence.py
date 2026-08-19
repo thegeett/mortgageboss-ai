@@ -54,7 +54,10 @@ def test_converged_text_is_the_exemplary_standalone_not_the_thin_yaml() -> None:
     assert '"unknown" is a correct, expected answer' in text
     # apparent_category values are DEFINED (LP-343's F5 — the thin YAML listed them undefined)
     assert "transfer_own\" (a transfer between the borrower's own accounts)" in text
-    assert 'vendor" (an ordinary purchase' in text
+    # LP-574 rewrote this definition (an insurance premium had nowhere to go and landed in
+    # `debt_payment`, which is what raised FR-5 on a GEICO premium). The assertion's PURPOSE is
+    # unchanged — that the values are DEFINED rather than listed — so it pins the new definition.
+    assert 'vendor" (a purchase or a payment for goods or services' in text
     # states the §3D principle (a tag reports facts; the rule judges)
     assert "you do NOT\n" in text or "you do NOT " in text
     assert (

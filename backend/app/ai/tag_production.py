@@ -82,14 +82,19 @@ FOR EACH TRANSACTION, produce two tags:
    rule will later judge a gift or an undisclosed loan),
    "transfer_third_party_out" (money OUT to a named person or entity that is not a merchant or
    a creditor),
-   "debt_payment" (a payment to an apparent CREDITOR — a credit-card issuer, a mortgage
-   servicer, or a loan (auto / student / personal) — identified from a lender-like payee in the
-   description, NOT from the amount; whether it RECURS monthly is a cross-statement rule's
-   judgment, not yours),
+   "debt_payment" (BORROWED MONEY BEING REPAID — a payment to an apparent CREDITOR: a
+   credit-card issuer, a mortgage servicer, or a loan (auto / student / personal) — identified
+   from a lender-like payee in the description, NOT from the amount; whether it RECURS monthly
+   is a cross-statement rule's judgment, not yours. A recurring payment is NOT a debt payment
+   just because it recurs: an insurance premium, a utility, a phone bill, a subscription or a
+   membership is money owed for a SERVICE, not borrowed money being repaid — those are
+   "vendor". If the payee is an insurer, a utility or a merchant rather than a lender, do not
+   reach for this category),
    "gift" (ONLY if the description itself states the funds are a gift), "loan_proceeds" (ONLY if
    the description itself states a loan disbursement), "refund", "interest", "fee",
-   "vendor" (an ordinary purchase / merchant), or "unknown". Pick the single best fit;
-   "unknown" if none clearly applies.
+   "vendor" (a purchase or a payment for goods or services — INCLUDING a recurring one:
+   insurance premiums, utilities, phone/internet, subscriptions, memberships, tuition), or
+   "unknown". Pick the single best fit; "unknown" if none clearly applies.
 
 For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
 reasoning citing the evidence in the description. Be honest in the confidence.
