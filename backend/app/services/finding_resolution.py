@@ -68,11 +68,25 @@ async def apply_finding(
     # LP-564 — the write path guards itself. The UI hides Apply on a satisfied finding, but
     # POST .../apply had no verdict check at all, so the button being absent was the only thing
     # stopping a structured change against a passing or abstaining verdict.
-    if finding.evaluation_outcome is not None and finding.evaluation_outcome is not (
-        EvaluationOutcome.OPEN
+    #
+    # LP-579 — NEEDS_REVIEW BELONGS HERE TOO, and leaving it out shipped a button that refused
+    # itself. LP-576 widened the ENGINE so a needs_review evaluation carries an apply (DT-6 and DT-8
+    # can never fire, so without it their remediation had no button) — and this guard, one layer
+    # down, still admitted only OPEN. The result: the button appeared, and clicking it produced
+    # "Couldn't compute the impact preview", because the preview runs this very function.
+    #
+    # The two admitted outcomes assert something actionable about the subject. The two refused ones
+    # do not: SATISFIED has nothing to remediate, and COULDNT_CHECK is an ABSTENTION — applying off
+    # "I could not tell" is the CR-1 duplicate-liability trap LP-564 was written for, and it stays
+    # shut.
+    _APPLICABLE_OUTCOMES = (EvaluationOutcome.OPEN, EvaluationOutcome.NEEDS_REVIEW)
+    if (
+        finding.evaluation_outcome is not None
+        and finding.evaluation_outcome not in _APPLICABLE_OUTCOMES
     ):
         raise CannotApplyError(
-            f"only a fired finding can be applied — this one is {finding.evaluation_outcome.value}"
+            f"only a fired or needs-review finding can be applied — this one is "
+            f"{finding.evaluation_outcome.value}"
         )
     # And only once: applying twice runs `add_liability` twice, leaving two StatedLiability rows while
     # `applied_record` remembers one. Undo would then reverse half of it and leave a phantom debt in
