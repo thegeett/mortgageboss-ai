@@ -129,6 +129,10 @@ class _CalcLineItem(Protocol):
     auto_amount: Decimal | None
     source: str
     overridden: bool
+    # LP-568 — DTI-only today (LtvLineItem has no notion of an obligation that ends at closing),
+    # so both carry defaults and the protocol stays satisfiable by every calculator.
+    excluded: bool
+    excluded_reason: str | None
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -155,6 +159,8 @@ def _line(item: _CalcLineItem, from_tag: str) -> CalcBreakdownLine:
         source=item.source,  # verbatim — never re-derived
         overridden=item.overridden,
         from_tag=from_tag,
+        excluded=item.excluded,
+        excluded_reason=item.excluded_reason,
     )
 
 

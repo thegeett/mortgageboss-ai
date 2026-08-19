@@ -368,6 +368,12 @@ class CalcBreakdownLine(BaseModel):
     source: str
     overridden: bool = False
     from_tag: str | None = None
+    # LP-568 — this line was SHOWN to the processor but NOT summed: an obligation that does not
+    # survive closing. It carries its real ``amount``, so a reader that naively sums the
+    # breakdown will NOT match the headline totals — that is deliberate, and this flag is how a
+    # reader tells the difference between "not counted" and "zero".
+    excluded: bool = False
+    excluded_reason: str | None = None
 
 
 class CalculationEntry(BaseModel):

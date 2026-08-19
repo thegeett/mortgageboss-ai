@@ -17,6 +17,13 @@ export interface DtiLineItem {
   /** LP-375: a REQUIRED input (taxes/insurance) that could not be derived and was not overridden — its
    * `amount` of 0 is a fail-closed placeholder, NOT an extracted $0.00 (absent≠0). Render as "Unknown". */
   unknown?: boolean;
+  /** LP-568: shown in the breakdown but NOT summed into the totals — an obligation that does not
+   * survive closing (the mortgage a refinance pays off, a departing residence, a debt cleared to
+   * qualify). Distinct from `unknown`: the amount is real and known, it simply stops existing.
+   * Render struck-through WITH the reason — never hide the row, or the processor cannot tell a
+   * debt was considered at all. */
+  excluded?: boolean;
+  excluded_reason?: string | null;
 }
 
 export type DtiLimitStatus = "pass" | "over" | "unknown";

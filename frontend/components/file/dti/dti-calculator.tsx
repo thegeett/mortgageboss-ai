@@ -288,6 +288,10 @@ function LineRow({
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
             </span>
+          ) : item.excluded ? (
+            <span className="text-gray-500">
+              not counted — {item.excluded_reason ?? "excluded"}
+            </span>
           ) : item.unknown ? (
             <span className="text-warning">
               unknown — missing or unusable input (fail-closed, never assumed $0)
@@ -345,9 +349,11 @@ function LineRow({
               "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
               item.unknown
                 ? "font-medium text-warning"
-                : item.overridden
-                  ? "font-semibold text-primary"
-                  : "font-medium text-gray-900",
+                : item.excluded
+                  ? "font-medium text-gray-400 line-through"
+                  : item.overridden
+                    ? "font-semibold text-primary"
+                    : "font-medium text-gray-900",
             )}
           >
             {item.unknown ? "Unknown" : formatMoneyPrecise(item.amount)}

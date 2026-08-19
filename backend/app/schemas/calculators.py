@@ -27,6 +27,11 @@ class CalcLine(BaseModel):
     amount: Decimal  # effective = override ?? auto ?? 0
     source: str  # "stated" / "computed" / "extracted" / "manual" / "override"
     overridden: bool
+    # LP-568 — a line SHOWN in the breakdown but not summed into the totals. Only the DTI
+    # back-end sets it today (an obligation that does not survive closing); it lives on the
+    # shared line shape so the snapshot mapper's protocol holds for every calculator.
+    excluded: bool = False
+    excluded_reason: str | None = None
 
 
 class CalcStep(BaseModel):

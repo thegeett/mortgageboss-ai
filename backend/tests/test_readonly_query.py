@@ -276,9 +276,20 @@ def _later_view_redefinitions() -> dict[str, str]:
         # C7 uses the placeholder and so do its successors, and this reads the file as TEXT, so the
         # placeholder is never substituted. Both spellings are accepted rather than requiring one,
         # so a migration that follows C7's own style is not silently skipped by this scan.
+        # Only the UPGRADE body describes the live database. A downgrade that recreates the
+        # previous shape is also a `CREATE ... VIEW` in the same file, and reading the whole file
+        # let the ROLLBACK definition win — reporting a freshly exposed column as unexposed.
+        text = path.read_text(encoding="utf-8")
+        upgrade_body = text.split("def downgrade(")[0]
         for view in re.findall(
-            r"CREATE VIEW\s+(?:readonly|\{_SCHEMA\})\.\w+\s+AS\s+(SELECT.*?FROM\s+public\.\w+)",
-            path.read_text(encoding="utf-8"),
+            # LP-568: `CREATE OR REPLACE VIEW` counts too. Appending a column is the one view
+            # change Postgres allows without a drop, so it is the natural way to expose a new
+            # column — and matching only the bare `CREATE VIEW` spelling made those rebuilds
+            # INVISIBLE here. That is the failure this scanner exists to prevent, in reverse: a
+            # replace that quietly dropped a column would have passed the guard unnoticed.
+            r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:readonly|\{_SCHEMA\})\.\w+\s+AS\s+"
+            r"(SELECT.*?FROM\s+public\.\w+)",
+            upgrade_body,
             re.DOTALL | re.IGNORECASE,
         ):
             match = re.search(r"FROM\s+public\.(\w+)", view)

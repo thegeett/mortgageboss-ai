@@ -315,6 +315,18 @@ def _parse_liabilities(deal: etree._Element, ctx: _Ctx) -> list[ParsedLiability]
                     ctx.text(liab, ".//m:LIABILITY_DETAIL/m:LiabilityUnpaidBalanceAmount")
                 ),
                 holder_name=ctx.text(liab, ".//m:LIABILITY_HOLDER//m:FullName"),
+                # LP-568 — the export's own payoff/exclusion answer. Read but NOT trusted in the
+                # negative: the real file this parser was hardened against carries
+                # `LiabilityPayoffStatusIndicator=false` on all ten liabilities, five of them
+                # mortgages, which is a default rather than a determination. `_to_bool` gives
+                # None for an absent element, and the consumer treats a false the same as a None
+                # — only True excludes a payment from the DTI.
+                payoff_status=_to_bool(
+                    ctx.text(liab, ".//m:LIABILITY_DETAIL/m:LiabilityPayoffStatusIndicator")
+                ),
+                exclusion_indicator=_to_bool(
+                    ctx.text(liab, ".//m:LIABILITY_DETAIL/m:LiabilityExclusionIndicator")
+                ),
             )
         )
     return out

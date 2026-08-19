@@ -227,6 +227,15 @@ async def create_loan_file_from_mismo(
                 monthly_payment=liab.monthly_payment,
                 unpaid_balance=liab.unpaid_balance,
                 holder_name=liab.holder_name,
+                # LP-568 — only a TRUE from the export sets the flag. A false or an absent
+                # element leaves it None ("not established"), so the rule that asks the
+                # retained-or-paid-off question still fires instead of being silently answered.
+                paid_off_at_closing=(
+                    True if (liab.payoff_status or liab.exclusion_indicator) else None
+                ),
+                payoff_source=(
+                    "mismo" if (liab.payoff_status or liab.exclusion_indicator) else None
+                ),
             )
         )
     for asset in parsed.assets:

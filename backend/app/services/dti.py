@@ -97,16 +97,27 @@ class _AutoLine:
     unrecognized frequency (we must not assume monthly, the 12x risk, nor drop it to 0, an understatement).
     Absent-HOA (no dues) stays ``unknown=False`` → a legitimate $0 line."""
 
-    __slots__ = ("auto", "key", "label", "source", "unknown")
+    __slots__ = ("auto", "excluded_reason", "key", "label", "source", "unknown")
 
     def __init__(
-        self, key: str, label: str, auto: Decimal | None, source: str, *, unknown: bool = False
+        self,
+        key: str,
+        label: str,
+        auto: Decimal | None,
+        source: str,
+        *,
+        unknown: bool = False,
+        excluded_reason: str | None = None,
     ) -> None:
         self.key = key
         self.label = label
         self.auto = auto
         self.source = source
         self.unknown = unknown
+        # LP-568: set → the line is SHOWN but not summed, and this says why. Distinct from
+        # ``unknown`` (a figure we could not derive) and from a $0 line (a figure that is zero):
+        # the amount here is known and real, it simply does not survive closing.
+        self.excluded_reason = excluded_reason
 
 
 async def _auto_income_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLine]:
@@ -137,7 +148,26 @@ async def _auto_debt_lines(db: AsyncSession, loan_file_id: UUID) -> list[_AutoLi
     for liab in (await db.execute(stmt)).scalars().all():
         kind = (liab.liability_type or "Liability").strip()
         label = f"{kind} — {liab.holder_name}" if liab.holder_name else kind
-        lines.append(_AutoLine(f"debt.{liab.id}", label, liab.monthly_payment, "stated"))
+        # LP-568 — a liability paid off at closing does not belong in the back-end ratio. DTI is
+        # forward-looking: it measures what is owed AFTER this loan funds. On a refinance the
+        # mortgage being replaced is the clearest case (counting it charges the same house twice,
+        # once as `housing_payment` and once here), and a purchase has the same shape via a
+        # departing residence or a debt cleared to qualify.
+        #
+        # `is True` is deliberate — None means "not established" and must keep counting. Silence
+        # is the safe direction here: over-counting fails a good file visibly, under-counting
+        # passes a bad one quietly.
+        lines.append(
+            _AutoLine(
+                f"debt.{liab.id}",
+                label,
+                liab.monthly_payment,
+                "stated",
+                excluded_reason=(
+                    "paid off at closing" if liab.paid_off_at_closing is True else None
+                ),
+            )
+        )
     return lines
 
 
@@ -334,9 +364,15 @@ def _to_items(
                     override is None
                     and (auto.unknown or (auto.auto is None and auto.key in _REQUIRED_HOUSING_KEYS))
                 ),
+                excluded=auto.excluded_reason is not None,
+                excluded_reason=auto.excluded_reason,
             )
         )
-        engine_lines.append(DtiLine(key=auto.key, label=auto.label, amount=effective))
+        # LP-568: the ITEM is still emitted (a processor must see the line and why it dropped
+        # out — a debt that silently vanishes is worse than one counted wrongly), but it never
+        # reaches the engine, so it cannot enter a total.
+        if auto.excluded_reason is None:
+            engine_lines.append(DtiLine(key=auto.key, label=auto.label, amount=effective))
     return items, engine_lines
 
 

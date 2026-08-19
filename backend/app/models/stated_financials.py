@@ -91,6 +91,26 @@ class StatedLiability(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     unpaid_balance: Mapped[Money | None] = mapped_column(nullable=True)
     holder_name: Mapped[str | None] = mapped_column(String(_HOLDER_LEN), nullable=True)
 
+    # LP-568 — will this obligation survive closing? A refinance pays off the mortgage it
+    # replaces, and a purchase can pay off a departing residence or a debt cleared to qualify;
+    # in each case the payment must leave the DTI, because DTI measures what is owed AFTER
+    # closing. Without this the same house is charged twice — once as the new housing payment,
+    # once as the old liability.
+    #
+    # THREE-STATE, and ``None`` is the default on purpose (§8: absent is not the same as
+    # known-false). Only ``True`` excludes the payment. A MISMO ``false`` does NOT land here as
+    # ``False``: the real export carries ``LiabilityPayoffStatusIndicator=false`` on every row,
+    # including five mortgages, so ``false`` is "not stated", not "retained". Treating it as
+    # authoritative would silently suppress the question on every file.
+    #
+    # Excluding wrongly UNDERSTATES the DTI and can pass a loan that should fail, so nothing
+    # sets this from a heuristic — only the source document or a human.
+    paid_off_at_closing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Provenance for the flag above — who established it (``mismo`` / ``processor``). Kept
+    # separate from the value so "excluded because the 1003 said so" and "excluded because a
+    # processor said so" never blur together in an audit.
+    payoff_source: Mapped[str | None] = mapped_column(String(_CATEGORY_LEN), nullable=True)
+
     loan_file: Mapped[LoanFile] = relationship(back_populates="stated_liabilities")
 
 

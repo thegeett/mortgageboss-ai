@@ -28,6 +28,12 @@ class DtiLineItem(BaseModel):
     # its ``amount`` of 0 is a FAIL-CLOSED placeholder, NOT an extracted $0.00 (absent≠0). The display must
     # render this as "unknown", never "$0.00 Extracted". False for a legitimately-zero input (HOA/MI).
     unknown: bool = False
+    # LP-568: shown in the breakdown but NOT summed into monthly_debts — an obligation that does
+    # not survive closing (a refinanced mortgage, a departing residence, a debt cleared to
+    # qualify). Distinct from ``unknown``: the amount is known, it just stops existing. The
+    # display must render it struck-through with the reason, never omit the row.
+    excluded: bool = False
+    excluded_reason: str | None = None
 
 
 class DtiLimit(BaseModel):

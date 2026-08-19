@@ -40,6 +40,7 @@ def _line(
     source: str,
     overridden: bool = False,
     auto_amount: Decimal | None | object = _UNSET,
+    excluded_reason: str | None = None,
 ) -> NS:
     # auto_amount defaults to the effective amount (a "known" input); pass None explicitly for an
     # UNKNOWN input (the calculator couldn't derive it → LP-318 gates on this).
@@ -51,6 +52,11 @@ def _line(
         auto_amount=auto,
         source=source,
         overridden=overridden,
+        # LP-568 — a line shown but NOT summed (an obligation that ends at closing). Every
+        # calculator's real line shape carries these, so the double must too or it stops being a
+        # faithful stand-in — the exact failure this file's own comments warn about.
+        excluded=excluded_reason is not None,
+        excluded_reason=excluded_reason,
     )
 
 

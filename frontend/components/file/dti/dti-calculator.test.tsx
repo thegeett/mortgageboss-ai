@@ -84,6 +84,41 @@ afterEach(() => {
 });
 
 describe("DtiCalculator", () => {
+  // LP-568 — a debt that does not survive closing (the mortgage a refinance pays off, a departing
+  // residence, a debt cleared to qualify) is left OUT of the totals. It must still be rendered: a
+  // liability that silently disappears from the breakdown is worse than one counted wrongly,
+  // because the processor cannot tell it was considered at all.
+  it("shows an excluded debt struck through, with its reason, and out of the total", () => {
+    mockDti({
+      data: {
+        ...CALC,
+        monthly_debts: "0.00",
+        total_monthly_obligations: "277.78",
+        debt_items: [
+          {
+            key: "debt.1",
+            label: "MortgageLoan — UNITED WHSLE MORT",
+            auto_amount: "3186.00",
+            override_amount: null,
+            amount: "3186.00",
+            source: "stated",
+            overridden: false,
+            excluded: true,
+            excluded_reason: "paid off at closing",
+          },
+        ],
+      },
+    });
+    render(<DtiCalculator fileId="LF-1" />);
+
+    // The row is present, and says WHY it does not count.
+    expect(screen.getByText(/not counted/)).toBeDefined();
+    expect(screen.getByText(/paid off at closing/)).toBeDefined();
+    // Its own figure is still shown — struck through, not hidden and not zeroed.
+    const amount = screen.getByText("$3,186.00");
+    expect(amount.className).toContain("line-through");
+  });
+
   it("renders the two ratios, the breakdown, the formula and the limit", () => {
     mockDti();
     render(<DtiCalculator fileId="LF-1" />);

@@ -110,6 +110,12 @@ class ParsedLiability(BaseModel):
     monthly_payment: Decimal | None = None
     unpaid_balance: Decimal | None = None
     holder_name: str | None = None
+    # LP-568 — MISMO's own answer to "does this obligation survive closing?", from
+    # LiabilityPayoffStatusIndicator / LiabilityExclusionIndicator. Tri-state like the property
+    # indicators above: None = the export did not state it. Only True is load-bearing — see the
+    # note in `_parse_liabilities` on why a `false` is not read as "retained".
+    payoff_status: bool | None = None
+    exclusion_indicator: bool | None = None
 
 
 class ParsedAsset(BaseModel):
