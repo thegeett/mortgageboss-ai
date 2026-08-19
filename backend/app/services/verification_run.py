@@ -628,8 +628,21 @@ async def run_verification(
     try:
         await persist_snapshot(db, snapshot)
     except Exception as exc:
-        logger.warning("verification_persist_snapshot_failed", error=type(exc).__name__)
-        degradations.append(Degradation("persist_snapshot", f"not persisted: {type(exc).__name__}"))
+        # LP-565 — LOG THE REASON, not just the class name. `_assert_no_raw_pii` was rewritten by
+        # LP-509-C1 specifically so its message NAMES THE FIELD, and this call site then threw that
+        # away — so the at-rest guard refused every write on staging for six days (22 completed runs,
+        # 0 snapshots) while the only trace was `error=RawPiiAtRestError`, which says nothing anyone
+        # can act on.
+        #
+        # The message is safe to log BY CONSTRUCTION: it reports the path and the SHAPE of what was
+        # found ("a 12-digit run"), never the value — a guard against logging raw PII must not log raw
+        # PII itself, and it does not.
+        logger.warning(
+            "verification_persist_snapshot_failed",
+            error=type(exc).__name__,
+            detail=str(exc),
+        )
+        degradations.append(Degradation("persist_snapshot", f"not persisted: {exc}"))
 
     logger.info(
         "verification_run_done",

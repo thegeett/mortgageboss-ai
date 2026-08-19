@@ -231,6 +231,12 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "social_security_number_masked": (PiiKind.SSN, True),  # certificate_of_eligibility — pre-masked
     "loan_number_masked": (PiiKind.ACCOUNT, True),  # verification_of_mortgage — pre-masked
     "policy_number": (PiiKind.ACCOUNT, True),  # homeowner_s_insurance_quote — pre-masked
+    # LP-565 — an Assessor's Parcel Number is identifier-shaped (9+ digits) and was passing through
+    # RAW, which is one of the values refusing every snapshot write on staging: 22 completed runs,
+    # 0 persisted. It is a public-record identifier rather than borrower PII, but the at-rest guard
+    # cannot tell one digit run from another and refuses the whole document — and the guard's own
+    # message says to route the field here rather than relax it.
+    "parcel_or_apn": (PiiKind.ACCOUNT, False),  # property_tax_bill — stored RAW
     # LP-443 Phase C — typed-core PII across the remaining generated extractors (all account/
     # SSN/TIN-like; no name conflicts). List-row PII still relies on prompt masking (reported gap).
     "account_case_or_reference_number": (PiiKind.ACCOUNT, False),
