@@ -61,6 +61,7 @@ from app.models.document_finding import DocumentFindingType
 from app.models.extraction import ExtractionStatus
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
+from app.services.document_borrower_links import assign_document_borrower_links
 from app.services.document_findings import (
     coerce_finding_type,
     create_document_finding,
@@ -416,6 +417,39 @@ async def _extract_branch(
         confidence=reported_confidence,
         confidence_source=confidence_source,
     )
+
+    # LP-567 — attribute the document to its borrower(s) HERE, while the extraction that
+    # asserts the name is the current one. The snapshot's ``belongs_to`` reads
+    # ``document_borrower_links``, and until this call the producer had no caller outside a
+    # dev script: staging ran with 0 of 16 documents attributed, so every per-borrower rule
+    # saw a file whose documents belonged to nobody. Placed before the branches below so it
+    # covers the completed, low-confidence and failed paths alike, and so a type override
+    # re-linking through ``reprocess_document_extraction`` gets it for free.
+    #
+    # SAVEPOINT, as the snapshot builder does: matching is deterministic and additive, and a
+    # DB error inside it must never cost the document the extraction that just succeeded. The
+    # rollback also undoes the linker's opening DELETE, so a failure leaves the PREVIOUS
+    # version's links standing rather than wiping them — stale beats absent, and the log names
+    # the document so it is findable.
+    try:
+        async with db.begin_nested():
+            links = await assign_document_borrower_links(db, document)
+    except Exception as exc:
+        logger.warning(
+            "document_borrower_link_failed",
+            document_id=str(document.id),
+            error_type=type(exc).__name__,
+        )
+    else:
+        # Zero links is a legitimate outcome, not a failure: the type asserts no name
+        # (closing_disclosure, form_1098), or the asserted name matches nobody above
+        # threshold. Logged with the count so the two are distinguishable in CloudWatch.
+        logger.info(
+            "document_borrower_linked",
+            document_id=str(document.id),
+            document_type=document.document_type,
+            link_count=len(links),
+        )
 
     if result.status == ExtractionStatus.FAILED:
         # Genuinely EMPTY (derive_status: nothing read → FAILED; PARTIAL keeps its fields and never lands
