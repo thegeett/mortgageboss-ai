@@ -103,13 +103,21 @@ def test_a_money_OUT_transaction_is_not_called_a_deposit() -> None:
     )
 
 
-def test_an_unknown_direction_reads_neither() -> None:
-    """Guessing a subject's direction is exactly the fabrication this layer exists to avoid."""
-    assert resolve_subject_label("txnabc123", _amount_tags(direction=None)) == "a transaction"
+def test_no_direction_still_names_the_amount_and_date() -> None:
+    """⚠️ THE REGRESSION THE FIRST VERSION SHIPPED. Requiring the direction before printing anything
+    collapsed EVERY AS-12 subject to "a transaction": their inline tags come from `reasoned_over`, which
+    excludes `txn.is_money_in` on purpose (LP-509-A1 — the applicability predicate has already filtered
+    the subjects, so it carries no signal for the model).
+
+    On the real file that turned nine distinct deposits into nine identical rows, and made four passes
+    and five reviews read as though the SAME transaction were sitting in two buckets at once. The
+    amount and date are what identify a subject; the noun only dresses it. Dropping the noun when the
+    direction is unknown is honest — dropping the amount is not."""
+    assert resolve_subject_label("txnabc123", _amount_tags(direction=None)) == "$20,000 on 3/27"
 
 
-def test_a_transaction_with_no_tags_claims_neither_direction_nor_amount() -> None:
-    """It used to read "a deposit" — an assertion about direction made from no evidence at all."""
+def test_a_transaction_with_no_amount_claims_nothing() -> None:
+    """With no amount there is nothing to identify it by, and no direction to name it by."""
     assert resolve_subject_label("txnabc123", []) == "a transaction"
 
 

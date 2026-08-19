@@ -85,12 +85,19 @@ def _deposit_label(load_bearing_tags: Sequence[Mapping[str, Any]]) -> str:
     subject is exactly the fabrication the label layer exists to avoid.
     """
     direction = _tag_value(load_bearing_tags, _DIRECTION_TAG)
-    noun = {"in": "Deposit", "out": "Payment"}.get(direction or "")
     amount = _tag_value(load_bearing_tags, _AMOUNT_TAG)
-    if amount is None or noun is None:
+    if amount is None:
         return {"in": "a deposit", "out": "a payment"}.get(direction or "", "a transaction")
+    # ⚠️ THE AMOUNT AND DATE IDENTIFY THE SUBJECT; THE NOUN ONLY DRESSES IT. A first version required
+    # the direction before it would print either, and AS-12's findings do not carry
+    # `txn.is_money_in` — their inline tags come from `reasoned_over`, which excludes the applicability
+    # predicate on purpose (LP-509-A1: it has already filtered the subjects, so it carries no signal).
+    # So every AS-12 subject collapsed to "a transaction", nine deposits became nine identical rows, and
+    # four passes and five reviews read as if they were the same item in two places at once. Losing the
+    # noun costs a word; losing the amount costs the reader the ability to tell one finding from another.
+    noun = {"in": "Deposit of ", "out": "Payment of "}.get(direction or "", "")
+    label = f"{noun}{_money(amount)}"
     date = _tag_value(load_bearing_tags, _DATE_TAG)
-    label = f"{noun} of {_money(amount)}"
     return f"{label} on {_short_date(date)}" if date is not None else label
 
 
