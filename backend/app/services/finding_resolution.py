@@ -396,6 +396,12 @@ async def _reverse_applied_change(
     if action == "correct_liability_payment":
         return await _restore_liability_payment(db, loan_file=loan_file, record=record)
 
+    # LP-573 — the exact inverse: clear the flag AND restore whatever provenance was there before,
+    # so undoing a processor's exclusion on a liability the application had already flagged does not
+    # silently discard the application's own answer.
+    if action == "exclude_liability_paid_off":
+        return await _restore_liability_payoff(db, loan_file=loan_file, record=record)
+
     if action in ("correct_purchase_price", "correct_valuation"):
         restored: dict[str, Any] = await _restore_property_money(
             db, loan_file=loan_file, record=record
@@ -628,6 +634,11 @@ async def _incorporate_into_structured_data(
     if action == "correct_liability_payment":
         return await _correct_liability_payment(db, loan_file=loan_file, spec=spec)
 
+    # LP-573 — DT-8's remediation. Not a money edit: it records that an obligation does not survive
+    # closing, and the DTI drops it from the ratio as a consequence.
+    if action == "exclude_liability_paid_off":
+        return await _exclude_liability_paid_off(db, loan_file=loan_file, spec=spec)
+
     if action == "correct_purchase_price":
         return await _correct_property_money(
             db, loan_file=loan_file, spec=spec, column="purchase_price"
@@ -706,6 +717,40 @@ async def _restore_liability_payment(
     return {"action": "restore_liability_payment", "liability_id": raw_id}
 
 
+async def _restore_liability_payoff(
+    db: AsyncSession, *, loan_file: LoanFile, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Undo an exclusion: clear the flag and put back whatever provenance preceded it (DT-8).
+
+    The recorded ``from`` may be a real source (``mismo_payoff``) rather than None — a processor can
+    apply over a liability the application had already flagged. Restoring None in that case would
+    discard the application's own answer, so the prior value is put back verbatim.
+
+    Same `deleted_at` guard as the payment restore, and for the same reason: a liability removed
+    between Apply and Undo must not be written to and reported as success.
+    """
+    raw_id = record.get("liability_id")
+    prior_source = record.get("from")
+    if not isinstance(raw_id, str):
+        return {"action": "restore_liability_payoff", "applied": False}
+    try:
+        liability_id = UUID(raw_id)
+    except ValueError:
+        return {"action": "restore_liability_payoff", "applied": False}
+    liability = await db.get(StatedLiability, liability_id)
+    if (
+        liability is None
+        or liability.deleted_at is not None
+        or liability.loan_file_id != loan_file.id
+    ):
+        return {"action": "restore_liability_payoff", "applied": False}
+    # None when nothing had flagged it before — the common case, and the honest "not established".
+    liability.paid_off_at_closing = True if prior_source else None
+    liability.payoff_source = prior_source if isinstance(prior_source, str) else None
+    await db.flush()
+    return {"action": "restore_liability_payoff", "liability_id": raw_id}
+
+
 async def _restore_property_money(
     db: AsyncSession, *, loan_file: LoanFile, record: dict[str, Any]
 ) -> dict[str, Any]:
@@ -775,6 +820,62 @@ async def _correct_liability_payment(
         "holder_name": holder,
         "from": _stringify_money(prior),
         "to": _stringify_money(new_payment),
+    }
+
+
+async def _exclude_liability_paid_off(
+    db: AsyncSession, *, loan_file: LoanFile, spec: dict[str, Any]
+) -> dict[str, Any]:
+    """Mark a stated liability as retired at closing, so its payment leaves the back-end DTI (DT-8).
+
+    TARGETED BY HOLDER NAME, for the same forced reason as `_correct_liability_payment`: a governed
+    rule works on the SNAPSHOT, whose liability subjects are content hashes, never
+    `stated_liabilities` primary keys. The holder is the business key both sides share.
+
+    EXACTLY ONE MATCH, OR NOTHING. Excluding the wrong debt UNDERSTATES the DTI and can pass a loan
+    that should fail, which is the one direction of error that matters here — so an ambiguous holder
+    declines and the processor uses the liabilities editor by hand.
+
+    ALREADY-EXCLUDED IS NOT AN APPLY. If the flag is already set the action reports `applied: False`
+    rather than rewriting provenance: re-stamping `processor` over a `mismo_payoff` would erase the
+    fact that the application itself said so.
+    """
+    holder = spec.get("holder_name")
+    if not isinstance(holder, str) or not holder.strip():
+        return {"action": "exclude_liability_paid_off", "applied": False}
+
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(StatedLiability).where(
+                        StatedLiability.loan_file_id == loan_file.id,
+                        StatedLiability.holder_name == holder,
+                    ),
+                    StatedLiability,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) != 1:
+        return {"action": "exclude_liability_paid_off", "applied": False}
+
+    liability = rows[0]
+    if liability.paid_off_at_closing is True:
+        return {"action": "exclude_liability_paid_off", "applied": False}
+
+    prior_source = liability.payoff_source
+    liability.paid_off_at_closing = True
+    liability.payoff_source = "processor"
+    await db.flush()
+    return {
+        "action": "exclude_liability_paid_off",
+        "liability_id": str(liability.id),
+        "holder_name": holder,
+        "from": prior_source,
+        "to": "processor",
     }
 
 

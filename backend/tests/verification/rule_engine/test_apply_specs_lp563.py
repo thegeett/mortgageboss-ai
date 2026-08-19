@@ -94,6 +94,9 @@ def test_every_declared_apply_names_an_action_the_engine_can_perform() -> None:
         "correct_liability_payment",
         "correct_purchase_price",
         "correct_valuation",
+        # LP-573 — DT-8's remediation. Not a money edit: it records that an obligation does not
+        # survive closing, and the DTI drops it from the back-end ratio as a consequence.
+        "exclude_liability_paid_off",
     }
     for path in sorted(pathlib.Path("app/verification/rules/specs").glob("*.yaml")):
         document = yaml.safe_load(path.read_text())

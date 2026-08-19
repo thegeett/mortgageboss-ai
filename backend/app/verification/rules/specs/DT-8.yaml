@@ -1,0 +1,176 @@
+# DT-8 — A refinanced lien still counted in the DTI — DETERMINISTIC structural rule SPEC (LP-573).
+#
+# Debt-to-income is FORWARD-LOOKING: it measures what the borrower owes AFTER this loan funds. On a
+# refinance the mortgage being replaced is paid off at closing, so counting its monthly payment
+# alongside the new housing payment charges the same property twice — once as `housing_payment`
+# (the new PITI) and once as a liability.
+#
+# THE FILE THIS WAS BUILT FROM. LF-WCHG, a rate/term refinance: income 13,166.67, new PITI 4,418.785,
+# liabilities 3,186.00 (a MortgageLoan held by the servicer named on the file's mortgage statement)
+# + 49 + 35 + 25. The engine reported a back-end DTI of 58.59%. Worked by hand with the resident
+# domain expert, the correct figure is 34.39%. 58.59% fails most conventional overlays and 34.39%
+# passes comfortably, so this is not a cosmetic discrepancy — it flips the verdict on the file.
+#
+# THIS RULE ASKS; IT DOES NOT CONCLUDE, AND THAT IS THE DESIGN. It does NOT prove which property
+# secures a given mortgage. Proving it would mean matching the liability to the subject property by
+# address, or corroborating through a 1098's tax figure — a new matcher that is silent on files
+# without those documents and that can be WRONG in the one direction that matters. Excluding a debt
+# that is actually retained understates the DTI and can pass a loan that should fail; leaving a
+# retired debt in overstates it, which costs a processor a glance. So the rule surfaces the
+# situation with the evidence attached and hands the judgment to a human, exactly as DT-6 does.
+#
+# THE COST OF THAT CHOICE, STATED RATHER THAN HIDDEN: on a refinance where the borrower owns
+# mortgaged rental property, this fires once per stated mortgage liability and the processor
+# dismisses the ones that are being retained. Noise, not danger.
+#
+# IT CAN NEVER PRODUCE `fired`. A mortgage liability on a refinance is not a defect — it is a
+# question. The verdict is `needs_review`, and Apply is the processor's affirmation.
+#
+# REFINANCE-SCOPED, THOUGH THE DEFECT IS NOT. A purchase reaches the same double count through a
+# departing residence being sold, or a debt cleared at closing to qualify. Detecting THOSE needs
+# different evidence (is the borrower selling?), so they are not folded in here — a purchase is
+# `not_applicable` to THIS rule, and the liabilities editor's control remains the path for them.
+# That is also why LP-568 put the flag on the liability rather than deriving it from loan purpose.
+#
+# SUBJECT: the STATED liability. `liab.stated_is_mortgage` declines on a credit-report tradeline
+# (its bureau codes would need the open-vocabulary classification ADR-353 defers), so a reported
+# tradeline never becomes a subject of this rule — and it is the stated row the exclusion is
+# written back to anyway.
+
+rule_id: DT-8
+name: Refinanced lien still counted in DTI
+category: DTI
+
+kind: structural          # must equal rule_kinds.csv
+numeric_check: false      # a presence check on a marking — no threshold, no ratio bookend
+
+criteria: >-
+  On a refinance, a mortgage the application states as a liability is paid off at closing when it is
+  the lien being refinanced, and its monthly payment must then leave the back-end debt-to-income
+  ratio. Where such a liability is counted and nothing has marked it as retired at closing, the
+  situation is surfaced for confirmation: the debt-to-income ratio may be charging the subject
+  property twice, once as the new housing payment and once as this liability. The rule does not
+  decide which property secures the mortgage — a borrower may hold mortgages on property being
+  retained, whose payments belong in the ratio.
+
+applicability:
+  scope: every mortgage liability the application states, on a loan whose purpose is a refinance
+  trigger: >-
+    loan.purpose == refinance. A purchase is not_applicable — its own version of this defect (a
+    departing residence, a debt cleared to qualify) needs different evidence and is not asked here.
+    A purpose the file does not state is couldnt_check, never absorbed into scope-false.
+
+reference_values:
+  priya_validated: false          # must equal rule_kinds.csv
+  threshold_needs_signoff: false  # must equal rule_kinds.csv — there is no threshold
+  values: {}
+  guideline_text: >-
+    The debt-to-income ratio reflects the borrower's obligations after the subject transaction
+    closes. An obligation satisfied at or before closing — including the mortgage a refinance pays
+    off — is excluded from the monthly obligations used in the ratio, provided the payoff is
+    documented. A mortgage secured by other property the borrower retains remains an obligation and
+    stays in the ratio.
+
+required_inputs:
+  - name: stated_is_mortgage
+    snapshot_path: 'tags.by_subject[<liability subject id>]["liab.stated_is_mortgage"]'
+    description: >-
+      does the application state this liability's type as MortgageLoan (derived, LP-573). Declines on
+      a credit-report tradeline, so this rule's subjects are stated liabilities only.
+  - name: payoff_marked
+    snapshot_path: 'tags.by_subject[<liability subject id>]["liab.payoff_marked"]'
+    description: >-
+      has this obligation already been marked as retired at closing (derived, LP-573) — a fact about
+      the MARKING, not about the world.
+  - name: purpose
+    snapshot_path: 'tags.by_subject["loan"]["loan.purpose"]'
+    description: the loan's purpose; this rule asks its question only of a refinance.
+  - name: creditor
+    snapshot_path: 'tags.by_subject[<liability subject id>]["liab.creditor_name"]'
+    description: >-
+      the holder — not an operand (those are numeric/temporal), but load-bearing twice over: it is
+      the finding's SUBJECT LABEL, and it is the business key the Apply targets.
+  - name: payment
+    snapshot_path: 'tags.by_subject[<liability subject id>]["liab.monthly_payment"]'
+    description: the monthly payment currently counted in the back-end ratio.
+
+subject_enumeration: per_liability
+subject_key_fields: [liability]
+
+evidence_required: >-
+  The holder and the monthly payment being counted, inline on the finding, so a processor can tell at
+  a glance whether this is the lien being refinanced or a mortgage on property being retained —
+  without reopening the application.
+
+guideline_reference: "Fannie Mae Selling Guide B3-6-05 (Monthly Debt Obligations) — an obligation satisfied at or before closing is excluded from the monthly obligations used in the debt-to-income ratio; a mortgage on retained property remains an obligation."
+
+requires_documents: []
+
+spec_version: 1
+
+deterministic:
+  # BOTH conditions are SCOPE, not outcomes, and that is the honest shape: `not_applicable` means the
+  # rule is irrelevant to this subject's nature (§8), and it is irrelevant to a credit card for the
+  # same reason it is irrelevant to a purchase. The engine reserves `not_applicable` for this
+  # predicate — an outcome cannot produce it — which is what forced the question and got it right.
+  applicability:
+    # `loan_tag`, NOT `tag` (LP-517). This rule's subject is a LIABILITY, so the subject's own tag map
+    # has no loan.purpose in it — a plain `tag:` here loads cleanly and is then ABSENT on every
+    # liability, so the eq guard never holds and every subject couldnt_checks. That is exactly the
+    # trap `reject_loan_tag` documents, and it is what this spec did on its first run.
+    - {loan_tag: loan.purpose, op: eq, value: refinance}
+    - {tag: liab.stated_is_mortgage, op: eq, value: "yes"}
+  # A file with no refinance purpose is genuinely out of scope, not missing data.
+  applicability_expected: false
+  load_bearing_tags:
+    - liab.stated_is_mortgage
+    - liab.payoff_marked
+    - liab.creditor_name
+    - liab.monthly_payment
+  # Only the two that DECIDE the verdict gate it. The creditor and payment are evidence carried
+  # inline; gating on them would turn a nameless liability into couldnt_check when the question
+  # ("is a mortgage counted un-excluded?") is already answerable.
+  gated_tags:
+    - liab.stated_is_mortgage
+    - liab.payoff_marked
+  # Evidence carried INLINE on the finding, so a processor can tell at a glance whether this is the
+  # lien being refinanced without reopening the application. Not gated (see gated_tags above): a
+  # nameless liability still has an answerable question.
+  # Operands are numeric/temporal comparands only, so the HOLDER is not one — it reaches the finding
+  # as the SUBJECT LABEL (`rule_subject_label` resolves a liability subject to its creditor name),
+  # which is where a processor reads "which debt is this" anyway.
+  operands:
+    payment: {tag: liab.monthly_payment}
+  apply:
+    action: exclude_liability_paid_off
+    fields:
+      holder_name: {tag: liab.creditor_name}
+  outcomes:
+    # Already answered — by the application's own payoff indicator, or by a processor.
+    - verdict: satisfied
+      when_tags:
+        - {tag: liab.payoff_marked, op: eq, value: "yes"}
+      reasoning: >-
+        this mortgage is marked as paid off at closing, so its payment is correctly excluded from the
+        back-end debt-to-income ratio
+    # `stated_is_mortgage == yes` is already guaranteed by applicability; only the marking is left.
+    - verdict: needs_review
+      when_tags:
+        - {tag: liab.payoff_marked, op: eq, value: "no"}
+      reasoning: >-
+        the debt-to-income ratio counts this mortgage's monthly payment of {payment} alongside the new
+        housing payment — if this is the lien being refinanced it is paid off at closing and the ratio
+        is charging the same property twice, and if it is secured by property being retained the
+        payment belongs where it is
+      how_to_fix: >-
+        Confirm whether this mortgage is the lien being refinanced. If it is, mark it paid off at
+        closing so its payment leaves the ratio — the payoff statement or the closing disclosure
+        documents it. If it is secured by property the borrower is keeping, leave it counted.
+    - verdict: couldnt_check
+      default: true
+      reasoning: >-
+        whether this liability is a mortgage, or whether it has already been marked as paid off at
+        closing, could not be established from the application
+      how_to_fix: >-
+        Confirm the liability's type on the application. A liability the application states without a
+        type cannot be told apart from the lien being refinanced.

@@ -1972,6 +1972,42 @@ RE-1:
     ⚠️ THIS RULE ASSERTS NOTHING ABOUT RETENTION and does not read `property.is_retained_reo` or
     `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by test). RE-2
     stays dropped: it asserted a CONSEQUENCE from the retention inference; this surfaces a DISCREPANCY.
+DT-8:
+  status: no-ai-dependency
+  ships: auto
+  threshold: null
+  validated: false
+  # Both inputs are DERIVED from the application's own stated liabilities: `liab.stated_is_mortgage`
+  # reads MISMO's LiabilityType verbatim, `liab.payoff_marked` reads the LP-568 flag. On LF-WCHG the
+  # four stated liabilities resolve to one mortgage (UNITED WHSLE MORT, 3,186.00) and three revolving
+  # accounts, and none is marked — so the rule asks its question exactly once on that file.
+  input_resolves: true
+  load_bearing_ai_tags: []
+  fp_fn: >-
+    THE TWO DIRECTIONS ARE NOT SYMMETRIC, AND THE ASYMMETRY IS WHY THIS RULE ONLY ASKS. A false
+    NEGATIVE (the refinanced lien stays in the ratio) OVERSTATES the DTI — LF-WCHG read 58.59% instead
+    of 34.39%, which fails a file that passes. A false POSITIVE here costs a processor one glance,
+    because the rule never fires and never excludes anything on its own. The dangerous direction is
+    the one an automatic exclusion would create: dropping a debt that is actually retained
+    UNDERSTATES the DTI and can pass a loan that should fail. That is the direction the design
+    refuses to take unilaterally.
+    The expected FP is real and named: on a refinance where the borrower owns mortgaged rental
+    property, the rule asks once per stated mortgage and the processor dismisses the retained ones.
+  rationale: >-
+    No AI tag and no threshold — a presence check on a marking. THE RULE DELIBERATELY DOES NOT PROVE
+    WHICH PROPERTY SECURES THE MORTGAGE. Proving it would mean matching the liability to the subject
+    property by address, or corroborating through a 1098's tax figure (on LF-WCHG the DTI's
+    housing.taxes of 440.215/month annualises to 5,282.58 and the 1098 reads "Property Taxes
+    5,282.58" — conclusive there, and silent on any file without a 1098). That matcher would be a new
+    source of error in the permissive direction, and the verdict is needs_review either way, so it
+    buys precision the workflow does not need. The rule surfaces the situation with the payment
+    inline and hands the judgment to a human, exactly as DT-6 does.
+    REFINANCE-SCOPED THOUGH THE DEFECT IS NOT: a purchase reaches the same double count through a
+    departing residence being sold or a debt cleared at closing to qualify. Detecting those needs
+    different evidence, so a purchase is not_applicable here and the liabilities editor's control
+    (LP-571) remains the path for them.
+    SCOPE IS BOTH CONDITIONS: `not_applicable` means the rule is irrelevant to the subject's nature,
+    and it is irrelevant to a credit card for the same reason it is irrelevant to a purchase.
 DT-6:
   status: no-ai-dependency
   ships: auto

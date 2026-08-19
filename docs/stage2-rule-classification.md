@@ -2,7 +2,7 @@
 
 Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of truth) via `app.scripts.generate_rule_kinds_md` — do not edit by hand. See ADR-247 / LP-301.
 
-**136 rules** — calculative 28, structural 66, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/136. Thresholds needing sign-off: 18.
+**137 rules** — calculative 28, structural 67, judgmental 27, out-of-scope 15. Numeric-check (deterministic bookend): 28. Priya-validated: 0/137. Thresholds needing sign-off: 18.
 
 `exact_match` applies to structural rules only (true = deterministic-only, no AI; false = AI fuzzy entity match). `numeric_check` = the calculative bookend. `signoff` = a regulatory threshold Priya must sign off before ship. All rules are `priya_validated=false` until confirmed.
 
@@ -39,7 +39,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | PE-1 | Conventional eligibility | Program | calculative | deterministic_bookend | true | — | false | false |
 | PE-3 | FHA minimum required investment | Program | calculative | deterministic_bookend | true | — | false | false |
 
-## structural (66)
+## structural (67)
 
 | rule_id | name | category | kind | evaluation_path | numeric | exact_match | validated | signoff |
 |---|---|---|---|---|---|---|---|---|
@@ -74,6 +74,7 @@ Generated from `backend/app/verification/rules/rule_kinds.csv` (the source of tr
 | DT-2 | HOA dues in DTI | DTI | structural | deterministic_only | false | true | false | false |
 | DT-3 | Mortgage insurance in DTI | DTI | structural | deterministic_only | false | true | false | false |
 | DT-6 | Retained-property PITIA | DTI | structural | ai_fuzzy_match | false | false | false | false |
+| DT-8 | Refinanced lien still counted in DTI | DTI | structural | deterministic_only | false | true | false | false |
 | PR-7 | Appraisal address matches | Property | structural | ai_fuzzy_match | false | false | false | false |
 | OC-1 | Occupancy consistency | Occupancy | structural | ai_fuzzy_match | false | false | false | false |
 | TI-1 | Title commitment parties | Title | structural | deterministic_only | false | true | false | false |

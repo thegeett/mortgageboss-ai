@@ -159,6 +159,11 @@ _FACT_LABELS: dict[str, str] = {
     # LP-546/551 — FR-5's two deterministic inputs. Both are phrased as QUESTIONS, so `fact_phrase`
     # returns them without an article ("the whether ..." was the LP-526 bug).
     "liab.creditor_name": "the account holder on this liability",  # LP-556
+    # LP-573 (DT-8) — these read to a PROCESSOR, so they name the application's own fact rather than
+    # the tag. A couldnt_check on either means the file does not say what kind of debt this is, or
+    # whether anyone has already answered the payoff question.
+    "liab.stated_is_mortgage": "the type the application states for this liability",
+    "liab.payoff_marked": "whether this obligation is marked as paid off at closing",
     "txn.is_recurring": "whether this payment recurs across months",
     "txn.stated_liability_match": "whether this payee matches a liability on the application",
     "txn.source_strength": "deposit's source strength",

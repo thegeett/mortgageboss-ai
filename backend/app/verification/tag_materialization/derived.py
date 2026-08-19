@@ -2915,6 +2915,86 @@ def liability_creditor_name(
     return scrubbed[:_CREDITOR_NAME_MAX], f"the account is held by {scrubbed[:_CREDITOR_NAME_MAX]}"
 
 
+# --------------------------------------------------------------------------- #
+# LP-573 — THE REFINANCED-LIEN DOUBLE COUNT (DT-8).
+#
+# DTI is forward-looking: it measures what is owed AFTER the loan funds. On a refinance the mortgage
+# being replaced is paid off at closing, so counting its payment ALONGSIDE the new housing payment
+# charges the same property twice. LF-WCHG read a back-end DTI of 58.59% for exactly this reason;
+# the figure worked by hand with the domain expert is 34.39%.
+#
+# These two tags DESCRIBE; DT-8 judges. Neither decides whether a given mortgage is the one being
+# refinanced — that is the question the rule hands to a processor, because getting it wrong in the
+# permissive direction removes a real obligation from the ratio and can pass a loan that should fail.
+# --------------------------------------------------------------------------- #
+
+
+def _liability_stated_is_mortgage(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """liab.stated_is_mortgage — is this stated liability a mortgage, per the application itself?
+
+    Reads MISMO's own ``LiabilityType`` and compares it to one value. This is NOT the open-vocabulary
+    classification ADR-353 defers: nothing here maps a bureau's ``MTG`` / ``REV`` onto a vocabulary
+    term. It DECLINES on a credit-report tradeline for precisely that reason — deciding what ``MTG``
+    means is the judgment `liab.account_type` has no parsed producer for.
+    """
+    # LAZY import (init-order: rule_engine <-> tag_materialization, as the recipes above do).
+    from app.verification.rule_engine.enumerators import _SOURCE_MISMO, LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return None, "not a liability subject"
+    if subject_raw.source != _SOURCE_MISMO:
+        return None, "not a stated liability — a reported tradeline's type is not read here"
+    field = subject_type("liability").read_field(subject_raw, "account_type")
+    if field is None or not field.is_present:
+        return _UNKNOWN, "the application states no type for this liability"
+    # A PiiField here would mean the column had been PII-routed; neither a liability TYPE nor a
+    # payoff marking is, so read the display form rather than assume a `.value` exists.
+    raw = field.display if isinstance(field, PiiField) else field.value
+    value = str(raw or "").strip()
+    if not value:
+        return _UNKNOWN, "the application states no type for this liability"
+    # Exact, case-insensitive, against MISMO's own enumeration. An unrecognised type is "no" rather
+    # than unknown ONLY because the question is "is it MortgageLoan", which a different value answers.
+    is_mortgage = value.casefold() == "mortgageloan"
+    return (
+        ("yes" if is_mortgage else "no"),
+        f"the application states this liability's type as {value}",
+    )
+
+
+def _liability_payoff_marked(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """liab.payoff_marked — has this obligation been MARKED as retired at closing? (LP-568)
+
+    A fact about the MARKING, not about the world — which is why an absent flag is "no" rather than
+    "unknown" and that is not a §8 violation. The question is "has anyone said so", and nobody
+    having said so is a definite no. Whether the obligation actually survives closing is the
+    question DT-8 asks; this tag only reports whether it has already been answered.
+    """
+    from app.verification.rule_engine.enumerators import _SOURCE_MISMO, LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return None, "not a liability subject"
+    if subject_raw.source != _SOURCE_MISMO:
+        return None, "a reported tradeline carries no payoff marking"
+    field = subject_type("liability").read_field(subject_raw, "paid_off_at_closing")
+    if field is None or not field.is_present:
+        return "no", "no one has marked this obligation as paid off at closing"
+    raw = field.display if isinstance(field, PiiField) else field.value
+    marked = str(raw or "").strip().casefold() == "true"
+    return (
+        ("yes" if marked else "no"),
+        (
+            "this obligation is marked paid off at closing"
+            if marked
+            else "no one has marked this obligation as paid off at closing"
+        ),
+    )
+
+
 def _liability_dispute_status(
     _snapshot: Snapshot, _subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -5786,6 +5866,10 @@ _RECIPES: dict[str, Recipe] = {
     # LP-410 — the derived-producer wave (unblocks PC-7 / AS-8 / IN-6; tags describe, rules judge).
     "liability_dispute_status": _liability_dispute_status,
     "liability_creditor_name": liability_creditor_name,  # LP-556  # LP-486 / ADR-376
+    # LP-573 — DT-8's two inputs. Both DECLINE on a credit-report tradeline: the type question is
+    # ADR-353's open-vocabulary classification, and a tradeline carries no payoff marking at all.
+    "liability_stated_is_mortgage": _liability_stated_is_mortgage,
+    "liability_payoff_marked": _liability_payoff_marked,
     "contract_days_until_closing": _contract_days_until_closing,
     # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Descriptive numbers only.
     "rate_lock_days_to_closing": _rate_lock_days_to_closing,

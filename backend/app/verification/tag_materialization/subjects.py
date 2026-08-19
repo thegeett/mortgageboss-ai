@@ -311,6 +311,10 @@ _LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
         "monthly_payment": "monthly_payment",
         "balance": "unpaid_balance",
         "creditor_name": "holder_name",
+        # LP-573 — MISMO-ONLY, deliberately. A credit-report tradeline has no notion of "retired at
+        # closing"; the fact lives on the application's stated liability, which is also the row the
+        # exclusion is written back to.
+        "paid_off_at_closing": "paid_off_at_closing",
     },
 }
 

@@ -140,7 +140,7 @@ def test_in16_is_active_and_the_invariant_holds() -> None:
     assert (
         len(ACTIVE_RULE_IDS)
         == EXPECTED_ACTIVE_RULE_COUNT
-        == 77  # LP-551 +FR-5  # LP-509-D1 +IH-9 (hazard policy expired)
+        == 78  # LP-551 +FR-5  # LP-509-D1 +IH-9 (hazard policy expired)
     )  # LP-447 +IH-1; LP-485 +CL-1/CR-13/PR-6
     assert set(ACTIVE_RULE_IDS) - set(_BASE_ACTIVE) == set(eligible_rule_ids())
 

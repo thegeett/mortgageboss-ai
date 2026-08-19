@@ -43,6 +43,7 @@ _ACTIVATED = frozenset(
         "IH-7",  # LP-487 — condo master policy (presence + adequacy; Fannie B7-4-01 / B7-3-03)
         # LP-509-D1 — IH-9, hazard policy EXPIRED (vs the file date, never the closing date).
         "IH-9",
+        "DT-8",  # LP-573
         "MI-1",  # LP-488 — conventional MI requirement (the PROGRAM axis's first use)
         "MI-4",  # LP-488 — FHA upfront MIP (the FHA side of the program axis)
         "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
@@ -195,6 +196,7 @@ def test_eligible_rule_ids_is_sorted_and_matches() -> None:
         "CR-8",  # LP-490a
         "DT-6",  # LP-495a — stated payment vs the servicer's billed payment
         "DT-7",  # LP-495c
+        "DT-8",  # LP-573 (sorted list — DT-8 follows DT-7, not the end)
         "FR-3",  # LP-498 (sorts after DT-7, before ID-*)
         "FR-5",  # LP-551
         "ID-5",

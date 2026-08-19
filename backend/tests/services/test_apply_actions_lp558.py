@@ -442,3 +442,95 @@ async def test_undo_survives_a_malformed_id_in_the_applied_record(
     )
 
     assert record["applied"] is False
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-573 — DT-8's remediation: an obligation retired at closing leaves the back-end DTI
+# --------------------------------------------------------------------------------------------- #
+
+
+async def test_excluding_a_paid_off_liability_marks_it_and_stamps_provenance(
+    db_session: AsyncSession,
+) -> None:
+    """The apply DT-8 offers. Not a money edit — it records that an obligation does not survive
+    closing, and the DTI drops it from the ratio as a consequence."""
+    loan_file, actor = await _loan_file(db_session)
+    liability = StatedLiability(
+        loan_file_id=loan_file.id,
+        liability_type="MortgageLoan",
+        monthly_payment=Decimal("3186.00"),
+        holder_name="UNITED WHSLE MORT",
+    )
+    db_session.add(liability)
+    await db_session.flush()
+    finding = await _finding(
+        db_session,
+        loan_file,
+        {"action": "exclude_liability_paid_off", "holder_name": "UNITED WHSLE MORT"},
+    )
+
+    await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+    await db_session.refresh(liability)
+
+    assert liability.paid_off_at_closing is True
+    assert liability.payoff_source == "processor"
+
+
+async def test_an_ambiguous_holder_refuses_rather_than_excluding_the_wrong_debt(
+    db_session: AsyncSession,
+) -> None:
+    """EXACTLY ONE MATCH, OR NOTHING. Excluding the wrong debt UNDERSTATES the DTI and can pass a
+    loan that should fail — the one direction of error that matters here. Two mortgages from the
+    same servicer are indistinguishable by holder, so the action declines."""
+    loan_file, actor = await _loan_file(db_session)
+    for _ in range(2):
+        db_session.add(
+            StatedLiability(
+                loan_file_id=loan_file.id,
+                liability_type="MortgageLoan",
+                monthly_payment=Decimal("3186.00"),
+                holder_name="UNITED WHSLE MORT",
+            )
+        )
+    await db_session.flush()
+    finding = await _finding(
+        db_session,
+        loan_file,
+        {"action": "exclude_liability_paid_off", "holder_name": "UNITED WHSLE MORT"},
+    )
+
+    with pytest.raises(CannotApplyError):
+        await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+
+async def test_undo_restores_a_mismo_payoff_rather_than_discarding_it(
+    db_session: AsyncSession,
+) -> None:
+    """A processor can apply over a liability the APPLICATION had already flagged. Undo must put the
+    prior provenance back verbatim — restoring None would silently discard the export's own answer
+    and leave the debt counted, which is a different file from the one the processor started with.
+    """
+    loan_file, actor = await _loan_file(db_session)
+    liability = StatedLiability(
+        loan_file_id=loan_file.id,
+        liability_type="MortgageLoan",
+        monthly_payment=Decimal("3186.00"),
+        holder_name="UNITED WHSLE MORT",
+        paid_off_at_closing=None,
+        payoff_source=None,
+    )
+    db_session.add(liability)
+    await db_session.flush()
+    finding = await _finding(
+        db_session,
+        loan_file,
+        {"action": "exclude_liability_paid_off", "holder_name": "UNITED WHSLE MORT"},
+    )
+    await apply_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+
+    await undo_finding(db_session, finding=finding, loan_file=loan_file, actor_user_id=actor)
+    await db_session.refresh(liability)
+
+    # Nothing had flagged it before, so it goes back to the honest "not established".
+    assert liability.paid_off_at_closing is None
+    assert liability.payoff_source is None

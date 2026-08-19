@@ -57,6 +57,7 @@ DT-4,Property taxes estimate,DTI,calculative,deterministic_bookend+ai,true,,fals
 DT-5,Insurance premium in DTI,DTI,calculative,deterministic_bookend,true,,false,false,premium used vs binder — numeric compare.
 DT-6,Retained-property PITIA,DTI,structural,ai_fuzzy_match,false,false,false,false,Each retained property PITIA (or net rental) in DTI — reconcile/presence; REO reasoning → AI.
 DT-7,ATR documentation completeness,DTI,judgmental,ai_judgment,false,,false,false,All ATR factors documented — completeness judgment.
+DT-8,Refinanced lien still counted in DTI,DTI,structural,deterministic_only,false,true,false,false,"On a refinance the mortgage being paid off must leave the back-end ratio; counting it alongside the new housing payment charges the same property twice. Presence check on a marking, no threshold."
 PR-1,LTV / CLTV / HCLTV limits,Property,calculative,deterministic_bookend+ai,true,,false,true,each ratio vs purpose-aware limit — arithmetic.
 PR-2,Appraised value vs purchase price,Property,calculative,deterministic_bookend,true,,false,false,lesser-of + gap — arithmetic compare.
 PR-3,Property type eligibility,Property,judgmental,ai_judgment,false,,false,false,Classify property type vs allowed — AI-assist classification.

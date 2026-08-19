@@ -495,6 +495,13 @@ _LP551_ACTIVATED: tuple[str, ...] = ("FR-5",)
 # need a real run before its bar's `validated` flips, which is what the hold always said.
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
+# LP-573 — DT-8, the refinanced-lien double count. DETERMINISTIC and it can never `fire`: a mortgage
+# liability on a refinance is a QUESTION, not a defect, so the verdict is needs_review and Apply is the
+# processor's affirmation. The rule deliberately does NOT prove which property secures the mortgage —
+# excluding a retained debt understates the DTI and can pass a loan that should fail, so the judgment
+# stays with a human. See DT-8.yaml's header for what that choice costs (noise on files with rentals).
+_LP573_ACTIVATED: tuple[str, ...] = ("DT-8",)
+
 ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_BASE_ACTIVE,
     *_LP389_ACTIVATED,
@@ -530,6 +537,7 @@ ACTIVE_RULE_IDS: tuple[str, ...] = (
     *_LP498_ACTIVATED,
     *_LP551_ACTIVATED,
     *_LP509_ACTIVATED,
+    *_LP573_ACTIVATED,
 )
 
 

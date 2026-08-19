@@ -365,6 +365,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "FR-3",
             "FR-5",
             "IH-9",  # LP-509-D1 — hazard policy expired
+            "DT-8",  # LP-573 — refinanced lien still counted in DTI
         )
     )
     # A bar persists after activation as the record of WHY the rule went live, so the bars now intersect the
@@ -445,6 +446,7 @@ def test_active_set_is_base_plus_lp389() -> None:
             "FR-3",
             "FR-5",
             "IH-9",  # LP-509-D1 — hazard policy expired
+            "DT-8",  # LP-573
             "CR-13",
             "PR-6",
         }

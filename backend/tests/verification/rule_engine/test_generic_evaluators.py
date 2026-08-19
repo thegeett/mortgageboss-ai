@@ -189,6 +189,7 @@ async def test_registry_dispatches_the_active_rule_set_by_kind() -> None:
             "FR-3",
             "FR-5",
             "IH-9",  # LP-509-D1 — hazard policy expired
+            "DT-8",  # LP-573
             # LP-495c — DT-7, activated when its enum gained the abstain its prompt already
             # sanctioned. On the rate LP-495b measured (1.0000 / 4 cases), unchanged.
             "DT-7",

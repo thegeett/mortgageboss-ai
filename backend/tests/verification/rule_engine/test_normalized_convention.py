@@ -311,5 +311,6 @@ def test_registry_drift_guard_and_activation_unchanged() -> None:
             "FR-3",
             "FR-5",
             "IH-9",  # LP-509-D1 — hazard policy expired
+            "DT-8",  # LP-573 — refinanced lien still counted in DTI
         )
     )

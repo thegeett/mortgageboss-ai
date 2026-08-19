@@ -234,7 +234,7 @@ def test_pr7_carries_no_model_and_needed_no_catalog_edit() -> None:
     from app.verification.rules.kinds import load_rule_kinds
 
     assert (
-        len(load_rule_kinds()) == 136
+        len(load_rule_kinds()) == 137
     )  # LP-519 +AS-13 (repeated same-amount deposits — INERT, bar held on measurement)  # LP-509-D1 +IH-9 (hazard policy expired)
     bar = load_activation_bars()["PR-7"]
     assert bar.status == "no-ai-dependency"

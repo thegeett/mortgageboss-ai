@@ -85,7 +85,7 @@ def test_active_rule_ids_unchanged() -> None:
 
     assert (
         len(ACTIVE_RULE_IDS)
-        == 77  # LP-551 +FR-5  # LP-509-D1 +IH-9 (hazard policy expired)  # LP-496a +PE-1/PE-3 (PE-2/PE-4 held)
+        == 78  # LP-551 +FR-5  # LP-509-D1 +IH-9 (hazard policy expired)  # LP-496a +PE-1/PE-3 (PE-2/PE-4 held)
     )  # LP-495a +RE-1/DT-6/LO-2  # LP-488 +MI-1  # LP-487 +IH-2/IH-7  # LP-486 +CR-12  # LP-485 +CL-1/CR-13/PR-6
 
 

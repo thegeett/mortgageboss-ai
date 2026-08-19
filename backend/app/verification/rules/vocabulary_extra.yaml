@@ -50,6 +50,28 @@
 # =============================================================================================
 
 tags:
+  # LP-573 (DT-8) — the refinanced-lien double count. DTI is forward-looking: on a refinance the
+  # mortgage being replaced is paid off at closing, so counting its payment alongside the new
+  # housing payment charges the same property twice. Both tags DESCRIBE; DT-8 judges, and neither
+  # decides WHICH mortgage is being refinanced — that question goes to a processor.
+  liab.stated_is_mortgage:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does the application state this liability's type as MortgageLoan? Read from MISMO's own
+      LiabilityType and DECLINED on a credit-report tradeline, whose bureau codes would need the
+      open-vocabulary classification ADR-353 defers.
+    produced_by: derived
+  liab.payoff_marked:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no"]
+    description: >-
+      Has this obligation been marked as retired at closing (LP-568)? A fact about the MARKING, not
+      about the world — an absent flag is "no" because nobody having said so is a definite no, and
+      whether the obligation truly survives closing is what DT-8 asks.
+    produced_by: derived
   # ID-9's rule_judgment output tag (LP-329). A NEW verdict tag added via the hand-editable overlay —
   # the GAP-E fix (LP-328) makes this possible without editing the generated fact_tags.csv / xlsx.
   id.poa_acceptable:

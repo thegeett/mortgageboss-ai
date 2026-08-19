@@ -351,6 +351,12 @@ tags:
   # defers to Priya. A parsed tag is NOT validated against allowed_values, so declaring it would ship
   # out-of-domain values silently. See docs/tickets/LP-483.md.
   liab.monthly_payment: {mode: parsed, subject: liability, data: monthly_payment}
+  # LP-573 — DT-8's two inputs, both DERIVED rather than parsed. A parsed tag is not validated
+  # against allowed_values (see the liab.account_type note above), and both of these constrain an
+  # open source value to a closed enum: MISMO's LiabilityType to yes/no, and a nullable boolean to
+  # yes/no. Producing them parsed would ship "MortgageLoan" and "True" as tag values.
+  liab.stated_is_mortgage: {mode: derived, subject: liability, data: liability_stated_is_mortgage}
+  liab.payoff_marked: {mode: derived, subject: liability, data: liability_payoff_marked}
   # LP-485 — the date-compare family. The two parsed dates are document_type-SCOPED so an unrelated
   # document sharing a field name can never materialize them (the contract.emd_amount precedent).
   rate_lock.expiration: {mode: parsed, subject: document, data: rate_lock_expiration, document_type: loan_estimate}

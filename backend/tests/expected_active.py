@@ -103,6 +103,15 @@ from __future__ import annotations
 # recurring creditor payment matching NOTHING disclosed rather than listing the borrower's bills.
 # Activated ratify-pending on a self-consistency rate measured against the context it ships with, so a
 # human signs every finding. -> 77.
-EXPECTED_ACTIVE_RULE_COUNT: int = 77
+# LP-573 — DT-8, THE REFINANCED-LIEN DOUBLE COUNT. DTI is forward-looking: on a refinance the mortgage
+# being replaced is paid off at closing, so counting its payment alongside the new housing payment charges
+# the same property twice. LF-WCHG read a back-end DTI of 58.59% for exactly this; the figure worked by
+# hand with the domain expert is 34.39% — a difference that flips the file from failing to passing.
+#
+# Deterministic, no AI tag, no threshold. It can never `fire`: a mortgage liability on a refinance is a
+# QUESTION, not a defect, so it surfaces needs_review and Apply is the processor's affirmation. It
+# deliberately does NOT prove which property secures the mortgage — excluding a retained debt understates
+# the DTI and can pass a loan that should fail, so that judgment stays with a human. -> 78.
+EXPECTED_ACTIVE_RULE_COUNT: int = 78
 
 __all__ = ["EXPECTED_ACTIVE_RULE_COUNT"]
