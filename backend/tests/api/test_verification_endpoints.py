@@ -305,7 +305,7 @@ async def _governed_finding_label(client: AsyncClient, token: str, loan_file: Lo
     return body["rule_findings"][0]["subject_label"]
 
 
-async def test_loan_subject_reads_loan_level(client: AsyncClient, db: AsyncSession) -> None:
+async def test_loan_subject_reads_whole_file(client: AsyncClient, db: AsyncSession) -> None:
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
     db.add(
@@ -319,7 +319,7 @@ async def test_loan_subject_reads_loan_level(client: AsyncClient, db: AsyncSessi
         )
     )
     await db.commit()
-    assert await _governed_finding_label(client, token, loan_file) == "Loan-level"
+    assert await _governed_finding_label(client, token, loan_file) == "Whole file"
 
 
 async def test_borrower_subject_reads_the_name(client: AsyncClient, db: AsyncSession) -> None:

@@ -69,7 +69,11 @@ export function outcomeMeta(outcome: EvaluationOutcome): OutcomeMeta {
 
 export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
   open: {
-    label: "Violation",
+    // LP-583 — "Violation" is not vocabulary at any stage of the loan: processors and underwriters
+    // say "condition", post-close QC says "defect" (Fannie's and FHA's taxonomies are both Defect
+    // Taxonomies). It was also the only severity NOUN in a set of action phrases — "Needs review",
+    // "Couldn't check". "Must fix" matches the register and says what to do.
+    label: "Must fix",
     blurb: "A rule fired — a real finding that needs action.",
     tone: "danger",
   },

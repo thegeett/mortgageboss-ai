@@ -76,7 +76,13 @@ function tab(name: RegExp) {
 
 describe("the §8 tabs — the honesty contract", () => {
   it("puts couldnt_check in Tab 1 (Needs attention), never Tab 2 or Tab 4", () => {
-    renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check", message: "a gap here" })]);
+    // LP-583 — a satisfied finding is seeded so the Satisfied tab EXISTS to be checked. Empty tabs
+    // are hidden now, and the point of this test is that couldnt_check does not LEAK into another
+    // bucket — which needs the other bucket present to be a real assertion.
+    renderTabs([
+      ruleFinding({ evaluation_outcome: "couldnt_check", message: "a gap here" }),
+      ruleFinding({ id: "sat", evaluation_outcome: "satisfied", message: "all good" }),
+    ]);
 
     // Default tab is Needs attention → the couldnt_check finding shows.
     expect(screen.getByText("a gap here")).toBeDefined();
@@ -92,28 +98,44 @@ describe("the §8 tabs — the honesty contract", () => {
   });
 
   it("keeps Tab 3 (No longer applies) distinct from Tab 4 (Not applicable)", () => {
-    renderTabs([]);
+    // LP-583 — `no_longer_applies` is seeded because an EMPTY archival tab is hidden now. Its
+    // explanatory copy is reached by having something in it, which is the only state a processor
+    // ever opens it in. `not_applicable` needs no seeding and CANNOT have one: it is structurally
+    // empty on every file (those subjects are never persisted), which is exactly why it stays
+    // visible — the tab is the explanation, not a list.
+    renderTabs([
+      ruleFinding({
+        id: "gone",
+        evaluation_outcome: "no_longer_applies",
+        message: "left the file",
+      }),
+    ]);
+
+    // Tab 3 holds actual subjects that dropped out since a prior run.
     fireEvent.click(tab(/no longer applies/i));
-    expect(screen.getByText(/subject leaves the file between runs/i)).toBeDefined();
+    expect(screen.getByText("left the file")).toBeDefined();
+
+    // Tab 4 holds no subjects and never can — it explains a structural absence instead. The two are
+    // NOT merged for tidiness, which is what this test protects.
     fireEvent.click(tab(/not applicable/i));
     expect(screen.getByText(/not recorded as findings/i)).toBeDefined();
-    // The two empty states say DIFFERENT things — they are not merged for tidiness.
-    expect(screen.queryByText(/subject leaves the file between runs/i)).toBeNull();
+    expect(screen.queryByText("left the file")).toBeNull();
   });
 
-  it("distinguishes the three Tab-1 outcomes, with the violations (open) group first", () => {
+  it("distinguishes the three Tab-1 outcomes, with the must-fix (open) group first", () => {
     renderTabs([
       ruleFinding({ id: "cc", evaluation_outcome: "couldnt_check", message: "cc msg" }),
       ruleFinding({ id: "nr", evaluation_outcome: "needs_review", message: "nr msg" }),
       ruleFinding({ id: "op", evaluation_outcome: "open", message: "op msg", status: "red" }),
     ]);
     // The three outcome group headers are all present and named differently.
-    expect(screen.getByRole("heading", { name: "Violation" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Must fix" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Couldn't check" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Needs review" })).toBeDefined();
-    // `open` (Violation) renders BEFORE `couldnt_check` — the real signal isn't buried.
+    // `open` (Must fix) renders BEFORE `couldnt_check` — the real signal isn't buried, and
+    // LP-583 gives it visual weight too, since ordering alone does not survive a fast scan.
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
-    expect(headings.indexOf("Violation")).toBeLessThan(headings.indexOf("Couldn't check"));
+    expect(headings.indexOf("Must fix")).toBeLessThan(headings.indexOf("Couldn't check"));
   });
 
   it("Tab 2 (Satisfied) is reachable — a pass is visible, not assumed", () => {
@@ -170,6 +192,10 @@ describe("the quarantine — the two systems never merge", () => {
       7,
     );
     expect(within(tab(/needs attention/i)).getByText("2")).toBeDefined();
+    // LP-583 — an archival tab shows its count only while open (113 "no longer applies" was the
+    // largest number on a real file and the least useful). The INVARIANT under test is unchanged:
+    // each tab reports its OWN list, never the sum.
+    fireEvent.click(tab(/old findings/i));
     expect(within(tab(/old findings/i)).getByText("7")).toBeDefined();
     // 9 (the sum) appears nowhere.
     expect(screen.queryByText("9")).toBeNull();

@@ -1,6 +1,6 @@
 """The processor-facing subject LABEL (LP-377-B) — declared per subject TYPE, never a raw content-id.
 
-The ticket in a test: a governed finding's subject renders as a filename / amount / borrower / "Loan-level",
+The ticket in a test: a governed finding's subject renders as a filename / amount / borrower / "Whole file",
 dispatched on the KEY'S SHAPE (no rule-id branch). No label is ever a content-id hash, a UUID, or a dotted
 tag id; an unresolvable subject reads honestly, never the hash.
 """
@@ -38,8 +38,8 @@ def _amount_tags(
 # --------------------------------------------------------------------------- #
 # Per subject TYPE — the label a processor recognises
 # --------------------------------------------------------------------------- #
-def test_loan_subject_reads_loan_level() -> None:
-    assert resolve_subject_label("loan", []) == "Loan-level"
+def test_loan_subject_reads_whole_file() -> None:
+    assert resolve_subject_label("loan", []) == "Whole file"
 
 
 def test_deposit_names_its_amount_and_date() -> None:

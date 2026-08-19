@@ -45,6 +45,15 @@ interface TabDef {
   /** Count-badge emphasis: "danger" = a violation (`open`), "warning" = a blocking gap (`couldnt_check`).
    *  A gap must not read as fine at a glance (the honesty contract) — hence a distinct warning tone. */
   tone?: "danger" | "warning";
+  /** LP-583 — is this tab something a processor ACTS on, or an audit trail they occasionally consult?
+   *
+   *  On a real file the counts read: attention 26, satisfied 34, no-longer-applies 113. Every one
+   *  rendered in an identical pill, so THE LARGEST NUMBER ON THE PAGE WAS THE LEAST USEFUL FACT —
+   *  "subjects that left the file since a previous run". An archive should be REACHABLE, not
+   *  advertised, so its count is shown only while the tab is open. */
+  archival?: boolean;
+  /** Keep the tab even at zero — for a tab whose CONTENT is an explanation rather than a list. */
+  alwaysShow?: boolean;
 }
 
 function TabStrip({
@@ -79,20 +88,24 @@ function TabStrip({
             )}
           >
             {tab.label}
-            <span
-              className={cn(
-                "rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
-                tab.tone === "danger"
-                  ? "bg-destructive/10 text-destructive"
-                  : tab.tone === "warning"
-                    ? "bg-warning/10 text-warning"
-                    : isActive
-                      ? "bg-primary/10 text-primary"
-                      : "bg-gray-100 text-gray-500",
-              )}
-            >
-              {tab.count}
-            </span>
+            {/* LP-583 — an archival tab shows its count only while open. Competing for attention is
+                the badge's whole function, and these have nothing to compete for. */}
+            {!tab.alwaysShow && (!tab.archival || isActive) && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
+                  tab.tone === "danger"
+                    ? "bg-destructive/10 text-destructive"
+                    : tab.tone === "warning"
+                      ? "bg-warning/10 text-warning"
+                      : isActive
+                        ? "bg-primary/10 text-primary"
+                        : "bg-gray-100 text-gray-500",
+                )}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         );
       })}
@@ -159,11 +172,36 @@ function OutcomeGroup({
   fileId?: string;
 }) {
   const meta = outcomeMeta(outcome);
+  // LP-583 — THE MUST-FIX GROUP CARRIES WEIGHT, NOT JUST POSITION. On a real file the three groups
+  // read 1 / 15 / 10, and the single thing that genuinely has to be fixed rendered in the same gray
+  // as fifteen missing-document notes. It was already ordered first, and ordering alone does not
+  // survive a processor scanning quickly — so it gets a left rule, a tinted panel and a darker
+  // heading. Deliberately the ONLY emphasised group: if all three shouted, none would.
+  const isViolation = outcome === "open";
   return (
-    <section className="space-y-2">
+    <section
+      className={cn(
+        "space-y-2",
+        isViolation && "rounded-md border-l-2 border-destructive bg-destructive/[0.03] py-2 pl-3",
+      )}
+    >
       <div className="flex items-baseline gap-2">
-        <h4 className="text-sm font-semibold text-gray-800">{meta.label}</h4>
-        <span className="text-xs tabular-nums text-gray-400">{findings.length}</span>
+        <h4
+          className={cn(
+            "text-sm font-semibold",
+            isViolation ? "text-destructive" : "text-gray-800",
+          )}
+        >
+          {meta.label}
+        </h4>
+        <span
+          className={cn(
+            "text-xs tabular-nums",
+            isViolation ? "font-semibold text-destructive" : "text-gray-400",
+          )}
+        >
+          {findings.length}
+        </span>
         <span className="text-xs text-gray-400">— {meta.blurb}</span>
       </div>
       {outcome === "couldnt_check" ? (
@@ -457,7 +495,7 @@ export function RuleFindingsTabs({
     (f) => f.evaluation_outcome === "couldnt_check",
   ).length;
 
-  const tabs: TabDef[] = [
+  const allTabs: TabDef[] = [
     {
       id: "attention",
       label: "Needs attention",
@@ -467,14 +505,24 @@ export function RuleFindingsTabs({
       tone: openCount > 0 ? "danger" : couldntCheckCount > 0 ? "warning" : undefined,
     },
     { id: "satisfied", label: "Satisfied", count: buckets.satisfied.length },
+    // Archival: real, worth keeping, and not what anyone opens the page to do.
     {
       id: "no_longer_applies",
       label: "No longer applies",
       count: buckets.no_longer_applies.length,
+      archival: true,
     },
-    { id: "not_applicable", label: "Not applicable", count: buckets.not_applicable.length },
-    { id: "legacy", label: "Old findings", count: legacyCount },
+    // NOT hidden when empty, and NOT given a count — it is STRUCTURALLY empty on every file
+    // (not_applicable subjects are never persisted as findings), so this tab is an EXPLANATION of an
+    // absence rather than a list of anything. Dropping it would delete an honest §8 statement, and a
+    // "0" beside it is noise about a number that can never be anything else.
+    { id: "not_applicable", label: "Not applicable", count: 0, archival: true, alwaysShow: true },
+    { id: "legacy", label: "Old findings", count: legacyCount, archival: true },
+    // LP-583 — AN EMPTY CATEGORY IS NOT A CATEGORY ON THIS FILE. "Not applicable 0" spent real
+    // estate telling a processor that nothing exists. `attention` is kept unconditionally: an empty
+    // one is the answer they came for, and its own empty state says so.
   ];
+  const tabs = allTabs.filter((tab) => tab.alwaysShow || tab.id === "attention" || tab.count > 0);
 
   return (
     <div className="space-y-4">

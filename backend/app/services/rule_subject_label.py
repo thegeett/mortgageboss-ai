@@ -128,7 +128,11 @@ def resolve_subject_label(
     if not subject_key:
         return "this file"  # governed findings always carry a subject_key; a defensive floor
     if subject_key == LOAN_SUBJECT:
-        return "Loan-level"
+        # LP-583 — "Whole file", not "Loan-level". This label sits in a set beside filenames, dollar
+        # amounts and creditor names, and "Loan-level" was the engine's subject-enumeration
+        # vocabulary showing through: it names the SCOPE of the check rather than telling a
+        # processor what the finding is about.
+        return "Whole file"
     if subject_key.startswith(TXN_PREFIX):
         return _deposit_label(load_bearing_tags)
     if subject_key.startswith(DOC_PREFIX):
