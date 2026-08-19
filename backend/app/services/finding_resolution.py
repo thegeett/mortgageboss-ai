@@ -24,12 +24,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.finding import Finding, FindingResolutionStatus, FindingStatus
+from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import (
     NeedsItem,
@@ -37,6 +39,7 @@ from app.models.needs_item import (
     NeedsItemOrigin,
     NeedsItemPriority,
 )
+from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
 from app.services.needs_items import create_needs_item
@@ -59,6 +62,16 @@ async def apply_finding(
     applied_record = await _incorporate_into_structured_data(
         db, finding=finding, loan_file=loan_file
     )
+    # ⚠️ AN APPLY THAT CHANGED NOTHING MUST NOT CLOSE THE FINDING. Every handler returns
+    # `applied: False` when it could not perform its change — a typo'd action name, a target row that
+    # is gone, an unparseable amount. Before LP-558 the finding was marked APPLIED regardless, so a
+    # processor saw "resolved" over a loan file nothing had been written to, and the DTI they were
+    # trusting had not moved. Fail loudly instead: the finding stays open and the caller is told.
+    if isinstance(applied_record, dict) and applied_record.get("applied") is False:
+        raise CannotApplyError(
+            f"this finding declares an apply the system could not perform "
+            f"({applied_record.get('action')!r}) — nothing was changed"
+        )
 
     finding.resolution_status = FindingResolutionStatus.APPLIED
     finding.applied_record = applied_record
@@ -194,6 +207,14 @@ async def accept_risk_finding(
     return finding
 
 
+class CannotApplyError(Exception):
+    """An apply that could not perform its structured change (LP-558).
+
+    Raised INSTEAD of closing the finding, so a processor never sees "resolved" over a loan file
+    nothing was written to. The four ways to get here are a typo'd action name, a target row that is
+    gone, an unparseable amount, and an ambiguous target."""
+
+
 class CannotUndoError(Exception):
     """The finding is not in an undoable (resolved) state."""
 
@@ -285,6 +306,17 @@ async def _reverse_applied_change(
                 await db.flush()
                 return {"action": "remove_liability", "liability_id": raw_id}
         return {"action": "remove_liability", "applied": False}
+
+    # LP-558 — the inverse of each new apply. Undo restores from `applied_record`, never an
+    # approximation: a money correction records its `from` value precisely so it can be put back.
+    if action == "correct_liability_payment":
+        return await _restore_liability_payment(db, loan_file=loan_file, record=record)
+
+    if action in ("correct_purchase_price", "correct_valuation"):
+        restored: dict[str, Any] = await _restore_property_money(
+            db, loan_file=loan_file, record=record
+        )
+        return restored
 
     if action == "correct_income":
         return await _restore_income(db, loan_file=loan_file, record=record)
@@ -421,6 +453,21 @@ async def _incorporate_into_structured_data(
             "monthly_payment": _stringify_money(liability.monthly_payment),
         }
 
+    # LP-558 — the loan-writing half of ADR "Apply writes the finding into the loan". Each targets a
+    # different structured surface, and the calculators recompute from whichever moved.
+    if action == "correct_liability_payment":
+        return await _correct_liability_payment(db, loan_file=loan_file, spec=spec)
+
+    if action == "correct_purchase_price":
+        return await _correct_property_money(
+            db, loan_file=loan_file, spec=spec, column="purchase_price"
+        )
+
+    if action == "correct_valuation":
+        return await _correct_property_money(
+            db, loan_file=loan_file, spec=spec, column="valuation_amount"
+        )
+
     if action == "correct_income":
         # Correct a stated income item to the verified figure (LP-78 — the income
         # half of the interlock). Lower income → the DTI recomputes higher.
@@ -460,6 +507,125 @@ async def _correct_income(
         "income_item_id": str(item.id),
         "from": _stringify_money(prior),
         "to": _stringify_money(new_amount),
+    }
+
+
+async def _restore_liability_payment(
+    db: AsyncSession, *, loan_file: LoanFile, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Put a corrected liability payment back to its recorded prior value (LP-558's undo half)."""
+    raw_id, prior = record.get("liability_id"), _to_money(record.get("from"))
+    if not isinstance(raw_id, str):
+        return {"action": "restore_liability_payment", "applied": False}
+    liability = await db.get(StatedLiability, UUID(raw_id))
+    if liability is None or liability.loan_file_id != loan_file.id:
+        return {"action": "restore_liability_payment", "applied": False}
+    liability.monthly_payment = prior  # `from` may legitimately have been null
+    await db.flush()
+    return {"action": "restore_liability_payment", "liability_id": raw_id}
+
+
+async def _restore_property_money(
+    db: AsyncSession, *, loan_file: LoanFile, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Put a corrected price or valuation back (LP-558's undo half)."""
+    column = (
+        "purchase_price" if record.get("action") == "correct_purchase_price" else "valuation_amount"
+    )
+    raw_id, prior = record.get("property_id"), _to_money(record.get("from"))
+    if not isinstance(raw_id, str):
+        return {"action": f"restore_{column}", "applied": False}
+    prop = await db.get(Property, UUID(raw_id))
+    if prop is None or prop.loan_file_id != loan_file.id:
+        return {"action": f"restore_{column}", "applied": False}
+    setattr(prop, column, prior)
+    await db.flush()
+    return {"action": f"restore_{column}", "property_id": raw_id}
+
+
+async def _correct_liability_payment(
+    db: AsyncSession, *, loan_file: LoanFile, spec: dict[str, Any]
+) -> dict[str, Any]:
+    """Raise a stated liability's monthly payment to the figure the documents show (DT-6).
+
+    ⚠️ TARGETED BY HOLDER NAME, NOT BY A ROW ID, and that is forced rather than chosen. A governed
+    rule works on the SNAPSHOT — its subjects are content-ids (LP-312), never `stated_liabilities`
+    primary keys — so it cannot name a DB row the way the legacy cross-source findings can. The holder
+    is the business key both sides already share.
+
+    ⚠️ EXACTLY ONE MATCH, OR NOTHING. Two liabilities from the same holder (a card and a HELOC with the
+    same bank) are indistinguishable here, and picking either would silently edit the wrong debt. An
+    ambiguous match declines and the processor edits it by hand.
+    """
+    holder = spec.get("holder_name")
+    new_payment = _to_money(spec.get("monthly_payment"))
+    if not isinstance(holder, str) or not holder.strip() or new_payment is None:
+        return {"action": "correct_liability_payment", "applied": False}
+
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(StatedLiability).where(
+                        StatedLiability.loan_file_id == loan_file.id,
+                        StatedLiability.holder_name == holder,
+                    ),
+                    StatedLiability,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) != 1:
+        return {"action": "correct_liability_payment", "applied": False}
+
+    liability = rows[0]
+    prior = liability.monthly_payment
+    liability.monthly_payment = new_payment
+    await db.flush()
+    return {
+        "action": "correct_liability_payment",
+        "liability_id": str(liability.id),
+        "holder_name": holder,
+        "from": _stringify_money(prior),
+        "to": _stringify_money(new_payment),
+    }
+
+
+async def _correct_property_money(
+    db: AsyncSession, *, loan_file: LoanFile, spec: dict[str, Any], column: str
+) -> dict[str, Any]:
+    """Correct the subject property's price or valuation — the two inputs LTV is computed from.
+
+    No targeting problem: a loan file has ONE subject property, so unlike a liability there is nothing
+    to disambiguate.
+    """
+    action = "correct_purchase_price" if column == "purchase_price" else "correct_valuation"
+    new_value = _to_money(spec.get("value"))
+    if new_value is None:
+        return {"action": action, "applied": False}
+
+    prop = (
+        (
+            await db.execute(
+                only_active(select(Property).where(Property.loan_file_id == loan_file.id), Property)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if prop is None:
+        return {"action": action, "applied": False}
+
+    prior = getattr(prop, column)
+    setattr(prop, column, new_value)
+    await db.flush()
+    return {
+        "action": action,
+        "property_id": str(prop.id),
+        "from": _stringify_money(prior),
+        "to": _stringify_money(new_value),
     }
 
 

@@ -47,6 +47,7 @@ from app.services.cross_source import (
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.finding_impact import has_apply_spec, preview_finding_apply
 from app.services.finding_resolution import (
+    CannotApplyError,
     CannotUndoError,
     accept_risk_finding,
     add_finding_note,
@@ -449,7 +450,13 @@ async def apply_finding_endpoint(
     if finding is None:
         raise _FINDING_NOT_FOUND
 
-    await apply_finding(db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id)
+    try:
+        await apply_finding(db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id)
+    except CannotApplyError as exc:
+        # LP-558 — the change did not happen, so the finding stays OPEN and the caller is told. The
+        # alternative shipped for a while: a finding marked APPLIED over a loan file nothing was
+        # written to, and a DTI the processor trusted that had not moved.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)
