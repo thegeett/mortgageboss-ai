@@ -26,6 +26,7 @@ import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import { useUpdatePreferences } from "@/lib/api/preferences";
 import {
+  useResolveFinding,
   useRunVerification,
   useSetAggression,
   useVerification,
@@ -302,6 +303,9 @@ function VerificationBody({
   onRetry: () => void;
   running: boolean;
 }) {
+  // LP-561 — the governed findings become actionable. This hook already refreshes the DTI, LTV
+  // and needs list on success, which is exactly what an Apply or a Request needs.
+  const resolveRuleFinding = useResolveFinding(fileId);
   // The file-level chrome sits ABOVE the tabs; the governed §8 tabs (1-4) render the rule engine's
   // output; the LEGACY body (the dial + stats + AI-sweep findings list) is quarantined into Tab 5, its
   // behaviour unchanged. The two systems' lists + counts are never merged (LP-375/376).
@@ -316,6 +320,7 @@ function VerificationBody({
       {data.stale && !running && !failedRun && <StaleBanner />}
       <NeedsCompleteness fileId={fileId} />
       <RuleFindingsTabs
+        onAct={(action) => resolveRuleFinding.mutate(action)}
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
         ruleFindings={data.rule_findings ?? []}

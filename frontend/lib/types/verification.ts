@@ -116,6 +116,9 @@ export interface RuleFinding {
    *  "VOE"). Empty means every required document is present, so the gap is in what a document SAYS
    *  rather than whether it exists — a different job, and the basis for the request/review split. */
   missing_documents: string[];
+  /** Would Apply actually change anything? Apply acts on the finding's declared change, and a rule
+   *  that declares none would give a button that looks right and does nothing. */
+  can_apply: boolean;
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */

@@ -317,6 +317,10 @@ class RuleFindingPublic(BaseModel):
     # to assume nothing is missing. Every ACTIVE rule declares its documents (test-enforced), so this
     # only affects findings whose rule no longer exists.
     missing_documents: list[str]
+    # LP-561 — would Apply actually change anything? Apply acts on `details["apply"]`, and a rule that
+    # declares none would give a button that looks right and does nothing. Sent so the row can omit it
+    # rather than offer a no-op.
+    can_apply: bool
 
     @classmethod
     def from_model(
@@ -361,6 +365,7 @@ class RuleFindingPublic(BaseModel):
             else None,
             confidence=finding.confidence,
             resolution_status=finding.resolution_status.value,
+            can_apply=isinstance(details.get("apply"), dict),
             missing_documents=_missing_documents(
                 spec, documents_on_file or set(), loan_purpose=loan_purpose
             ),

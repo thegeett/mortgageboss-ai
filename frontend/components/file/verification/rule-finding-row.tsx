@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { type OutcomeTone, outcomeMeta, ruleCategoryLabel } from "@/lib/verification/rule-findings";
 import { ChevronDown, Gavel } from "lucide-react";
 import { useId, useState } from "react";
+import { type RuleFindingAction, RuleFindingActions } from "./rule-finding-actions";
 
 const TONE: Record<OutcomeTone, { text: string; chipBg: string; border: string; dot: string }> = {
   danger: {
@@ -123,7 +124,13 @@ export function RuleLabel({ finding }: { finding: RuleFinding }) {
   );
 }
 
-export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
+export function RuleFindingRow({
+  finding,
+  onAct,
+}: {
+  finding: RuleFinding;
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = outcomeMeta(finding.evaluation_outcome);
   const tone = TONE[meta.tone];
@@ -232,6 +239,15 @@ export function RuleFindingRow({ finding }: { finding: RuleFinding }) {
               Subject: <span className="font-medium text-gray-500">{finding.subject_label}</span>
             </p>
           )}
+        </div>
+      )}
+
+      {/* LP-561 — OUTSIDE the expander, deliberately. The point of the buttons is to clear a queue;
+          hiding them behind a click makes acting cost more than reading, and the fastest action on a
+          list of twenty-five is the one that needs no navigation. */}
+      {onAct !== undefined && (
+        <div className="px-3 pb-2.5">
+          <RuleFindingActions finding={finding} onAct={onAct} />
         </div>
       )}
     </div>

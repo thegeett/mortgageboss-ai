@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useId, useState } from "react";
+import type { RuleFindingAction } from "./rule-finding-actions";
 import { RuleFindingRow, RuleLabel } from "./rule-finding-row";
 
 interface TabDef {
@@ -109,7 +110,13 @@ function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; bod
 }
 
 /** Tab 1 — the three outcomes grouped + labelled, `open` first (the real signal must not drown). */
-function AttentionTab({ findings }: { findings: RuleFinding[] }) {
+function AttentionTab({
+  findings,
+  onAct,
+}: {
+  findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   if (findings.length === 0) {
     return (
       <EmptyState
@@ -123,7 +130,7 @@ function AttentionTab({ findings }: { findings: RuleFinding[] }) {
   return (
     <div className="space-y-5">
       {groups.map(({ outcome, findings: groupFindings }) => (
-        <OutcomeGroup key={outcome} outcome={outcome} findings={groupFindings} />
+        <OutcomeGroup key={outcome} outcome={outcome} findings={groupFindings} onAct={onAct} />
       ))}
     </div>
   );
@@ -132,9 +139,11 @@ function AttentionTab({ findings }: { findings: RuleFinding[] }) {
 function OutcomeGroup({
   outcome,
   findings,
+  onAct,
 }: {
   outcome: EvaluationOutcome;
   findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
 }) {
   const meta = outcomeMeta(outcome);
   return (
@@ -145,9 +154,9 @@ function OutcomeGroup({
         <span className="text-xs text-gray-400">— {meta.blurb}</span>
       </div>
       {outcome === "couldnt_check" ? (
-        <MissingVsPresent findings={findings} />
+        <MissingVsPresent findings={findings} onAct={onAct} />
       ) : (
-        <GroupedFindingList findings={findings} />
+        <GroupedFindingList findings={findings} onAct={onAct} />
       )}
     </section>
   );
@@ -164,10 +173,16 @@ function OutcomeGroup({
  * where five separate cards are five separate errands. Rendered only when BOTH sides are non-empty —
  * a single header over the whole bucket adds a level of nesting and says nothing.
  */
-function MissingVsPresent({ findings }: { findings: RuleFinding[] }) {
+function MissingVsPresent({
+  findings,
+  onAct,
+}: {
+  findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   const { missing, present } = splitByMissingDocument(findings);
   if (missing.length === 0 || present.length === 0) {
-    return <GroupedFindingList findings={findings} />;
+    return <GroupedFindingList findings={findings} onAct={onAct} />;
   }
   return (
     <div className="space-y-4">
@@ -178,13 +193,13 @@ function MissingVsPresent({ findings }: { findings: RuleFinding[] }) {
             waiting on {awaitedDocuments(missing).join(", ")}
           </span>
         </p>
-        <GroupedFindingList findings={missing} />
+        <GroupedFindingList findings={missing} onAct={onAct} />
       </div>
       <div className="space-y-2">
         <p className="text-xs font-medium text-gray-500">
           In the file — read or clarify these ({present.length})
         </p>
-        <GroupedFindingList findings={present} />
+        <GroupedFindingList findings={present} onAct={onAct} />
       </div>
     </div>
   );
@@ -193,16 +208,22 @@ function MissingVsPresent({ findings }: { findings: RuleFinding[] }) {
 /** LP-376-C: render findings that share a rule + reason as ONE summary row (expandable to WHICH ones), so
  * N documents failing a check the same way don't read as N identical lines. A lone finding renders plainly.
  * A pure display collapse — the underlying findings (and their reconcile keys) are untouched. */
-function GroupedFindingList({ findings }: { findings: RuleFinding[] }) {
+function GroupedFindingList({
+  findings,
+  onAct,
+}: {
+  findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   return (
     <div className="space-y-2">
       {groupByRule(findings).map((group) => {
         const first = group[0];
         if (first === undefined) return null; // never — groups are non-empty by construction
         return group.length === 1 ? (
-          <RuleFindingRow key={first.id} finding={first} />
+          <RuleFindingRow key={first.id} finding={first} onAct={onAct} />
         ) : (
-          <CollapsedFindings key={first.id} findings={group} />
+          <CollapsedFindings key={first.id} findings={group} onAct={onAct} />
         );
       })}
     </div>
@@ -258,7 +279,13 @@ function collapsedSummary(findings: RuleFinding[]): string {
   return rest > 0 ? `${shown}, and ${rest} more` : shown;
 }
 
-function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
+function CollapsedFindings({
+  findings,
+  onAct,
+}: {
+  findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   const first = findings[0];
   // A VIOLATION group starts EXPANDED. LP-518 widened grouping from rule+message to rule alone, which
   // also swept up `open` findings whose messages genuinely differ per subject — collapsing those hid the
@@ -340,9 +367,15 @@ function CollapsedFindings({ findings }: { findings: RuleFinding[] }) {
   );
 }
 
-function FindingList({ findings }: { findings: RuleFinding[] }) {
+function FindingList({
+  findings,
+  onAct,
+}: {
+  findings: RuleFinding[];
+  onAct?: (action: RuleFindingAction) => void;
+}) {
   // Also collapsed by reason (LP-376-C) — e.g. AS-1's 15 identical "deposit sourced" satisfied rows.
-  return <GroupedFindingList findings={findings} />;
+  return <GroupedFindingList findings={findings} onAct={onAct} />;
 }
 
 export function RuleFindingsTabs({
@@ -350,12 +383,16 @@ export function RuleFindingsTabs({
   ruleFindingsStale = false,
   legacyCount,
   legacy,
+  onAct,
 }: {
   ruleFindings: RuleFinding[];
   /** LP-377-C: the latest run's rule engine did not complete — these findings are from an earlier run. */
   ruleFindingsStale?: boolean;
   legacyCount: number;
   legacy: ReactNode;
+  /** LP-561 — resolve a governed finding. Optional so a read-only caller (a test, a print view) can
+   *  render the tabs without the action bar appearing at all. */
+  onAct?: (action: RuleFindingAction) => void;
 }) {
   const [active, setActive] = useState<TabId>("attention");
   const buckets = bucketRuleFindings(ruleFindings);
@@ -404,7 +441,7 @@ export function RuleFindingsTabs({
       <TabStrip tabs={tabs} active={active} onPick={setActive} />
 
       <div role="tabpanel">
-        {active === "attention" && <AttentionTab findings={buckets.attention} />}
+        {active === "attention" && <AttentionTab findings={buckets.attention} onAct={onAct} />}
 
         {active === "satisfied" &&
           (buckets.satisfied.length > 0 ? (
@@ -413,7 +450,7 @@ export function RuleFindingsTabs({
                 {OUTCOME_META.satisfied.blurb} These ran and passed — visible so you know a rule was
                 actually checked, not silently skipped.
               </p>
-              <FindingList findings={buckets.satisfied} />
+              <FindingList findings={buckets.satisfied} onAct={onAct} />
             </div>
           ) : (
             <EmptyState
@@ -425,7 +462,7 @@ export function RuleFindingsTabs({
 
         {active === "no_longer_applies" &&
           (buckets.no_longer_applies.length > 0 ? (
-            <FindingList findings={buckets.no_longer_applies} />
+            <FindingList findings={buckets.no_longer_applies} onAct={onAct} />
           ) : (
             <EmptyState
               icon={<History className="h-8 w-8" />}
