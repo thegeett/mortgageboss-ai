@@ -202,8 +202,12 @@ export function RuleFindingRow({
             </DetailBlock>
           )}
 
+          {/* LP-582 — the label was "Guideline (from the rule spec)". A rule spec is a file in our
+              repo, not anything a processor knows; the parenthetical told them nothing and cost
+              them a moment working out whether it mattered. The citation already names its own
+              source (Fannie Mae B3-6-05, and so on). */}
           {finding.guideline != null && finding.guideline.trim().length > 0 && (
-            <DetailBlock label="Guideline (from the rule spec)">
+            <DetailBlock label="Guideline">
               <p className="text-sm italic leading-relaxed text-gray-600">{finding.guideline}</p>
             </DetailBlock>
           )}
@@ -227,9 +231,9 @@ export function RuleFindingRow({
             <details className="group">
               <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600">
                 <span className="group-open:hidden">
-                  Show the {finding.load_bearing_tags.length} tags this verdict rested on
+                  Show the {finding.load_bearing_tags.length} facts this rested on
                 </span>
-                <span className="hidden group-open:inline">Hide the tags</span>
+                <span className="hidden group-open:inline">Hide the facts</span>
               </summary>
               <ul className="mt-1.5 space-y-2">
                 {finding.load_bearing_tags.map((tag, index) => (

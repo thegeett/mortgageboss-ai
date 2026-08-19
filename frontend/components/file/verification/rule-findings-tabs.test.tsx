@@ -184,7 +184,7 @@ describe("the quarantine — the two systems never merge", () => {
 });
 
 describe("the provenance card — the reasoning IS the product", () => {
-  it("shows the AI's reasoning and the SPEC's guideline when a row is expanded", () => {
+  it("shows the AI's reasoning and the guideline when a row is expanded", () => {
     renderTabs([
       ruleFinding({
         message: "the address-type is unknown",
@@ -206,7 +206,8 @@ describe("the provenance card — the reasoning IS the product", () => {
     // The reasoning is shown prominently (not hidden), and the guideline is the spec's.
     expect(screen.getByText("the bank statement states no address type")).toBeDefined();
     expect(screen.getByText(/Fannie B3-4.1 — residence must be consistent./)).toBeDefined();
-    expect(screen.getByText(/from the rule spec/i)).toBeDefined();
+    // LP-582 — labelled just "Guideline": a rule spec is a file in our repo, not a processor's word.
+    expect(screen.getByText(/^Guideline$/i)).toBeDefined();
   });
 
   it("marks a needs_review finding as awaiting sign-off — not a violation", () => {
