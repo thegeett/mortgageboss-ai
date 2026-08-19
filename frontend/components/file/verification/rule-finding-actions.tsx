@@ -20,7 +20,7 @@ import { useState } from "react";
  */
 export type RuleFindingAction =
   | { kind: "ratify"; findingId: string; note?: string }
-  | { kind: "apply"; findingId: string }
+  | { kind: "apply"; findingId: string; expectedFingerprint?: string }
   | { kind: "override"; findingId: string; reason: string }
   | { kind: "accept-risk"; findingId: string; reason: string }
   | { kind: "note"; findingId: string; note: string }
@@ -246,9 +246,9 @@ export function RuleFindingActions({
           onOpenChange={setPreviewOpen}
           fileId={fileId}
           finding={finding}
-          onApply={() => {
+          onApply={(expectedFingerprint) => {
             setPreviewOpen(false);
-            onAct({ kind: "apply", findingId: finding.id });
+            onAct({ kind: "apply", findingId: finding.id, expectedFingerprint });
           }}
           busy={pending}
         />

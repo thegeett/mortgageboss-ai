@@ -193,7 +193,9 @@ export function ViewFixDialog({
   // `VerificationFinding` kept the governed rule findings (a different type) out of a preview that
   // works for them unchanged. Narrowed to what is actually used, so both finding families reach it.
   finding: { id: string };
-  onApply: () => void;
+  // LP-578 — the confirm hands back the fingerprint the preview was computed against, so the apply
+  // can refuse if the file moved while the processor was reading it.
+  onApply: (expectedFingerprint?: string) => void;
   busy?: boolean;
 }) {
   const preview = useApplyPreview(fileId, finding.id, open);
@@ -246,7 +248,7 @@ export function ViewFixDialog({
             className="h-8 gap-1 text-xs"
             disabled={busy || preview.isPending || preview.isError}
             onClick={() => {
-              onApply();
+              onApply(preview.data?.fingerprint);
               onOpenChange(false);
             }}
           >

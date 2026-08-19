@@ -20,16 +20,72 @@ The flow:
 
 from __future__ import annotations
 
+import hashlib
+import json
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finding import Finding
 from app.models.loan_file import LoanFile
+from app.schemas.dti import DtiCalculation
 from app.schemas.finding_impact import FindingImpactPreview
+from app.schemas.ltv import LtvCalculation
 from app.services.dti import build_dti_calculation, gate_display_ratios
 from app.services.finding_resolution import apply_finding
 from app.services.ltv import build_ltv_calculation
+
+
+def _money_key(value: Decimal | None) -> str:
+    """A money figure canonicalised to two places, so the hash tracks VALUE and not formatting.
+
+    `str(Decimal("3000"))` and `str(Decimal("3000.00"))` are the same amount and different strings.
+    Hashing the raw repr made an edit-and-revert read as a change — a false "this file moved" that
+    would train processors to click past the warning, which is worse than not having it.
+    """
+    return "-" if value is None else f"{value:.2f}"
+
+
+def apply_fingerprint(finding: Finding, dti: DtiCalculation, ltv: LtvCalculation) -> str:
+    """A hash of everything that decides what an Apply would do (LP-578).
+
+    THE STALENESS PROBLEM. The preview is computed at T and confirmed at T+30s. In between, another
+    processor can edit the liability, add a second one from the same servicer (which turns a clean
+    target into an ambiguous one the apply refuses), soft-delete the row, or change an override. The
+    processor then confirms a before/after that no longer describes what will happen — and Apply
+    WRITES TO THE LOAN and moves an underwriting number, so "close enough" is not good enough.
+
+    WHAT IT COVERS, and why this particular material. The calculators' LINE ITEMS are the
+    apply-relevant rows: a debt line's key is `debt.<liability id>`, its label carries the holder
+    name (`f"{kind} — {holder}"`), and its amount is the figure. So hashing the items catches a
+    changed payment, a renamed holder, an added or removed liability, and a new override — without
+    enumerating tables here and going stale the moment one is added. The finding's own resolution
+    state is included because applying twice is the other way the outcome diverges.
+
+    It is deliberately NOT a timestamp: a file edited and edited back is unchanged, and should not
+    be refused.
+    """
+    material = {
+        "finding": [
+            str(finding.id),
+            finding.resolution_status.value,
+            finding.evaluation_outcome.value if finding.evaluation_outcome else None,
+            finding.details.get("apply"),
+        ],
+        # The full item lists, in order — key, label and amount each matter for a different reason
+        # (identity, holder, figure).
+        "dti": [
+            [i.key, i.label, _money_key(i.amount), i.excluded]
+            for i in (*dti.income_items, *dti.housing_items, *dti.debt_items)
+        ],
+        "ltv": [
+            [i.key, i.label, _money_key(i.amount)] for i in (*ltv.loan_items, *ltv.value_items)
+        ],
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()[
+        :32
+    ]
 
 
 def _summarize_change(finding: Finding) -> str:
@@ -118,6 +174,8 @@ async def preview_finding_apply(
         summary=summary,
         applied_record=applied_record,
         affects=affects,
+        # Computed from the BEFORE state — the one the processor is looking at.
+        fingerprint=apply_fingerprint(finding, dti_before, ltv_before),
         # Only the calculators the apply actually moves are returned (the rest would be noise). The DTI
         # is passed through ``gate_display_ratios`` so the preview shows the SAME honest (nulled-when-
         # gated) ratios as the /dti card — never a confident number resting on a fabricated 0 (LP-375).

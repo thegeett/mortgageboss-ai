@@ -173,4 +173,8 @@ export interface FindingImpactPreview {
   dti_after: DtiCalculation | null;
   ltv_before: LtvCalculation | null;
   ltv_after: LtvCalculation | null;
+  /** LP-578 — the state this preview was computed against. Handed back on confirm so the apply can
+   *  refuse if the file moved in between, rather than writing a different before/after than the one
+   *  the processor approved. */
+  fingerprint: string;
 }

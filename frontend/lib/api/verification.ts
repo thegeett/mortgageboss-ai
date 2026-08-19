@@ -126,7 +126,10 @@ export function useSetAggression(identifier: string) {
 
 /** The kind of resolution action + its body. */
 type Resolution =
-  | { kind: "apply"; findingId: string }
+  // LP-578 — `expectedFingerprint` is the preview's state hash. Optional: an Apply reached without
+  // opening a preview still works (it just has no staleness protection), which is better than a
+  // button that cannot fire.
+  | { kind: "apply"; findingId: string; expectedFingerprint?: string }
   | { kind: "override"; findingId: string; reason: string }
   | { kind: "note"; findingId: string; note: string }
   | { kind: "accept-risk"; findingId: string; reason: string }
@@ -156,6 +159,8 @@ async function resolveFinding(identifier: string, action: Resolution): Promise<V
   else if (action.kind === "accept-risk") body = { reason: action.reason };
   else if (action.kind === "request-docs") body = { note: action.note };
   else if (action.kind === "ratify" && action.note) body = { note: action.note };
+  else if (action.kind === "apply" && action.expectedFingerprint)
+    body = { expected_fingerprint: action.expectedFingerprint };
   const res = await apiClient.post<VerificationStatus>(`${base}/${action.kind}`, body);
   return res.data;
 }

@@ -25,7 +25,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
-from app.schemas.finding_impact import FindingImpactPreview
+from app.schemas.finding_impact import ApplyRequest, FindingImpactPreview
 from app.schemas.verification import (
     AcceptRiskRequest,
     AggressionPublic,
@@ -50,8 +50,13 @@ from app.services.cross_source import (
     compute_input_fingerprint,
     latest_completed_run,
 )
+from app.services.dti import build_dti_calculation
 from app.services.finding_blocking import open_in_scope_findings
-from app.services.finding_impact import has_apply_spec, preview_finding_apply
+from app.services.finding_impact import (
+    apply_fingerprint,
+    has_apply_spec,
+    preview_finding_apply,
+)
 from app.services.finding_resolution import (
     CannotApplyError,
     CannotRatifyError,
@@ -66,6 +71,7 @@ from app.services.finding_resolution import (
     undo_finding,
 )
 from app.services.loan_files import get_loan_file
+from app.services.ltv import build_ltv_calculation
 from app.services.rule_subject_label import resolve_subject_label
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
@@ -453,7 +459,11 @@ async def preview_finding_apply_endpoint(
 
 @router.post("/{identifier}/findings/{finding_id}/apply", response_model=VerificationStatusPublic)
 async def apply_finding_endpoint(
-    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser
+    identifier: str,
+    finding_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+    body: ApplyRequest | None = None,
 ) -> VerificationStatusPublic:
     """Resolve a finding as APPLIED — incorporate it into the structured data (LP-75).
 
@@ -466,6 +476,30 @@ async def apply_finding_endpoint(
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
     if finding is None:
         raise _FINDING_NOT_FOUND
+
+    # LP-578 — THE STALENESS GUARD. The preview was computed at T and confirmed at T+30s; in between
+    # another processor can edit the target liability, add a second one from the same servicer
+    # (turning a clean target into an ambiguous one), soft-delete it, or change an override. Applying
+    # anyway would write something other than the before/after this processor approved — and Apply
+    # moves an underwriting number, so it refuses and asks them to look again.
+    #
+    # Optional, deliberately: a caller that sends no fingerprint gets today's behaviour rather than a
+    # hard failure. The trade is real — no fingerprint means no protection — and the UI always sends
+    # one, so the gap is a non-preview caller (a script, a test) rather than the product path.
+    if body is not None and body.expected_fingerprint is not None:
+        current = apply_fingerprint(
+            finding,
+            await build_dti_calculation(db, loan_file=loan_file),
+            await build_ltv_calculation(db, loan_file=loan_file),
+        )
+        if current != body.expected_fingerprint:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    "This loan file changed since the preview was computed, so applying now would "
+                    "not produce the before/after you reviewed. Reopen the preview and confirm again."
+                ),
+            )
 
     try:
         await apply_finding(db, finding=finding, loan_file=loan_file, actor_user_id=current_user.id)

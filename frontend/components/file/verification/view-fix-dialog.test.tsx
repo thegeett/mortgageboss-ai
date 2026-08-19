@@ -58,6 +58,7 @@ function preview(over: Partial<FindingImpactPreview> = {}): FindingImpactPreview
     finding_id: "f-1",
     summary: "Add to monthly debts: Auto loan — $6000/mo",
     applied_record: { action: "add_liability" },
+    fingerprint: "abc123", // LP-578 — the state this preview was computed against
     affects: ["dti"],
     dti_before: dti({}),
     dti_after: dti({
@@ -111,6 +112,30 @@ function mock(data: FindingImpactPreview | undefined, extra: Record<string, unkn
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe("the confirm carries the preview's fingerprint (LP-578)", () => {
+  // The preview is computed at T and confirmed at T+30s. In between another processor can edit the
+  // target liability, or add a second one from the same servicer — which turns a clean Apply target
+  // into an ambiguous one the action refuses. Confirming would then write something other than the
+  // before/after this processor approved, and Apply moves an underwriting number.
+  it("hands the fingerprint back so the apply can refuse a moved file", () => {
+    mock(preview());
+    const onApply = vi.fn();
+    render(
+      <ViewFixDialog
+        open
+        onOpenChange={vi.fn()}
+        fileId="LF-1"
+        finding={{ id: "f-1" }}
+        onApply={onApply}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Apply fix/i }));
+
+    expect(onApply).toHaveBeenCalledWith("abc123");
+  });
 });
 
 describe("ViewFixDialog", () => {

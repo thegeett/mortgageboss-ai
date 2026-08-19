@@ -29,3 +29,17 @@ class FindingImpactPreview(BaseModel):
     dti_after: DtiCalculation | None = None
     ltv_before: LtvCalculation | None = None
     ltv_after: LtvCalculation | None = None
+    # LP-578 — the state this preview was computed against. The client hands it back on confirm and
+    # the apply refuses if the file has moved since, so a processor cannot approve one before/after
+    # and have a different one written.
+    fingerprint: str
+
+
+class ApplyRequest(BaseModel):
+    """LP-578 — the optional confirm-time body for POST .../apply.
+
+    Carries the fingerprint the preview was computed against. Optional so a caller that never opened
+    a preview still works; the UI always sends one.
+    """
+
+    expected_fingerprint: str | None = None
