@@ -241,3 +241,73 @@ def test_above_ten_financed_properties_abstains_rather_than_guessing() -> None:
 
     assert value == "unknown"
     assert "outside the 1-10 tiers" in reason
+
+
+# --------------------------------------------------------------------------- #
+# LP-600 — the schedule must say which property this loan is against
+# --------------------------------------------------------------------------- #
+
+
+def test_a_schedule_that_never_marks_a_subject_abstains_rather_than_counting_the_subject() -> None:
+    """THE FALSE POSITIVE THIS CLOSES. `_REAL_FILE` is an export that writes `false` on every block.
+    Treating "not true" as "another property" made the subject property its own other-financed
+    property — pushing AS-4 from satisfied to needs_review on an ordinary refinance and inflating both
+    the count and the aggregate.
+
+    §8: unknown, not a guessed "yes" and not a confident "no". `unknown` does not match AS-4's
+    `eq "yes"` guard, so the rule lands exactly where it was rather than on a false alarm.
+    """
+    snapshot = _snapshot(_REAL_FILE)
+
+    value, reason = _reserves_has_other_financed_properties(snapshot, "loan", None)
+
+    assert value == "unknown"
+    assert "does not identify which property this loan is against" in reason
+
+
+def test_a_schedule_that_does_mark_a_subject_is_trusted() -> None:
+    """The flag is meaningful on an export that uses it — which the real staging files do."""
+    rows = [
+        {"is_subject": "True", "disposition_status": "Retain", "lien_upb": "451829.00"},
+        _row("582417.00"),
+    ]
+    snapshot = _snapshot(rows)
+
+    assert _reserves_has_other_financed_properties(snapshot, "loan", None)[0] == "yes"
+    # The subject's own row is excluded from both the tier and the balance.
+    assert _reserves_other_financed_count(snapshot, "loan", None)[0] == "2"
+
+
+def test_a_schedule_listing_only_the_subject_reports_no_other_property() -> None:
+    """The real staging shape: one row, marked subject. AS-4 must stay satisfied."""
+    snapshot = _snapshot(
+        [{"is_subject": "True", "disposition_status": "Retain", "lien_upb": "451829.00"}]
+    )
+
+    assert _reserves_has_other_financed_properties(snapshot, "loan", None)[0] == "no"
+
+
+def test_a_retained_property_with_no_stated_lien_balance_still_counts() -> None:
+    """LP-600 — it used to be filtered out with free-and-clear property, which made the aggregate's
+    own abstention DEAD CODE and let AS-4 assert "the application lists no other retained financed
+    property" about data it never saw. Absent and zero are different answers."""
+    rows = [
+        {"is_subject": "True", "disposition_status": "Retain", "lien_upb": "451829.00"},
+        {"is_subject": "False", "disposition_status": "Retain"},  # no lien_upb stated
+    ]
+    snapshot = _snapshot(rows)
+
+    assert _reserves_has_other_financed_properties(snapshot, "loan", None)[0] == "yes"
+    value, reason = _reserves_other_financed_aggregate_upb(snapshot, "loan", None)
+    assert value == "unknown"
+    assert "states no lien balance" in reason
+
+
+def test_a_free_and_clear_property_is_still_excluded() -> None:
+    """A ZERO balance is a real answer — owned, not financed — and must not become an abstention."""
+    rows = [
+        {"is_subject": "True", "disposition_status": "Retain", "lien_upb": "451829.00"},
+        {"is_subject": "False", "disposition_status": "Retain", "lien_upb": "0"},
+    ]
+
+    assert _reserves_has_other_financed_properties(_snapshot(rows), "loan", None)[0] == "no"

@@ -713,12 +713,45 @@ def _owned_property_rows(snapshot: Snapshot) -> list[dict[str, str]]:
     return [rows[k] for k in sorted(rows)]
 
 
+def _schedule_marks_a_subject(snapshot: Snapshot) -> bool:
+    """Does this export USE ``OwnedPropertySubjectIndicator`` at all? (LP-600)
+
+    THE MISSING PREMISE IN LP-596/597. Both recorded that only a ``true`` identifies the subject,
+    because the first export seen wrote ``false`` on every block — and then both consumers treated
+    "not true" as "another property", which is the same mistake wearing different clothes. On an
+    export that never sets the flag, the subject property's OWN row becomes an other-financed property
+    and its own lien "contradicts" its own payoff marking.
+
+    And the deeper reason it must: ``OwnedPropertyDispositionStatusType`` describes the PROPERTY, not
+    the lien. A borrower refinancing their home RETAINS it — of course they do — while the lien is
+    retired at closing. So "marked paid off" + "property Retain" is the ordinary refinance, not a
+    contradiction, unless the row is positively known to be a DIFFERENT property.
+
+    So the indicator is only trustworthy on a schedule that uses it. Where nothing is marked, the
+    schedule cannot distinguish the subject and the honest answer is to abstain, not to guess.
+    """
+    return any(
+        row.get("is_subject", "").strip().lower() == "true"
+        for row in _owned_property_rows(snapshot)
+    )
+
+
 def _other_financed(snapshot: Snapshot) -> list[dict[str, str]]:
     """Owned properties that carry a lien the borrower KEEPS after this loan closes.
 
     Excluded, each for a reason the guide gives: a block marked as the subject (only a true counts —
-    see LP-596 on why the false is worthless), anything being sold or pending sale, and anything with
-    no lien at all (a free-and-clear property is owned, not financed).
+    see LP-596 on why the false is worthless), and anything being sold or pending sale.
+
+    ⚠️ A ROW WITH NO STATED LIEN BALANCE IS KEPT. It used to be filtered out here alongside a
+    free-and-clear property, which had two consequences: the aggregate's "a retained financed property
+    states no lien balance" abstention became DEAD CODE (nothing without a balance ever reached it),
+    and three retained financed properties whose export omits ``OwnedPropertyLienUPBAmount`` produced
+    ``has_other_financed_properties = "no"`` — AS-4 passing while asserting "the application lists no
+    other retained financed property", a positive claim about data it never saw.
+
+    A zero balance IS still excluded: a free-and-clear property is owned, not financed. Absent and
+    zero are different answers and this is the §8 line — the aggregate abstains on the first and
+    counts the second as nothing.
     """
     out = []
     for row in _owned_property_rows(snapshot):
@@ -726,7 +759,7 @@ def _other_financed(snapshot: Snapshot) -> list[dict[str, str]]:
             continue
         if row.get("disposition_status", "").strip().lower() != _RETAINED_DISPOSITION:
             continue
-        if _to_decimal_or_none(row.get("lien_upb")) in (None, Decimal(0)):
+        if _to_decimal_or_none(row.get("lien_upb")) == Decimal(0):
             continue
         out.append(row)
     return out
@@ -753,6 +786,15 @@ def _reserves_has_other_financed_properties(
     wrong "no" leaves AS-4 exactly where it already was rather than making it worse.
     """
     rows = _other_financed(snapshot)
+    if rows and not _schedule_marks_a_subject(snapshot):
+        # The schedule lists retained financed property but never says which one this loan is
+        # against, so "besides the subject" cannot be established — and on a refinance the subject's
+        # own row looks exactly like these. §8: unknown, never a guessed "yes" or a confident "no".
+        return (
+            _UNKNOWN,
+            "the owned-property schedule does not identify which property this loan is against, so "
+            "whether any of them is besides the subject cannot be determined",
+        )
     if not rows:
         return "no", "the application lists no retained financed property besides the subject"
     return (
@@ -3189,6 +3231,15 @@ def _liability_payoff_contradicted(
             # The schedule says this IS the subject property, which corroborates the payoff.
             return "no", "the schedule identifies this as the lien on the subject property"
         if row.get("disposition_status", "").strip().lower() == _RETAINED_DISPOSITION:
+            if not _schedule_marks_a_subject(snapshot):
+                # This row may BE the subject — the schedule never says. A borrower refinancing
+                # their home retains it while the lien is retired, so without knowing which property
+                # this loan is against, "Retain" says nothing about whether the lien survives.
+                return (
+                    "no",
+                    "the schedule does not identify which property this loan is against, so a "
+                    "retained property is not evidence that this lien survives closing",
+                )
             return (
                 "yes",
                 "the owned-property schedule marks the property securing this lien as retained, "
@@ -3349,11 +3400,25 @@ def _loan_ltv_basis_is_appraised(
     """
     if _appraised_value_from_appraisal(snapshot) is not None:
         return "yes", "an appraisal on the file supplies the value the ratio divides by"
-    for tag_id in ("property.valuation_amount", "property.estimated_value"):
+    # ⚠️ THE PURCHASE PRICE IS ONE OF THESE, and leaving it out made this guard INERT on every
+    # purchase. `value_basis` divides a purchase by the LESSER of price and appraised value, so a
+    # purchase stating a price and carrying no appraisal produces a perfectly good `loan.ltv_percent`
+    # — while this returned "unknown", MI-1's `eq "no"` never matched, and MI-1 went on clearing the
+    # insurance requirement at 79% off a sales price. That is the exact failure the guard was written
+    # for, arriving from the other direction.
+    #
+    # A sales price is no more an appraisal than the borrower's estimate is: B2-1.2-01 puts the
+    # appraised value in the denominator, and a price is what the parties agreed, not what the
+    # property is worth.
+    for tag_id in (
+        "property.valuation_amount",
+        "property.estimated_value",
+        "property.purchase_price",
+    ):
         if [v for v in _parsed_decimals(snapshot, tag_id) if v > 0]:
             return (
                 "no",
-                "the ratio divides by the value stated on the application; no appraisal is on the file",
+                "the ratio divides by a value the application states, not by an appraisal",
             )
     return _UNKNOWN, "the file states no value to divide by at all"
 

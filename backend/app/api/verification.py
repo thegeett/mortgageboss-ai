@@ -21,6 +21,7 @@ from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.finding import EvaluationOutcome, Finding, FindingOrigin, FindingStatus
+from app.models.finding_event import FindingEvent
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.snapshot_finding import SnapshotFinding
@@ -894,21 +895,41 @@ async def list_verification_runs(
         .limit(max(1, min(limit, 100)))
     )
     runs = (await db.execute(stmt)).scalars().all()
-    # LP-592 — the governed outcome counts, per run, in ONE grouped query rather than a query per
-    # row. Derived rather than denormalised because findings DO carry `verification_id`, so the
-    # answer is exact and cannot drift from the findings themselves.
+    # LP-600 — the governed outcome counts, per run, FROM THE EVENT LOG.
+    #
+    # ⚠️ NOT FROM `Finding.verification_id`, which is what LP-592 did and what made every historical
+    # run render as "produced no findings". That column is REASSIGNED on every run: `_update_finding`
+    # sets it for each re-detected finding and the retire loop does the same, so after run 2 almost
+    # all of run 1's findings point at run 2. Grouping by it returns rows for the latest run only.
+    # LP-592's own comment claimed the answer "cannot drift from the findings themselves" — the exact
+    # opposite of what reconcile does two files away.
+    #
+    # `finding_events` is APPEND-ONLY and genuinely per-run: each detected finding gets exactly one
+    # event per run carrying `to_outcome`, and `detail->>'run_id'` is the verification id (the task
+    # passes `run_id=run.id, verification_id=run.id`). So this is exact for every run, including the
+    # ones already in the database — no migration, no denormalised column to keep in step.
+    #
+    # The two filters are the PANEL's (`rule_findings_stmt`), so a history badge counts exactly what
+    # its tab shows: a soft-deleted finding, or one of a non-shown origin, is in neither.
     counts: dict[UUID, dict[str, int]] = {}
     if runs:
+        run_id_expr = FindingEvent.detail["run_id"].astext
         outcome_rows = await db.execute(
             select(
-                Finding.verification_id,
-                Finding.evaluation_outcome,
+                run_id_expr,
+                FindingEvent.to_outcome,
                 func.count(),
             )
-            .where(Finding.verification_id.in_([r.id for r in runs]))
-            .group_by(Finding.verification_id, Finding.evaluation_outcome)
+            .join(Finding, Finding.id == FindingEvent.finding_id)
+            .where(
+                run_id_expr.in_([str(r.id) for r in runs]),
+                Finding.deleted_at.is_(None),
+                Finding.origin.in_(_SHOWN_ORIGINS),
+            )
+            .group_by(run_id_expr, FindingEvent.to_outcome)
         )
-        for run_id_, outcome, total in outcome_rows:
+        for run_id_raw, outcome, total in outcome_rows:
+            run_id_ = UUID(run_id_raw)
             bucket = counts.setdefault(run_id_, {"attention": 0, "satisfied": 0})
             if outcome is EvaluationOutcome.SATISFIED:
                 bucket["satisfied"] += total

@@ -970,3 +970,126 @@ async def test_bulk_request_docs_route_exists_and_creates_one_item_per_document(
     )
 
     assert resp.status_code == 200, resp.text
+
+
+async def test_run_history_counts_survive_a_later_run(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-600 — THE HIGH BUG. Every historical run rendered as "produced no findings".
+
+    LP-592 derived the per-run counts by grouping findings on `Finding.verification_id`, on the stated
+    reasoning that "findings DO carry verification_id, so the answer is exact and cannot drift". It
+    drifts on the very next run: `_update_finding` REASSIGNS that column for every re-detected finding
+    and the retire loop does the same, so after run 2 essentially all of run 1's findings point at run
+    2. The badge for a run that produced 26 findings the day before read "—".
+
+    Counted from `finding_events` instead, which is append-only and genuinely per-run.
+    """
+    from app.models import EvaluationOutcome, FindingCategory
+    from app.services.rule_findings import reconcile_evaluation_findings
+    from app.verification.rule_engine.result import RuleEvaluation, Verdict
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    run_one = await _seed_completed_run(db, loan_file, fingerprint="aaa")
+
+    def _evaluation(subject: str, verdict: Verdict) -> RuleEvaluation:
+        return RuleEvaluation(
+            rule_id="AS-1",
+            subject_id=subject,
+            verdict=verdict,
+            verdict_confidence=0.9,
+            load_bearing_tags=(),
+            threshold_used=None,
+            priya_validated=False,
+            gated_pending_signoff=True,
+            reasoning="the verdict reasoning",
+            how_to_fix=None,
+        )
+
+    async def _reconcile(run_id, evaluations):
+        return await reconcile_evaluation_findings(
+            db,
+            loan_file_id=loan_file.id,
+            verification_id=run_id,
+            run_id=run_id,
+            results=evaluations,
+            evaluated_rule_ids=frozenset({"AS-1"}),
+            category_by_rule={"AS-1": FindingCategory.ASSETS},
+        )
+
+    await _reconcile(
+        run_one.id, [_evaluation("d1", Verdict.FIRED), _evaluation("d2", Verdict.FIRED)]
+    )
+    await db.commit()
+
+    # A SECOND run re-detects both — which is what overwrites run one's verification_id.
+    run_two = await _seed_completed_run(db, loan_file, fingerprint="bbb")
+    await _reconcile(
+        run_two.id, [_evaluation("d1", Verdict.FIRED), _evaluation("d2", Verdict.SATISFIED)]
+    )
+    await db.commit()
+
+    resp = await client.get(f"{API}/{loan_file.display_id}/verification/runs", headers=_auth(token))
+    assert resp.status_code == 200
+    by_id = {r["id"]: r for r in resp.json()}
+
+    # Run ONE still reports what run one concluded, even though its findings now point at run two.
+    assert by_id[str(run_one.id)]["attention_count"] == 2
+    assert by_id[str(run_one.id)]["satisfied_count"] == 0
+    # Run TWO reports its own outcomes: one still open, one resolved to satisfied.
+    assert by_id[str(run_two.id)]["attention_count"] == 1
+    assert by_id[str(run_two.id)]["satisfied_count"] == 1
+    assert EvaluationOutcome  # imported for the reader; the assertions above are the contract
+
+
+async def test_run_history_counts_exclude_what_the_panel_hides(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-600 — the badge must count exactly what its tab shows.
+
+    The panel's own statement is `only_active(...)` plus `origin.in_(_SHOWN_ORIGINS)`; the count query
+    had neither, so a soft-deleted finding — or one of a non-shown origin — inflated the history badge
+    while being absent from "Needs attention".
+    """
+    from app.models import FindingCategory, FindingOrigin
+    from app.models.base import utcnow
+    from app.services.rule_findings import reconcile_evaluation_findings
+    from app.verification.rule_engine.result import RuleEvaluation, Verdict
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    run = await _seed_completed_run(db, loan_file, fingerprint="aaa")
+
+    result = await reconcile_evaluation_findings(
+        db,
+        loan_file_id=loan_file.id,
+        verification_id=run.id,
+        run_id=run.id,
+        results=[
+            RuleEvaluation(
+                rule_id="AS-1",
+                subject_id=subject,
+                verdict=Verdict.FIRED,
+                verdict_confidence=0.9,
+                load_bearing_tags=(),
+                threshold_used=None,
+                priya_validated=False,
+                gated_pending_signoff=True,
+                reasoning="the verdict reasoning",
+                how_to_fix=None,
+            )
+            for subject in ("d1", "d2", "d3")
+        ],
+        evaluated_rule_ids=frozenset({"AS-1"}),
+        category_by_rule={"AS-1": FindingCategory.ASSETS},
+    )
+    minted = sorted(result.minted, key=lambda f: f.subject_key or "")
+    minted[0].deleted_at = utcnow()  # soft-deleted — gone from the tab
+    minted[1].origin = FindingOrigin.DOCUMENT_ANALYSIS  # not in _SHOWN_ORIGINS
+    await db.commit()
+
+    resp = await client.get(f"{API}/{loan_file.display_id}/verification/runs", headers=_auth(token))
+
+    [row] = [r for r in resp.json() if r["id"] == str(run.id)]
+    assert row["attention_count"] == 1, "the badge counted findings the panel does not show"

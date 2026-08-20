@@ -61,9 +61,27 @@ async def test_ltv_above_80_needs_review() -> None:
     assert await _one(build_mi1_high_ltv_snapshot) is Verdict.NEEDS_REVIEW
 
 
-async def test_ltv_at_or_below_80_is_satisfied() -> None:
-    """$300,000 on $400,000 = 75% → no MI required."""
-    assert await _one(build_mi1_low_ltv_snapshot) is Verdict.SATISFIED
+async def test_ltv_at_or_below_80_off_a_sales_price_alone_cannot_clear_mi() -> None:
+    """$300,000 on a $400,000 purchase = 75%, and MI-1 no longer clears it. THIS ASSERTION WAS FLIPPED
+    BY LP-600, deliberately — the old one encoded the bug.
+
+    `build_mi1_low_ltv_snapshot` carries a purchase price and NO DOCUMENTS. Its 75% is computed from
+    the sales price, because `value_basis` divides a purchase by the lesser of price and appraised
+    value and only one of them exists. B2-1.2-01 puts the APPRAISED value in that denominator, and a
+    sales price is what the parties agreed rather than what the property is worth — so dismissing a
+    mortgage-insurance requirement on it clears a real monthly cost before the evidence exists.
+
+    The guard LP-597 added was inert here: `_loan_ltv_basis_is_appraised` did not look at
+    `property.purchase_price`, returned "unknown", and MI-1's `eq "no"` branch never matched. The
+    companion test below is what keeps this honest — with an appraisal on the file, 75% still passes.
+    """
+    assert await _one(build_mi1_low_ltv_snapshot) is Verdict.COULDNT_CHECK
+
+
+async def test_an_appraisal_on_the_file_still_clears_a_low_ltv() -> None:
+    """THE OTHER HALF, so the guard is discriminating rather than merely strict. Same rule, a file
+    that carries appraisals — MI-1 clears it, exactly as before."""
+    assert await _one(build_mi1_two_appraisals_snapshot) is not Verdict.COULDNT_CHECK
 
 
 async def test_mi1_cannot_fire_from_any_outcome() -> None:

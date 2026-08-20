@@ -189,16 +189,44 @@ def _producer_snapshot(owned: list[dict[str, str]], balance: str = "451829.00"):
 
 
 def test_a_retained_property_at_the_same_balance_is_a_contradiction() -> None:
-    """The join is BY BALANCE, which is what links the two sections: in the real export the five
-    OwnedPropertyLienUPBAmount values equal the five LiabilityUnpaidBalanceAmount values exactly."""
+    """The join is BY BALANCE, which is what links the two sections: in the real export the
+    OwnedPropertyLienUPBAmount values equal the LiabilityUnpaidBalanceAmount values exactly.
+
+    LP-600 — THE SCHEDULE MUST IDENTIFY A SUBJECT SOMEWHERE for a `false` to mean anything, so the
+    fixture now carries a second row that does. The first version of this test asserted a
+    contradiction from `is_subject: "False"` alone, which encoded the ambiguity instead of resolving
+    it: on an export that never sets the flag, the row would be the subject property itself.
+    """
     snapshot, subject_id, raw = _producer_snapshot(
-        [{"is_subject": "False", "disposition_status": "Retain", "lien_upb": "451829.00"}]
+        [
+            {"is_subject": "True", "disposition_status": "Retain", "lien_upb": "300000.00"},
+            {"is_subject": "False", "disposition_status": "Retain", "lien_upb": "451829.00"},
+        ]
     )
 
     value, reason = _liability_payoff_contradicted(snapshot, subject_id, raw)
 
     assert value == "yes"
     assert "retained" in reason
+
+
+def test_a_schedule_that_never_marks_a_subject_establishes_no_contradiction() -> None:
+    """LP-600 — THE FALSE POSITIVE THIS CLOSES, and it fires on the ordinary refinance.
+
+    `OwnedPropertyDispositionStatusType` describes the PROPERTY, not the lien. A borrower refinancing
+    their home retains it — of course — while the lien is retired at closing. So on an export that
+    never sets the subject indicator, the subject's own row matched the refinanced lien and DT-8
+    announced that "the schedule marks the property securing this lien as retained" about the very
+    lien being paid off.
+    """
+    snapshot, subject_id, raw = _producer_snapshot(
+        [{"is_subject": "False", "disposition_status": "Retain", "lien_upb": "451829.00"}]
+    )
+
+    value, reason = _liability_payoff_contradicted(snapshot, subject_id, raw)
+
+    assert value == "no"
+    assert "does not identify which property this loan is against" in reason
 
 
 def test_a_schedule_entry_marked_subject_corroborates_rather_than_contradicts() -> None:

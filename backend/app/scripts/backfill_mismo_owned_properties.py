@@ -126,6 +126,12 @@ async def _backfill(db: AsyncSession, *, apply: bool) -> Outcome:
                     estimated_value=owned.estimated_value,
                 )
             )
+        # ⚠️ FLUSH, because the session is built with `autoflush=False` (app/core/database.py). The
+        # `count()` above issues its own SELECT, which would NOT see these pending inserts — so a loan
+        # file carrying two MismoImport rows would have its schedule written twice, doubling
+        # `other_financed_count` and the aggregate UPB. That is precisely the "confident wrong number"
+        # the skip-if-present guard exists to prevent, arriving through the guard itself.
+        await db.flush()
         out.filled_files += 1
         out.filled_rows += len(parsed.owned_properties)
         retained = sum(1 for o in parsed.owned_properties if o.disposition_status == "Retain")

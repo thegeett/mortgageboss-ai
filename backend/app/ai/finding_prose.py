@@ -175,7 +175,12 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
     as the thing it is checking. A number is either in the source text or it is not, and that is
     decidable without judgement.
     """
-    source = _numbers_in(summary.to_json())
+    # ⚠️ THE DOCUMENT COUNT IS NOT A PERMITTED NUMBER. LP-597 injects `documents_on_file` into the
+    # summary so the model can stop inventing a corpus — but this check derives its allow-list from
+    # that same JSON, so a file with 24 documents silently licensed the token "24" anywhere in the
+    # output ("24 months of reserves"). The count is excluded here rather than kept out of the
+    # payload, because the model genuinely needs to see it.
+    source = _numbers_in(summary.to_json()) - _numbers_in(str(summary.documents_on_file))
     return _numbers_in(composition.message) - source
 
 
@@ -223,9 +228,16 @@ _EDITORIALISING = (
 
 
 def editorialises_correctness(composition: Composition) -> set[str]:
-    """Words asserting that something was done RIGHT, rather than saying what the file shows."""
+    """Words asserting that something was done RIGHT, rather than saying what the file shows.
+
+    ⚠️ WORD BOUNDARIES, NOT SUBSTRINGS. A plain `in` check inverts this rule's meaning: "the
+    application INcorrectly lists the property as a second home" contains "correctly", so a finding
+    reporting a genuine error was rejected as editorialising, retried, rejected again, and shipped the
+    raw engine template. Same for "improperly" against "properly". The negated forms are precisely
+    what a finding SHOULD say.
+    """
     text = composition.message.lower()
-    return {word for word in _EDITORIALISING if word in text}
+    return {word for word in _EDITORIALISING if re.search(rf"\b{re.escape(word)}\b", text)}
 
 
 def machinery_talk(composition: Composition) -> set[str]:
