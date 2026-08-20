@@ -182,29 +182,82 @@ async def test_a_dismissal_survives_a_snapshot_change(db_session: AsyncSession) 
     )  # wording refreshes
 
 
-async def test_an_open_finding_the_model_no_longer_sees_is_dropped(
+async def _sees(_payload: str):
+    return _drafts()
+
+
+async def _sees_nothing(_payload: str):
+    return []
+
+
+async def test_an_open_finding_the_model_no_longer_sees_shows_as_resolved(
     db_session: AsyncSession,
 ) -> None:
-    """The list stays honest to the current file. An OPEN finding that is gone is gone."""
+    """FEEDBACK, not silence. Deleting outright is honest about the current file but tells a
+    processor nothing: they upload the appraisal and the finding simply vanishes, indistinguishable
+    from a bug. Resolved says the file moved and this is why."""
     loan_file = await _file(db_session, "gone")
 
-    async def sees(_payload: str):
-        return _drafts()
+    await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=_sees
+    )
+    (after,) = await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923"),
+        reasoner=_sees_nothing,
+    )
 
-    async def sees_nothing(_payload: str):
-        return []
+    assert after.disposition == "resolved"
+
+
+async def test_a_resolved_finding_clears_on_the_next_change(db_session: AsyncSession) -> None:
+    """ONE run, not forever. It survives exactly as long as the snapshot that resolved it — long
+    enough to be seen, not long enough to silt the tab up with old good news."""
+    loan_file = await _file(db_session, "cleared")
 
     await refresh_snapshot_findings(
-        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=sees
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=_sees
+    )
+    await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923"),
+        reasoner=_sees_nothing,
     )
     remaining = await refresh_snapshot_findings(
         db_session,
         loan_file_id=loan_file.id,
-        snapshot=_snapshot(valuation="551923"),
-        reasoner=sees_nothing,
+        snapshot=_snapshot(valuation="540000"),
+        reasoner=_sees_nothing,
     )
 
     assert remaining == []
+
+
+async def test_a_resolved_finding_that_comes_back_reopens(db_session: AsyncSession) -> None:
+    """THE CASE THAT IS EASY TO MISS. `resolved` is the SYSTEM's label, not the processor's — and
+    seeing the finding again means it did not stay resolved. Leaving the label on a live finding
+    would tell a processor something was fixed while it sits in front of them."""
+    loan_file = await _file(db_session, "reopened")
+
+    await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=_sees
+    )
+    await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923"),
+        reasoner=_sees_nothing,
+    )
+    (back,) = await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="540000"),
+        reasoner=_sees,
+    )
+
+    assert back.disposition == "open"
 
 
 async def test_a_resolved_finding_is_retained_even_when_no_longer_seen(

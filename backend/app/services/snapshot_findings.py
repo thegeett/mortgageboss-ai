@@ -32,6 +32,11 @@ from app.verification.snapshot_findings.fingerprint import snapshot_fingerprint
 
 logger = get_logger(__name__)
 
+# The dispositions. OPEN and RESOLVED are the SYSTEM's — it sets both from what the model observed.
+# SIGNED_OFF and NOT_AN_ISSUE are the PROCESSOR's, and nothing here overwrites them.
+OPEN = "open"
+RESOLVED = "resolved"
+
 Reasoner = Callable[[str], Awaitable[list[SnapshotFindingDraft]]]
 
 
@@ -92,22 +97,40 @@ async def refresh_snapshot_findings(
                 )
             )
             continue
-        # RE-OBSERVED. The disposition is deliberately untouched — that is the processor's, not the
+        # RE-OBSERVED. A processor's disposition is deliberately untouched — that is theirs, not the
         # model's. The WORDING is refreshed because the same observation may be expressed better,
-        # and because refusing to update it would freeze a sentence written against an older file.
+        # and freezing it would keep a sentence written against an older file.
+        #
+        # ⚠️ EXCEPT `resolved`, WHICH IS OURS AND NOT THEIRS. We set that when the finding stopped
+        # being observed; seeing it again means it did not stay resolved, and leaving the label on a
+        # live finding would tell a processor something was fixed while it sits in front of them.
+        if row.disposition == RESOLVED:
+            row.disposition = OPEN
         row.snapshot_fingerprint = fingerprint
         row.last_seen_at = now
         row.title = draft.title
         row.detail = draft.detail
         row.sources = draft.sources
 
-    # NO LONGER OBSERVED. Dropped only when still OPEN: a finding a processor acted on is a record of
-    # that action, and deleting it would erase their work the first time the file moved. An open one
-    # that the model no longer sees is genuinely gone, and keeping it would be the stale-finding
-    # problem this pass exists to avoid.
+    # NO LONGER OBSERVED — three different things, and they are not the same.
     for row in existing:
-        if row.finding_key not in seen and row.disposition == "open":
+        if row.finding_key in seen:
+            continue
+        if row.disposition == OPEN:
+            # SHOWN AS RESOLVED, ONCE. Deleting outright is honest about the current file but gives a
+            # processor NO FEEDBACK that their work landed — they upload the appraisal and the
+            # finding simply vanishes, indistinguishable from a bug. Marking it resolved says the
+            # file moved and this is why. It carries the CURRENT fingerprint, so it survives exactly
+            # as long as the snapshot that resolved it.
+            row.disposition = RESOLVED
+            row.snapshot_fingerprint = fingerprint
+            row.last_seen_at = now
+        elif row.disposition == RESOLVED:
+            # It was already shown as resolved against an EARLIER snapshot and is still not observed.
+            # It has served its purpose; keeping it would silt the tab up with old good news.
             await db.delete(row)
+        # signed_off / not_an_issue are RETAINED indefinitely: a processor's action is a record, and
+        # deleting it would erase their work the first time the file moved (ADR-061's reasoning).
 
     await db.flush()
     return await _stored(db, loan_file_id)
