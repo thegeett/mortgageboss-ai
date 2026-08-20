@@ -36,6 +36,19 @@ logger = get_logger(__name__)
 
 _MAX_TOKENS = 8192
 
+#: The ONLY kinds a finding may carry. Identity hashes this, so it must be a closed set — a
+#: model-authored slug drifts between runs and takes every dismissal with it (LP-598).
+_KINDS = frozenset(
+    {
+        "value_mismatch",
+        "identity_mismatch",
+        "date_inconsistency",
+        "undisclosed_obligation",
+        "calculation_blocked",
+        "other",
+    }
+)
+
 SNAPSHOT_CROSS_SOURCE_PROMPT = """\
 You review a mortgage loan file for a PROCESSOR who is assembling it before underwriting. You are \
 given one frozen snapshot of the file: what the application STATES, what the DOCUMENTS say, and the \
@@ -56,12 +69,22 @@ Do NOT report:
 - anything you cannot point at two sources for
 - a restatement of a single value with nothing to compare it to
 
-Also say when figures that LOOK inconsistent are actually consistent — a balance declining across \
-dated documents is amortization, not a discrepancy. A processor's time is the scarce resource.
+- agreement. If two figures MATCH, that is not a finding and must not be reported. Where something \
+looks inconsistent but is not — a balance declining across dated documents is amortization — the \
+right response is SILENCE. A processor's time is the scarce resource, and a tab of confirmations \
+costs them the same attention as a tab of problems.
+
+"kind" MUST be exactly one of these — never invent another:
+- value_mismatch          two sources state the same fact differently
+- identity_mismatch       parties, names, addresses or ownership that do not line up
+- date_inconsistency      dates that cannot both be true, or an out-of-sequence event
+- undisclosed_obligation  a document shows something the application does not
+- calculation_blocked     a computed figure cannot be produced, and you can name what is missing
+- other                   a real cross-source pairing none of the above fits
 
 Return ONLY a JSON object:
 {"findings": [
-  {"kind": "<short_snake_case_category>",
+  {"kind": "<one of the six above>",
    "title": "<one line, what the pairing is>",
    "detail": "<2-3 sentences: the two facts, and what a processor should confirm>",
    "sources": [{"label": "<where this came from>", "value": "<the figure or fact>"}, ...]}
@@ -99,6 +122,17 @@ class SnapshotFindingDraft:
     sources: list[dict[str, str]] = field(default_factory=list)
 
     @property
+    def normalised_kind(self) -> str:
+        """The kind, forced into the fixed vocabulary (LP-598).
+
+        A model-authored slug is FREE TEXT and drifts exactly as much as the title does. Anything
+        outside the six categories collapses to "other" rather than being kept verbatim, because a
+        verbatim slug is the thing that broke identity in the first place.
+        """
+        candidate = self.kind.strip().casefold().replace("-", "_").replace(" ", "_")
+        return candidate if candidate in _KINDS else "other"
+
+    @property
     def finding_key(self) -> str:
         """CONTENT IDENTITY — the same observation on a later run hashes the same.
 
@@ -110,10 +144,19 @@ class SnapshotFindingDraft:
         verbatim, so "tax bill"/"551,923" and "property tax bill"/"551923" — the same two facts
         described twice — produced different keys and the dismissal was lost anyway. They are
         normalised first, so identity survives the model's phrasing of its own evidence.
+
+        LP-598 — AND SO IS THE KIND, which was the half of this the first version missed. It hashed
+        `kind` VERBATIM while carefully normalising the sources beside it, and `kind` is model-authored
+        free text subject to exactly the same drift. Observed on LF-3CVT: one snapshot change renamed
+        SEVEN findings at once — `citizenship_documentation` became
+        `citizenship_status_no_supporting_documents`, `credit_report_absent` became
+        `liability_balances_no_credit_report` — so all seven read as "resolved by a file change" and
+        eight identical ones opened beside them. Nothing had resolved. The kind is now drawn from a
+        FIXED vocabulary, so it can only change when the model genuinely re-categorises.
         """
         material = json.dumps(
             {
-                "kind": self.kind.strip().casefold(),
+                "kind": self.normalised_kind,
                 "sources": sorted(
                     f"{_normalise(s.get('label', ''))}={_normalise(s.get('value', ''))}"
                     for s in self.sources
@@ -122,6 +165,36 @@ class SnapshotFindingDraft:
             sort_keys=True,
         )
         return hashlib.sha256(material.encode()).hexdigest()
+
+
+#: Words a TITLE uses to announce a discrepancy, and words a DETAIL uses to report agreement. Kept
+#: deliberately small: this pair exists to catch a headline that contradicts its own body, not to
+#: police vocabulary. A phrase in one list and nothing from the other is not a contradiction.
+_MISMATCH_WORDS = (
+    "mismatch",
+    "differs",
+    "discrepancy",
+    "inconsistent",
+    "conflict",
+    "does not match",
+)
+_AGREEMENT_WORDS = (
+    "figures match",
+    "these match",
+    "all three agree",
+    "figures agree",
+    "amounts match",
+)
+
+
+def _claims_mismatch(title: str) -> bool:
+    lowered = title.casefold()
+    return any(word in lowered for word in _MISMATCH_WORDS)
+
+
+def _states_agreement(detail: str) -> bool:
+    lowered = detail.casefold()
+    return any(word in lowered for word in _AGREEMENT_WORDS)
 
 
 def _parse(text: str) -> list[SnapshotFindingDraft]:
@@ -159,6 +232,16 @@ def _parse(text: str) -> list[SnapshotFindingDraft]:
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
+        # LP-598 — A FINDING THAT CONTRADICTS ITSELF. The prompt used to invite the model to "say when
+        # figures that LOOK inconsistent are actually consistent", and it obliged: LF-3CVT carried
+        # `existing_mortgage_balance_mismatch` whose own detail read "These figures match, confirming
+        # consistency". The title is what a processor scans, so a mismatch headline over a body that
+        # says the figures agree sends them after nothing. The invitation is gone from the prompt; this
+        # is the check behind it, narrow on purpose — it fires only on the CONTRADICTION, never on a
+        # finding that merely mentions agreement somewhere in its reasoning.
+        if _claims_mismatch(title) and _states_agreement(detail):
+            continue
+
         # A finding with fewer than two sources is not CROSS-source — it is an observation about one
         # value, which the rules already cover and which this pass is explicitly told not to report.
         if len(sources) < 2:

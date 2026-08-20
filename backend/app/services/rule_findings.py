@@ -192,6 +192,7 @@ def _update_finding(
     outcome: EvaluationOutcome,
     severity: FindingStatus,
     message: str,
+    category: FindingCategory | None,
 ) -> None:
     """Carry a finding forward: refresh its state to THIS run's, keeping its id + resolution history."""
     finding.verification_id = verification_id
@@ -201,6 +202,15 @@ def _update_finding(
     finding.confidence = result.verdict_confidence if result.verdict_confidence is not None else 1.0
     finding.evaluation_outcome = outcome
     finding.load_bearing_tags = [_tag_dict(tag) for tag in result.load_bearing_tags]
+    # LP-598 — THE CATEGORY IS REFRESHED TOO, and it was not. LP-595 fixed the category map, but the
+    # map is only read when MINTING, so every finding that already existed kept whatever it was filed
+    # under. On LF-3CVT that was all thirty of them: the fix deployed, a run completed, and every
+    # finding still read "assets" — a fix that looked applied and was not.
+    #
+    # Safe to overwrite because a category is DERIVED from the rule id, not chosen by anyone. It is
+    # not `resolution_status`, which is a human's decision and is deliberately left alone below.
+    if category is not None:
+        finding.category = category
     # resolution_status (the HUMAN lifecycle) + subject_key (the identity) are NOT touched here.
 
 
@@ -378,6 +388,7 @@ async def reconcile_evaluation_findings(
         _update_finding(
             prior_finding,
             verification_id=verification_id,
+            category=category_by_rule.get(result.rule_id),
             result=result,
             outcome=outcome,
             severity=severity,

@@ -106,7 +106,10 @@ async def refresh_snapshot_findings(
                     loan_file_id=loan_file_id,
                     finding_key=key,
                     snapshot_fingerprint=fingerprint,
-                    kind=draft.kind,
+                    # LP-598 — the NORMALISED kind, so the stored value matches the one identity
+                    # hashes. Storing the raw slug would show a processor a category the dedupe does
+                    # not use, and re-open the drift this ticket closed.
+                    kind=draft.normalised_kind,
                     title=draft.title,
                     detail=draft.detail,
                     sources=draft.sources,

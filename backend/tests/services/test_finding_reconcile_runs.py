@@ -16,6 +16,7 @@ from app.models import (
     FindingCategory,
     FindingEvent,
     FindingEventType,
+    FindingResolutionStatus,
 )
 from app.services.loan_files import create_loan_file
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
@@ -347,3 +348,63 @@ async def test_rerun_does_not_collide_on_the_uniqueness_index(db_session: AsyncS
         FindingEventType.CARRIED_FORWARD,
         FindingEventType.CARRIED_FORWARD,
     ]
+
+
+async def test_a_recategorised_rule_refiles_the_findings_it_already_has(
+    db_session: AsyncSession,
+) -> None:
+    """LP-598 — THE HALF LP-595 MISSED, and it made that whole fix invisible.
+
+    ``reconcile_run`` read the category map only when MINTING, so every finding that already existed
+    kept whatever it was filed under. On LF-3CVT the category fix deployed, a verification run
+    completed, and all thirty findings still read "assets" — the appraisal rule and every income rule
+    among them. A fix that looks applied and is not is worse than one that visibly fails.
+
+    Safe to overwrite because a category is DERIVED from the rule id rather than chosen by anyone —
+    unlike ``resolution_status``, which the next test pins as untouched.
+    """
+    lf = await _loan_file_id(db_session)
+    [minted] = (
+        await _reconcile(db_session, lf, [_as1("dep1", Verdict.FIRED, has_source="no")])
+    ).minted
+    assert minted.category is FindingCategory.ASSETS
+
+    # The rule is re-filed — exactly what LP-595 did to sixty-nine rules at once.
+    result = await reconcile_evaluation_findings(
+        db_session,
+        loan_file_id=lf,
+        verification_id=None,
+        run_id=uuid4(),
+        results=[_as1("dep1", Verdict.FIRED, has_source="no")],
+        evaluated_rule_ids=_RULES,
+        category_by_rule={"AS-1": FindingCategory.INCOME},
+    )
+
+    [carried] = result.carried_forward
+    assert carried.id == minted.id, "identity must be unaffected by a re-filing"
+    assert carried.category is FindingCategory.INCOME
+
+
+async def test_refiling_does_not_disturb_a_humans_resolution(db_session: AsyncSession) -> None:
+    """The line the category refresh must not cross. A processor's decision is theirs; a category is
+    the engine's bookkeeping."""
+    lf = await _loan_file_id(db_session)
+    [minted] = (
+        await _reconcile(db_session, lf, [_as1("dep1", Verdict.FIRED, has_source="no")])
+    ).minted
+    minted.resolution_status = FindingResolutionStatus.ACCEPTED_RISK
+    await db_session.flush()
+
+    result = await reconcile_evaluation_findings(
+        db_session,
+        loan_file_id=lf,
+        verification_id=None,
+        run_id=uuid4(),
+        results=[_as1("dep1", Verdict.FIRED, has_source="no")],
+        evaluated_rule_ids=_RULES,
+        category_by_rule={"AS-1": FindingCategory.INCOME},
+    )
+
+    [carried] = result.carried_forward
+    assert carried.category is FindingCategory.INCOME
+    assert carried.resolution_status is FindingResolutionStatus.ACCEPTED_RISK
