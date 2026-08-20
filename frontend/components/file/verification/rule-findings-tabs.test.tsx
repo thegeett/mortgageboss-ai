@@ -97,6 +97,17 @@ describe("the §8 tabs — the honesty contract", () => {
     expect(screen.getByText(/structurally empty on every file/i)).toBeDefined();
   });
 
+  it("keeps the Not applicable tab even at zero, and shows a count if it ever has one", () => {
+    // It is slated to carry real content later. Today the tab is an EXPLANATION of a structural
+    // absence (those subjects are never persisted), so it stays visible with no count — but the
+    // count is read from the real bucket, not hardcoded, or the day something populates it the tab
+    // would silently keep looking empty.
+    renderTabs([]);
+
+    expect(tab(/not applicable/i)).toBeDefined();
+    expect(within(tab(/not applicable/i)).queryByText("0")).toBeNull();
+  });
+
   it("keeps Tab 3 (No longer applies) distinct from Tab 4 (Not applicable)", () => {
     // LP-583 — `no_longer_applies` is seeded because an EMPTY archival tab is hidden now. Its
     // explanatory copy is reached by having something in it, which is the only state a processor

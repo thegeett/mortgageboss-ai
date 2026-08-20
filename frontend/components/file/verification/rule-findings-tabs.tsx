@@ -52,7 +52,8 @@ interface TabDef {
    *  "subjects that left the file since a previous run". An archive should be REACHABLE, not
    *  advertised, so its count is shown only while the tab is open. */
   archival?: boolean;
-  /** Keep the tab even at zero — for a tab whose CONTENT is an explanation rather than a list. */
+  /** Keep the tab even at zero — for one whose CONTENT is an explanation rather than a list.
+   *  Independent of the count badge, which is suppressed at zero for every tab. */
   alwaysShow?: boolean;
 }
 
@@ -90,7 +91,10 @@ function TabStrip({
             {tab.label}
             {/* LP-583 — an archival tab shows its count only while open. Competing for attention is
                 the badge's whole function, and these have nothing to compete for. */}
-            {!tab.alwaysShow && (!tab.archival || isActive) && (
+            {/* Two separate concerns: `alwaysShow` decides whether the TAB exists, this decides
+                whether its COUNT is worth showing. No tab benefits from displaying a zero — the
+                empty state inside says it better — and an archival count shows only while open. */}
+            {tab.count > 0 && (!tab.archival || isActive) && (
               <span
                 className={cn(
                   "rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
@@ -512,11 +516,18 @@ export function RuleFindingsTabs({
       count: buckets.no_longer_applies.length,
       archival: true,
     },
-    // NOT hidden when empty, and NOT given a count — it is STRUCTURALLY empty on every file
-    // (not_applicable subjects are never persisted as findings), so this tab is an EXPLANATION of an
-    // absence rather than a list of anything. Dropping it would delete an honest §8 statement, and a
-    // "0" beside it is noise about a number that can never be anything else.
-    { id: "not_applicable", label: "Not applicable", count: 0, archival: true, alwaysShow: true },
+    // NOT hidden when empty. Today `not_applicable` subjects are never persisted as findings, so
+    // this tab is an EXPLANATION of an absence rather than a list — dropping it would delete an
+    // honest §8 statement rather than remove noise. It is also slated to carry real content later,
+    // so it reads its REAL count: hardcoding 0 here would have left the tab silently empty-looking
+    // on the day something started populating it.
+    {
+      id: "not_applicable",
+      label: "Not applicable",
+      count: buckets.not_applicable.length,
+      archival: true,
+      alwaysShow: true,
+    },
     { id: "legacy", label: "Old findings", count: legacyCount, archival: true },
     // LP-583 — AN EMPTY CATEGORY IS NOT A CATEGORY ON THIS FILE. "Not applicable 0" spent real
     // estate telling a processor that nothing exists. `attention` is kept unconditionally: an empty
