@@ -194,8 +194,11 @@ export function FindingCard({
 
   const FORM_META: Record<FormKind, { label: string; submit: string; placeholder: string }> = {
     override: {
-      label: "Reason for dismissing (required)",
-      submit: "Override",
+      // LP-584 — renamed HERE TOO, deliberately. Leaving the legacy card on "Override" while the
+      // rule findings say "Not an issue" would give one action two names in two lists, which is the
+      // exact confusion the "Apply" rename (LP-580) existed to remove.
+      label: "Why is this not an issue? (required)",
+      submit: "Not an issue",
       placeholder: "e.g. already disclosed on the 1003; documented separately",
     },
     note: { label: "Note", submit: "Save note", placeholder: "Add context for the file…" },
@@ -429,8 +432,9 @@ export function FindingCard({
                       className="h-7 text-xs"
                       disabled={busy}
                       onClick={() => openForm("override")}
+                      title="The system got this wrong — dismiss it with a reason"
                     >
-                      Override…
+                      Not an issue…
                     </Button>
                   )}
                   {onNote && (

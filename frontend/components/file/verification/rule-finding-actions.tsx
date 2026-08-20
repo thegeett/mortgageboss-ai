@@ -36,11 +36,16 @@ const FORM: Record<
   { label: string; submit: string; placeholder: string; required: boolean }
 > = {
   override: {
-    label: "Why is this being dismissed?",
-    submit: "Override",
+    // LP-584 — "Override" named the MECHANISM (overriding the engine); "Not an issue" states the
+    // CLAIM, which is what the processor is actually asserting and what a later reader needs. The
+    // distinction from Accept risk is who was right: this says the system was WRONG, Accept risk
+    // says it was right and the file proceeds anyway. Those tell opposite stories to an auditor,
+    // which is why they are two actions and why the reason is mandatory here.
+    label: "Why is this not an issue?",
+    submit: "Not an issue",
     placeholder: "e.g. vesting confirmed on the existing deed; not required pre-approval",
-    // Required, deliberately: an override contradicts the engine, and the reason is what a later
-    // reader has instead of the finding.
+    // Required, deliberately: this contradicts the engine, and the reason is what a later reader
+    // has instead of the finding.
     required: true,
   },
   "accept-risk": {
@@ -203,8 +208,9 @@ export function RuleFindingActions({
             className="h-7 px-2 text-xs"
             disabled={pending}
             onClick={() => setForm("override")}
+            title="The system got this wrong — dismiss it with a reason"
           >
-            Override
+            Not an issue
           </Button>
           <Button
             size="sm"

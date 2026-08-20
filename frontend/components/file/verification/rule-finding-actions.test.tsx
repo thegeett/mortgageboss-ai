@@ -146,14 +146,15 @@ describe("which actions appear, and why", () => {
 });
 
 describe("the reason is required where it carries the audit trail", () => {
-  it("will not submit an override without one", () => {
+  it('will not submit a "not an issue" dismissal without one', () => {
     // An override contradicts the engine, and the reason is what a later reader has instead of the
     // finding. Accept-risk and note are the same. A request needs none — the document names it.
     const onAct = vi.fn();
     render(<RuleFindingActions finding={finding()} onAct={onAct} />);
 
-    screen.getByRole("button", { name: "Override" }).click();
-    screen.getByRole("button", { name: "Override" }).click();
+    // LP-584 — "Not an issue" states the claim; the wire action is still `override`.
+    screen.getByRole("button", { name: "Not an issue" }).click();
+    screen.getByRole("button", { name: "Not an issue" }).click();
 
     expect(onAct).not.toHaveBeenCalled();
   });

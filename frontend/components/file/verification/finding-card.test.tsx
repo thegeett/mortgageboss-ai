@@ -182,7 +182,7 @@ describe("FindingCard", () => {
     expect(screen.queryByRole("button", { name: /Apply/ })).toBeNull();
   });
 
-  it("Override requires a reason, then calls onOverride with it", () => {
+  it('"Not an issue" requires a reason, then calls onOverride with it', () => {
     const onOverride = vi.fn();
     render(
       <FindingCard
@@ -192,14 +192,16 @@ describe("FindingCard", () => {
         onNote={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /override…/i }));
+    // LP-584 — labelled by the CLAIM ("the system got this wrong"), not the mechanism. The wire
+    // action and the handler stay `override`; only what a processor reads changed.
+    fireEvent.click(screen.getByRole("button", { name: /not an issue…/i }));
     // The confirm button is disabled until a reason is typed.
-    const confirm = screen.getByRole("button", { name: "Override" });
+    const confirm = screen.getByRole("button", { name: "Not an issue" });
     expect(confirm).toHaveProperty("disabled", true);
-    fireEvent.change(screen.getByLabelText(/Reason for dismissing/), {
+    fireEvent.change(screen.getByLabelText(/Why is this not an issue/), {
       target: { value: "Already on the 1003" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Override" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not an issue" }));
     expect(onOverride).toHaveBeenCalledWith("Already on the 1003");
   });
 
