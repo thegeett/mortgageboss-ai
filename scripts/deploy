@@ -101,10 +101,14 @@ ARGUMENTS
                Set VERIFY_FORCE=0 to opt out of forcing.
 
     backfill-mismo
-               Fill properties.in_project / is_pud from each file's ORIGINAL MISMO,
-               re-parsed from the retained raw file (LP-510). REPORT ONLY unless
-               BACKFILL_APPLY=1. Only ever fills a NULL, never overwrites, so it is
-               idempotent and a re-run repairs a partial run.
+               Re-parse each file's ORIGINAL MISMO from the retained raw file and fill
+               facts a later parser learned to read. REPORT ONLY unless BACKFILL_APPLY=1;
+               both variants are idempotent, so a re-run repairs a partial run.
+                 BACKFILL=property-indicators  (default) properties.in_project / is_pud,
+                                               only where NULL (LP-510).
+                 BACKFILL=owned-properties     stated_owned_properties -- the 1003's
+                                               real-estate-owned schedule (LP-596).
+                                               Skips any file that already has rows.
 
     query      Run ONE read-only SELECT and print the result. Same one-off task
                mechanism. Connects as mbai_readonly, which has no privileges in
@@ -1960,7 +1964,7 @@ verify_tail() {
 # REPORT-ONLY by default. It prints exactly what it would change and writes nothing
 # until BACKFILL_APPLY=1, so looking is never the same action as changing.
 stage_backfill_mismo() {
-  banner "backfill-mismo -- property project indicators in '$ENV_NAME'"
+  banner "backfill-mismo -- re-parse retained MISMO in '$ENV_NAME'"
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
@@ -1974,6 +1978,16 @@ stage_backfill_mismo() {
 
   apply_flag="${BACKFILL_APPLY:-}"
 
+  # LP-596 -- WHICH backfill. Both re-parse the retained raw MISMO for facts a later parser
+  # learned to read; they differ only in what they fill. Selected by name rather than by a free
+  # module path so a typo fails here, loudly, instead of starting a task that imports nothing.
+  local backfill_module
+  case "${BACKFILL:-property-indicators}" in
+    property-indicators) backfill_module="app.scripts.backfill_mismo_property_indicators" ;;
+    owned-properties)    backfill_module="app.scripts.backfill_mismo_owned_properties" ;;
+    *) die "Unknown BACKFILL='${BACKFILL}'. Use 'property-indicators' or 'owned-properties'." ;;
+  esac
+
   ensure_secret_tmpdir
   netcfg=$(oneoff_network "$cluster")
   subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
@@ -1984,7 +1998,12 @@ stage_backfill_mismo() {
   local action_desc="REPORT ONLY -- nothing is written"
   if [ -n "$apply_flag" ]; then action_desc="APPLY -- fills NULL columns and commits"; fi
   info "  action      : $action_desc"
-  info "  fills       : properties.in_project / is_pud, only where NULL"
+  info "  backfill    : ${BACKFILL:-property-indicators}  ($backfill_module)"
+  if [ "${BACKFILL:-property-indicators}" = "owned-properties" ]; then
+    info "  fills       : stated_owned_properties, only for files that have none"
+  else
+    info "  fills       : properties.in_project / is_pud, only where NULL"
+  fi
   hr
   if [ -n "$apply_flag" ]; then
     confirm "Proceed?" || die "Aborted. Nothing was run."
@@ -1995,6 +2014,7 @@ stage_backfill_mismo() {
     umask 077
     ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
     ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" BF_APPLY="$apply_flag" \
+    ONEOFF_MODULE="$backfill_module" \
       jq -n '{
         cluster: env.ONEOFF_CLUSTER,
         taskDefinition: env.ONEOFF_TD,
@@ -2005,7 +2025,7 @@ stage_backfill_mismo() {
           assignPublicIp: "DISABLED"}},
         overrides: {containerOverrides: [{
           name: env.ONEOFF_CONTAINER,
-          command: ["uv","run","python","-m","app.scripts.backfill_mismo_property_indicators"],
+          command: ["uv","run","python","-m", env.ONEOFF_MODULE],
           environment: [{name:"BACKFILL_APPLY", value: env.BF_APPLY}]}]}
       }' >"$request"
   ) || die "Could not build the run-task request."
