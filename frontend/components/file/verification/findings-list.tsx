@@ -77,7 +77,7 @@ export function FindingsList({
               busy={resolve.isPending}
               onApply={() => act({ kind: "apply", findingId: f.id }, "Finding applied")}
               onOverride={(reason) =>
-                act({ kind: "override", findingId: f.id, reason }, "Finding overridden")
+                act({ kind: "override", findingId: f.id, reason }, "Marked not an issue")
               }
               onNote={(note) => act({ kind: "note", findingId: f.id, note }, "Note added")}
               onAcceptRisk={(reason) =>

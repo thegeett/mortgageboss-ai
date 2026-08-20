@@ -70,7 +70,12 @@ export type EvaluationOutcome =
   // LP-391 — a blocked-but-applicable rule found something in scope but is not yet automated: a manual-review
   // flag in Tab 1, NEVER a trusted pass/fail.
   | "pending_automation"
-  | "no_longer_applies";
+  | "no_longer_applies"
+  // LP-588 — declared even though the backend does not emit it today (those subjects are not
+  // persisted as findings). Without it, `tabForOutcome`'s `?? "attention"` fallback would route a
+  // not-applicable subject into NEEDS ATTENTION the day the backend starts emitting one — showing a
+  // rule that does not apply as work to do, which is the opposite of what the tab is for.
+  | "not_applicable";
 
 /** One load-bearing tag inline (LP-316) — the provenance a human reads to see WHY a verdict held. */
 export interface RuleFindingTag {

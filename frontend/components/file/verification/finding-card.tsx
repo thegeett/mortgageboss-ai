@@ -28,6 +28,7 @@ import {
   findingHeadline,
   findingTypeLabel,
 } from "@/lib/verification/finding-display";
+import { resolutionLabel } from "@/lib/verification/rule-findings";
 import {
   Check,
   ChevronDown,
@@ -232,7 +233,7 @@ export function FindingCard({
                 variant="outline"
                 className="shrink-0 border-success/40 font-normal text-success"
               >
-                {humanize(finding.resolution_status)}
+                {resolutionLabel(finding.resolution_status)}
               </Badge>
             )}
           </div>
@@ -505,7 +506,9 @@ export function FindingCard({
                     {finding.resolution_note ?? "—"}
                   </>
                 ) : (
-                  <span className="text-gray-400">{humanize(finding.resolution_status)}</span>
+                  <span className="text-gray-400">
+                    {resolutionLabel(finding.resolution_status)}
+                  </span>
                 )}
               </p>
               {onUndo && (

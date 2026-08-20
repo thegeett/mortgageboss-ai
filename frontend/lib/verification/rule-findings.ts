@@ -20,7 +20,7 @@ export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "n
 // into either family, because it answers a different question from both.
 export type TabId = GovernedTabId | "legacy" | "cross_source";
 
-/** The five §8 outcomes → their governed tab. `not_applicable` never appears (not persisted). */
+/** The §8 outcomes → their governed tab. */
 const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
   open: "attention",
   couldnt_check: "attention",
@@ -28,6 +28,10 @@ const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
   pending_automation: "attention", // LP-391 — a manual-review flag lives where the work is (Tab 1)
   satisfied: "satisfied",
   no_longer_applies: "no_longer_applies",
+  // LP-588 — routed explicitly rather than left to the fallback. The backend does not emit this
+  // today, but the fallback sends anything unrecognised to "attention", so the day it does, a
+  // subject the rule does NOT apply to would appear as work to do.
+  not_applicable: "not_applicable",
 };
 
 export function tabForOutcome(outcome: EvaluationOutcome): GovernedTabId {
@@ -106,6 +110,11 @@ export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
   no_longer_applies: {
     label: "No longer applies",
     blurb: "The subject left the file since a prior run.",
+    tone: "muted",
+  },
+  not_applicable: {
+    label: "Not applicable",
+    blurb: "The rule is irrelevant to this subject's nature — not a pass, and not a gap.",
     tone: "muted",
   },
 };
@@ -234,4 +243,26 @@ const RULE_CATEGORY_LABELS: Record<string, string> = {
 
 export function ruleCategoryLabel(category: string): string {
   return RULE_CATEGORY_LABELS[category.toLowerCase()] ?? humanize(category);
+}
+
+/** LP-588 — how a RESOLUTION STATUS reads to a processor.
+ *
+ * The wire value is `overridden`; the button that produces it says "Not an issue" (LP-584). Every
+ * display site was humanizing the wire value instead, so clicking "Not an issue" produced a toast
+ * reading "Finding overridden" and a row labelled "Overridden" — one action with two names in the
+ * same list, which is the exact confusion the rename existed to remove. The rename stopped at the
+ * buttons; this is the other half.
+ *
+ * Keyed here rather than at each site so the next rename cannot stop halfway again.
+ */
+const RESOLUTION_LABELS: Record<string, string> = {
+  overridden: "Not an issue",
+  accepted_risk: "Risk accepted",
+  applied: "Applied",
+  ratified: "Signed off",
+  open: "Open",
+};
+
+export function resolutionLabel(status: string): string {
+  return RESOLUTION_LABELS[status] ?? status.replace(/_/g, " ");
 }

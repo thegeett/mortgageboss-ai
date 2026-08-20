@@ -97,6 +97,42 @@ describe("the §8 tabs — the honesty contract", () => {
     expect(screen.getByText(/structurally empty on every file/i)).toBeDefined();
   });
 
+  it("falls back to Needs attention when the selected tab is filtered away", () => {
+    // LP-588 — `active` is plain state and the panel POLLS every 2s while a run is in flight, so the
+    // findings are replaced under a processor. Sitting on "Satisfied" when a re-run empties that
+    // bucket, the tab disappears from the strip while `active` still names it: every body guard is
+    // an equality check, so the panel kept rendering a tab that no longer existed and NOTHING
+    // carried aria-selected.
+    const { rerender } = renderTabs([
+      ruleFinding({ id: "s1", evaluation_outcome: "satisfied", message: "all good" }),
+    ]);
+    fireEvent.click(tab(/satisfied/i));
+    expect(screen.getByText("all good")).toBeDefined();
+
+    // The re-run lands and the satisfied bucket empties.
+    rerender(
+      <RuleFindingsTabs
+        ruleFindings={[]}
+        ruleFindingsStale={false}
+        legacyCount={0}
+        legacy={<div>LEGACY-SWEEP-CONTENT</div>}
+      />,
+    );
+
+    expect(screen.queryByRole("tab", { name: /satisfied/i })).toBeNull();
+    expect(tab(/needs attention/i).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("shows the Old findings count — that tab still carries open, blocking work", () => {
+    // LP-588 — marking it archival was a regression. LP-583's rationale was that a 113-count of
+    // "no longer applies" is noise; this tab is not that. Its list carries OPEN findings with the
+    // full action set, and the Blocking/Warnings/Resolved tiles render INSIDE its body — so hiding
+    // the count left a file with unresolved blocking work showing no number and no stats at all.
+    renderTabs([], 7);
+
+    expect(within(tab(/old findings/i)).getByText("7")).toBeDefined();
+  });
+
   it("keeps the Not applicable tab even at zero, and shows a count if it ever has one", () => {
     // It is slated to carry real content later. Today the tab is an EXPLANATION of a structural
     // absence (those subjects are never persisted), so it stays visible with no count — but the

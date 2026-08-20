@@ -4,6 +4,7 @@ import { ViewFixDialog } from "@/components/file/verification/view-fix-dialog";
 import { Button } from "@/components/ui/button";
 import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
+import { resolutionLabel } from "@/lib/verification/rule-findings";
 import { Wrench } from "lucide-react";
 import { useState } from "react";
 
@@ -89,7 +90,7 @@ export function RuleFindingActions({
   if (resolved) {
     return (
       <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
-        <span className="capitalize">{finding.resolution_status.replace(/_/g, " ")}</span>
+        <span>{resolutionLabel(finding.resolution_status)}</span>
         <button
           type="button"
           className="underline underline-offset-2 hover:text-gray-700"

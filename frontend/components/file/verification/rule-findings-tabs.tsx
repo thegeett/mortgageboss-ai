@@ -519,9 +519,13 @@ export function RuleFindingsTabs({
     },
     // NOT hidden when empty. Today `not_applicable` subjects are never persisted as findings, so
     // this tab is an EXPLANATION of an absence rather than a list — dropping it would delete an
-    // honest §8 statement rather than remove noise. It is also slated to carry real content later,
-    // so it reads its REAL count: hardcoding 0 here would have left the tab silently empty-looking
-    // on the day something started populating it.
+    // honest §8 statement rather than remove noise.
+    //
+    // It is slated to carry real content later, so it reads its REAL count. LP-585 claimed that
+    // alone made it future-proof and it did not: the outcome was absent from the union, so
+    // `tabForOutcome` would have routed it to NEEDS ATTENTION via the fallback, and the body
+    // rendered the empty state unconditionally. LP-588 wired the routing and branched the body, so
+    // the count, the routing and the panel now agree.
     {
       id: "not_applicable",
       label: "Not applicable",
@@ -540,12 +544,26 @@ export function RuleFindingsTabs({
       archival: true,
       alwaysShow: true,
     },
-    { id: "legacy", label: "Old findings", count: legacyCount, archival: true },
+    // LP-588 — NOT archival, and marking it so was a real regression. LP-583's rationale was that a
+    // 113-count of "no longer applies" is noise; this tab is not that. `legacyCount` is
+    // `data.findings.length` and that list still carries OPEN, blocking findings with the full
+    // action set — and the Blocking/Warnings/Resolved tiles render INSIDE this tab's body, so
+    // hiding its count left a file with unresolved blocking work showing no number and no stats
+    // anywhere in the default view.
+    { id: "legacy", label: "Old findings", count: legacyCount },
     // LP-583 — AN EMPTY CATEGORY IS NOT A CATEGORY ON THIS FILE. "Not applicable 0" spent real
     // estate telling a processor that nothing exists. `attention` is kept unconditionally: an empty
     // one is the answer they came for, and its own empty state says so.
   ];
   const tabs = allTabs.filter((tab) => tab.alwaysShow || tab.id === "attention" || tab.count > 0);
+  // LP-588 — RECONCILE THE SELECTION WITH WHAT SURVIVED THE FILTER. `active` is plain state and the
+  // panel POLLS every 2s while a run is in flight, so the findings are replaced under a processor:
+  // sitting on "Satisfied" when a re-run empties that bucket, the tab disappears from the strip
+  // while `active` still names it. Every body guard is `active === …`, so the panel kept rendering a
+  // tab that no longer existed, nothing carried aria-selected, and the content shown was an empty
+  // state that is otherwise unreachable. Falling back is one line; noticing it needed a re-run to
+  // land while someone was reading.
+  const shown = tabs.some((tab) => tab.id === active) ? active : "attention";
 
   return (
     <div className="space-y-4">
@@ -565,14 +583,14 @@ export function RuleFindingsTabs({
           </span>
         </div>
       )}
-      <TabStrip tabs={tabs} active={active} onPick={setActive} />
+      <TabStrip tabs={tabs} active={shown} onPick={setActive} />
 
       <div role="tabpanel">
-        {active === "attention" && (
+        {shown === "attention" && (
           <AttentionTab findings={buckets.attention} onAct={onAct} fileId={fileId} />
         )}
 
-        {active === "satisfied" &&
+        {shown === "satisfied" &&
           (buckets.satisfied.length > 0 ? (
             <div className="space-y-2">
               <p className="text-xs text-gray-400">
@@ -589,7 +607,7 @@ export function RuleFindingsTabs({
             />
           ))}
 
-        {active === "no_longer_applies" &&
+        {shown === "no_longer_applies" &&
           (buckets.no_longer_applies.length > 0 ? (
             <FindingList findings={buckets.no_longer_applies} onAct={onAct} fileId={fileId} />
           ) : (
@@ -600,7 +618,14 @@ export function RuleFindingsTabs({
             />
           ))}
 
-        {active === "not_applicable" && (
+        {/* LP-588 — branch on the bucket rather than rendering the explanation unconditionally.
+            The count is read from the real bucket (LP-585), so an unconditional empty state would
+            have let the badge and the body contradict each other the day one is populated. */}
+        {shown === "not_applicable" && buckets.not_applicable.length > 0 && (
+          <FindingList findings={buckets.not_applicable} onAct={onAct} fileId={fileId} />
+        )}
+
+        {shown === "not_applicable" && buckets.not_applicable.length === 0 && (
           <EmptyState
             icon={<CircleSlash className="h-8 w-8" />}
             title="Nothing to show — and that's by design"
@@ -608,9 +633,9 @@ export function RuleFindingsTabs({
           />
         )}
 
-        {active === "cross_source" && fileId && <SnapshotFindingsTab fileId={fileId} />}
+        {shown === "cross_source" && fileId && <SnapshotFindingsTab fileId={fileId} />}
 
-        {active === "legacy" && (
+        {shown === "legacy" && (
           <div className="space-y-3">
             <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">
               <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
