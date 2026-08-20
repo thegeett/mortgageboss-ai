@@ -142,3 +142,82 @@ async def test_a_transport_failure_is_not_retried_here(monkeypatch) -> None:
     assert await compose(_summary()) is None
     assert calls["n"] == 1
     assert "call_failed" not in _RETRYABLE
+
+
+# --------------------------------------------------------------------------- #
+# LP-599 — the composer put "correctly" back after the spec removed it
+# --------------------------------------------------------------------------- #
+
+
+def _composition(text: str):
+    from app.ai.finding_prose import Composition
+
+    return Composition(action=text, why="because")
+
+
+def test_the_exact_sentence_that_shipped_is_rejected() -> None:
+    """VERBATIM FROM STAGING. DT-8's template was rewritten to drop "correctly" and the reference to a
+    gated ratio; the composer paraphrased it straight back and a processor read this:
+
+        "The existing mortgage with UNITED WHSLE MORT is correctly excluded from the
+         debt-to-income ratio."
+
+    Fixing the template does not hold when a model rewrites it. "Correctly" claims the check confirmed
+    the lien BELONGS excluded — that it sits on the subject property — which nothing established.
+    """
+    from app.ai.finding_prose import editorialises_correctness
+
+    shipped = _composition(
+        "The existing mortgage with UNITED WHSLE MORT is correctly excluded from the "
+        "debt-to-income ratio."
+    )
+
+    assert editorialises_correctness(shipped) == {"correctly"}
+
+
+def test_the_words_a_passing_finding_actually_needs_are_left_alone() -> None:
+    """THE LINE THIS CHECK MUST NOT CROSS. The prompt's own worked examples for a pass are
+    "Employment is verified for the full two-year history" and "Reserves are fully documented".
+    Banning those would break the guidance the same file gives three rules above."""
+    from app.ai.finding_prose import editorialises_correctness
+
+    for kept in (
+        "Employment is verified for the full two-year history.",
+        "Reserves are fully documented.",
+        "This payment is on the application's liability list.",
+        "The two-year employment history is continuous.",
+    ):
+        assert editorialises_correctness(_composition(kept)) == set(), kept
+
+
+def test_every_editorialising_word_is_caught() -> None:
+    from app.ai.finding_prose import _EDITORIALISING, editorialises_correctness
+
+    for word in _EDITORIALISING:
+        assert editorialises_correctness(_composition(f"This is {word} handled.")) == {word}
+
+
+def test_the_prompt_forbids_it_and_says_which_words_are_still_fine() -> None:
+    """A ban with no carve-out would have the model avoid "documented" and "verified" too, which the
+    pass guidance depends on."""
+    from app.ai.finding_prose import SYSTEM_PROMPT
+
+    assert "Never write that something is CORRECTLY" in SYSTEM_PROMPT
+    assert '"documented" and "verified" ARE fine' in SYSTEM_PROMPT
+
+
+async def test_it_is_retried_rather_than_falling_back_to_the_template(monkeypatch) -> None:
+    """The template is the thing being rescued here — DT-8's raw text is what a rejection ships, and
+    it reads as engine prose. A retry is what turns this into a fix rather than a different failure."""
+    model = _Model(
+        json.dumps({"action": "The mortgage is correctly excluded from the ratio", "why": "b"}),
+        json.dumps({"action": "The application marks this mortgage as paid off", "why": "b"}),
+    )
+    monkeypatch.setattr("app.ai.finding_prose.complete", model)
+
+    result = await compose(_summary())
+
+    assert result is not None
+    assert "correctly" not in result.message
+    assert len(model.messages) == 2
+    assert "not yours to assert" in model.messages[1]

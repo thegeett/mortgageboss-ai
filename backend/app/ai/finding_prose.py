@@ -81,6 +81,12 @@ RULES, all mandatory:
   the floor"). The exact arithmetic is appended to your text automatically, so writing your own version
   says the same thing twice, once vaguely and once precisely. Say what to obtain and why the source
   matters; leave the size of the deposit to the appended clause.
+- Never write that something is CORRECTLY, properly, appropriately or accurately done. Describe what
+  the file shows — "the application marks this mortgage as paid off at closing" — never your view of
+  whether a figure, an exclusion or a calculation is right. Saying a value is correctly excluded
+  claims the check confirmed it belongs excluded, which is a different and larger statement than the
+  one you were given. (Words like "documented" and "verified" ARE fine: they describe the file's
+  evidence, not whether someone got something right.)
 - NEVER ASSERT THAT A DOCUMENT IS IN THE FILE, and never describe agreement "across the documents".
   "documents_on_file" tells you how many documents exist and nothing about what they are. When it is
   0 the file has NO documents at all, so every sentence implying one — "the file contains pay stubs",
@@ -193,6 +199,35 @@ _MACHINERY = (
 )
 
 
+#: Adverbs that JUDGE an action rather than describe the file (LP-599).
+#:
+#: DT-8's template was rewritten to say "the application marks this mortgage as paid off at closing,
+#: so it is excluded from the debt ratio" — deliberately, because "CORRECTLY excluded from the
+#: BACK-END debt-to-income ratio" claimed two things the rule never established: that the lien sits on
+#: the subject property, and a property of a ratio that is gated on any file missing taxes and
+#: insurance. The composer put "correctly" straight back, and shipped it to a processor.
+#:
+#: NARROW BY CONSTRUCTION. "verified", "documented" and "confirmed" are NOT here and must not be: the
+#: prompt's own worked examples for a passing finding are "Employment is verified for the full
+#: two-year history" and "Reserves are fully documented". Those describe the FILE'S evidence. The six
+#: below describe whether something was done RIGHT, which is a judgment about the engine's own work
+#: and never needed to state a fact about a loan.
+_EDITORIALISING = (
+    "correctly",
+    "properly",
+    "appropriately",
+    "accurately",
+    "rightly",
+    "as it should be",
+)
+
+
+def editorialises_correctness(composition: Composition) -> set[str]:
+    """Words asserting that something was done RIGHT, rather than saying what the file shows."""
+    text = composition.message.lower()
+    return {word for word in _EDITORIALISING if word in text}
+
+
 def machinery_talk(composition: Composition) -> set[str]:
     """Phrases naming the software instead of the loan file."""
     text = composition.message.lower()
@@ -243,7 +278,14 @@ def _parse(text: str) -> Composition | None:
 #: at temperature 0 the retry gets the reason appended so it is not simply the same draw again.
 #: `asking_on_a_pass` is here too: it is a tone failure, not a factual one.
 _RETRYABLE = frozenset(
-    {"unsupported_numbers", "machinery_talk", "identifier", "asking_on_a_pass", "malformed"}
+    {
+        "unsupported_numbers",
+        "machinery_talk",
+        "identifier",
+        "asking_on_a_pass",
+        "malformed",
+        "editorialising",
+    }
 )
 
 
@@ -270,6 +312,10 @@ _REJECTION_GUIDANCE = {
         "what a system or a check did."
     ),
     "identifier": "you included an identifier that must never reach a processor. Remove it.",
+    "editorialising": (
+        "you wrote that something was done correctly, properly or accurately. Say what the file "
+        "SHOWS, never whether a figure or a calculation is right — that is not yours to assert."
+    ),
     "asking_on_a_pass": (
         "this check PASSED, and you wrote it as a task. State what is in order, and never begin with "
         "Obtain, Confirm, Verify, Review, Check, Upload, Provide or Request."
@@ -325,6 +371,9 @@ async def compose(summary: FactSummary, *, _retry_of: str | None = None) -> Comp
         # NOT logged with the text — the count and the fact of rejection are the signal.
         logger.warning("finding_prose_rejected_unsupported_numbers", count=len(invented))
         return await _maybe_retry(summary, "unsupported_numbers", _retry_of)
+    if editorialising := editorialises_correctness(composition):
+        logger.warning("finding_prose_rejected_editorialising", words=sorted(editorialising))
+        return await _maybe_retry(summary, "editorialising", _retry_of)
     if machinery := machinery_talk(composition):
         logger.warning("finding_prose_rejected_machinery_talk", phrases=sorted(machinery))
         return await _maybe_retry(summary, "machinery_talk", _retry_of)
