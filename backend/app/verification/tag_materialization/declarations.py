@@ -103,6 +103,21 @@ class AiGroup:
     tag_ids: tuple[str, ...]
     system_prompt: str
     applies_to: frozenset[str] | None = None  # None = all document types (fail-open default)
+    # LP-606 — the SUBJECT SOURCE a group can actually assess. `applies_to` scopes a DOCUMENT group by
+    # type; this scopes any group by where its subject came from, and exists because a group asked about
+    # a subject it cannot see answered anyway.
+    #
+    # `credit_derogatory` asks "does this account carry any derogatory mark?" for every liability
+    # subject — including the four MISMO-STATED ones on LF-3CVT, which carry a type, a holder, a payment
+    # and a balance and no credit history whatsoever. The model answered "no" for all four ("No
+    # indicators of derogatory status. Account appears current"), reading silence as evidence and
+    # contradicting its own prompt's "when you cannot determine a value, return unknown". That flipped
+    # CR-6 to not_applicable on four debts, retiring four honest couldnt_checks as "no longer applies" —
+    # a false all-clear on credit, drawn from an application row.
+    #
+    # DECLARED, not a per-group branch, and the same shape as `include_borrower_roster`. Also saves the
+    # four model calls per run that could only ever be wrong.
+    subject_source: str | None = None
     # LP-390-8a — a DOCUMENT group that must compare a document's stated party against the loan's borrowers
     # (stmt.owner_matches_borrower) declares this; the producer then adds the loan's borrower roster to the
     # group's context. DECLARED (not a per-group code branch): a group that does not set it is byte-unchanged.
@@ -242,6 +257,9 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(f"ai group {key!r}: `tags` must be a non-empty list")
         if not isinstance(prompt, str) or not prompt.strip():
             raise DeclarationError(f"ai group {key!r}: `system_prompt` is required")
+        subject_source = body.get("subject_source")
+        if subject_source is not None and not isinstance(subject_source, str):
+            raise DeclarationError(f"ai group {key!r}: `subject_source` must be a string")
         roster = body.get("include_borrower_roster", False)
         if not isinstance(roster, bool):
             raise DeclarationError(
@@ -337,6 +355,7 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 key, subject, body.get("applies_to"), include_documents=include_docs
             ),
             include_borrower_roster=roster,
+            subject_source=subject_source,
             include_lists=include_lists,
             list_row_cap=cap,
             include_stated_liabilities=include_liabilities,

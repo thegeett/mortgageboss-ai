@@ -715,6 +715,11 @@ ai_groups:
   credit_derogatory:
     subject: liability
     context_builder: liability
+    # LP-606 — CREDIT-REPORT TRADELINES ONLY. A MISMO-stated liability carries a type, a holder, a
+    # payment and a balance, and no credit history at all; asked anyway, the model answered "no" for
+    # all four on LF-3CVT ("No indicators of derogatory status") and CR-6 went not_applicable on four
+    # debts. Absence of a derogatory field is not absence of derogatory history.
+    subject_source: credit_report_reported
     tags: [liab.is_derogatory, liab.derogatory_type, liab.derogatory_date]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING factual derogatory-credit tags for ONE DEBT.

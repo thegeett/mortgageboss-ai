@@ -34,6 +34,7 @@ from app.services.finding_resolution import override_finding
 from app.services.loan_files import create_loan_file
 from app.services.verifications import create_verification_run
 from app.verification.cross_source import CrossSourceFacts
+from app.verification.cross_source.facts import ObligationRef
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,10 +79,15 @@ async def _run_employers(
     db: AsyncSession, loan_file: LoanFile, documented: tuple[str, ...]
 ) -> None:
     """Run the deterministic pass with the given documented employers (none stated → all fire)."""
+    # LP-606 — RE-POINTED from `xsrc.income.employer_name_consistency` (retired, superseded by IN-5).
+    # The dedup this file protects is rule-AGNOSTIC — `finding_identity` normalises substance for any
+    # cross-source rule — and `ObligationRef.key` is a holder name, so the en-dash/em-dash case that
+    # prompted the module transfers verbatim onto a rule that is still live.
     facts = CrossSourceFacts(
-        stated_employers=("Acme Payroll Co",),  # a DIFFERENT stated employer → the docs don't match
-        documented_employers=documented,
-        stated_employer_count=1,
+        stated_liabilities=(ObligationRef(key="Acme Payroll Co", amount=None, source="1003"),),
+        credit_report_liabilities=tuple(
+            ObligationRef(key=k, amount=None, source="credit report") for k in documented
+        ),
     )
     run = await create_verification_run(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
@@ -95,7 +101,7 @@ async def _employer_findings(db: AsyncSession, loan_file_id: UUID) -> list[Findi
             await db.execute(
                 select(Finding).where(
                     Finding.loan_file_id == loan_file_id,
-                    Finding.rule_id == "xsrc.income.employer_name_consistency",
+                    Finding.rule_id == "xsrc.liability.undisclosed_debt",
                     Finding.deleted_at.is_(None),
                 )
             )
@@ -130,11 +136,11 @@ def test_normalize_text_keeps_real_textual_differences() -> None:
 
 def test_identity_collapses_case_and_dash_variants() -> None:
     a = Finding(
-        rule_id="xsrc.income.employer_name_consistency",
+        rule_id="xsrc.liability.undisclosed_debt",
         details={"type": "employer_mismatch", "subject_key": f"employer_name:{_EMP_A.lower()}"},
     )
     b = Finding(
-        rule_id="xsrc.income.employer_name_consistency",
+        rule_id="xsrc.liability.undisclosed_debt",
         details={"type": "employer_mismatch", "subject_key": f"employer_name:{_EMP_B.lower()}"},
     )
     assert finding_identity(a) == finding_identity(b)
@@ -142,11 +148,11 @@ def test_identity_collapses_case_and_dash_variants() -> None:
 
 def test_identity_separates_different_subjects() -> None:
     a = Finding(
-        rule_id="xsrc.income.employer_name_consistency",
+        rule_id="xsrc.liability.undisclosed_debt",
         details={"type": "employer_mismatch", "subject_key": "employer_name:thermofisher"},
     )
     b = Finding(
-        rule_id="xsrc.income.employer_name_consistency",
+        rule_id="xsrc.liability.undisclosed_debt",
         details={"type": "employer_mismatch", "subject_key": "employer_name:swad mania llc"},
     )
     assert finding_identity(a) != finding_identity(b)
@@ -164,7 +170,9 @@ async def test_case_punctuation_duplicate_collapses_to_one(db_session: AsyncSess
     findings = await _employer_findings(db_session, loan_file.id)
     assert len(findings) == 1  # the two casings/dashes are ONE finding
     # The FIRST wording is kept (not overwritten by the second casing).
-    assert findings[0].message == f"Documented employer not among the stated employers: {_EMP_A}."
+    assert findings[0].message == (
+        f"Liability on the credit report not disclosed on the application: {_EMP_A} (unknown)."
+    )
 
 
 async def test_genuinely_different_employers_stay_separate(db_session: AsyncSession) -> None:

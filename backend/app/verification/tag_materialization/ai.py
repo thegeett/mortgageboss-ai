@@ -251,6 +251,20 @@ def _gate_subjects(group: AiGroup, subjects: list[tuple[str, object]]) -> list[t
     document CONFIDENTLY mis-typed (e.g. a title document typed ``w2``) is gated by its wrong type and its
     group is skipped. Mitigated by the unknown fail-open + deliberately wide ``applies_to`` lists; a
     reported residual, not silently absorbed."""
+    # LP-606 — SOURCE SCOPING, checked before the document gate and NOT behind `gate_ai_groups`.
+    #
+    # That flag exists to make the document gate reversible: gating there only skips a redundant call,
+    # and the prompt's own abstention is the backstop. This is a different thing. A group asked about a
+    # subject it has no data for does not abstain — `credit_derogatory` answered "no" for four
+    # MISMO-stated liabilities with no credit history at all — so leaving it switchable would leave the
+    # false all-clear switchable with it.
+    if group.subject_source is not None:
+        subjects = [
+            (sid, raw)
+            for sid, raw in subjects
+            if getattr(raw, "source", None) == group.subject_source
+        ]
+
     if (
         not settings.gate_ai_groups
         or group.subject != _DOCUMENT_SUBJECT

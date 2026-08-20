@@ -34,8 +34,16 @@ def _ids(findings: list[CrossSourceFinding]) -> set[str]:
 
 
 def test_eighteen_cross_source_rules_distinct_category() -> None:
-    assert len(CROSS_SOURCE_RULES) == 18
+    # LP-606 — 18 -> 17. `xsrc.income.employer_name_consistency` is retired, superseded by IN-5.
+    # Both asked "is the employer named consistently across the sources that state it", and on one run
+    # they answered the same file differently: IN-5 satisfied, this one yellow, over AMERICAS vs
+    # America — one trailing letter. Its `_norm` folds case and whitespace and nothing else, so it
+    # cannot tell a spelling variant from a different company; IN-5 is ai_fuzzy_match and its criteria
+    # say in words that it tolerates "legal-vs-common-name and formatting variance". ADR-375's
+    # principle: one matcher per question, or the file says both things at once.
+    assert len(CROSS_SOURCE_RULES) == 17
     ids = [r.rule_id for r in CROSS_SOURCE_RULES]
+    assert "xsrc.income.employer_name_consistency" not in ids
     assert len(ids) == len(set(ids))
     assert all(i.startswith("xsrc.") for i in ids)
 

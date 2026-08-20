@@ -591,7 +591,25 @@ CROSS_SOURCE_RULES: tuple[CrossSourceRule, ...] = (
     XSRC_ADDRESS_EMPLOYER_EQUALS_SUBJECT,
     XSRC_ADDRESS_CURRENT_CONSISTENCY,
     XSRC_INCOME_STATED_VS_DOCUMENTED,
-    XSRC_INCOME_EMPLOYER_NAME,
+    # LP-606 — XSRC_INCOME_EMPLOYER_NAME is RETIRED here, superseded by IN-5.
+    #
+    # Both ask "is the employer named consistently across the sources that state it", and they
+    # answered the SAME file differently on the same run:
+    #
+    #   IN-5   satisfied  "The employer name is consistent across all sources."
+    #   xsrc   yellow     "Documented employer not among the stated employers:
+    #                      SUMITOMO PHARMA AMERICAS INC."
+    #
+    # The pay stub says AMERICAS, the application says America — one trailing letter. This rule's
+    # `_norm` folds case and whitespace and nothing else, so it cannot tell a spelling variant from a
+    # different company. IN-5 is a structural rule with `ai_fuzzy_match`, whose criteria say in words
+    # that it is "tolerant of legal-vs-common-name and formatting variance" — the exact judgment this
+    # one is unequipped to make. Its own note already conceded the gap: "STARTER — employer-name
+    # normalization (DBA/legal name) to verify."
+    #
+    # ADR-375's principle, applied: ONE matcher per question. Two mechanisms answering it with
+    # different normalisation will disagree, and a processor cannot act on a file that says both.
+    # The definition object is kept so the rule id remains resolvable for findings already stored.
     XSRC_INCOME_EMPLOYER_COUNT,
     XSRC_LIABILITY_UNDISCLOSED,
     XSRC_LIABILITY_STATED_NOT_ON_REPORT,

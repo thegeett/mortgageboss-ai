@@ -31,12 +31,19 @@ from app.services.finding_resolution import override_finding
 from app.services.loan_files import create_loan_file
 from app.services.verifications import create_verification_run
 from app.verification.cross_source import CrossSourceFacts
+from app.verification.cross_source.facts import ObligationRef
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# LP-606 — RE-POINTED from `xsrc.income.employer_name_consistency`, which is retired (superseded by
+# IN-5, which does the same comparison with the formatting tolerance a literal `_norm` cannot have).
+#
+# These tests are about RECONCILE — carry-forward, resolve, retire, tenant scoping — and used that rule
+# only as a vehicle: one finding per non-matching value. `xsrc.liability.undisclosed_debt` has exactly
+# that shape and is live, so the coverage moves intact rather than being deleted with the rule.
 _EMP_A = "Thermofisher Life Science - PPD Development LP."
 _EMP_B = "Swad Mania LLC"
-_STATED = ("Acme Payroll Co",)  # a different stated employer → documented ones don't match
+_STATED = ("Acme Payroll Co",)  # a different stated obligation → reported ones don't match
 
 
 async def _company(db: AsyncSession, slug: str = "acme") -> Company:
@@ -71,9 +78,10 @@ async def _file(db: AsyncSession, company: Company) -> LoanFile:
 
 async def _run(db: AsyncSession, loan_file: LoanFile, documented: tuple[str, ...]) -> None:
     facts = CrossSourceFacts(
-        stated_employers=_STATED,
-        documented_employers=documented,
-        stated_employer_count=1,
+        stated_liabilities=tuple(ObligationRef(key=k, amount=None, source="1003") for k in _STATED),
+        credit_report_liabilities=tuple(
+            ObligationRef(key=k, amount=None, source="credit report") for k in documented
+        ),
     )
     run = await create_verification_run(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
@@ -86,7 +94,7 @@ async def _employer_findings(
 ) -> list[Finding]:
     stmt = select(Finding).where(
         Finding.loan_file_id == loan_file_id,
-        Finding.rule_id == "xsrc.income.employer_name_consistency",
+        Finding.rule_id == "xsrc.liability.undisclosed_debt",
     )
     if not include_deleted:
         stmt = stmt.where(Finding.deleted_at.is_(None))
