@@ -221,3 +221,36 @@ async def test_it_is_retried_rather_than_falling_back_to_the_template(monkeypatc
     assert "correctly" not in result.message
     assert len(model.messages) == 2
     assert "not yours to assert" in model.messages[1]
+
+
+# --------------------------------------------------------------------------- #
+# LP-601 — a guard that only runs on a cache MISS never sees stored prose
+# --------------------------------------------------------------------------- #
+
+
+def test_the_shared_verdict_catches_every_guard() -> None:
+    """`compose` and the cache filter both go through `rejection_reason`, so a guard cannot be added
+    to one and forgotten in the other — which is how DT-8 kept shipping "correctly excluded" after
+    LP-599 banned it."""
+    from app.ai.finding_prose import rejection_reason
+
+    summary = _summary(documents_on_file=0)
+
+    assert rejection_reason(summary, _composition("Obtain the pay stub")) is None
+    assert rejection_reason(summary, _composition("It is correctly excluded")) == "editorialising"
+    assert rejection_reason(summary, _composition("The system could not check")) == "machinery_talk"
+    assert (
+        rejection_reason(summary, _composition("Obtain a stub for $9,999"))
+        == "unsupported_numbers:1"
+    )
+
+
+def test_a_pass_finding_asking_for_work_is_still_caught_through_the_shared_path() -> None:
+    from app.ai.finding_prose import rejection_reason
+
+    settled = _summary(settled=True)
+
+    assert rejection_reason(settled, _composition("Confirm the reserves are documented")) == (
+        "asking_on_a_pass"
+    )
+    assert rejection_reason(settled, _composition("Reserves are fully documented")) is None

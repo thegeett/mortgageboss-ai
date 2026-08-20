@@ -25,7 +25,13 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.finding_prose import IDENTIFIER, Composition, FactSummary, compose
+from app.ai.finding_prose import (
+    IDENTIFIER,
+    Composition,
+    FactSummary,
+    compose,
+    rejection_reason,
+)
 from app.core.logging import get_logger
 from app.models.document import Document
 from app.models.finding import Finding
@@ -299,6 +305,27 @@ async def compose_findings(
     by_id = {finding.id: finding for finding in findings}
     keys = {fid: summary.cache_key() for fid, summary in summaries.items()}
     cache = await _cached(db, list(dict.fromkeys(keys.values())))
+
+    # LP-601 — A CACHED COMPOSITION IS RE-CHECKED, and this is not belt-and-braces. `compose` runs
+    # only on a MISS, so a composition stored before a guard existed is served forever and that guard
+    # never sees it. LP-599 added the "correctly" check and DT-8's already-cached "is correctly
+    # excluded from the debt-to-income ratio" went on shipping to processors — a fix that was right
+    # and unreachable.
+    #
+    # Dropping a failing entry here turns it back into a miss, so it is recomposed under the current
+    # rules. That makes every FUTURE guard self-healing too, rather than applying only to findings
+    # nobody had composed yet.
+    for finding_id, key in keys.items():
+        cached = cache.get(key)
+        if cached is None:
+            continue
+        if reason := rejection_reason(summaries[finding_id], cached):
+            logger.warning(
+                "finding_prose_cached_rejected",
+                rule_id=by_id[finding_id].rule_id,
+                reason=reason,
+            )
+            cache.pop(key, None)
 
     misses = [fid for fid, key in keys.items() if key not in cache]
     if misses:

@@ -301,6 +301,31 @@ _RETRYABLE = frozenset(
 )
 
 
+def rejection_reason(summary: FactSummary, composition: Composition) -> str | None:
+    """Why this composition must not reach a processor, or None if it may (LP-601).
+
+    ONE function, called from TWO places, and that is the point. `compose` runs only on a cache MISS
+    (`finding_prose.py`'s `misses = [... if key not in cache]`), so a composition stored before a guard
+    existed is served forever and the guard never sees it. LP-599 added the "correctly" check, and
+    DT-8's already-cached "is correctly excluded from the debt-to-income ratio" went on shipping —
+    a fix that was right and unreachable.
+
+    The cache is now filtered through this on the way in, so ANY guard added later heals the stored
+    prose on the next run rather than applying only to findings nobody had composed yet.
+    """
+    if invented := unsupported_numbers(summary, composition):
+        return f"unsupported_numbers:{len(invented)}"
+    if editorialises_correctness(composition):
+        return "editorialising"
+    if machinery_talk(composition):
+        return "machinery_talk"
+    if leaked_identifiers(composition):
+        return "identifier"
+    if summary.settled and asks_for_work(composition):
+        return "asking_on_a_pass"
+    return None
+
+
 def _user_message(summary: FactSummary, retry_of: str | None) -> str:
     """The summary, plus — on a retry — what was wrong with the previous attempt."""
     if retry_of is None:
@@ -379,23 +404,14 @@ async def compose(summary: FactSummary, *, _retry_of: str | None = None) -> Comp
         logger.warning("finding_prose_malformed")
         return await _maybe_retry(summary, "malformed", _retry_of)
 
-    if invented := unsupported_numbers(summary, composition):
-        # NOT logged with the text — the count and the fact of rejection are the signal.
-        logger.warning("finding_prose_rejected_unsupported_numbers", count=len(invented))
-        return await _maybe_retry(summary, "unsupported_numbers", _retry_of)
-    if editorialising := editorialises_correctness(composition):
-        logger.warning("finding_prose_rejected_editorialising", words=sorted(editorialising))
-        return await _maybe_retry(summary, "editorialising", _retry_of)
-    if machinery := machinery_talk(composition):
-        logger.warning("finding_prose_rejected_machinery_talk", phrases=sorted(machinery))
-        return await _maybe_retry(summary, "machinery_talk", _retry_of)
-    if leaked := leaked_identifiers(composition):
-        logger.warning("finding_prose_rejected_identifier", count=len(leaked))
-        return await _maybe_retry(summary, "identifier", _retry_of)
-    if summary.settled and asks_for_work(composition):
-        # The template stands — it already states the pass rather than asking for it.
-        logger.warning("finding_prose_rejected_asking_on_a_pass")
-        return await _maybe_retry(summary, "asking_on_a_pass", _retry_of)
+    # LP-601 — THROUGH THE SHARED VERDICT, so this path and the cache filter cannot drift apart. A
+    # guard that lived only here would be invisible to prose composed before it existed, which is
+    # exactly how DT-8 kept shipping "correctly excluded" after LP-599 banned it.
+    #
+    # NOT logged with the text — the reason and the fact of rejection are the signal.
+    if reason := rejection_reason(summary, composition):
+        logger.warning("finding_prose_rejected", reason=reason)
+        return await _maybe_retry(summary, reason.split(":")[0], _retry_of)
     return composition
 
 
