@@ -285,3 +285,25 @@ const PHASE_LABELS: Record<string, string> = {
 export function phaseLabel(phase: string): string {
   return PHASE_LABELS[phase] ?? "Working";
 }
+
+/** LP-591 — remaining time, in a processor's words, or null when there is nothing honest to say.
+ *
+ * Two behaviours matter more than the number itself.
+ *
+ * It ROUNDS TO THE MINUTE. The estimate is a median with about half a minute of spread, so a
+ * to-the-second countdown would claim a precision it does not have and would visibly stall.
+ *
+ * And it says "taking longer than usual" once elapsed passes the estimate, rather than clamping at
+ * "any second now" forever. That overrun is real information: a six-minute run with no signal is
+ * indistinguishable from a hung worker, and this is the line that tells them apart.
+ */
+export function remainingLabel(
+  estimatedTotalSeconds: number | null | undefined,
+  elapsedSeconds: number | null | undefined,
+): string | null {
+  if (estimatedTotalSeconds == null || elapsedSeconds == null) return null;
+  const remaining = estimatedTotalSeconds - elapsedSeconds;
+  if (remaining <= 0) return "taking longer than usual";
+  if (remaining < 60) return "less than a minute left";
+  return `about ${Math.round(remaining / 60)} min left`;
+}

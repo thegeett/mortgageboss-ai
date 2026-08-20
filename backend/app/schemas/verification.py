@@ -154,6 +154,11 @@ class VerificationRunPublic(BaseModel):
     phase: str | None = None
     phase_index: int | None = None
     phase_total: int | None = None
+    # LP-591 — BOTH computed server-side, deliberately. Returning only the estimate and letting the
+    # client subtract `started_at` would put the browser's clock into the arithmetic, and a few
+    # seconds of skew turns "1 min left" into a countdown that finishes early or stalls at zero.
+    estimated_total_seconds: int | None = None
+    elapsed_seconds: int | None = None
     #: Why a FAILED run failed. The run marks itself failed with a reason (an un-enqueued pass, a
     #: dead AI call, a governed pass exhausted after retries), and without this field none of that
     #: reached the client: a failed run looked to the processor exactly like a run that never
@@ -162,7 +167,12 @@ class VerificationRunPublic(BaseModel):
 
     @classmethod
     def from_model(
-        cls, run: Verification, *, progress: VerificationProgress | None = None
+        cls,
+        run: Verification,
+        *,
+        progress: VerificationProgress | None = None,
+        estimated_total_seconds: int | None = None,
+        elapsed_seconds: int | None = None,
     ) -> VerificationRunPublic:
         return cls(
             id=run.id,
@@ -180,6 +190,8 @@ class VerificationRunPublic(BaseModel):
             phase=progress.phase if progress else None,
             phase_index=progress.phase_index if progress else None,
             phase_total=progress.phase_total if progress else None,
+            estimated_total_seconds=estimated_total_seconds,
+            elapsed_seconds=elapsed_seconds,
         )
 
 

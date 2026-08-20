@@ -23,6 +23,10 @@ export interface VerificationRun {
   phase?: string | null;
   phase_index?: number | null;
   phase_total?: number | null;
+  /** LP-591 — both server-computed, so the browser's clock never enters the arithmetic. Null when
+   * the file has too little history for a median worth trusting. */
+  estimated_total_seconds?: number | null;
+  elapsed_seconds?: number | null;
   /** Why a `failed` run failed, straight from the run. Null on every other status. `?? null` at the
    * read site: a version-skewed backend that predates the field must degrade to "no reason given",
    * not blank the panel. */

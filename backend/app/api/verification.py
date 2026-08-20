@@ -81,6 +81,7 @@ from app.services.loan_files import get_loan_file
 from app.services.ltv import build_ltv_calculation
 from app.services.rule_subject_label import resolve_subject_label
 from app.services.snapshot_findings import list_snapshot_findings
+from app.services.verification_eta import estimated_seconds
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
 from app.verification.snapshot.content_id import DOC_PREFIX
@@ -282,6 +283,13 @@ async def _build_status(
         if latest is not None and latest.status is VerificationStatus.RUNNING
         else None
     )
+    # LP-591 — only while RUNNING, and only when this file has enough history for a median worth
+    # trusting. Elapsed is computed here so the browser's clock never enters the arithmetic.
+    eta_total = eta_elapsed = None
+    if latest is not None and latest.status is VerificationStatus.RUNNING:
+        eta_total = await estimated_seconds(db, loan_file_id=loan_file.id)
+        if latest.started_at is not None:
+            eta_elapsed = int((utcnow() - latest.started_at).total_seconds())
 
     # LP-375 — the two finding systems are split STRUCTURALLY by ``evaluation_outcome`` (the discriminator;
     # ``origin`` does NOT work — ``deterministic_rule`` spans BOTH the governed rule engine AND retired
@@ -356,7 +364,16 @@ async def _build_status(
     return VerificationStatusPublic(
         stale=loan_file.verification_stale,
         program=loan_file.loan_program.value if loan_file.loan_program else None,
-        latest_run=VerificationRunPublic.from_model(latest, progress=progress) if latest else None,
+        latest_run=(
+            VerificationRunPublic.from_model(
+                latest,
+                progress=progress,
+                estimated_total_seconds=eta_total,
+                elapsed_seconds=eta_elapsed,
+            )
+            if latest
+            else None
+        ),
         findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
         rule_findings=[
             RuleFindingPublic.from_model(

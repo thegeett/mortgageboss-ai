@@ -154,6 +154,73 @@ describe("progress while a run is in flight (LP-590)", () => {
     expect(screen.getByText(/Applying rules \(4 of 5\)/)).toBeDefined();
   });
 
+  it("shows how long is left, rounded to the minute", () => {
+    // The estimate is a median with roughly half a minute of spread, so a to-the-second countdown
+    // would claim precision it does not have and would visibly stall.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "running",
+          phase: "stage_a",
+          phase_index: 2,
+          phase_total: 5,
+          estimated_total_seconds: 384,
+          elapsed_seconds: 144,
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/about 4 min left/)).toBeDefined();
+  });
+
+  it("says a run is taking longer than usual once it passes its estimate", () => {
+    // THE CASE WORTH MORE THAN THE NUMBER. Clamping at "any second now" forever would hide the one
+    // thing a processor needs: a six-minute run with no signal is indistinguishable from a hung
+    // worker, and this is the line that tells them apart.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "running",
+          phase: "rules",
+          phase_index: 4,
+          phase_total: 5,
+          estimated_total_seconds: 384,
+          elapsed_seconds: 900,
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/taking longer than usual/)).toBeDefined();
+  });
+
+  it("shows the phase alone when the file has too little history to estimate", () => {
+    // A wrong ETA is worse than none — it teaches a processor to distrust the panel.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "running",
+          phase: "build",
+          phase_index: 1,
+          phase_total: 5,
+          estimated_total_seconds: null,
+          elapsed_seconds: 12,
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/Reading the file \(1 of 5\)/)).toBeDefined();
+    expect(screen.queryByText(/min left/)).toBeNull();
+  });
+
   it("shows no phase once the run has finished", () => {
     // The row is deleted when the run ends. A phase frozen on screen afterwards is exactly what a
     // hung run looks like, which would defeat the point.

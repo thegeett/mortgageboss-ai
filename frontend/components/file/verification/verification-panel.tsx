@@ -42,7 +42,7 @@ import type {
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
-import { phaseLabel } from "@/lib/verification/rule-findings";
+import { phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -245,6 +245,13 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
               {data.latest_run.phase_index && data.latest_run.phase_total
                 ? ` (${data.latest_run.phase_index} of ${data.latest_run.phase_total})`
                 : ""}
+              {(() => {
+                const left = remainingLabel(
+                  data.latest_run.estimated_total_seconds,
+                  data.latest_run.elapsed_seconds,
+                );
+                return left ? ` · ${left}` : "";
+              })()}
             </span>
           )}
           {/* Escape hatch (LP-376-A): force a run past the fingerprint cache, enqueuing BOTH passes. Shown
