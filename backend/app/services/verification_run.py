@@ -40,6 +40,7 @@ from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
 from app.services.finding_prose import compose_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
+from app.services.snapshot_findings import Reasoner as SnapshotFindingsReasoner
 from app.services.tag_correlation import (
     Reasoner as StageBReasoner,
 )
@@ -236,6 +237,10 @@ class Reasoners:
     materialization: dict[str, AiGroupReasoner] | None = None
     # LP-325/326: keyed by RULE_ID for the consistency evaluators' fuzzy leg (e.g. "ID-4").
     consistency: dict[str, ConsistencyReasoner] | None = None
+    # LP-586: the snapshot cross-source pass. Injected through the SAME seam as every other reasoner
+    # rather than reaching for the real client directly — a keyless test would otherwise degrade every
+    # run on an AuthenticationError, which is exactly how this omission was caught.
+    snapshot_findings: SnapshotFindingsReasoner | None = None
 
 
 @dataclass(frozen=True)
@@ -643,6 +648,29 @@ async def run_verification(
             detail=str(exc),
         )
         degradations.append(Degradation("persist_snapshot", f"not persisted: {exc}"))
+
+    # LP-586 — the snapshot-based AI cross-source pass. Best-effort for the same reason the persist
+    # above is: an AI hiccup degrades the run, it does not fail one whose rules already completed.
+    #
+    # Runs AFTER the snapshot is persisted and reads the SAME in-memory object, so what the model
+    # saw is exactly what is on disk. On an unchanged file this does not call the model at all — the
+    # fingerprint decides, and that is what keeps the tab from moving under a processor's feet.
+    try:
+        from app.services.snapshot_findings import refresh_snapshot_findings
+
+        await refresh_snapshot_findings(
+            db,
+            loan_file_id=snapshot.loan_file_id,
+            snapshot=snapshot,
+            reasoner=reasoners.snapshot_findings,
+        )
+    except Exception as exc:
+        logger.warning(
+            "snapshot_findings_failed",
+            error=type(exc).__name__,
+            detail=str(exc),
+        )
+        degradations.append(Degradation("snapshot_findings", f"not refreshed: {exc}"))
 
     logger.info(
         "verification_run_done",

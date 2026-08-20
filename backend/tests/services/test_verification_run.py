@@ -93,12 +93,23 @@ async def _loan_file_id(db: AsyncSession) -> UUID:
     return lf.id
 
 
+async def _no_snapshot_findings(_payload: str) -> list:
+    """LP-586 — the snapshot cross-source pass, stubbed to find nothing.
+
+    Every AI seam in this run is injected for the same reason: a keyless test would otherwise make a
+    real call, get an AuthenticationError, and DEGRADE the run — which is how the missing seam here
+    was caught (`assert not run.degraded` failed with "not refreshed: AuthenticationError").
+    """
+    return []
+
+
 def _reasoners(txns: tuple[FixtureTxn, ...], *, oc2: object = None) -> Reasoners:
     return Reasoners(
         stage_a=StubStageAReasoner(txns),
         stage_b=StubStageBReasoner(txns),
         oc2=oc2,  # type: ignore[arg-type]
         materialization=stub_materialization_reasoners(),
+        snapshot_findings=_no_snapshot_findings,
     )
 
 

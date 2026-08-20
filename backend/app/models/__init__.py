@@ -63,6 +63,7 @@ from app.models.needs_item import (
 from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
 from app.models.rule import Rule
+from app.models.snapshot_finding import SnapshotFinding
 from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
     StatedAsset,
@@ -142,6 +143,7 @@ __all__ = [
     "Rule",
     "RuleTag",
     "ShortStr",
+    "SnapshotFinding",
     "SnapshotRecord",
     "SoftDeleteMixin",
     "StatedAsset",
