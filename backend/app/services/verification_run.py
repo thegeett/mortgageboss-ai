@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
+from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
 from app.services.snapshot_findings import Reasoner as SnapshotFindingsReasoner
@@ -682,12 +683,19 @@ async def run_verification(
         # snapshot and the COMPLETED status with it. `begin_nested()` contains it: the outer
         # transaction survives, and the pass degrades the way the comment above always claimed.
         async with db.begin_nested():
-            await refresh_snapshot_findings(
+            cross_checks = await refresh_snapshot_findings(
                 db,
                 loan_file_id=snapshot.loan_file_id,
                 snapshot=snapshot,
                 reasoner=reasoners.snapshot_findings,
             )
+            # LP-592 — record the OPEN count on this run. It cannot be derived later: snapshot
+            # findings are keyed by loan file and persist across runs by design, so nothing
+            # afterwards can answer "how many did this run see". Open only — a badge that counted
+            # signed-off ones would keep advertising work a processor had already cleared.
+            run_row = await db.get(Verification, run_id)
+            if run_row is not None:
+                run_row.cross_check_count = sum(1 for f in cross_checks if f.disposition == "open")
     except Exception as exc:
         logger.warning(
             "snapshot_findings_failed",

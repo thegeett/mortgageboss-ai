@@ -159,6 +159,13 @@ class VerificationRunPublic(BaseModel):
     # seconds of skew turns "1 min left" into a countdown that finishes early or stalls at zero.
     estimated_total_seconds: int | None = None
     elapsed_seconds: int | None = None
+    # LP-592 — the run-history summary, in the tab strip's own terms. `red/yellow/green` are the
+    # LEGACY sweep's severity counts and mean something different from the governed outcomes a
+    # processor now reads on screen, so the history was reporting one vocabulary while the panel
+    # used another.
+    attention_count: int = 0
+    satisfied_count: int = 0
+    cross_check_count: int = 0
     #: Why a FAILED run failed. The run marks itself failed with a reason (an un-enqueued pass, a
     #: dead AI call, a governed pass exhausted after retries), and without this field none of that
     #: reached the client: a failed run looked to the processor exactly like a run that never
@@ -173,6 +180,8 @@ class VerificationRunPublic(BaseModel):
         progress: VerificationProgress | None = None,
         estimated_total_seconds: int | None = None,
         elapsed_seconds: int | None = None,
+        attention_count: int = 0,
+        satisfied_count: int = 0,
     ) -> VerificationRunPublic:
         return cls(
             id=run.id,
@@ -192,6 +201,11 @@ class VerificationRunPublic(BaseModel):
             phase_total=progress.phase_total if progress else None,
             estimated_total_seconds=estimated_total_seconds,
             elapsed_seconds=elapsed_seconds,
+            attention_count=attention_count,
+            satisfied_count=satisfied_count,
+            # Recorded on the run, not derived: snapshot findings persist across runs and carry no
+            # run id, so nothing afterwards can answer "how many did this run see".
+            cross_check_count=run.cross_check_count,
         )
 
 

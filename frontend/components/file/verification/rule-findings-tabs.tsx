@@ -546,7 +546,9 @@ export function RuleFindingsTabs({
     // not an absence worth hiding. Not archival: unlike "no longer applies", these are open work.
     {
       id: "cross_source",
-      label: "Cross-source",
+      // LP-593 — "Cross-source" named the METHOD (comparing across sources), which is our word.
+      // "Cross-check" is ordinary English a processor already uses and says what the tab contains.
+      label: "Cross-checks",
       count: crossSourceCount,
       alwaysShow: true,
     },

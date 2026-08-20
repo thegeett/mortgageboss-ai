@@ -12,7 +12,7 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import CurrentUser
@@ -20,7 +20,7 @@ from app.core.database import DbSession
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document
-from app.models.finding import Finding, FindingOrigin, FindingStatus
+from app.models.finding import EvaluationOutcome, Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.snapshot_finding import SnapshotFinding
@@ -861,6 +861,18 @@ async def request_docs_endpoint(
     return await _build_status(db, loan_file=loan_file, user=current_user)
 
 
+# LP-592 — what "needs attention" means, matching the tab that bears the name: everything that is
+# not a pass and not out of scope. `no_longer_applies` is excluded because it is history, not work.
+_ATTENTION_OUTCOMES = frozenset(
+    {
+        EvaluationOutcome.OPEN,
+        EvaluationOutcome.COULDNT_CHECK,
+        EvaluationOutcome.NEEDS_REVIEW,
+        EvaluationOutcome.PENDING_AUTOMATION,
+    }
+)
+
+
 @router.get("/{identifier}/verification/runs", response_model=list[VerificationRunPublic])
 async def list_verification_runs(
     identifier: str, db: DbSession, current_user: CurrentUser, limit: int = 20
@@ -882,4 +894,31 @@ async def list_verification_runs(
         .limit(max(1, min(limit, 100)))
     )
     runs = (await db.execute(stmt)).scalars().all()
-    return [VerificationRunPublic.from_model(r) for r in runs]
+    # LP-592 — the governed outcome counts, per run, in ONE grouped query rather than a query per
+    # row. Derived rather than denormalised because findings DO carry `verification_id`, so the
+    # answer is exact and cannot drift from the findings themselves.
+    counts: dict[UUID, dict[str, int]] = {}
+    if runs:
+        outcome_rows = await db.execute(
+            select(
+                Finding.verification_id,
+                Finding.evaluation_outcome,
+                func.count(),
+            )
+            .where(Finding.verification_id.in_([r.id for r in runs]))
+            .group_by(Finding.verification_id, Finding.evaluation_outcome)
+        )
+        for run_id_, outcome, total in outcome_rows:
+            bucket = counts.setdefault(run_id_, {"attention": 0, "satisfied": 0})
+            if outcome is EvaluationOutcome.SATISFIED:
+                bucket["satisfied"] += total
+            elif outcome in _ATTENTION_OUTCOMES:
+                bucket["attention"] += total
+    return [
+        VerificationRunPublic.from_model(
+            r,
+            attention_count=counts.get(r.id, {}).get("attention", 0),
+            satisfied_count=counts.get(r.id, {}).get("satisfied", 0),
+        )
+        for r in runs
+    ]

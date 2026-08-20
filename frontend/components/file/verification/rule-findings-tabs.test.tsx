@@ -123,7 +123,7 @@ describe("the §8 tabs — the honesty contract", () => {
     expect(tab(/needs attention/i).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("shows a real Cross-source count, not a hardcoded zero", () => {
+  it("shows a real Cross-checks count, not a hardcoded zero", () => {
     // LP-589 — it shipped as `count: 0`, and the badge gate is `count > 0 && …`, so a file with five
     // unreconciled pairings looked identical to one with none and nobody had a reason to click. That
     // is the same failure the not_applicable comment records, reintroduced four lines below it.
@@ -137,7 +137,7 @@ describe("the §8 tabs — the honesty contract", () => {
       />,
     );
 
-    expect(within(tab(/cross-source/i)).getByText("5")).toBeDefined();
+    expect(within(tab(/cross-checks/i)).getByText("5")).toBeDefined();
   });
 
   it("shows the Old findings count — that tab still carries open, blocking work", () => {

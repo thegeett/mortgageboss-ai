@@ -71,16 +71,36 @@ export function VersionSelector({
                     )}
                     <span className="text-gray-400">· {run.trigger}</span>
                   </div>
+                  {/* LP-593 — the counts a processor reads on the TAB STRIP, not the legacy
+                      sweep's severity letters. `R` and `Y` were colour codes needing decoding, and
+                      they named a different vocabulary from the panel beside them.
+
+                      Numbers alone with the tab name on hover: this list exists to COMPARE runs and
+                      pick one, so the figures are what the eye needs, and spelling three labels on
+                      every row would wrap the dropdown. */}
                   <div className="flex items-center gap-2 tabular-nums">
-                    {run.red_count > 0 && (
-                      <span className="text-destructive">{run.red_count}R</span>
+                    {run.attention_count > 0 && (
+                      <span className="text-warning" title="Needs attention">
+                        {run.attention_count}
+                      </span>
                     )}
-                    {run.yellow_count > 0 && (
-                      <span className="text-warning">{run.yellow_count}Y</span>
+                    {run.satisfied_count > 0 && (
+                      <span className="text-success" title="Satisfied">
+                        {run.satisfied_count}
+                      </span>
                     )}
-                    {run.red_count === 0 && run.yellow_count === 0 && (
-                      <span className="text-success">clear</span>
+                    {run.cross_check_count > 0 && (
+                      <span className="text-primary" title="Cross-checks">
+                        {run.cross_check_count}
+                      </span>
                     )}
+                    {run.attention_count === 0 &&
+                      run.satisfied_count === 0 &&
+                      run.cross_check_count === 0 && (
+                        <span className="text-gray-400" title="This run produced no findings">
+                          —
+                        </span>
+                      )}
                   </div>
                 </li>
               ))}

@@ -114,7 +114,7 @@ describe("the cross-source tab", () => {
     mock([]);
     render(<SnapshotFindingsTab fileId="LF-1" />);
 
-    expect(screen.getByText(/no cross-source pairings found/i)).toBeDefined();
+    expect(screen.getByText(/nothing flagged on a cross-check/i)).toBeDefined();
     expect(screen.getByText(/not that nothing was looked at/i)).toBeDefined();
   });
 });

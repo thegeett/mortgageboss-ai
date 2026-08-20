@@ -134,10 +134,7 @@ export function SnapshotFindingsTab({ fileId }: { fileId: string }) {
   if (isPending) return <SkeletonText lines={4} />;
   if (isError) {
     return (
-      <InlineErrorState
-        message="Couldn't load the cross-source findings."
-        onRetry={() => void refetch()}
-      />
+      <InlineErrorState message="Couldn't load the cross-checks." onRetry={() => void refetch()} />
     );
   }
 
@@ -146,7 +143,7 @@ export function SnapshotFindingsTab({ fileId }: { fileId: string }) {
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
         <Layers className="h-8 w-8 text-gray-300" />
-        <p className="text-sm font-medium text-gray-700">No cross-source pairings found</p>
+        <p className="text-sm font-medium text-gray-700">Nothing flagged on a cross-check</p>
         <p className="max-w-md text-xs text-gray-500">
           This pass reads the whole snapshot for a fact in one source that can be checked against a
           fact in another. It runs with verification, and only re-reads when the file actually

@@ -88,6 +88,9 @@ const STATUS: VerificationStatus = {
     green_count: 0,
     total_cost_estimate: 0.02,
     error_detail: null,
+    attention_count: 0,
+    satisfied_count: 0,
+    cross_check_count: 0,
   },
   findings: [
     finding({ id: "f-1", message: "Stated income exceeds the documents by 8%.", confidence: 0.82 }),

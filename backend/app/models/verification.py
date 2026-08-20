@@ -84,6 +84,11 @@ class Verification(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     red_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     yellow_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     green_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # LP-592 — open cross-check findings as of this run. Recorded HERE rather than derived,
+    # because `snapshot_findings` are keyed by loan file and deliberately persist ACROSS runs — so
+    # there is no way to ask "how many did run X see" after the fact. Written when the pass runs and
+    # carried forward on a cache hit, so the history shows the run where the number actually moved.
+    cross_check_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # --- AI cost tracking (if the run used AI-assisted checks) --------------
     total_tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)

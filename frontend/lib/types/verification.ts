@@ -27,6 +27,12 @@ export interface VerificationRun {
    * the file has too little history for a median worth trusting. */
   estimated_total_seconds?: number | null;
   elapsed_seconds?: number | null;
+  /** LP-593 — the run-history summary in the tab strip's own terms. `red/yellow/green` above are the
+   * LEGACY sweep's severity counts and mean something different from the governed outcomes shown on
+   * screen, so the history was reporting one vocabulary while the panel used another. */
+  attention_count: number;
+  satisfied_count: number;
+  cross_check_count: number;
   /** Why a `failed` run failed, straight from the run. Null on every other status. `?? null` at the
    * read site: a version-skewed backend that predates the field must degrade to "no reason given",
    * not blank the panel. */
