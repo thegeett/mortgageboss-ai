@@ -117,3 +117,60 @@ async def test_an_acceptable_cached_composition_is_still_reused(
 
     assert calls["n"] == 0, "an acceptable cached composition was needlessly recomposed"
     assert "paid off at closing" in finding.message
+
+
+async def test_the_composer_names_the_borrower_it_was_given(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-605 — the composition pass must resolve subjects with the SAME maps the list view uses.
+
+    It passed `document_filenames` and not `borrower_names`, so a borrower subject fell to the
+    resolver's fallback and the model was handed "a borrower no longer on this file". On LF-3CVT that
+    produced eight findings — CR-4, CR-10, ID-2, IN-1, IN-7, IN-10, IN-11, IN-16 — instructing a
+    processor to obtain documents for a borrower removed from an application that has exactly one
+    borrower, still on it, whose two pay stubs had just linked to them at confidence 1.0.
+
+    The composer's own docstring had said it "just has to use the same resolver, with the same maps,
+    so a finding cannot read one way in the list and another in its text." It used half of them.
+    """
+    from app.models.borrower import Borrower
+
+    company = Company(name="Acme", slug=f"acme-{uuid4().hex[:6]}")
+    db_session.add(company)
+    await db_session.flush()
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    borrower = Borrower(loan_file_id=loan_file.id, first_name="Aditya", last_name="Talluri")
+    db_session.add(borrower)
+    await db_session.flush()
+
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-16",
+        origin=FindingOrigin.DETERMINISTIC_RULE,
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        evaluation_outcome=EvaluationOutcome.OPEN,
+        subject_key=str(borrower.id),
+        message="a W-2 could not be found for this borrower",
+        details={},
+        confidence=1.0,
+    )
+    db_session.add(finding)
+    await db_session.flush()
+
+    seen: dict[str, str] = {}
+
+    async def _compose(summary, **_kw):
+        seen["subject"] = summary.subject
+        return Composition(action="Obtain a W-2", why="Two years of history are required.")
+
+    monkeypatch.setattr("app.services.finding_prose.compose", _compose)
+
+    await compose_findings(
+        db_session, [finding], rule_names={"IN-16": "Two-year history"}, loan_file_id=loan_file.id
+    )
+
+    assert "no longer on this file" not in seen["subject"], (
+        "the composer told the model the borrower had been removed"
+    )
+    assert seen["subject"] == "Aditya Talluri"

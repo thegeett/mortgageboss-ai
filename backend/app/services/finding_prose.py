@@ -40,7 +40,10 @@ from app.models.loan_file import LoanFile
 from app.services.rule_subject_label import resolve_subject_label
 from app.verification.rule_engine.reasons import document_label, fact_label
 from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
-from app.verification.snapshot.documents_section import document_filenames_by_content_id
+from app.verification.snapshot.documents_section import (
+    _active_borrower_names,
+    document_filenames_by_content_id,
+)
 
 logger = get_logger(__name__)
 
@@ -124,6 +127,7 @@ def summarize(
         subject=resolve_subject_label(
             finding.subject_key,
             finding.load_bearing_tags or [],
+            borrower_names=borrower_names,
             document_filenames=document_filenames,
         ),
         evidence=evidence,
@@ -280,6 +284,16 @@ async def compose_findings(
         if loan_file is not None:
             document_filenames = await document_filenames_by_content_id(db, loan_file)
 
+    # LP-605 — THE OTHER HALF OF "the same maps". This pass resolved subjects with the document map
+    # and without the borrower map, so every borrower-subject finding was composed against the label
+    # "a borrower no longer on this file" and wrote a removal into text a processor reads. The list
+    # view passed both maps all along, so the same finding named the borrower in one place and
+    # declared them gone in the other.
+    borrower_names = {
+        str(borrower_id): name
+        for borrower_id, name in (await _active_borrower_names(db, loan_file_id)).items()
+    }
+
     # LP-597 — COUNTED SEPARATELY, not from `document_filenames`. That map is loaded only when a
     # document-SUBJECT finding exists (most files have none), so using its size would report zero
     # documents on a file that has plenty — and the prompt rule this feeds says a zero means no
@@ -297,6 +311,7 @@ async def compose_findings(
             finding,
             rule_name=rule_names.get(finding.rule_id, finding.rule_id),
             document_filenames=document_filenames,
+            borrower_names=borrower_names,
             documents_on_file=documents_on_file,
         )
         for finding in findings

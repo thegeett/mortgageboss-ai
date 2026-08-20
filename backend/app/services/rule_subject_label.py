@@ -123,7 +123,6 @@ def resolve_subject_label(
     the read path's DB-resolved maps (empty by default, so a maps-free caller still gets loan/deposit labels
     and an honest fallback for the rest). Every branch returns human vocabulary — never the raw key.
     """
-    borrower_names = borrower_names or {}
     document_filenames = document_filenames or {}
     if not subject_key:
         return "this file"  # governed findings always carry a subject_key; a defensive floor
@@ -156,6 +155,18 @@ def resolve_subject_label(
     if subject_key.startswith(_ACCOUNT_PREFIX):
         return "a bank account"
     if _is_uuid(subject_key):
+        # LP-605 — A CALLER THAT WAS NEVER GIVEN THE MAP MUST NOT CLAIM THE BORROWER WAS REMOVED.
+        #
+        # `borrower_names` defaulted to `{}`, so "not supplied" and "supplied, and this id is not in
+        # it" collapsed into one answer — and that answer asserts a fact. The composition pass passed
+        # `document_filenames` and not this one, so EVERY borrower-subject finding on LF-3CVT was
+        # handed the subject "a borrower no longer on this file" and wrote accordingly: eight findings
+        # telling a processor to chase documents for a person who had been removed from an application
+        # with exactly one borrower, still on it. The model invented nothing; it was told this.
+        #
+        # None (not supplied) and {} (supplied, empty) are now different answers.
+        if borrower_names is None:
+            return "this borrower"
         return borrower_names.get(subject_key) or "a borrower no longer on this file"
     return (
         "an item in this file"  # an unrecognised key shape — surfaced honestly, never the raw key

@@ -85,11 +85,40 @@ def test_document_gone_reads_honestly_not_a_hash() -> None:
     assert "doc067c" not in label
 
 
-def test_borrower_gone_reads_honestly_not_a_uuid() -> None:
+def test_a_caller_without_the_map_does_not_claim_the_borrower_was_removed() -> None:
+    """LP-605 — "not supplied" and "supplied, and this id is not in it" used to collapse into one
+    answer, and that answer ASSERTS a fact.
+
+    The composition pass passed `document_filenames` and not `borrower_names`, so every
+    borrower-subject finding on LF-3CVT was handed the subject "a borrower no longer on this file"
+    and wrote accordingly — eight findings sending a processor after documents for a person removed
+    from an application that has exactly one borrower, still on it. The model invented nothing.
+    """
     bid = str(uuid4())
+
     label = resolve_subject_label(bid, [])
+
+    assert label == "this borrower"
+    assert bid not in label
+
+
+def test_a_borrower_genuinely_absent_from_the_map_still_reads_as_removed() -> None:
+    """The other half: a caller that DID supply the map and does not find the id is looking at a
+    borrower who really is gone, and saying so is the honest answer."""
+    bid = str(uuid4())
+
+    label = resolve_subject_label(bid, [], borrower_names={str(uuid4()): "Someone Else"})
+
     assert label == "a borrower no longer on this file"
     assert bid not in label
+
+
+def test_a_named_borrower_is_named() -> None:
+    bid = str(uuid4())
+
+    assert resolve_subject_label(bid, [], borrower_names={bid: "Aditya Talluri"}) == (
+        "Aditya Talluri"
+    )
 
 
 def test_a_money_OUT_transaction_is_not_called_a_deposit() -> None:
