@@ -21,8 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.snapshot_cross_source import (
     SnapshotFindingDraft,
+    _normalise,
     reason_over_snapshot,
+    snapshot_paths,
     snapshot_payload,
+    text_rejection,
 )
 from app.core.logging import get_logger
 from app.models.base import utcnow
@@ -37,7 +40,10 @@ logger = get_logger(__name__)
 OPEN = "open"
 RESOLVED = "resolved"
 
-Reasoner = Callable[[str], Awaitable[list[SnapshotFindingDraft]]]
+# LP-604 — takes the payload AND the acceptable addresses. A test stub that ignores the second
+# argument still type-checks, which is deliberate: a stub returns fixed drafts and has nothing to
+# validate them against.
+Reasoner = Callable[[str, frozenset[str]], Awaitable[list[SnapshotFindingDraft]]]
 
 
 async def _stored(db: AsyncSession, loan_file_id: UUID) -> list[SnapshotFinding]:
@@ -45,6 +51,20 @@ async def _stored(db: AsyncSession, loan_file_id: UUID) -> list[SnapshotFinding]
         select(SnapshotFinding).where(SnapshotFinding.loan_file_id == loan_file_id)
     )
     return list(rows.scalars().all())
+
+
+def _cited_values(sources: list[dict[str, str]] | None) -> list[str]:
+    """The figures a finding cites, normalised and ordered BY PATH (LP-604).
+
+    Ordered by path rather than by position because the model lists its sources in whatever order it
+    likes — the probe showed the same finding citing the same two facts in opposite orders on
+    consecutive runs. Comparing positionally would read that as a value change and rewrite the text
+    for no reason, which is the churn this is meant to end.
+    """
+    return [
+        _normalise(str(s.get("value", "")))
+        for s in sorted(sources or [], key=lambda x: str(x.get("path", "")))
+    ]
 
 
 async def refresh_snapshot_findings(
@@ -80,7 +100,9 @@ async def refresh_snapshot_findings(
         return existing
 
     run = reasoner or reason_over_snapshot
-    drafts = await run(snapshot_payload(snapshot))
+    # LP-604 — the acceptable addresses, derived from the SAME payload the model is handed, so a
+    # finding citing a place that is not in the file is dropped rather than stored as evidence.
+    drafts = await run(snapshot_payload(snapshot), snapshot_paths(snapshot))
 
     # DE-DUPLICATE BEFORE INSERTING. `finding_key` deliberately ignores the wording, so two drafts
     # describing the same pairing in different words collide — ordinary model output. Both would miss
@@ -129,8 +151,32 @@ async def refresh_snapshot_findings(
             row.disposition = OPEN
         row.snapshot_fingerprint = fingerprint
         row.last_seen_at = now
-        row.title = draft.title
-        row.detail = draft.detail
+
+        # LP-604 — THE ORIGINAL WORDING STAYS. Identity is now the snapshot addresses a finding is
+        # about, so the same finding is recognised across runs — but the model rewords itself anyway,
+        # and rewriting the text on every match made a settled finding LOOK like it had changed. In
+        # three probe runs over one unchanged file, the same finding came back with two different
+        # titles. Keeping the text means a wording change now MEANS something, and the sentence a
+        # processor dismissed is the sentence that stays dismissed.
+        #
+        # Two exceptions, and both are the difference between stable and stale:
+        #
+        # 1. A CITED VALUE MOVED. Identity is (kind, paths) and deliberately excludes the figures, so
+        #    a finding stays itself when a balance changes — but its text quotes those figures. Frozen
+        #    wording would state $451,829 as fact after the file says $398,000.
+        # 2. THE STORED TEXT NO LONGER PASSES. LP-601 was this bug one layer over: the composer's
+        #    guards ran only on a cache miss, so prose written before a guard existed outlived it.
+        #    Re-checking here is what stops retention from recreating that.
+        values_moved = _cited_values(row.sources) != _cited_values(draft.sources)
+        stale_text = text_rejection(row.title, row.detail, draft.sources) is not None
+        if values_moved or stale_text:
+            logger.info(
+                "snapshot_finding_text_refreshed",
+                finding_key=row.finding_key,
+                reason="values_moved" if values_moved else "text_rejected",
+            )
+            row.title = draft.title
+            row.detail = draft.detail
         row.sources = draft.sources
 
     # NO LONGER OBSERVED — three different things, and they are not the same.

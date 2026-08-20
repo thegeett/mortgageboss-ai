@@ -91,8 +91,14 @@ Return ONLY a JSON object:
   {"kind": "<one of the six above>",
    "title": "<one line, what the pairing is>",
    "detail": "<2-3 sentences: the two facts, and what a processor should confirm>",
-   "sources": [{"label": "<where this came from>", "value": "<the figure or fact>"}, ...]}
+   "sources": [{"path": "<the EXACT snapshot address, copied character for character>",
+                "label": "<how to say that place to a person>",
+                "value": "<the figure or fact>"}, ...]}
 ]}
+
+Every "path" MUST be a key that appears in the snapshot you were given, copied verbatim — for
+example `liability.3.unpaid_balance`. Do not shorten it, re-number it, or describe it. A finding
+whose path is not in the snapshot is discarded.
 
 Write for a processor. Name documents the way the file names them. No markdown, no preamble."""
 
@@ -149,6 +155,25 @@ class SnapshotFindingDraft:
         described twice — produced different keys and the dismissal was lost anyway. They are
         normalised first, so identity survives the model's phrasing of its own evidence.
 
+        LP-604 — AND NOW IT IS NEITHER OF THOSE: identity is the set of SNAPSHOT ADDRESSES the
+        finding is about. Normalising the model's prose was treating the symptom. Measured on three
+        Bedrock calls over one real snapshot at temperature 0, the label-and-value scheme kept 1 of 8
+        identities across all three runs; addresses kept 4 of 5. The failing case, verbatim:
+
+            run 1  "Subject property lien balance does not match liability being paid off"
+            run 2  "Existing mortgage balance does not match subject property lien balance"
+            both   liability.3.unpaid_balance + owned_property.1.lien_upb
+
+        Same two facts, reworded title, sources listed in the opposite order — one identity now,
+        three findings before. A label is commentary; an address is a fact about where the fact is.
+
+        ⚠️ THE INDEX IS KEPT. Stripping it (`liability.3.unpaid_balance` → `liability.unpaid_balance`)
+        to survive a reordering was measured and REJECTED: it gave identical stability (4 of 5) while
+        collapsing `liability.1` and `liability.4` onto one key, so two findings about different debts
+        would silently merge. The cost of keeping it is that renumbering breaks identity —
+        `build_mismo_section` orders by row UUID, so existing rows hold still, and MISMO re-import is
+        deferred. Revisit when re-import ships.
+
         LP-598 — AND SO IS THE KIND, which was the half of this the first version missed. It hashed
         `kind` VERBATIM while carefully normalising the sources beside it, and `kind` is model-authored
         free text subject to exactly the same drift. Observed on LF-3CVT: one snapshot change renamed
@@ -159,16 +184,26 @@ class SnapshotFindingDraft:
         FIXED vocabulary, so it can only change when the model genuinely re-categorises.
         """
         material = json.dumps(
-            {
-                "kind": self.normalised_kind,
-                "sources": sorted(
-                    f"{_normalise(s.get('label', ''))}={_normalise(s.get('value', ''))}"
-                    for s in self.sources
-                ),
-            },
+            {"kind": self.normalised_kind, "paths": sorted(self.paths)},
             sort_keys=True,
         )
         return hashlib.sha256(material.encode()).hexdigest()
+
+    @property
+    def paths(self) -> set[str]:
+        """The snapshot addresses this finding is about — its identity, and the only part of a
+        source the model cannot reword."""
+        return {str(s.get("path", "")).strip() for s in self.sources if s.get("path")}
+
+    @property
+    def values(self) -> list[str]:
+        """The cited figures, normalised and ordered by path. Not part of identity — a finding stays
+        the same finding when a balance moves — but a CHANGE here is what makes stored wording stale,
+        so `refresh_snapshot_findings` compares it before keeping the old text."""
+        return [
+            _normalise(str(s.get("value", "")))
+            for s in sorted(self.sources, key=lambda x: str(x.get("path", "")))
+        ]
 
 
 #: Words a TITLE uses to announce a discrepancy, and words a DETAIL uses to report agreement. Kept
@@ -201,7 +236,24 @@ def _states_agreement(detail: str) -> bool:
     return any(word in lowered for word in _AGREEMENT_WORDS)
 
 
-def _parse(text: str) -> list[SnapshotFindingDraft]:
+def text_rejection(title: str, detail: str, sources: list[dict[str, str]]) -> str | None:
+    """Why this wording must not reach a processor, or None if it may (LP-604).
+
+    ONE function, called from TWO places: `_parse` when a draft arrives, and `refresh_snapshot_findings`
+    before it KEEPS stored wording. That second caller is the point. LP-601 was this exact bug one
+    layer over — the composer's guards ran only on a cache miss, so prose stored before a guard existed
+    was served forever. Retaining a finding's original text rebuilds that trap unless the retained text
+    is re-checked against the rules as they stand now.
+    """
+    values = {_normalise(str(s.get("value", ""))) for s in sources if isinstance(s, dict)}
+    if _claims_mismatch(title) and len(values) == 1:
+        return "mismatch_between_equal_values"
+    if _claims_mismatch(title) and _states_agreement(detail):
+        return "contradicts_itself"
+    return None
+
+
+def _parse(text: str, snapshot_keys: frozenset[str] | None = None) -> list[SnapshotFindingDraft]:
     """Defensive parse — a malformed response yields NO findings, never a raise and never a guess.
 
     `extract_json_object` returns the JSON SUBSTRING, not a parsed object. The first version checked
@@ -232,7 +284,11 @@ def _parse(text: str) -> list[SnapshotFindingDraft]:
         if not (kind.strip() and title.strip() and detail.strip()):
             continue
         sources = [
-            {"label": str(s.get("label", "")), "value": str(s.get("value", ""))}
+            {
+                "path": str(s.get("path", "")).strip(),
+                "label": str(s.get("label", "")),
+                "value": str(s.get("value", "")),
+            }
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
@@ -250,9 +306,20 @@ def _parse(text: str) -> list[SnapshotFindingDraft]:
         #
         # Normalised through `_normalise`, so "$451,829" and "451829.00" count as equal — the same
         # comparison identity already uses.
+        # LP-604 — GROUNDING. A finding must point at addresses that EXIST, and nothing checked that
+        # before: a cited place was model prose, so a fabricated pairing was indistinguishable from a
+        # real one. Now it is decidable. Measured over three real calls the model cited 29 of 29
+        # paths correctly, so this rejects fabrications rather than ordinary output.
+        if snapshot_keys is not None:
+            cited = {str(s.get("path", "")).strip() for s in sources}
+            if not cited or not cited.issubset(snapshot_keys):
+                continue
+
         values = {_normalise(str(s.get("value", ""))) for s in sources if isinstance(s, dict)}
         claims_a_difference = _claims_mismatch(title) or kind.strip().casefold() == "value_mismatch"
         if claims_a_difference and len(values) == 1:
+            continue
+        if text_rejection(title, detail, sources) is not None:
             continue
 
         # LP-598 — A FINDING THAT CONTRADICTS ITSELF. The prompt used to invite the model to "say when
@@ -280,7 +347,9 @@ def _parse(text: str) -> list[SnapshotFindingDraft]:
     return drafts
 
 
-async def reason_over_snapshot(snapshot_json: str) -> list[SnapshotFindingDraft]:
+async def reason_over_snapshot(
+    snapshot_json: str, snapshot_keys: frozenset[str] | None = None
+) -> list[SnapshotFindingDraft]:
     """One pass over the snapshot. Never logs the snapshot or the response — counts only (PII)."""
     result = await complete(
         model=settings.anthropic_model_reasoning,
@@ -297,7 +366,7 @@ async def reason_over_snapshot(snapshot_json: str) -> list[SnapshotFindingDraft]
             output_tokens=result.output_tokens,
             max_tokens=_MAX_TOKENS,
         )
-    drafts = _parse(result.text)
+    drafts = _parse(result.text, snapshot_keys)
     logger.info(
         "snapshot_cross_source_done",
         findings=len(drafts),
@@ -305,6 +374,36 @@ async def reason_over_snapshot(snapshot_json: str) -> list[SnapshotFindingDraft]
         output_tokens=result.output_tokens,
     )
     return drafts
+
+
+def snapshot_paths(snapshot: Any) -> frozenset[str]:
+    """Every address a finding may legitimately cite (LP-604).
+
+    Built from the PAYLOAD the model is actually given, so the two can never drift: if a place is in
+    the JSON it is citable, and if it is not, a finding pointing at it is invented.
+
+    Permissive about depth on purpose. The snapshot is nested — a stated liability lives at
+    ``mismo.facts["liability.3.unpaid_balance"]`` — and the model may reasonably cite either the full
+    route or the leaf key it can see. Both are accepted; what is NOT accepted is a route that appears
+    nowhere. The goal is to catch fabrication, not to make the model guess a house style.
+    """
+    accepted: set[str] = set()
+
+    def walk(node: Any, prefix: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                route = f"{prefix}.{key}" if prefix else str(key)
+                accepted.add(route)
+                # The leaf key alone — `liability.3.unpaid_balance` rather than
+                # `mismo.facts.liability.3.unpaid_balance`, which is how the flat sections read.
+                accepted.add(str(key))
+                walk(value, route)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{prefix}.{index}")
+
+    walk(snapshot.model_dump(mode="json"), "")
+    return frozenset(accepted)
 
 
 def snapshot_payload(snapshot: Any) -> str:

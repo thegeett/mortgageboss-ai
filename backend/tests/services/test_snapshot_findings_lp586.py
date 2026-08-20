@@ -12,6 +12,7 @@ trains people to stop dismissing, and is worse than a count that drifts.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -47,15 +48,26 @@ def _snapshot(*, valuation: str = "578000.00", run: int = 1) -> Snapshot:
 
 def _drafts(
     title: str = "Assessed value is below the stated valuation",
+    application_value: str = "578000.00",
 ) -> list[SnapshotFindingDraft]:
     return [
         SnapshotFindingDraft(
             kind="valuation_vs_assessment",
             title=title,
             detail="The tax bill assesses the property below the stated valuation.",
+            # LP-604 — identity is the PATHS. `value` still matters, but only for deciding whether
+            # retained wording has gone stale.
             sources=[
-                {"label": "application", "value": "578000.00"},
-                {"label": "property tax bill", "value": "551923"},
+                {
+                    "path": "property.valuation_amount",
+                    "label": "application",
+                    "value": application_value,
+                },
+                {
+                    "path": "documents.1.fields.assessed_value",
+                    "label": "property tax bill",
+                    "value": "551923",
+                },
             ],
         )
     ]
@@ -96,7 +108,7 @@ async def test_an_unchanged_snapshot_does_not_ask_the_model_again(db_session: As
     snapshot = _snapshot()
     calls = 0
 
-    async def reasoner(_payload: str):
+    async def reasoner(_payload: str, _keys: frozenset[str] = frozenset()):
         nonlocal calls
         calls += 1
         return _drafts()
@@ -117,7 +129,7 @@ async def test_a_changed_snapshot_re_asks(db_session: AsyncSession) -> None:
     loan_file = await _file(db_session, "changed")
     calls = 0
 
-    async def reasoner(_payload: str):
+    async def reasoner(_payload: str, _keys: frozenset[str] = frozenset()):
         nonlocal calls
         calls += 1
         return _drafts()
@@ -155,7 +167,7 @@ async def test_a_dismissal_survives_a_snapshot_change(db_session: AsyncSession) 
     an unrelated reason. If the finding returns as open, they learn that dismissing is pointless."""
     loan_file = await _file(db_session, "dismissed")
 
-    async def reasoner(_payload: str):
+    async def reasoner(_payload: str, _keys: frozenset[str] = frozenset()):
         return _drafts()
 
     (finding,) = await refresh_snapshot_findings(
@@ -165,7 +177,7 @@ async def test_a_dismissal_survives_a_snapshot_change(db_session: AsyncSession) 
     finding.disposition_note = "assessment lags market in this county"
     await db_session.flush()
 
-    async def reworded(_payload: str):
+    async def reworded(_payload: str, _keys: frozenset[str] = frozenset()):
         return _drafts("A different sentence about the very same two figures")
 
     (after,) = await refresh_snapshot_findings(
@@ -177,16 +189,18 @@ async def test_a_dismissal_survives_a_snapshot_change(db_session: AsyncSession) 
 
     assert after.disposition == "not_an_issue"
     assert after.disposition_note == "assessment lags market in this county"
-    assert (
-        after.title == "A different sentence about the very same two figures"
-    )  # wording refreshes
+    # LP-604 — THE WORDING IS KEPT, and this assertion was inverted to say so. Rewriting the text on
+    # every match made a settled finding look like it had changed: in three probe runs over one
+    # unchanged file the same finding came back with two different titles. The sentence a processor
+    # dismissed is the sentence that stays in front of them, and a wording change now MEANS something.
+    assert after.title == "Assessed value is below the stated valuation"
 
 
-async def _sees(_payload: str):
+async def _sees(_payload: str, _keys: frozenset[str] = frozenset()):
     return _drafts()
 
 
-async def _sees_nothing(_payload: str):
+async def _sees_nothing(_payload: str, _keys: frozenset[str] = frozenset()):
     return []
 
 
@@ -267,10 +281,10 @@ async def test_a_resolved_finding_is_retained_even_when_no_longer_seen(
     work — the same reason the older cross-source layer retains resolved findings (ADR-061)."""
     loan_file = await _file(db_session, "retained")
 
-    async def sees(_payload: str):
+    async def sees(_payload: str, _keys: frozenset[str] = frozenset()):
         return _drafts()
 
-    async def sees_nothing(_payload: str):
+    async def sees_nothing(_payload: str, _keys: frozenset[str] = frozenset()):
         return []
 
     (finding,) = await refresh_snapshot_findings(
@@ -301,7 +315,7 @@ async def test_a_file_with_no_findings_is_not_re_asked(db_session: AsyncSession)
     loan_file = await _file(db_session, "quiet")
     calls = 0
 
-    async def finds_nothing(_payload: str):
+    async def finds_nothing(_payload: str, _keys: frozenset[str] = frozenset()):
         nonlocal calls
         calls += 1
         return []
@@ -323,7 +337,7 @@ async def test_a_retained_disposition_does_not_break_the_cache(db_session: Async
     loan_file = await _file(db_session, "retainedcache")
     calls = 0
 
-    async def counting(_payload: str):
+    async def counting(_payload: str, _keys: frozenset[str] = frozenset()):
         nonlocal calls
         calls += 1
         return _drafts() if calls == 1 else []
@@ -360,7 +374,7 @@ async def test_two_drafts_with_the_same_key_do_not_break_the_run(db_session: Asy
     findings, the persisted snapshot and the COMPLETED status roll back with it."""
     loan_file = await _file(db_session, "collide")
 
-    async def says_it_twice(_payload: str):
+    async def says_it_twice(_payload: str, _keys: frozenset[str] = frozenset()):
         first = _drafts("One phrasing")[0]
         second = _drafts("A different phrasing of the very same pairing")[0]
         return [first, second]
@@ -379,7 +393,7 @@ async def test_reopening_keeps_the_note_the_processor_wrote(db_session: AsyncSes
     actually supplied."""
     loan_file = await _file(db_session, "note")
 
-    async def sees(_payload: str):
+    async def sees(_payload: str, _keys: frozenset[str] = frozenset()):
         return _drafts()
 
     (finding,) = await refresh_snapshot_findings(
@@ -394,3 +408,99 @@ async def test_reopening_keeps_the_note_the_processor_wrote(db_session: AsyncSes
     await db_session.flush()
 
     assert finding.disposition_note == "confirmed with the county assessor"
+
+
+# --------------------------------------------------------------------------- #
+# LP-604 — identity by snapshot address, and wording that holds still
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_reworded_finding_is_the_same_finding(db_session: AsyncSession) -> None:
+    """THE CHURN, ended. Measured on three real Bedrock calls over one unchanged snapshot: the
+    label-and-value scheme kept 1 of 8 identities across all three runs, addresses kept 4 of 5. The
+    failing case, verbatim from the probe:
+
+        run 1  "Subject property lien balance does not match liability being paid off"
+        run 2  "Existing mortgage balance does not match subject property lien balance"
+        both   liability.3.unpaid_balance + owned_property.1.lien_upb
+
+    Same two facts, different sentence, sources listed in the opposite order.
+    """
+    loan_file = await _file(db_session, "reworded")
+
+    async def first(_payload: str, _keys: frozenset[str] = frozenset()):
+        return _drafts("Assessed value is below the stated valuation")
+
+    async def second(_payload: str, _keys: frozenset[str] = frozenset()):
+        return _drafts("The stated valuation exceeds the assessed value")
+
+    (before,) = await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=first
+    )
+    rows = await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923"),
+        reasoner=second,
+    )
+
+    assert len(rows) == 1, "a reworded finding minted a second row"
+    assert rows[0].finding_key == before.finding_key
+    assert rows[0].disposition == "open"
+
+
+async def test_the_wording_refreshes_when_a_cited_figure_moves(db_session: AsyncSession) -> None:
+    """EXCEPTION 1, and the reason retention is not simply 'freeze the text'. Identity excludes the
+    figures on purpose — a finding stays itself when a balance changes — but its text QUOTES them.
+    Frozen wording would go on stating the old number as fact."""
+    loan_file = await _file(db_session, "moved")
+
+    async def first(_payload: str, _keys: frozenset[str] = frozenset()):
+        return _drafts("The stated valuation of $578,000 exceeds the assessment")
+
+    async def moved(_payload: str, _keys: frozenset[str] = frozenset()):
+        return _drafts(
+            "The stated valuation of $412,000 exceeds the assessment",
+            application_value="412000.00",
+        )
+
+    (before,) = await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=first
+    )
+    rows = await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="412000"),
+        reasoner=moved,
+    )
+
+    assert rows[0].finding_key == before.finding_key, "a changed figure is not a different finding"
+    assert "412,000" in rows[0].title, "stale wording quoted a figure the file no longer states"
+
+
+async def test_a_finding_citing_a_place_that_is_not_in_the_file_is_dropped() -> None:
+    """GROUNDING. Nothing checked this before: a cited place was model prose, so a fabricated pairing
+    was indistinguishable from a real one. Measured over three real calls in both payload shapes, the
+    model cited 31 of 31 paths correctly — so this rejects fabrications, not ordinary output."""
+    from app.ai.snapshot_cross_source import _parse
+
+    payload = json.dumps(
+        {
+            "findings": [
+                {
+                    "kind": "value_mismatch",
+                    "title": "Stated value disagrees with the appraisal",
+                    "detail": "Two sections disagree.",
+                    "sources": [
+                        {"path": "property.valuation_amount", "label": "a", "value": "578000"},
+                        {"path": "property.invented_field", "label": "b", "value": "551923"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    real = frozenset({"property.valuation_amount"})
+    assert _parse(payload, real) == []
+    # ...and with the address present, the same finding is kept.
+    assert len(_parse(payload, real | {"property.invented_field"})) == 1

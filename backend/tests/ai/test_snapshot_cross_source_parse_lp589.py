@@ -82,12 +82,58 @@ def test_identity_survives_the_models_wording_of_its_own_evidence() -> None:
 
 
 def test_a_genuinely_different_source_still_differs() -> None:
-    """Normalisation must not collapse distinct claims. "property tax bill" and "tax bill" are
-    different statements about provenance and stay different findings."""
-    a = _draft([{"label": "tax bill", "value": "551923"}, {"label": "app", "value": "578000"}])
-    b = _draft([{"label": "appraisal", "value": "551923"}, {"label": "app", "value": "578000"}])
+    """Distinct claims must not collapse — but LP-604 changed WHAT makes them distinct.
+
+    This test used to vary the model's LABEL ("tax bill" vs "appraisal") and expect two findings.
+    That was the bug, not the contract: labels are prose the model rewrites between runs, and keying
+    on them is what produced the churn. Two findings differ when they are about different PLACES in
+    the snapshot, which is a fact rather than a wording choice.
+    """
+    a = _draft(
+        [
+            {"path": "documents.1.fields.assessed_value", "label": "tax bill", "value": "551923"},
+            {"path": "property.valuation_amount", "label": "app", "value": "578000"},
+        ]
+    )
+    b = _draft(
+        [
+            {"path": "documents.2.fields.appraised_value", "label": "appraisal", "value": "551923"},
+            {"path": "property.valuation_amount", "label": "app", "value": "578000"},
+        ]
+    )
 
     assert a.finding_key != b.finding_key
+
+
+def test_a_reworded_label_over_the_same_place_is_one_finding() -> None:
+    """The inverse, and the whole point of LP-604. Verbatim from the probe: the same finding came
+    back with its labels rewritten and its sources in the opposite order."""
+    a = _draft(
+        [
+            {
+                "path": "liability.3.unpaid_balance",
+                "label": "Mortgage liability",
+                "value": "451829",
+            },
+            {
+                "path": "owned_property.1.lien_upb",
+                "label": "Subject property lien",
+                "value": "451829",
+            },
+        ]
+    )
+    b = _draft(
+        [
+            {"path": "owned_property.1.lien_upb", "label": "the schedule", "value": "$451,829.00"},
+            {
+                "path": "liability.3.unpaid_balance",
+                "label": "the application",
+                "value": "451829.00",
+            },
+        ]
+    )
+
+    assert a.finding_key == b.finding_key
 
 
 def test_the_normaliser_parses_numbers_rather_than_keeping_digits() -> None:

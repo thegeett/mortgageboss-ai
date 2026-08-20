@@ -93,7 +93,7 @@ async def _loan_file_id(db: AsyncSession) -> UUID:
     return lf.id
 
 
-async def _no_snapshot_findings(_payload: str) -> list:
+async def _no_snapshot_findings(_payload: str, _keys: frozenset[str] = frozenset()) -> list:
     """LP-586 — the snapshot cross-source pass, stubbed to find nothing.
 
     Every AI seam in this run is injected for the same reason: a keyless test would otherwise make a

@@ -38,7 +38,12 @@ _PER_RUN_FIELDS = ("run_id", "created_at")
 
 # Bumped when the prompt or the finding schema changes, so a reworded question re-asks rather than
 # serving an answer to the previous one. The snapshot cannot capture this — it is not in the file.
-PROMPT_VERSION = 1
+# LP-604 — 1 -> 2. It should have moved twice already and did not: LP-598 replaced the free-text
+# category with a fixed vocabulary and rewrote the prohibitions, and LP-602 added the
+# calculation_blocked clause. Neither bumped this, so every file whose snapshot had not otherwise
+# changed went on being served answers produced by the ORIGINAL prompt — the fixes were live in the
+# code and invisible on those files. Bumping it once here covers all three prompt changes.
+PROMPT_VERSION = 2
 
 
 def snapshot_fingerprint(snapshot: Snapshot) -> str:
