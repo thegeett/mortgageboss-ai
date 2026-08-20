@@ -110,6 +110,8 @@ deterministic:
     value: conventional
   load_bearing_tags:
     - loan.ltv_percent
+    # LP-597 — evidence, NOT gated: an absent basis tag must leave MI-1 exactly as it was.
+    - loan.ltv_basis_is_appraised
   gated_tags:
     - loan.ltv_percent
   operands:
@@ -128,6 +130,32 @@ deterministic:
         housing payment. If the borrower is putting more down, confirm the final loan amount — at or below
         {mi_threshold}% the requirement falls away. If the loan uses lender-paid MI, note that on the file:
         the coverage exists but no borrower-paid premium will appear in the payment.
+    # LP-597 — ORDERED AHEAD OF THE DEFAULT, and it guards only the CLEARING direction.
+    #
+    # B2-1.2-01: "For refinance transactions ... the property value is the current appraised value."
+    # `_conservative_appraised_value` falls back to the application's stated estimate so the worksheet
+    # always has a denominator — correct for a display, wrong for a rule that DISMISSES a requirement.
+    # Saying "no mortgage insurance is required" off the borrower's own estimate of value clears a real
+    # monthly cost before the evidence exists: if the appraisal lands lower the loan crosses 80% and MI
+    # is required after all. Observed on LF-3CVT, which reported 79% with no appraisal on the file.
+    #
+    # couldnt_check, not needs_review: the appraisal is DATA THAT IS MISSING, which is what §8 reserves
+    # this verdict for. The rule is not asking a human to judge — it is declining to answer until the
+    # document arrives, and PR-6 is already on the file asking for it.
+    #
+    # The other direction needs no guard: a stated value that ALREADY exceeds the threshold is if
+    # anything optimistic, so the needs_review branch above stands on it safely.
+    - verdict: couldnt_check
+      when_tags:
+        - {tag: loan.ltv_basis_is_appraised, op: eq, value: "no"}
+      reasoning: >-
+        the loan-to-value of {ltv}% is computed from the value stated on the application, not from an
+        appraisal — mortgage insurance turns on the appraised value, so whether this loan needs it
+        cannot be settled until the appraisal is on the file
+      how_to_fix: >-
+        Upload the appraisal report. If its value puts the loan-to-value above {mi_threshold}%, this
+        conventional loan requires mortgage insurance and the premium belongs in the qualifying housing
+        payment.
     # ⚠️ THE DEFAULT IS REACHED ONLY WITH A RESOLVED, PARSEABLE LTV. A numeric compare has no third
     # state — the tag is either above the threshold or not — and the gate routes an absent, "unknown" or
     # unparseable value to couldnt_check BEFORE this body runs. This is PR-6's structure, deliberately.

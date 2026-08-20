@@ -66,12 +66,22 @@ requires_documents:
 spec_version: 1
 deterministic:
   load_bearing_tags:
+    # LP-597 — the overlay tags are deliberately NOT here. `load_bearing` means "this rule cannot
+    # answer without it", and the engine couldnt_checks when one is absent. The overlay can only ever
+    # ADD a review, never remove one, so making it load-bearing would turn every file without an REO
+    # schedule into a couldnt_check — trading a narrow false pass for a broad abstention, which is a
+    # worse rule. An absent overlay tag simply leaves AS-4 where it was before this ticket.
     - reserves.required_months
   gated_tags:
     - reserves.required_months
   operands:
     months_available: {calc: [reserves, months_available]}
     required_months: {tag: reserves.required_months}
+    # LP-597 — the overlay figures are deliberately NOT operands. `deterministic.py` couldnt_checks on
+    # ANY unresolvable declared operand, whichever outcome would have matched, so declaring them would
+    # mean one REO property missing a lien balance takes out AS-4's occupancy check as well. The
+    # `when_tags` guard below reads the subject tag directly and simply does not match when it is
+    # absent, which is the containment this rule needs.
   outcomes:
     - verdict: fired
       # A GATED reserves calc → the operand is None → couldnt_check (the LP-318 path, generic since
@@ -84,13 +94,35 @@ deterministic:
       how_to_fix: >-
         Document additional reserve-eligible assets, or confirm the reserve requirement for this
         occupancy/property is correctly applied.
+    # LP-597 — ORDERED AFTER `fired` ON PURPOSE: a genuine shortfall against the occupancy matrix is
+    # still the finding, and this branch only intercepts what would otherwise have been a pass.
+    #
+    # WHY needs_review RATHER THAN fired. The overlay amount is real and computed, but whether the file
+    # MEETS it is not something this rule can answer: the requirement is in dollars and the reserves
+    # calculator reports months of PITIA, and converting needs the housing payment — gated on exactly
+    # the files where taxes and insurance have not arrived. So this reports the requirement and hands
+    # the comparison to a human, rather than passing a file it has not actually cleared.
+    #
+    # The bug it fixes: on a borrower with five retained financed liens totalling $2,190,383, AS-4
+    # returned `satisfied` reading "no minimum reserves are required for a one-unit principal
+    # residence" — true of the matrix cell, and badly wrong about the file.
+    - verdict: needs_review
+      when_tags:
+        - {tag: reserves.has_other_financed_properties, op: eq, value: "yes"}
+      reasoning: >-
+        reserves meet the {required_months} months required for this occupancy, but the borrower
+        retains financed property besides the subject — B3-4.1-01 then requires additional reserves of
+        2% to 6% of the aggregate liens on those properties, which this check does not confirm the
+        file holds
+      how_to_fix: >-
+        Confirm the file documents at least the additional reserves required for the borrower's other
+        financed properties, on top of the months required for this occupancy. The retained properties
+        and their lien balances are on the application's real-estate-owned schedule.
     - verdict: satisfied
       default: true
-      # NOT a blanket all-clear, and the wording is deliberate. B3-4.1-01 also requires reserves of
-      # 2%/4%/6% of aggregate UPB when the borrower owns other financed properties, and 6 months for a
-      # cash-out refinance over 45% DTI. Neither the financed-property count nor the aggregate UPB
-      # reaches the snapshot, so neither overlay is evaluated. Both can only RAISE the requirement, so
-      # this verdict is scoped to what was actually checked.
+      # STILL NOT A BLANKET ALL-CLEAR. LP-597 added the financed-property overlay above, so reaching
+      # here means it does not apply. The cash-out-over-45%-DTI overlay is still not modelled, so this
+      # verdict remains scoped to what was actually checked.
       reasoning: >-
         reserve months available meet or exceed the {required_months} months required for this
-        occupancy and unit count
+        occupancy and unit count, and the application lists no other retained financed property

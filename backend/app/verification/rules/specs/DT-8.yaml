@@ -127,6 +127,9 @@ deterministic:
     - liab.payoff_marked
     - liab.creditor_name
     - liab.monthly_payment
+    # LP-597 — evidence, NOT gated (see gated_tags): an absent contradiction check must leave DT-8
+    # exactly where it was, never turn an answerable liability into a couldnt_check.
+    - liab.payoff_contradicted
   # Only the two that DECIDE the verdict gate it. The creditor and payment are evidence carried
   # inline; gating on them would turn a nameless liability into couldnt_check when the question
   # ("is a mortgage counted un-excluded?") is already answerable.
@@ -146,13 +149,37 @@ deterministic:
     fields:
       holder_name: {tag: liab.creditor_name}
   outcomes:
+    # LP-597 — ORDERED FIRST, ahead of the satisfied branch it guards. The application marking a lien
+    # paid off while its own owned-property schedule marks that property RETAINED is the form
+    # disagreeing with itself, and this rule's guideline text is explicit that the distinction decides
+    # the answer: "A mortgage secured by other property the borrower retains remains an obligation and
+    # stays in the ratio." Without this, an LO who ticks the wrong row removes a payment from the DTI
+    # and nothing asks.
+    - verdict: needs_review
+      when_tags:
+        - {tag: liab.payoff_marked, op: eq, value: "yes"}
+        - {tag: liab.payoff_contradicted, op: eq, value: "yes"}
+      reasoning: >-
+        this mortgage is marked as paid off at closing, but the application's owned-property schedule
+        marks the property securing it as retained — if the borrower is keeping that property its
+        payment belongs in the debt-to-income ratio, and if it is the lien being refinanced the
+        schedule is wrong
+      how_to_fix: >-
+        Confirm which property secures this mortgage. If the borrower is keeping it, the payment stays
+        in the ratio; if this is the lien being refinanced, correct the owned-property schedule. The
+        payoff statement settles it.
     # Already answered — by the application's own payoff indicator, or by a processor.
+    #
+    # LP-597 — the reasoning no longer says "correctly", and no longer names the back-end ratio. Both
+    # overclaimed: nothing here establishes that the lien sits on the SUBJECT property (the branch
+    # above is the only check of that), and the ratio it referred to is gated on any file whose taxes
+    # and insurance have not arrived — asserting a property of a calculation that did not run.
     - verdict: satisfied
       when_tags:
         - {tag: liab.payoff_marked, op: eq, value: "yes"}
       reasoning: >-
-        this mortgage is marked as paid off at closing, so its payment is correctly excluded from the
-        back-end debt-to-income ratio
+        the application marks this mortgage as paid off at closing, so it is excluded from the debt
+        ratio
     # `stated_is_mortgage == yes` is already guaranteed by applicability; only the marking is left.
     - verdict: needs_review
       when_tags:

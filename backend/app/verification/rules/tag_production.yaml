@@ -163,6 +163,11 @@ tags:
   asset.liquidation_terms: {mode: ai, subject: document, data: asset_facts}
   asset.usable_value: {mode: ai, subject: document, data: asset_facts}
   reserves.required_months: {mode: derived, subject: loan, data: reserves_required_months}
+  # LP-597 — the B3-4.1-01 other-financed-properties overlay, off the LP-596 REO schedule.
+  reserves.has_other_financed_properties: {mode: derived, subject: loan, data: reserves_has_other_financed_properties}
+  reserves.other_financed_count: {mode: derived, subject: loan, data: reserves_other_financed_count}
+  reserves.other_financed_aggregate_upb: {mode: derived, subject: loan, data: reserves_other_financed_aggregate_upb}
+  reserves.other_financed_required_amount: {mode: derived, subject: loan, data: reserves_other_financed_required_amount}
   # LP-519 — the largest total among money-in deposits sharing one exact amount (AS-13's input). A
   # LOAN-subject derived tag, so the generic materialization pass produces it; a `transaction`-subject
   # derived tag would fall between the generic pass and Stage A/B and never materialize (LP-516/517).
@@ -360,6 +365,8 @@ tags:
   reo.statement_billed_payment: {mode: derived, subject: document, data: reo_statement_billed_payment}
   liab.stated_is_mortgage: {mode: derived, subject: liability, data: liability_stated_is_mortgage}
   liab.payoff_marked: {mode: derived, subject: liability, data: liability_payoff_marked}
+  # LP-597 — DT-8's guard: does the REO schedule contradict the payoff marking?
+  liab.payoff_contradicted: {mode: derived, subject: liability, data: liability_payoff_contradicted}
   # LP-485 — the date-compare family. The two parsed dates are document_type-SCOPED so an unrelated
   # document sharing a field name can never materialize them (the contract.emd_amount precedent).
   rate_lock.expiration: {mode: parsed, subject: document, data: rate_lock_expiration, document_type: loan_estimate}
@@ -410,6 +417,8 @@ tags:
   property.appraised_value: {mode: parsed, subject: document, data: appraised_value, document_type: appraisal}
   property.value_basis: {mode: derived, subject: loan, data: property_value_basis}
   loan.ltv_percent: {mode: derived, subject: loan, data: loan_ltv_percent}
+  # LP-597 — is that ratio's denominator an appraisal, or the application's own estimate?
+  loan.ltv_basis_is_appraised: {mode: derived, subject: loan, data: loan_ltv_basis_is_appraised}
 
   # --- LP-488 — MI-4 (FHA upfront MIP). ------------------------------------------------------------ #
   # Reads the SAME two MISMO amounts MI-1 declares, as a pair: loan.amount is TERMS_OF_LOAN/BaseLoanAmount

@@ -21,12 +21,13 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.finding_prose import IDENTIFIER, Composition, FactSummary, compose
 from app.core.logging import get_logger
+from app.models.document import Document
 from app.models.finding import Finding
 from app.models.finding_prose import FindingProse
 from app.models.loan_file import LoanFile
@@ -85,6 +86,7 @@ def summarize(
     rule_name: str,
     borrower_names: Mapping[str, str] | None = None,
     document_filenames: Mapping[str, str] | None = None,
+    documents_on_file: int = 0,
 ) -> FactSummary:
     """The ONLY input a composition may draw on — assembled from the finding, never from the snapshot.
 
@@ -125,6 +127,8 @@ def summarize(
         problem=finding.message,
         fix=details.get("how_to_fix") if isinstance(details.get("how_to_fix"), str) else None,
         facts=facts,
+        # LP-597 — the one fact that stops the model inventing a corpus to explain an absence.
+        documents_on_file=documents_on_file,
     )
 
 
@@ -270,11 +274,24 @@ async def compose_findings(
         if loan_file is not None:
             document_filenames = await document_filenames_by_content_id(db, loan_file)
 
+    # LP-597 — COUNTED SEPARATELY, not from `document_filenames`. That map is loaded only when a
+    # document-SUBJECT finding exists (most files have none), so using its size would report zero
+    # documents on a file that has plenty — and the prompt rule this feeds says a zero means no
+    # document exists. A false zero would license exactly the invention it is meant to prevent.
+    documents_on_file = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(Document.loan_file_id == loan_file_id, Document.deleted_at.is_(None))
+        )
+    ) or 0
+
     summaries = {
         finding.id: summarize(
             finding,
             rule_name=rule_names.get(finding.rule_id, finding.rule_id),
             document_filenames=document_filenames,
+            documents_on_file=documents_on_file,
         )
         for finding in findings
         if finding.message

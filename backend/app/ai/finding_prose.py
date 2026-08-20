@@ -81,6 +81,11 @@ RULES, all mandatory:
   the floor"). The exact arithmetic is appended to your text automatically, so writing your own version
   says the same thing twice, once vaguely and once precisely. Say what to obtain and why the source
   matters; leave the size of the deposit to the appended clause.
+- NEVER ASSERT THAT A DOCUMENT IS IN THE FILE, and never describe agreement "across the documents".
+  "documents_on_file" tells you how many documents exist and nothing about what they are. When it is
+  0 the file has NO documents at all, so every sentence implying one — "the file contains pay stubs",
+  "consistent across all loan documents" — is simply false. Describe what is stated on the
+  application, or say plainly what the file does not have.
 - Plain sentences. No markdown, no bullet points, no headings.
 - Keep the whole thing under 60 words."""
 
@@ -104,6 +109,13 @@ class FactSummary:
     # A processor closing a green item should finish the line feeling the file is in order, not be
     # handed a task that has been completed. NOT the verdict enum: the summary still carries no engine
     # vocabulary, only the one fact that changes how a sentence should read.
+    # LP-597 — HOW MANY DOCUMENTS ARE ON THE FILE. Nothing in this summary used to say, and the model
+    # filled the gap: on a file with ZERO documents, IN-2's couldnt_check was rewritten as "The file
+    # contains pay stubs, but none of them display a pay date", and OC-1's "agrees with the file's
+    # other occupancy DECLARATIONS" became "consistent across all loan DOCUMENTS". Both invented a
+    # corpus to explain an absence — which the rule above ("use ONLY facts present in the summary")
+    # forbids, and which the model could not obey because the summary never said.
+    documents_on_file: int = 0
     settled: bool = False
     guideline: str | None = None
 
@@ -118,7 +130,12 @@ class FactSummary:
             "already_resolved": self.settled,
             "guideline": self.guideline,
         }
-        return json.dumps({k: v for k, v in payload.items() if v}, sort_keys=True)
+        # LP-597 — `if v` DROPS A FALSY VALUE, and `documents_on_file: 0` is the single most
+        # load-bearing value this summary carries: zero documents is precisely when the model invents
+        # a corpus. Filtering it out would have shipped this fix inert. It is added after the filter.
+        kept: dict[str, object] = {k: v for k, v in payload.items() if v}
+        kept["documents_on_file"] = self.documents_on_file
+        return json.dumps(kept, sort_keys=True)
 
     def cache_key(self) -> str:
         """Identical facts → identical key → identical prose, without a second model call."""
@@ -221,17 +238,73 @@ def _parse(text: str) -> Composition | None:
     return Composition(action, why) if action and why else None
 
 
-async def compose(summary: FactSummary) -> Composition | None:
+#: Rejections worth a second attempt. Every one of them is the model producing something MALFORMED or
+#: OVERREACHING rather than the summary being uncomposable — a different sample usually complies, and
+#: at temperature 0 the retry gets the reason appended so it is not simply the same draw again.
+#: `asking_on_a_pass` is here too: it is a tone failure, not a factual one.
+_RETRYABLE = frozenset(
+    {"unsupported_numbers", "machinery_talk", "identifier", "asking_on_a_pass", "malformed"}
+)
+
+
+def _user_message(summary: FactSummary, retry_of: str | None) -> str:
+    """The summary, plus — on a retry — what was wrong with the previous attempt."""
+    if retry_of is None:
+        return summary.to_json()
+    return (
+        f"{summary.to_json()}\n\n"
+        f"Your previous answer was REJECTED for: {_REJECTION_GUIDANCE[retry_of]} "
+        "Write it again, obeying that rule exactly."
+    )
+
+
+#: What to tell the model on a retry. Specific, because "try again" at temperature 0 mostly reproduces
+#: the same draw — the appended sentence is what makes the second attempt different from the first.
+_REJECTION_GUIDANCE = {
+    "unsupported_numbers": (
+        "you introduced a number that is not in the summary. Use only figures that appear there, or "
+        "none at all."
+    ),
+    "machinery_talk": (
+        "you described the software rather than the loan file. Say what the FILE is missing, never "
+        "what a system or a check did."
+    ),
+    "identifier": "you included an identifier that must never reach a processor. Remove it.",
+    "asking_on_a_pass": (
+        "this check PASSED, and you wrote it as a task. State what is in order, and never begin with "
+        "Obtain, Confirm, Verify, Review, Check, Upload, Provide or Request."
+    ),
+    "malformed": 'you did not return a single JSON object of exactly {"action": "...", "why": "..."}.',
+}
+
+
+async def _maybe_retry(
+    summary: FactSummary, reason: str, already_retried: str | None
+) -> Composition | None:
+    """One retry, and only one — a second rejection means the template stands."""
+    if already_retried is not None or reason not in _RETRYABLE:
+        return None
+    return await compose(summary, _retry_of=reason)
+
+
+async def compose(summary: FactSummary, *, _retry_of: str | None = None) -> Composition | None:
     """Rewrite one finding, or ``None`` when the caller should keep the template.
 
     Returns None — never raises — for every failure mode: transport, truncation, malformed JSON, and a
     generation that introduced a fact. The caller's fallback is the template it already has.
+
+    LP-597 — ONE RETRY on a rejection the model can fix. Rejection is a real safety mechanism (it is
+    what keeps an invented number or an unrequested document off a processor's screen), but a rejected
+    composition means the finding ships the raw template — and the templates read as engine prose,
+    lowercase and mid-sentence, because they were written to be rewritten. On a real run that left
+    DT-8 and MI-1 reading quite differently from every finding beside them. Retrying the recoverable
+    rejections keeps the guard and narrows the fallback to what genuinely cannot be composed.
     """
     try:
         result = await complete(
             model=settings.anthropic_model_reasoning,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": summary.to_json()}],
+            messages=[{"role": "user", "content": _user_message(summary, _retry_of)}],
             max_tokens=_MAX_TOKENS,
             temperature=0.0,
         )
@@ -246,22 +319,22 @@ async def compose(summary: FactSummary) -> Composition | None:
     composition = _parse(result.text or "")
     if composition is None:
         logger.warning("finding_prose_malformed")
-        return None
+        return await _maybe_retry(summary, "malformed", _retry_of)
 
     if invented := unsupported_numbers(summary, composition):
         # NOT logged with the text — the count and the fact of rejection are the signal.
         logger.warning("finding_prose_rejected_unsupported_numbers", count=len(invented))
-        return None
+        return await _maybe_retry(summary, "unsupported_numbers", _retry_of)
     if machinery := machinery_talk(composition):
         logger.warning("finding_prose_rejected_machinery_talk", phrases=sorted(machinery))
-        return None
+        return await _maybe_retry(summary, "machinery_talk", _retry_of)
     if leaked := leaked_identifiers(composition):
         logger.warning("finding_prose_rejected_identifier", count=len(leaked))
-        return None
+        return await _maybe_retry(summary, "identifier", _retry_of)
     if summary.settled and asks_for_work(composition):
         # The template stands — it already states the pass rather than asking for it.
         logger.warning("finding_prose_rejected_asking_on_a_pass")
-        return None
+        return await _maybe_retry(summary, "asking_on_a_pass", _retry_of)
     return composition
 
 

@@ -105,6 +105,17 @@ tags:
       about the world — an absent flag is "no" because nobody having said so is a definite no, and
       whether the obligation truly survives closing is what DT-8 asks.
     produced_by: derived
+  # LP-597 — the guard on DT-8's satisfied branch.
+  liab.payoff_contradicted:
+    entity: liability
+    value_type: string
+    allowed_values: [yes, no]
+    description: >-
+      Does the 1003's owned-property schedule mark the property securing this lien as RETAINED while
+      the liability is marked paid off at closing? Matched by balance (the schedule's lien UPBs equal
+      the stated liability balances). "no" when no schedule entry matches — an unestablished
+      contradiction, never a guess.
+    produced_by: derived
   # ID-9's rule_judgment output tag (LP-329). A NEW verdict tag added via the hand-editable overlay —
   # the GAP-E fix (LP-328) makes this possible without editing the generated fact_tags.csv / xlsx.
   id.poa_acceptable:
@@ -375,6 +386,44 @@ tags:
       Required reserves in months of PITIA, selected from occupancy (AS-4 threshold). Derived; abstains
       ("unknown") for any occupancy/property cell not in the agency-standard map (the full matrix is Priya's).
     produced_by: derived
+
+  # --- LP-597 — the other-financed-properties reserve overlay (B3-4.1-01). ---------------------------
+  # These exist because LP-596 put the 1003's real-estate-owned schedule into the snapshot; before it,
+  # `reserves.required_months` said in its own docstring that it could not model this overlay.
+  reserves.has_other_financed_properties:
+    entity: loan
+    value_type: string
+    allowed_values: [yes, no]
+    description: >-
+      Does the borrower retain a financed property besides the subject, triggering B3-4.1-01's
+      additional-reserves overlay? An absent REO schedule reads "no", not unknown — see the recipe on
+      why abstaining on absence would be worse than a weak no.
+    produced_by: derived
+  reserves.other_financed_count:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Financed properties for the B3-4.1-01 TIER lookup (2% at 1-4, 4% at 5-6, 6% at 7-10). Includes
+      the subject property, per B2-2-03's counting.
+    produced_by: derived
+  reserves.other_financed_aggregate_upb:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The aggregate lien balance the overlay percentage applies to. NARROWER than the count: the guide
+      excludes the subject, the principal residence, and anything sold or pending sale.
+    produced_by: derived
+  reserves.other_financed_required_amount:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      Additional reserves required by B3-4.1-01 for other financed properties, in DOLLARS (AS-4
+      compares months of PITIA; converting would need the housing payment, which is gated on exactly
+      the files where taxes and insurance have not yet arrived).
+    produced_by: derived
   # LP-519 — the split-deposit signal. Groups non-exempt money-in deposits by EXACT amount and reports
   # the largest group's total; 0 means every in-scope deposit was readable and none repeated. Abstains
   # rather than undercount (see the recipe).
@@ -588,6 +637,16 @@ tags:
       the lesser of purchase price and appraised value on a purchase, the appraised value on a refinance.
       "unknown" when the loan amount or the value basis is missing — never 0, which would read as a
       fully-collateralised loan.
+    produced_by: derived
+  # LP-597 — the guard on MI-1's clearing branch.
+  loan.ltv_basis_is_appraised:
+    entity: loan
+    value_type: string
+    allowed_values: [yes, no]
+    description: >-
+      Is the value the LTV divides by an APPRAISAL, or the application's stated estimate? B2-1.2-01
+      requires the current appraised value for a refinance, so a rule that CLEARS a requirement off
+      the ratio must know which it has. Abstains when the file states no value at all.
     produced_by: derived
   loan.refinance_type:
     entity: loan

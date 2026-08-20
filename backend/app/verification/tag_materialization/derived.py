@@ -677,6 +677,152 @@ def _housing_insurance_monthly(
     return str(monthly), f"monthly homeowners insurance {monthly} (annual premium {annual} ÷ 12)"
 
 
+# --------------------------------------------------------------------------- #
+# LP-597 — the other-financed-properties reserve overlay (B3-4.1-01)
+# --------------------------------------------------------------------------- #
+#
+# Fannie requires reserves BEYOND the occupancy/unit matrix when the borrower owns other financed
+# properties: 2% of the aggregate UPB at 1-4 financed properties, 4% at 5-6, 6% at 7-10 (DU only).
+# `_reserves_required_months` has always said in its own docstring that it does not model this,
+# because the count and the aggregate UPB did not reach the snapshot. LP-596 put the 1003's
+# real-estate-owned schedule there, so they do now.
+_OTHER_FINANCED_TIERS: tuple[tuple[int, int, Decimal], ...] = (
+    (1, 4, Decimal("0.02")),
+    (5, 6, Decimal("0.04")),
+    (7, 10, Decimal("0.06")),
+)
+
+#: Dispositions that keep a property (and therefore its lien) on the borrower's books after closing.
+#: `Sell` / `PendingSale` are EXCLUDED by the guide itself — "the aggregate UPB calculation does not
+#: include ... properties that are sold or pending sale".
+_RETAINED_DISPOSITION = "retain"
+
+
+def _owned_property_rows(snapshot: Snapshot) -> list[dict[str, str]]:
+    """The REO schedule, regrouped out of the snapshot's flat ``owned_property.<n>.<field>`` keys."""
+    if snapshot.mismo.absent:
+        return []
+    rows: dict[str, dict[str, str]] = {}
+    for key in snapshot.mismo.facts:
+        if not key.startswith("owned_property."):
+            continue
+        _, index, field = key.split(".", 2)
+        value = _mismo_str(snapshot, key)
+        if value is not None:
+            rows.setdefault(index, {})[field] = value
+    return [rows[k] for k in sorted(rows)]
+
+
+def _other_financed(snapshot: Snapshot) -> list[dict[str, str]]:
+    """Owned properties that carry a lien the borrower KEEPS after this loan closes.
+
+    Excluded, each for a reason the guide gives: a block marked as the subject (only a true counts —
+    see LP-596 on why the false is worthless), anything being sold or pending sale, and anything with
+    no lien at all (a free-and-clear property is owned, not financed).
+    """
+    out = []
+    for row in _owned_property_rows(snapshot):
+        if row.get("is_subject", "").strip().lower() == "true":
+            continue
+        if row.get("disposition_status", "").strip().lower() != _RETAINED_DISPOSITION:
+            continue
+        if _to_decimal_or_none(row.get("lien_upb")) in (None, Decimal(0)):
+            continue
+        out.append(row)
+    return out
+
+
+def _to_decimal_or_none(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(value)
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _reserves_has_other_financed_properties(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """reserves.has_other_financed_properties — does the B3-4.1-01 overlay apply at all?
+
+    A GUARD, and deliberately a weak one. An absent REO schedule yields "no", NOT "unknown": most
+    exports carry the section, a purchase with no real estate owned legitimately states none, and
+    abstaining on absence would turn AS-4 into a couldnt_check on essentially every file without one.
+    The tag is NOT gated for the same reason — it can only ever ADD a review, never remove one, so a
+    wrong "no" leaves AS-4 exactly where it already was rather than making it worse.
+    """
+    rows = _other_financed(snapshot)
+    if not rows:
+        return "no", "the application lists no retained financed property besides the subject"
+    return (
+        "yes",
+        f"the application lists {len(rows)} retained financed "
+        f"{'property' if len(rows) == 1 else 'properties'} besides the subject",
+    )
+
+
+def _reserves_other_financed_count(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """reserves.other_financed_count — financed properties for the TIER lookup, subject included.
+
+    B2-2-03 counts the subject property among the borrower's financed properties, and the tier
+    boundaries in B3-4.1-01 ("one to four", "five to six") are read against that count — so the +1 is
+    the guide's arithmetic, not a padding. What the count selects is only the PERCENTAGE; the balance
+    it is applied to is a different set, which is why `aggregate_upb` is computed separately.
+    """
+    count = len(_other_financed(snapshot)) + 1
+    return str(count), f"{count - 1} other retained financed properties, plus the subject"
+
+
+def _reserves_other_financed_aggregate_upb(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """reserves.other_financed_aggregate_upb — the balance the percentage is applied to.
+
+    NARROWER THAN THE COUNT, and the difference is the guide's: "the aggregate UPB calculation does
+    not include the mortgages and HELOCs that are on the subject property, the borrower's principal
+    residence, properties that are sold or pending sale, and accounts that will be paid by closing."
+    So the borrower's own home is counted for the tier and excluded from the balance.
+    """
+    total = Decimal(0)
+    excluded = 0
+    for row in _other_financed(snapshot):
+        if row.get("current_usage_type", "").strip().lower() == "primaryresidence":
+            excluded += 1
+            continue
+        upb = _to_decimal_or_none(row.get("lien_upb"))
+        if upb is None:
+            return _UNKNOWN, "a retained financed property states no lien balance"
+        total += upb
+    note = f", excluding {excluded} principal residence" if excluded else ""
+    return str(total), f"the aggregate lien balance on retained financed properties{note}"
+
+
+def _reserves_other_financed_required_amount(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """reserves.other_financed_required_amount — the additional reserves B3-4.1-01 requires, in dollars.
+
+    DOLLARS, NOT MONTHS, on purpose. AS-4 compares months of PITIA, and converting this would need the
+    housing payment as a divisor — which is gated on exactly the files where taxes and insurance have
+    not arrived. Reporting the dollar figure keeps the number available to a processor on a file whose
+    ratio cannot yet be computed, which is when they most need it.
+    """
+    count = len(_other_financed(snapshot)) + 1
+    aggregate = _reserves_other_financed_aggregate_upb(snapshot, _subject_id, _subject_raw)[0]
+    if aggregate == _UNKNOWN:
+        return _UNKNOWN, "the aggregate lien balance could not be totalled"
+    rate = next((r for lo, hi, r in _OTHER_FINANCED_TIERS if lo <= count <= hi), None)
+    if rate is None:
+        # Above ten financed properties the loan is not deliverable at all (B2-2-03), so there is no
+        # percentage to apply — a separate eligibility question, not a reserves figure to guess at.
+        return _UNKNOWN, f"{count} financed properties is outside the 1-10 tiers B3-4.1-01 covers"
+    amount = (Decimal(str(aggregate)) * rate).quantize(Decimal("0.01"))
+    return str(amount), f"{rate * 100:.0f}% of {aggregate} at {count} financed properties"
+
+
 def _reserves_required_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -2995,6 +3141,63 @@ def _liability_payoff_marked(
     )
 
 
+def _liability_payoff_contradicted(
+    snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue | None, str]:
+    """liab.payoff_contradicted — does the application contradict its own payoff marking? (LP-597)
+
+    DT-8's satisfied branch rests entirely on ``liab.payoff_marked``, whose own docstring says it is
+    "a fact about the MARKING, not about the world". That is defensible — an application is
+    authoritative about the borrower's own intent — but it is unguarded: an LO who ticks payoff on a
+    mortgage secured by a property the borrower KEEPS removes that payment from the ratio, and nothing
+    asks. DT-8's guideline text says so in words: "A mortgage secured by other property the borrower
+    retains remains an obligation and stays in the ratio."
+
+    This is the cheapest possible guard and it needs NO threshold: LP-596 put the 1003's
+    real-estate-owned schedule in the snapshot, and that schedule says, per property, whether the
+    borrower is retaining it. A lien marked paid off whose property is marked ``Retain`` is the
+    application disagreeing with itself. That is not a judgment call about plausibility — it is two
+    sections of one form saying opposite things, which is exactly what a processor should look at.
+
+    Matched by BALANCE, which is what joins the two sections: in the real export the five
+    ``OwnedPropertyLienUPBAmount`` values equal the five ``LiabilityUnpaidBalanceAmount`` values
+    exactly. No match means no contradiction was established — "no", never a guess, and never a
+    reason to disturb a file whose export simply omits the schedule.
+    """
+    from app.verification.rule_engine.enumerators import _SOURCE_MISMO, LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return None, "not a liability subject"
+    if subject_raw.source != _SOURCE_MISMO:
+        return None, "a reported tradeline is not on the application's owned-property schedule"
+
+    # `balance` is the CANONICAL name — MISMO's `unpaid_balance` and a tradeline's `balance` both
+    # resolve through it (subjects.py's alias map). Reading the MISMO spelling here would silently
+    # return None on every liability, which is exactly what it did on the first run of this code.
+    field = subject_type("liability").read_field(subject_raw, "balance")
+    if field is None or not field.is_present:
+        return "no", "this liability states no balance to match against the schedule"
+    raw = field.display if isinstance(field, PiiField) else field.value
+    balance = _to_decimal_or_none(str(raw or "").strip())
+    if balance is None:
+        return "no", "this liability's balance could not be read"
+
+    for row in _owned_property_rows(snapshot):
+        if _to_decimal_or_none(row.get("lien_upb")) != balance:
+            continue
+        if row.get("is_subject", "").strip().lower() == "true":
+            # The schedule says this IS the subject property, which corroborates the payoff.
+            return "no", "the schedule identifies this as the lien on the subject property"
+        if row.get("disposition_status", "").strip().lower() == _RETAINED_DISPOSITION:
+            return (
+                "yes",
+                "the owned-property schedule marks the property securing this lien as retained, "
+                "while the liability is marked paid off at closing",
+            )
+        return "no", "the schedule shows this property is not being retained"
+    return "no", "no owned property on the schedule matches this lien's balance"
+
+
 def _liability_dispute_status(
     _snapshot: Snapshot, _subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -3123,6 +3326,36 @@ def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
         if stated:
             return min(stated)
     return None
+
+
+def _loan_ltv_basis_is_appraised(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """loan.ltv_basis_is_appraised — is the LTV denominator an APPRAISAL, or the application's estimate?
+
+    ``_conservative_appraised_value`` deliberately falls back to ``property.valuation_amount`` /
+    ``property.estimated_value`` so the worksheet always has a denominator, and its own comment states
+    the hazard this tag exists to expose: "A MISMO-stated value is the BORROWER'S estimate, not an
+    appraisal ... the WRONG input for any rule whose question is 'what did the appraisal say'."
+
+    MI-1's `satisfied` branch is such a question in all but name. Fannie B2-1.2-01: "For refinance
+    transactions ... the property value is the current appraised value." So declaring that no mortgage
+    insurance is required because the LTV is 79% asserts a ratio the guideline says must rest on an
+    appraisal, off a number the borrower supplied. If the appraisal lands lower, the loan crosses 80%
+    and MI IS required — a real monthly cost, cleared before the evidence arrived.
+
+    Only the CLEARING direction needs this. A stated value that ALREADY exceeds the threshold is if
+    anything optimistic, so MI-1's needs_review branch is safe without it.
+    """
+    if _appraised_value_from_appraisal(snapshot) is not None:
+        return "yes", "an appraisal on the file supplies the value the ratio divides by"
+    for tag_id in ("property.valuation_amount", "property.estimated_value"):
+        if [v for v in _parsed_decimals(snapshot, tag_id) if v > 0]:
+            return (
+                "no",
+                "the ratio divides by the value stated on the application; no appraisal is on the file",
+            )
+    return _UNKNOWN, "the file states no value to divide by at all"
 
 
 def _ltv_purpose(snapshot: Snapshot) -> LtvPurpose:
@@ -5905,7 +6138,9 @@ _RECIPES: dict[str, Recipe] = {
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
     "dwelling_settlement_basis": _dwelling_settlement_basis,
     "property_value_basis": _property_value_basis,  # LP-488 — MI-1
-    "loan_ltv_percent": _loan_ltv_percent,  # LP-488 — MI-1
+    "loan_ltv_percent": _loan_ltv_percent,
+    # LP-597 — MI-1 must not clear an MI requirement off the borrower's own estimate of value.
+    "loan_ltv_basis_is_appraised": _loan_ltv_basis_is_appraised,  # LP-488 — MI-1
     "fha_ufmip_percent": _fha_ufmip_percent,  # LP-488 — MI-4
     "condo_questionnaire_present": _condo_questionnaire_present,  # LP-488 — CO-1
     "title_vested_owner_matches": _title_vested_owner_matches,  # LP-491 — TI-1
@@ -5960,6 +6195,11 @@ _RECIPES: dict[str, Recipe] = {
     "housing_insurance_monthly": _housing_insurance_monthly,
     # LP-323-AS-B — the assets family (registry entries only).
     "reserves_required_months": _reserves_required_months,
+    # LP-597 — the other-financed-properties overlay (B3-4.1-01), unblocked by LP-596.
+    "reserves_has_other_financed_properties": _reserves_has_other_financed_properties,
+    "reserves_other_financed_count": _reserves_other_financed_count,
+    "reserves_other_financed_aggregate_upb": _reserves_other_financed_aggregate_upb,
+    "reserves_other_financed_required_amount": _reserves_other_financed_required_amount,
     "stmt_repeated_money_in_max_total": _stmt_repeated_money_in_max_total,  # LP-519
     "stmt_nsf_count": _stmt_nsf_count,
     "stmt_min_account_months": _stmt_min_account_months,
@@ -5976,6 +6216,7 @@ _RECIPES: dict[str, Recipe] = {
     "reo_statement_billed_payment": _reo_statement_billed_payment,
     "liability_stated_is_mortgage": _liability_stated_is_mortgage,
     "liability_payoff_marked": _liability_payoff_marked,
+    "liability_payoff_contradicted": _liability_payoff_contradicted,
     "contract_days_until_closing": _contract_days_until_closing,
     # LP-485 — the date-compare family (CL-1 / CR-13 / PR-6). Descriptive numbers only.
     "rate_lock_days_to_closing": _rate_lock_days_to_closing,

@@ -71,7 +71,12 @@ async def test_mi1_cannot_fire_from_any_outcome() -> None:
     MISSING, and firing would assert the latter. If someone adds a `fired` outcome, this fails."""
     outcomes = load_rule_spec("MI-1").deterministic.outcomes
     assert Verdict.FIRED.value not in [o.verdict for o in outcomes]
-    assert [o.verdict for o in outcomes] == ["needs_review", "satisfied"]
+    # LP-597 inserted a `couldnt_check` between them: MI-1 must not CLEAR an MI requirement off
+    # the value stated on the application, because B2-1.2-01 puts the appraised value in that
+    # denominator. The invariant this test protects is the line above — MI-1 knows MI is required and
+    # cannot know it is missing — and a couldnt_check asserts strictly less than either of the others,
+    # so it cannot violate it.
+    assert [o.verdict for o in outcomes] == ["needs_review", "couldnt_check", "satisfied"]
 
 
 # --------------------------------------------------------------------------- #
