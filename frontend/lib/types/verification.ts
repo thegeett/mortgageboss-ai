@@ -17,6 +17,12 @@ export interface VerificationRun {
   yellow_count: number;
   green_count: number;
   total_cost_estimate: number | null;
+  /** LP-590 — which phase a RUNNING pass has reached. Null once it finishes: a phase still showing
+   * after completion is exactly what a hung run looks like, which is the thing this is meant to
+   * distinguish. Optional so a version-skewed backend degrades to the old spinner. */
+  phase?: string | null;
+  phase_index?: number | null;
+  phase_total?: number | null;
   /** Why a `failed` run failed, straight from the run. Null on every other status. `?? null` at the
    * read site: a version-skewed backend that predates the field must degrade to "no reason given",
    * not blank the panel. */

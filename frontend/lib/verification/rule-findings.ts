@@ -266,3 +266,22 @@ const RESOLUTION_LABELS: Record<string, string> = {
 export function resolutionLabel(status: string): string {
   return RESOLUTION_LABELS[status] ?? status.replace(/_/g, " ");
 }
+
+/** LP-590 — the run's phases in a processor's words.
+ *
+ * A run takes about six and a half minutes and showed a bare spinner for all of it, which is
+ * indistinguishable from a hung worker. Deliberately a PHASE and a position, never a percentage:
+ * stage A scales with the file's transaction count, so the phases are not evenly sized and a
+ * progress bar would visibly stall — a bar that lies is worse than no bar.
+ */
+const PHASE_LABELS: Record<string, string> = {
+  build: "Reading the file",
+  stage_a: "Reading transactions",
+  stage_b: "Connecting facts across documents",
+  rules: "Applying rules",
+  cross_source: "Cross-source review",
+};
+
+export function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase] ?? "Working";
+}

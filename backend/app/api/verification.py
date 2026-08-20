@@ -26,6 +26,7 @@ from app.models.loan_file import LoanFile
 from app.models.snapshot_finding import SnapshotFinding
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
+from app.models.verification_progress import VerificationProgress
 from app.schemas.finding_impact import ApplyRequest, FindingImpactPreview
 from app.schemas.snapshot_findings import (
     SnapshotFindingDisposition,
@@ -274,6 +275,13 @@ async def _build_status(
         .limit(1)
     )
     latest = (await db.execute(latest_stmt)).scalars().first()
+    # LP-590 — the live phase, read only while a run is actually in flight. The row is deleted when
+    # the run ends, so this is None for a finished run without a second query to prove it.
+    progress = (
+        await db.get(VerificationProgress, latest.id)
+        if latest is not None and latest.status is VerificationStatus.RUNNING
+        else None
+    )
 
     # LP-375 — the two finding systems are split STRUCTURALLY by ``evaluation_outcome`` (the discriminator;
     # ``origin`` does NOT work — ``deterministic_rule`` spans BOTH the governed rule engine AND retired
@@ -348,7 +356,7 @@ async def _build_status(
     return VerificationStatusPublic(
         stale=loan_file.verification_stale,
         program=loan_file.loan_program.value if loan_file.loan_program else None,
-        latest_run=VerificationRunPublic.from_model(latest) if latest else None,
+        latest_run=VerificationRunPublic.from_model(latest, progress=progress) if latest else None,
         findings=[FindingPublic.from_model(f, document_names=document_names) for f in findings],
         rule_findings=[
             RuleFindingPublic.from_model(

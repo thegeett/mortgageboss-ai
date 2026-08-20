@@ -56,6 +56,10 @@ from app.services.tag_production import (
     TransactionTagCache,
     produce_stage_a_transaction_tags,
 )
+from app.services.verification_progress import (
+    SessionFactory as ProgressSessionFactory,
+)
+from app.services.verification_progress import clear_progress, report_phase
 from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
 from app.verification.rule_engine.enumerators import (
@@ -241,6 +245,10 @@ class Reasoners:
     # rather than reaching for the real client directly — a keyless test would otherwise degrade every
     # run on an AuthenticationError, which is exactly how this omission was caught.
     snapshot_findings: SnapshotFindingsReasoner | None = None
+    # LP-590: the progress reporter's session factory. `task_session()` builds an engine from the DEV
+    # database URL, so a test exercising the run would write progress rows into dev — silently, since
+    # the reporter swallows its errors. Injected here like every other seam.
+    progress_session: ProgressSessionFactory | None = None
 
 
 @dataclass(frozen=True)
@@ -517,6 +525,12 @@ async def run_verification(
     # 1. RAW snapshot (+ calculators-as-tags, built inside build_snapshot; each section degrades on
     #    its own — LP-318/builder). Calculators read stated financials, not Stage-A/B tags, so they
     #    do not depend on the tag stages.
+    # LP-590 — PROGRESS. Each call opens its own short-lived session and commits immediately: this
+    # run is one transaction that commits at the very end, so anything written on `db` would be
+    # invisible to a poller until the run was already over. Best-effort by construction — the
+    # reporter swallows its own errors, because failing a verification to describe it would be a
+    # grotesque trade.
+    await report_phase(run_id, "build", session_factory=reasoners.progress_session)
     if base_snapshot is not None:
         snapshot = base_snapshot
     else:
@@ -529,6 +543,7 @@ async def run_verification(
 
     if produce_tags:
         # 2. Stage A — per-transaction atomic tags.
+        await report_phase(run_id, "stage_a", session_factory=reasoners.progress_session)
         snapshot = await _run_stage(
             "stage_a",
             lambda s: produce_stage_a_transaction_tags(
@@ -547,6 +562,7 @@ async def run_verification(
             degradations,
         )
         # 3. Stage B — cross-entity sourcing (consumes A's is_money_in; follows the tag DAG).
+        await report_phase(run_id, "stage_b", session_factory=reasoners.progress_session)
         snapshot = await _run_stage(
             "stage_b",
             lambda s: produce_stage_b_sourcing_tags(
@@ -581,6 +597,7 @@ async def run_verification(
 
     # 6. Rules — the fail-closed gate + deterministic + judgment rules. Any rule_judgment tag a
     #    judgment rule produced is written back into the tags layer (not discarded). 7. Findings.
+    await report_phase(run_id, "rules", session_factory=reasoners.progress_session)
     results, judgment_tags = await _evaluate_rules(
         snapshot,
         oc2_reasoner=reasoners.oc2,
@@ -655,6 +672,7 @@ async def run_verification(
     # Runs AFTER the snapshot is persisted and reads the SAME in-memory object, so what the model
     # saw is exactly what is on disk. On an unchanged file this does not call the model at all — the
     # fingerprint decides, and that is what keeps the tab from moving under a processor's feet.
+    await report_phase(run_id, "cross_source", session_factory=reasoners.progress_session)
     try:
         from app.services.snapshot_findings import refresh_snapshot_findings
 
@@ -677,6 +695,10 @@ async def run_verification(
             detail=str(exc),
         )
         degradations.append(Degradation("snapshot_findings", f"not refreshed: {exc}"))
+
+    # Cleared rather than left on the last phase: "Cross-source review" still showing after a run
+    # finished is exactly what a hung run looks like.
+    await clear_progress(run_id, session_factory=reasoners.progress_session)
 
     logger.info(
         "verification_run_done",

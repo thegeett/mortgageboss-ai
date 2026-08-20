@@ -42,6 +42,7 @@ import type {
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
+import { phaseLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -234,6 +235,18 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             {running ? "Running…" : "Run verification"}
           </Button>
+          {/* LP-590 — WHICH phase, and where it sits in the sequence. A run takes about six and a
+              half minutes; a bare spinner for that long is indistinguishable from a hung worker.
+              A position rather than a percentage, deliberately: stage A scales with the file's
+              transaction count, so the phases are not evenly sized and a bar would visibly stall. */}
+          {running && data?.latest_run?.phase && (
+            <span className="text-[11px] tabular-nums text-gray-500">
+              {phaseLabel(data.latest_run.phase)}
+              {data.latest_run.phase_index && data.latest_run.phase_total
+                ? ` (${data.latest_run.phase_index} of ${data.latest_run.phase_total})`
+                : ""}
+            </span>
+          )}
           {/* Escape hatch (LP-376-A): force a run past the fingerprint cache, enqueuing BOTH passes. Shown
               whenever a prior run exists and we're not currently running — INCLUDING a failed run, which is
               exactly when you need it (the default button caches against the last COMPLETED run, so a failed

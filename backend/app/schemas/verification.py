@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
+from app.models.verification_progress import VerificationProgress
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rule_engine.reasons import document_label
@@ -148,6 +149,11 @@ class VerificationRunPublic(BaseModel):
     yellow_count: int
     green_count: int
     total_cost_estimate: float | None
+    # LP-590 — which phase a RUNNING pass has reached, e.g. ("rules", 4, 5). None once it finishes:
+    # a phase still showing after completion is exactly what a hung run looks like.
+    phase: str | None = None
+    phase_index: int | None = None
+    phase_total: int | None = None
     #: Why a FAILED run failed. The run marks itself failed with a reason (an un-enqueued pass, a
     #: dead AI call, a governed pass exhausted after retries), and without this field none of that
     #: reached the client: a failed run looked to the processor exactly like a run that never
@@ -155,7 +161,9 @@ class VerificationRunPublic(BaseModel):
     error_detail: str | None
 
     @classmethod
-    def from_model(cls, run: Verification) -> VerificationRunPublic:
+    def from_model(
+        cls, run: Verification, *, progress: VerificationProgress | None = None
+    ) -> VerificationRunPublic:
         return cls(
             id=run.id,
             status=run.status.value,
@@ -167,6 +175,11 @@ class VerificationRunPublic(BaseModel):
             green_count=run.green_count,
             total_cost_estimate=run.total_cost_estimate,
             error_detail=run.error_detail,
+            # LP-590 — only meaningful while RUNNING. The row is deleted when the run ends, so a
+            # finished run reports no phase rather than freezing on the last one.
+            phase=progress.phase if progress else None,
+            phase_index=progress.phase_index if progress else None,
+            phase_total=progress.phase_total if progress else None,
         )
 
 

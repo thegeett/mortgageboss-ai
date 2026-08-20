@@ -133,6 +133,37 @@ afterEach(() => {
   vi.resetAllMocks(); // resets call history AND any per-test mockImplementation
 });
 
+describe("progress while a run is in flight (LP-590)", () => {
+  // A run takes about six and a half minutes. A bare spinner for that long is indistinguishable
+  // from a hung worker — a distinction that has mattered twice — so the panel names the phase.
+  it("names the phase and its position while running", () => {
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "running",
+          phase: "rules",
+          phase_index: 4,
+          phase_total: 5,
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/Applying rules \(4 of 5\)/)).toBeDefined();
+  });
+
+  it("shows no phase once the run has finished", () => {
+    // The row is deleted when the run ends. A phase frozen on screen afterwards is exactly what a
+    // hung run looks like, which would defeat the point.
+    mock({ data: STATUS });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.queryByText(/Applying rules/)).toBeNull();
+  });
+});
+
 describe("VerificationPanel", () => {
   it("renders the trigger and the cross-source findings", () => {
     mock();
