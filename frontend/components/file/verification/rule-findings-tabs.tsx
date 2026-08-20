@@ -37,6 +37,7 @@ import type { ReactNode } from "react";
 import { useId, useState } from "react";
 import type { RuleFindingAction } from "./rule-finding-actions";
 import { RuleFindingRow, RuleLabel } from "./rule-finding-row";
+import { SnapshotFindingsTab } from "./snapshot-findings-tab";
 
 interface TabDef {
   id: TabId;
@@ -528,6 +529,17 @@ export function RuleFindingsTabs({
       archival: true,
       alwaysShow: true,
     },
+    // LP-586 — always shown. Its count comes from its own query rather than this component's
+    // buckets, so it is not derivable here; the tab is a doorway and the panel inside reports what
+    // it found. `alwaysShow` because an empty list is a real answer ("the last run reconciled
+    // everything"), not an absence worth hiding.
+    {
+      id: "cross_source",
+      label: "Cross-source",
+      count: 0,
+      archival: true,
+      alwaysShow: true,
+    },
     { id: "legacy", label: "Old findings", count: legacyCount, archival: true },
     // LP-583 — AN EMPTY CATEGORY IS NOT A CATEGORY ON THIS FILE. "Not applicable 0" spent real
     // estate telling a processor that nothing exists. `attention` is kept unconditionally: an empty
@@ -595,6 +607,8 @@ export function RuleFindingsTabs({
             body="Subjects a rule doesn't apply to (e.g. AS-1's money-OUT transactions) are not recorded as findings, so this tab is structurally empty on every file. It exists so that 'not applicable' can never quietly absorb a 'couldn't check' — a real gap always stays in Needs attention."
           />
         )}
+
+        {active === "cross_source" && fileId && <SnapshotFindingsTab fileId={fileId} />}
 
         {active === "legacy" && (
           <div className="space-y-3">

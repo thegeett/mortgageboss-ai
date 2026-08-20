@@ -11,6 +11,7 @@ import { ltvQueryKey } from "@/lib/api/ltv";
 import type {
   AggressionLevel,
   FindingImpactPreview,
+  SnapshotFinding,
   VerificationRun,
   VerificationStatus,
 } from "@/lib/types/verification";
@@ -200,5 +201,45 @@ export function useVerificationRuns(identifier: string, enabled = true) {
     queryFn: () => fetchVerificationRuns(identifier),
     enabled: Boolean(identifier) && enabled,
     retry: noRetryOn404,
+  });
+}
+
+// --------------------------------------------------------------------------------------------- //
+// LP-586 — snapshot-based AI cross-source findings.
+// --------------------------------------------------------------------------------------------- //
+
+function snapshotFindingsKey(identifier: string) {
+  return ["snapshot-findings", identifier] as const;
+}
+
+/** Read-only. The list is refreshed by the verification RUN, never by looking at it — asking the
+ *  model on a page load would make the tab move whenever someone opened it, which is the drift this
+ *  whole pass exists to remove. */
+export function useSnapshotFindings(identifier: string) {
+  return useQuery({
+    queryKey: snapshotFindingsKey(identifier),
+    queryFn: async () => {
+      const res = await apiClient.get<SnapshotFinding[]>(
+        `${API_V1}/loan-files/${identifier}/snapshot-findings`,
+      );
+      return res.data;
+    },
+  });
+}
+
+/** Record what a processor decided. NEVER changes the loan — there is no apply on this pass. */
+export function useSetSnapshotFindingDisposition(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { findingId: string; disposition: string; note?: string }) => {
+      const res = await apiClient.post<SnapshotFinding>(
+        `${API_V1}/loan-files/${identifier}/snapshot-findings/${input.findingId}/disposition`,
+        { disposition: input.disposition, note: input.note ?? null },
+      );
+      return res.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: snapshotFindingsKey(identifier) });
+    },
   });
 }

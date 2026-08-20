@@ -23,9 +23,15 @@ from app.models.document import Document
 from app.models.finding import Finding, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
+from app.models.snapshot_finding import SnapshotFinding
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.schemas.finding_impact import ApplyRequest, FindingImpactPreview
+from app.schemas.snapshot_findings import (
+    SnapshotFindingDisposition,
+    SnapshotFindingPublic,
+    SnapshotFindingSource,
+)
 from app.schemas.verification import (
     AcceptRiskRequest,
     AggressionPublic,
@@ -73,6 +79,7 @@ from app.services.finding_resolution import (
 from app.services.loan_files import get_loan_file
 from app.services.ltv import build_ltv_calculation
 from app.services.rule_subject_label import resolve_subject_label
+from app.services.snapshot_findings import list_snapshot_findings
 from app.services.verifications import create_verification_run, mark_verification_current
 from app.verification.confidence import CONFIDENCE_CUTOFFS
 from app.verification.snapshot.content_id import DOC_PREFIX
@@ -455,6 +462,88 @@ async def preview_finding_apply_endpoint(
         # job is to tell a processor "this cannot be applied, and why" was the flow that crashed on
         # it. A 409 carries the reason to the dialog.
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{identifier}/snapshot-findings",
+    response_model=list[SnapshotFindingPublic],
+)
+async def list_snapshot_findings_endpoint(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> list[SnapshotFindingPublic]:
+    """The snapshot-based AI cross-source findings for this file (LP-586).
+
+    Read-only, and refreshed by the verification run rather than here: asking the model on a page
+    load would make the tab move whenever someone looked at it, which is the drift this pass exists
+    to remove.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    rows = await list_snapshot_findings(db, loan_file_id=loan_file.id)
+    return [
+        SnapshotFindingPublic(
+            id=row.id,
+            kind=row.kind,
+            title=row.title,
+            detail=row.detail,
+            sources=[SnapshotFindingSource(**s) for s in row.sources],
+            disposition=row.disposition,
+            disposition_note=row.disposition_note,
+            first_seen_at=row.first_seen_at,
+            last_seen_at=row.last_seen_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/{identifier}/snapshot-findings/{finding_id}/disposition",
+    response_model=SnapshotFindingPublic,
+)
+async def set_snapshot_finding_disposition_endpoint(
+    identifier: str,
+    finding_id: UUID,
+    body: SnapshotFindingDisposition,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> SnapshotFindingPublic:
+    """Record what a processor decided about one observation.
+
+    ⚠️ THIS NEVER TOUCHES THE LOAN. There is no apply here — no rule spec, no calibrated threshold,
+    no guideline — so the only thing written is the disposition and who set it. The finding itself
+    is the model's; the decision is theirs; the loan is neither's to change from this tab.
+
+    Tenant-scoped through the loan file, and the finding must belong to it — a bare id lookup would
+    be the cross-tenant read shape `document_borrower_links` records a removal for.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    row = await db.scalar(
+        select(SnapshotFinding).where(
+            SnapshotFinding.id == finding_id,
+            SnapshotFinding.loan_file_id == loan_file.id,
+        )
+    )
+    if row is None:
+        raise _FINDING_NOT_FOUND
+    row.disposition = body.disposition
+    row.disposition_note = body.note
+    row.disposition_by_user_id = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return SnapshotFindingPublic(
+        id=row.id,
+        kind=row.kind,
+        title=row.title,
+        detail=row.detail,
+        sources=[SnapshotFindingSource(**s) for s in row.sources],
+        disposition=row.disposition,
+        disposition_note=row.disposition_note,
+        first_seen_at=row.first_seen_at,
+        last_seen_at=row.last_seen_at,
+    )
 
 
 @router.post("/{identifier}/findings/{finding_id}/apply", response_model=VerificationStatusPublic)

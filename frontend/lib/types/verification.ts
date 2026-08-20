@@ -178,3 +178,23 @@ export interface FindingImpactPreview {
    *  the processor approved. */
   fingerprint: string;
 }
+
+/** LP-586 — one snapshot-based AI cross-source observation.
+ *
+ * DISTINCT from a governed rule finding: there is no rule id, no guideline citation and no apply,
+ * because this pass has no spec behind it. It notices a pairing across two sources and hands it to a
+ * processor; it never judges and never writes to the loan.
+ */
+export interface SnapshotFinding {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  /** The two-or-more sides compared. What makes it CROSS-source, and what a processor checks. */
+  sources: { label: string; value: string }[];
+  /** `open` | `resolved` are the SYSTEM's; `signed_off` | `not_an_issue` are the processor's. */
+  disposition: string;
+  disposition_note: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+}

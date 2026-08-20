@@ -15,7 +15,10 @@ import { humanize } from "@/lib/format";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
 export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
-export type TabId = GovernedTabId | "legacy";
+// LP-586 — `cross_source` is neither governed nor legacy: a separate AI pass over the SNAPSHOT,
+// with its own stability contract and no apply. It gets its own id rather than being folded
+// into either family, because it answers a different question from both.
+export type TabId = GovernedTabId | "legacy" | "cross_source";
 
 /** The five §8 outcomes → their governed tab. `not_applicable` never appears (not persisted). */
 const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
