@@ -287,3 +287,110 @@ async def test_a_resolved_finding_is_retained_even_when_no_longer_seen(
     )
 
     assert [f.disposition for f in remaining] == ["signed_off"]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-589 — the cache cases the first version got backwards
+# --------------------------------------------------------------------------------------------- #
+
+
+async def test_a_file_with_no_findings_is_not_re_asked(db_session: AsyncSession) -> None:
+    """THE CASE THE ORIGINAL COMMENT CLAIMED TO HANDLE AND DID NOT. The guard was
+    `existing and all(...)`, and `existing` is falsy when the model found nothing — so a clean file
+    re-asked on every run, forever, paying for a full call each time and discarding it."""
+    loan_file = await _file(db_session, "quiet")
+    calls = 0
+
+    async def finds_nothing(_payload: str):
+        nonlocal calls
+        calls += 1
+        return []
+
+    await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=finds_nothing
+    )
+    await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(run=7), reasoner=finds_nothing
+    )
+
+    assert calls == 1, "a file with nothing to report was re-asked about an unchanged snapshot"
+
+
+async def test_a_retained_disposition_does_not_break_the_cache(db_session: AsyncSession) -> None:
+    """A finding a processor signed off, which the model later stopped seeing, kept its OLD
+    fingerprint — so `all(...)` never held again and the file re-asked forever after. Because the
+    model's answer differs between calls, the tab then moved on a file that had not changed."""
+    loan_file = await _file(db_session, "retainedcache")
+    calls = 0
+
+    async def counting(_payload: str):
+        nonlocal calls
+        calls += 1
+        return _drafts() if calls == 1 else []
+
+    (finding,) = await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=counting
+    )
+    finding.disposition = "not_an_issue"
+    await db_session.flush()
+
+    # snapshot B: the model no longer sees it, so the row is RETAINED with its old fingerprint
+    await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923"),
+        reasoner=counting,
+    )
+    # snapshot B again, unchanged — this must be a cache hit
+    await refresh_snapshot_findings(
+        db_session,
+        loan_file_id=loan_file.id,
+        snapshot=_snapshot(valuation="551923", run=9),
+        reasoner=counting,
+    )
+
+    assert calls == 2, "a retained disposition kept the file re-asking on an unchanged snapshot"
+
+
+async def test_two_drafts_with_the_same_key_do_not_break_the_run(db_session: AsyncSession) -> None:
+    """`finding_key` ignores the wording by design, so two drafts describing one pairing in
+    different words COLLIDE — ordinary model output. Both missed the lookup, both were inserted, and
+    the flush raised IntegrityError on the unique constraint. That does not degrade gracefully: it
+    poisons the session, so the caller's own commit raises PendingRollbackError and the rule
+    findings, the persisted snapshot and the COMPLETED status roll back with it."""
+    loan_file = await _file(db_session, "collide")
+
+    async def says_it_twice(_payload: str):
+        first = _drafts("One phrasing")[0]
+        second = _drafts("A different phrasing of the very same pairing")[0]
+        return [first, second]
+
+    rows = await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=says_it_twice
+    )
+
+    assert len(rows) == 1
+
+
+async def test_reopening_keeps_the_note_the_processor_wrote(db_session: AsyncSession) -> None:
+    """LP-589 — ABSENT IS NOT "CLEAR IT". The endpoint assigned `body.note` unconditionally and Reopen
+    sends none, so someone who signed off with an explanation and later reopened lost it silently and
+    unrecoverably. Asserted at the service level here; the route now only assigns when a note is
+    actually supplied."""
+    loan_file = await _file(db_session, "note")
+
+    async def sees(_payload: str):
+        return _drafts()
+
+    (finding,) = await refresh_snapshot_findings(
+        db_session, loan_file_id=loan_file.id, snapshot=_snapshot(), reasoner=sees
+    )
+    finding.disposition = "signed_off"
+    finding.disposition_note = "confirmed with the county assessor"
+    await db_session.flush()
+
+    # What Reopen does: change the disposition, supply no note.
+    finding.disposition = "open"
+    await db_session.flush()
+
+    assert finding.disposition_note == "confirmed with the county assessor"

@@ -25,6 +25,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import { useUpdatePreferences } from "@/lib/api/preferences";
+import { snapshotFindingsKey, useSnapshotFindings } from "@/lib/api/verification";
 import {
   useResolveFinding,
   useRunVerification,
@@ -33,6 +34,7 @@ import {
   verificationQueryKey,
 } from "@/lib/api/verification";
 import { humanize } from "@/lib/format";
+import type { SnapshotFinding } from "@/lib/types/verification";
 import type {
   AggressionLevel,
   VerificationFinding,
@@ -176,6 +178,10 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
     if (prevStatus.current === "running" && status === "completed") {
       void queryClient.invalidateQueries({ queryKey: dtiQueryKey(fileId) });
       void queryClient.invalidateQueries({ queryKey: ltvQueryKey(fileId) });
+      // LP-589 — the cross-source list too. It has no polling and a 60s staleTime, so a processor
+      // watching that tab through a re-run kept seeing the PREVIOUS list — precisely when the
+      // findings legitimately changed, and precisely the moment the tab is meant to be trusted.
+      void queryClient.invalidateQueries({ queryKey: snapshotFindingsKey(fileId) });
       setConsequence(null);
     }
     prevStatus.current = status;
@@ -303,6 +309,8 @@ function VerificationBody({
   onRetry: () => void;
   running: boolean;
 }) {
+  // LP-589 — read here, where the tabs are rendered, so the badge reports a real number.
+  const crossSource = useSnapshotFindings(fileId);
   // LP-561 — the governed findings become actionable. This hook already refreshes the DTI, LTV
   // and needs list on success, which is exactly what an Apply or a Request needs.
   const resolveRuleFinding = useResolveFinding(fileId);
@@ -321,6 +329,12 @@ function VerificationBody({
       <NeedsCompleteness fileId={fileId} />
       <RuleFindingsTabs
         fileId={fileId}
+        // LP-589 — OPEN ones only. A badge counting signed-off and resolved findings would keep
+        // showing work after a processor cleared it, which is the opposite of the signal it exists
+        // to give.
+        crossSourceCount={
+          (crossSource.data ?? []).filter((f: SnapshotFinding) => f.disposition === "open").length
+        }
         onAct={(action) => resolveRuleFinding.mutate(action)}
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.

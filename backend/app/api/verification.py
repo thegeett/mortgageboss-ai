@@ -510,7 +510,7 @@ async def set_snapshot_finding_disposition_endpoint(
 ) -> SnapshotFindingPublic:
     """Record what a processor decided about one observation.
 
-    ⚠️ THIS NEVER TOUCHES THE LOAN. There is no apply here — no rule spec, no calibrated threshold,
+    THIS NEVER TOUCHES THE LOAN. There is no apply here — no rule spec, no calibrated threshold,
     no guideline — so the only thing written is the disposition and who set it. The finding itself
     is the model's; the decision is theirs; the loan is neither's to change from this tab.
 
@@ -529,7 +529,11 @@ async def set_snapshot_finding_disposition_endpoint(
     if row is None:
         raise _FINDING_NOT_FOUND
     row.disposition = body.disposition
-    row.disposition_note = body.note
+    # LP-589 — ABSENT IS NOT "CLEAR IT". `note` defaults to None, and Reopen sends no note at all, so
+    # assigning unconditionally erased the explanation someone wrote when they signed off — silently
+    # and unrecoverably. Only an explicitly-supplied note replaces the stored one.
+    if body.note is not None:
+        row.disposition_note = body.note
     row.disposition_by_user_id = current_user.id
     await db.commit()
     await db.refresh(row)

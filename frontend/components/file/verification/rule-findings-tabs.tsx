@@ -480,6 +480,7 @@ export function RuleFindingsTabs({
   legacy,
   onAct,
   fileId,
+  crossSourceCount = 0,
 }: {
   ruleFindings: RuleFinding[];
   /** LP-377-C: the latest run's rule engine did not complete — these findings are from an earlier run. */
@@ -489,6 +490,9 @@ export function RuleFindingsTabs({
   /** LP-577 — threaded through to the Apply preview. Optional: without it Apply still works, it
    *  just skips the before/after dialog rather than the button vanishing. */
   fileId?: string;
+  /** LP-589 — open cross-source findings. Owned by the panel (which already holds that query) so
+   *  the badge reports a real number rather than a placeholder nobody can act on. */
+  crossSourceCount?: number;
   /** LP-561 — resolve a governed finding. Optional so a read-only caller (a test, a print view) can
    *  render the tabs without the action bar appearing at all. */
   onAct?: (action: RuleFindingAction) => void;
@@ -533,15 +537,17 @@ export function RuleFindingsTabs({
       archival: true,
       alwaysShow: true,
     },
-    // LP-586 — always shown. Its count comes from its own query rather than this component's
-    // buckets, so it is not derivable here; the tab is a doorway and the panel inside reports what
-    // it found. `alwaysShow` because an empty list is a real answer ("the last run reconciled
-    // everything"), not an absence worth hiding.
+    // LP-589 — the count is PASSED IN, not hardcoded. It shipped as `count: 0`, which the badge gate
+    // (`count > 0 && …`) turns into "never show a number" — so a file with five unreconciled
+    // pairings looked identical to one with none and nobody had a reason to click. That is exactly
+    // the failure recorded four lines above for `not_applicable`, reintroduced immediately below it.
+    //
+    // `alwaysShow` because an empty list is a real answer ("the last run reconciled everything"),
+    // not an absence worth hiding. Not archival: unlike "no longer applies", these are open work.
     {
       id: "cross_source",
       label: "Cross-source",
-      count: 0,
-      archival: true,
+      count: crossSourceCount,
       alwaysShow: true,
     },
     // LP-588 — NOT archival, and marking it so was a real regression. LP-583's rationale was that a

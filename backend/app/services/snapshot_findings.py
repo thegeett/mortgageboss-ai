@@ -26,7 +26,7 @@ from app.ai.snapshot_cross_source import (
 )
 from app.core.logging import get_logger
 from app.models.base import utcnow
-from app.models.snapshot_finding import SnapshotFinding
+from app.models.snapshot_finding import SnapshotFinding, SnapshotFindingScan
 from app.verification.snapshot.model import Snapshot
 from app.verification.snapshot_findings.fingerprint import snapshot_fingerprint
 
@@ -61,10 +61,17 @@ async def refresh_snapshot_findings(
     fingerprint = snapshot_fingerprint(snapshot)
     existing = await _stored(db, loan_file_id)
 
-    # THE CACHE HIT. Every stored finding was observed in THIS snapshot, so there is nothing to
-    # re-derive and no reason to pay for a call. `all()` on an empty list is True — a file that
-    # genuinely produced no findings stays quiet instead of being re-asked every run.
-    if existing and all(f.snapshot_fingerprint == fingerprint for f in existing):
+    # THE CACHE HIT, decided by a per-file SCAN MARKER rather than by the findings themselves.
+    #
+    # The first version asked `existing and all(row.fingerprint == current)`, which was wrong twice
+    # over. A file that genuinely produced NO findings has no row to carry a fingerprint, so
+    # `existing` was falsy and it re-asked every run forever — the very case its comment claimed to
+    # handle. And a finding a processor signed off, which the model later stopped seeing, kept its
+    # OLD fingerprint, so `all(...)` never held again and that file re-asked forever after. Since the
+    # model's answer differs between calls, the tab then moved on a file that had not changed: the
+    # exact failure this pass exists to prevent.
+    scan = await db.get(SnapshotFindingScan, loan_file_id)
+    if scan is not None and scan.snapshot_fingerprint == fingerprint:
         logger.info(
             "snapshot_findings_cache_hit",
             loan_file_id=str(loan_file_id),
@@ -74,6 +81,17 @@ async def refresh_snapshot_findings(
 
     run = reasoner or reason_over_snapshot
     drafts = await run(snapshot_payload(snapshot))
+
+    # DE-DUPLICATE BEFORE INSERTING. `finding_key` deliberately ignores the wording, so two drafts
+    # describing the same pairing in different words collide — ordinary model output. Both would miss
+    # `by_key`, both would be added, and the flush would raise IntegrityError on the unique
+    # constraint. That does not degrade gracefully: it poisons the session, so the caller's own
+    # commit then raises PendingRollbackError and the rule findings, the persisted snapshot and the
+    # COMPLETED status all roll back with it.
+    deduped: dict[str, SnapshotFindingDraft] = {}
+    for draft in drafts:
+        deduped.setdefault(draft.finding_key, draft)
+    drafts = list(deduped.values())
 
     by_key = {f.finding_key: f for f in existing}
     now = utcnow()
@@ -101,7 +119,7 @@ async def refresh_snapshot_findings(
         # model's. The WORDING is refreshed because the same observation may be expressed better,
         # and freezing it would keep a sentence written against an older file.
         #
-        # ⚠️ EXCEPT `resolved`, WHICH IS OURS AND NOT THEIRS. We set that when the finding stopped
+        # EXCEPT `resolved`, WHICH IS OURS AND NOT THEIRS. We set that when the finding stopped
         # being observed; seeing it again means it did not stay resolved, and leaving the label on a
         # live finding would tell a processor something was fixed while it sits in front of them.
         if row.disposition == RESOLVED:
@@ -116,6 +134,8 @@ async def refresh_snapshot_findings(
     for row in existing:
         if row.finding_key in seen:
             continue
+        # A retained disposition keeps its LAST-OBSERVED fingerprint on purpose — that column is
+        # provenance ("when did we last actually see this"), and the cache no longer reads it.
         if row.disposition == OPEN:
             # SHOWN AS RESOLVED, ONCE. Deleting outright is honest about the current file but gives a
             # processor NO FEEDBACK that their work landed — they upload the appraisal and the
@@ -131,6 +151,13 @@ async def refresh_snapshot_findings(
             await db.delete(row)
         # signed_off / not_an_issue are RETAINED indefinitely: a processor's action is a record, and
         # deleting it would erase their work the first time the file moved (ADR-061's reasoning).
+
+    # Record WHAT WAS ASKED, so an answer of "nothing" is cacheable like any other.
+    if scan is None:
+        db.add(SnapshotFindingScan(loan_file_id=loan_file_id, snapshot_fingerprint=fingerprint))
+    else:
+        scan.snapshot_fingerprint = fingerprint
+        scan.scanned_at = now
 
     await db.flush()
     return await _stored(db, loan_file_id)

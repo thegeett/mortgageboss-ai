@@ -33,7 +33,7 @@ class SnapshotFindingPublic(BaseModel):
 class SnapshotFindingDisposition(BaseModel):
     """A processor's disposition.
 
-    ⚠️ NO APPLY, and the absence is the design. This pass has no rule spec, no calibrated threshold
+    NO APPLY, and the absence is the design. This pass has no rule spec, no calibrated threshold
     and no guideline citation, so it may not write to the loan — only record what a human decided.
     `resolved` is excluded too: that one is the system's, set when the file stops producing the
     finding, and letting a client claim it would let the tab lie about why something cleared.

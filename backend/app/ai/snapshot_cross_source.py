@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.ai.client import complete
@@ -68,6 +70,25 @@ Return ONLY a JSON object:
 Write for a processor. Name documents the way the file names them. No markdown, no preamble."""
 
 
+def _normalise(value: str) -> str:
+    """Reduce a model-authored source string to what it MEANS, for identity purposes.
+
+    An essentially-numeric value keeps only its digits, so "551,923", "551923" and "$551,923.00"
+    agree. Text is lowercased and punctuation collapsed, so "Tax Bill," and "tax bill" agree while
+    "property tax bill" and "tax bill" still differ — those are different claims about provenance.
+    """
+    text = value.strip().casefold()
+    # Numeric: PARSE it, do not just keep the digits. Keeping digits made "$578,000.00" normalise to
+    # "57800000" while "578000" gave "578000" — the same amount, two keys, and the dismissal lost.
+    candidate = re.sub(r"[,$\s]", "", text)
+    if re.fullmatch(r"-?\d+(\.\d+)?", candidate):
+        try:
+            return str(Decimal(candidate).normalize())
+        except InvalidOperation:  # pragma: no cover — the regex already guarantees a valid decimal
+            pass
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
 @dataclass(frozen=True)
 class SnapshotFindingDraft:
     """One observation, before persistence."""
@@ -83,13 +104,20 @@ class SnapshotFindingDraft:
 
         Over the kind and the SOURCES, never the title or detail: those are the model's wording and
         will drift between calls even at temperature 0. Hashing them would mint a new finding for a
-        reworded sentence, and a processor's dismissal would evaporate — the failure that would make
-        this tab worse than useless.
+        reworded sentence, and a processor's dismissal would evaporate.
+
+        The SOURCE strings are model-authored too, which the first version missed: it hashed them
+        verbatim, so "tax bill"/"551,923" and "property tax bill"/"551923" — the same two facts
+        described twice — produced different keys and the dismissal was lost anyway. They are
+        normalised first, so identity survives the model's phrasing of its own evidence.
         """
         material = json.dumps(
             {
-                "kind": self.kind,
-                "sources": sorted(json.dumps(s, sort_keys=True) for s in self.sources),
+                "kind": self.kind.strip().casefold(),
+                "sources": sorted(
+                    f"{_normalise(s.get('label', ''))}={_normalise(s.get('value', ''))}"
+                    for s in self.sources
+                ),
             },
             sort_keys=True,
         )
@@ -97,8 +125,21 @@ class SnapshotFindingDraft:
 
 
 def _parse(text: str) -> list[SnapshotFindingDraft]:
-    """Defensive parse — a malformed response yields NO findings, never a raise and never a guess."""
-    payload = extract_json_object(text)
+    """Defensive parse — a malformed response yields NO findings, never a raise and never a guess.
+
+    `extract_json_object` returns the JSON SUBSTRING, not a parsed object. The first version checked
+    `isinstance(payload, dict)` on that string, which is never true — so every response was
+    discarded, the pass produced nothing on any file, and the tab reported "the last run found
+    nothing to reconcile" while the model was called and paid for on every run. Every test injected a
+    stub reasoner, so nothing exercised this path.
+    """
+    raw = extract_json_object(text)
+    if raw is None:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
     if not isinstance(payload, dict):
         return []
     raw = payload.get("findings")

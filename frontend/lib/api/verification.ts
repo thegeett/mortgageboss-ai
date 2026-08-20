@@ -208,7 +208,7 @@ export function useVerificationRuns(identifier: string, enabled = true) {
 // LP-586 — snapshot-based AI cross-source findings.
 // --------------------------------------------------------------------------------------------- //
 
-function snapshotFindingsKey(identifier: string) {
+export function snapshotFindingsKey(identifier: string) {
   return ["snapshot-findings", identifier] as const;
 }
 

@@ -27,6 +27,10 @@ vi.mock("@/lib/api/verification", () => ({
   useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
   useVerificationRuns: () => ({ data: [] }),
   verificationQueryKey: (id: string) => ["verification", id],
+  // LP-589 — the panel owns this query so the Cross-source badge reports a real number instead of a
+  // hardcoded 0 (which the badge gate turns into "never show one").
+  useSnapshotFindings: () => ({ data: [] }),
+  snapshotFindingsKey: (id: string) => ["snapshot-findings", id],
 }));
 
 vi.mock("@/lib/api/needs", () => ({

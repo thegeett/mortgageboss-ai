@@ -8,12 +8,12 @@ Stability therefore cannot come from prompting. It comes from NOT ASKING AGAIN: 
 would see and reuse the previous answer verbatim while the hash holds. The finding-prose cache
 (LP-527) makes the same argument for the same reason.
 
-⚠️ THE PER-RUN FIELDS MUST BE EXCLUDED, AND THAT IS THE WHOLE TRICK. `run_id` is a fresh UUID and
+THE PER-RUN FIELDS MUST BE EXCLUDED, AND THAT IS THE WHOLE TRICK. `run_id` is a fresh UUID and
 `created_at` a fresh timestamp on EVERY run, so hashing the snapshot as-is would produce a new
 fingerprint every time, the cache would never hit, and the feature would look implemented while
 being inert.
 
-⚠️ AND NOTE WHAT IS *NOT* HASHED: the engine. `app/services/cross_source.py` folds
+AND NOTE WHAT IS *NOT* HASHED: the engine. `app/services/cross_source.py` folds
 `engine_fingerprint()` — every version-controlled file under `app/verification/` — into its key,
 because it reasons over live tables and cannot tell which engine version produced them. This pass
 does not need to: engine changes that MATTER reach it through the snapshot itself, since the tags

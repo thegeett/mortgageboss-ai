@@ -658,12 +658,18 @@ async def run_verification(
     try:
         from app.services.snapshot_findings import refresh_snapshot_findings
 
-        await refresh_snapshot_findings(
-            db,
-            loan_file_id=snapshot.loan_file_id,
-            snapshot=snapshot,
-            reasoner=reasoners.snapshot_findings,
-        )
+        # SAVEPOINT — "best-effort" was only true for non-DB exceptions. A DB error inside this call
+        # poisons the session, so the `except` below would record a degradation while the caller's
+        # own commit then raised PendingRollbackError, rolling back the rule findings, the persisted
+        # snapshot and the COMPLETED status with it. `begin_nested()` contains it: the outer
+        # transaction survives, and the pass degrades the way the comment above always claimed.
+        async with db.begin_nested():
+            await refresh_snapshot_findings(
+                db,
+                loan_file_id=snapshot.loan_file_id,
+                snapshot=snapshot,
+                reasoner=reasoners.snapshot_findings,
+            )
     except Exception as exc:
         logger.warning(
             "snapshot_findings_failed",

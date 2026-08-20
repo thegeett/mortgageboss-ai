@@ -123,6 +123,23 @@ describe("the §8 tabs — the honesty contract", () => {
     expect(tab(/needs attention/i).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("shows a real Cross-source count, not a hardcoded zero", () => {
+    // LP-589 — it shipped as `count: 0`, and the badge gate is `count > 0 && …`, so a file with five
+    // unreconciled pairings looked identical to one with none and nobody had a reason to click. That
+    // is the same failure the not_applicable comment records, reintroduced four lines below it.
+    render(
+      <RuleFindingsTabs
+        ruleFindings={[]}
+        ruleFindingsStale={false}
+        legacyCount={0}
+        legacy={<div />}
+        crossSourceCount={5}
+      />,
+    );
+
+    expect(within(tab(/cross-source/i)).getByText("5")).toBeDefined();
+  });
+
   it("shows the Old findings count — that tab still carries open, blocking work", () => {
     // LP-588 — marking it archival was a regression. LP-583's rationale was that a 113-count of
     // "no longer applies" is noise; this tab is not that. Its list carries OPEN findings with the
