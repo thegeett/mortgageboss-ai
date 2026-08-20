@@ -70,6 +70,7 @@ def _build(**kw: object) -> dict[str, object]:
         property_=kw.get("property_"),  # type: ignore[arg-type]
         liabilities=kw.get("liabilities", []),  # type: ignore[arg-type]
         assets=kw.get("assets", []),  # type: ignore[arg-type]
+        owned_properties=kw.get("owned_properties", []),  # type: ignore[arg-type]
     )
 
 
@@ -95,7 +96,12 @@ def _full_sample() -> tuple[LoanFile, dict[str, object]]:
     ]
     assets = [_asset("CheckingAccount", Decimal("40000"), "Wells Fargo", aid=3)]
     section = build_mismo_section(
-        loan_file=lf, borrowers=[b2, b1], property_=prop, liabilities=liabs, assets=assets
+        loan_file=lf,
+        borrowers=[b2, b1],
+        property_=prop,
+        liabilities=liabs,
+        assets=assets,
+        owned_properties=[],
     )
     return lf, section
 

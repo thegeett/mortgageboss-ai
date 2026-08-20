@@ -118,6 +118,37 @@ class ParsedLiability(BaseModel):
     exclusion_indicator: bool | None = None
 
 
+class ParsedOwnedProperty(BaseModel):
+    """One property the borrower already owns — MISMO's ``OWNED_PROPERTY`` (LP-596).
+
+    THE 1003's REAL-ESTATE-OWNED SCHEDULE. Five of these sat unread in the one real export, and each
+    carries a fact a live rule was reporting it could not determine:
+
+    * ``is_subject`` — WHICH owned property this loan is against. DT-8 and DT-6 both turn on "is this
+      lien the one being refinanced, or one on property the borrower keeps", and the application
+      answers it outright.
+    * ``disposition_status`` — Retain / Sell / PendingSale. This IS DT-6's question, stated.
+    * ``lien_upb`` — joins an owned property to a stated liability: the five UPBs in the real export
+      match the five ``MortgageLoan`` balances exactly.
+    * ``current_usage_type`` — the principal residence is EXCLUDED from the reserves aggregate
+      (B3-4.1-01), so AS-4 cannot size a requirement without it.
+
+    Every field is optional because MISMO makes them optional; absent means the export did not state
+    it, never "no". ``is_subject`` in particular is tri-state on purpose — see ``_owned_properties``
+    in the parser for why a ``false`` on every block is not read as "none of them is the subject".
+    """
+
+    is_subject: bool | None = None
+    disposition_status: str | None = None  # Retain / Sell / PendingSale
+    lien_upb: Decimal | None = None
+    unit_count: int | None = None
+    rental_income_gross: Decimal | None = None
+    rental_income_net: Decimal | None = None
+    current_usage_type: str | None = None  # PrimaryResidence / Investment / SecondHome
+    usage_type: str | None = None
+    estimated_value: Decimal | None = None
+
+
 class ParsedAsset(BaseModel):
     """One stated asset."""
 
@@ -148,6 +179,7 @@ class ParsedMismo(BaseModel):
     property: ParsedProperty | None = None
     liabilities: list[ParsedLiability] = Field(default_factory=list)
     assets: list[ParsedAsset] = Field(default_factory=list)
+    owned_properties: list[ParsedOwnedProperty] = Field(default_factory=list)
     catch_all: list[CatchAllSection] = Field(default_factory=list)
     # Needed-now fields that were missing / odd (never includes PII values).
     parse_warnings: list[str] = Field(default_factory=list)

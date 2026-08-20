@@ -38,6 +38,7 @@ from app.mismo.schema import (
     ParsedLiability,
     ParsedLoan,
     ParsedMismo,
+    ParsedOwnedProperty,
     ParsedProperty,
 )
 
@@ -332,6 +333,68 @@ def _parse_liabilities(deal: etree._Element, ctx: _Ctx) -> list[ParsedLiability]
     return out
 
 
+def _parse_owned_properties(deal: etree._Element, ctx: _Ctx) -> list[ParsedOwnedProperty]:
+    """The 1003's real-estate-owned schedule — ``OWNED_PROPERTY`` (LP-596).
+
+    Each block pairs an ``OWNED_PROPERTY_DETAIL`` (the borrower's relationship to the property: keep
+    or sell, the lien balance, what rent it makes) with a nested ``PROPERTY`` (what the property IS:
+    usage, estimated value). Both halves are read here; the ADDRESS inside that ``PROPERTY`` is
+    deliberately NOT — it is the borrower's other home, it is PII, and no rule asks for it. The
+    catch-all still retains it for display, which is the right home for something only a human reads.
+
+    ``is_subject`` IS TRI-STATE, AND THE FALSE MATTERS AS LITTLE AS THE LIABILITY PAYOFF FLAG. The one
+    real export carries ``OwnedPropertySubjectIndicator=false`` on all five blocks — the subject
+    property is described in its own section and is simply not repeated in the REO schedule. So a file
+    where nothing is marked subject means "the schedule lists other properties", NOT "this loan has no
+    subject property", and a consumer must never read the absence of a true as a contradiction. Only a
+    True identifies a block as the subject.
+    """
+    out: list[ParsedOwnedProperty] = []
+    for owned in deal.findall(".//m:OWNED_PROPERTY", NS):
+        out.append(
+            ParsedOwnedProperty(
+                is_subject=_to_bool(
+                    ctx.text(
+                        owned,
+                        ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertySubjectIndicator",
+                    )
+                ),
+                disposition_status=ctx.text(
+                    owned,
+                    ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertyDispositionStatusType",
+                ),
+                lien_upb=_to_decimal(
+                    ctx.text(owned, ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertyLienUPBAmount")
+                ),
+                unit_count=_to_int(
+                    ctx.text(owned, ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertyOwnedUnitCount")
+                ),
+                rental_income_gross=_to_decimal(
+                    ctx.text(
+                        owned,
+                        ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertyRentalIncomeGrossAmount",
+                    )
+                ),
+                rental_income_net=_to_decimal(
+                    ctx.text(
+                        owned,
+                        ".//m:OWNED_PROPERTY_DETAIL/m:OwnedPropertyRentalIncomeNetAmount",
+                    )
+                ),
+                current_usage_type=ctx.text(
+                    owned, ".//m:PROPERTY/m:PROPERTY_DETAIL/m:PropertyCurrentUsageType"
+                ),
+                usage_type=ctx.text(owned, ".//m:PROPERTY/m:PROPERTY_DETAIL/m:PropertyUsageType"),
+                estimated_value=_to_decimal(
+                    ctx.text(
+                        owned, ".//m:PROPERTY/m:PROPERTY_DETAIL/m:PropertyEstimatedValueAmount"
+                    )
+                ),
+            )
+        )
+    return out
+
+
 def _parse_assets(deal: etree._Element, ctx: _Ctx) -> list[ParsedAsset]:
     out: list[ParsedAsset] = []
     for asset in deal.findall(".//m:ASSETS/m:ASSET", NS):
@@ -429,6 +492,7 @@ def parse_mismo(content: bytes | str) -> ParsedMismo:
     prop = _parse_property(deal, ctx)
     liabilities = _parse_liabilities(deal, ctx)
     assets = _parse_assets(deal, ctx)
+    owned_properties = _parse_owned_properties(deal, ctx)
     catch_all = _parse_catch_all(deal, tree, ctx.consumed)
 
     # Metadata-only logging — NEVER the SSN, names, amounts, or raw content.
@@ -437,6 +501,7 @@ def parse_mismo(content: bytes | str) -> ParsedMismo:
         source_format=source_format,
         borrowers=len(borrowers),
         liabilities=len(liabilities),
+        owned_properties=len(owned_properties),
         assets=len(assets),
         catch_all_sections=len(catch_all),
         warnings=len(ctx.warnings),
@@ -448,6 +513,7 @@ def parse_mismo(content: bytes | str) -> ParsedMismo:
         property=prop,
         liabilities=liabilities,
         assets=assets,
+        owned_properties=owned_properties,
         catch_all=catch_all,
         parse_warnings=ctx.warnings,
         source_format=source_format,

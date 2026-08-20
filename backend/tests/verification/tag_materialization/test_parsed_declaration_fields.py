@@ -159,12 +159,28 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
     )
     # build_mismo_section only READS attributes (it is pure, no ORM behaviour), so duck-typed
     # SimpleNamespace rows drive the real mapping without the DB/session a real ORM row would need.
+    # LP-596 — every field must be POPULATED: `put` omits a NULL, so a row of Nones would leave the
+    # owned-property keys out of the universe this test exists to enumerate.
+    owned = ns(
+        id=uuid4(),
+        is_deleted=False,
+        is_subject=False,
+        disposition_status="Retain",
+        lien_upb=Decimal("1"),
+        unit_count=1,
+        rental_income_gross=Decimal("1"),
+        rental_income_net=Decimal("1"),
+        current_usage_type="Investment",
+        usage_type="Investment",
+        estimated_value=Decimal("1"),
+    )
     facts = build_mismo_section(
         loan_file=lf,  # type: ignore[arg-type]
         borrowers=[bor],  # type: ignore[list-item]
         property_=prop,  # type: ignore[arg-type]
         liabilities=[liab],  # type: ignore[list-item]
         assets=[asset],  # type: ignore[list-item]
+        owned_properties=[owned],  # type: ignore[list-item]
     )
     loan_keys, borrower_suffixes = set(), set()
     for key in facts:

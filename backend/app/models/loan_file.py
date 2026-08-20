@@ -47,7 +47,11 @@ if TYPE_CHECKING:
     from app.models.mismo_import import MismoImport
     from app.models.needs_item import NeedsItem
     from app.models.property import Property
-    from app.models.stated_financials import StatedAsset, StatedLiability
+    from app.models.stated_financials import (
+        StatedAsset,
+        StatedLiability,
+        StatedOwnedProperty,
+    )
     from app.models.verification import Verification
 
 # Domain for the borrower inbox address. A module constant for now; may move to
@@ -272,6 +276,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         cascade="all, delete-orphan",
     )
     stated_assets: Mapped[list["StatedAsset"]] = relationship(
+        back_populates="loan_file",
+        cascade="all, delete-orphan",
+    )
+    # LP-596 — the 1003's real-estate-owned schedule.
+    stated_owned_properties: Mapped[list["StatedOwnedProperty"]] = relationship(
         back_populates="loan_file",
         cascade="all, delete-orphan",
     )

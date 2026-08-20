@@ -58,7 +58,11 @@ from app.models.borrower import Borrower
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import Property
-from app.models.stated_financials import StatedAsset, StatedLiability
+from app.models.stated_financials import (
+    StatedAsset,
+    StatedLiability,
+    StatedOwnedProperty,
+)
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import SnapshotField
 from app.verification.snapshot.pii import PiiField, PiiKind
@@ -106,6 +110,7 @@ def build_mismo_section(
     property_: Property | None,
     liabilities: list[StatedLiability],
     assets: list[StatedAsset],
+    owned_properties: list[StatedOwnedProperty],
 ) -> dict[str, SnapshotField]:
     """Reshape already-loaded MISMO ORM rows into the flat snapshot ``mismo`` map.
 
@@ -253,6 +258,26 @@ def build_mismo_section(
         put(f"{akey}.value", asset.value)
         put(f"{akey}.holder_name", asset.holder_name)
 
+    # --- The real-estate-owned schedule (LP-596) --------------------------
+    # THE POINT OF THE TICKET IS THIS LOOP. The parser has always retained these leaves, but only in
+    # `catch_all`, which this section does not read and the snapshot therefore never carried. So the
+    # rule engine could not see them and AS-4 / DT-6 / DT-8 reported they could not determine facts
+    # the application states outright. Projecting them here is what makes them evaluable.
+    #
+    # No address: `_parse_owned_properties` deliberately does not read the nested PROPERTY/ADDRESS,
+    # so there is no PII to route — every field below is a status, a count or an amount.
+    for k, owned in enumerate(sorted(_active(owned_properties), key=lambda x: str(x.id)), start=1):
+        okey = f"owned_property.{k}"
+        put(f"{okey}.is_subject", owned.is_subject)
+        put(f"{okey}.disposition_status", owned.disposition_status)
+        put(f"{okey}.lien_upb", owned.lien_upb)
+        put(f"{okey}.unit_count", owned.unit_count)
+        put(f"{okey}.rental_income_gross", owned.rental_income_gross)
+        put(f"{okey}.rental_income_net", owned.rental_income_net)
+        put(f"{okey}.current_usage_type", owned.current_usage_type)
+        put(f"{okey}.usage_type", owned.usage_type)
+        put(f"{okey}.estimated_value", owned.estimated_value)
+
     return out
 
 
@@ -282,10 +307,12 @@ async def load_mismo_section(db: AsyncSession, loan_file: LoanFile) -> dict[str,
     ).scalar_one_or_none()
     liabilities = await _by_loan_file(StatedLiability)
     assets = await _by_loan_file(StatedAsset)
+    owned_properties = await _by_loan_file(StatedOwnedProperty)
     return build_mismo_section(
         loan_file=loan_file,
         borrowers=borrowers,
         property_=property_,
         liabilities=liabilities,
         assets=assets,
+        owned_properties=owned_properties,
     )

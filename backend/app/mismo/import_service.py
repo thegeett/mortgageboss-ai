@@ -49,6 +49,7 @@ from app.models.stated_financials import (
     StatedEmployer,
     StatedIncomeItem,
     StatedLiability,
+    StatedOwnedProperty,
 )
 from app.schemas.property import PropertyCreate
 from app.services.activity_log import log_activity
@@ -242,6 +243,25 @@ async def create_loan_file_from_mismo(
                     if liab.payoff_status
                     else ("mismo_exclusion" if liab.exclusion_indicator else None)
                 ),
+            )
+        )
+    # LP-596 — the 1003's real-estate-owned schedule. Stored verbatim: `is_subject` keeps MISMO's
+    # tri-state (None = the export did not say) rather than collapsing to a boolean, because the one
+    # real export marks `false` on every block and reading that as "not the subject" would be reading
+    # a default as a determination — the same trap `paid_off_at_closing` above sidesteps.
+    for owned in parsed.owned_properties:
+        db.add(
+            StatedOwnedProperty(
+                loan_file_id=loan_file.id,
+                is_subject=owned.is_subject,
+                disposition_status=owned.disposition_status,
+                lien_upb=owned.lien_upb,
+                unit_count=owned.unit_count,
+                rental_income_gross=owned.rental_income_gross,
+                rental_income_net=owned.rental_income_net,
+                current_usage_type=owned.current_usage_type,
+                usage_type=owned.usage_type,
+                estimated_value=owned.estimated_value,
             )
         )
     for asset in parsed.assets:

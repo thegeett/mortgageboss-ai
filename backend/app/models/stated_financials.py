@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -135,4 +135,56 @@ class StatedAsset(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     loan_file: Mapped[LoanFile] = relationship(back_populates="stated_assets")
 
 
-__all__ = ["StatedAsset", "StatedEmployer", "StatedIncomeItem", "StatedLiability"]
+class StatedOwnedProperty(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """One property the borrower already owns — the 1003's real-estate-owned schedule (LP-596).
+
+    File-level, like assets and liabilities: MISMO carries ``OWNED_PROPERTY`` at the deal level.
+
+    WHY THIS TABLE EXISTS. The parser retained these leaves in ``catch_all`` from the start, but
+    ``catch_all`` never reaches the snapshot — so the rule engine could not see them, and three live
+    rules were reporting they could not determine facts the application states outright:
+
+    * DT-8 / DT-6 ask whether a mortgage is the lien being refinanced or one on property the borrower
+      keeps. ``is_subject`` and ``disposition_status`` answer both.
+    * AS-4 waives minimum reserves for a one-unit principal residence, but only when the borrower has
+      no OTHER financed properties (B3-4.1-01). Sizing that needs the count, the lien balances, and
+      ``current_usage_type`` — the principal residence is excluded from the aggregate.
+
+    STATED, NOT VERIFIED. Everything here is what the application says; a lien balance is corroborated
+    by a payoff statement and a value by an appraisal, neither of which this table claims. It is named
+    for the ``Stated*`` family for exactly that reason.
+    """
+
+    __tablename__ = "stated_owned_properties"
+
+    loan_file_id: Mapped[UUID] = mapped_column(
+        ForeignKey("loan_files.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # TRI-STATE, and a False is close to meaningless — the real export marks `false` on every block
+    # because the subject property lives in its own section rather than being repeated here. Only a
+    # True identifies the subject. See `_parse_owned_properties`.
+    is_subject: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # MISMO OwnedPropertyDispositionStatusType: Retain / Sell / PendingSale.
+    disposition_status: Mapped[str | None] = mapped_column(String(_CATEGORY_LEN), nullable=True)
+    # The lien balance on THIS property. Joins to a StatedLiability by amount — in the real export the
+    # five UPBs match the five MortgageLoan balances exactly.
+    lien_upb: Mapped[Money | None] = mapped_column(nullable=True)
+    unit_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rental_income_gross: Mapped[Money | None] = mapped_column(nullable=True)
+    rental_income_net: Mapped[Money | None] = mapped_column(nullable=True)
+    # PrimaryResidence / Investment / SecondHome. The principal residence is EXCLUDED from the
+    # reserves aggregate, so this is load-bearing for AS-4 rather than descriptive.
+    current_usage_type: Mapped[str | None] = mapped_column(String(_CATEGORY_LEN), nullable=True)
+    usage_type: Mapped[str | None] = mapped_column(String(_CATEGORY_LEN), nullable=True)
+    estimated_value: Mapped[Money | None] = mapped_column(nullable=True)
+
+    loan_file: Mapped[LoanFile] = relationship(back_populates="stated_owned_properties")
+
+
+__all__ = [
+    "StatedAsset",
+    "StatedEmployer",
+    "StatedIncomeItem",
+    "StatedLiability",
+    "StatedOwnedProperty",
+]
