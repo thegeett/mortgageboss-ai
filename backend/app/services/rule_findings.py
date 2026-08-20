@@ -24,6 +24,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.finding import (
     EvaluationOutcome,
     Finding,
@@ -41,6 +42,8 @@ _HAS_SOURCE_TAG = "txn.has_identified_source"
 # ``resolved`` event so the history says WHY the rule now passes. A resolve is driven by a TAG flip,
 # never by an observation (the LP-320 boundary): an observation only surfaces to a human.
 _RESOLVING_TAGS = (_HAS_SOURCE_TAG, _SOURCE_STRENGTH_TAG)
+
+logger = get_logger(__name__)
 
 # Verdict → (evaluation outcome, severity color). NOT_APPLICABLE is absent → not persisted (the
 # rule does not apply to that subject). Severity is a COARSE triage color derived from the outcome;
@@ -347,7 +350,16 @@ async def reconcile_evaluation_findings(
     for identity, (result, outcome, severity, message) in this_by_identity.items():
         prior_finding = prior_by_identity.get(identity)
         if prior_finding is None:
+            # LP-595 — the fallback is now a LOUD last resort. `category_for_rule` covers every
+            # active rule and a test pins that, so reaching this line means a rule was filed under
+            # someone else's category: the failure that hid sixty-nine misfiled rules in ASSETS.
             category = category_by_rule.get(result.rule_id, default_category)
+            if result.rule_id not in category_by_rule:
+                logger.warning(
+                    "finding_category_unresolved",
+                    rule_id=result.rule_id,
+                    filed_under=default_category.value,
+                )
             finding = _build_finding(
                 loan_file_id=loan_file_id,
                 verification_id=verification_id,

@@ -204,17 +204,60 @@ def _rule_names() -> dict[str, str]:
     return {rule_id: rk.name for rule_id, rk in load_rule_kinds().items()}
 
 
+# LP-595 — the category a finding is FILED under, resolved per rule and then per FAMILY.
+#
+# THE BUG THIS REPLACES. There were nine entries here and a `default_category=ASSETS` fallback, so the
+# other sixty-nine active rules were all filed as ASSETS: the appraisal rules, every income rule, the
+# rate-lock rule, the mortgage-insurance rules. On LF-3CVT that was twenty-eight of thirty findings in
+# one category, which makes grouping or filtering by category actively misleading rather than merely
+# incomplete. Nothing failed — a wrong category is silent, which is why it survived.
+#
+# The family table is derived from what each family ASKS (its spec titles), not from the prefix letters:
+# CO is condo-project docs, IH is hazard insurance on the property, RE-1 is an undisclosed MORTGAGE
+# (a debt), LO-2 is letter-of-explanation completeness. A rule whose family answer is wrong for it gets
+# an entry in `_RULE_CATEGORY`, which always wins — that is what the ID split below is.
+_FAMILY_CATEGORY: dict[str, FindingCategory] = {
+    "AS": FindingCategory.ASSETS,  # deposits, statements, reserves
+    "AU": FindingCategory.REGULATORY,  # AUS recommendation status
+    "CL": FindingCategory.REGULATORY,  # rate-lock expiry
+    "CO": FindingCategory.PROPERTY,  # condo project: questionnaire, master policy, HOA budget
+    "CR": FindingCategory.CREDIT,  # tradelines, collections, disputes
+    "DT": FindingCategory.CREDIT,  # debt obligations and the ratios built from them
+    "FR": FindingCategory.CROSS_SOURCE,  # undisclosed arrangements, found by comparing sources
+    "ID": FindingCategory.CROSS_SOURCE,  # identity facts across sources (ID-6/7/9 override below)
+    "IH": FindingCategory.PROPERTY,  # hazard insurance ON the property
+    "IN": FindingCategory.INCOME,
+    "LO": FindingCategory.DOCUMENTATION,  # letter-of-explanation completeness
+    "MI": FindingCategory.REGULATORY,  # PMI / FHA MIP requirements
+    "OC": FindingCategory.PROPERTY,  # occupancy
+    "PC": FindingCategory.PROPERTY,  # purchase price, address, closing date
+    "PE": FindingCategory.REGULATORY,  # program eligibility
+    "PR": FindingCategory.PROPERTY,  # appraisal and property condition
+    "RE": FindingCategory.CREDIT,  # RE-1 is an undisclosed MORTGAGE — a debt, not a property fact
+    "TI": FindingCategory.PROPERTY,  # title
+}
+
+# Per-rule overrides. These WIN over the family. Only for a rule the family answer is wrong for.
 _RULE_CATEGORY: dict[str, FindingCategory] = {
-    "AS-1": FindingCategory.ASSETS,
-    "OC-2": FindingCategory.PROPERTY,
-    "ID-2": FindingCategory.CROSS_SOURCE,  # identity facts compared across sources
-    "ID-4": FindingCategory.CROSS_SOURCE,
-    "ID-1": FindingCategory.CROSS_SOURCE,  # name across sources
-    "ID-3": FindingCategory.CROSS_SOURCE,  # DOB across sources
+    # The ID family splits: 1/2/3/4 compare a fact ACROSS sources; 6/7/9 are about a document.
     "ID-6": FindingCategory.DOCUMENTATION,  # 1003 completeness
     "ID-7": FindingCategory.DOCUMENTATION,  # marital/title vesting consistency
     "ID-9": FindingCategory.DOCUMENTATION,  # POA acceptability
+    # ATR is a regulatory obligation (Dodd-Frank), not a reading of the borrower's debts.
+    "DT-7": FindingCategory.REGULATORY,
 }
+
+
+def category_for_rule(rule_id: str) -> FindingCategory | None:
+    """The category a rule's findings are filed under, or None if the rule is unclassified.
+
+    Returns None rather than guessing: ``test_every_active_rule_has_a_category`` turns an
+    unclassified rule into a CI failure, so a new rule cannot quietly inherit someone else's
+    category the way all sixty-nine did before LP-595.
+    """
+    if rule_id in _RULE_CATEGORY:
+        return _RULE_CATEGORY[rule_id]
+    return _FAMILY_CATEGORY.get(rule_id.split("-")[0])
 
 
 @dataclass
@@ -492,7 +535,13 @@ async def _persist(
         results=results,
         # The rules that RAN — the registry, the single source of truth — never the category map.
         evaluated_rule_ids=frozenset(ACTIVE_RULE_IDS),
-        category_by_rule=_RULE_CATEGORY,
+        # LP-595 — RESOLVED for every active rule (per-rule override, then family), not the nine-entry
+        # map that left the other sixty-nine falling through to ASSETS.
+        category_by_rule={
+            rule_id: category
+            for rule_id in ACTIVE_RULE_IDS
+            if (category := category_for_rule(rule_id)) is not None
+        },
         retire_eligible_rule_ids=retire_eligible_rule_ids,
     )
 
