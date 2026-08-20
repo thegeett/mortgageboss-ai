@@ -107,7 +107,12 @@ def test_the_prompt_lists_exactly_the_vocabulary_the_code_enforces() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _payload(title: str, detail: str) -> str:
+def _payload(
+    title: str, detail: str, *, values: tuple[str, str] = ("451829.00", "451829.00")
+) -> str:
+    """One finding. `values` are the two SOURCE figures — LP-602 compares them, so a fixture claiming
+    a mismatch has to carry figures that actually differ. The default is the equal pair, which is the
+    real staging case."""
     return json.dumps(
         {
             "findings": [
@@ -116,8 +121,8 @@ def _payload(title: str, detail: str) -> str:
                     "title": title,
                     "detail": detail,
                     "sources": [
-                        {"label": "application", "value": "451829.00"},
-                        {"label": "owned property schedule", "value": "451829.00"},
+                        {"label": "application", "value": values[0]},
+                        {"label": "owned property schedule", "value": values[1]},
                     ],
                 }
             ]
@@ -142,6 +147,7 @@ def test_a_real_mismatch_is_untouched() -> None:
         "Existing mortgage balance differs between application and owned property schedule",
         "The application lists $451,829.00 and the schedule shows $398,000.00, a difference of "
         "$53,829.00 that nothing on the file explains.",
+        values=("451829.00", "398000.00"),
     )
 
     assert len(_parse(text)) == 1
@@ -153,6 +159,7 @@ def test_a_finding_that_merely_mentions_agreement_is_kept() -> None:
         "Income stated on the application is not supported by the pay documents",
         "The employer names match, but the stated $13,166.67 monthly does not reconcile to the "
         "annualised figure on the pay stubs.",
+        values=("13166.67", "9800.00"),
     )
 
     assert len(_parse(text)) == 1
@@ -164,3 +171,66 @@ def test_the_prompt_no_longer_invites_reporting_agreement() -> None:
         SNAPSHOT_CROSS_SOURCE_PROMPT
     )
     assert "If two figures MATCH, that is not a finding" in SNAPSHOT_CROSS_SOURCE_PROMPT
+
+
+# --------------------------------------------------------------------------- #
+# LP-602 — compare the figures, do not hunt for a phrase
+# --------------------------------------------------------------------------- #
+
+
+def test_a_mismatch_whose_own_sources_are_equal_is_dropped() -> None:
+    """VERBATIM FROM STAGING, and the finding LP-598's guard was written for and missed.
+
+        title:  "Existing mortgage balance differs between application and owned property schedule"
+        kind:   value_mismatch
+        sources: owned_property.1.lien_upb = "$451,829"
+                 liability.3.unpaid_balance (UNITED WHSLE MORT) = "$451,829"
+        detail: "... so they match. No mismatch exists here."
+
+    LP-598 looked for "these match" in the prose; the model wrote "they match". A wording check is a
+    guess about phrasing. The figures were sitting in `sources` the whole time.
+    """
+    text = _payload(
+        "Existing mortgage balance differs between application and owned property schedule",
+        "The application lists an owned property (the subject) with a lien UPB of $451,829. The "
+        "liability schedule lists the UNITED WHSLE MORT mortgage with an unpaid balance of $451,829. "
+        "However, both state $451,829, so they match. No mismatch exists here.",
+        values=("$451,829", "$451,829"),
+    )
+
+    assert _parse(text) == []
+
+
+def test_formatting_differences_are_not_a_mismatch() -> None:
+    """The comparison normalises, so "$451,829" and "451829.00" are the SAME figure — the same
+    normalisation identity already uses. Without it, a model citing one source formatted and the other
+    raw would manufacture a discrepancy out of punctuation."""
+    text = _payload(
+        "Balance differs between the application and the schedule",
+        "The two sections state different balances.",
+        values=("$451,829", "451829.00"),
+    )
+
+    assert _parse(text) == []
+
+
+def test_the_kind_alone_is_enough_to_claim_a_difference() -> None:
+    """A title that does not use the word "differs" still claims one when `kind` is value_mismatch."""
+    text = _payload(
+        "Existing mortgage balance across the two sections",
+        "Both sections report the same figure.",
+        values=("451829.00", "451829.00"),
+    )
+
+    assert _parse(text) == []
+
+
+def test_the_prompt_names_the_calculation_blocked_evasion() -> None:
+    """The same run showed three "document absent" findings filed as `calculation_blocked` — the model
+    routing around "do not report a missing document" by relabelling it. The prohibition now says it
+    holds whatever kind is chosen, and what that kind is actually for."""
+    from app.ai.snapshot_cross_source import SNAPSHOT_CROSS_SOURCE_PROMPT
+
+    assert "reported as calculation_blocked" in SNAPSHOT_CROSS_SOURCE_PROMPT
+    assert "This holds WHATEVER" in SNAPSHOT_CROSS_SOURCE_PROMPT
+    assert "Use that kind only when a COMPUTED figure" in SNAPSHOT_CROSS_SOURCE_PROMPT

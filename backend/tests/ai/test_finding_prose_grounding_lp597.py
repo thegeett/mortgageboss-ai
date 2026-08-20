@@ -215,7 +215,10 @@ async def test_it_is_retried_rather_than_falling_back_to_the_template(monkeypatc
     )
     monkeypatch.setattr("app.ai.finding_prose.complete", model)
 
-    result = await compose(_summary())
+    # settled=True: DT-8's is a SATISFIED finding, so a statement is the right shape and LP-603's
+    # inverse guard ("a review must ask for something") does not apply. The fixture said otherwise
+    # before, which made it an incoherent pair — a pass-style sentence on an unresolved finding.
+    result = await compose(_summary(settled=True))
 
     assert result is not None
     assert "correctly" not in result.message
@@ -254,3 +257,56 @@ def test_a_pass_finding_asking_for_work_is_still_caught_through_the_shared_path(
         "asking_on_a_pass"
     )
     assert rejection_reason(settled, _composition("Reserves are fully documented")) is None
+
+
+# --------------------------------------------------------------------------- #
+# LP-603 — a finding on the list must say what to do about it
+# --------------------------------------------------------------------------- #
+
+
+def test_a_finding_that_is_not_resolved_must_ask_for_something() -> None:
+    """VERBATIM FROM STAGING. OC-2 shipped this on a `needs_review`:
+
+        "The stated primary residence occupancy is supported by the application."
+
+    A sentence that reads as a pass, sitting in Needs attention, asking for nothing. OC-2 is a
+    judgment rule and ratifies every verdict (ADR-336), so even a confident "yes" reaches a human —
+    and the text has to make that ratification the ask rather than report that all is well.
+
+    The `settled` direction was already guarded ("do not write a pass as a task"); this is its
+    inverse, which had no check at all.
+    """
+    from app.ai.finding_prose import rejection_reason
+
+    unresolved = _summary(settled=False)
+    shipped = _composition("The stated primary residence occupancy is supported by the application")
+
+    assert rejection_reason(unresolved, shipped) == "stating_on_a_review"
+    assert rejection_reason(unresolved, _composition("Confirm the stated occupancy")) is None
+
+
+def test_the_two_directions_do_not_contradict_each_other() -> None:
+    """The pair has to be exclusive, or every composition is rejected whichever way it is written."""
+    from app.ai.finding_prose import rejection_reason
+
+    statement = _composition("Reserves are fully documented")
+    task = _composition("Obtain the reserve documentation")
+
+    assert rejection_reason(_summary(settled=True), statement) is None
+    assert rejection_reason(_summary(settled=True), task) == "asking_on_a_pass"
+    assert rejection_reason(_summary(settled=False), task) is None
+    assert rejection_reason(_summary(settled=False), statement) == "stating_on_a_review"
+
+
+def test_ih3_asks_for_both_sides_of_its_comparison() -> None:
+    """IH-3 compares an insurance effective date against a closing date, and its couldnt_check fix
+    presumed the policy was already in the file ("the policy's effective date", "if more than one
+    homeowners policy is in the file"). On a file carrying NEITHER — the ordinary state at intake — it
+    asked only for the Closing Disclosure, so a processor who uploaded it would find the rule still
+    unable to answer."""
+    from app.verification.rules.specs import load_rule_spec
+
+    fix = load_rule_spec("IH-3").deterministic.couldnt_check_fix or ""
+
+    assert "homeowners insurance declarations page or binder" in fix
+    assert "Closing Disclosure" in fix

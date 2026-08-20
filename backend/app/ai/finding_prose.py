@@ -297,6 +297,7 @@ _RETRYABLE = frozenset(
         "asking_on_a_pass",
         "malformed",
         "editorialising",
+        "stating_on_a_review",
     }
 )
 
@@ -323,6 +324,14 @@ def rejection_reason(summary: FactSummary, composition: Composition) -> str | No
         return "identifier"
     if summary.settled and asks_for_work(composition):
         return "asking_on_a_pass"
+    # LP-603 — THE INVERSE, which had no check at all. A finding that is NOT settled is on the
+    # processor's list because something is outstanding, and its action must say what to do about it.
+    # OC-2 shipped "The stated primary residence occupancy is supported by the application." on a
+    # `needs_review`: a sentence that reads as a pass, sitting in Needs attention, asking for nothing.
+    # OC-2 is a judgment rule and ratifies every verdict (ADR-336), so even a confident "yes" reaches a
+    # human — and the text has to make the ratification the ask, not report that all is well.
+    if not summary.settled and not asks_for_work(composition):
+        return "stating_on_a_review"
     return None
 
 
@@ -349,6 +358,11 @@ _REJECTION_GUIDANCE = {
         "what a system or a check did."
     ),
     "identifier": "you included an identifier that must never reach a processor. Remove it.",
+    "stating_on_a_review": (
+        "this check is NOT resolved — something is still outstanding — and you wrote it as a "
+        "statement. Begin the action with what the processor must DO about it: Obtain, Confirm, "
+        "Verify, Review, Check, Upload, Provide or Request."
+    ),
     "editorialising": (
         "you wrote that something was done correctly, properly or accurately. Say what the file "
         "SHOWS, never whether a figure or a calculation is right — that is not yours to assert."

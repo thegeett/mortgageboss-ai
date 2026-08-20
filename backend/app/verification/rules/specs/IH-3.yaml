@@ -90,11 +90,15 @@ deterministic:
   # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
   # so without this the finding named a missing fact and stopped there. Static per rule, so the
   # wording holds whichever gated input was the missing one.
+  # LP-603 — NAMES BOTH SIDES, because either can be the missing one and the old text presumed the
+  # policy was already there ("the policy's effective date", "if more than one homeowners policy is in
+  # the file"). On a file carrying NEITHER — the ordinary state at intake — it asked only for the
+  # Closing Disclosure, so a processor who uploaded it would find the rule still unable to answer.
   couldnt_check_fix: >-
-    Upload the Closing Disclosure or settlement statement carrying the closing date, so the policy's
-    effective date can be compared with it. If more than one homeowners policy is in the file, confirm
-    which is in force: two policies with different effective dates leave it unclear which one
-    governs at closing.
+    Upload both sides of this comparison: the homeowners insurance declarations page or binder showing
+    the policy's effective date, and the Closing Disclosure or settlement statement carrying the
+    closing date. If more than one homeowners policy is in the file, confirm which is in force: two
+    policies with different effective dates leave it unclear which one governs at closing.
   load_bearing_tags:
     - ins.loan_effective_date
     - contract.loan_closing_date

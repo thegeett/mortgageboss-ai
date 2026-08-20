@@ -64,7 +64,11 @@ Report a finding only when you can name BOTH sides and they can be compared. Goo
 - two documents that disagree about the same fact
 
 Do NOT report:
-- a missing document on its own (the needs list tracks those)
+- a missing document on its own (the needs list tracks those). This holds WHATEVER "kind" you would
+  give it: "the appraisal is absent so the stated value cannot be verified" and "no credit report, so
+  the tradelines cannot be checked" are missing documents, not blocked calculations, and must not be
+  reported as calculation_blocked. Use that kind only when a COMPUTED figure — a ratio, a total — is
+  named and cannot be produced.
 - a ratio being high or low (the calculators judge those)
 - anything you cannot point at two sources for
 - a restatement of a single value with nothing to compare it to
@@ -232,6 +236,25 @@ def _parse(text: str) -> list[SnapshotFindingDraft]:
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
+        # LP-602 — A MISMATCH WHOSE OWN SOURCES ARE EQUAL. This is the check LP-598 should have
+        # written: it compares the VALUES the model cited rather than hunting for a phrase in its
+        # prose. Verbatim from staging, titled "Existing mortgage balance differs between application
+        # and owned property schedule", kind `value_mismatch`, sources:
+        #
+        #     owned_property.1.lien_upb                        = "$451,829"
+        #     liability.3.unpaid_balance (UNITED WHSLE MORT)   = "$451,829"
+        #
+        # ...and a detail ending "so they match. No mismatch exists here." LP-598's phrase list held
+        # "these match" and the model wrote "they match", so it sailed through — which is the lesson:
+        # a wording check is a guess about phrasing, and the numbers are right there.
+        #
+        # Normalised through `_normalise`, so "$451,829" and "451829.00" count as equal — the same
+        # comparison identity already uses.
+        values = {_normalise(str(s.get("value", ""))) for s in sources if isinstance(s, dict)}
+        claims_a_difference = _claims_mismatch(title) or kind.strip().casefold() == "value_mismatch"
+        if claims_a_difference and len(values) == 1:
+            continue
+
         # LP-598 — A FINDING THAT CONTRADICTS ITSELF. The prompt used to invite the model to "say when
         # figures that LOOK inconsistent are actually consistent", and it obliged: LF-3CVT carried
         # `existing_mortgage_balance_mismatch` whose own detail read "These figures match, confirming
