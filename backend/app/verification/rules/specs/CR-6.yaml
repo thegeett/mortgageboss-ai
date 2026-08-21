@@ -133,10 +133,17 @@ deterministic:
   # produced 35 unfixable couldnt_check findings telling a processor to "read the event's own date from the
   # discharge order" for a credit card. That is the flooding CR-12 documents having fixed. liab.is_derogatory
   # was declared and produced and read by NO spec — it is the predicate this rule was missing.
+  # LP-613 — A SECOND PREDICATE, and the rule is wrong without it. `liab.is_derogatory` is produced
+  # ONLY for `credit_report_reported` rows (the tag's `subject_source` gate, LP-606), so on a
+  # MISMO-stated liability the tag is ABSENT — and an absent predicate resolves to couldnt_check, not
+  # not_applicable. On a file that HAS a tri-merge report, its eight stated liabilities therefore each
+  # shipped a couldnt_check saying "Upload the tri-merge credit report", which the processor already
+  # did and can never clear. Scoping to the report leg makes a stated row scope-FALSE (not_applicable),
+  # which is the honest answer: this rule has no question to ask of a row the report never reported.
+  # CR-1 and CR-12 carry the identical predicate for the identical reason.
   applicability:
-    tag: liab.is_derogatory
-    op: eq
-    value: "yes"
+    - {tag: liability.source, op: eq, value: credit_report_reported}
+    - {tag: liab.is_derogatory, op: eq, value: "yes"}
   # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
   # so without this the finding named a missing fact and stopped there. Static per rule, so the
   # wording holds whichever gated input was the missing one.

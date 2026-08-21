@@ -49,7 +49,7 @@ consistency:
   on_disagree:
     verdict: fired
     reasoning: >-
-      the date of birth differs across sources ({sources}) — a differing DOB is a discrepancy to resolve
+      the date of birth differs across {count} sources ({sources}) — a differing DOB is a discrepancy to resolve
     how_to_fix: >-
       Confirm the borrower's date of birth and correct the source(s) that disagree. A genuine
       mismatch across the 1003, credit report, or ID may indicate a data-entry error or identity

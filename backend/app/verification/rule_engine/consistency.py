@@ -335,13 +335,20 @@ def _outcome_result(
 
     ``reason_suffix`` (LP-372) appends a note about candidates that were excluded because their filter
     TYPE was AI-``unknown`` — so a satisfied/fired verdict SURFACES what it could not compare."""
+    labels = [inst.source_label or inst.source_id for inst in gathered]
+    # DEDUPED, order-preserving, WHEN THE SOURCES AGREE: five documents of two kinds read
+    # "pay stub, W-2" rather than "pay stub, pay stub, W-2, W-2, W-2", and `{count}` carries the number.
+    #
+    # LP-613 — NOT when they disagree. Deduping by document TYPE erases the multiplicity a disagreement
+    # IS: two pay stubs carrying different SSNs rendered "the SSN differs across sources (pay stub)",
+    # which reads as one document contradicting itself and names neither of the two to compare. The
+    # fired templates carry no `{count}` either, so the number was not recovering it. Keeping every
+    # source on a disagreement says "pay stub, pay stub" — odd-looking and true, and no content id
+    # reaches the sentence, which is what LP-607 was actually protecting.
+    disagrees = VERDICT_BY_NAME[outcome.verdict] is not Verdict.SATISFIED
     fields = {
         "values": ", ".join(str(inst.tag.value) for inst in gathered),
-        # DEDUPED, order-preserving: five documents of two kinds read "pay stub, W-2" rather than
-        # "pay stub, pay stub, W-2, W-2, W-2". `{count}` carries the number, so nothing is lost.
-        "sources": ", ".join(
-            dict.fromkeys(inst.source_label or inst.source_id for inst in gathered)
-        ),
+        "sources": ", ".join(labels if disagrees else dict.fromkeys(labels)),
         "count": str(len(gathered)),
     }
     return _result(

@@ -193,7 +193,16 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
     # that same JSON, so a file with 24 documents silently licensed the token "24" anywhere in the
     # output ("24 months of reserves"). The count is excluded here rather than kept out of the
     # payload, because the model genuinely needs to see it.
-    source = _numbers_in(summary.to_json()) - _numbers_in(str(summary.documents_on_file))
+    #
+    # LP-613 — AND NEITHER ARE THE DOCUMENT-KIND LABELS, for the same reason and by the same route.
+    # `document_kinds_on_file` (LP-610) lists kinds by slug, and several slugs ARE numbers: a file
+    # holding a 1099 licensed the literal "1099" anywhere in the output, a 1003 licensed "1003". The
+    # field two lines up was given this treatment and the new one was not.
+    source = (
+        _numbers_in(summary.to_json())
+        - _numbers_in(str(summary.documents_on_file))
+        - _numbers_in(str(summary.document_kinds_on_file))
+    )
     return _numbers_in(composition.message) - source
 
 

@@ -18,7 +18,6 @@ from sqlalchemy.orm import selectinload
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.models.base import utcnow
-from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.finding import EvaluationOutcome, Finding, FindingOrigin, FindingStatus
 from app.models.finding_event import FindingEvent
@@ -53,6 +52,7 @@ from app.schemas.verification import (
     _rule_spec,
 )
 from app.services.aggression import active_cutoff, resolve_aggression_level
+from app.services.borrowers import borrower_display_names
 from app.services.cross_source import (
     assemble_cross_source_context,
     compute_input_fingerprint,
@@ -141,19 +141,12 @@ async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
 
 
 async def _borrower_names(db: DbSession, loan_file_id: UUID) -> dict[str, str]:
-    """The file's active borrowers as ``str(id) → "First Last"`` (LP-377-B), so a per-borrower finding's
-    subject resolves to a name a processor recognises rather than the borrower's UUID."""
-    rows = (
-        await db.execute(
-            only_active(
-                select(Borrower.id, Borrower.first_name, Borrower.last_name).where(
-                    Borrower.loan_file_id == loan_file_id
-                ),
-                Borrower,
-            )
-        )
-    ).all()
-    return {str(r.id): f"{r.first_name} {r.last_name}".strip() for r in rows}
+    """The file's active borrowers as ``str(id) → name`` (LP-377-B), so a per-borrower finding's
+    subject resolves to a name a processor recognises rather than the borrower's UUID.
+
+    Delegates to the shared builder (LP-613): this path and the prose composer disagreed on whether a
+    middle name is part of the name, so one finding could read two ways in one panel."""
+    return await borrower_display_names(db, loan_file_id)
 
 
 async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) -> Finding | None:

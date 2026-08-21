@@ -84,7 +84,7 @@ consistency:
   on_disagree:
     verdict: fired
     reasoning: >-
-      the borrower's current residence differs across sources ({sources}) — a real discrepancy
+      the borrower's current residence differs across {count} sources ({sources}) — a real discrepancy
     how_to_fix: >-
       Confirm the borrower's current residence address and reconcile the source(s) that disagree. A
       mailing or prior address should be typed accordingly, not compared as the current residence.

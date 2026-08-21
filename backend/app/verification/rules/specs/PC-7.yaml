@@ -103,7 +103,7 @@ spec_version: 1
 deterministic:
   # LP-608 — see AS-4. The closing date can come from either document, so both are named rather than
   # presuming which one the file will have.
-  # LP-610 — the second branch. ⚠️ PC-7's two document groups are ALTERNATIVES for one fact — the
+  # LP-610 — the second branch. PC-7's two document groups are ALTERNATIVES for one fact — the
   # closing date comes from the purchase agreement OR the Closing Disclosure — not two sides of a
   # comparison like the other eight. "Upload only the other" would be wrong here: neither is owed
   # once one is present. See AS-4 for why the alternative must live in the template at all.

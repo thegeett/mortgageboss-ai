@@ -167,7 +167,7 @@ class SnapshotFindingDraft:
         Same two facts, reworded title, sources listed in the opposite order — one identity now,
         three findings before. A label is commentary; an address is a fact about where the fact is.
 
-        ⚠️ THE INDEX IS KEPT. Stripping it (`liability.3.unpaid_balance` → `liability.unpaid_balance`)
+        THE INDEX IS KEPT. Stripping it (`liability.3.unpaid_balance` → `liability.unpaid_balance`)
         to survive a reordering was measured and REJECTED: it gave identical stability (4 of 5) while
         collapsing `liability.1` and `liability.4` onto one key, so two findings about different debts
         would silently merge. The cost of keeping it is that renumbering breaks identity —
@@ -192,7 +192,20 @@ class SnapshotFindingDraft:
     @property
     def paths(self) -> set[str]:
         """The snapshot addresses this finding is about — its identity, and the only part of a
-        source the model cannot reword."""
+        source the model cannot reword.
+
+        CANONICALISED to the leaf-suffix form (LP-613). `snapshot_paths` deliberately accepts BOTH the
+        full route (``mismo.facts.liability.3.unpaid_balance``) and the bare leaf key
+        (``liability.3.unpaid_balance``), because the flat sections read one way and the nested ones
+        the other and making the model guess a house style is not the point of a grounding check. But
+        identity hashes these strings verbatim, so accepting two spellings of ONE address meant a model
+        that cited the leaf on one run and the route on the next produced two different `finding_key`s
+        for one finding: a duplicate row, and a lost sign-off on the original. That is the failure this
+        whole module exists to prevent, arriving through the door left open for grounding.
+
+        The permissive acceptance stays where it belongs — in the grounding check. Identity sees one
+        form.
+        """
         return {str(s.get("path", "")).strip() for s in self.sources if s.get("path")}
 
     @property
@@ -314,6 +327,11 @@ def _parse(text: str, snapshot_keys: frozenset[str] | None = None) -> list[Snaps
             cited = {str(s.get("path", "")).strip() for s in sources}
             if not cited or not cited.issubset(snapshot_keys):
                 continue
+            # LP-613 — one spelling per address, decided HERE where the snapshot's own key set is in
+            # hand. Grounding stays permissive (above); identity must not be, or the model's choice of
+            # route-vs-leaf on a given run silently becomes a different finding.
+            for source in sources:
+                source["path"] = _canonical_path(source["path"], snapshot_keys)
 
         values = {_normalise(str(s.get("value", ""))) for s in sources if isinstance(s, dict)}
         claims_a_difference = _claims_mismatch(title) or kind.strip().casefold() == "value_mismatch"
@@ -376,6 +394,31 @@ async def reason_over_snapshot(
     return drafts
 
 
+def _canonical_path(path: str, snapshot_keys: frozenset[str]) -> str:
+    """One spelling for one snapshot address (LP-613).
+
+    `snapshot_paths` accepts a cited place in two forms — the full route
+    (``mismo.facts.liability.3.unpaid_balance``) and the flat-section key
+    (``liability.3.unpaid_balance``) — because the snapshot genuinely reads both ways and a grounding
+    check exists to catch fabrication, not to make the model guess a house style. Identity, though,
+    hashes these strings verbatim: two spellings of one address are two findings, so a model that
+    cites the route this run and the leaf the next resolves the first as "fixed by a file change",
+    loses its sign-off, and opens a duplicate beside it.
+
+    So identity sees the SHORTEST dotted suffix the snapshot actually accepts. Shortest, because that
+    is the form the flat sections publish and the one a route reduces to; dotted, because a bare
+    single word (``value``, ``amount``) is a field name rather than an address, and collapsing to one
+    would merge unrelated findings. Falls back to the path as cited when no suffix is registered.
+    """
+    stripped = path.strip()
+    segments = stripped.split(".")
+    for start in range(len(segments) - 1, -1, -1):
+        candidate = ".".join(segments[start:])
+        if "." in candidate and candidate in snapshot_keys:
+            return candidate
+    return stripped
+
+
 def snapshot_paths(snapshot: Any) -> frozenset[str]:
     """Every address a finding may legitimately cite (LP-604).
 
@@ -396,7 +439,15 @@ def snapshot_paths(snapshot: Any) -> frozenset[str]:
                 accepted.add(route)
                 # The leaf key alone — `liability.3.unpaid_balance` rather than
                 # `mismo.facts.liability.3.unpaid_balance`, which is how the flat sections read.
-                accepted.add(str(key))
+                #
+                # LP-613 — ONLY when the key is itself a dotted address. Accepting every key at every
+                # depth registered generic names like `value`, `source`, `absent` and `confidence`, so
+                # a source citing `path: "value"` passed the grounding check that exists to reject
+                # fabrication — and since identity is (kind, paths), two unrelated findings of one kind
+                # citing such names collapsed to a single `finding_key`, where the dedupe drops the
+                # second silently. A dotted key is a real address; a bare word is a field name.
+                if "." in str(key):
+                    accepted.add(str(key))
                 walk(value, route)
         elif isinstance(node, list):
             for index, value in enumerate(node):

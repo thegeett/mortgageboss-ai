@@ -75,7 +75,7 @@ consistency:
     reasoning: the borrower's employer agrees across all {count} sources ({sources}) after tolerant comparison
   on_disagree:
     verdict: fired
-    reasoning: the borrower's employer differs across sources ({sources}) — a discrepancy to reconcile
+    reasoning: the borrower's employer differs across {count} sources ({sources}) — a discrepancy to reconcile
     how_to_fix: >-
       Confirm the borrower's employer and reconcile the source(s) that disagree. A legal-vs-common-name
       difference should be documented; a genuinely different employer may indicate a second job (verify

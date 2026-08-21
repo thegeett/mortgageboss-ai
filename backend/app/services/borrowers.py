@@ -140,3 +140,32 @@ async def soft_delete_borrower(db: AsyncSession, *, borrower: Borrower) -> None:
     """Soft-delete a borrower (set ``deleted_at``); never a hard delete."""
     borrower.deleted_at = utcnow()
     await db.flush()
+
+
+async def borrower_display_names(db: AsyncSession, loan_file_id: UUID) -> dict[str, str]:
+    """The file's active borrowers as ``str(id) → display name`` — ONE builder, for every caller.
+
+    LP-613 — there were two. The findings list built ``f"{first} {last}"`` in the API layer while the
+    prose composer used ``Borrower.full_name`` (first + MIDDLE + last) through a private snapshot
+    helper, so any borrower with a middle name read "Aditya Talluri" in the list and "Aditya K Talluri"
+    in the text of a finding sitting in that list. LP-605 set out to make both paths use "the same
+    resolver, with the same maps" and got the maps; this is the resolver.
+
+    ``full_name`` is the display form, because it is what the borrower is called everywhere else in the
+    product. Selects the three columns it needs rather than whole ORM rows: the composer's old path
+    loaded every column on every composition pass, SSN ciphertext included, for a name.
+    """
+    rows = (
+        await db.execute(
+            only_active(
+                select(
+                    Borrower.id, Borrower.first_name, Borrower.middle_name, Borrower.last_name
+                ).where(Borrower.loan_file_id == loan_file_id),
+                Borrower,
+            )
+        )
+    ).all()
+    return {
+        str(r.id): " ".join(part for part in (r.first_name, r.middle_name, r.last_name) if part)
+        for r in rows
+    }

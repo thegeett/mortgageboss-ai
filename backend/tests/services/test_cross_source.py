@@ -231,6 +231,8 @@ async def test_starter_comparisons_and_an_unanticipated_discrepancy(
         loan_file,
         [
             _raw(type="income_variance", description="income off"),
+            # LP-613 — `employer_mismatch` is DEFERRED unconditionally now (IN-5 owns the question),
+            # so it is asserted separately below rather than expected in this set.
             _raw(type="employer_mismatch", description="employer differs"),
             _raw(type="gift_discrepancy", description="gift differs"),
             # A novel discrepancy with no canonical type → the "other" bucket survives:
@@ -244,10 +246,12 @@ async def test_starter_comparisons_and_an_unanticipated_discrepancy(
     rule_ids = {f.rule_id for f in await _findings(db_session, loan_file.id)}
     assert rule_ids == {
         "cross_source.income_variance",
-        "cross_source.employer_mismatch",
         "cross_source.gift_discrepancy",
         "cross_source.other",  # the novel one — preserved, not suppressed
     }
+    assert "cross_source.employer_mismatch" not in rule_ids, (
+        "IN-5 owns the employer question; an AI finding of that type must not reach the file"
+    )
 
 
 async def test_findings_are_for_review_not_auto_applied(db_session: AsyncSession) -> None:
@@ -553,15 +557,14 @@ async def test_rerun_replaces_open_findings(db_session: AsyncSession) -> None:
     assert len(await _active_findings(db_session, loan_file.id)) == 2
 
     # A second pass returns a different set — the first run's open findings are gone.
+    # LP-613 — `employer_mismatch` is deferred (IN-5 owns it), so the second pass yields ONE finding.
+    # The point of the test is that the FIRST run's open findings are superseded, which still holds.
     await _run(
         db_session, loan_file, [_raw(type="income_variance"), _raw(type="employer_mismatch")]
     )
     active = await _active_findings(db_session, loan_file.id)
-    assert len(active) == 2  # not 4 — the prior open findings were superseded
-    assert {f.rule_id for f in active} == {
-        "cross_source.income_variance",
-        "cross_source.employer_mismatch",
-    }
+    assert len(active) == 1  # not 3 — the prior open findings were superseded
+    assert {f.rule_id for f in active} == {"cross_source.income_variance"}
 
 
 async def test_rerun_preserves_resolved_findings(db_session: AsyncSession) -> None:

@@ -644,6 +644,24 @@ CROSS_SOURCE_RULES: tuple[CrossSourceRule, ...] = (
 OWNED_CANONICAL_TYPES: frozenset[str] = frozenset(r.canonical_type for r in CROSS_SOURCE_RULES)
 
 
+# LP-613 — TYPES A GOVERNED RULE NOW OWNS, deferred whether or not anything fired this run.
+#
+# The deferral above is RUN-SCOPED: it drops an AI finding only when a deterministic rule emitted that
+# type on the same run. That was right while a deterministic rule owned the question, because silence
+# from it meant "the facts for it were not present" and the AI was the wider net.
+#
+# It is wrong for a question that MOVED to the governed engine. LP-606 retired the employer rule and
+# LP-611 the name rule, both because a strict `_norm` disagreed with a tolerant governed rule in front
+# of a processor. Retiring them removed the FIRING, not the question — so on a name-order or spelling
+# variance nothing fires, the type is absent from `fired_types`, and the AI pass (whose prompt still
+# lists both types, with no tolerance guidance) re-emits the very sentence that was retired, beside
+# ID-1's "consistent across all sources". The contradiction returns from the other side.
+#
+# These types are therefore deferred UNCONDITIONALLY: ID-1..ID-4 and IN-5 are the authority on them,
+# and their silence is an ANSWER ("consistent"), not an absence of one.
+GOVERNED_OWNED_TYPES: frozenset[str] = frozenset({"identity_discrepancy", "employer_mismatch"})
+
+
 def apply_cross_source_overlay(
     rules: tuple[CrossSourceRule, ...], overrides: dict[str, Condition]
 ) -> tuple[CrossSourceRule, ...]:

@@ -44,7 +44,7 @@ consistency:
   on_disagree:
     verdict: fired
     reasoning: >-
-      the SSN differs across sources ({sources}) — a differing SSN is a discrepancy to resolve
+      the SSN differs across {count} sources ({sources}) — a differing SSN is a discrepancy to resolve
     how_to_fix: >-
       Confirm the borrower's SSN and correct the source(s) that disagree. A genuine mismatch
       across the 1003, credit report, or ID may indicate identity fraud and must be escalated.

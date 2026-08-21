@@ -63,6 +63,7 @@ from app.services.finding_identity import FindingIdentity, finding_identity
 from app.services.finding_reconcile import reconcile_findings
 from app.services.finding_source_matching import populate_finding_source_documents
 from app.services.verifications import mark_verification_current
+from app.verification.cross_source import GOVERNED_OWNED_TYPES
 from app.verification.finding_guidance import (
     FIX_KEY,
     GUIDANCE_BY_TYPE,
@@ -150,8 +151,13 @@ async def run_cross_source(
     deferred = 0
     fresh_ai: list[Finding] = []
     for raw in result.findings:
-        if raw.type in fired_types:
+        if raw.type in fired_types or raw.type in GOVERNED_OWNED_TYPES:
             # A deterministic rule already owns + reported this discrepancy — the AI defers.
+            #
+            # LP-613 — and it defers on a GOVERNED-owned type whether or not anything fired. The
+            # run-scoped test alone reads a retired rule's silence as "nobody asked", when a governed
+            # rule did ask and answered "consistent"; the AI then re-emits the sentence the retirement
+            # removed, contradicting that answer in the same panel.
             deferred += 1
             continue
         fresh_ai.append(

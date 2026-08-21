@@ -49,7 +49,7 @@ WHAT TO REPORT — DISCREPANCIES AND MISSING DOCUMENTATION:
 - A CONFLICT — a stated value and a documented value that DISAGREE (e.g. stated
   income vs. the income shown by the pay stubs / W-2s).
 
-  ⚠️ COMPARE LIKE WITH LIKE, AND DO THE ARITHMETIC FIRST. A pay stub states gross
+  COMPARE LIKE WITH LIKE, AND DO THE ARITHMETIC FIRST. A pay stub states gross
   pay PER PERIOD — weekly, biweekly, semi-monthly — and the application states a
   MONTHLY figure. Convert the per-period amount to a monthly one before deciding
   whether anything disagrees (biweekly x 26 / 12; semi-monthly x 24 / 12; weekly
@@ -62,7 +62,7 @@ WHAT TO REPORT — DISCREPANCIES AND MISSING DOCUMENTATION:
   which is how it was caught. If your own explanation would show the figures
   agreeing, there is nothing to report.
 
-  ⚠️ AND CONVERTING IS NOT ENOUGH — YOU MUST THEN ACCEPT THE ANSWER. On the next run
+  AND CONVERTING IS NOT ENOUGH — YOU MUST THEN ACCEPT THE ANSWER. On the next run
   the same finding came back reading "conflicts with documented biweekly gross pay
   which converts to approximately $13,136 per month", against a stated $13,166.67.
   That is a difference of two tenths of one percent, described as a conflict. Income

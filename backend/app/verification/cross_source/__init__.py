@@ -27,6 +27,7 @@ from app.verification.cross_source.facts import (
 )
 from app.verification.cross_source.rules import (
     CROSS_SOURCE_RULES,
+    GOVERNED_OWNED_TYPES,
     OWNED_CANONICAL_TYPES,
     CrossSourceMatch,
     CrossSourceRule,
@@ -35,6 +36,7 @@ from app.verification.cross_source.rules import (
 
 __all__ = [
     "CROSS_SOURCE_RULES",
+    "GOVERNED_OWNED_TYPES",
     "OWNED_CANONICAL_TYPES",
     "CrossSourceFacts",
     "CrossSourceFinding",

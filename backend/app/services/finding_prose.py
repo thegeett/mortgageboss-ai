@@ -37,11 +37,11 @@ from app.models.document import Document
 from app.models.finding import Finding
 from app.models.finding_prose import FindingProse
 from app.models.loan_file import LoanFile
+from app.services.borrowers import borrower_display_names
 from app.services.rule_subject_label import resolve_subject_label
 from app.verification.rule_engine.reasons import document_label, fact_label
 from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
 from app.verification.snapshot.documents_section import (
-    _active_borrower_names,
     document_filenames_by_content_id,
 )
 
@@ -215,7 +215,14 @@ def unrequested_documents(finding: Finding, summary: FactSummary, action: str) -
         return set()  # a retired rule declares nothing; do not invent a constraint for it
     declared = {slug for group in spec.requires_documents or () for slug in group}
     template = documents_named(f"{summary.problem} {summary.fix or ''}")
-    return documents_named(action) - declared - template
+    # LP-613 — AND THE KINDS ALREADY ON THE FILE. The prompt tells the model in as many words that
+    # "naming a kind from that list is allowed", so that it can pick the right half of a two-branch fix
+    # ("upload X" vs "X is already in the file, confirm Y"). This guard did not know that, so a
+    # composition that followed the instruction was discarded as unrequested and the raw template
+    # shipped instead — the exact text LP-609/610 were replacing. Naming a document the file HAS is not
+    # a shopping list; it is the opposite.
+    on_file = set(summary.document_kinds_on_file)
+    return documents_named(action) - declared - template - on_file
 
 
 async def _cached(db: AsyncSession, keys: list[str]) -> dict[str, Composition]:
@@ -291,10 +298,7 @@ async def compose_findings(
     # "a borrower no longer on this file" and wrote a removal into text a processor reads. The list
     # view passed both maps all along, so the same finding named the borrower in one place and
     # declared them gone in the other.
-    borrower_names = {
-        str(borrower_id): name
-        for borrower_id, name in (await _active_borrower_names(db, loan_file_id)).items()
-    }
+    borrower_names = await borrower_display_names(db, loan_file_id)
 
     # LP-597 — COUNTED SEPARATELY, not from `document_filenames`. That map is loaded only when a
     # document-SUBJECT finding exists (most files have none), so using its size would report zero

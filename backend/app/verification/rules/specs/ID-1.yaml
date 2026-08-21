@@ -75,7 +75,7 @@ consistency:
   on_disagree:
     verdict: fired
     reasoning: >-
-      the borrower's name differs across sources ({sources}) — a real discrepancy
+      the borrower's name differs across {count} sources ({sources}) — a real discrepancy
     how_to_fix: >-
       Confirm the borrower's legal name and reconcile the source(s) that disagree. A maiden/married
       or nickname difference should be documented (e.g. a name-affidavit); a genuinely different name
