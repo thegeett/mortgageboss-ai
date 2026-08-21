@@ -76,3 +76,22 @@ def test_no_active_multi_document_rule_is_left_silent() -> None:
         f"these rules need several documents and say nothing about which when they cannot run: "
         f"{silent}"
     )
+
+
+def test_in3_offers_both_branches_not_just_upload() -> None:
+    """LP-609 — IN-3 asked a processor to upload a pay stub on a file that already carried two.
+
+    The composer could not correct that on its own: its instruction is to make THE SAME REQUEST as the
+    fix text, and the guard rejects a rewrite that asks for anything else. So the alternative has to
+    exist in the template for it to have something legitimate to choose.
+
+    Why one document needed two branches at all: IN-3 reads
+    `income.ytd_annualized_shortfall_pct`, whose own dependencies reach past the pay stub. The
+    document can be present and the rule still unable to answer — a shape no audit of the spec can
+    see, since the spec declares one document and names it.
+    """
+    fix = load_rule_spec("IN-3").deterministic.couldnt_check_fix or ""
+
+    assert "Upload the borrower's most recent pay stub" in fix  # the file-has-nothing branch
+    assert "already in the file" in fix  # the file-has-them branch
+    assert "legible" in fix, "the second branch must say what to DO, not merely note they are there"

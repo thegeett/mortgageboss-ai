@@ -87,6 +87,11 @@ RULES, all mandatory:
   claims the check confirmed it belongs excluded, which is a different and larger statement than the
   one you were given. (Words like "documented" and "verified" ARE fine: they describe the file's
   evidence, not whether someone got something right.)
+- "document_kinds_on_file" lists the KINDS of document actually on the file. Use it to choose which
+  half of a suggested_fix applies. When the fix offers both "upload X" and "if X is already in the
+  file, confirm Y", pick the branch that matches what is listed — do not ask for a document the list
+  says is already there. Naming a kind from that list is allowed; asking for a kind that is in
+  NEITHER the list nor the suggested_fix is not.
 - NEVER ASSERT THAT A DOCUMENT IS IN THE FILE, and never describe agreement "across the documents".
   "documents_on_file" tells you how many documents exist and nothing about what they are. When it is
   0 the file has NO documents at all, so every sentence implying one — "the file contains pay stubs",
@@ -122,6 +127,11 @@ class FactSummary:
     # corpus to explain an absence — which the rule above ("use ONLY facts present in the summary")
     # forbids, and which the model could not obey because the summary never said.
     documents_on_file: int = 0
+    # LP-609 — WHICH kinds are on the file, as readable names ("pay stub", "W-2"). The count above
+    # stopped the model inventing a corpus on an EMPTY file; it cannot tell "no pay stub" from "pay
+    # stubs are here and something else is missing", which is the state IN-3 was in when it asked a
+    # processor to upload a document they had just uploaded twice.
+    document_kinds_on_file: tuple[str, ...] = ()
     settled: bool = False
     guideline: str | None = None
 
@@ -141,6 +151,9 @@ class FactSummary:
         # a corpus. Filtering it out would have shipped this fix inert. It is added after the filter.
         kept: dict[str, object] = {k: v for k, v in payload.items() if v}
         kept["documents_on_file"] = self.documents_on_file
+        # Added after the filter for the same reason as the count: an empty tuple is falsy, and "the
+        # file has none of the kinds this rule reads" is exactly the case worth stating.
+        kept["document_kinds_on_file"] = list(self.document_kinds_on_file)
         return json.dumps(kept, sort_keys=True)
 
     def cache_key(self) -> str:

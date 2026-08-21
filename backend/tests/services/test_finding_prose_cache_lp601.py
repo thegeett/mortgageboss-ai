@@ -174,3 +174,118 @@ async def test_the_composer_names_the_borrower_it_was_given(
         "the composer told the model the borrower had been removed"
     )
     assert seen["subject"] == "Aditya Talluri"
+
+
+async def test_the_composer_is_told_which_document_kinds_are_on_the_file(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-609 — a COUNT cannot tell "no pay stub" from "pay stubs are here, something else is missing".
+
+    IN-3 asked a processor to upload a pay stub on a file that already carried two. LP-597 gave the
+    composer `documents_on_file`, which was enough to stop it inventing a corpus on an EMPTY file and
+    useless for this: 2 documents says nothing about whether either is the one being asked for.
+    """
+    from app.models.document import Document, UploadSource
+
+    company = Company(name="Acme", slug=f"acme-{uuid4().hex[:6]}")
+    db_session.add(company)
+    await db_session.flush()
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    for doc_type in ("pay_stub", "pay_stub", "w2"):
+        db_session.add(
+            Document(
+                loan_file_id=loan_file.id,
+                document_type=doc_type,
+                original_filename=f"{doc_type}.pdf",
+                storage_path=f"s3://x/{uuid4().hex}",
+                mime_type="application/pdf",
+                file_size_bytes=1024,
+                upload_source=UploadSource.USER_UPLOAD,
+            )
+        )
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-3",
+        origin=FindingOrigin.DETERMINISTIC_RULE,
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        subject_key="loan",
+        message="the year-to-date figure could not be compared",
+        details={},
+        confidence=1.0,
+    )
+    db_session.add(finding)
+    await db_session.flush()
+
+    seen: dict[str, object] = {}
+
+    async def _compose(summary, **_kw):
+        seen["kinds"] = summary.document_kinds_on_file
+        seen["count"] = summary.documents_on_file
+        return Composition(action="Confirm the pay stubs are legible", why="They are in the file.")
+
+    monkeypatch.setattr("app.services.finding_prose.compose", _compose)
+
+    await compose_findings(
+        db_session, [finding], rule_names={"IN-3": "Pay stub recency"}, loan_file_id=loan_file.id
+    )
+
+    assert seen["count"] == 3
+    # DEDUPED and sorted — two pay stubs are one KIND, and a stable order keeps `cache_key` stable so
+    # an unchanged file does not re-compose every finding on every run.
+    assert seen["kinds"] == ("W-2", "pay stub")
+
+
+async def test_a_deleted_document_is_not_reported_as_on_the_file(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inverse of the bug: telling the model a document is present when it is not would license
+    exactly the invention LP-597 closed."""
+    from app.models.base import utcnow
+    from app.models.document import Document, UploadSource
+
+    company = Company(name="Acme", slug=f"acme-{uuid4().hex[:6]}")
+    db_session.add(company)
+    await db_session.flush()
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    db_session.add(
+        Document(
+            loan_file_id=loan_file.id,
+            document_type="pay_stub",
+            original_filename="gone.pdf",
+            storage_path=f"s3://x/{uuid4().hex}",
+            mime_type="application/pdf",
+            file_size_bytes=1024,
+            upload_source=UploadSource.USER_UPLOAD,
+            deleted_at=utcnow(),
+        )
+    )
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-3",
+        origin=FindingOrigin.DETERMINISTIC_RULE,
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        subject_key="loan",
+        message="the year-to-date figure could not be compared",
+        details={},
+        confidence=1.0,
+    )
+    db_session.add(finding)
+    await db_session.flush()
+
+    seen: dict[str, object] = {}
+
+    async def _compose(summary, **_kw):
+        seen["kinds"] = summary.document_kinds_on_file
+        return Composition(action="Upload a pay stub", why="None is in the file.")
+
+    monkeypatch.setattr("app.services.finding_prose.compose", _compose)
+
+    await compose_findings(
+        db_session, [finding], rule_names={"IN-3": "Pay stub recency"}, loan_file_id=loan_file.id
+    )
+
+    assert seen["kinds"] == ()

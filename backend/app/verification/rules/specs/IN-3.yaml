@@ -55,11 +55,24 @@ deterministic:
   # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
   # so without this the finding named a missing fact and stopped there. Static per rule, so the
   # wording holds whichever gated input was the missing one.
+  # LP-609 — BOTH BRANCHES, because a composer may only choose among requests the template makes.
+  #
+  # This read "Upload the borrower's most recent pay stub..." and nothing else, so on a file that
+  # already carried two pay stubs it asked a processor to upload one again. The composer could not
+  # correct that: its instruction is to make THE SAME REQUEST as this text, and the guard rejects a
+  # rewrite that asks for anything else. So the alternative has to be written here.
+  #
+  # Why one document needed two branches at all: this rule reads `income.ytd_annualized_shortfall_pct`,
+  # whose own dependencies reach past the pay stub to a documented monthly income. The pay stub can be
+  # present and the check still unable to run — a shape no audit of the spec can see, since the spec
+  # declares one document and names it.
   couldnt_check_fix: >-
     Upload the borrower's most recent pay stub showing year-to-date gross and the pay period, so the
-    annualised figure can be compared with the income stated on the application. Where several
-    documents state different figures for the same employer, reconcile them or note which one is
-    correct.
+    annualised figure can be compared with the income stated on the application. If the pay stubs are
+    already in the file, confirm the year-to-date gross and the pay date are legible on the most
+    recent one — an unreadable figure leaves the comparison open just as an absent document does.
+    Where several documents state different figures for the same employer, reconcile them or note
+    which one is correct.
   load_bearing_tags:
     - income.ytd_annualized_shortfall_pct
   gated_tags:

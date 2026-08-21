@@ -96,6 +96,7 @@ def summarize(
     borrower_names: Mapping[str, str] | None = None,
     document_filenames: Mapping[str, str] | None = None,
     documents_on_file: int = 0,
+    document_kinds_on_file: tuple[str, ...] = (),
 ) -> FactSummary:
     """The ONLY input a composition may draw on — assembled from the finding, never from the snapshot.
 
@@ -139,6 +140,7 @@ def summarize(
         facts=facts,
         # LP-597 — the one fact that stops the model inventing a corpus to explain an absence.
         documents_on_file=documents_on_file,
+        document_kinds_on_file=document_kinds_on_file,
     )
 
 
@@ -298,13 +300,25 @@ async def compose_findings(
     # document-SUBJECT finding exists (most files have none), so using its size would report zero
     # documents on a file that has plenty — and the prompt rule this feeds says a zero means no
     # document exists. A false zero would license exactly the invention it is meant to prevent.
-    documents_on_file = (
-        await db.scalar(
-            select(func.count())
-            .select_from(Document)
+    # LP-609 — the KINDS as well as the count, in one query. The count alone cannot tell "no pay
+    # stub" from "pay stubs are here and something else is missing", which is how IN-3 came to ask a
+    # processor for a document they had just uploaded twice.
+    #
+    # Deleted documents are excluded on the same reasoning as the count: a soft-deleted document is
+    # not on the file, and saying it is would be the inverse of the bug this fixes.
+    document_rows = (
+        await db.execute(
+            select(Document.document_type, func.count())
             .where(Document.loan_file_id == loan_file_id, Document.deleted_at.is_(None))
+            .group_by(Document.document_type)
         )
-    ) or 0
+    ).all()
+    documents_on_file = sum(count for _, count in document_rows)
+    # Readable names, sorted so the summary hashes the same for the same file — `cache_key` is a hash
+    # of this JSON, and an unordered set would re-compose every finding on every run.
+    document_kinds_on_file = tuple(
+        sorted(document_label(doc_type) for doc_type, _ in document_rows if doc_type)
+    )
 
     summaries = {
         finding.id: summarize(
@@ -313,6 +327,7 @@ async def compose_findings(
             document_filenames=document_filenames,
             borrower_names=borrower_names,
             documents_on_file=documents_on_file,
+            document_kinds_on_file=document_kinds_on_file,
         )
         for finding in findings
         if finding.message
