@@ -101,6 +101,12 @@ spec_version: 1
 # operand coerces to None → couldnt_check (the gate catches it first, over gated_tags). TWO fired outcomes with
 # DIFFERENT reasons (past vs far-future are different problems for a processor), ordered first-match-wins.
 deterministic:
+  # LP-608 — see AS-4. The closing date can come from either document, so both are named rather than
+  # presuming which one the file will have.
+  couldnt_check_fix: >-
+    Upload the purchase agreement stating the contract closing date, or the Closing Disclosure or
+    settlement statement if one has been issued. The closing date is taken from whichever of the two
+    the file carries, and measured against the file date.
   load_bearing_tags:
     - contract.days_until_closing
   gated_tags:

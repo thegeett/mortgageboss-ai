@@ -90,6 +90,12 @@ deterministic:
     tag: loan.purpose
     op: eq
     value: purchase
+  # LP-608 — see AS-4. Both sides again: an appraised value with no contract price is as unanswerable
+  # as a price with no appraisal, and neither figure can be inferred from the other.
+  couldnt_check_fix: >-
+    Upload the appraisal report showing the appraised value, and the purchase agreement stating the
+    contract price. A file carrying only one of the two leaves the comparison open — the missing
+    figure is never inferred from the one that is present.
   load_bearing_tags:
     - property.value_vs_price_gap
   gated_tags:

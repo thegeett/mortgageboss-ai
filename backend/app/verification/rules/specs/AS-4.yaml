@@ -65,6 +65,14 @@ requires_documents:
 
 spec_version: 1
 deterministic:
+  # LP-608 — what to DO when this check cannot run. Without it the finding named a missing fact and
+  # stopped, and the composer invented an action from the problem text. Static per rule, so the
+  # wording holds whichever input was the missing one — the reserve months, or the requirement itself.
+  couldnt_check_fix: >-
+    Upload the asset documentation the reserve figure is built from: a statement for each deposit
+    account, and the statement for any retirement or brokerage account being counted toward reserves.
+    If the months still cannot be worked out, confirm the occupancy and the financed unit count on
+    the application — the required reserves are selected from those two, and neither can be assumed.
   load_bearing_tags:
     # LP-597 — the overlay tags are deliberately NOT here. `load_bearing` means "this rule cannot
     # answer without it", and the engine couldnt_checks when one is absent. The overlay can only ever
