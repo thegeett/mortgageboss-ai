@@ -35,6 +35,7 @@ from app.verification.confidence import AggressionLevel
 from app.verification.snapshot.documents_section import document_filenames_by_content_id
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.integration import factories
 
 API = "/api/v1/loan-files"
 PREFS = "/api/v1/users/me/preferences"
@@ -269,6 +270,64 @@ async def test_retired_xsrc_findings_do_not_render_in_the_legacy_tab(
     assert not any(r.startswith("xsrc.") for r in rule_ids)
     # ...and it did not leak into the governed list either (it has no evaluation_outcome).
     assert not any(f["rule_id"].startswith("xsrc.") for f in body["rule_findings"])
+
+
+async def test_a_governed_finding_names_its_source_documents(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-617 — the link must survive all the way to the API, not just into the column. Before this,
+    148 governed findings on the two staging files carried zero, and the read schema had nowhere to
+    put one even if they had."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    doc = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="w2-2023.pdf"
+    )
+    await db.flush()
+    finding = _rule_finding(
+        loan_file,
+        rule_id="ID-4",
+        outcome=EvaluationOutcome.OPEN,
+        status=FindingStatus.RED,
+        message="the address differs across sources",
+        subject_key="b1",
+    )
+    finding.source_document_ids = [str(doc.id)]
+    finding.source_document_id = doc.id
+    db.add(finding)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+
+    (row,) = body["rule_findings"]
+    assert [d["filename"] for d in row["source_documents"]] == ["w2-2023.pdf"]
+    assert row["source_documents"][0]["id"] == str(doc.id)
+
+
+async def test_a_governed_finding_with_no_document_says_so_rather_than_inventing_one(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A loan-level rule over a computed tag has nothing to point at. Empty, never fabricated."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="DT-7",
+            outcome=EvaluationOutcome.SATISFIED,
+            status=FindingStatus.GREEN,
+            message="every ability-to-repay factor has a supporting document",
+            subject_key="loan",
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    assert body["rule_findings"][0]["source_documents"] == []
 
 
 async def test_rule_findings_separate_and_satisfied_is_reachable(

@@ -28,7 +28,7 @@ Deferred to LP-322: matching findings ACROSS runs (this ticket runs ONE verifica
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from uuid import UUID
@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory
+from app.models.loan_file import LoanFile
 from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
@@ -72,6 +73,7 @@ from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rule
 from app.verification.rule_engine.result import RuleEvaluation
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.builder import build_snapshot
+from app.verification.snapshot.documents_section import document_id_by_content_id
 from app.verification.snapshot.model import Snapshot, TagsSection
 from app.verification.snapshot.persistence import persist_snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy
@@ -524,6 +526,7 @@ async def _persist(
     run_id: UUID,
     results: list[RuleEvaluation],
     retire_eligible_rule_ids: frozenset[str],
+    document_id_by_content_id: Mapping[str, UUID],  # LP-617
 ) -> ReconcileRunResult:
     """Reconcile this run's results into findings across runs (LP-322).
 
@@ -535,6 +538,7 @@ async def _persist(
     """
     return await reconcile_evaluation_findings(
         db,
+        document_id_by_content_id=document_id_by_content_id,
         loan_file_id=loan_file_id,
         verification_id=verification_id,
         run_id=run_id,
@@ -674,8 +678,17 @@ async def run_verification(
             consistency_reasoners=reasoners.consistency,
             confidence_floor=confidence_floor,
         )
+    # LP-617 — resolve each finding's snapshot content ids back to real document ids, so a finding can
+    # point a processor AT the documents it is about instead of naming their categories. Built here,
+    # next to its one consumer, rather than threaded from the snapshot build minutes earlier. Mirrors
+    # `document_filenames_by_content_id` (LP-377-B), which resolves the same keys for the read path.
+    loan_file_row = await db.get(LoanFile, loan_file_id)
+    document_ids = (
+        await document_id_by_content_id(db, loan_file_row) if loan_file_row is not None else {}
+    )
     reconciliation = await _persist(
         db,
+        document_id_by_content_id=document_ids,
         loan_file_id=loan_file_id,
         verification_id=verification_id,
         run_id=run_id,

@@ -42,6 +42,7 @@ function ruleFinding(overrides: Partial<RuleFinding> = {}): RuleFinding {
     how_to_fix: overrides.how_to_fix ?? null,
     confidence: overrides.confidence ?? 1,
     resolution_status: overrides.resolution_status ?? "open",
+    source_documents: [],
   };
 }
 

@@ -89,3 +89,20 @@ class RuleEvaluation:
     # that AI verdict may land satisfied (benign variance) OR fired (real discrepancy) while still
     # ratification-pending. So the invariant is per-path, not universal: pending ⟹ an AI made the call.
     ratification_pending: bool = False
+    # LP-617 — WHICH DOCUMENTS this verdict was actually derived from, as snapshot content ids.
+    #
+    # The finding's provenance is a SET, and until now the governed engine recorded none of it: 148
+    # governed findings on the two staging files carried zero document links. ID-4 shipped "reconcile
+    # the discrepancies across the W-2s, pay stubs, bank statements, driver's license, homeowners
+    # insurance, and property tax bill" — ten documents named as categories, none as the culprit, so a
+    # processor opens all of them.
+    #
+    # The value-matching populator (`services/finding_source_matching.py`) cannot supply this: it reads
+    # `details["document_value"]` and `source_snippet`, and a governed finding sets NEITHER, so it
+    # returns an empty set for every one of them. The rules already KNOW their sources — a consistency
+    # rule gathers per-source and a per_document rule's subject IS the document — so this carries what
+    # they know rather than guessing it back out of the prose.
+    #
+    # EMPTY IS HONEST, not a gap. A loan-level rule over a computed tag (DTI, reserves, LTV) has no
+    # document to point at, and inventing one would be worse than silence.
+    source_content_ids: tuple[str, ...] = ()

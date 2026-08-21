@@ -361,6 +361,12 @@ def _result(
         reasoning=reasoning,
         how_to_fix=how_to_fix,
         ratification_pending=ratification_pending,
+        # LP-617 — the documents this verdict actually compared, in gather order. A consistency rule
+        # is the case that most needs them: "the W-2s, pay stubs, bank statements, driver's license,
+        # homeowners insurance, and property tax bill" names ten documents as categories and the
+        # culprit as none of them. These are the sources that SURVIVED the filter and the exclusion,
+        # so they are exactly the set the verdict rests on.
+        source_content_ids=tuple(inst.source_id for inst in gathered),
     )
 
 

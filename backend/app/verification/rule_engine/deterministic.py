@@ -171,6 +171,10 @@ def _result(
         # ai_fuzzy_match rule (CR-1, CR-4, CR-5, OC-1, …) would have shipped an unmeasured AI judgment as
         # an AUTO verdict with NO HUMAN IN THE LOOP — the hole that had to close before anything activated.
         ratification_pending=ratification_pending or _ratifies_every_finding(spec.rule_id),
+        # LP-617 — a per_document rule's SUBJECT IS THE DOCUMENT, so its provenance is exact and free.
+        # Any other enumerator's subject_id is a borrower/liability/account key, never a content id, and
+        # emitting it here would produce a link to a document that does not exist.
+        source_content_ids=((subject_id,) if spec.subject_enumeration == "per_document" else ()),
     )
 
 

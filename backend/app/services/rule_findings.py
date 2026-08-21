@@ -18,6 +18,7 @@ Flush-only; the caller owns the transaction.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -153,6 +154,25 @@ def _persistable(results: list[RuleEvaluation]) -> list[_Persistable]:
     return persistable
 
 
+def _source_document_ids(
+    result: RuleEvaluation, document_id_by_content_id: Mapping[str, UUID]
+) -> list[str] | None:
+    """The finding's source documents as id strings, or ``None`` when the rule knows of none.
+
+    LP-617. Deliberately RESOLVED rather than stored raw: a content id is a snapshot key, and the map
+    only contains documents that are active on the file right now, so a content id that no longer
+    resolves (its document was deleted or superseded between runs) is DROPPED rather than written as a
+    dangling link. ``None`` for a rule with no document provenance — a loan-level rule over a computed
+    tag has no document to point at, and an empty list would read as "we looked and found none".
+    """
+    ids = [
+        str(document_id_by_content_id[content_id])
+        for content_id in dict.fromkeys(result.source_content_ids)  # dedupe, order-preserving
+        if content_id in document_id_by_content_id
+    ]
+    return ids or None
+
+
 def _build_finding(
     *,
     loan_file_id: UUID,
@@ -162,8 +182,10 @@ def _build_finding(
     severity: FindingStatus,
     message: str,
     category: FindingCategory,
+    document_id_by_content_id: Mapping[str, UUID],
 ) -> Finding:
     """A fresh Finding for one evaluated subject (its content-id ``subject_key`` is its identity)."""
+    source_ids = _source_document_ids(result, document_id_by_content_id)
     return Finding(
         loan_file_id=loan_file_id,
         verification_id=verification_id,
@@ -181,6 +203,10 @@ def _build_finding(
         subject_key=result.subject_id,  # the deposit's stable content_id (LP-312)
         load_bearing_tags=[_tag_dict(tag) for tag in result.load_bearing_tags],
         resolution_status=FindingResolutionStatus.OPEN,
+        # LP-617 — WHICH documents this finding is about. `source_document_id` stays the single
+        # "primary" the older read paths expect; the set is the honest provenance.
+        source_document_ids=source_ids,
+        source_document_id=UUID(source_ids[0]) if source_ids else None,
     )
 
 
@@ -193,6 +219,7 @@ def _update_finding(
     severity: FindingStatus,
     message: str,
     category: FindingCategory | None,
+    document_id_by_content_id: Mapping[str, UUID],
 ) -> None:
     """Carry a finding forward: refresh its state to THIS run's, keeping its id + resolution history."""
     finding.verification_id = verification_id
@@ -202,6 +229,13 @@ def _update_finding(
     finding.confidence = result.verdict_confidence if result.verdict_confidence is not None else 1.0
     finding.evaluation_outcome = outcome
     finding.load_bearing_tags = [_tag_dict(tag) for tag in result.load_bearing_tags]
+    # LP-617 — REFRESHED, not set-on-mint-only, for exactly the reason recorded just below: a field
+    # written only when minting never reaches a finding that already exists, and on a re-run every
+    # finding is carried forward rather than minted. Refreshing also lets a link follow a superseded
+    # document to its replacement, and drops one whose document was deleted.
+    source_ids = _source_document_ids(result, document_id_by_content_id)
+    finding.source_document_ids = source_ids
+    finding.source_document_id = UUID(source_ids[0]) if source_ids else None
     # LP-598 — THE CATEGORY IS REFRESHED TOO, and it was not. LP-595 fixed the category map, but the
     # map is only read when MINTING, so every finding that already existed kept whatever it was filed
     # under. On LF-3CVT that was all thirty of them: the fix deployed, a run completed, and every
@@ -221,6 +255,7 @@ async def persist_evaluation_findings(
     verification_id: UUID | None,
     results: list[RuleEvaluation],
     category: FindingCategory = FindingCategory.ASSETS,
+    document_id_by_content_id: Mapping[str, UUID] | None = None,  # LP-617
 ) -> list[Finding]:
     """Persist evaluated subjects as findings + a ``created`` event each (single-run, LP-316).
 
@@ -229,6 +264,7 @@ async def persist_evaluation_findings(
     is the SINGLE-RUN path; a re-run into the same loan file collides on the uniqueness index — use
     :func:`reconcile_evaluation_findings` for cross-run runs (LP-322).
     """
+    doc_id_map = document_id_by_content_id or {}
     outcomes: list[tuple[Finding, EvaluationOutcome]] = []
     for result, outcome, severity, message in _persistable(results):
         finding = _build_finding(
@@ -239,6 +275,7 @@ async def persist_evaluation_findings(
             severity=severity,
             message=message,
             category=category,
+            document_id_by_content_id=doc_id_map,
         )
         db.add(finding)
         outcomes.append((finding, outcome))
@@ -316,6 +353,10 @@ async def reconcile_evaluation_findings(
     category_by_rule: dict[str, FindingCategory],
     default_category: FindingCategory = FindingCategory.ASSETS,
     retire_eligible_rule_ids: frozenset[str] | None = None,
+    # LP-617 — content_id -> documents.id, from `document_id_by_content_id`. Defaults to empty so a
+    # caller that has no map (a test, a path with no documents) simply produces findings with no
+    # links, rather than needing to construct one.
+    document_id_by_content_id: Mapping[str, UUID] | None = None,
 ) -> ReconcileRunResult:
     """Reconcile THIS run's evaluations against the loan file's prior findings (LP-322, §9).
 
@@ -331,6 +372,7 @@ async def reconcile_evaluation_findings(
     documents section is absent, so it saw zero transactions) must be EXCLUDED: a degraded run is not
     "the subject is gone", and retiring on it would flip real open findings to green (false-closed).
     """
+    doc_id_map = document_id_by_content_id or {}
     retire_eligible = (
         retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
     )
@@ -378,6 +420,7 @@ async def reconcile_evaluation_findings(
                 severity=severity,
                 message=message,
                 category=category,
+                document_id_by_content_id=doc_id_map,
             )
             db.add(finding)
             res.minted.append(finding)
@@ -393,6 +436,7 @@ async def reconcile_evaluation_findings(
             outcome=outcome,
             severity=severity,
             message=message,
+            document_id_by_content_id=doc_id_map,
         )
         if was is EvaluationOutcome.NO_LONGER_APPLIES:
             res.revived.append(prior_finding)

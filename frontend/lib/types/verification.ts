@@ -140,6 +140,11 @@ export interface RuleFinding {
   /** Would Apply actually change anything? Apply acts on the finding's declared change, and a rule
    *  that declares none would give a button that looks right and does nothing. */
   can_apply: boolean;
+  /** LP-617: WHICH documents this finding is about. A consistency finding used to name the document
+   * KINDS it compared ("the W-2s, pay stubs, bank statements, ...") and none of the documents, so a
+   * processor opened all of them. Empty is honest, not a gap — a loan-level rule over a computed
+   * value (DTI, reserves, LTV) has no document to point at. */
+  source_documents: FindingSourceDocument[];
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */

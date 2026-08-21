@@ -368,6 +368,18 @@ class RuleFindingPublic(BaseModel):
     # rather than offer a no-op.
     can_apply: bool
 
+    # LP-617 — WHICH documents this finding is about, named and addressable.
+    #
+    # A consistency finding used to say "reconcile the discrepancies across the W-2s, pay stubs, bank
+    # statements, driver's license, homeowners insurance, and property tax bill" — ten documents named
+    # as CATEGORIES and the culprit as none of them, so a processor opened all ten. The engine knew
+    # exactly which sources it compared and threw that away at the finding boundary.
+    #
+    # EMPTY IS HONEST. A loan-level rule over a computed tag (DTI, reserves, LTV) has no document to
+    # point at, and a fabricated link is worse than none. Same shape as `FindingPublic.source_documents`
+    # so the client renders both lists identically.
+    source_documents: list[SourceDocument] = []
+
     @classmethod
     def from_model(
         cls,
@@ -376,6 +388,7 @@ class RuleFindingPublic(BaseModel):
         subject_label: str,
         documents_on_file: set[str] | None = None,
         loan_purpose: str | None = None,
+        document_names: dict[UUID, str] | None = None,
     ) -> RuleFindingPublic:
         details = finding.details or {}
         spec = _rule_spec(
@@ -412,6 +425,14 @@ class RuleFindingPublic(BaseModel):
             confidence=finding.confidence,
             resolution_status=finding.resolution_status.value,
             can_apply=isinstance(details.get("apply"), dict),
+            # LP-617 — resolved against the file's CURRENT documents, so a stored id whose document
+            # was deleted or superseded is skipped rather than rendered as a broken link. Identical
+            # resolution to FindingPublic's, one line above in spirit and in behaviour.
+            source_documents=[
+                SourceDocument(id=doc_id, filename=(document_names or {})[doc_id])
+                for raw_id in (finding.source_document_ids or [])
+                if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
+            ],
             missing_documents=_missing_documents(
                 spec, documents_on_file or set(), loan_purpose=loan_purpose
             ),

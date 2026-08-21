@@ -25,6 +25,7 @@ function finding(overrides: Partial<RuleFinding> = {}): RuleFinding {
     how_to_fix: null,
     confidence: 1,
     resolution_status: "open",
+    source_documents: [],
     ...overrides,
   };
 }

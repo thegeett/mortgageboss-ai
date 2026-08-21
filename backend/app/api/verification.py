@@ -366,6 +366,7 @@ async def _build_status(
                 ),
                 documents_on_file=documents_on_file,
                 loan_purpose=loan_file.loan_purpose.value if loan_file.loan_purpose else None,
+                document_names=document_names,  # LP-617 — same map FindingPublic already uses
             )
             for f in rule_findings
         ],

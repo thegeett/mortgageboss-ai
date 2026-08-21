@@ -1821,6 +1821,24 @@ async def _reshape_and_assign_ids(
     return list(documents), reshaped, doc_ids
 
 
+async def document_id_by_content_id(db: AsyncSession, loan_file: LoanFile) -> dict[str, UUID]:
+    """Map each snapshot ``content_id`` back to its ``documents.id`` (LP-617).
+
+    The snapshot deliberately carries NO database ids — that is what makes a `DocumentEntry`
+    content-addressed and run-independent, and it should stay that way. But a finding that wants to
+    point a processor AT a document needs the real id, and the two are only known together HERE, where
+    `_reshape_and_assign_ids` zips the `Document` rows with the ids it derives from their content.
+
+    Deliberately a SECOND reshape rather than a value threaded out of `build_snapshot`: the snapshot is
+    built once near the start of a run and the findings are written at the end, so threading it would
+    put a document-id map through the whole pipeline for one consumer. The cost is one extra read of
+    the file's documents + current extractions — real, and small beside a run that spends minutes on
+    model calls.
+    """
+    documents, _reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
+    return {content_id: doc.id for doc, content_id in zip(documents, doc_ids, strict=True)}
+
+
 async def build_documents_section(db: AsyncSession, loan_file: LoanFile) -> list[DocumentEntry]:
     """Assemble the ``documents`` section for a loan file (active documents only).
 

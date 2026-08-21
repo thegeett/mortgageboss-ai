@@ -16,7 +16,8 @@ import { humanize } from "@/lib/format";
 import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { type OutcomeTone, outcomeMeta, ruleCategoryLabel } from "@/lib/verification/rule-findings";
-import { ChevronDown, Gavel } from "lucide-react";
+import { ChevronDown, FileText, Gavel } from "lucide-react";
+import Link from "next/link";
 import { useId, useState } from "react";
 import { type RuleFindingAction, RuleFindingActions } from "./rule-finding-actions";
 
@@ -121,6 +122,49 @@ export function RuleLabel({ finding }: { finding: RuleFinding }) {
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * LP-617 — the documents this finding is actually about, each linking to the document itself.
+ *
+ * ID-4 used to read "reconcile the discrepancies across the W-2s, pay stubs, bank statements,
+ * driver's license, homeowners insurance, and property tax bill" — ten documents named as KINDS and
+ * the culprit as none of them, so the processor opened all ten. The engine knew which sources it
+ * compared; this shows them.
+ *
+ * Renders NOTHING when the finding has no documents. That is honest rather than missing: a
+ * loan-level rule over a computed value (DTI, reserves, LTV) has none to point at, and a fabricated
+ * link is worse than no link.
+ */
+function SourceDocuments({
+  fileId,
+  documents,
+}: {
+  fileId?: string;
+  documents: RuleFinding["source_documents"];
+}) {
+  if (documents.length === 0) return null;
+  return (
+    <p className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-gray-400">
+      <FileText className="h-3 w-3 shrink-0 text-gray-400" aria-hidden />
+      {documents.length === 1 ? "Document:" : "Documents:"}{" "}
+      {documents.map((doc, index) => (
+        <span key={doc.id || doc.filename}>
+          {fileId && doc.id ? (
+            <Link
+              href={`/loan-files/${fileId}/documents?doc=${doc.id}`}
+              className="font-medium text-primary hover:underline"
+            >
+              {doc.filename}
+            </Link>
+          ) : (
+            <span className="font-medium text-gray-500">{doc.filename}</span>
+          )}
+          {index < documents.length - 1 ? "," : ""}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -250,6 +294,8 @@ export function RuleFindingRow({
               Subject: <span className="font-medium text-gray-500">{finding.subject_label}</span>
             </p>
           )}
+
+          <SourceDocuments fileId={fileId} documents={finding.source_documents} />
         </div>
       )}
 

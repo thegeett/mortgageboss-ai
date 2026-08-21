@@ -140,6 +140,10 @@ def _result(
         # the model can only ever ADD a review, never remove one.
         ratification_pending=ratification_pending,
         derivation=derivation,
+        # LP-617 — a per_document rule's SUBJECT IS THE DOCUMENT, so its provenance is exact and free.
+        # Any other enumerator's subject_id is a borrower/liability/account key, never a content id, and
+        # emitting it here would produce a link to a document that does not exist.
+        source_content_ids=((subject_id,) if spec.subject_enumeration == "per_document" else ()),
     )
 
 
