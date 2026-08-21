@@ -148,6 +148,11 @@ def _hard_reads(spec: RuleSpec) -> set[str]:
         tags.add(spec.consistency.gather_tag)
         if spec.consistency.gather_filter is not None:
             tags.add(spec.consistency.gather_filter.tag_id)
+        # LP-618 — the exclusion's tag is a gated read too: absent, the exclusion never fires. This
+        # list mirrors `_load_bearing_tag_ids`, and both omitted it, so the orphan guard could not have
+        # caught an exclusion reading a tag nothing produces.
+        if spec.consistency.gather_exclude is not None:
+            tags.add(spec.consistency.gather_exclude.tag_id)
     if spec.deterministic is not None:
         det = spec.deterministic
         tags |= set(det.load_bearing_tags)

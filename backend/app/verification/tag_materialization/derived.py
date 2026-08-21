@@ -795,14 +795,90 @@ _ADDRESS_AS_OF_FIELDS: tuple[str, ...] = (
     "document_issue_date",
     "issue_date",
     "notice_date",
-    "effective_date",
+    # LP-618 — THE 1003, without which this feature does not fire on the shape it was written for.
+    # The `id_address` prompt names the URLA as a `residence` source and it is the file's authoritative
+    # statement of TODAY's address, but neither of its date fields was listed — so on "2023 W-2 (old
+    # address) + 1003 (current address)" the W-2 found no newer dated residence, stayed
+    # `current_residence`, and ID-4 still fired the false discrepancy this ticket exists to remove.
+    # It only worked when a dated paystub, W-2 or licence happened to also be present.
+    "application_signed_date",
+    "application_taken_date",
+    # `effective_date` is NOT here, for the reason `expiration_date` is not: a hazard or condo policy
+    # is routinely effective AT CLOSING, i.e. in the future, and those extractors state the SUBJECT
+    # PROPERTY address. Were `id.current_address_type` ever to type one as a residence, the binder
+    # would become the newest document on file and demote every genuinely-current residence at once.
+    # `_address_as_of_year` also refuses a year past the snapshot as a second guard.
 )
 
 _ADDRESS_NORMALIZATION = ("casefold", "drop_punct", "collapse_ws", "strip")
 
+#: Street-suffix and unit abbreviations folded to one form before two addresses are compared. Short
+#: on purpose: this is not a postal canonicalizer, it is the residue an AI canonicalizer leaves.
+_ADDRESS_SYNONYMS: dict[str, str] = {
+    "street": "st",
+    "avenue": "ave",
+    "road": "rd",
+    "drive": "dr",
+    "lane": "ln",
+    "court": "ct",
+    "boulevard": "blvd",
+    "place": "pl",
+    "terrace": "ter",
+    "circle": "cir",
+    "highway": "hwy",
+    "parkway": "pkwy",
+    "apartment": "apt",
+    "unit": "apt",
+    "number": "apt",
+    "suite": "ste",
+    "north": "n",
+    "south": "s",
+    "east": "e",
+    "west": "w",
+}
 
-def _address_as_of_year(entry: DocumentEntry) -> int | None:
-    """The year this document speaks for its address, or None if it does not say."""
+#: Unit MARKERS, dropped after folding — the designator carries no information, the unit value does.
+#: `Apt A` and `#A` are the same unit ('#' is punctuation and disappears in normalization, leaving a
+#: bare `a`), so keeping the marker on one side and not the other made them read as different places.
+#: `100 Elm St` and `100 Elm St Apt 5` still differ: the `5` survives.
+_ADDRESS_DROP_TOKENS = frozenset({"apt", "ste"})
+
+_ZIP_PLUS_FOUR = re.compile(r"\b(\d{5})-?\d{4}\b")
+
+
+def _addresses_agree(left: str, right: str) -> bool:
+    """Whether two stated addresses are the same place, TOLERANTLY (LP-618).
+
+    THIS MUST BE AT LEAST AS FORGIVING AS THE RULE IT FEEDS. ID-4 is `compare_mode: fuzzy` with a
+    judge whose whole job is calling abbreviation, unit and ZIP+4 variance benign — so an EXACT
+    compare here demoted a document the rule would have judged consistent, and the demotion is
+    one-directional: the older document leaves the compare set, ID-4 gathers one source, and a check
+    that was SATISFIED becomes "only 1 document(s) in the file state the current address". A stricter
+    predicate feeding a looser rule can only ever remove evidence the rule wanted.
+
+    `298 Sewall Street Apt A, 01505` and `298 Sewall St #A, 01505-1234` are the same place.
+
+    Ambiguity resolves to AGREEMENT, which is the fail-closed direction here: agreeing keeps the older
+    document in the comparison, where a real discrepancy can still fire. Disagreeing removes it.
+    """
+    from app.verification.rule_engine.consistency import _normalize
+
+    def canonical(value: str) -> str:
+        text = _ZIP_PLUS_FOUR.sub(r"\1", _normalize(value, _ADDRESS_NORMALIZATION))
+        folded = (_ADDRESS_SYNONYMS.get(token, token) for token in text.split())
+        return " ".join(token for token in folded if token not in _ADDRESS_DROP_TOKENS)
+
+    return canonical(left) == canonical(right)
+
+
+def _address_as_of_year(entry: DocumentEntry, *, not_after: int | None = None) -> int | None:
+    """The year this document speaks for its address, or None if it does not say.
+
+    LP-618 — a year LATER than the snapshot is refused. A future-dated document cannot be evidence of
+    where the borrower lives today, and treating one as the newest document on file would demote every
+    genuinely-current residence at once. `expiration_date` and `effective_date` are kept out of the
+    allowlist for the same reason; this is the guard for a field that slips in another way.
+    """
     for name in _ADDRESS_AS_OF_FIELDS:
         field = entry.fields.get(name)
         if not isinstance(field, Field) or not field.is_present:
@@ -813,11 +889,11 @@ def _address_as_of_year(entry: DocumentEntry) -> int | None:
                 year = int(float(raw))
             except (TypeError, ValueError):
                 continue
-            if 1900 <= year <= 2200:
+            if 1900 <= year <= 2200 and (not_after is None or year <= not_after):
                 return year
             continue
         parsed = coerce_date(raw)
-        if parsed is not None:
+        if parsed is not None and (not_after is None or parsed.year <= not_after):
             return parsed.year
     return None
 
@@ -831,8 +907,6 @@ def _id_address_role(
     superseded stops joining the current-address comparison. See the block comment above for why the
     AI tag itself is left alone and why the demotion is one-directional.
     """
-    from app.verification.rule_engine.consistency import _normalize
-
     if not isinstance(subject_raw, DocumentEntry):
         return _UNKNOWN, "not a document — the role is a per-document fact"
     own = {} if snapshot.tags.absent else snapshot.tags.by_subject.get(subject_id, {})
@@ -844,7 +918,8 @@ def _id_address_role(
     if address is None or str(address.value) == _UNKNOWN:
         return "current_residence", "the document states a residence but no readable address"
 
-    my_year = _address_as_of_year(subject_raw)
+    this_year = snapshot.created_at.year
+    my_year = _address_as_of_year(subject_raw, not_after=this_year)
     if my_year is None:
         return (
             "current_residence",
@@ -855,12 +930,19 @@ def _id_address_role(
         # No link → no way to tell whose address this is, so no way to say a NEWER one replaced it.
         return "current_residence", "the document is not linked to a borrower"
 
-    mine = _normalize(address.value, _ADDRESS_NORMALIZATION)
     newer_disagree = False
     for other in () if snapshot.documents.absent else snapshot.documents.entries:
         if other.content_id == subject_id:
             continue
-        if not borrowers & {str(ref.borrower_id) for ref in (other.belongs_to or ())}:
+        # LP-618 — SUPERSET, not intersection. The role is ONE value per DOCUMENT, applied to every
+        # borrower that document belongs to, so a newer document that speaks for only SOME of them
+        # cannot demote it: on a joint 1003 linked to A and B, a newer paystub belonging to B alone
+        # would otherwise demote the joint document for A too, dropping A's compare set from two
+        # sources to one and turning a real discrepancy into couldnt_check. A co-borrower's document
+        # silently suppressing the other borrower's finding is the failure this design calls
+        # unreachable, so the newer document has to cover everyone this one speaks for.
+        other_borrowers = {str(ref.borrower_id) for ref in (other.belongs_to or ())}
+        if not borrowers <= other_borrowers:
             continue
         other_tags = (
             {} if snapshot.tags.absent else snapshot.tags.by_subject.get(other.content_id, {})
@@ -871,10 +953,10 @@ def _id_address_role(
             continue
         if other_address is None or str(other_address.value) == _UNKNOWN:
             continue
-        other_year = _address_as_of_year(other)
+        other_year = _address_as_of_year(other, not_after=this_year)
         if other_year is None or other_year <= my_year:
             continue
-        if _normalize(other_address.value, _ADDRESS_NORMALIZATION) == mine:
+        if _addresses_agree(str(other_address.value), str(address.value)):
             # A newer document still states THIS address → it is current, whatever else disagrees.
             return "current_residence", (
                 f"a {other_year} document still states this address, so it is current"

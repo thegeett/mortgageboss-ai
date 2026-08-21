@@ -183,6 +183,12 @@ class _GatherResult:
     filter_tags: dict[str, Tag]
     candidate_count: int
     type_undetermined: int = 0
+    #: LP-618 — candidates removed by the DETERMINISTIC ``gather_exclude``, surfaced for the same
+    #: reason ``type_undetermined`` is: a source that stated the fact and was set aside must not
+    #: vanish from the finding. Without it, an exclusion taking the set from 2 to 1 produced "only 1
+    #: document(s) in the file state the current address", which is false — two do — and gave the
+    #: processor no hint that the older one was set aside as superseded.
+    deterministically_excluded: int = 0
 
 
 # A borrower_id -> its documents index, built ONCE per run (not re-scanned per subject — that was
@@ -235,6 +241,7 @@ def _borrower_documents(
     filter_tags: dict[str, Tag] = {}
     candidate_count = 0
     type_undetermined = 0
+    deterministically_excluded = 0
     for entry in index.get(subject_id, []):
         source_tags = snapshot.tags.by_subject.get(entry.content_id, {})
         tag = source_tags.get(gather_tag)
@@ -265,9 +272,15 @@ def _borrower_documents(
         # LP-616 — a DETERMINISTIC exclusion, applied after the filter and NOT confidence-gated (a
         # derived tag carries no confidence). It only ever removes a source, so it can shrink the
         # compare set but never introduce a value into it. `candidate_count` is deliberately left
-        # counting this source: it stated the fact, and the count drives the "one source is not a
-        # comparison" honesty branch below.
+        # counting this source: it stated the fact.
+        #
+        # LP-618 — an earlier comment here claimed that count "drives the 'one source is not a
+        # comparison' honesty branch". It does not: that branch reads `len(gathered)`. What the
+        # inflated count still drives is the step-1 filter-confidence gate, which can therefore return
+        # NEEDS_REVIEW citing the address type of a document no longer being compared. The exclusion is
+        # counted separately and surfaced in the reason instead of being inferred from this.
         if gather_exclude is not None and _tag_holds(gather_exclude, source_tags):
+            deterministically_excluded += 1
             continue
         included.append(
             _Gathered(
@@ -278,7 +291,9 @@ def _borrower_documents(
                 document_label(entry.document_type) if entry.document_type else "a document",
             )
         )
-    return _GatherResult(included, filter_tags, candidate_count, type_undetermined)
+    return _GatherResult(
+        included, filter_tags, candidate_count, type_undetermined, deterministically_excluded
+    )
 
 
 class _Scope(Protocol):
@@ -466,6 +481,17 @@ async def evaluate_consistency_rule(
             f"be confirmed as a {enum_label(con.gather_filter.value)} and "
             f"{'was' if n_undetermined == 1 else 'were'} set aside)"
             if n_undetermined and con.gather_filter is not None
+            else ""
+        )
+        # LP-618 — and the DETERMINISTIC exclusions, for the same reason. Reads as a second clause so a
+        # finding can carry both: "(1 other document could not be confirmed as a residence and was set
+        # aside) (1 document was set aside as superseded)".
+        n_excluded = result.deterministically_excluded
+        excluded_note += (
+            f" ({n_excluded} {'document' if n_excluded == 1 else 'documents'} "
+            f"{'was' if n_excluded == 1 else 'were'} set aside as "
+            f"{enum_label(con.gather_exclude.value)})"
+            if n_excluded and con.gather_exclude is not None
             else ""
         )
 

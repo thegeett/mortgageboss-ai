@@ -944,6 +944,11 @@ class ConsistencyEval(BaseModel):
     @model_validator(mode="after")
     def _gather_filter_is_a_subject_tag(self) -> ConsistencyEval:
         reject_loan_tag(_as_conditions(self.gather_filter), "gather_filter")
+        # LP-618 — `gather_exclude` reads the same per-SOURCE tag map and was unvalidated. A
+        # loan-scoped tag placed there is looked up per document by `_tag_holds`, never found, and the
+        # exclusion silently becomes a permanent no-op — the exact trap this validator was written to
+        # close, left open on the newer field.
+        reject_loan_tag(_as_conditions(self.gather_exclude), "gather_exclude")
         return self
 
     @model_validator(mode="after")

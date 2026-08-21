@@ -124,6 +124,12 @@ def _load_bearing_tag_ids(rule_id: str) -> set[str]:
         tags = {spec.consistency.gather_tag}
         if spec.consistency.gather_filter is not None:
             tags.add(spec.consistency.gather_filter.tag_id)
+        # LP-618 — AND THE EXCLUSION'S TAG. Without it, an exclusion reading an AI-backed tag whose
+        # group nothing else pulls in would find that tag ABSENT and be permanently inert — a filter
+        # that silently never fires. ID-4 escapes only incidentally: `id.address_role` is derived and
+        # its upstream AI group is already required by `gather_tag`.
+        if spec.consistency.gather_exclude is not None:
+            tags.add(spec.consistency.gather_exclude.tag_id)
         return tags
     if spec.deterministic is not None:
         return set(spec.deterministic.load_bearing_tags)
