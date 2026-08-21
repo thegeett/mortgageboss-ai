@@ -128,9 +128,26 @@ judgment:
   # reconciled against the application, and a processor closing it should finish the line knowing the
   # file is in order rather than being handed a task that is already done. "{value}" is `exact` or
   # `probable`, so the sentence is honest about how strong the match was without asking for anything.
+  # LP-612 — NAMES WHAT WAS MATCHED, AND WHAT WAS NOT. It read "This recurring payment is already
+  # accounted for", which a processor reads as the payment having been checked. The exemption fires on
+  # `txn.stated_liability_match` — a PAYEE match — and this rule's own criteria say the stated
+  # liabilities are not reachable from a transaction subject, so the amount is not compared and cannot
+  # be. On LF-3CVT that mattered twice on one run:
+  #
+  #   UNITED WHSLE MORT   bank $3,286.21/mo   application $3,186.00   -> "accounted for"
+  #   CITI                bank $4,802.22/mo   application    $49.00   -> "accounted for"
+  #
+  # Neither is a defect in this rule — the payee IS disclosed in both — but a sentence that reads as
+  # settlement over a $100 and a $4,753 gap is one a processor is entitled to be annoyed by. DT-6
+  # compares a stated housing payment against what the servicer bills; that is the rule for the
+  # amount, and it needs a mortgage statement or 1098 to run.
+  #
+  # Still a pass, and still reads as one: no "confirm", no "verify", no "obtain" (see the note above).
+  # Stating the scope of a match is not asking for work.
   exempt_message: >-
-    This recurring payment is already accounted for — its payee is on the application's liability list
-    ({value} match), so there is no undisclosed obligation here.
+    This recurring payment's payee is on the application's liability list ({value} match), so the
+    obligation is disclosed rather than hidden. The match is on the payee alone — what leaves the
+    account each month is not compared here with the payment the application states.
   load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring, txn.stated_liability_match]
   # `_build_context` builds the model's context from THIS list alone, and each entry carries the tag's
   # own REASONING — which is where the payee name lives ("Citi (Citibank) is a credit card issuer ...")
