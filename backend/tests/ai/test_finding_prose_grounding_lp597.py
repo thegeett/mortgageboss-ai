@@ -310,3 +310,54 @@ def test_ih3_asks_for_both_sides_of_its_comparison() -> None:
 
     assert "homeowners insurance declarations page or binder" in fix
     assert "Closing Disclosure" in fix
+
+
+# --------------------------------------------------------------------------- #
+# LP-607 — content ids are identifiers too
+# --------------------------------------------------------------------------- #
+
+
+def test_a_content_id_in_composed_text_is_rejected() -> None:
+    """The dotted pattern cannot see these — they have no dot — so `docdbbe8db1f5a7d9ff` walked
+    straight past the guard whose whole job is keeping internal keys away from a processor. ID-4
+    shipped five of them in one sentence."""
+    from app.ai.finding_prose import leaked_identifiers
+
+    leaked = _composition(
+        "Reconcile the address; it differs across sources "
+        "(docdbbe8db1f5a7d9ff, doc6abd650d555473b0)."
+    )
+
+    assert leaked_identifiers(leaked) == {"docdbbe8db1f5a7d9ff", "doc6abd650d555473b0"}
+
+
+def test_every_subject_key_prefix_is_covered() -> None:
+    """`doc` was the one observed, but the subject-key vocabulary has four prefixes and any of them
+    would read the same way to a processor."""
+    from app.ai.finding_prose import leaked_identifiers
+
+    for key in (
+        "doc1a2b3c4d5e6f70",
+        "lia7a033a46ec70cc10",
+        "txn0f1e2d3c4b5a6978",
+        "acct9988776655",
+    ):
+        assert leaked_identifiers(_composition(f"See {key} for detail.")) == {key}
+
+
+def test_ordinary_words_are_not_mistaken_for_content_ids() -> None:
+    """The pattern needs a hex run of real length, so prose that happens to start with those letters
+    is untouched — "documented", "liability", "accounted for"."""
+    from app.ai.finding_prose import leaked_identifiers
+
+    clean = _composition("The documented liability is accounted for on the application.")
+
+    assert leaked_identifiers(clean) == set()
+
+
+def test_the_rejection_is_retried_rather_than_shipping_the_template() -> None:
+    """Same reasoning as every other guard here: a rejection ships the raw engine template, so the
+    retry is what makes this a fix instead of a different bad output."""
+    from app.ai.finding_prose import _RETRYABLE
+
+    assert "identifier" in _RETRYABLE

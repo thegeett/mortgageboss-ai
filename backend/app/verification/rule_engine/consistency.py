@@ -35,7 +35,7 @@ from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgm
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
-from app.verification.rule_engine.reasons import enum_label, fact_label
+from app.verification.rule_engine.reasons import document_label, enum_label, fact_label
 from app.verification.rule_engine.result import (
     VERDICT_BY_NAME,
     LoadBearingTag,
@@ -156,10 +156,18 @@ def _normalize(value: object, keys: tuple[str, ...]) -> str:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class _Gathered:
-    """One gathered instance of the fact: its value-tag + the SOURCE it came from (a content_id)."""
+    """One gathered instance of the fact: its value-tag + the SOURCE it came from (a content_id).
+
+    LP-607 — ``source_label`` is what a PROCESSOR is shown; ``source_id`` stays for identity and
+    evidence. ID-4 shipped "the borrower's current residence differs across sources
+    (docdbbe8db1f5a7d9ff, doc6abd650d555473b0, docafdf7653352bf74d, ...)" — five content ids in a
+    sentence a person reads. LP-377-B exists to keep exactly those away from them, and the composer's
+    identifier guard only matches DOTTED ids, so `doc<hex>` walked straight through.
+    """
 
     source_id: str
     tag: Tag
+    source_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -251,7 +259,15 @@ def _borrower_documents(
                 filter_tags[entry.content_id] = filter_tag
             if not _tag_holds(gather_filter, source_tags):
                 continue
-        included.append(_Gathered(entry.content_id, tag))
+        included.append(
+            _Gathered(
+                entry.content_id,
+                tag,
+                # The document TYPE, which is what the reader needs — "pay stub, W-2, W-2" tells them
+                # which sources disagree; a content id tells them nothing and leaks an internal key.
+                document_label(entry.document_type) if entry.document_type else "a document",
+            )
+        )
     return _GatherResult(included, filter_tags, candidate_count, type_undetermined)
 
 
@@ -321,7 +337,11 @@ def _outcome_result(
     TYPE was AI-``unknown`` — so a satisfied/fired verdict SURFACES what it could not compare."""
     fields = {
         "values": ", ".join(str(inst.tag.value) for inst in gathered),
-        "sources": ", ".join(inst.source_id for inst in gathered),
+        # DEDUPED, order-preserving: five documents of two kinds read "pay stub, W-2" rather than
+        # "pay stub, pay stub, W-2, W-2, W-2". `{count}` carries the number, so nothing is lost.
+        "sources": ", ".join(
+            dict.fromkeys(inst.source_label or inst.source_id for inst in gathered)
+        ),
         "count": str(len(gathered)),
     }
     return _result(

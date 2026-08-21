@@ -79,10 +79,17 @@ def _parsed(value: object) -> Tag:
     return _tag(value, conf=None, by=TagProducedBy.PARSED)
 
 
-def _doc(cid: str, *, dtype: str = "doc", borrower=_B1) -> DocumentEntry:
+def _doc(cid: str, *, dtype: str | None = None, borrower=_B1) -> DocumentEntry:
+    """LP-607 — the type DEFAULTS TO THE CONTENT ID, so fixture documents stay distinguishable.
+
+    Consistency reasoning names its sources by document TYPE now: a content id is an internal key and
+    ID-4 shipped five of them into a sentence a processor reads. A fixture that types every document
+    "doc" would collapse to one name and stop proving that the reasoning names WHERE it disagreed —
+    and the real shape is distinct types anyway (an application against a credit report).
+    """
     return DocumentEntry(
         content_id=cid,
-        document_type=dtype,
+        document_type=dtype if dtype is not None else cid,
         belongs_to=(BorrowerRef(borrower_id=borrower, name="Sam"),) if borrower else None,
     )
 

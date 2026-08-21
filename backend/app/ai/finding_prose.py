@@ -253,10 +253,19 @@ def machinery_talk(composition: Composition) -> set[str]:
 # where it produced one anyway.
 IDENTIFIER = re.compile(r"\b[a-z][a-z_]{2,}\.[a-z][a-z_.]{2,}[a-z]\b")
 
+#: LP-607 — a CONTENT ID, which the dotted pattern above cannot see because it has no dot. ID-4
+#: shipped "the borrower's current residence differs across sources (docdbbe8db1f5a7d9ff,
+#: doc6abd650d555473b0, docafdf7653352bf74d, ...)" — five internal keys in a sentence a processor
+#: reads, straight past a guard whose whole job is keeping them out. The prefixes are the ones the
+#: subject-key vocabulary uses (`doc`, `lia`, `txn`, `acct`) followed by a hex run.
+CONTENT_ID = re.compile(r"\b(?:doc|lia|txn|acct)[0-9a-f]{8,}\b")
+
 
 def leaked_identifiers(composition: Composition) -> set[str]:
-    """Tag ids or MISMO paths in the output — LP-377-B's rule, applied to generated text."""
-    return set(IDENTIFIER.findall(composition.message))
+    """Tag ids, MISMO paths, or CONTENT IDS in the output — LP-377-B's rule, applied to generated text."""
+    return set(IDENTIFIER.findall(composition.message)) | set(
+        CONTENT_ID.findall(composition.message)
+    )
 
 
 # Imperatives that turn a PASS into a chore. Only checked on a settled finding — everywhere else these

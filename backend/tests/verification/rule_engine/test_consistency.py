@@ -55,11 +55,19 @@ def _tag(
 
 
 def _snapshot(sources: list[tuple[str, dict[str, Tag]]], *, borrower=_BORROWER) -> Snapshot:
-    """A snapshot with one document per (source_id, tags) pair, all belonging to ``borrower``."""
+    """A snapshot with one document per (source_id, tags) pair, all belonging to ``borrower``.
+
+    LP-607 — the content_id doubles as the DOCUMENT TYPE here. Consistency reasoning names its
+    sources by type now (a content id is an internal key and must never reach a processor), so a
+    fixture whose documents all share one type would collapse to a single name and stop proving that
+    the reasoning names WHERE it disagreed. Using the source_id as the type keeps each fixture
+    document distinguishable, which is also the real shape: an SSN differs between an application and
+    a credit report, not between two identical documents.
+    """
     entries = [
         DocumentEntry(
             content_id=source_id,
-            document_type="doc",
+            document_type=source_id,
             belongs_to=(BorrowerRef(borrower_id=borrower, name="Sam Borrower"),),
             fields={},
         )
@@ -602,3 +610,52 @@ def test_date_normalizer_canonicalizes_via_shared_coerce_date() -> None:
     # surface a false discrepancy for review but never masks a real one (never collapses two dates).
     assert _date("  13/01/1985  ") == "13/01/1985"
     assert _date("not a date") == "not a date"
+
+
+async def test_reasoning_names_document_types_never_content_ids() -> None:
+    """LP-607 — ID-4 shipped five internal keys into a sentence a processor reads:
+
+        "the borrower's current residence differs across sources (docdbbe8db1f5a7d9ff,
+         doc6abd650d555473b0, docafdf7653352bf74d, docfdf4385a90bf5cf0, docd0015582725c420b)
+         — a real discrepancy"
+
+    LP-377-B exists to keep content ids away from a processor, and the composer's identifier guard
+    only matches DOTTED ids, so `doc<hex>` walked straight past it. The template now renders the
+    document TYPE, which is both safe and more useful — it says WHICH KIND of source disagrees.
+    """
+    # Built inline: `_snapshot` uses the content id AS the type so its fixtures stay
+    # distinguishable, which would make this test circular. Here the two must genuinely differ.
+    ids = ("doc1a2b3c4d5e6f7081", "doc9f8e7d6c5b4a3021")
+    entries = [
+        DocumentEntry(
+            content_id=cid,
+            document_type=dtype,
+            belongs_to=(BorrowerRef(borrower_id=_BORROWER, name="Sam Borrower"),),
+            fields={},
+        )
+        for cid, dtype in zip(ids, ("pay_stub", "w2"), strict=True)
+    ]
+    snapshot = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 14, tzinfo=UTC),
+        documents=DocumentsSection.present(entries),
+        tags=TagsSection.present({ids[0]: _ssn("H1"), ids[1]: _ssn("H2")}),
+    )
+
+    results = await _eval_id2(snapshot, reasoner=_Reasoner("agree"))
+
+    reasoning = results[0].reasoning or ""
+    assert "doc1a2b3c4d5e6f7081" not in reasoning
+    assert "doc9f8e7d6c5b4a3021" not in reasoning
+    assert "pay stub" in reasoning and "W-2" in reasoning  # document_label maps w2 -> W-2
+
+
+async def test_repeated_document_types_are_not_listed_twice() -> None:
+    """Five documents of two kinds read "pay stub, W-2", not "pay stub, pay stub, W-2, W-2, W-2".
+    `{count}` carries the number, so nothing is lost."""
+    snapshot = _snapshot([("pay_stub", _ssn("H1")), ("pay_stub_2", _ssn("H2")), ("w2", _ssn("H3"))])
+
+    results = await _eval_id2(snapshot, reasoner=_Reasoner("agree"))
+
+    assert (results[0].reasoning or "").count("pay stub") <= 2

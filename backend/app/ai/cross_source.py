@@ -48,6 +48,19 @@ documents).
 WHAT TO REPORT — DISCREPANCIES AND MISSING DOCUMENTATION:
 - A CONFLICT — a stated value and a documented value that DISAGREE (e.g. stated
   income vs. the income shown by the pay stubs / W-2s).
+
+  ⚠️ COMPARE LIKE WITH LIKE, AND DO THE ARITHMETIC FIRST. A pay stub states gross
+  pay PER PERIOD — weekly, biweekly, semi-monthly — and the application states a
+  MONTHLY figure. Convert the per-period amount to a monthly one before deciding
+  whether anything disagrees (biweekly x 26 / 12; semi-monthly x 24 / 12; weekly
+  x 52 / 12). A difference that vanishes once converted is NOT a conflict and must
+  not be reported.
+
+  This is not hypothetical: a $6,028 biweekly gross was reported as conflicting
+  with a stated $13,166.67 per month. Biweekly $6,028 IS $13,061 a month — the two
+  agree to within one percent. The finding's own text even carried the conversion,
+  which is how it was caught. If your own explanation would show the figures
+  agreeing, there is nothing to report.
 - A MISSING-DOCUMENT gap — a stated value (income, an asset, a liability, a gift)
   that LACKS the supporting document needed to verify it. REPORT THESE. In mortgage
   processing an unflagged document gap is a real error, so it is SAFER to surface a
