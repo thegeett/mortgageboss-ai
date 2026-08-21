@@ -154,6 +154,32 @@ export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
  * outcome by construction), so a group never mixes an `open` with a `satisfied`. The header must not
  * assume a shared message — see `CollapsedFindings`, which summarises when the members disagree.
  */
+/** Order two rule ids the way a processor reads them: by family, then NUMERICALLY (LP-613).
+ *
+ * ⚠️ NOT a string sort. Rule ids are `AS-1`, `AS-4`, `AS-8`, `AS-10` — lexicographically that is
+ * AS-1, AS-10, AS-4, which puts the tenth rule second and reads as an accident. The number is a
+ * number and is compared as one.
+ *
+ * The legacy ids (`cross_source.*`, `xsrc.*`) have no family-number shape. They sort after the
+ * governed rules and alphabetically among themselves — deliberate rather than incidental: they are a
+ * different generation of check, and interleaving them with AS/CR/ID would suggest they belong to
+ * the same sequence.
+ */
+export function compareRuleIds(left: string, right: string): number {
+  const parse = (id: string) => {
+    const match = /^([A-Za-z]+)-(\d+)$/.exec(id);
+    return match ? { family: match[1] as string, number: Number(match[2]) } : null;
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (a && b) {
+    return a.family === b.family ? a.number - b.number : a.family.localeCompare(b.family);
+  }
+  if (a) return -1; // a governed rule before a legacy id
+  if (b) return 1;
+  return left.localeCompare(right);
+}
+
 export function groupByRule(findings: RuleFinding[]): RuleFinding[][] {
   const groups = new Map<string, RuleFinding[]>();
   const order: string[] = [];
@@ -167,6 +193,10 @@ export function groupByRule(findings: RuleFinding[]): RuleFinding[][] {
       order.push(key);
     }
   }
+  // LP-613 — ORDERED BY RULE ID, not by whatever order the API returned. Every section on both tabs
+  // renders through this one function, so sorting here is what makes "Must fix", "Couldn't check",
+  // "In the file" and "Needs review" all read the same way.
+  order.sort(compareRuleIds);
   return order.map((key) => groups.get(key) as RuleFinding[]);
 }
 
