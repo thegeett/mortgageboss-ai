@@ -32,9 +32,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Both borrowed from the API deliberately: `_STUCK_RUN_TIMEOUT_SECONDS` so "stuck" has ONE definition
-# (the one the UI already acts on), and `_enqueue_cross_source` so the enqueue path — which is
+# (the one the UI already acts on), and `_enqueue_rule_engine` so the enqueue path — which is
 # documented never to raise and to leave the caller responsible for failing the run — is not duplicated.
-from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS, _enqueue_cross_source
+#
+# LP-614: this was `_enqueue_cross_source`. That was the ONLY pass this script ever enqueued, so a
+# script-triggered run ran the legacy sweep and never the governed rules — and with the sweep now off
+# it would have created a run and enqueued nothing at all. The rule engine is what verification means.
+from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS, _enqueue_rule_engine
 from app.core.database import async_session_maker
 from app.core.logging import get_logger
 from app.models.base import utcnow
@@ -124,9 +128,9 @@ async def _run() -> int:
         # attribute can be expired, so reading them later is a lazy-load on a dead session.
         run_id, loan_file_id = run.id, loan_file.id
 
-    # `_enqueue_cross_source` never raises; a False return means the broker is unreachable, and the
+    # `_enqueue_rule_engine` never raises; a False return means the broker is unreachable, and the
     # caller owns failing the run — a swallowed enqueue would strand it RUNNING forever.
-    if not _enqueue_cross_source(loan_file_id, run_id):
+    if not _enqueue_rule_engine(loan_file_id, run_id):
         async with async_session_maker() as db:
             stranded = await db.get(Verification, run_id)
             if stranded is not None:

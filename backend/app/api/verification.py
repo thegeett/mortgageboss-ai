@@ -165,23 +165,6 @@ async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) 
     return (await db.execute(stmt)).scalars().first()
 
 
-def _enqueue_cross_source(loan_file_id: UUID, run_id: UUID) -> bool:
-    """Enqueue the cross-source pass (the worker runs it). Returns success.
-
-    Never raises (an enqueue failure must not 500 the request), but the caller
-    must surface a failure on the run — a swallowed enqueue would otherwise strand
-    the run RUNNING forever (the Phase-2 "surface, don't swallow" principle).
-    """
-    try:
-        from app.tasks.cross_source import run_cross_source_pass
-
-        run_cross_source_pass.delay(str(loan_file_id), str(run_id))
-        return True
-    except Exception:
-        log.warning("cross_source_enqueue_failed", loan_file_id=str(loan_file_id))
-        return False
-
-
 def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> bool:
     """Enqueue the governed snapshot/rules pass (LP-365) ALONGSIDE the sweep, on the same run. Returns
     False on an enqueue failure (broker/worker unavailable) so the caller can mark the run FAILED — the
@@ -235,12 +218,6 @@ async def run_verification(
     )
     await db.commit()
 
-    if not _enqueue_cross_source(loan_file.id, run.id):
-        run.status = VerificationStatus.FAILED
-        run.completed_at = utcnow()
-        run.error_detail = "Could not enqueue the verification pass (worker/broker unavailable)."
-        await db.commit()
-
     # LP-365: the governed snapshot/rules pass runs ALONGSIDE the sweep on the same run. Enqueued on the
     # cache-MISS path only (a new run). A failed enqueue marks the run FAILED (fail-closed: the governed
     # pass must run, or the run must NOT read COMPLETED). NOTE (reported, not fixed): the LP-78.1
@@ -293,14 +270,23 @@ async def _build_status(
             eta_elapsed = int((utcnow() - latest.started_at).total_seconds())
 
     # LP-375 — the two finding systems are split STRUCTURALLY by ``evaluation_outcome`` (the discriminator;
-    # ``origin`` does NOT work — ``deterministic_rule`` spans BOTH the governed rule engine AND retired
-    # ``xsrc`` findings). ``findings`` is the LEGACY quarantine (evaluation_outcome null: the AI sweep +
-    # the retired xsrc deterministic findings) — RED/YELLOW, unchanged, so the sweep behaves identically.
+    # ``origin`` does NOT work for the GOVERNED side — ``deterministic_rule`` spans BOTH the governed rule
+    # engine AND retired ``xsrc`` findings). ``findings`` is the LEGACY quarantine — RED/YELLOW.
+    #
+    # LP-614 — the legacy tab is now AI-TYPED ONLY. It used to carry a second population: the retired
+    # ``xsrc.*`` deterministic rules, which also land here (origin ``deterministic_rule``, NO
+    # evaluation_outcome). Seven such rows exist on staging, from the two xsrc rules that ever fired —
+    # `xsrc.identity.name_consistency` and `xsrc.income.employer_name_consistency` — both retired for
+    # contradicting ID-1 and IN-5 with a `_norm` that folds case and whitespace and nothing else. A
+    # processor reading "Borrower name differs across sources" next to ID-1's "consistent across all
+    # documents" cannot act on the file, which is why they were retired; leaving their output rendering
+    # in a tab keeps that contradiction on screen. The rows are NOT deleted — they stop being displayed,
+    # and with the pass off (app/tasks/cross_source.py) no more are written.
     findings_stmt = (
         only_active(
             select(Finding).where(
                 Finding.loan_file_id == loan_file.id,
-                Finding.origin.in_(_SHOWN_ORIGINS),
+                Finding.origin == FindingOrigin.AI_CROSS_SOURCE,
                 Finding.status.in_((FindingStatus.RED, FindingStatus.YELLOW)),
                 Finding.evaluation_outcome.is_(
                     None

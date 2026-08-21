@@ -135,7 +135,7 @@ async def test_post_run_triggers_pass(client: AsyncClient, db: AsyncSession, mon
         enqueued["args"] = (loan_file_id, run_id)
 
     monkeypatch.setattr(
-        "app.tasks.cross_source.run_cross_source_pass.delay", _fake_delay, raising=True
+        "app.tasks.verification_rules.run_rule_engine_pass.delay", _fake_delay, raising=True
     )
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
@@ -158,7 +158,9 @@ async def test_post_run_marks_failed_when_enqueue_fails(
     def _boom(loan_file_id: str, run_id: str) -> None:
         raise RuntimeError("broker unreachable")
 
-    monkeypatch.setattr("app.tasks.cross_source.run_cross_source_pass.delay", _boom, raising=True)
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay", _boom, raising=True
+    )
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
     loan_file = await create_loan_file(db, company_id=company.id)
@@ -233,6 +235,40 @@ def _rule_finding(
         ],
         details={"gated_pending_signoff": ratification_pending, "subject_key": subject_key},
     )
+
+
+async def test_retired_xsrc_findings_do_not_render_in_the_legacy_tab(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-614 — a retired `xsrc.*` finding is origin `deterministic_rule` with NO evaluation_outcome, so
+    it used to fall into the legacy tab alongside the AI sweep. Seven such rows exist on staging from the
+    two xsrc rules that ever fired, both retired for contradicting ID-1/IN-5. The tab is AI-typed only
+    now: the row is not deleted, it just stops being displayed."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await _add_finding(db, loan_file, confidence=0.8)  # the AI sweep finding — still shown
+    db.add(
+        Finding(
+            loan_file_id=loan_file.id,
+            rule_id="xsrc.identity.name_consistency",
+            origin=FindingOrigin.DETERMINISTIC_RULE,
+            confidence=1.0,
+            status=FindingStatus.YELLOW,
+            category=FindingCategory.CROSS_SOURCE,
+            message="Borrower name differs across sources: ADITYA TALLURI; TALLURI ADITYA.",
+        )
+    )
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+
+    rule_ids = [f["rule_id"] for f in body["findings"]]
+    assert rule_ids == ["cross_source.income_variance"]
+    assert not any(r.startswith("xsrc.") for r in rule_ids)
+    # ...and it did not leak into the governed list either (it has no evaluation_outcome).
+    assert not any(f["rule_id"].startswith("xsrc.") for f in body["rule_findings"])
 
 
 async def test_rule_findings_separate_and_satisfied_is_reachable(
@@ -501,7 +537,7 @@ async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSessi
 
 def _spy_delay(monkeypatch, calls: list) -> None:
     monkeypatch.setattr(
-        "app.tasks.cross_source.run_cross_source_pass.delay",
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
         lambda *a: calls.append(a),
         raising=True,
     )
@@ -586,7 +622,7 @@ async def test_cached_return_reconciles_staleness(
 
 
 def _spy_both_delays(monkeypatch, calls: list) -> None:
-    """Spy BOTH worker enqueues (the AI sweep + the governed rule pass) — LP-377 asserts the GOVERNED
+    """Spy BOTH worker enqueues (the legacy AI sweep + the governed rule pass) — LP-377 asserts the GOVERNED
     pass re-runs on a rule-relevant change, so both are captured."""
     monkeypatch.setattr(
         "app.tasks.cross_source.run_cross_source_pass.delay",
@@ -626,17 +662,17 @@ async def test_rule_relevant_change_reruns_the_governed_pass(
     resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
     assert resp.status_code == 200
     assert resp.json()["status"] == "running"  # a FRESH run — the cache MISSED on the engine change
-    assert {c[0] for c in calls} == {
-        "sweep",
-        "rules",
-    }  # BOTH re-ran — the governed pass is not stale
+    # LP-614: the legacy sweep no longer runs at all, so "rules" alone is the whole expectation —
+    # what this test protects is that the ENGINE change missed the cache, not how many passes fire.
+    assert {c[0] for c in calls} == {"rules"}
 
 
-async def test_governed_pass_enqueued_alongside_the_sweep_on_a_miss(
+async def test_governed_pass_enqueued_on_a_miss_and_the_legacy_sweep_is_not(
     client: AsyncClient, db: AsyncSession, monkeypatch
 ) -> None:
-    """A cache miss (no prior run) enqueues the governed pass ALONGSIDE the sweep — so the cache never
-    skips the rule engine on a real re-run (the fail-open the LP-377 key closes)."""
+    """A cache miss (no prior run) enqueues the governed pass — so the cache never skips the rule engine
+    on a real re-run (the fail-open the LP-377 key closes). LP-614: and the legacy sweep, which used to
+    be enqueued alongside it, is NOT dispatched any more."""
     calls: list = []
     _spy_both_delays(monkeypatch, calls)
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
@@ -646,7 +682,7 @@ async def test_governed_pass_enqueued_alongside_the_sweep_on_a_miss(
     resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
     assert resp.status_code == 200
     assert resp.json()["status"] == "running"
-    assert {c[0] for c in calls} == {"sweep", "rules"}
+    assert {c[0] for c in calls} == {"rules"}  # LP-614: the sweep is off; the governed pass runs
 
 
 # --- The aggression dial (LP-79) ---------------------------------------------

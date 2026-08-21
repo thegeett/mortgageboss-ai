@@ -9,11 +9,12 @@ Paired with the task-registration guard (tests/tasks/test_task_registration.py),
 worker-seam lesson: the registered task body works when invoked as the worker invokes it.
 """
 
+import pathlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-from app.ai.cross_source import CrossSourceRawFinding, CrossSourceResult
+from app.ai.cross_source import CrossSourceResult
 from app.models import Finding, FindingOrigin
 from app.models.verification import VerificationStatus, VerificationTrigger
 from app.services.loan_files import create_loan_file
@@ -23,60 +24,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration import factories
 
 
-def _stub_result() -> CrossSourceResult:
-    return CrossSourceResult(
-        findings=[
-            CrossSourceRawFinding(
-                type="income_variance",
-                description="Stated income exceeds the documents",
-                stated_value="16400",
-                document_value="15100",
-                source_document="pay_stub",
-                page=1,
-                snippet="Gross 3,775.00 biweekly",
-                confidence=0.82,
-                reasoning="docs show less",
-            )
-        ],
-        input_tokens=10,
-        output_tokens=5,
-        model="claude-test",
-    )
-
-
-async def test_cross_source_task_runs_end_to_end_and_persists_findings(
+async def test_cross_source_task_makes_no_ai_call_and_leaves_the_run_alone(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """LP-614: the legacy pass is off. It must not call the model, must not write findings, and must
+    NOT complete the run — the governed rule pass shares this run and owns completion (LP-377-C)."""
     company = await factories.make_company(db, slug="acme")
     loan_file = await create_loan_file(db, company_id=company.id)
-    borrower = await factories.make_borrower(db, loan_file=loan_file)
+    await factories.make_borrower(db, loan_file=loan_file)
     run = await create_verification_run(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
     )
     await db.commit()
 
-    # The task body opens its own session via task_session() + calls the default reasoner.
-    # Point both at the test session + a deterministic stub (no broker, no AI key).
     @asynccontextmanager
     async def _fake_task_session() -> AsyncIterator[AsyncSession]:
         yield db
 
-    async def _fake_reasoner(_context_json: str) -> CrossSourceResult:
-        return _stub_result()
+    async def _explode(_context_json: str) -> CrossSourceResult:
+        raise AssertionError("LP-614: the legacy cross-source pass must make no AI call")
 
     monkeypatch.setattr("app.tasks.cross_source.task_session", _fake_task_session)
-    monkeypatch.setattr("app.services.cross_source.reason_cross_source", _fake_reasoner)
+    monkeypatch.setattr("app.services.cross_source.reason_cross_source", _explode)
 
-    # Invoke the task body exactly as the worker would (enqueue → worker → _run).
     from app.tasks.cross_source import _run
 
     await _run(str(loan_file.id), str(run.id))
 
-    # LP-377-C: the sweep persists its findings but NO LONGER completes the run alone — the governed rule
-    # pass is the completion authority, so the run stays RUNNING after the sweep (a full run completes when
-    # the rule pass finishes; a run that only ran the sweep is failed by the watchdog).
     await db.refresh(run)
-    assert run.status is VerificationStatus.RUNNING
+    assert run.status is VerificationStatus.RUNNING, (
+        "completion belongs to the rule pass, not this one"
+    )
+    assert run.completed_at is None
     findings = (
         (
             await db.execute(
@@ -89,8 +68,15 @@ async def test_cross_source_task_runs_end_to_end_and_persists_findings(
         .scalars()
         .all()
     )
-    assert any(f.rule_id == "cross_source.income_variance" for f in findings)
-    assert borrower is not None  # the file had a borrower (a realistic fixture)
+    assert findings == []
+
+
+async def test_creating_a_run_does_not_enqueue_the_legacy_cross_source_pass() -> None:
+    """LP-614: the endpoint stopped enqueueing it, so the task is never dispatched for a new run."""
+    import app.api.verification as verification_api
+
+    assert not hasattr(verification_api, "_enqueue_cross_source")
+    assert "_enqueue_cross_source" not in pathlib.Path(verification_api.__file__).read_text()
 
 
 def test_the_cross_source_task_is_registered_on_the_worker() -> None:
