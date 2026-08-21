@@ -13,6 +13,7 @@ mortgage processors. Start here to find your way around.
 | [onboarding-and-tenancy.md](onboarding-and-tenancy.md) | Company/user onboarding model, tenancy, staged build plan, dev seed |
 | [frontend-architecture.md](frontend-architecture.md) | Route groups, the protected app shell, adding pages, role-aware nav |
 | [stitch-ui-prompts.md](stitch-ui-prompts.md)         | The shipped design system as hex/tokens, plus Google Stitch prompts per screen |
+| [rule-engine.md](rule-engine.md)                     | The verification subsystem end to end: snapshot → fact tags → rule specs → findings, the three evaluators, the fail-closed gate, activation and ratification |
 | [api.md](api.md)                                     | HTTP API surface: conventions, tenant scoping, loan-file CRUD |
 | [document-model.md](document-model.md)               | The three-tier document model: tiers, the type catalog, tier-aware routing |
 | [glossary.md](glossary.md)                           | Mortgage domain terms and technical terms                 |
