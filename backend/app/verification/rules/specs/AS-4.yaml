@@ -68,11 +68,19 @@ deterministic:
   # LP-608 — what to DO when this check cannot run. Without it the finding named a missing fact and
   # stopped, and the composer invented an action from the problem text. Static per rule, so the
   # wording holds whichever input was the missing one — the reserve months, or the requirement itself.
+  # LP-610 — the second branch. The sentence below names both sides, which was LP-603/608's fix for a
+  # text that presumed which one was missing. It still asks for BOTH every time, so a file that has
+  # one of them is told to upload it again — IN-3's symptom, one step milder.
+  #
+  # A composer may only choose among requests the template makes (its instruction is to make THE SAME
+  # REQUEST as this text), so the alternative has to be written here. `document_kinds_on_file`
+  # (LP-609) is what lets it pick.
   couldnt_check_fix: >-
     Upload the asset documentation the reserve figure is built from: a statement for each deposit
     account, and the statement for any retirement or brokerage account being counted toward reserves.
-    If the months still cannot be worked out, confirm the occupancy and the financed unit count on
-    the application — the required reserves are selected from those two, and neither can be assumed.
+    If one of those is already in the file, upload only the other. If the months still cannot be
+    worked out after that, confirm the occupancy and the financed unit count on the application — the
+    required reserves are selected from those two, and neither can be assumed.
   load_bearing_tags:
     # LP-597 — the overlay tags are deliberately NOT here. `load_bearing` means "this rule cannot
     # answer without it", and the engine couldnt_checks when one is absent. The overlay can only ever

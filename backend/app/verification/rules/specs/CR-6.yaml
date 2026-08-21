@@ -140,11 +140,13 @@ deterministic:
   # LP-524 — what to DO when this check cannot run. The gate short-circuits before any outcome,
   # so without this the finding named a missing fact and stopped there. Static per rule, so the
   # wording holds whichever gated input was the missing one.
+  # LP-610 — the second branch; see AS-4 for why it must live in the template.
   couldnt_check_fix: >-
     Upload the tri-merge credit report. Seasoning runs from the date of a bankruptcy, foreclosure,
     short sale or deed-in-lieu to the closing date, so both the report and a closing date are needed.
     Upload it even if you expect a clean history: a report showing no derogatory events is
     what establishes that, and its absence is not evidence of it.
+    If one of the two is already in the file, upload only the other.
   load_bearing_tags:
     # LP-556 — provenance only, NOT gated: it names WHICH debt this finding is about. Gating on it
     # would make a liability with no holder name abstain instead of being evaluated.

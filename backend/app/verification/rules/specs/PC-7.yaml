@@ -103,10 +103,16 @@ spec_version: 1
 deterministic:
   # LP-608 — see AS-4. The closing date can come from either document, so both are named rather than
   # presuming which one the file will have.
+  # LP-610 — the second branch. ⚠️ PC-7's two document groups are ALTERNATIVES for one fact — the
+  # closing date comes from the purchase agreement OR the Closing Disclosure — not two sides of a
+  # comparison like the other eight. "Upload only the other" would be wrong here: neither is owed
+  # once one is present. See AS-4 for why the alternative must live in the template at all.
   couldnt_check_fix: >-
     Upload the purchase agreement stating the contract closing date, or the Closing Disclosure or
     settlement statement if one has been issued. The closing date is taken from whichever of the two
     the file carries, and measured against the file date.
+    Either document answers this, so if one of them is already in the file nothing further is
+    needed for the date.
   load_bearing_tags:
     - contract.days_until_closing
   gated_tags:

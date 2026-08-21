@@ -95,3 +95,46 @@ def test_in3_offers_both_branches_not_just_upload() -> None:
     assert "Upload the borrower's most recent pay stub" in fix  # the file-has-nothing branch
     assert "already in the file" in fix  # the file-has-them branch
     assert "legible" in fix, "the second branch must say what to DO, not merely note they are there"
+
+
+# --------------------------------------------------------------------------- #
+# LP-610 — a fix that asks for both every time asks again for what you gave it
+# --------------------------------------------------------------------------- #
+
+#: Every active rule needing two kinds of document. LP-603/608 made each NAME both sides, which fixed
+#: a text that presumed which one was missing; all nine then asked for BOTH every time, so a file
+#: carrying one was told to upload it again — IN-3's symptom, one step milder.
+_TWO_SIDED = ("AS-4", "CL-1", "CR-13", "CR-6", "ID-5", "IH-3", "PC-7", "PR-2", "PR-6")
+
+
+@pytest.mark.parametrize("rule_id", _TWO_SIDED)
+def test_a_two_document_fix_says_what_to_do_when_one_is_already_there(rule_id: str) -> None:
+    """The composer can only choose among requests the template makes, so the second branch has to be
+    written here. `document_kinds_on_file` (LP-609) is what lets it pick."""
+    fix = " ".join((load_rule_spec(rule_id).deterministic.couldnt_check_fix or "").split()).lower()
+
+    assert "already in the file" in fix, (
+        f"{rule_id} asks for both documents unconditionally, so a file carrying one is told to "
+        f"upload it again"
+    )
+
+
+def test_pc7_does_not_ask_for_the_second_document_it_does_not_need() -> None:
+    """⚠️ PC-7 IS NOT LIKE THE OTHER EIGHT, and a uniform clause got it wrong before this test.
+
+    Its two document groups are ALTERNATIVES for one fact — the closing date comes from the purchase
+    agreement OR the Closing Disclosure — not two sides of a comparison. "Upload only the other" would
+    contradict its own preceding sentence and send a processor after a document nothing needs.
+    """
+    fix = " ".join((load_rule_spec("PC-7").deterministic.couldnt_check_fix or "").split())
+
+    assert "upload only the other" not in fix.lower()
+    assert "nothing further is needed" in fix.lower()
+
+
+def test_the_other_eight_do_ask_for_the_missing_side() -> None:
+    """The inverse of the PC-7 case: where the two documents really are two sides, the one that is
+    missing is still owed."""
+    for rule_id in (r for r in _TWO_SIDED if r != "PC-7"):
+        fix = " ".join((load_rule_spec(rule_id).deterministic.couldnt_check_fix or "").split())
+        assert "upload only the other" in fix.lower(), rule_id

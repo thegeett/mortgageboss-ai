@@ -57,11 +57,13 @@ spec_version: 1
 deterministic:
   # LP-608 — see AS-4. Both sides are named because either can be the missing one: an unexpired ID
   # with no closing date to compare it against is as unanswerable as a closing date with no ID.
+  # LP-610 — the second branch; see AS-4 for why it must live in the template.
   couldnt_check_fix: >-
     Upload the borrower's unexpired government photo ID — a driver's license, passport,
     government-issued ID or military ID — and the Closing Disclosure or settlement statement carrying
     the closing date. An unexpired ID with no closing date to compare it against leaves the question
     open, and so does a closing date with no ID.
+    If one of the two is already in the file, upload only the other.
   load_bearing_tags:
     - id.borrower_id_expiration
     - contract.loan_closing_date
