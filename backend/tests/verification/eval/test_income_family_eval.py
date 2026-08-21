@@ -198,7 +198,9 @@ def test_pin1_now_fixed_per_borrower_fires_for_the_fraud_borrower() -> None:
         allowed_values=None,
     )
     produced = produce_derived_tags(decl, snap)
-    assert produced[str(_B1)]["income.documented_income_shortfall_pct"].value == "0.4"  # A fires
+    assert (
+        produced[str(_B1)]["income.documented_income_shortfall_pct"].value == "0.400000"
+    )  # A fires
     assert str(produced[str(_B2)]["income.documented_income_shortfall_pct"].value).startswith(
         "-"
     )  # B raise

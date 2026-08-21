@@ -41,6 +41,34 @@ from app.verification.tag_materialization.subjects import (
 Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
 
 _UNKNOWN = "unknown"
+
+#: Money, to the cent. Every monthly figure a recipe writes is quantized to this (LP-615).
+_CENTS = Decimal("0.01")
+
+#: A RATIO, to six places (LP-616). Ratios reach the snapshot as tag values too, and a ratio division
+#: repeats far more readily than a money one: `(5500 - 4000) / 5500` is 0.2727… to 28 digits, which the
+#: at-rest guard reads as an unmasked account number and refuses the whole snapshot over — the same
+#: failure LP-615 fixed for money and left standing here. Six places is far finer than any threshold
+#: these ratios are compared against (IN-1's is 5%), so no verdict moves.
+_RATIO = Decimal("0.000001")
+
+
+def _quantized(value: Decimal, quantum: Decimal) -> Decimal | None:
+    """``value`` rounded to ``quantum``, or None when it cannot be (LP-616).
+
+    ``Decimal.quantize`` RAISES ``InvalidOperation`` when the result would need more than the context's
+    28 digits — which is precisely the input this rounding defends against: a 30-digit account number
+    extracted into an amount field. Rounding it unguarded crashes tag materialization and takes the
+    whole verification run with it, where before the run finished and the at-rest guard refused the
+    persist naming the offending path. A crash is not an improvement on a diagnosable refusal, so the
+    caller abstains instead.
+    """
+    try:
+        return value.quantize(quantum, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return None
+
+
 # The classifier's UNCLASSIFIED sentinel — a SLUG, not None. classification.py sets it both when the model
 # is unsure and when the call never completed, so any "is this document type X?" read must treat it as
 # undetermined rather than as a confident "not X" (mirrors _UNKNOWN_DOC_TYPE in subjects/enumerators).
@@ -221,7 +249,18 @@ def _income_documented_shortfall(
             "this borrower: documented monthly income is absent, incomplete, or has "
             "conflicting figures across documents",
         )
-    shortfall = (stated - documented) / stated
+    # LP-616 — QUANTIZED, for the reason LP-615 quantized the money divisions and this one was missed.
+    # `(5500 - 4000) / 5500` is 0.2727272727272727272727272727: a 28-digit fractional run, which the
+    # at-rest guard matches as an unmasked account number, so `persist_snapshot` refuses the ENTIRE
+    # snapshot. A ratio is not money, but it takes the same path to the same guard.
+    raw_shortfall = (stated - documented) / stated
+    shortfall = _quantized(raw_shortfall, _RATIO)
+    if shortfall is None:
+        return (
+            _UNKNOWN,
+            "this borrower: the documented-vs-stated ratio cannot be expressed at a sane precision — "
+            f"stated {stated}, documented {documented} (a figure this large is an extraction defect)",
+        )
     return (
         str(shortfall),
         f"this borrower: documented {documented} vs stated {stated} → shortfall "
@@ -357,8 +396,18 @@ def _income_ytd_annualized_shortfall(
             "year-to-date figure from"
         )
 
+    # LP-616 — quantized, and this one essentially never terminates without it: the divisor is
+    # `_DAYS_PER_MONTH` (30.4375), so the shortfall runs to the context's full 28 digits on ordinary
+    # inputs. See `income.documented_income_shortfall_pct` for what that costs.
     ytd_monthly = ytd / elapsed_months
-    shortfall = (documented - ytd_monthly) / documented
+    raw_shortfall = (documented - ytd_monthly) / documented
+    shortfall = _quantized(raw_shortfall, _RATIO)
+    if shortfall is None:
+        return (
+            _UNKNOWN,
+            f"the year-to-date pace ratio cannot be expressed at a sane precision — YTD {ytd}, "
+            f"documented {documented} (a figure this large is an extraction defect)",
+        )
     return (
         str(shortfall),
         f"year-to-date gross {ytd} through {pay_date.isoformat()} "
@@ -673,11 +722,6 @@ def _housing_insurance_monthly(
             "premium — cannot tell which is current",
         )
     annual = next(iter(premiums))
-    if annual <= 0:
-        return (
-            _UNKNOWN,
-            f"the homeowners insurance binder states a non-positive annual premium ({annual})",
-        )
     # QUANTIZED TO CENTS, and this is load-bearing rather than cosmetic. `Decimal(1250) / Decimal(12)`
     # is 104.1666666666666666666666667 — a 25-digit fractional run — and the snapshot's PII-at-rest
     # guard matches `\b\d{9,}\b(?!\.\d)`, whose lookahead protects the INTEGER part of a decimal and
@@ -685,7 +729,24 @@ def _housing_insurance_monthly(
     # the whole write: on LF-3CVT the 14:07 run computed every finding and stored no snapshot. A monthly
     # dollar figure has no business carrying 25 decimal places in the first place. ROUND_HALF_UP and
     # cents match what every calculator already does (verification/dti.py `_ratio`, ltv, mi, reserves).
-    monthly = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    #
+    # LP-616 — ROUNDED FIRST, THEN GATED. The non-positive test used to run on the ANNUAL figure, so a
+    # $0.05 annual premium passed it and then rounded to a monthly "0.00" — a confident zero, which
+    # this function's own contract forbids ("absent ≠ 0 … the exact false-green the DTI's gate exists
+    # to prevent"). The gate has to see the number the tag will actually carry.
+    monthly = _quantized(annual / Decimal(12), _CENTS)
+    if monthly is None:
+        return (
+            _UNKNOWN,
+            f"the homeowners insurance binder states an annual premium that cannot be expressed as a "
+            f"monthly figure ({annual}) — a figure this large is an extraction defect",
+        )
+    if monthly <= 0:
+        return (
+            _UNKNOWN,
+            f"the homeowners insurance binder states a non-positive annual premium ({annual}) — "
+            "it is not a positive monthly amount",
+        )
     return str(monthly), f"monthly homeowners insurance {monthly} (annual premium {annual} ÷ 12)"
 
 
@@ -5665,11 +5726,23 @@ def _housing_taxes_monthly(
             "cannot tell which is the subject property's",
         )
     annual = next(iter(annuals))
-    if annual <= 0:
-        return _UNKNOWN, f"the property-tax bill states a non-positive annual tax amount ({annual})"
     # Cents, for the reason spelled out on housing.insurance_monthly above — this sibling only escaped
     # the guard because 5282.58 / 12 happens to terminate. A $5,000 bill (416.666…) would not.
-    monthly = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    # LP-616 — and gated on the MONTHLY figure, so a sub-cent annual amount abstains instead of
+    # reporting a confident 0.00. Same ordering fix as its sibling.
+    monthly = _quantized(annual / Decimal(12), _CENTS)
+    if monthly is None:
+        return (
+            _UNKNOWN,
+            f"the property-tax bill states an annual tax amount that cannot be expressed as a monthly "
+            f"figure ({annual}) — a figure this large is an extraction defect",
+        )
+    if monthly <= 0:
+        return (
+            _UNKNOWN,
+            f"the property-tax bill states a non-positive annual tax amount ({annual}) — it is not "
+            "a positive monthly amount",
+        )
     return str(monthly), f"monthly property taxes {monthly} (annual tax {annual} ÷ 12)"
 
 
@@ -5740,8 +5813,12 @@ def _housing_hoa_monthly(
                 "cannot convert to monthly without assuming a periodicity"
             )
             continue
-        # Cents — see housing.insurance_monthly. Quarterly dues ÷ 3 repeat for most amounts.
-        monthlies.add((dues / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        # LP-616 — the FULL-PRECISION monthly goes into the set; rounding happens on the way out.
+        # Rounding on the way IN made the conflict detector looser than it was written to be: two HOA
+        # statements at 300.00 and 300.01 quarterly are two different figures, and the tag's job here is
+        # to abstain when it cannot tell which applies. Both rounded to 100.00 and it reported
+        # agreement — a fail-closed guard relaxed as a side effect of a formatting fix.
+        monthlies.add(dues / Decimal(months))
     if stmt_count == 0:
         return _UNKNOWN, "no HOA statement in the file — HOA dues are unknown, not 0"
     if problem is not None:
@@ -5752,7 +5829,15 @@ def _housing_hoa_monthly(
             f"{stmt_count} HOA statements state conflicting monthly dues "
             f"({', '.join(str(m) for m in sorted(monthlies))}) — cannot tell which applies",
         )
-    monthly = next(iter(monthlies))
+    # Cents on the way OUT — see housing.insurance_monthly for why a monthly dollar figure must not
+    # reach the snapshot with 25 decimal places. Quarterly dues ÷ 3 repeat for most amounts.
+    monthly = _quantized(next(iter(monthlies)), _CENTS)
+    if monthly is None:
+        return (
+            _UNKNOWN,
+            "the HOA statement states dues that cannot be expressed as a monthly figure — a figure "
+            "this large is an extraction defect",
+        )
     return str(
         monthly
     ), f"monthly HOA dues {monthly} (from the HOA statement's stated dues and frequency)"

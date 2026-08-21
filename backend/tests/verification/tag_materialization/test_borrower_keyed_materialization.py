@@ -169,7 +169,9 @@ def test_per_borrower_shortfall_isolated_and_fixes_pin1() -> None:
         None,
     )
     produced = produce_derived_tags(decl, snap)
-    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "0.4"  # A fires
+    assert (
+        produced[str(_A)]["income.documented_income_shortfall_pct"].value == "0.400000"
+    )  # A fires
     assert str(produced[str(_B)]["income.documented_income_shortfall_pct"].value).startswith("-")
 
     # Per-subject fail-closed: borrower B's income absent → B abstains (unknown), A still computes.
@@ -183,7 +185,7 @@ def test_per_borrower_shortfall_isolated_and_fixes_pin1() -> None:
         tags={"aStub": {"income.documented_monthly": _tag("3000")}},
     )
     p2 = produce_derived_tags(decl, snap_b_absent)
-    assert p2[str(_A)]["income.documented_income_shortfall_pct"].value == "0.4"
+    assert p2[str(_A)]["income.documented_income_shortfall_pct"].value == "0.400000"
     assert (
         p2[str(_B)]["income.documented_income_shortfall_pct"].value == "unknown"
     )  # B abstains, A unaffected
@@ -220,7 +222,7 @@ def test_two_paystubs_same_figure_are_not_double_counted() -> None:
         },
     )
     produced = produce_derived_tags(_SHORTFALL_DECL, snap)
-    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "0.4"
+    assert produced[str(_A)]["income.documented_income_shortfall_pct"].value == "0.400000"
 
 
 def test_conflicting_documented_figures_abstain_never_sum() -> None:

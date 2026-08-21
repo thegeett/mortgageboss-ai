@@ -26,7 +26,7 @@ file (the caller resolves it within the company first); no PII (no SSNs) is read
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
@@ -286,7 +286,7 @@ async def _extracted_monthly(
     A processor who knows a figure is genuinely 0 can still override the line explicitly (an override
     is trusted)."""
     value = _typed_value(await _current_extracted_data(db, loan_file_id, document_type), field)
-    if value is None or value <= 0:
+    if value is None:
         return None
     # QUANTIZED TO CENTS. An unrounded `annual / 12` reaches the snapshot as e.g.
     # 104.1666666666666666666666667, and the PII-at-rest guard reads that 25-digit fractional run as an
@@ -296,11 +296,22 @@ async def _extracted_monthly(
     # fixed. Kept identical to the housing.insurance_monthly / housing.taxes_monthly TAGS, which round
     # the same way — the tags are documented as agreeing-or-abstaining and never looser than this
     # calculation, and rounding one side but not the other would break that by a fraction of a cent.
-    return (
-        (value / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP)
-        if annual
-        else value.quantize(_CENTS, rounding=ROUND_HALF_UP)
-    )
+    #
+    # LP-616 — AND THE NON-POSITIVE GATE READS THE ROUNDED FIGURE. It used to run first, on the annual
+    # value, so a $0.05 annual premium passed it and then rounded to 0.00 — a confident zero handed to
+    # the DTI, which is the fabricated 0 the docstring above says this gate exists to prevent. Both
+    # gates key off `auto_amount is None`, so the zero had to become a None to reach them.
+    # `quantize` raises InvalidOperation past the context's 28 digits (a 30-digit account number
+    # mis-extracted into an amount field), which is a value this function cannot derive a monthly from.
+    try:
+        monthly = (
+            (value / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+            if annual
+            else value.quantize(_CENTS, rounding=ROUND_HALF_UP)
+        )
+    except InvalidOperation:
+        return None
+    return monthly if monthly > 0 else None
 
 
 # LP-413 — the HOA dues-frequency → months-covered map (the divisor to a monthly figure). Kept BYTE-

@@ -11,6 +11,7 @@ would refuse a write fails here instead — on a machine, before a run.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
@@ -194,10 +195,40 @@ def test_the_same_division_unquantized_is_what_the_guard_refuses(
 def test_the_producers_and_the_dti_round_a_premium_the_same_way() -> None:
     """The tags are documented as agreeing-or-abstaining and NEVER LOOSER than the DTI, which
     computes the same monthly figure from the same extracted field. Rounding one side but not the
-    other would break that by a fraction of a cent, so both are pinned to one expected value."""
+    other would break that by a fraction of a cent, so both are pinned to one expected value.
+
+    LP-616 — CALLS THE REAL PRODUCER. This test used to recompute both sides inline with literal
+    `quantize` expressions, so it asserted `Decimal("0.01") == _CENTS` and nothing about the code it
+    names: deleting the quantize from `_housing_insurance_monthly`, or switching it to ROUND_DOWN,
+    left it passing. A parity test that does not call either side pins nothing.
+    """
     from app.services.dti import _CENTS
+    from app.verification.snapshot.fields import Field, FieldSource
+    from app.verification.snapshot.model import (
+        DocumentEntry,
+        DocumentsSection,
+        Snapshot,
+        TagsSection,
+    )
+    from app.verification.tag_materialization.derived import _housing_insurance_monthly
 
     annual = Decimal("1250")
-    tag_side = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    binder = DocumentEntry(
+        content_id="ins1",
+        document_type="homeowners_insurance",
+        fields={"annual_premium": Field.present(str(annual), source=FieldSource.EXTRACTED)},
+    )
+    snapshot = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 7, 17, tzinfo=UTC),
+        documents=DocumentsSection.present([binder]),
+        tags=TagsSection.present({}),
+    )
+
+    tag_value, _reason = _housing_insurance_monthly(snapshot, "loan", None)
     dti_side = (annual / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP)
-    assert tag_side == dti_side == Decimal("104.17")
+
+    assert Decimal(str(tag_value)) == dti_side == Decimal("104.17")
+    # And the tag's own string carries no long fractional run — the thing the guard refuses.
+    assert not _LONG_DIGITS.search(str(tag_value))

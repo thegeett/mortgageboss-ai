@@ -128,7 +128,9 @@ async def test_derived_recipe_reads_freshly_produced_ai_tags() -> None:
     # The AI tag materialized on the document this run...
     assert out.tags.by_subject["ps"]["income.documented_monthly"].value == "3000"
     # ...and the derived PER-BORROWER recipe SAW it: (5000 - 3000) / 5000 = 0.4 (AI → derived, reorder).
-    assert out.tags.by_subject[str(_B)]["income.documented_income_shortfall_pct"].value == "0.4"
+    assert (
+        out.tags.by_subject[str(_B)]["income.documented_income_shortfall_pct"].value == "0.400000"
+    )
 
 
 # --------------------------------------------------------------------------- #
