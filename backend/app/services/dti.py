@@ -26,7 +26,7 @@ file (the caller resolves it within the company first); no PII (no SSNs) is read
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID
 
@@ -64,6 +64,10 @@ from app.verification.dti import (
 from app.verification.registry import default_registry
 
 # --- Stable field keys for the housing components (the PITI + MI + HOA lines) -
+#: Money is carried to cents. Same constant and rounding as every calculator (verification/dti.py,
+#: ltv, mi, reserves) — see `_extracted_monthly` for why an unrounded division is not merely untidy.
+_CENTS = Decimal("0.01")
+
 HOUSING_PRINCIPAL_INTEREST = "housing.principal_interest"
 HOUSING_TAXES = "housing.taxes"
 HOUSING_INSURANCE = "housing.insurance"
@@ -284,7 +288,19 @@ async def _extracted_monthly(
     value = _typed_value(await _current_extracted_data(db, loan_file_id, document_type), field)
     if value is None or value <= 0:
         return None
-    return (value / Decimal(12)) if annual else value
+    # QUANTIZED TO CENTS. An unrounded `annual / 12` reaches the snapshot as e.g.
+    # 104.1666666666666666666666667, and the PII-at-rest guard reads that 25-digit fractional run as an
+    # unmasked account number and refuses to persist the ENTIRE snapshot (its lookahead exempts only the
+    # integer part of a decimal). That cost LF-3CVT its snapshot the moment a homeowners binder landed.
+    # Quantized on BOTH branches: an already-monthly extracted figure is a no-op, and a malformed one is
+    # fixed. Kept identical to the housing.insurance_monthly / housing.taxes_monthly TAGS, which round
+    # the same way — the tags are documented as agreeing-or-abstaining and never looser than this
+    # calculation, and rounding one side but not the other would break that by a fraction of a cent.
+    return (
+        (value / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+        if annual
+        else value.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    )
 
 
 # LP-413 — the HOA dues-frequency → months-covered map (the divisor to a monthly figure). Kept BYTE-
@@ -337,7 +353,8 @@ async def _extracted_hoa_monthly(
     if months is None:
         # Present dues, unconvertible frequency: fail closed (gate), never assume monthly, never drop to 0.
         return None, True
-    return dues / Decimal(months), False
+    # Cents, matching the housing.hoa_monthly tag's identical division — see `_extracted_monthly`.
+    return (dues / Decimal(months)).quantize(_CENTS, rounding=ROUND_HALF_UP), False
 
 
 # --------------------------------------------------------------------------- #

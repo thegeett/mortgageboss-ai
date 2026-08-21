@@ -59,15 +59,19 @@ def _snapshot(docs: list[DocumentEntry]) -> Snapshot:
 # --------------------------------------------------------------------------- #
 def test_binder_materializes_annual_over_twelve() -> None:
     value, reason = _housing_insurance_monthly(_snapshot([_binder("1200")]), "loan", None)
-    assert value == "100"  # 1200 / 12
+    assert value == "100.00"  # 1200 / 12, carried to cents (LP-615)
     assert "1200" in reason and "12" in reason
 
 
-def test_non_whole_division_keeps_full_precision() -> None:
+def test_non_whole_division_is_carried_to_cents_not_to_a_whole_number() -> None:
+    """LP-615 — this test used to pin the FULL repeating expansion. Its stated intent was "never
+    rounded to 0/108", i.e. never collapsed to a whole number, and cents honour that. The full
+    expansion did not: `Decimal(1300) / 12` is 108.3333333333333333333333333, and the snapshot's
+    PII-at-rest guard reads a 25-digit fractional run as an unmasked account number and refuses to
+    persist the ENTIRE snapshot. A premium of $1,250 did exactly that to LF-3CVT."""
     value, _ = _housing_insurance_monthly(_snapshot([_binder("1300")]), "loan", None)
-    assert Decimal(str(value)) == Decimal("1300") / Decimal(
-        "12"
-    )  # 108.333… — never rounded to 0/108
+    assert value == "108.33"
+    assert Decimal(str(value)) not in (Decimal(0), Decimal(108))  # the original intent, intact
 
 
 def test_declaration_is_derived_loan() -> None:
@@ -80,7 +84,7 @@ async def test_end_to_end_materialization_keys_the_loan_subject() -> None:
     # The DECLARATION wires it: materialize_tags produces housing.insurance_monthly under the loan subject.
     snap = await materialize_tags(_snapshot([_binder("1440")]), only_subjects=frozenset({"loan"}))
     tag = snap.tags.by_subject[LOAN_SUBJECT]["housing.insurance_monthly"]
-    assert str(tag.value) == "120"  # 1440 / 12
+    assert str(tag.value) == "120.00"  # 1440 / 12, carried to cents (LP-615)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,7 +119,7 @@ def test_identical_duplicate_binders_do_not_conflict() -> None:
     # A declarations page + a renewal stating the SAME premium is not ambiguous → the one distinct value.
     snap = _snapshot([_binder("1200", content_id="a"), _binder("1200", content_id="b")])
     value, _ = _housing_insurance_monthly(snap, "loan", None)
-    assert value == "100"
+    assert value == "100.00"
 
 
 def test_multiple_binders_one_missing_premium_abstains() -> None:

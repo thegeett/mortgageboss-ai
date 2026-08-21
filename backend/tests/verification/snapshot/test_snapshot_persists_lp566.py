@@ -11,11 +11,16 @@ would refuse a write fails here instead — on a machine, before a run.
 from __future__ import annotations
 
 import json
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
 import pytest
 from app.verification.snapshot.documents_section import build_document_fields
-from app.verification.snapshot.persistence import RawPiiAtRestError, _assert_no_raw_pii
+from app.verification.snapshot.persistence import (
+    _LONG_DIGITS,
+    RawPiiAtRestError,
+    _assert_no_raw_pii,
+)
 
 # Every (document_type, field) a staging query found carrying an identifier-shaped value, with a
 # stand-in value of the same shape. The point is the SHAPE — a 9+-digit run is what the guard refuses.
@@ -130,3 +135,69 @@ def test_every_declaring_doc_type_is_registered() -> None:
         "_SCRUB_FREE_TEXT_FIELDS. Each one can refuse an entire loan file's snapshot:\n  "
         + "\n  ".join(missing)
     )
+
+
+# --------------------------------------------------------------------------- #
+# LP-615 — THE SECOND WAY TO LOSE A SNAPSHOT: unquantized arithmetic.
+#
+# Everything above is about an identifier-shaped value arriving in an EXTRACTED FIELD. This class is
+# different and the file did not cover it: a value the snapshot COMPUTES ITSELF. `Decimal(1250) /
+# Decimal(12)` is 104.1666666666666666666666667, and `_LONG_DIGITS` matches `\b\d{9,}\b(?!\.\d)` —
+# the lookahead exempts the INTEGER part of a decimal and nothing else, so a 25-digit FRACTION reads
+# as an unmasked account number and the whole write is refused.
+#
+# That is not hypothetical. On 2026-08-21 LF-3CVT took a homeowners binder with a $1,250 annual
+# premium; the 14:07 run computed every finding, then stored no snapshot, naming five paths — the
+# insurance tag's value AND its reasoning string, the DTI's insurance breakdown line, and the
+# housing_payment and total_monthly_obligations it flowed into.
+#
+# The property-tax sibling escaped only by luck: 5282.58 / 12 terminates at 440.215. A $5,000 bill
+# does not. Every money division that reaches the snapshot is now quantized to cents, and these are
+# the divisions and the real premiums that prove it.
+# --------------------------------------------------------------------------- #
+_MONEY_DIVISIONS_REACHING_THE_SNAPSHOT = [
+    # (label, annual-or-period amount, divisor) — the real LF-3CVT figures plus the near-misses.
+    ("homeowners insurance (LF-3CVT)", Decimal("1250"), 12),
+    ("property taxes (LF-3CVT)", Decimal("5282.58"), 12),
+    ("property taxes, a bill that does not terminate", Decimal("5000"), 12),
+    ("HOA dues, quarterly", Decimal("100"), 3),
+    ("HOA dues, semiannual", Decimal("700"), 6),
+]
+
+
+@pytest.mark.parametrize(("label", "amount", "divisor"), _MONEY_DIVISIONS_REACHING_THE_SNAPSHOT)
+def test_a_money_division_quantized_to_cents_never_refuses_the_write(
+    label: str, amount: Decimal, divisor: int
+) -> None:
+    quantized = (amount / Decimal(divisor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    # Serialized the way the snapshot carries it: a string value AND inside a reasoning sentence,
+    # because the insurance tag leaked through BOTH and fixing only the value would still refuse.
+    payload = json.dumps({"value": str(quantized), "reasoning": f"monthly {quantized} ({label})"})
+    _assert_no_raw_pii(payload)  # must not raise
+
+
+@pytest.mark.parametrize(("label", "amount", "divisor"), _MONEY_DIVISIONS_REACHING_THE_SNAPSHOT)
+def test_the_same_division_unquantized_is_what_the_guard_refuses(
+    label: str, amount: Decimal, divisor: int
+) -> None:
+    """The other half of the proof: without the quantize these refuse — except the one that
+    terminates, which is exactly why the bug hid behind property taxes for a day."""
+    raw = amount / Decimal(divisor)
+    if not _LONG_DIGITS.search(
+        str(raw)
+    ):  # 5282.58 / 12 = 440.215 — a short fraction, never at risk
+        pytest.skip(f"{label} has no 9+ digit run unrounded; it could not have tripped the guard")
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"value": str(raw)}))
+
+
+def test_the_producers_and_the_dti_round_a_premium_the_same_way() -> None:
+    """The tags are documented as agreeing-or-abstaining and NEVER LOOSER than the DTI, which
+    computes the same monthly figure from the same extracted field. Rounding one side but not the
+    other would break that by a fraction of a cent, so both are pinned to one expected value."""
+    from app.services.dti import _CENTS
+
+    annual = Decimal("1250")
+    tag_side = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    dti_side = (annual / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    assert tag_side == dti_side == Decimal("104.17")

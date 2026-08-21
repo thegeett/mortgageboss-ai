@@ -678,7 +678,14 @@ def _housing_insurance_monthly(
             _UNKNOWN,
             f"the homeowners insurance binder states a non-positive annual premium ({annual})",
         )
-    monthly = annual / Decimal(12)
+    # QUANTIZED TO CENTS, and this is load-bearing rather than cosmetic. `Decimal(1250) / Decimal(12)`
+    # is 104.1666666666666666666666667 — a 25-digit fractional run — and the snapshot's PII-at-rest
+    # guard matches `\b\d{9,}\b(?!\.\d)`, whose lookahead protects the INTEGER part of a decimal and
+    # nothing else. So the fraction reads as an unmasked account number and `persist_snapshot` refuses
+    # the whole write: on LF-3CVT the 14:07 run computed every finding and stored no snapshot. A monthly
+    # dollar figure has no business carrying 25 decimal places in the first place. ROUND_HALF_UP and
+    # cents match what every calculator already does (verification/dti.py `_ratio`, ltv, mi, reserves).
+    monthly = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return str(monthly), f"monthly homeowners insurance {monthly} (annual premium {annual} ÷ 12)"
 
 
@@ -5660,7 +5667,9 @@ def _housing_taxes_monthly(
     annual = next(iter(annuals))
     if annual <= 0:
         return _UNKNOWN, f"the property-tax bill states a non-positive annual tax amount ({annual})"
-    monthly = annual / Decimal(12)
+    # Cents, for the reason spelled out on housing.insurance_monthly above — this sibling only escaped
+    # the guard because 5282.58 / 12 happens to terminate. A $5,000 bill (416.666…) would not.
+    monthly = (annual / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return str(monthly), f"monthly property taxes {monthly} (annual tax {annual} ÷ 12)"
 
 
@@ -5731,7 +5740,8 @@ def _housing_hoa_monthly(
                 "cannot convert to monthly without assuming a periodicity"
             )
             continue
-        monthlies.add(dues / Decimal(months))
+        # Cents — see housing.insurance_monthly. Quarterly dues ÷ 3 repeat for most amounts.
+        monthlies.add((dues / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
     if stmt_count == 0:
         return _UNKNOWN, "no HOA statement in the file — HOA dues are unknown, not 0"
     if problem is not None:
