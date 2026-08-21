@@ -69,6 +69,10 @@ tags:
   # subject, so ID-4's residence filter works (the LP-325 contract).
   id.address_normalized: {mode: ai, subject: document, data: id_address}
   id.current_address_type: {mode: ai, subject: document, data: id_address}
+  # LP-616 — the DOWNSTREAM staleness check `id_address`'s own prompt says is not its job: a residence
+  # a strictly-later document has replaced is `superseded_residence`, so ID-4 stops comparing a 2023
+  # W-2's address against today's. DERIVED (runs after the AI group, LP-333) and demotion-only.
+  id.address_role: {mode: derived, subject: document, data: id_address_role}
   id.title_vesting_consistent: {mode: ai, subject: document, data: id_title}
   id.poa_present_and_acceptable: {mode: ai, subject: document, data: id_poa}
 

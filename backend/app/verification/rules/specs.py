@@ -926,6 +926,10 @@ class ConsistencyEval(BaseModel):
     )  # the tag gathered across sources (the load-bearing fact)
     source_scope: str = PydField(min_length=1)  # the gather-registry key (which sources to collect)
     gather_filter: TagCondition | None = None  # which instances count (residence-vs-mailing trap)
+    # LP-616 — an instance is DROPPED when this holds. Distinct from `gather_filter`, which says which
+    # instances COUNT and whose tag is confidence-gated: this one is for a DETERMINISTIC exclusion
+    # (a derived tag has no confidence to gate) and it only ever removes, never includes.
+    gather_exclude: TagCondition | None = None
     compare_mode: str = PydField(pattern="^(exact|fuzzy)$")
     normalization: tuple[str, ...] = ()  # declared normalizer keys for the exact compare
     judge: ConsistencyJudge | None = None  # required iff fuzzy (the AI residue leg)

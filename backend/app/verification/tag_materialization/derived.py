@@ -751,6 +751,147 @@ def _housing_insurance_monthly(
 
 
 # --------------------------------------------------------------------------- #
+# LP-616 — id.address_role: is this document's stated residence STILL the current one?
+# --------------------------------------------------------------------------- #
+#
+# THE PROBLEM THIS EXISTS TO SOLVE. ID-4 gathers every address a borrower's documents state as a
+# `residence` and compares them. A 2023 W-2 states the address the borrower lived at IN 2023. On a
+# file where they have since moved, that lands in the same comparison as today's address and ID-4
+# reports a discrepancy that is really a house move — correctly, over a set that should never have
+# held both.
+#
+# WHY NOT FIX `id.current_address_type`. Its prompt is explicit that it reports what THE DOCUMENT
+# INDICATES, that "prior" means the document EXPLICITLY marks the address as former, and that
+# staleness "is checked DOWNSTREAM by comparing sources — it is not this tag's job". A W-2 marks
+# nothing, so `residence` is the CORRECT answer there and the tag is doing what it was asked. (On
+# LF-3CVT the model answered `prior` and on LF-T9HD `residence`, on the same two W-2s — the second is
+# the one following the spec.) OC-2 also reasons over that tag, so its meaning is not ours to move.
+# This is the downstream check the prompt promises, and it did not exist.
+#
+# DEMOTION ONLY, AND FAIL-OPEN. This can turn a `residence` into `superseded_residence` and never the
+# reverse, so it can only ever SHRINK ID-4's comparison set — it cannot introduce a new "current"
+# address. Anything it cannot decide (no date, no borrower link, no known address) stays
+# `current_residence`, which is exactly today's behaviour: a false positive is recoverable, a hidden
+# discrepancy is not.
+#
+# EVERY newer document must disagree, not merely one. If a single strictly-newer document stating a
+# different address were enough, one mis-extracted address on the newest document would demote every
+# correct older one and HIDE a real discrepancy. Requiring ALL newer documents to disagree means a
+# lone bad extraction cannot do that — its siblings still agree with the older set.
+#
+# YEAR GRANULARITY, deliberately. The dates below are of mixed precision: `tax_year` is a year, a pay
+# date is a day. Any rule about WHEN IN THE YEAR a W-2 speaks for would be invented (ADR-361), so the
+# comparison is on the year alone and demotion needs a STRICT year difference. Two documents from the
+# same year never demote each other — a mid-year move is left to ID-4's judge, which exists for it.
+
+#: Fields that say WHEN a document speaks for its address, best first. Deliberately an allowlist:
+#: `expiration_date` is in the future, `date_of_birth` is not about the document, and a tax bill's
+#: `due_dates` is when money is owed. A document with none of these is never demoted.
+_ADDRESS_AS_OF_FIELDS: tuple[str, ...] = (
+    "tax_year",
+    "pay_date",
+    "pay_period_end",
+    "statement_period_end",
+    "document_issue_date",
+    "issue_date",
+    "notice_date",
+    "effective_date",
+)
+
+_ADDRESS_NORMALIZATION = ("casefold", "drop_punct", "collapse_ws", "strip")
+
+
+def _address_as_of_year(entry: DocumentEntry) -> int | None:
+    """The year this document speaks for its address, or None if it does not say."""
+    for name in _ADDRESS_AS_OF_FIELDS:
+        field = entry.fields.get(name)
+        if not isinstance(field, Field) or not field.is_present:
+            continue
+        raw = str(field.value).strip()
+        if name == "tax_year":  # a bare year, not a date
+            try:
+                year = int(float(raw))
+            except (TypeError, ValueError):
+                continue
+            if 1900 <= year <= 2200:
+                return year
+            continue
+        parsed = coerce_date(raw)
+        if parsed is not None:
+            return parsed.year
+    return None
+
+
+def _id_address_role(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """id.address_role — `current_residence` / `superseded_residence` / `not_residence` (LP-616).
+
+    ID-4 filters on THIS instead of on `id.current_address_type`, so a residence a newer document has
+    superseded stops joining the current-address comparison. See the block comment above for why the
+    AI tag itself is left alone and why the demotion is one-directional.
+    """
+    from app.verification.rule_engine.consistency import _normalize
+
+    if not isinstance(subject_raw, DocumentEntry):
+        return _UNKNOWN, "not a document — the role is a per-document fact"
+    own = {} if snapshot.tags.absent else snapshot.tags.by_subject.get(subject_id, {})
+    kind = own.get("id.current_address_type")
+    if kind is None or str(kind.value) != "residence":
+        stated = "no address type" if kind is None else str(kind.value)
+        return "not_residence", f"this document states {stated}, not a residence address"
+    address = own.get("id.address_normalized")
+    if address is None or str(address.value) == _UNKNOWN:
+        return "current_residence", "the document states a residence but no readable address"
+
+    my_year = _address_as_of_year(subject_raw)
+    if my_year is None:
+        return (
+            "current_residence",
+            "the document does not say what date its address is stated as of",
+        )
+    borrowers = {str(ref.borrower_id) for ref in (subject_raw.belongs_to or ())}
+    if not borrowers:
+        # No link → no way to tell whose address this is, so no way to say a NEWER one replaced it.
+        return "current_residence", "the document is not linked to a borrower"
+
+    mine = _normalize(address.value, _ADDRESS_NORMALIZATION)
+    newer_disagree = False
+    for other in () if snapshot.documents.absent else snapshot.documents.entries:
+        if other.content_id == subject_id:
+            continue
+        if not borrowers & {str(ref.borrower_id) for ref in (other.belongs_to or ())}:
+            continue
+        other_tags = (
+            {} if snapshot.tags.absent else snapshot.tags.by_subject.get(other.content_id, {})
+        )
+        other_kind = other_tags.get("id.current_address_type")
+        other_address = other_tags.get("id.address_normalized")
+        if other_kind is None or str(other_kind.value) != "residence":
+            continue
+        if other_address is None or str(other_address.value) == _UNKNOWN:
+            continue
+        other_year = _address_as_of_year(other)
+        if other_year is None or other_year <= my_year:
+            continue
+        if _normalize(other_address.value, _ADDRESS_NORMALIZATION) == mine:
+            # A newer document still states THIS address → it is current, whatever else disagrees.
+            return "current_residence", (
+                f"a {other_year} document still states this address, so it is current"
+            )
+        newer_disagree = True
+    if newer_disagree:
+        return "superseded_residence", (
+            f"this address is stated as of {my_year}, and every later document on file states a "
+            "different residence — the borrower moved after this document"
+        )
+    return (
+        "current_residence",
+        f"no later document states a different residence than this {my_year} one",
+    )
+
+
+# --------------------------------------------------------------------------- #
 # LP-597 — the other-financed-properties reserve overlay (B3-4.1-01)
 # --------------------------------------------------------------------------- #
 #
@@ -6358,6 +6499,8 @@ _RECIPES: dict[str, Recipe] = {
     # LP-374 — the loan's monthly homeowners (hazard) insurance from the binder's annual_premium ÷ 12
     # (the DTI's last vocabulary orphan). Fail-closed to unknown, never 0.
     "housing_insurance_monthly": _housing_insurance_monthly,
+    # LP-616 — is this document's stated residence superseded by a newer one? (ID-4's filter)
+    "id_address_role": _id_address_role,
     # LP-323-AS-B — the assets family (registry entries only).
     "reserves_required_months": _reserves_required_months,
     # LP-597 — the other-financed-properties overlay (B3-4.1-01), unblocked by LP-596.

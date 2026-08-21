@@ -1375,3 +1375,33 @@ tags:
     allowed_values: null
     description: The account holder this liability names, for a finding's subject label (CR-1/6/8/12).
     produced_by: derived
+
+  # LP-616 — IS A DOCUMENT'S STATED RESIDENCE STILL THE CURRENT ONE?
+  #
+  # ID-4 gathers every address a borrower's documents state as a `residence` and compares them. A 2023
+  # W-2 states where the borrower lived IN 2023, so on a file where they have since moved it lands in
+  # the same set as today's address and ID-4 reports a discrepancy that is really a house move.
+  #
+  # THIS IS NOT A DEFECT IN `id.current_address_type`, AND IT IS NOT FIXED THERE. That tag's prompt is
+  # explicit: it reports what THE DOCUMENT INDICATES, "prior" means the document EXPLICITLY marks the
+  # address as former, and staleness "is checked DOWNSTREAM by comparing sources — it is not this
+  # tag's job". A W-2 marks nothing, so `residence` is the correct answer. (Two files with the same
+  # two W-2s got `prior` and `residence` from the model; the second is the one following the spec.)
+  # OC-2 also reasons over that tag. This tag IS the downstream check, which nothing performed.
+  #
+  # DEMOTION-ONLY AND FAIL-OPEN. It can move a residence OUT of the comparison and never into it, so
+  # it can only shrink ID-4's set. No date, no borrower link, no readable address → `current_residence`,
+  # which is exactly today's behaviour: a false positive is recoverable, a hidden discrepancy is not.
+  #
+  # EVERY later document must disagree, not merely one — otherwise a single mis-extracted address on
+  # the newest document would demote every correct older one and HIDE a real discrepancy.
+  #
+  # Compared at YEAR granularity: `tax_year` is a year and a pay date is a day, and any rule about WHEN
+  # IN THE YEAR a W-2 speaks for would be invented (ADR-361). Same-year documents never demote each
+  # other — a mid-year move stays with ID-4's judge, which exists for exactly that call.
+  id.address_role:
+    entity: doc
+    value_type: enum
+    allowed_values: ["current_residence", "superseded_residence", "not_residence", "unknown"]
+    description: Is this document's stated residence still the current one, or superseded by a later document (ID-4)?
+    produced_by: derived

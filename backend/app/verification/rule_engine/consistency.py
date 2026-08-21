@@ -28,6 +28,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from app.ai.client import AIClientError
 from app.ai.extraction.parsing import coerce_date
@@ -219,6 +220,8 @@ def _borrower_documents(
     gather_tag: str,
     gather_filter: TagCondition | None,
     index: _DocIndex,
+    *,
+    gather_exclude: TagCondition | None = None,
 ) -> _GatherResult:
     """Gather ``gather_tag`` from every document belonging to the borrower (filtered).
 
@@ -259,6 +262,13 @@ def _borrower_documents(
                 filter_tags[entry.content_id] = filter_tag
             if not _tag_holds(gather_filter, source_tags):
                 continue
+        # LP-616 — a DETERMINISTIC exclusion, applied after the filter and NOT confidence-gated (a
+        # derived tag carries no confidence). It only ever removes a source, so it can shrink the
+        # compare set but never introduce a value into it. `candidate_count` is deliberately left
+        # counting this source: it stated the fact, and the count drives the "one source is not a
+        # comparison" honesty branch below.
+        if gather_exclude is not None and _tag_holds(gather_exclude, source_tags):
+            continue
         included.append(
             _Gathered(
                 entry.content_id,
@@ -271,7 +281,25 @@ def _borrower_documents(
     return _GatherResult(included, filter_tags, candidate_count, type_undetermined)
 
 
-_Scope = Callable[[Snapshot, str, str, "TagCondition | None", "_DocIndex"], _GatherResult]
+class _Scope(Protocol):
+    """A gather scope: collect the fact for one subject from its sources.
+
+    ``gather_exclude`` (LP-616) is keyword-only with a default so a scope that has no deterministic
+    exclusion to apply needs no signature change.
+    """
+
+    def __call__(
+        self,
+        snapshot: Snapshot,
+        subject_id: str,
+        gather_tag: str,
+        gather_filter: TagCondition | None,
+        index: _DocIndex,
+        *,
+        gather_exclude: TagCondition | None = None,
+    ) -> _GatherResult: ...
+
+
 _SOURCE_SCOPES: dict[str, _Scope] = {
     "borrower_documents": _borrower_documents,
 }
@@ -417,7 +445,14 @@ async def evaluate_consistency_rule(
     doc_index = _index_borrower_documents(snapshot)  # built ONCE, not re-scanned per subject
     results: list[RuleEvaluation] = []
     for subject_id, _subject_tags in enumerate_subjects(con.subject, snapshot):
-        result = scope(snapshot, subject_id, con.gather_tag, con.gather_filter, doc_index)
+        result = scope(
+            snapshot,
+            subject_id,
+            con.gather_tag,
+            con.gather_filter,
+            doc_index,
+            gather_exclude=con.gather_exclude,
+        )
         gathered = result.included
 
         # LP-372: a note SURFACING candidates dropped because their filter TYPE was AI-``unknown``

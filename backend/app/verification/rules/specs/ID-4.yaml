@@ -47,6 +47,19 @@ consistency:
     tag: id.current_address_type
     op: eq
     value: residence
+  # LP-616 — the DOWNSTREAM staleness check `id_address`'s own prompt promises and nothing performed:
+  # drop a residence that every strictly-later document on file has replaced, so a 2023 W-2's address
+  # stops being compared against today's.
+  #
+  # A SEPARATE condition rather than a replacement for `gather_filter`, deliberately. The filter tag is
+  # confidence-GATED (LP-325: "a shaky residence/mailing label must not silently drive the compare
+  # set"), and `id.address_role` is DERIVED, so it carries `confidence=None` — filtering on it would
+  # have moved the gate onto a tag that has nothing to gate and quietly dropped that protection. The
+  # exclusion needs no gate: it is deterministic, and it only ever removes a source.
+  gather_exclude:
+    tag: id.address_role
+    op: eq
+    value: superseded_residence
   compare_mode: fuzzy
   normalization:
     - casefold
