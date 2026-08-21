@@ -208,18 +208,23 @@ def _income_documented_shortfall(
     if not s_present or s_unknown or stated == 0:
         return (
             _UNKNOWN,
-            f"borrower {subject_id}: stated monthly income is absent, zero, or incomplete",
+            # LP-611 — "this borrower", not the subject id. These reasonings are engineer-facing
+            # provenance AND the text a couldnt_check finding shows, so IN-1 shipped "borrower
+            # 7558383f-dfbb-47c3-8b3f-aa1ca5494987: documented monthly income is absent" to a
+            # processor. The finding already carries the subject, which resolves to the borrower's
+            # NAME, so the id was redundant as well as leaked. 28 sites, all in this file.
+            "this borrower: stated monthly income is absent, zero, or incomplete",
         )
     if not d_present or d_unknown:
         return (
             _UNKNOWN,
-            f"borrower {subject_id}: documented monthly income is absent, incomplete, or has "
+            "this borrower: documented monthly income is absent, incomplete, or has "
             "conflicting figures across documents",
         )
     shortfall = (stated - documented) / stated
     return (
         str(shortfall),
-        f"borrower {subject_id}: documented {documented} vs stated {stated} → shortfall "
+        f"this borrower: documented {documented} vs stated {stated} → shortfall "
         f"{shortfall:.4f} (negative = a raise, not a shortfall)",
     )
 
@@ -1186,7 +1191,7 @@ def _borrower_id_expiration(
     if snapshot.tags.absent:
         return (
             _UNKNOWN,
-            f"borrower {subject_id}: no tags materialized to read an ID expiration from",
+            "this borrower: no tags materialized to read an ID expiration from",
         )
     # Key by the NORMALIZED date (coerce_date, mirroring the operand's `type: date`), not the raw string, so the
     # same expiration in two renderings ("2027-01-15" vs "01/15/2027") is ONE value, not a spurious conflict.
@@ -1201,16 +1206,16 @@ def _borrower_id_expiration(
         raw = str(tag.value)
         values[coerce_date(raw) or raw] = raw
     if not values:
-        return _UNKNOWN, f"borrower {subject_id}: no driver's licence found for this borrower"
+        return _UNKNOWN, "this borrower: no driver's licence found for this borrower"
     if len(values) > 1:
         return _UNKNOWN, (
-            f"borrower {subject_id}: the borrower's ID documents disagree on the expiration date "
+            f"this borrower: the borrower's ID documents disagree on the expiration date "
             f"({', '.join(sorted(values.values()))}) — ambiguous"
         )
     expiration = next(iter(values.values()))
     return (
         expiration,
-        f"borrower {subject_id}: government-ID expiration {expiration} (from their attributed ID)",
+        f"this borrower: government-ID expiration {expiration} (from their attributed ID)",
     )
 
 
@@ -5458,17 +5463,17 @@ def _income_is_self_employed(
     if snapshot.documents.absent:
         return (
             _UNKNOWN,
-            f"borrower {subject_id}: no documents to read a self-employment signal from",
+            "this borrower: no documents to read a self-employment signal from",
         )
     # LP-422 — Schedule C presence is a DETERMINISTIC self-employment FACT (a filed Schedule C business).
     for entry in _borrower_attributed_documents(snapshot, subject_id):
         if entry.schedule_c:
             return "yes", (
-                f"borrower {subject_id}: an attributed tax return has a Schedule C (a self-employment "
+                "this borrower: an attributed tax return has a Schedule C (a self-employment "
                 "business) — presence, not amount (a loss still counts)"
             )
     if snapshot.tags.absent:
-        return _UNKNOWN, f"borrower {subject_id}: no tags to read an income type from"
+        return _UNKNOWN, "this borrower: no tags to read an income type from"
     any_type_seen = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.type")
@@ -5477,15 +5482,15 @@ def _income_is_self_employed(
         any_type_seen = True
         if str(tag.value) == "self_employment":
             return "yes", (
-                f"borrower {subject_id}: an income document states self-employment income "
+                "this borrower: an income document states self-employment income "
                 "(2-year self-employment history applies)"
             )
     if not any_type_seen:
         return _UNKNOWN, (
-            f"borrower {subject_id}: no attributed income document carries a readable income type"
+            "this borrower: no attributed income document carries a readable income type"
         )
     return "no", (
-        f"borrower {subject_id}: the borrower's income documents carry income types, none self-employment "
+        "this borrower: the borrower's income documents carry income types, none self-employment "
         "(the 2-year self-employment requirement is not applicable)"
     )
 
@@ -5516,7 +5521,7 @@ def _income_has_rental_income(
     if not isinstance(subject_raw, BorrowerSubject):
         return _UNKNOWN, "rental income is a per-borrower recipe (needs a borrower subject)"
     if snapshot.documents.absent:
-        return _UNKNOWN, f"borrower {subject_id}: no documents to read a rental signal from"
+        return _UNKNOWN, "this borrower: no documents to read a rental signal from"
     # 1. Schedule E presence — the DETERMINISTIC signal (needs only the documents, not the tags layer).
     saw_tax_return = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
@@ -5524,7 +5529,7 @@ def _income_has_rental_income(
             saw_tax_return = True
             if entry.schedule_e is not None:
                 return "yes", (
-                    f"borrower {subject_id}: an attributed tax return has a Schedule E (rental income) — "
+                    "this borrower: an attributed tax return has a Schedule E (rental income) — "
                     "presence, not amount (a zero-rent year still counts)"
                 )
     # 2. income.type == "rental" — the softer signal (mirrors is_self_employed's self_employment fallback).
@@ -5537,18 +5542,18 @@ def _income_has_rental_income(
             any_type_seen = True
             if str(tag.value) == "rental":
                 return "yes", (
-                    f"borrower {subject_id}: an income document is typed rental income "
+                    "this borrower: an income document is typed rental income "
                     "(rental income is stated even without a Schedule E filed)"
                 )
     # 3. A definitive "no": a filed tax return with no Schedule E, or readable income types none rental.
     if saw_tax_return or any_type_seen:
         return "no", (
-            f"borrower {subject_id}: no Schedule E on any attributed tax return and no income document "
+            "this borrower: no Schedule E on any attributed tax return and no income document "
             "typed rental — no rental income evidenced"
         )
     # 4. Nothing to read → fail-closed (never a fabricated "no").
     return _UNKNOWN, (
-        f"borrower {subject_id}: no tax return and no readable income type attributed — "
+        "this borrower: no tax return and no readable income type attributed — "
         "cannot tell if the borrower has rental income"
     )
 
@@ -5803,17 +5808,17 @@ def _income_terminated_employment(
     status, end = _borrower_termination(snapshot, subject_id)
     reasons = {
         "needs_pay_stub": (
-            f"borrower {subject_id}: employment shown as ended {end} with no pay stub dated after it — "
+            f"this borrower: employment shown as ended {end} with no pay stub dated after it — "
             "a pay stub dated after that is needed to confirm current employment"
         ),
         "cleared": (
-            f"borrower {subject_id}: employment ended {end}, but a pay stub dated after it confirms "
+            f"this borrower: employment ended {end}, but a pay stub dated after it confirms "
             "current employment"
         ),
         "not_terminated": (
-            f"borrower {subject_id}: no employment end date in the past — not a terminated job"
+            "this borrower: no employment end date in the past — not a terminated job"
         ),
-        "unknown": f"borrower {subject_id}: employment-termination documentation cannot be read",
+        "unknown": "this borrower: employment-termination documentation cannot be read",
     }
     return status, reasons[status]
 
@@ -5828,10 +5833,10 @@ def _income_terminated_employment_end_date(
         return _UNKNOWN, "a per-borrower recipe (needs a borrower subject)"
     _status, end = _borrower_termination(snapshot, subject_id)
     if end is None:
-        return _UNKNOWN, f"borrower {subject_id}: no past employment end date to name"
+        return _UNKNOWN, "this borrower: no past employment end date to name"
     return (
         end.isoformat(),
-        f"borrower {subject_id}: most recent past employment end date is {end.isoformat()}",
+        f"this borrower: most recent past employment end date is {end.isoformat()}",
     )
 
 
@@ -5851,19 +5856,19 @@ def _income_history_documentation(
             "income-history documentation is a per-borrower recipe (needs a borrower subject)",
         )
     if snapshot.documents.absent:
-        return _UNKNOWN, f"borrower {subject_id}: no documents to read an income-history basis from"
+        return _UNKNOWN, "this borrower: no documents to read an income-history basis from"
     types = {entry.document_type for entry in _borrower_attributed_documents(snapshot, subject_id)}
     if types & {"w2", "1099"}:
         return "w2_or_1099", (
-            f"borrower {subject_id}: a W-2 or 1099 is attributed — the two-year income history can be "
+            "this borrower: a W-2 or 1099 is attributed — the two-year income history can be "
             "established"
         )
     if "pay_stub" in types:
         return "pay_stub_only", (
-            f"borrower {subject_id}: income is evidenced only by pay stubs (no W-2 or 1099 attributed)"
+            "this borrower: income is evidenced only by pay stubs (no W-2 or 1099 attributed)"
         )
     return "no_pay_stubs", (
-        f"borrower {subject_id}: no pay stubs attributed, so there is no pay-stub-only history"
+        "this borrower: no pay stubs attributed, so there is no pay-stub-only history"
     )
 
 

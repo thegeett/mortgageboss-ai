@@ -41,7 +41,13 @@ def test_eighteen_cross_source_rules_distinct_category() -> None:
     # cannot tell a spelling variant from a different company; IN-5 is ai_fuzzy_match and its criteria
     # say in words that it tolerates "legal-vs-common-name and formatting variance". ADR-375's
     # principle: one matcher per question, or the file says both things at once.
-    assert len(CROSS_SOURCE_RULES) == 17
+    # LP-611 — 17 -> 16. `xsrc.identity.name_consistency` joins the employer rule in retirement, for
+    # the same reason: it fired "Borrower name differs across sources: ADITYA TALLURI (pay_stub);
+    # TALLURI ADITYA (drivers_license)" while ID-1 said satisfied on the same run. Surname-first is
+    # how a licence prints a name; `_norm` folds case and whitespace and cannot tell that from a
+    # different person, and ID-1's tolerant comparison can.
+    assert len(CROSS_SOURCE_RULES) == 16
+    assert "xsrc.identity.name_consistency" not in [r.rule_id for r in CROSS_SOURCE_RULES]
     ids = [r.rule_id for r in CROSS_SOURCE_RULES]
     assert "xsrc.income.employer_name_consistency" not in ids
     assert len(ids) == len(set(ids))
@@ -109,7 +115,10 @@ def test_name_mismatch_fires_ssn_mismatch_is_red() -> None:
         ssns=(SourcedValue("111-22-3333", "application"), SourcedValue("111-22-4444", "w2")),
     )
     findings = evaluate_cross_source(facts)
-    assert "xsrc.identity.name_consistency" in _ids(findings)
+    # LP-611 — the name rule is RETIRED (superseded by ID-1, which tolerates the formatting a
+    # licence prints a name in). The SSN half of this test is what still belongs to this layer:
+    # a differing SSN is a fact about a number, not about how a name is written.
+    assert "xsrc.identity.name_consistency" not in _ids(findings)
     ssn = next(f for f in findings if f.rule.rule_id == "xsrc.identity.ssn_consistency")
     assert ssn.rule.severity is RuleSeverity.RED  # SSN mismatch is a serious red flag
 

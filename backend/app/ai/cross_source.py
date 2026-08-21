@@ -61,6 +61,22 @@ WHAT TO REPORT — DISCREPANCIES AND MISSING DOCUMENTATION:
   agree to within one percent. The finding's own text even carried the conversion,
   which is how it was caught. If your own explanation would show the figures
   agreeing, there is nothing to report.
+
+  ⚠️ AND CONVERTING IS NOT ENOUGH — YOU MUST THEN ACCEPT THE ANSWER. On the next run
+  the same finding came back reading "conflicts with documented biweekly gross pay
+  which converts to approximately $13,136 per month", against a stated $13,166.67.
+  That is a difference of two tenths of one percent, described as a conflict. Income
+  documents never match a stated figure to the dollar — a stub covers a different
+  period, a bonus lands in one month — so a small difference is the normal state of a
+  correct file. Report an income conflict only when the converted figures differ by
+  more than TEN PERCENT. Below that, say nothing.
+
+- A COMPARISON BETWEEN TWO DIFFERENT THINGS. Check that the two sides are the same
+  object before calling their difference a discrepancy. "Stated Bank of America
+  checking account with $10,000, but documented Wells Fargo account shows only
+  $6,526.74" compares two accounts at two banks; that a Wells Fargo balance differs
+  from a Bank of America one is not a finding. If the stated account has no statement,
+  the honest observation is that it is undocumented — not that its balance is wrong.
 - A MISSING-DOCUMENT gap — a stated value (income, an asset, a liability, a gift)
   that LACKS the supporting document needed to verify it. REPORT THESE. In mortgage
   processing an unflagged document gap is a real error, so it is SAFER to surface a

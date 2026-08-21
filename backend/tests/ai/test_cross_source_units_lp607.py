@@ -71,3 +71,40 @@ def test_the_deterministic_rule_it_defers_to_is_unchanged() -> None:
         documented_income_monthly=Decimal("6028"),  # the per-period figure, unconverted
     )
     assert len(_check_income_variance(conflicting, None)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# LP-611 — converting correctly and still calling it a conflict
+# --------------------------------------------------------------------------- #
+
+
+def test_the_prompt_says_a_small_converted_difference_is_not_a_conflict() -> None:
+    """LP-607 fixed the ARITHMETIC and not the conclusion. The next run produced:
+
+        "Stated monthly income of $13,166.67 conflicts with documented biweekly gross pay which
+         converts to approximately $13,136 per month"
+
+    The conversion is now right. Two tenths of one percent is still described as a conflict. Income
+    documents never match a stated figure to the dollar — a stub covers a different period, a bonus
+    lands in one month — so a small difference is the normal state of a correct file.
+    """
+    assert "more than TEN PERCENT" in CROSS_SOURCE_SYSTEM_PROMPT
+    assert "converts to approximately $13,136 per month" in CROSS_SOURCE_SYSTEM_PROMPT
+
+
+def test_the_threshold_matches_the_deterministic_rule_that_owns_this() -> None:
+    """Ten percent is not invented for the prompt — it is the bar `_check_income_variance` already
+    uses, so the AI filling that rule's gap applies the same standard rather than a stricter one."""
+    from app.verification.cross_source.rules import XSRC_INCOME_STATED_VS_DOCUMENTED
+
+    threshold = XSRC_INCOME_STATED_VS_DOCUMENTED.threshold
+    assert threshold is not None
+    assert str(threshold.value) == "10"
+
+
+def test_the_prompt_forbids_comparing_two_different_accounts() -> None:
+    """From the same run: "Stated Bank of America checking account with $10,000, but documented Wells
+    Fargo account shows only $6,526.74". Two accounts at two banks — that their balances differ is
+    not a discrepancy. The honest observation is that the stated account is undocumented."""
+    assert "compares two accounts at two banks" in CROSS_SOURCE_SYSTEM_PROMPT
+    assert "the honest observation is that it is undocumented" in CROSS_SOURCE_SYSTEM_PROMPT

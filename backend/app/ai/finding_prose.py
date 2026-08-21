@@ -273,11 +273,18 @@ IDENTIFIER = re.compile(r"\b[a-z][a-z_]{2,}\.[a-z][a-z_.]{2,}[a-z]\b")
 #: subject-key vocabulary uses (`doc`, `lia`, `txn`, `acct`) followed by a hex run.
 CONTENT_ID = re.compile(r"\b(?:doc|lia|txn|acct)[0-9a-f]{8,}\b")
 
+#: LP-611 — a bare UUID, which the pattern above cannot see: it has dashes and no prefix. IN-1
+#: shipped "borrower 7558383f-dfbb-47c3-8b3f-aa1ca5494987: documented monthly income is absent" to a
+#: processor. Third identifier shape to reach user-facing text (a dotted tag id, then a content id,
+#: now this), so the guard covers the family rather than the instance.
+UUID_ID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+
 
 def leaked_identifiers(composition: Composition) -> set[str]:
     """Tag ids, MISMO paths, or CONTENT IDS in the output — LP-377-B's rule, applied to generated text."""
-    return set(IDENTIFIER.findall(composition.message)) | set(
-        CONTENT_ID.findall(composition.message)
+    text = composition.message
+    return (
+        set(IDENTIFIER.findall(text)) | set(CONTENT_ID.findall(text)) | set(UUID_ID.findall(text))
     )
 
 

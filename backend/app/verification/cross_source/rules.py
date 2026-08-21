@@ -584,7 +584,21 @@ XSRC_PROPERTY_OCCUPANCY = CrossSourceRule(
 
 
 CROSS_SOURCE_RULES: tuple[CrossSourceRule, ...] = (
-    XSRC_IDENTITY_NAME,
+    # LP-611 — XSRC_IDENTITY_NAME is RETIRED, superseded by ID-1, and for exactly the reason LP-606
+    # retired its employer sibling: two mechanisms answering one question with different tolerance
+    # disagree in front of a processor. On LF-3CVT, on one run:
+    #
+    #   ID-1  satisfied  "The borrower's name is consistent across all income and identity documents."
+    #   xsrc  yellow     "Borrower name differs across sources: ADITYA TALLURI (pay_stub);
+    #                     TALLURI ADITYA (drivers_license); aditya talluri ..."
+    #
+    # Surname-first is how a driver's licence prints a name, and case is not a fact about a person.
+    # This rule's `_norm` folds case and whitespace and nothing else, so it cannot tell a name ORDER
+    # or a licence's formatting from a different human being. ID-1 is a consistency rule with an AI
+    # tolerant comparison, which is the judgment this one cannot make.
+    #
+    # Kept as a definition so the rule id resolves for findings already stored; `identity_discrepancy`
+    # stays an owned canonical type through the SSN and DOB rules, so the AI layer still defers on it.
     XSRC_IDENTITY_SSN,
     XSRC_IDENTITY_DOB,
     XSRC_ADDRESS_DL_EQUALS_SUBJECT,
