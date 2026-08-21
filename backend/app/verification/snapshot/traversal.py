@@ -51,3 +51,38 @@ def all_list_rows(
         if document_type is None or entry.document_type == document_type
         for row in entry.lists.get(list_name, ())
     ]
+
+
+def source_document_by_subject(snapshot: Snapshot) -> dict[str, str]:
+    """Map every subject a rule can be keyed on to the DOCUMENT it came from (LP-619).
+
+    A finding is keyed by SUBJECT, and only some subjects are documents. A deposit's subject is a
+    transaction's content_id and a tradeline's is a list row's — and both are stored NESTED INSIDE the
+    document they came from, then flattened by :func:`all_transactions` / :func:`all_list_rows`, which
+    keep the child and drop the parent. On LF-3CVT that was most of the file: AS-1 alone has eleven
+    findings, each about a deposit, none able to say WHICH bank statement it is on.
+
+    So this is not a derivation — it is the parent link that already exists in the structure, kept:
+
+    * a document maps to ITSELF (a `per_document` rule's subject IS its source);
+    * a transaction maps to the statement carrying it;
+    * a stable list row maps to the document declaring the list (a tradeline to the credit report).
+
+    NOT EVERY SUBJECT IS IN HERE, and that is the point. A borrower, a loan, an account key, a MISMO
+    stated liability (which came from the 1003 import, not from any document on the file) and an
+    id-less tradeline (synthesized a subject id because its row carried none) are all ABSENT — a
+    caller gets nothing for them and must say nothing, rather than attributing a finding to a document
+    it did not come from.
+    """
+    if snapshot.documents.absent:
+        return {}
+    parents: dict[str, str] = {}
+    for entry in snapshot.documents.entries:
+        parents[entry.content_id] = entry.content_id
+        for txn in entry.transactions or ():
+            parents[txn.content_id] = entry.content_id
+        for rows in entry.lists.values():
+            for row in rows:
+                if row.row_id is not None:
+                    parents[row.row_id] = entry.content_id
+    return parents

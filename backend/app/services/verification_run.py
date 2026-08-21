@@ -29,7 +29,7 @@ Deferred to LP-322: matching findings ACROSS runs (this ticket runs ONE verifica
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 from uuid import UUID
 
@@ -77,6 +77,7 @@ from app.verification.snapshot.documents_section import document_id_by_content_i
 from app.verification.snapshot.model import Snapshot, TagsSection
 from app.verification.snapshot.persistence import persist_snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy
+from app.verification.snapshot.traversal import source_document_by_subject
 from app.verification.tag_materialization.ai import AiTagCache
 from app.verification.tag_materialization.ai import Reasoner as AiGroupReasoner
 from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
@@ -518,6 +519,38 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     return frozenset(eligible)
 
 
+def _attach_document_provenance(
+    results: list[RuleEvaluation], snapshot: Snapshot
+) -> list[RuleEvaluation]:
+    """Give each finding the documents it came from, where the snapshot can say (LP-617 / LP-619).
+
+    Two sources, in priority order:
+
+    1. What the RULE already carried. A consistency rule gathers per SOURCE, so it knows exactly which
+       documents it compared — including which it EXCLUDED — and nothing here can reconstruct that.
+       Never overwritten.
+    2. The SUBJECT's own document. A `per_document` rule's subject IS the document; a deposit's and a
+       tradeline's subject is nested inside one (`source_document_by_subject`). This is the bulk: on
+       LF-3CVT, AS-1's eleven deposit findings, AS-12's ten, FR-5's six and CR-6's four could name no
+       document at all, and between them that is most of the file.
+
+    A subject with no document in the map — a borrower, the loan, a MISMO-stated liability — gets
+    NOTHING, and the finding says nothing. Attributing it to a document it did not come from would
+    send a processor to the wrong page with the system's confidence behind it.
+    """
+    parents = source_document_by_subject(snapshot)
+    attached: list[RuleEvaluation] = []
+    for result in results:
+        if result.source_content_ids:  # the rule knew better than the subject does
+            attached.append(result)
+            continue
+        parent = parents.get(result.subject_id)
+        attached.append(
+            replace(result, source_content_ids=(parent,)) if parent is not None else result
+        )
+    return attached
+
+
 async def _persist(
     db: AsyncSession,
     *,
@@ -686,6 +719,7 @@ async def run_verification(
     document_ids = (
         await document_id_by_content_id(db, loan_file_row) if loan_file_row is not None else {}
     )
+    results = _attach_document_provenance(results, snapshot)
     reconciliation = await _persist(
         db,
         document_id_by_content_id=document_ids,
