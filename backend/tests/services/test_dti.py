@@ -645,3 +645,43 @@ async def test_a_non_positive_estimate_is_not_reported_as_a_figure(
     await db_session.flush()
 
     assert await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"]) == ()
+
+
+async def test_a_file_with_both_documents_uses_the_bill_and_says_nothing_of_the_estimate(
+    db_session: AsyncSession,
+) -> None:
+    """The ordinary case once a tax bill arrives: the BILL feeds the DTI, the estimate is neither
+    used nor mentioned, and there is no gate to explain.
+
+    NOTE (reported, not fixed): the two figures are not compared. A bill of $6,000 against an
+    estimate of $5,579 is used silently, and a large divergence between an assessor-sourced estimate
+    and the billed amount is arguably worth a processor's attention — but that is a new RULE, not a
+    gate message, and inventing a tolerance for it here would be exactly the invented threshold
+    ADR-361 forbids."""
+    from decimal import Decimal
+
+    from app.services.dti import _extracted_monthly, _unverified_housing_inputs
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    bill = await factories.make_document(
+        db_session, loan_file=loan_file, company=company, document_type="property_tax_bill"
+    )
+    await factories.make_extraction(
+        db_session, document=bill, data={"annual_tax_amount": {"value": "6000"}}
+    )
+    hve = await factories.make_document(
+        db_session, loan_file=loan_file, company=company, document_type="home_value_estimate"
+    )
+    await factories.make_extraction(
+        db_session, document=hve, data={"annual_property_taxes": {"value": "5579"}}
+    )
+    await db_session.flush()
+
+    monthly = await _extracted_monthly(
+        db_session, loan_file.id, "property_tax_bill", "annual_tax_amount", annual=True
+    )
+    assert monthly == Decimal("500.00")  # 6000 / 12, from the BILL
+    # The line is known, so "Property taxes" never reaches gated_labels and no note is produced.
+    assert await _unverified_housing_inputs(db_session, loan_file.id, []) == ()
