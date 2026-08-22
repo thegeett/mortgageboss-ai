@@ -206,6 +206,25 @@ _UMBRELLA_NEED_CATEGORY: dict[str, DocumentCategory] = {
 }
 
 
+# bug-001 — NEED TYPES THAT NAME A DOCUMENT NOBODY CAN UPLOAD.
+#
+# Satisfaction matches `needs_type == document_type`. These two are declared simple-presence needs —
+# ONE document is the whole requirement — but neither string is a document type the classifier can
+# produce, and neither is an umbrella. So the need was raised, the processor uploaded exactly the
+# right document, and the need stayed pending forever with no way to clear it.
+#
+# Both were pending on a real file WHILE THE DOCUMENT SAT IN IT: `existing_mortgage_statement` beside
+# an extracted `mortgage_statement`, and `verification_of_employment` beside the `voe` slug it means.
+#
+# ALIASED RATHER THAN RENAMED, deliberately. The needs_type is stored on every row already raised, so
+# renaming the constant would leave those rows naming a type nothing matches — the same defect, moved.
+# An alias fixes the rows that exist and the ones still to come, and costs one lookup.
+_NEED_TYPE_ALIASES: dict[str, str] = {
+    "existing_mortgage_statement": "mortgage_statement",
+    "verification_of_employment": "voe",
+}
+
+
 def is_simple_presence_need(need: NeedsItem) -> bool:
     """Whether ONE document is the whole requirement (LP-108). Safe default: graded (False)."""
     return (need.needs_type or "") in _SIMPLE_PRESENCE_NEEDS_TYPES
@@ -259,11 +278,13 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     # CATEGORY of documents (e.g. "asset_statement") — by the document's category. Coarse, not
     # account-level (LP-108).
     umbrella_types = [t for t, c in _UMBRELLA_NEED_CATEGORY.items() if c == document.category]
+    # bug-001 — a need whose type names this document under another name (see _NEED_TYPE_ALIASES).
+    aliased = [n for n, d in _NEED_TYPE_ALIASES.items() if d == document.document_type]
     stmt = (
         select(NeedsItem)
         .where(
             NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.needs_type.in_([document.document_type, *umbrella_types]),
+            NeedsItem.needs_type.in_([document.document_type, *umbrella_types, *aliased]),
             NeedsItem.status.in_(_OPEN_STATES),
         )
         .order_by(NeedsItem.created_at)
