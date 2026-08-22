@@ -450,8 +450,13 @@ function CollapsedFindings({
 
       {open && (
         <div id={panelId} className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-3">
+          {/* bug-001 — `onAct` WAS ACCEPTED HERE AND DROPPED. RuleFindingRow gates its whole action
+              bar on `onAct !== undefined`, so every finding inside a grouped rule rendered with no
+              buttons: a rule with ONE finding was actionable and the same rule with two was not.
+              On a real file that was 32 of 48 findings — AS-1's fifteen deposits, AS-12's nine,
+              FR-5's four, CR-6's four — visible, expandable, and impossible to act on. */}
           {findings.map((finding) => (
-            <RuleFindingRow key={finding.id} finding={finding} fileId={fileId} />
+            <RuleFindingRow key={finding.id} finding={finding} onAct={onAct} fileId={fileId} />
           ))}
         </div>
       )}

@@ -686,3 +686,65 @@ describe("LP-564 — the bulk button survives its own best case", () => {
     expect(screen.queryByText(/read or clarify these/i)).toBeNull();
   });
 });
+
+// --------------------------------------------------------------------------- //
+// bug-001 — a grouped rule's findings had no action buttons.
+//
+// `RuleFindingRow` gates its whole action bar on `onAct !== undefined`. `CollapsedFindings` ACCEPTED
+// `onAct` in its props and passed it to nothing, so a rule with ONE finding was actionable and the
+// same rule with two was not. On a real file that was 32 of 48 findings — AS-1's fifteen deposits,
+// AS-12's nine, FR-5's four, CR-6's four — visible, expandable, and impossible to act on.
+// --------------------------------------------------------------------------- //
+describe("bug-001 — every finding is actionable, grouped or not", () => {
+  // `ratification_pending` so a known action ("Sign off") renders — the point is whether ANY action
+  // bar reaches a grouped member, not which action it is.
+  const grouped = [
+    ruleFinding({
+      id: "f1",
+      rule_id: "AS-1",
+      subject_key: "txn1",
+      subject_label: "Deposit 1",
+      ratification_pending: true,
+      evaluation_outcome: "needs_review",
+    }),
+    ruleFinding({
+      id: "f2",
+      rule_id: "AS-1",
+      subject_key: "txn2",
+      subject_label: "Deposit 2",
+      ratification_pending: true,
+      evaluation_outcome: "needs_review",
+    }),
+  ];
+
+  it("offers actions on each member of an expanded group", () => {
+    const onAct = vi.fn();
+    renderTabs(grouped, 0, false, onAct);
+
+    // The group renders collapsed behind a "2 findings" disclosure — open it.
+    fireEvent.click(screen.getByText("2 findings"));
+
+    // One action bar per member, not one for the group.
+    expect(screen.getAllByRole("button", { name: "Sign off" }).length).toBe(2);
+  });
+
+  it("acts on the member that was clicked, not the first of the group", () => {
+    const onAct = vi.fn();
+    renderTabs(grouped, 0, false, onAct);
+    fireEvent.click(screen.getByText("2 findings"));
+
+    const [, second] = screen.getAllByRole("button", { name: "Sign off" });
+    if (!second) throw new Error("expected an action button on the second member");
+    fireEvent.click(second);
+
+    expect(onAct).toHaveBeenCalledTimes(1);
+    expect(onAct.mock.calls[0]?.[0]).toMatchObject({ findingId: "f2" });
+  });
+
+  it("still renders nothing actionable when the tab supplies no handler", () => {
+    renderTabs(grouped); // read-only view — no onAct
+    fireEvent.click(screen.getByText("2 findings"));
+
+    expect(screen.queryByRole("button", { name: "Sign off" })).toBeNull();
+  });
+});
