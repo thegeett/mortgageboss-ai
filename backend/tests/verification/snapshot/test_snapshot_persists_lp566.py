@@ -232,3 +232,67 @@ def test_the_producers_and_the_dti_round_a_premium_the_same_way() -> None:
     assert Decimal(str(tag_value)) == dti_side == Decimal("104.17")
     # And the tag's own string carries no long fractional run — the thing the guard refuses.
     assert not _LONG_DIGITS.search(str(tag_value))
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — THE THIRD WAY TO LOSE A SNAPSHOT: an ordinary identifier nobody routed.
+#
+# LP-566 covers identifier-shaped values in EXTRACTED FIELDS that were known to carry them, and
+# LP-615 covers values the snapshot COMPUTES. This is the residue: a field whose value is a perfectly
+# ordinary reference number, on a document type nobody had thought about, which is nine or more
+# digits and therefore indistinguishable from an unmasked SSN to the guard.
+#
+# On a real file, BOTH runs stored nothing and the refusal named two paths:
+#     mismo.facts.property.postal_code.value                    (a 9-digit run)
+#     documents.entries[10].fields.project_or_job_number.value  (a 10-digit run)
+#
+# The postal code is a ZIP+4 with the hyphen dropped — the example `persistence.py` names in its own
+# comment — and is fixed at the MISMO parser, because a ZIP+4 is public geography and the shape the
+# guard already accepts is the hyphenated one. The job number is fixed by routing, the remedy the
+# guard's own message asks for.
+# --------------------------------------------------------------------------- #
+def test_a_zip_plus_four_is_hyphenated_so_it_is_not_read_as_an_account_number() -> None:
+    """The real value from the file's MISMO. The same export writes `40290-1037` WITH the hyphen
+    elsewhere, so this is one field inconsistent with its own document, not a house style."""
+    from app.mismo.parser import _to_postal_code
+
+    assert _to_postal_code("341203361") == "34120-3361"
+    _assert_no_raw_pii(json.dumps({"postal_code": {"value": _to_postal_code("341203361")}}))
+
+    # ...and the unrouted form is exactly what the guard refuses.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"postal_code": {"value": "341203361"}}))
+
+
+@pytest.mark.parametrize(
+    "raw", ["34120", "34120-3361", "SW1A 1AA", "K1A 0B1", ""], ids=lambda v: v or "empty"
+)
+def test_every_other_postal_code_is_passed_through_untouched(raw: str) -> None:
+    """A 5-digit ZIP, an already-hyphenated ZIP+4, and non-US codes are left as written."""
+    from app.mismo.parser import _to_postal_code
+
+    assert _to_postal_code(raw) == (raw or None)
+
+
+@pytest.mark.parametrize("field", ["project_or_job_number", "aba_routing_number"])
+def test_the_newly_routed_identifiers_are_in_the_pii_registry(field: str) -> None:
+    """Routed rather than exempted: masking keeps the guard strong, where an exemption would trade a
+    loud failure for a silent leak. `aba_routing_number` is here before it has broken anything — a US
+    routing number is ALWAYS exactly nine digits, so it would refuse with certainty, not by luck."""
+    from app.verification.snapshot.documents_section import _PII_FIELDS
+
+    assert field in _PII_FIELDS
+
+
+def test_an_unrouted_identifier_field_still_refuses_the_whole_write() -> None:
+    """The property that makes this class expensive, pinned so it is not mistaken for harmless: ONE
+    unrouted field does not lose its own value — it refuses the ENTIRE snapshot, so the file loses
+    every tag value and every calculation too."""
+    payload = json.dumps(
+        {
+            "documents": {"entries": [{"fields": {"some_new_reference": {"value": "1234567890"}}}]},
+            "tags": {"by_subject": {"loan": {"dti.back_end_pct": {"value": "34.16"}}}},
+        }
+    )
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(payload)

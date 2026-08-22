@@ -222,6 +222,12 @@ _PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     "control_number": (PiiKind.ACCOUNT, False),  # W-2 Box d payroll control id — masked ****NNNN
     "lender_tin": (PiiKind.ACCOUNT, False),  # form_1098 lender tax id — masked ****NNNN
     "tax_bill_or_account_number": (PiiKind.ACCOUNT, False),  # property_tax_bill — masked ****NNNN
+    # bug-001 — the SAME class again, found the same way: a real file lost its snapshot on every run
+    # and the refusal named the field. Neither is borrower PII and neither is read by any rule
+    # (`"rules":[]` in their schema specs); they are routed for the reason stated above, that a 9+
+    # digit run is what the at-rest guard treats as a possible unmasked SSN.
+    #
+    "project_or_job_number": (PiiKind.ACCOUNT, False),  # survey — surveyor's job reference
     # LP-443 step 7 — typed-core PII of the first wired batch. NOTE (reported gap): only TOP-LEVEL
     # typed-core fields are routed here; PII inside a captured LIST row (e.g. a tradeline's
     # account_number_masked) is NOT routed — it relies on the prompt masking it, so list-row PII

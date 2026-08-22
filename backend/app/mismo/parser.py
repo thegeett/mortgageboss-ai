@@ -92,6 +92,32 @@ def _to_int(value: str | None) -> int | None:
         return None
 
 
+def _to_postal_code(value: str | None) -> str | None:
+    """A postal code, with a ZIP+4 hyphenated (bug-001).
+
+    NOT cosmetic. The snapshot's PII-at-rest guard refuses any bare run of 9+ digits, because that is
+    the shape of an unmasked SSN or account number — and an un-hyphenated ZIP+4 is exactly nine
+    digits. `persistence.py` names this case in its own comment as an accepted over-flag, and on a
+    real file it landed: `<PostalCode>341203361</PostalCode>` cost that loan file its snapshot on
+    every run, so there was no record of what any finding was derived from.
+
+    The same export writes `40290-1037` WITH the hyphen elsewhere, so this is not a house style to
+    respect — it is one field inconsistent with its own document. Hyphenating restores the shape the
+    guard already accepts, which is why the fix belongs here rather than in the guard: a ZIP+4 is
+    public geography, and relaxing a rule that exists to stop SSNs reaching disk to accommodate it
+    would trade a loud failure for a silent leak.
+
+    Anything that is not exactly nine digits is passed through untouched — a 5-digit ZIP, an
+    already-hyphenated ZIP+4, and a non-US postal code are all left as the document wrote them.
+    """
+    if value is None or not value.strip():
+        return None
+    cleaned = value.strip()
+    if len(cleaned) == 9 and cleaned.isdigit():
+        return f"{cleaned[:5]}-{cleaned[5:]}"
+    return cleaned
+
+
 def _to_bool(value: str | None) -> bool | None:
     if value is None:
         return None
@@ -219,7 +245,7 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
         address_line=ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:AddressLineText"),
         city=ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:CityName"),
         state=ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:StateCode"),
-        postal_code=ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:PostalCode"),
+        postal_code=_to_postal_code(ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:PostalCode")),
         address_type=ctx.text(party, ".//m:ADDRESSES/m:ADDRESS/m:AddressType"),
         citizenship=ctx.text(party, ".//m:DECLARATION_DETAIL/m:CitizenshipResidencyType"),
         income_items=income_items,
@@ -285,7 +311,7 @@ def _parse_property(deal: etree._Element, ctx: _Ctx) -> ParsedProperty | None:
         address_line=ctx.text(prop, ".//m:ADDRESS/m:AddressLineText"),
         city=ctx.text(prop, ".//m:ADDRESS/m:CityName"),
         state=ctx.text(prop, ".//m:ADDRESS/m:StateCode"),
-        postal_code=ctx.text(prop, ".//m:ADDRESS/m:PostalCode"),
+        postal_code=_to_postal_code(ctx.text(prop, ".//m:ADDRESS/m:PostalCode")),
         county=ctx.text(prop, ".//m:ADDRESS/m:CountyName"),
         estimated_value=_to_decimal(ctx.text(prop, ".//m:PropertyEstimatedValueAmount")),
         valuation_amount=_to_decimal(ctx.text(prop, ".//m:PropertyValuationAmount")),
