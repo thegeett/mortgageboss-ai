@@ -100,12 +100,17 @@ def test_every_declared_apply_names_an_action_the_engine_can_perform() -> None:
     }
     for path in sorted(pathlib.Path("app/verification/rules/specs").glob("*.yaml")):
         document = yaml.safe_load(path.read_text())
-        # LP-564 — `deterministic` ONLY. A judgment rule cannot declare an apply (the field is gone),
-        # and scanning both blocks was how a judgment `apply:` would have passed CI while producing
-        # nothing — the guard would have vouched for a declaration the engine never reads.
-        declared = (document.get("deterministic") or {}).get("apply")
-        if declared:
-            assert declared["action"] in known, f"{path.stem}: {declared['action']}"
-        assert "apply" not in (document.get("judgment") or {}), (
-            f"{path.stem}: a judgment rule declared an apply, which no evaluator resolves"
-        )
+        # BOTH BLOCKS, and the reason this changed is worth keeping.
+        #
+        # LP-564 scanned `deterministic` only and asserted a judgment rule declared NO apply, because
+        # at the time none was resolved: "scanning both blocks was how a judgment `apply:` would have
+        # passed CI while producing nothing — the guard would have vouched for a declaration the
+        # engine never reads."
+        #
+        # bug-001 made the judgment path resolve one (FR-5's add_liability), so that premise is gone.
+        # The concern it protected is NOT: a declaration nothing reads is still the failure, so both
+        # blocks are now checked against the same action list rather than one being forbidden.
+        for block in ("deterministic", "judgment"):
+            declared = (document.get(block) or {}).get("apply")
+            if declared:
+                assert declared["action"] in known, f"{path.stem} ({block}): {declared['action']}"

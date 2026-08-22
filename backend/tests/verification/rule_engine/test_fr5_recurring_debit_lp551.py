@@ -171,3 +171,65 @@ async def test_a_recurring_NON_creditor_payment_is_out_of_scope() -> None:
     evaluations = await _evaluate(_snapshot(category="vendor"))
 
     assert all(e.verdict is Verdict.NOT_APPLICABLE for e in evaluations)
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — the Apply that adds the liability FR-5's fix text already asks for.
+# --------------------------------------------------------------------------- #
+async def test_an_undisclosed_payment_carries_the_add(monkeypatch) -> None:
+    """The reported case: a recurring creditor payment the 1003 does not state."""
+    snapshot = _snapshot(match="none")
+    tags = dict(snapshot.tags.by_subject)
+    tags["t1"] = dict(tags["t1"]) | {"txn.counterparty": _tag("Carvana")}
+    snapshot = snapshot.model_copy(update={"tags": TagsSection.present(tags)})
+
+    (evaluation,) = await _evaluate(snapshot)
+
+    assert evaluation.verdict is Verdict.NEEDS_REVIEW
+    assert evaluation.apply == {
+        "action": "add_liability",
+        "holder_name": "Carvana",
+        "monthly_payment": "451.00",
+        "liability_type": "Other",
+    }
+
+
+@pytest.mark.parametrize("match", ["exact", "probable"])
+async def test_a_disclosed_payment_offers_no_add(match: str) -> None:
+    """THE SAFETY, and it is structural rather than a second guard that could drift: `exempt_when`
+    clears a matched payee to SATISFIED, and an apply is gated on fired/needs_review — so FR-5
+    cannot offer to add a debt the application already states. That is the LP-564 trap, where an
+    Apply on an abstention would have duplicated a liability and inflated the very ratio it exists
+    to correct."""
+    snapshot = _snapshot(match=match)
+    tags = dict(snapshot.tags.by_subject)
+    tags["t1"] = dict(tags["t1"]) | {"txn.counterparty": _tag("Carvana")}
+    snapshot = snapshot.model_copy(update={"tags": TagsSection.present(tags)})
+
+    (evaluation,) = await _evaluate(snapshot)
+
+    assert evaluation.verdict is Verdict.SATISFIED
+    assert evaluation.apply is None
+
+
+async def test_no_payee_means_no_button_rather_than_a_debt_owed_to_nobody() -> None:
+    """`_resolve_apply` drops the WHOLE apply when a declared field is unresolvable. A bank fee or a
+    cash withdrawal names nobody, and a liability with a payment and no holder is worse than no
+    button — the processor could not tell which debt it was."""
+    snapshot = _snapshot(match="none")  # no txn.counterparty tag at all
+
+    (evaluation,) = await _evaluate(snapshot)
+
+    assert evaluation.verdict is Verdict.NEEDS_REVIEW  # the finding still stands...
+    assert evaluation.apply is None  # ...it just cannot be actioned in one click
+
+
+async def test_an_unknown_payee_is_not_written_as_a_creditor_called_unknown() -> None:
+    snapshot = _snapshot(match="none")
+    tags = dict(snapshot.tags.by_subject)
+    tags["t1"] = dict(tags["t1"]) | {"txn.counterparty": _tag("unknown")}
+    snapshot = snapshot.model_copy(update={"tags": TagsSection.present(tags)})
+
+    (evaluation,) = await _evaluate(snapshot)
+
+    assert evaluation.apply is None

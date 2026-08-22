@@ -732,6 +732,16 @@ class JudgmentEval(BaseModel):
     # LP-518 — a per-loan-purpose SIZE floor, applied AFTER `applicability` and BEFORE the gate/AI.
     # See :class:`Materiality` for why this scopes before asking where `exempt_when` does not.
     materiality: Materiality | None = None
+    # bug-001 — A JUDGMENT RULE MAY DECLARE AN APPLY TOO. Only DeterministicEval could, because DT-6
+    # (the first Apply) is deterministic — but the remediation a rule offers has nothing to do with
+    # whether its verdict came from arithmetic or from a model. FR-5's own fix says "obtain the
+    # account details and add it", and until now the only way to do that was to leave the finding and
+    # re-type a payee and an amount the system had already extracted.
+    #
+    # Resolved by the SAME `_resolve_apply` and gated on the SAME verdicts as the deterministic path,
+    # so an abstention still cannot carry a button (the LP-564 trap) and a field the subject cannot
+    # resolve still removes it entirely.
+    apply: ApplySpec | None = None
     # LP-520 — what each answer in `value_domain` MEANS, in words, for the finding text.
     #
     # A judgment finding read "the AI judged 'yes'", which never states the QUESTION — and on AS-12 the

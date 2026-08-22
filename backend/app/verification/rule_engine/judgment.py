@@ -37,7 +37,11 @@ from app.verification.rule_engine.applicability import (
     missing_document_subject_id,
     resolve_applicabilities,
 )
-from app.verification.rule_engine.deterministic import _loan_tags, _reference_operand
+from app.verification.rule_engine.deterministic import (
+    _loan_tags,
+    _reference_operand,
+    _resolve_apply,
+)
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rule_engine.reasons import fact_label
@@ -140,6 +144,16 @@ def _result(
         # the model can only ever ADD a review, never remove one.
         ratification_pending=ratification_pending,
         derivation=derivation,
+        # bug-001 — the SAME resolver and the SAME verdict gate as the deterministic path, so this
+        # inherits its two safeties rather than restating them: an unresolvable field removes the
+        # button entirely (a half-filled `add_liability` would create a debt with no payment), and an
+        # ABSTENTION can never carry one — the LP-564 trap, where CR-1's couldnt_check offered to
+        # insert a liability that may already have been on the 1003.
+        apply=(
+            _resolve_apply(spec.judgment.apply, subject_tags)
+            if spec.judgment is not None and verdict in (Verdict.FIRED, Verdict.NEEDS_REVIEW)
+            else None
+        ),
     )
 
 

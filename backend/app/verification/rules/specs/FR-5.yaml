@@ -148,6 +148,38 @@ judgment:
     This recurring payment's payee is on the application's liability list ({value} match), so the
     obligation is disclosed rather than hidden. The match is on the payee alone — what leaves the
     account each month is not compared here with the payment the application states.
+  # bug-001 — THE ADD THE FIX ALREADY ASKS FOR. `how_to_fix` below says "obtain the account details
+  # and add it — an undisclosed monthly obligation understates the debt-to-income ratio", and until
+  # now the only way to do that was to leave the finding, open the overview tab's stated-financials
+  # editor, click Add under Liabilities, and re-type a payee and an amount the system had extracted.
+  #
+  # SAFE BECAUSE THE EXEMPTION ALREADY RAN. `exempt_when` clears a payment whose payee matched the
+  # 1003 `exact` or `probable`, so a finding only exists where the match is `none` or `unknown` — the
+  # rule cannot offer to add a debt the application already states. That is the LP-564 failure (CR-1
+  # offering an Apply on its abstention, which would have inserted a liability that may already be
+  # there, duplicating the debt and inflating the DTI) and the exemption is what makes it unreachable
+  # here rather than a second guard that could drift from the first.
+  #
+  # NO OVERLAP WITH CR-1 TODAY, checked rather than assumed: CR-1 compares the credit report against
+  # the application, and no loan file in staging has ever carried a credit report — CR-4 reads
+  # `couldnt_check` on every one of them for that reason. If a file ever has both, two rules could
+  # name one debt; the ADR-375 answer (one matcher per question) would apply then.
+  #
+  # THREE FIELDS, NOT FOUR. `unpaid_balance` is genuinely unavailable — a statement line shows a
+  # payment, never a balance — so it is not declared, and the row is added without one. That is why
+  # the fix text still asks for the account details: the Apply saves the re-typing it can honestly
+  # save and does not pretend to complete the record.
+  #
+  # `liability_type` IS "Other", DELIBERATELY. The handler defaults to "Installment", which for a
+  # credit-card autopay is simply wrong, and a transaction cannot tell revolving from installment —
+  # `apparent_category` says `debt_payment` and stops there. "Other" is a value the data already uses
+  # and the only one FR-5 can state truthfully.
+  apply:
+    action: add_liability
+    fields:
+      holder_name: {tag: txn.counterparty}
+      monthly_payment: {tag: txn.amount}
+      liability_type: {literal: "Other"}
   load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.is_recurring, txn.stated_liability_match]
   # `_build_context` builds the model's context from THIS list alone, and each entry carries the tag's
   # own REASONING — which is where the payee name lives ("Citi (Citibank) is a credit card issuer ...")
