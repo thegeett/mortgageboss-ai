@@ -108,6 +108,14 @@ ARGUMENTS
                                                only where NULL (LP-510).
                  BACKFILL=owned-properties     stated_owned_properties -- the 1003's
                                                real-estate-owned schedule (LP-596).
+                 BACKFILL=relink-borrowers     NOT a MISMO re-parse: re-runs borrower
+                                               matching over extractions already on disk
+                                               (no model call). Linking happens once, at
+                                               extraction, so a fix to the MATCHER reaches
+                                               only later uploads without this (bug-001).
+                                               RELINK_FILE=LF-XXXX scopes it to one file.
+                                               It can also REMOVE a link the old matcher
+                                               made wrongly; the report names both ways.
                                                Skips any file that already has rows.
 
     query      Run ONE read-only SELECT and print the result. Same one-off task
@@ -1985,7 +1993,11 @@ stage_backfill_mismo() {
   case "${BACKFILL:-property-indicators}" in
     property-indicators) backfill_module="app.scripts.backfill_mismo_property_indicators" ;;
     owned-properties)    backfill_module="app.scripts.backfill_mismo_owned_properties" ;;
-    *) die "Unknown BACKFILL='${BACKFILL}'. Use 'property-indicators' or 'owned-properties'." ;;
+    # bug-001 -- NOT a MISMO re-parse. Re-runs borrower matching over documents already extracted,
+    # because linking happens once, at extraction, and a fix to the MATCHER otherwise reaches only
+    # documents uploaded after it deploys. Scope one file with RELINK_FILE=LF-XXXX.
+    relink-borrowers)    backfill_module="app.scripts.relink_document_borrowers" ;;
+    *) die "Unknown BACKFILL='${BACKFILL}'. Use 'property-indicators', 'owned-properties' or 'relink-borrowers'." ;;
   esac
 
   ensure_secret_tmpdir
@@ -1999,11 +2011,16 @@ stage_backfill_mismo() {
   if [ -n "$apply_flag" ]; then action_desc="APPLY -- fills NULL columns and commits"; fi
   info "  action      : $action_desc"
   info "  backfill    : ${BACKFILL:-property-indicators}  ($backfill_module)"
-  if [ "${BACKFILL:-property-indicators}" = "owned-properties" ]; then
-    info "  fills       : stated_owned_properties, only for files that have none"
-  else
-    info "  fills       : properties.in_project / is_pud, only where NULL"
-  fi
+  case "${BACKFILL:-property-indicators}" in
+    owned-properties)
+      info "  fills       : stated_owned_properties, only for files that have none" ;;
+    relink-borrowers)
+      info "  re-links    : document -> borrower, over extractions already on disk (no model call)"
+      info "  scope       : ${RELINK_FILE:-every loan file}"
+      info "  ⚠ can also REMOVE a link the old matcher made wrongly -- the report names both directions" ;;
+    *)
+      info "  fills       : properties.in_project / is_pud, only where NULL" ;;
+  esac
   hr
   if [ -n "$apply_flag" ]; then
     confirm "Proceed?" || die "Aborted. Nothing was run."
@@ -2014,6 +2031,7 @@ stage_backfill_mismo() {
     umask 077
     ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
     ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" BF_APPLY="$apply_flag" \
+    BF_FILE="${RELINK_FILE:-}" \
     ONEOFF_MODULE="$backfill_module" \
       jq -n '{
         cluster: env.ONEOFF_CLUSTER,
@@ -2026,7 +2044,8 @@ stage_backfill_mismo() {
         overrides: {containerOverrides: [{
           name: env.ONEOFF_CONTAINER,
           command: ["uv","run","python","-m", env.ONEOFF_MODULE],
-          environment: [{name:"BACKFILL_APPLY", value: env.BF_APPLY}]}]}
+          environment: [{name:"BACKFILL_APPLY", value: env.BF_APPLY},
+                        {name:"RELINK_FILE", value: env.BF_FILE}]}]}
       }' >"$request"
   ) || die "Could not build the run-task request."
 
