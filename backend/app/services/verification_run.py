@@ -715,10 +715,29 @@ async def run_verification(
     # point a processor AT the documents it is about instead of naming their categories. Built here,
     # next to its one consumer, rather than threaded from the snapshot build minutes earlier. Mirrors
     # `document_filenames_by_content_id` (LP-377-B), which resolves the same keys for the read path.
-    loan_file_row = await db.get(LoanFile, loan_file_id)
-    document_ids = (
-        await document_id_by_content_id(db, loan_file_row) if loan_file_row is not None else {}
-    )
+    #
+    # LP-620 — BEST-EFFORT, like every other call around it. This reshapes the same document rows
+    # `_build_section` does, and `_build_section` absorbs every exception (behind a savepoint, so a
+    # failure "never poisons the shared session") precisely because an extraction that breaks
+    # `build_document_fields` is a known state — one that by construction already failed once earlier
+    # in THIS run. Unguarded here, that raise arrives AFTER every model call: `run_rule_engine_pass`
+    # retries the whole multi-minute pass to MAX_RETRIES and then marks the run FAILED, so a run that
+    # would have degraded gracefully commits zero findings. Provenance is a nicety; the findings are
+    # not. No link is the right degradation.
+    document_ids: dict[str, UUID] = {}
+    try:
+        loan_file_row = await db.get(LoanFile, loan_file_id)
+        if loan_file_row is not None:
+            document_ids = await document_id_by_content_id(db, loan_file_row)
+    except Exception as exc:
+        logger.warning(
+            "verification_document_provenance_failed",
+            error=type(exc).__name__,
+            detail=str(exc),
+        )
+        degradations.append(
+            Degradation("document_provenance", f"findings carry no document links: {exc}")
+        )
     results = _attach_document_provenance(results, snapshot)
     reconciliation = await _persist(
         db,

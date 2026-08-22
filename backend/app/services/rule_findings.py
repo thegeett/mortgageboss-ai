@@ -233,9 +233,19 @@ def _update_finding(
     # written only when minting never reaches a finding that already exists, and on a re-run every
     # finding is carried forward rather than minted. Refreshing also lets a link follow a superseded
     # document to its replacement, and drops one whose document was deleted.
+    #
+    # LP-620 — REFRESHED TO SOMETHING, NEVER TO NOTHING. Refreshing is right; refreshing to empty on a
+    # run that admits it could not look is the false-negative twin of the retire-eligibility guard two
+    # arguments away. The documents section degrades, ID-4 still enumerates its borrower subjects (they
+    # come from the borrowers section), gathers nothing, returns couldnt_check, is re-detected — and
+    # its three stored links were erased with the documents untouched on the file. The same happened
+    # when the end-of-run provenance map came back empty, which it now can by design (the lookup is
+    # best-effort). Keeping the prior links is the honest degradation: they were true when written, and
+    # a document that really did go away is dropped on the next run that CAN resolve one.
     source_ids = _source_document_ids(result, document_id_by_content_id)
-    finding.source_document_ids = source_ids
-    finding.source_document_id = UUID(source_ids[0]) if source_ids else None
+    if source_ids:
+        finding.source_document_ids = source_ids
+        finding.source_document_id = UUID(source_ids[0])
     # LP-598 — THE CATEGORY IS REFRESHED TOO, and it was not. LP-595 fixed the category map, but the
     # map is only read when MINTING, so every finding that already existed kept whatever it was filed
     # under. On LF-3CVT that was all thirty of them: the fix deployed, a run completed, and every

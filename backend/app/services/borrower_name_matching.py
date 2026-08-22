@@ -185,6 +185,29 @@ def normalize_name(raw: str | None) -> list[str]:
     return [t for t in tokens if t not in _SUFFIXES and t not in _CONNECTORS]
 
 
+def _adjacent_joins(tokens: list[str]) -> set[str]:
+    """Concatenations of two or more ADJACENT tokens (bug-001).
+
+    A name is written one way on the application and another on the document, and the difference is
+    often only WHERE THE SPACES ARE: `Vidulasrri` on the 1003 and `Vidula Srri` on every pay stub and
+    bank statement; `Maryann` and `Mary Ann`; `Delacruz` and `De La Cruz`. Token-by-token matching
+    cannot see through that — `vidulasrri` is never close enough to `vidula` for the fuzzy ratio, so
+    a file whose surname anchors at 1.0 links NOTHING.
+
+    ADJACENT only, and used for EXACT membership only (see `_best_token_match`). Both restrictions
+    are precision, not tidiness: joining non-adjacent tokens would let a middle name be spliced onto a
+    surname, and allowing a join to also match FUZZILY would stack a re-spacing on top of an edit,
+    which is two liberties at once on the evidence that two people are the same person.
+    """
+    joins: set[str] = set()
+    for i in range(len(tokens)):
+        acc = tokens[i]
+        for j in range(i + 1, len(tokens)):
+            acc += tokens[j]
+            joins.add(acc)
+    return joins
+
+
 def _best_token_match(borrower_tok: str, doc_tokens: list[str]) -> tuple[float, str]:
     """Best ``(score, kind)`` of a borrower token against any document token.
 
@@ -211,6 +234,11 @@ def _best_token_match(borrower_tok: str, doc_tokens: list[str]) -> tuple[float, 
     bc = _canons(borrower_tok)
     if any(bc & _canons(t) for t in doc_tokens):
         return 0.95, "nickname"
+    # bug-001 — the document spells as several tokens what the application spells as one
+    # (`Vidula Srri` vs `Vidulasrri`). EXACT membership against adjacent joins only: the name is the
+    # same name, so it scores as one, but a join is never allowed to also match fuzzily.
+    if borrower_tok in _adjacent_joins(doc_tokens):
+        return 1.0, "exact"
     best_ratio, best_tok = 0.0, ""
     for t in doc_tokens:
         ratio = SequenceMatcher(None, borrower_tok, t).ratio()
@@ -233,11 +261,25 @@ def _score_one(borrower: BorrowerName, doc_tokens: list[str]) -> MatchResult | N
     first_tok = first_tokens[0] if first_tokens else None
 
     last_score, last_kind = _best_token_match(last_tok, doc_tokens)
+    # bug-001 — the same asymmetry on the ANCHOR. `last_tok` is the LAST token of the surname, so an
+    # application spelling `Van Der Berg` anchors on `berg` alone and a document printing
+    # `VANDERBERG` fails, even though the two are one surname. Tried only when the plain token did
+    # not already match, and only as an EXACT membership test — the anchor is what stops two
+    # different families linking, so it is never widened fuzzily.
+    if last_score < 1.0 and len(last_tokens) > 1 and "".join(last_tokens) in doc_tokens:
+        last_score, last_kind = 1.0, "exact"
     if last_score < _LAST_NAME_MIN:
         return None  # anchor failed
 
     if first_tok is not None:
         first_score, first_kind = _best_token_match(first_tok, doc_tokens)
+        # bug-001, the OTHER direction: the APPLICATION spells as several tokens what the document
+        # spells as one (`Mary Ann` on the 1003, `MARYANN` on the pay stub). Only `first_tokens[0]`
+        # was ever scored, so the rest of a multi-token given name was invisible.
+        if first_score < 1.0 and len(first_tokens) > 1:
+            joined = "".join(first_tokens)
+            if joined in doc_tokens:
+                first_score, first_kind = 1.0, "exact"
     else:
         first_score, first_kind = 1.0, "exact"  # no known first name → last-only
 

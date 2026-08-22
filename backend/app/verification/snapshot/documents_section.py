@@ -1834,6 +1834,22 @@ async def document_id_by_content_id(db: AsyncSession, loan_file: LoanFile) -> di
     put a document-id map through the whole pipeline for one consumer. The cost is one extra read of
     the file's documents + current extractions — real, and small beside a run that spends minutes on
     model calls.
+
+    THE KEYS CAN DRIFT, and the claim that they cannot was wrong (LP-620). This map is built from LIVE
+    DB state at the END of a run, while the content ids it resolves were derived at the START, minutes
+    of model calls earlier. Two consequences, both mild and both worth naming rather than assuming
+    away:
+
+    * a document uploaded, re-extracted or soft-deleted in that window — or a borrower renamed, since
+      `belongs_to` feeds the id — has a different content id here, and the finding silently gets no
+      link. A missing link, not a wrong one.
+    * `assign_content_ids` folds a POSITIONAL occurrence index into the hash for byte-identical
+      payloads, so if one of two duplicate documents is deleted mid-run the survivor inherits the
+      deleted twin's id, and a finding derived from the deleted document resolves to the survivor's
+      row. A link to a byte-identical twin, which is the same document by content.
+
+    Neither is worth threading the map through the pipeline to close. Both are worth knowing before
+    treating a missing link as a bug in the resolver.
     """
     documents, _reshaped, doc_ids = await _reshape_and_assign_ids(db, loan_file)
     return {content_id: doc.id for doc, content_id in zip(documents, doc_ids, strict=True)}

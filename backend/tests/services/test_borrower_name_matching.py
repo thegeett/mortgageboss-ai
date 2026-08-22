@@ -140,3 +140,75 @@ def test_asserted_names_reads_registered_field_excludes_counterparty() -> None:
     assert asserted_names_for({"appraised_value": {"value": "500000"}}, "appraisal") == []
     # absent field → no name
     assert asserted_names_for({}, "pay_stub") == []
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — THE SPACES MOVE. A name is written one way on the application and another on the
+# document, and the difference is often only where the spaces are.
+#
+# Found on a real submission: the MISMO carried `<FirstName>Vidulasrri</FirstName>` and every pay
+# stub, W-2 and bank statement printed `VIDULA SRRI MURUGANANDAM`. The matcher linked 2 of 13
+# documents — and the two it DID link included one whose surname was misspelled (`MURUGANDAM`,
+# fuzzy 0.95). It accepted a corrupted surname and rejected a space.
+#
+# The cost is invisible: eleven unlinked documents left ~15 per-borrower rules unable to check, with
+# text that reads as a documentation gap ("no income documents are currently attributed to this
+# borrower") on a file carrying two W-2s.
+# --------------------------------------------------------------------------- #
+def test_document_splits_the_given_name_the_application_writes_as_one_word() -> None:
+    """The real case. `Vidulasrri` on the 1003, `VIDULA SRRI` on every document."""
+    borrower = _b("Vidulasrri", "Muruganandam")
+    results = match_document(["VIDULA SRRI MURUGANANDAM"], [borrower])
+    assert len(results) == 1
+    assert results[0].borrower_id == borrower.borrower_id
+    # NORMALIZED, not EXACT: same name, different spacing — the tokens are not byte-identical.
+    assert results[0].method == "normalized"
+    assert results[0].confidence == 1.0
+
+
+def test_application_splits_the_given_name_the_document_writes_as_one_word() -> None:
+    """The other direction — only `first_tokens[0]` was ever scored, so `Ann` was invisible."""
+    results = match_document(["MARYANN SANCHEZ"], [_b("Mary Ann", "Sanchez")])
+    assert len(results) == 1 and results[0].confidence == 1.0
+
+
+def test_a_multi_token_surname_matches_the_document_that_joins_it() -> None:
+    """The ANCHOR has the same asymmetry: `last_tok` is the surname's LAST token, so `Van Der Berg`
+    anchored on `berg` alone and a document printing `VANDERBERG` failed."""
+    results = match_document(["PIET VANDERBERG"], [_b("Piet", "Van Der Berg")])
+    assert len(results) == 1 and results[0].confidence == 1.0
+
+
+def test_a_joined_surname_matches_the_document_that_splits_it() -> None:
+    results = match_document(["JOSE DE LA CRUZ"], [_b("Jose", "Delacruz")])
+    assert len(results) == 1 and results[0].confidence == 1.0
+
+
+# --- the precision half: a join must never link two different people --------- #
+def test_a_join_does_not_link_a_different_given_name() -> None:
+    assert match_document(["PRIYA MURUGANANDAM"], [_b("Vidulasrri", "Muruganandam")]) == []
+
+
+def test_a_join_does_not_link_a_different_surname() -> None:
+    assert match_document(["VIDULASRRI SUNDARAM"], [_b("Vidulasrri", "Muruganandam")]) == []
+
+
+def test_a_join_does_not_link_a_relative_sharing_the_surname() -> None:
+    """The case the anchor exists for: the surname joins perfectly, the given name is another person."""
+    assert match_document(["VIDULA SRRI MURUGANANDAM"], [_b("Raj", "Muruganandam")]) == []
+
+
+def test_tokens_of_a_stranger_are_not_joined_into_a_match() -> None:
+    """`SMITH` + `SONIA` concatenates to `smithsonia`, which contains the borrower's surname — the
+    join is EXACT-membership only, so a substring is not a match."""
+    assert match_document(["JOHN SMITH SONIA"], [_b("Ann", "Smithson")]) == []
+
+
+def test_non_adjacent_tokens_are_never_joined() -> None:
+    """Only ADJACENT tokens join. Splicing a given name onto a surname across the middle name would
+    invent a surname nobody wrote."""
+    from app.services.borrower_name_matching import _adjacent_joins
+
+    joins = _adjacent_joins(["van", "quang", "tran"])
+    assert "vanquang" in joins and "quangtran" in joins and "vanquangtran" in joins
+    assert "vantran" not in joins  # skipping `quang` is not a re-spacing of anything

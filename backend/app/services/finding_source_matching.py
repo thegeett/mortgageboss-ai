@@ -184,6 +184,21 @@ async def populate_finding_source_documents(db: AsyncSession, *, loan_file_id: U
     ).all()
     changed = 0
     for finding in findings:
+        # LP-620 — A GOVERNED FINDING IS SKIPPED, because for one this function truncates rather than
+        # enriches. `distinctive_values` returns [] for it (no `details["document_value"]`, no
+        # `source_snippet`), so `matched` is empty; LP-617 then made `source_document_id` non-null, so
+        # the primary is inserted at index 0 and the set is rewritten to that ONE id — a two-document
+        # ID-4 provenance collapsing to one. The rule engine resolves its own provenance from snapshot
+        # content ids, which is exact where this is a value match. Both callers are currently dead
+        # (`cross_source._run` returns early since LP-614; `verification_engine` has no caller), so this
+        # is a guard for whoever re-enables one, not a live fix.
+        #
+        # KEYED ON `evaluation_outcome`, NOT `origin` — LP-375's discriminator, for its reason:
+        # `deterministic_rule` spans BOTH the governed engine AND the retired xsrc findings, and the
+        # xsrc ones are exactly what this populator is for. Keying on origin skipped them too and broke
+        # the provenance it exists to build.
+        if finding.evaluation_outcome is not None:
+            continue
         matched = match_source_documents(finding, index)
         ids: list[UUID] = list(matched)
         # LP-114's exact primary is authoritative — always included, first.
