@@ -125,6 +125,27 @@ deterministic:
     - reo.statement_payment_coverage
   gated_tags:
     - reo.statement_payment_coverage
+  # bug-001 — THE GATE PATH HAD NO ACTION, AND SOMETHING FILLED THE VACUUM.
+  #
+  # The `couldnt_check` OUTCOME below carries a careful how_to_fix. The gate never reaches it: an
+  # unresolvable gated tag short-circuits to a couldnt_check that reads `couldnt_check_fix`, which
+  # this spec did not declare — so the finding shipped with how_to_fix NULL and the composer, which
+  # must "make THE SAME REQUEST as suggested_fix", had no request to make and wrote its own.
+  #
+  # On a real file that produced "Confirm whether the Lake Michigan Credit Union mortgage shown on
+  # the statement is being paid off at closing or retained" — a DISPOSITION question the abstention
+  # never raised, and RE-1's remit. RE-1 was on the same file asking the processor to add that
+  # mortgage to the application. One lien, two different instructions, from the rule whose own
+  # header promises it will not "double-report the discrepancy RE-1 already surfaced".
+  #
+  # So this says what DT-6 actually needs, and hands the undisclosed-mortgage question back to the
+  # rule that owns it — the same deferral the outcome's how_to_fix already makes.
+  couldnt_check_fix: >-
+    Identify which liability on the application this mortgage statement belongs to, and check that
+    the application and the statement each state a monthly payment — the stated payment cannot be
+    compared with the billed payment until both are known. If the statement's mortgage is not on the
+    application at all, that is reconciled by the undisclosed-mortgage-obligation check rather than
+    here.
   # LP-576 — DT-6 could tell a processor to raise the stated payment and could not do it for them:
   # `correct_liability_payment` had been implemented, tested and given an undo, and declared by NO
   # spec. This wires it up.

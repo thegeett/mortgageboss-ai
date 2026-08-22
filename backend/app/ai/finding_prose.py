@@ -67,6 +67,15 @@ RULES, all mandatory:
 - The action must make THE SAME REQUEST as "suggested_fix". Sharpen its wording, name the document it
   names — but never ask for a document or a step it does not ask for. "evidence" is context for the
   "why"; it is NOT a list of things to request. A document mentioned there may not exist for this loan.
+- WHEN "suggested_fix" IS ABSENT, ask ONLY for what "problem" says is missing, and introduce NO new
+  question. A rule that could not complete its check states what it could not resolve; that, and
+  nothing beyond it, is the request. Do not reason from the situation to a DIFFERENT thing a
+  processor might want to know — another rule may own that question and be asking it already, and two
+  instructions about one fact is worse for a processor than one.
+  Real example of the failure: given the problem "no mortgage liability stated on the application
+  names a holder matching this statement's lender", the right action asks which liability the
+  statement belongs to. Asking whether the mortgage "is being paid off at closing or retained" is a
+  different question the problem never raised, and another rule was asking it on the same file.
 - "why" explains why this is in their queue, in plain language a processor uses. Name the specific
   document or fact when the summary gives it.
 - When "evidence" is present it is what the check actually relied on. USE IT: name those documents and
