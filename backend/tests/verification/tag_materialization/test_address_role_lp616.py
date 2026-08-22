@@ -156,17 +156,53 @@ async def test_id4_is_satisfied_once_the_moved_from_address_is_excluded() -> Non
 # --------------------------------------------------------------------------- #
 # The guards — each one is a way this could hide a real discrepancy
 # --------------------------------------------------------------------------- #
-def test_one_later_document_agreeing_blocks_the_demotion() -> None:
-    """EVERY later document must disagree. Otherwise a single mis-extracted address on the newest
-    document would demote every correct older one and hide a real discrepancy."""
+def test_two_documents_sharing_an_address_always_share_a_verdict() -> None:
+    """bug-001 — THIS TEST PREVIOUSLY ASSERTED THE OPPOSITE, and the behaviour it pinned was wrong.
+
+    It required EVERY later document to disagree before demoting, meaning to stop one mis-extracted
+    recent address demoting correct older ones. It asserted only `w23`, and that hid the split: under
+    that rule `w24` (the LATEST document stating NC) was demoted anyway, because nothing after it
+    agreed — so the guard only ever saved the EARLIEST copy while losing the newest one.
+
+    On a real file that produced two W-2s stating 2369 Tangerine Lane with opposite labels, one
+    `superseded_residence` and one `current_residence`, and the surviving one went on feeding ID-4 a
+    discrepancy that was really a house move.
+
+    The question is now asked once per ADDRESS, so a shared address cannot receive two answers.
+
+    THE RESIDUAL RISK IS REAL AND UNCHANGED: no date-based rule can tell a typo on the newest
+    document from a genuine move, and this one reads it as a move. What changed is that it now does
+    so CONSISTENTLY, instead of splitting one address across two verdicts."""
     snap = _snap(
         [
             (_doc("w23", "w2", date_field=("tax_year", "2023")), _NC, "residence"),
-            (_doc("w24", "w2", date_field=("tax_year", "2024")), _NC, "residence"),  # agrees
-            (_doc("typo", "pay_stub", date_field=("pay_date", "2025-04-04")), _MA, "residence"),
+            (_doc("w24", "w2", date_field=("tax_year", "2024")), _NC, "residence"),
+            (_doc("newer", "pay_stub", date_field=("pay_date", "2025-04-04")), _MA, "residence"),
         ]
     )
-    assert _role(snap, "w23") == "current_residence"
+    assert _role(snap, "w23") == _role(snap, "w24") == "superseded_residence"
+    assert _role(snap, "newer") == "current_residence"
+
+
+def test_the_newest_document_stating_an_address_is_what_dates_it() -> None:
+    """The mechanism, stated directly: an address is as recent as the LAST document to state it, so a
+    later document agreeing keeps the whole group current rather than only itself."""
+    snap = _snap(
+        [
+            (_doc("old", "w2", date_field=("tax_year", "2023")), _NC, "residence"),
+            (_doc("recent", "pay_stub", date_field=("pay_date", "2026-04-04")), _NC, "residence"),
+            (
+                _doc("middle", "bank_statement", date_field=("statement_period_end", "2024-06-30")),
+                _MA,
+                "residence",
+            ),
+        ]
+    )
+    # NC is last stated in 2026, after the 2024 document that says MA → nothing supersedes it.
+    assert _role(snap, "old") == "current_residence"
+    assert _role(snap, "recent") == "current_residence"
+    # MA is last stated in 2024, and 2026 says NC → superseded.
+    assert _role(snap, "middle") == "superseded_residence"
 
 
 def test_same_year_documents_never_demote_each_other() -> None:
@@ -288,3 +324,32 @@ async def test_the_declaration_actually_materializes_the_tag() -> None:
     )
     assert str(out.tags.by_subject["w23"]["id.address_role"].value) == "superseded_residence"
     assert str(out.tags.by_subject["stub"]["id.address_role"].value) == "current_residence"
+
+
+def test_the_real_file_two_w2s_one_move_and_an_investment_property() -> None:
+    """bug-001, reproduced from LF-ABRS.
+
+    The borrower lived at Tangerine Lane (both W-2s), moved to Cumming in Jul 2025 (the 2026 pay
+    stub and bank statements), and is refinancing a property in Naples they do not live in. ID-4 saw
+    three "current" addresses and reported a discrepancy; two of the three were not current at all.
+
+    This pins the half that was mine: BOTH W-2s now read as the old address, together."""
+    tangerine = "2369 Tangerine Lane, Naples, FL 34120"
+    cumming = "4070 Preserve Crossing Lane, Cumming, GA 30040"
+    snap = _snap(
+        [
+            (_doc("w24", "w2", date_field=("tax_year", "2024")), tangerine, "residence"),
+            (_doc("w25", "w2", date_field=("tax_year", "2025")), tangerine, "residence"),
+            (_doc("stub", "pay_stub", date_field=("pay_date", "2026-08-02")), cumming, "residence"),
+            (
+                _doc("bank", "bank_statement", date_field=("statement_period_end", "2026-07-15")),
+                cumming,
+                "residence",
+            ),
+        ]
+    )
+
+    assert _role(snap, "w24") == "superseded_residence"
+    assert _role(snap, "w25") == "superseded_residence"
+    assert _role(snap, "stub") == "current_residence"
+    assert _role(snap, "bank") == "current_residence"

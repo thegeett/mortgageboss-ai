@@ -930,7 +930,27 @@ def _id_address_role(
         # No link → no way to tell whose address this is, so no way to say a NEWER one replaced it.
         return "current_residence", "the document is not linked to a borrower"
 
-    newer_disagree = False
+    # bug-001 — ONE ANSWER PER ADDRESS, not per document, and this is a correction.
+    #
+    # The first version asked, for each document: "does EVERY later document state something
+    # different?" That let an old address SHIELD ITS OWN EARLIER COPY. On a real file both W-2s
+    # stated 2369 Tangerine Lane:
+    #
+    #   2025 W-2 → everything later (2026 pay stub, 2026 statements) says Cumming → superseded ✅
+    #   2024 W-2 → the 2025 W-2 is later and says Tangerine, so "every later differs" was FALSE,
+    #              and it stayed `current_residence` ❌
+    #
+    # Two documents, the identical address, opposite labels — which no processor can make sense of,
+    # and one of them went on feeding ID-4 a discrepancy that was really just a house move.
+    #
+    # The clause existed to stop ONE mis-extracted recent document demoting correct older ones. It
+    # never achieved that: the LATEST correct document was demoted anyway, since nothing later agreed
+    # with it. It only ever saved the earliest copy, which is why the labels came out inconsistent.
+    #
+    # So the question is asked ONCE PER ADDRESS: take the newest document stating THIS address, and
+    # ask whether everything after it states somewhere else. Two documents sharing an address now
+    # share a verdict by construction.
+    siblings: list[tuple[int, str]] = []
     for other in () if snapshot.documents.absent else snapshot.documents.entries:
         if other.content_id == subject_id:
             continue
@@ -954,18 +974,18 @@ def _id_address_role(
         if other_address is None or str(other_address.value) == _UNKNOWN:
             continue
         other_year = _address_as_of_year(other, not_after=this_year)
-        if other_year is None or other_year <= my_year:
+        if other_year is None:
             continue
-        if _addresses_agree(str(other_address.value), str(address.value)):
-            # A newer document still states THIS address → it is current, whatever else disagrees.
-            return "current_residence", (
-                f"a {other_year} document still states this address, so it is current"
-            )
-        newer_disagree = True
-    if newer_disagree:
+        siblings.append((other_year, str(other_address.value)))
+
+    mine = str(address.value)
+    # The newest document stating THIS address — this one, or a later one that agrees with it.
+    latest_mine = max([my_year] + [year for year, addr in siblings if _addresses_agree(addr, mine)])
+    after = [addr for year, addr in siblings if year > latest_mine]
+    if after and not any(_addresses_agree(addr, mine) for addr in after):
         return "superseded_residence", (
-            f"this address is stated as of {my_year}, and every later document on file states a "
-            "different residence — the borrower moved after this document"
+            f"this address is last stated as of {latest_mine}, and every later document on file "
+            "states a different residence — the borrower moved after it"
         )
     return (
         "current_residence",
