@@ -48,6 +48,7 @@ export interface DtiCalculation {
    * nulled (never a confident number on a fabricated 0) and `gate_reason` names the unknown input(s). */
   gated?: boolean;
   gate_reason?: string | null;
+  unverified_inputs?: UnverifiedInput[];
   gross_monthly_income: string;
   housing_payment: string;
   monthly_debts: string;
@@ -60,6 +61,23 @@ export interface DtiCalculation {
   program: string | null;
   limit: DtiLimit;
   findings: DtiFindingsStatus;
+}
+
+/** bug-001: a figure the FILE STATES for a gated input, which is not acceptable verification.
+ *
+ * A real file gated on "Property taxes is unknown" while two of its documents stated the annual tax
+ * outright ($5,579). Both were automated valuations, so gating is right — an estimator's figure must
+ * not silently set a DTI. But telling a processor it is missing sends them to find it twice.
+ *
+ * `field_key` + `monthly_amount` are exactly a `DtiOverrideInput`, so the card can offer it as ONE
+ * CLICK — which records who accepted it and why, rather than the calculator assuming it quietly. */
+export interface UnverifiedInput {
+  field_key: string;
+  label: string;
+  monthly_amount: string;
+  annual_amount: string;
+  source_label: string;
+  sentence: string;
 }
 
 export interface DtiOverrideInput {

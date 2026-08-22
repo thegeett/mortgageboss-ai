@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.loan_file import LoanFile
 from app.schemas.calculators import CalculatorView
-from app.schemas.dti import DtiCalculation
+from app.schemas.dti import DtiCalculation, UnverifiedInput
 from app.schemas.ltv import LtvCalculation
 from app.services.calculators import build_reserves_view
 from app.services.dti import (
@@ -218,7 +218,7 @@ def _entry(
     required: frozenset[str] = frozenset(),
     nullable_headlines: tuple[str, ...] = (),
     confidence_of: _ConfidenceOf = _no_tag_confidence,
-    unverified_inputs: tuple[str, ...] = (),
+    unverified_inputs: tuple[UnverifiedInput, ...] = (),
 ) -> CalculationEntry:
     """Assemble a CalculationEntry with confidence + fail-closed gating over its breakdown.
 
@@ -231,7 +231,7 @@ def _entry(
     # where a processor read "DTI calculation gated due to missing property tax amount" about a figure
     # the file states twice.
     if reason is not None and unverified_inputs:
-        reason = reason + "  " + " ".join(unverified_inputs)
+        reason = reason + "  " + " ".join(u.sentence for u in unverified_inputs)
     if reason is not None:
         value = {**value, **dict.fromkeys(nullable_headlines)}
     return CalculationEntry(

@@ -49,6 +49,7 @@ from app.schemas.dti import (
     DtiLimit,
     DtiLineItem,
     DtiOverrideInput,
+    UnverifiedInput,
 )
 from app.services.activity_log import log_activity
 from app.services.finding_blocking import open_in_scope_findings
@@ -275,7 +276,7 @@ def _typed_value(data: dict[str, Any] | None, field: str) -> Decimal | None:
 
 async def _unverified_housing_inputs(
     db: AsyncSession, loan_file_id: UUID, gated_labels: list[str]
-) -> tuple[str, ...]:
+) -> tuple[UnverifiedInput, ...]:
     """Figures the FILE STATES for a gated housing input, which are not acceptable verification.
 
     bug-001. A real file gated on "Property taxes is unknown" while stating the annual tax outright
@@ -284,21 +285,31 @@ async def _unverified_housing_inputs(
     DTI, and `_extracted_monthly` reads the tax BILL for exactly that reason. What was wrong is being
     told the number is missing, going to look, and finding it twice.
 
-    So this does not feed the calculation and cannot ungate it — it only lets the gate SAY what the
-    file already contains and why that is not enough. A processor who disagrees can still override
-    the line explicitly, which is a decision on the record rather than an estimate promoted quietly.
+    This does not feed the calculation and cannot ungate it. It lets the gate SAY what the file
+    contains, and gives the card the `field_key` + `monthly_amount` to offer it as a ONE-CLICK
+    OVERRIDE — which records the processor's id and a note naming the source, so accepting an
+    estimate is a decision on the record rather than an assumption the calculator made quietly.
     """
     if "Property taxes" not in gated_labels:
         return ()
-    estimate = _typed_value(
+    annual = _typed_value(
         await _current_extracted_data(db, loan_file_id, "home_value_estimate"),
         "annual_property_taxes",
     )
-    if estimate is None or estimate <= 0:
+    if annual is None or annual <= 0:
         return ()
     return (
-        f"The home value estimate states annual property taxes of ${estimate:,.2f}. That is an "
-        "automated valuation's estimate, not verification — upload the property tax bill.",
+        UnverifiedInput(
+            field_key=HOUSING_TAXES,
+            label="Property taxes",
+            monthly_amount=(annual / Decimal(12)).quantize(_CENTS, rounding=ROUND_HALF_UP),
+            annual_amount=annual.quantize(_CENTS, rounding=ROUND_HALF_UP),
+            source_label="the home value estimate",
+            sentence=(
+                f"The home value estimate states annual property taxes of ${annual:,.2f}. That is an "
+                "automated valuation's estimate, not verification — upload the property tax bill."
+            ),
+        ),
     )
 
 
@@ -493,7 +504,7 @@ async def build_dti_calculation(
     gate_reason = (
         "calculation gated (fail-closed): "
         + "; ".join(f"{label} is unknown" for label in gated_labels)
-        + ("  " + " ".join(unverified) if unverified else "")
+        + ("  " + " ".join(u.sentence for u in unverified) if unverified else "")
         if gated
         else None
     )

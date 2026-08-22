@@ -188,3 +188,60 @@ describe("DtiCalculator", () => {
     expect(refetch).toHaveBeenCalled();
   });
 });
+
+// --------------------------------------------------------------------------- //
+// bug-001 — one click to accept a figure the file states for a gated input.
+//
+// A real file gated on "Property taxes is unknown" while two of its documents stated the annual tax
+// outright ($5,579). Gating is right — an estimator's figure must not silently set a DTI — but the
+// processor had no way to act on it except retyping a number the system already had.
+// --------------------------------------------------------------------------- //
+describe("bug-001 — using a stated estimate", () => {
+  const suggestion = {
+    field_key: "housing.taxes",
+    label: "Property taxes",
+    monthly_amount: "464.92",
+    annual_amount: "5579.00",
+    source_label: "the home value estimate",
+    sentence:
+      "The home value estimate states annual property taxes of $5,579.00. That is an automated valuation's estimate, not verification — upload the property tax bill.",
+  };
+  const gated = {
+    ...CALC,
+    gated: true,
+    gate_reason: "calculation gated (fail-closed): Property taxes is unknown",
+  };
+
+  it("offers the figure on a gated calculation, with its monthly amount", () => {
+    mockDti({ data: { ...gated, unverified_inputs: [suggestion] } });
+    render(<DtiCalculator fileId="LF-ABRS" />);
+
+    expect(
+      screen.getByRole("button", { name: /Use the estimate \(\$464\.92\/mo\)/ }),
+    ).toBeDefined();
+  });
+
+  it("writes it as an override carrying a note that names the source", () => {
+    mockDti({ data: { ...gated, unverified_inputs: [suggestion] } });
+    render(<DtiCalculator fileId="LF-ABRS" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Use the estimate/ }));
+
+    expect(setMutate).toHaveBeenCalledTimes(1);
+    const call = setMutate.mock.calls[0]?.[0];
+    expect(call.fieldKey).toBe("housing.taxes");
+    // The MONTHLY figure the calculator uses...
+    expect(call.input.amount).toBe("464.92");
+    // ...and a note recording that an ESTIMATE was accepted, not a verified bill.
+    expect(call.input.note).toContain("home value estimate");
+    expect(call.input.note).toContain("not a verified tax bill");
+  });
+
+  it("offers nothing when the file states no such figure", () => {
+    mockDti({ data: gated });
+    render(<DtiCalculator fileId="LF-ABRS" />);
+
+    expect(screen.getByRole("alert")).toBeDefined(); // the gate banner renders...
+    expect(screen.queryByRole("button", { name: /Use the estimate/ })).toBeNull(); // ...with no offer
+  });
+});

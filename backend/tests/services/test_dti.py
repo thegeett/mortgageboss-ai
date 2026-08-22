@@ -588,10 +588,15 @@ async def test_the_note_is_built_from_our_own_extraction_of_the_home_value_estim
     )
     await db_session.flush()
 
-    (note,) = await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"])
+    (suggestion,) = await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"])
 
-    assert "$5,579.00" in note
-    assert "not verification" in note and "property tax bill" in note
+    assert "$5,579.00" in suggestion.sentence
+    assert "not verification" in suggestion.sentence
+    assert "property tax bill" in suggestion.sentence
+    # STRUCTURED, so the card can offer it as one click: these are exactly a DtiOverrideInput.
+    assert suggestion.field_key == "housing.taxes"
+    assert suggestion.annual_amount == Decimal("5579.00")
+    assert suggestion.monthly_amount == Decimal("464.92")  # 5579 / 12, to cents
 
 
 async def test_no_note_when_the_taxes_line_is_not_the_gated_one(db_session: AsyncSession) -> None:

@@ -53,6 +53,33 @@ class DtiFindingsStatus(BaseModel):
     open_in_scope_count: int
 
 
+class UnverifiedInput(BaseModel):
+    """A figure the FILE STATES for a gated DTI input, which is not acceptable verification.
+
+    bug-001. A real submission gated on "Property taxes is unknown" while two of its documents stated
+    the annual tax outright ($5,579). Both were automated valuations over county assessor data, so
+    GATING IS RIGHT — an estimator's figure must not silently set a DTI. But a processor told the
+    number is missing goes looking, finds it twice, and concludes the system cannot read its own file.
+
+    STRUCTURED, not just prose, so the card can offer it as a one-click override: `field_key` and
+    `monthly_amount` are exactly what `DtiOverrideInput` needs. Accepting it is then a DECISION on the
+    record — an override carrying the processor's id and a note naming the source — rather than an
+    estimate the calculator promoted quietly.
+
+    `sentence` is the same text both gate-reason producers render, carried here so the card, the /dti
+    reason and the snapshot's reason cannot word it differently.
+    """
+
+    model_config = {"frozen": True}
+
+    field_key: str  # the override target, e.g. "housing.taxes"
+    label: str  # "Property taxes"
+    monthly_amount: Decimal  # what an override would set
+    annual_amount: Decimal  # what the document actually states
+    source_label: str  # "the home value estimate"
+    sentence: str  # the prose both gate reasons use
+
+
 class DtiCalculation(BaseModel):
     """The full DTI calculation for a loan file — transparent + itemized."""
 
@@ -77,7 +104,7 @@ class DtiCalculation(BaseModel):
     #: Carried STRUCTURALLY rather than folded into `gate_reason` by each producer, because there are
     #: two gate-reason producers (this card's, and the snapshot's in `calculations_section`, which is
     #: what the AI cross-check reads) and they would otherwise drift.
-    unverified_inputs: tuple[str, ...] = ()
+    unverified_inputs: tuple[UnverifiedInput, ...] = ()
 
     # The totals.
     gross_monthly_income: Decimal

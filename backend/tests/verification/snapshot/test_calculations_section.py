@@ -616,11 +616,21 @@ def _gated_dti(unverified: tuple[str, ...]) -> NS:
 
 
 def test_the_gate_names_the_figure_the_file_states_and_why_it_is_not_enough() -> None:
+    from app.schemas.dti import UnverifiedInput
+
     note = (
         "The home value estimate states annual property taxes of $5,579.00. That is an automated "
         "valuation's estimate, not verification — upload the property tax bill."
     )
-    entry = map_dti(_gated_dti((note,)))
+    suggestion = UnverifiedInput(
+        field_key="housing.taxes",
+        label="Property taxes",
+        monthly_amount=Decimal("464.92"),
+        annual_amount=Decimal("5579.00"),
+        source_label="the home value estimate",
+        sentence=note,
+    )
+    entry = map_dti(_gated_dti((suggestion,)))
 
     assert entry is not None and entry.gated is True
     assert "housing.taxes_monthly is unknown" in entry.gate_reason  # the machine reason survives

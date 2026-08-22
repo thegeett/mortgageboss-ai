@@ -18,11 +18,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useClearDtiOverride, useDti, useSetDtiOverride } from "@/lib/api/dti";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
-import type { DtiCalculation, DtiLimit, DtiLineItem } from "@/lib/types/dti";
+import type { DtiCalculation, DtiLimit, DtiLineItem, UnverifiedInput } from "@/lib/types/dti";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calculator, Check, Lock, Pencil, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Calculator, Check, Info, Lock, Pencil, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
 
 export function DtiCalculator({ fileId }: { fileId: string }) {
@@ -79,6 +80,12 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
     clearOverride.mutate(fieldKey);
     setEditingKey(null);
   };
+  // bug-001 — accepting a stated estimate is an ordinary override, deliberately: it carries the
+  // processor's id and a note naming the source, so the file records that a human accepted an
+  // estimate rather than the calculator having assumed one.
+  const onUseEstimate = (fieldKey: string, amount: string, note: string) => {
+    setOverride.mutate({ fieldKey, input: { amount, note } });
+  };
 
   const rowProps = {
     editingKey,
@@ -92,7 +99,14 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   return (
     <div className="space-y-6">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
-      {data.gated && <GatedBanner reason={data.gate_reason} />}
+      {data.gated && (
+        <GatedBanner
+          reason={data.gate_reason}
+          unverified={data.unverified_inputs ?? []}
+          onUse={onUseEstimate}
+          disabled={isMutating}
+        />
+      )}
 
       <HeroRatios data={data} />
 
@@ -391,20 +405,82 @@ function LineRow({
 
 /** LP-375: the DTI is FAIL-CLOSED — a required housing input is unknown, so no confident ratio is shown
  * (a $0 there would read confidently too-low). The display agrees with the engine's gate. */
-function GatedBanner({ reason }: { reason?: string | null }) {
+function GatedBanner({
+  reason,
+  unverified,
+  onUse,
+  disabled,
+}: {
+  reason?: string | null;
+  unverified: UnverifiedInput[];
+  onUse: (fieldKey: string, amount: string, note: string) => void;
+  disabled?: boolean;
+}) {
   return (
     <div
       role="alert"
       className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
     >
       <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-      <span>
-        <span className="font-medium text-gray-900">The DTI can't be computed yet</span> —{" "}
-        {reason?.replace(/^calculation gated \(fail-closed\):\s*/, "") ??
-          "a required housing input is unknown"}
-        . It's shown as gated rather than a confident ratio resting on a missing value.
-      </span>
+      <div className="space-y-2">
+        <span>
+          <span className="font-medium text-gray-900">The DTI can't be computed yet</span> —{" "}
+          {reason?.replace(/^calculation gated \(fail-closed\):\s*/, "") ??
+            "a required housing input is unknown"}
+          . It's shown as gated rather than a confident ratio resting on a missing value.
+        </span>
+        {unverified.map((u) => (
+          <UseEstimateButton key={u.field_key} suggestion={u} onUse={onUse} disabled={disabled} />
+        ))}
+      </div>
     </div>
+  );
+}
+
+/**
+ * bug-001 — accept a figure the file states for a gated input, in one click.
+ *
+ * The gate is CORRECT and this does not weaken it: the calculator still reads only the tax bill, and
+ * clicking here writes a normal processor OVERRIDE — carrying who did it and a note naming the
+ * source. The difference between this and letting the calculator read the estimate quietly is the
+ * whole point: one is a decision on the record, the other is an assumption nobody made.
+ *
+ * The tooltip carries the reason rather than the button label, because the label has to be short and
+ * the reason is the part a processor must not miss.
+ */
+function UseEstimateButton({
+  suggestion,
+  onUse,
+  disabled,
+}: {
+  suggestion: UnverifiedInput;
+  onUse: (fieldKey: string, amount: string, note: string) => void;
+  disabled?: boolean;
+}) {
+  const note = `Accepted ${suggestion.source_label}'s figure of $${suggestion.annual_amount}/yr — not a verified tax bill.`;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onUse(suggestion.field_key, suggestion.monthly_amount, note)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-warning/10 disabled:opacity-50"
+          >
+            <Info className="h-3.5 w-3.5 text-warning" aria-hidden />
+            Use the estimate (${suggestion.monthly_amount}/mo)
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          <p>{suggestion.sentence}</p>
+          <p className="mt-1.5 text-gray-300">
+            Using it records an override in your name — the file will still show this figure is an
+            estimate, and the tax bill is still outstanding.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
