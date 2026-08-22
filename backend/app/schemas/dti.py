@@ -66,6 +66,18 @@ class DtiCalculation(BaseModel):
     # already did this; the display path used to collapse the absent input to 0 and show a confident ratio.
     gated: bool = False
     gate_reason: str | None = None
+    #: bug-001 — a figure the FILE STATES for a gated input, which is not acceptable verification.
+    #:
+    #: A real submission gated on "Property taxes is unknown" while two documents in it stated the
+    #: annual tax outright ($5,579, on a UWM dashboard and a Property Explorer report). Both are
+    #: automated-valuation output over county assessor data, so GATING IS RIGHT — an estimator's
+    #: figure must not set a DTI. But a processor told the number is missing goes looking and finds
+    #: it twice, and concludes the system is broken when it is being careful.
+    #:
+    #: Carried STRUCTURALLY rather than folded into `gate_reason` by each producer, because there are
+    #: two gate-reason producers (this card's, and the snapshot's in `calculations_section`, which is
+    #: what the AI cross-check reads) and they would otherwise drift.
+    unverified_inputs: tuple[str, ...] = ()
 
     # The totals.
     gross_monthly_income: Decimal

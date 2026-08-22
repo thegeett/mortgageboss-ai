@@ -273,6 +273,35 @@ def _typed_value(data: dict[str, Any] | None, field: str) -> Decimal | None:
         return None
 
 
+async def _unverified_housing_inputs(
+    db: AsyncSession, loan_file_id: UUID, gated_labels: list[str]
+) -> tuple[str, ...]:
+    """Figures the FILE STATES for a gated housing input, which are not acceptable verification.
+
+    bug-001. A real file gated on "Property taxes is unknown" while stating the annual tax outright
+    in two documents — $5,579, on a UWM dashboard and a Property Explorer report, both automated
+    valuations over county assessor data. The gate is RIGHT: an estimator's figure must not set a
+    DTI, and `_extracted_monthly` reads the tax BILL for exactly that reason. What was wrong is being
+    told the number is missing, going to look, and finding it twice.
+
+    So this does not feed the calculation and cannot ungate it — it only lets the gate SAY what the
+    file already contains and why that is not enough. A processor who disagrees can still override
+    the line explicitly, which is a decision on the record rather than an estimate promoted quietly.
+    """
+    if "Property taxes" not in gated_labels:
+        return ()
+    estimate = _typed_value(
+        await _current_extracted_data(db, loan_file_id, "home_value_estimate"),
+        "annual_property_taxes",
+    )
+    if estimate is None or estimate <= 0:
+        return ()
+    return (
+        f"The home value estimate states annual property taxes of ${estimate:,.2f}. That is an "
+        "automated valuation's estimate, not verification — upload the property tax bill.",
+    )
+
+
 async def _extracted_monthly(
     db: AsyncSession, loan_file_id: UUID, document_type: str, field: str, *, annual: bool
 ) -> Decimal | None:
@@ -458,9 +487,13 @@ async def build_dti_calculation(
     # agrees with the engine WITHOUT this shared function altering the snapshot path.
     gated_labels = [item.label for item in housing_items if item.unknown]
     gated = bool(gated_labels)
+    # bug-001 — name what the file DOES state for a gated input, so the gate reads as caution rather
+    # than as a system that cannot see its own documents.
+    unverified = await _unverified_housing_inputs(db, loan_file.id, gated_labels)
     gate_reason = (
         "calculation gated (fail-closed): "
         + "; ".join(f"{label} is unknown" for label in gated_labels)
+        + ("  " + " ".join(unverified) if unverified else "")
         if gated
         else None
     )
@@ -477,6 +510,7 @@ async def build_dti_calculation(
         back_end_dti=result.back_end_pct,
         gated=gated,
         gate_reason=gate_reason,
+        unverified_inputs=unverified,
         gross_monthly_income=result.gross_monthly_income,
         housing_payment=result.housing_payment,
         monthly_debts=result.monthly_debts,

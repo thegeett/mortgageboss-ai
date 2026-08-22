@@ -218,6 +218,7 @@ def _entry(
     required: frozenset[str] = frozenset(),
     nullable_headlines: tuple[str, ...] = (),
     confidence_of: _ConfidenceOf = _no_tag_confidence,
+    unverified_inputs: tuple[str, ...] = (),
 ) -> CalculationEntry:
     """Assemble a CalculationEntry with confidence + fail-closed gating over its breakdown.
 
@@ -225,6 +226,12 @@ def _entry(
     the calc emits the gated marker + reason, NOT a confident-but-wrong number.
     """
     reason = _gate_reason(lines, required)
+    # bug-001 — the SAME note the /dti card shows, carried on the calculation rather than rebuilt, so
+    # the two gate-reason producers cannot drift. It reaches the AI cross-check through this, which is
+    # where a processor read "DTI calculation gated due to missing property tax amount" about a figure
+    # the file states twice.
+    if reason is not None and unverified_inputs:
+        reason = reason + "  " + " ".join(unverified_inputs)
     if reason is not None:
         value = {**value, **dict.fromkeys(nullable_headlines)}
     return CalculationEntry(
@@ -261,6 +268,7 @@ def map_dti(dti: DtiCalculation) -> CalculationEntry | None:
         lines,
         required=_REQUIRED_DTI_TAGS,
         nullable_headlines=("front_end_dti", "back_end_dti"),
+        unverified_inputs=dti.unverified_inputs,
     )
 
 

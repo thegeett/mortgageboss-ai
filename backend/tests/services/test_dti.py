@@ -564,3 +564,84 @@ def test_active_rule_count_matches_the_central_expectation() -> None:
     from tests.expected_active import EXPECTED_ACTIVE_RULE_COUNT
 
     assert len(ACTIVE_RULE_IDS) == EXPECTED_ACTIVE_RULE_COUNT
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — the gate names the figure the file states, and still gates.
+# --------------------------------------------------------------------------- #
+async def test_the_note_is_built_from_our_own_extraction_of_the_home_value_estimate(
+    db_session: AsyncSession,
+) -> None:
+    """$5,579 is the real value, read from OUR extraction of that document — not re-derived."""
+    from app.services.dti import _unverified_housing_inputs
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    doc = await factories.make_document(
+        db_session, loan_file=loan_file, company=company, document_type="home_value_estimate"
+    )
+    await factories.make_extraction(
+        db_session,
+        document=doc,
+        data={"annual_property_taxes": {"value": "5579", "confidence": 0.97}},
+    )
+    await db_session.flush()
+
+    (note,) = await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"])
+
+    assert "$5,579.00" in note
+    assert "not verification" in note and "property tax bill" in note
+
+
+async def test_no_note_when_the_taxes_line_is_not_the_gated_one(db_session: AsyncSession) -> None:
+    """The note explains a specific gate. A file gated only on insurance must not be told about a
+    tax estimate it was not asked for."""
+    from app.services.dti import _unverified_housing_inputs
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    doc = await factories.make_document(
+        db_session, loan_file=loan_file, company=company, document_type="home_value_estimate"
+    )
+    await factories.make_extraction(
+        db_session, document=doc, data={"annual_property_taxes": {"value": "5579"}}
+    )
+    await db_session.flush()
+
+    assert (
+        await _unverified_housing_inputs(db_session, loan_file.id, ["Homeowners insurance"]) == ()
+    )
+
+
+async def test_no_note_when_the_file_states_no_estimate(db_session: AsyncSession) -> None:
+    from app.services.dti import _unverified_housing_inputs
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    await db_session.flush()
+
+    assert await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"]) == ()
+
+
+async def test_a_non_positive_estimate_is_not_reported_as_a_figure(
+    db_session: AsyncSession,
+) -> None:
+    """`absent != 0` — a 0 is not a tax bill anyone can act on, and quoting it would invite a
+    processor to override the line to zero."""
+    from app.services.dti import _unverified_housing_inputs
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    doc = await factories.make_document(
+        db_session, loan_file=loan_file, company=company, document_type="home_value_estimate"
+    )
+    await factories.make_extraction(
+        db_session, document=doc, data={"annual_property_taxes": {"value": "0"}}
+    )
+    await db_session.flush()
+
+    assert await _unverified_housing_inputs(db_session, loan_file.id, ["Property taxes"]) == ()

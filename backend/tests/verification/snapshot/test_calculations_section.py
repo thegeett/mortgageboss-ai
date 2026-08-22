@@ -77,6 +77,9 @@ def _dti(back_end: Decimal | None = Decimal("43.10")) -> NS:
             _line("housing.insurance", "Insurance", Decimal("120.00"), "extracted"),
         ],
         debt_items=[_line("debt.1", "Card", Decimal("900.00"), "stated", overridden=True)],
+        # bug-001 — the note the gate reason appends when the file STATES a figure for a gated input
+        # that is not acceptable verification. Empty here: this double is a complete, ungated file.
+        unverified_inputs=(),
     )
 
 
@@ -586,3 +589,55 @@ def test_max_loan_and_self_employed_are_not_in_the_snapshot() -> None:
     assert set(CalculationsSection.model_fields) >= {"dti", "ltv", "mi", "reserves"}
     assert "max_loan" not in CalculationsSection.model_fields
     assert "self_employed" not in CalculationsSection.model_fields
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — a gate that names what the file DOES state.
+#
+# A real submission gated on "Property taxes is unknown" while two of its documents stated the annual
+# tax outright: $5,579, on a UWM dashboard and a Property Explorer report. Both are automated
+# valuations over county assessor data, so the GATE IS RIGHT — an estimator's figure must not set a
+# DTI, and the calculator reads the tax BILL for exactly that reason. What was wrong is telling a
+# processor the number is missing, sending them to look, and letting them find it twice.
+# --------------------------------------------------------------------------- #
+def _gated_dti(unverified: tuple[str, ...]) -> NS:
+    dti = _dti()
+    return NS(
+        **{
+            **dti.__dict__,
+            "housing_items": [
+                _line("housing.principal_interest", "P&I", Decimal("1380.00"), "computed"),
+                _line("housing.taxes", "Tax", None, "extracted"),  # the gated input
+                _line("housing.insurance", "Insurance", Decimal("120.00"), "extracted"),
+            ],
+            "unverified_inputs": unverified,
+        }
+    )
+
+
+def test_the_gate_names_the_figure_the_file_states_and_why_it_is_not_enough() -> None:
+    note = (
+        "The home value estimate states annual property taxes of $5,579.00. That is an automated "
+        "valuation's estimate, not verification — upload the property tax bill."
+    )
+    entry = map_dti(_gated_dti((note,)))
+
+    assert entry is not None and entry.gated is True
+    assert "housing.taxes_monthly is unknown" in entry.gate_reason  # the machine reason survives
+    assert note in entry.gate_reason  # ...and now says what the file has
+    # STILL GATED: naming the estimate must never ungate the calculation.
+    assert entry.value["back_end_dti"] is None
+
+
+def test_without_such_a_figure_the_reason_is_unchanged() -> None:
+    """A file that genuinely states nothing must read exactly as it did before."""
+    entry = map_dti(_gated_dti(()))
+
+    assert entry is not None and entry.gated is True
+    assert entry.gate_reason == "calculation gated (fail-closed): housing.taxes_monthly is unknown"
+
+
+def test_an_ungated_calculation_never_carries_the_note() -> None:
+    """No gate, no reason to mention an estimate — the note exists to explain a gate."""
+    entry = map_dti(_dti())
+    assert entry is not None and entry.gated is False and entry.gate_reason is None
