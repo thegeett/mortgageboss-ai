@@ -898,6 +898,39 @@ def _address_as_of_year(entry: DocumentEntry, *, not_after: int | None = None) -
     return None
 
 
+def _subject_property_when_not_occupied(snapshot: Snapshot) -> str | None:
+    """The subject property's address WHEN THE BORROWER DOES NOT LIVE THERE, else None (bug-001).
+
+    A mortgage statement and an insurance binder for the subject property carry the PROPERTY's
+    address — that is who the servicer bills and what the policy covers. On an owner-occupied loan
+    that is also the borrower's home, so reading it as their residence is right. On an INVESTMENT
+    property it is not a home at all, and treating it as one puts the collateral's address into the
+    same comparison as the borrower's, which then reports a discrepancy that is really just a
+    landlord living somewhere else.
+
+    On a real file that was two of ID-4's three "current" addresses: 220 39th Ave NW appeared on the
+    mortgage statement and the insurance, the application declared the property an investment with
+    intent-to-occupy "No", and the borrower's actual home was in another state.
+
+    ONLY `investment`, deliberately. `second` is a home the borrower does live in, part of the year;
+    `primary` is the ordinary owner-occupied case; and `unknown` must not silently exclude an address
+    — an occupancy we cannot read is not evidence the borrower is absent.
+    """
+    occupancy = _mismo_str(snapshot, "property.occupancy")
+    if occupancy is None or _OCCUPANCY_ENUM.get(occupancy.casefold()) != "investment":
+        return None
+    line = _mismo_str(snapshot, "property.address_line")
+    if line is None:
+        return None
+    parts = [
+        line,
+        _mismo_str(snapshot, "property.city"),
+        _mismo_str(snapshot, "property.state"),
+        _mismo_str(snapshot, "property.postal_code"),
+    ]
+    return ", ".join(part for part in parts if part)
+
+
 def _id_address_role(
     snapshot: Snapshot, subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -979,6 +1012,16 @@ def _id_address_role(
         siblings.append((other_year, str(other_address.value)))
 
     mine = str(address.value)
+    # bug-001 — THE COLLATERAL IS NOT A HOME. Checked before the date comparison because it is not a
+    # question about time: an investment property's address was never the borrower's residence, so
+    # there is nothing for a later document to supersede.
+    if (subject := _subject_property_when_not_occupied(snapshot)) is not None and _addresses_agree(
+        subject, mine
+    ):
+        return "not_residence", (
+            "this is the subject property's address, and the application declares the property an "
+            "investment — the borrower does not live there"
+        )
     # The newest document stating THIS address — this one, or a later one that agrees with it.
     latest_mine = max([my_year] + [year for year, addr in siblings if _addresses_agree(addr, mine)])
     after = [addr for year, addr in siblings if year > latest_mine]

@@ -60,18 +60,26 @@ class _Reasoner:
         return RuleJudgmentResult(RuleJudgment(self.value, 0.9, "because"), 1, 1, "stub", False)
 
 
-def _snap(docs: list[tuple[str, str, str, str]]) -> Snapshot:
+def _snap(docs: list[tuple[str, ...]]) -> Snapshot:
     """docs = [(content_id, document_type, address, current_address_type)] — the DL/1003 sources,
     each co-locating id.address_normalized + id.current_address_type on its own document subject (LP-325/326)."""
     entries = [
         DocumentEntry(
-            content_id=cid, document_type=dt, belongs_to=(BorrowerRef(borrower_id=_B, name="Sam"),)
+            content_id=d[0],
+            document_type=d[1],
+            belongs_to=(BorrowerRef(borrower_id=_B, name="Sam"),),
         )
-        for cid, dt, _, _ in docs
+        for d in docs
     ]
     by_subject = {
-        cid: {"id.address_normalized": _tag(addr), "id.current_address_type": _tag(atype)}
-        for cid, _dt, addr, atype in docs
+        d[0]: {
+            "id.address_normalized": _tag(d[2]),
+            "id.current_address_type": _tag(d[3]),
+            # bug-001 — the optional fifth element is `id.address_role`, which ID-4's gather_exclude
+            # reads. Omitted, no role tag is emitted and nothing is excluded (fail-open).
+            **({"id.address_role": _tag(d[4])} if len(d) > 4 else {}),
+        }
+        for d in docs
     }
     return Snapshot(
         loan_file_id=uuid4(),
@@ -82,7 +90,7 @@ def _snap(docs: list[tuple[str, str, str, str]]) -> Snapshot:
     )
 
 
-async def _id4(docs: list[tuple[str, str, str, str]], reasoner: _Reasoner) -> list[RuleEvaluation]:
+async def _id4(docs: list[tuple[str, ...]], reasoner: _Reasoner) -> list[RuleEvaluation]:
     return await evaluate_consistency_rule(load_rule_spec("ID-4"), _snap(docs), reasoner=reasoner)
 
 
@@ -168,3 +176,37 @@ async def test_document_marked_prior_is_still_excluded() -> None:
         _Reasoner("disagree"),
     )
     assert [x.verdict for x in r] == [Verdict.COULDNT_CHECK]
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — LF-ABRS end to end: ID-4 saw three "current" addresses, and only one was.
+# --------------------------------------------------------------------------- #
+async def test_id4_passes_once_the_old_address_and_the_collateral_are_excluded() -> None:
+    """The real file. The borrower lived at Tangerine Lane (both W-2s), moved to Cumming in Jul 2025
+    (the 2026 pay stub, statements and licence), and is refinancing a Naples property the
+    application declares an INVESTMENT.
+
+    ID-4 reported a discrepancy across all three. Two were not residences: an address the borrower
+    had moved out of, and a property they never lived in. Excluding them leaves one address stated
+    four times — which is a pass, and no AI call, because there is no residue to judge."""
+    stub = _Reasoner("disagree")
+    tangerine = "2369 Tangerine Lane, Naples, FL 34120"
+    cumming = "4070 Preserve Crossing Lane, Cumming, GA 30040"
+    subject = "220 39th Avenue Northwest, Naples, FL 34120"
+
+    results = await _id4(
+        [
+            ("w24", "w2", tangerine, "residence", "superseded_residence"),
+            ("w25", "w2", tangerine, "residence", "superseded_residence"),
+            ("stmt", "mortgage_statement", subject, "residence", "not_residence"),
+            ("ins", "homeowners_insurance", subject, "residence", "not_residence"),
+            ("stub", "pay_stub", cumming, "residence", "current_residence"),
+            ("bank1", "bank_statement", cumming, "residence", "current_residence"),
+            ("bank2", "bank_statement", cumming, "residence", "current_residence"),
+            ("dl", "drivers_license", cumming, "residence", "current_residence"),
+        ],
+        stub,
+    )
+
+    assert [r.verdict for r in results] == [Verdict.SATISFIED]
+    assert stub.calls == 0  # nothing differs once the two non-residences are out

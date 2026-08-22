@@ -353,3 +353,136 @@ def test_the_real_file_two_w2s_one_move_and_an_investment_property() -> None:
     assert _role(snap, "w25") == "superseded_residence"
     assert _role(snap, "stub") == "current_residence"
     assert _role(snap, "bank") == "current_residence"
+
+
+# --------------------------------------------------------------------------- #
+# bug-001 — the collateral is not a home.
+#
+# A mortgage statement and an insurance binder for the subject property carry the PROPERTY's address:
+# that is who the servicer bills and what the policy covers. On an owner-occupied loan it is also the
+# borrower's home. On an INVESTMENT property it is not a home at all — and on LF-ABRS those two
+# documents supplied two of ID-4's three "current residence" addresses while the borrower lived in
+# another state.
+# --------------------------------------------------------------------------- #
+_SUBJECT = "220 39th Avenue Northwest, Naples, FL 34120-3361"
+_HOME = "4070 Preserve Crossing Lane, Cumming, GA 30040"
+
+
+def _with_property(snap: Snapshot, occupancy: str) -> Snapshot:
+    from app.verification.snapshot.model import MismoSection
+
+    return snap.model_copy(
+        update={
+            "mismo": MismoSection.present(
+                {
+                    "property.occupancy": Field.present(occupancy, source=FieldSource.PARSED),
+                    "property.address_line": Field.present(
+                        "220 39th Avenue Northwest", source=FieldSource.PARSED
+                    ),
+                    "property.city": Field.present("Naples", source=FieldSource.PARSED),
+                    "property.state": Field.present("FL", source=FieldSource.PARSED),
+                    "property.postal_code": Field.present("34120-3361", source=FieldSource.PARSED),
+                }
+            )
+        }
+    )
+
+
+def test_an_investment_propertys_address_is_not_the_borrowers_residence() -> None:
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stmt", "mortgage_statement", date_field=("issue_date", "2026-07-01")),
+                    _SUBJECT,
+                    "residence",
+                ),
+                (
+                    _doc("stub", "pay_stub", date_field=("pay_date", "2026-08-02")),
+                    _HOME,
+                    "residence",
+                ),
+            ]
+        ),
+        "investment",
+    )
+
+    assert _role(snap, "stmt") == "not_residence"
+    assert _role(snap, "stub") == "current_residence"
+
+
+def test_on_an_owner_occupied_loan_the_same_address_IS_the_residence() -> None:
+    """The whole point is occupancy, not the document type. A servicer's statement for a home the
+    borrower lives in states their address, and excluding it would shrink the comparison for no
+    reason."""
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stmt", "mortgage_statement", date_field=("issue_date", "2026-07-01")),
+                    _SUBJECT,
+                    "residence",
+                ),
+            ]
+        ),
+        "primary_residence",
+    )
+
+    assert _role(snap, "stmt") == "current_residence"
+
+
+def test_a_second_home_is_still_a_home() -> None:
+    """`second` is a property the borrower does live in, part of the year — only `investment` says
+    they do not."""
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stmt", "mortgage_statement", date_field=("issue_date", "2026-07-01")),
+                    _SUBJECT,
+                    "residence",
+                ),
+            ]
+        ),
+        "second_home",
+    )
+
+    assert _role(snap, "stmt") == "current_residence"
+
+
+def test_an_unreadable_occupancy_never_excludes_an_address() -> None:
+    """An occupancy we cannot read is not evidence the borrower is absent. Fail-open: a missing or
+    unmapped occupancy leaves the address in the comparison."""
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stmt", "mortgage_statement", date_field=("issue_date", "2026-07-01")),
+                    _SUBJECT,
+                    "residence",
+                ),
+            ]
+        ),
+        "something_the_map_does_not_know",
+    )
+
+    assert _role(snap, "stmt") == "current_residence"
+
+
+def test_only_the_subject_propertys_own_address_is_excluded() -> None:
+    """A different address on an investment file is still the borrower's home — the exclusion is
+    about WHICH address, not about the loan being an investment."""
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stub", "pay_stub", date_field=("pay_date", "2026-08-02")),
+                    _HOME,
+                    "residence",
+                ),
+            ]
+        ),
+        "investment",
+    )
+
+    assert _role(snap, "stub") == "current_residence"

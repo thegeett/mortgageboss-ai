@@ -56,10 +56,20 @@ consistency:
   # set"), and `id.address_role` is DERIVED, so it carries `confidence=None` — filtering on it would
   # have moved the gate onto a tag that has nothing to gate and quietly dropped that protection. The
   # exclusion needs no gate: it is deterministic, and it only ever removes a source.
+  # bug-001 — `ne current_residence` rather than `eq superseded_residence`, so the exclusion covers
+  # EVERY way the role says "not the borrower's home today", not just the one it was written for. The
+  # second way arrived a week later: an INVESTMENT property's address, which the servicer's statement
+  # and the insurance binder both carry, and which was never a residence for a later document to
+  # supersede. Listing outcomes one at a time would have needed this edit again for the third.
+  #
+  # An ABSENT role tag is NOT excluded — `_tag_holds` returns False for a missing tag, whatever the
+  # operator — so a document the derived pass never reached keeps its place in the comparison. That
+  # is the fail-open direction: a missing tag must not silently shrink the set a discrepancy is
+  # measured across.
   gather_exclude:
     tag: id.address_role
-    op: eq
-    value: superseded_residence
+    op: ne
+    value: current_residence
   compare_mode: fuzzy
   normalization:
     - casefold
