@@ -61,6 +61,13 @@ class StubStageAReasoner:
                     apparent_category=TagJudgment(
                         fx.apparent_category, _STUB_CONFIDENCE, "stub: labeled fixture"
                     ),
+                    # bug-001 — the stub must model the CONTRACT, not a subset of it. Omitting
+                    # `counterparty` is what a model failing to answer looks like, and the
+                    # orchestrator rightly reports that as a degradation — so a stub that left it
+                    # out made every stubbed run degraded, and a degraded run does not retire
+                    # findings (LP-322). "null" is the honest fixture answer: a labelled fixture
+                    # carries no payee, and a JUDGED absence keeps its confidence.
+                    counterparty=TagJudgment("null", _STUB_CONFIDENCE, "stub: labeled fixture"),
                 )
             )
         return StageAResult(

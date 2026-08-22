@@ -64,6 +64,7 @@ _TAG_AMOUNT = "txn.amount"
 _TAG_DATE = "txn.date"
 _TAG_IS_MONEY_IN = "txn.is_money_in"
 _TAG_APPARENT_CATEGORY = "txn.apparent_category"
+_TAG_COUNTERPARTY = "txn.counterparty"
 _TAG_VERSION = 1
 
 # Reasons attached to an unknown-with-reason tag so a human sees WHY it is unknown.
@@ -88,6 +89,9 @@ class _Judged:
     is_money_in: TagJudgment | None
     apparent_category: TagJudgment | None
     reason: str  # the reason to attach when a tag is None (why it is unknown)
+    # bug-001 — LAST and defaulted, deliberately: the failure paths construct this POSITIONALLY as
+    # `_Judged(None, None, reason)`, so a field inserted before `reason` silently rebinds it.
+    counterparty: TagJudgment | None = None
 
 
 TransactionTagCache = dict[str, _Judged]
@@ -221,7 +225,12 @@ async def produce_stage_a_transaction_tags(
                 continue
             # Returned, but a tag value may still be missing/malformed — record that (not
             # "not returned"), so a human triaging the unknown tag sees the accurate cause.
-            entry = _Judged(judgment.is_money_in, judgment.apparent_category, _REASON_MALFORMED)
+            entry = _Judged(
+                judgment.is_money_in,
+                judgment.apparent_category,
+                _REASON_MALFORMED,
+                counterparty=judgment.counterparty,
+            )
             resolved[fp] = entry
             # Cache only a COMPLETE judgment, so a partial retries next run.
             if entry.is_money_in is not None and entry.apparent_category is not None:
@@ -260,6 +269,9 @@ def _build_transaction_tags(txn: TransactionRecord, judged: _Judged) -> dict[str
         _TAG_APPARENT_CATEGORY: _ai_tag(
             _TAG_APPARENT_CATEGORY, judged.apparent_category, txn.content_id, judged.reason
         ),
+        # bug-001 — a FREE STRING, so it takes the open-vocabulary path: there is no value set to
+        # check a creditor's name against, and inventing one would reject real names.
+        _TAG_COUNTERPARTY: _ai_string_tag(judged.counterparty, txn.content_id, judged.reason),
     }
 
 
@@ -303,6 +315,54 @@ def _ai_tag(tag_id: str, judgment: TagJudgment | None, content_id: str, absent_r
         return _unknown_ai_tag(content_id, judgment.reasoning or _REASON_OFF_VOCAB)
     return Tag(
         value=judgment.value,
+        confidence=judgment.confidence,
+        reasoning=judgment.reasoning,
+        source_facts=(content_id,),
+        produced_by=TagProducedBy.AI,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        tag_version=_TAG_VERSION,
+        stage=TagStage.A,
+    )
+
+
+def _ai_string_tag(judgment: TagJudgment | None, content_id: str, absent_reason: str) -> Tag:
+    """An AI-judged FREE-STRING tag — no value set to check against (bug-001).
+
+    `_ai_tag` coerces anything outside its vocabulary to unknown, which is right for an enum and
+    impossible for a name: there is no list of every creditor. So the only checks here are the ones
+    that do not need a vocabulary — a missing judgment, and a blank or "null"/"none"/"unknown"
+    string, all of which become an honest unknown-with-reason rather than a name nobody wrote.
+
+    A name is NOT trimmed to a house style beyond whitespace. The prompt asks the model to strip the
+    bank's reference numbers; second-guessing what remains here would be this layer deciding what a
+    creditor is called.
+    """
+    if judgment is None:
+        # OMITTED by the model — a fail-closed fallback, confidence None, which the orchestrator's
+        # structural scan correctly reports as a degradation.
+        return _unknown_ai_tag(content_id, absent_reason)
+    name = (judgment.value or "").strip()
+    if not name or name.casefold() in {"null", "none", "unknown", "n/a"}:
+        # JUDGED to have no other party, which is an ordinary fact about a bank fee, a cash
+        # withdrawal or an interest credit — NOT a production failure. So the model's own confidence
+        # is kept, exactly as `_ai_tag` keeps it for a genuine AI "unknown".
+        #
+        # This is load-bearing, and a test caught it: `_scan_tag_degradations` marks a run degraded
+        # on `value=="unknown"` + AI + `confidence is None`, and a degraded run MUST NOT RETIRE
+        # findings (LP-322). Emitting a confidence-less fallback here would have made almost every
+        # real file degrade itself over a transaction that simply names nobody.
+        return Tag(
+            value="unknown",
+            confidence=judgment.confidence,
+            reasoning=judgment.reasoning or "the description names no other party",
+            source_facts=(content_id,),
+            produced_by=TagProducedBy.AI,
+            tag_role=TagRole.STRUCTURAL_FACT,
+            tag_version=_TAG_VERSION,
+            stage=TagStage.A,
+        )
+    return Tag(
+        value=name,
         confidence=judgment.confidence,
         reasoning=judgment.reasoning,
         source_facts=(content_id,),

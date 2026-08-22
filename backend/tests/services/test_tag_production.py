@@ -116,7 +116,15 @@ async def test_produces_the_stage_a_contract_per_transaction() -> None:
 
     assert out.tags.is_present and len(out.tags.by_subject) == 2
     tags = _tags_for(out, 0)
-    assert set(tags) == {"txn.amount", "txn.date", "txn.is_money_in", "txn.apparent_category"}
+    # bug-001 — `txn.counterparty` joins the contract: it was in the vocabulary from the start,
+    # naming FR-5 among its consumers, and no group produced it.
+    assert set(tags) == {
+        "txn.amount",
+        "txn.date",
+        "txn.is_money_in",
+        "txn.apparent_category",
+        "txn.counterparty",
+    }
 
     mi = tags["txn.is_money_in"]
     assert mi.value == "in" and mi.produced_by is TagProducedBy.AI

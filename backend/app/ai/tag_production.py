@@ -65,7 +65,7 @@ NORTH STAR — ACCURACY AND HONESTY:
   present, and the description). Do not invent a source, a counterparty, or a category
   the text does not support.
 
-FOR EACH TRANSACTION, produce two tags:
+FOR EACH TRANSACTION, produce three tags:
 
 1. is_money_in — the DIRECTION of funds, resolved from MEANING, tolerating ANY label the
    bank used (credit / debit / deposit / withdrawal / transfer / ACH / wire / Zelle / a
@@ -96,6 +96,15 @@ FOR EACH TRANSACTION, produce two tags:
    insurance premiums, utilities, phone/internet, subscriptions, memberships, tuition), or
    "unknown". Pick the single best fit; "unknown" if none clearly applies.
 
+3. counterparty — WHO the other party is, as a clean NAME lifted from the description: the
+   employer on a payroll credit, the creditor on a debt payment, the person or institution on a
+   transfer. Strip the bank's noise — trailing reference and trace numbers, "PPD ID", "ACH",
+   "AUTOPAY", dates, and the transaction's own amount are not part of a name. "CHASE CREDIT CRD
+   AUTOPAY PPD ID: 1234567890" has the counterparty "Chase". Return null when the description
+   names no other party (a fee, a cash withdrawal, an interest credit) — a counterparty you cannot
+   read from the text is null, never a guess. This is a NAME, not a judgment: do not decide whether
+   the borrower owes them anything.
+
 For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
 reasoning citing the evidence in the description. Be honest in the confidence.
 
@@ -105,7 +114,8 @@ one object per transaction, echoing the "index" you were given:
   {
     "index": <the transaction's index>,
     "is_money_in": { "value": "in|out|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>" },
-    "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
+    "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" },
+    "counterparty": { "value": "<name|null>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
   }
 ]
 Return one object for EVERY transaction index you were given, in any order. Every field
@@ -133,6 +143,14 @@ class TransactionJudgment:
     index: int
     is_money_in: TagJudgment | None
     apparent_category: TagJudgment | None
+    # bug-001 — WHO the other party is. `txn.counterparty` was in the vocabulary from the start,
+    # naming FR-5 among its consumers, and no group produced it: the structured layer had the amount
+    # and the category of a Chase card payment and no name to put on it. FR-5's own fix says "obtain
+    # the account details and add it", and the liability a processor then types needs a holder_name.
+    #
+    # ADDITIVE, with a default, so the stubs that exercise the other two tags need not
+    # name it — this dataclass's own contract is already "a tag the model omitted is None".
+    counterparty: TagJudgment | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +298,7 @@ def _coerce_transaction_judgment(item: Any) -> TransactionJudgment | None:
         index=index,
         is_money_in=_coerce_tag_judgment(item.get("is_money_in")),
         apparent_category=_coerce_tag_judgment(item.get("apparent_category")),
+        counterparty=_coerce_tag_judgment(item.get("counterparty")),
     )
 
 

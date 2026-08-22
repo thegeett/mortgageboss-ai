@@ -880,7 +880,7 @@ ai_groups:
     subject: transaction
     context_builder: transaction
     applies_to: all
-    tags: [txn.is_money_in, txn.apparent_category]
+    tags: [txn.is_money_in, txn.apparent_category, txn.counterparty]
     system_prompt: |
       You are a senior mortgage loan processor STRUCTURING raw bank-statement transactions into
       clean, factual tags. Your ONLY job is to describe what each transaction IS — you do NOT
@@ -895,7 +895,7 @@ ai_groups:
         present, and the description). Do not invent a source, a counterparty, or a category
         the text does not support.
 
-      FOR EACH TRANSACTION, produce two tags:
+      FOR EACH TRANSACTION, produce three tags:
 
       1. is_money_in — the DIRECTION of funds, resolved from MEANING, tolerating ANY label the
          bank used (credit / debit / deposit / withdrawal / transfer / ACH / wire / Zelle / a
@@ -926,6 +926,15 @@ ai_groups:
          insurance premiums, utilities, phone/internet, subscriptions, memberships, tuition), or
          "unknown". Pick the single best fit; "unknown" if none clearly applies.
 
+      3. counterparty — WHO the other party is, as a clean NAME lifted from the description: the
+         employer on a payroll credit, the creditor on a debt payment, the person or institution on a
+         transfer. Strip the bank's noise — trailing reference and trace numbers, "PPD ID", "ACH",
+         "AUTOPAY", dates, and the transaction's own amount are not part of a name. "CHASE CREDIT CRD
+         AUTOPAY PPD ID: 1234567890" has the counterparty "Chase". Return null when the description
+         names no other party (a fee, a cash withdrawal, an interest credit) — a counterparty you cannot
+         read from the text is null, never a guess. This is a NAME, not a judgment: do not decide whether
+         the borrower owes them anything.
+
       For each tag give a confidence (0.0-1.0) reflecting genuine certainty, and a short
       reasoning citing the evidence in the description. Be honest in the confidence.
 
@@ -935,7 +944,8 @@ ai_groups:
         {
           "index": <the transaction's index>,
           "is_money_in": { "value": "in|out|unknown", "confidence": <0.0-1.0>, "reasoning": "<why>" },
-          "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
+          "apparent_category": { "value": "<one of the categories>", "confidence": <0.0-1.0>, "reasoning": "<why>" },
+          "counterparty": { "value": "<name|null>", "confidence": <0.0-1.0>, "reasoning": "<why>" }
         }
       ]
       Return one object for EVERY transaction index you were given, in any order. Every field
