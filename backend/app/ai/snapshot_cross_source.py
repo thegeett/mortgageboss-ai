@@ -394,6 +394,42 @@ async def reason_over_snapshot(
     return drafts
 
 
+#: A row inside a document entry, in EITHER of the two channels the snapshot publishes it through.
+#: `documents.entries.0.transactions.13.description` and
+#: `documents.entries.0.lists.transactions.13.fields.amount.value` are the same bank-statement row.
+_DOC_ROW = re.compile(r"^(documents\.entries\.\d+)\.(?:lists\.)?([A-Za-z_]\w*)\.(\d+)(?:\..*)?$")
+
+
+def _document_row(path: str) -> str | None:
+    """A document row's canonical address, or None if `path` does not address one (bug-001).
+
+    TWO CHANNELS, ONE ROW. The snapshot publishes a bank statement's transactions twice — through
+    `entry.transactions` (typed, feeds AS-1) and through `entry.lists["transactions"]` (generic,
+    LP-437) — and `documents_section` says so in its own comment: "the SAME extracted transactions
+    rows populate BOTH". Both are real addresses, the grounding check accepts both, and identity
+    hashed them verbatim.
+
+    AND THE FIELD DRIFTS TOO. On a real file the model cited the same Chase autopay row as
+    `...transactions.13.description` on one run and `...lists.transactions.13.fields.amount.value` on
+    the next — same statement, same row, a different quoted field. Nine findings resolved and nine
+    reopened; one pair carried a BYTE-IDENTICAL title.
+
+    So a document row reduces to the ROW, not the field. Within one transaction the field is the
+    model's choice of what to quote about a single event — commentary, in LP-604's sense, like the
+    title. This is deliberately NOT applied to the flat sections: `liability.3.unpaid_balance` and
+    `liability.3.monthly_payment` are genuinely different facts about one debt, and merging them
+    would hide one behind the other.
+
+    THE ROW INDEX IS KEPT, as LP-613 kept it: stripping it would collapse two different transactions
+    onto one key, which is the failure that measurement rejected.
+    """
+    match = _DOC_ROW.match(path.strip())
+    if match is None:
+        return None
+    entry, list_name, row = match.groups()
+    return f"{entry}.{list_name}.{row}"
+
+
 def _canonical_path(path: str, snapshot_keys: frozenset[str]) -> str:
     """One spelling for one snapshot address (LP-613).
 
@@ -411,6 +447,10 @@ def _canonical_path(path: str, snapshot_keys: frozenset[str]) -> str:
     would merge unrelated findings. Falls back to the path as cited when no suffix is registered.
     """
     stripped = path.strip()
+    # bug-001 — a document row first: the two channels and the quoted field must not be three
+    # identities for one bank-statement transaction.
+    if (row := _document_row(stripped)) is not None:
+        return row
     segments = stripped.split(".")
     for start in range(len(segments) - 1, -1, -1):
         candidate = ".".join(segments[start:])
