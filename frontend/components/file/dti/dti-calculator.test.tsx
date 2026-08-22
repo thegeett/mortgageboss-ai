@@ -206,13 +206,27 @@ describe("bug-001 — using a stated estimate", () => {
     sentence:
       "The home value estimate states annual property taxes of $5,579.00. That is an automated valuation's estimate, not verification — upload the property tax bill.",
   };
+  // The taxes line must be PRESENT and unknown — the offer renders on the line, keyed to it.
   const gated = {
     ...CALC,
     gated: true,
     gate_reason: "calculation gated (fail-closed): Property taxes is unknown",
+    housing_items: [
+      ...CALC.housing_items,
+      {
+        key: "housing.taxes",
+        label: "Property taxes",
+        auto_amount: "0.00",
+        override_amount: null,
+        amount: "0.00",
+        source: "extracted",
+        overridden: false,
+        unknown: true,
+      },
+    ],
   };
 
-  it("offers the figure on a gated calculation, with its monthly amount", () => {
+  it("offers the figure ON THE LINE that reads unknown, not only in the banner", () => {
     mockDti({ data: { ...gated, unverified_inputs: [suggestion] } });
     render(<DtiCalculator fileId="LF-ABRS" />);
 
@@ -243,5 +257,21 @@ describe("bug-001 — using a stated estimate", () => {
 
     expect(screen.getByRole("alert")).toBeDefined(); // the gate banner renders...
     expect(screen.queryByRole("button", { name: /Use the estimate/ })).toBeNull(); // ...with no offer
+  });
+
+  it("offers nothing once the line has already been overridden", () => {
+    // The figure has been accepted; repeating the offer would invite overriding an override.
+    const overridden = {
+      ...gated,
+      housing_items: gated.housing_items.map((i) =>
+        i.key === "housing.taxes"
+          ? { ...i, overridden: true, unknown: false, override_amount: "464.92" }
+          : i,
+      ),
+    };
+    mockDti({ data: { ...overridden, unverified_inputs: [suggestion] } });
+    render(<DtiCalculator fileId="LF-ABRS" />);
+
+    expect(screen.queryByRole("button", { name: /Use the estimate/ })).toBeNull();
   });
 });

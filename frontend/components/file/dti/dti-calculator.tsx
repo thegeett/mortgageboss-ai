@@ -94,19 +94,17 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
     onSave,
     onClear,
     disabled: isMutating,
+    // bug-001 — offered ON THE LINE that reads "unknown", which is where a processor is looking when
+    // they need it. The gate banner keeps the REASON (the backend already appends the sentence to
+    // `gate_reason`); one button, in the place the problem is stated.
+    unverified: data.unverified_inputs ?? [],
+    onUseEstimate,
   };
 
   return (
     <div className="space-y-6">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
-      {data.gated && (
-        <GatedBanner
-          reason={data.gate_reason}
-          unverified={data.unverified_inputs ?? []}
-          onUse={onUseEstimate}
-          disabled={isMutating}
-        />
-      )}
+      {data.gated && <GatedBanner reason={data.gate_reason} />}
 
       <HeroRatios data={data} />
 
@@ -239,6 +237,11 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
 // --------------------------------------------------------------------------- //
 
 interface RowControls {
+  /** bug-001 — figures the file STATES for a gated input, keyed by the line they would fill. Offered
+   *  ON THE LINE, next to the "unknown" that explains why the DTI is gated: that is where a processor
+   *  is looking when they need it. The gate banner still carries the reason. */
+  unverified?: UnverifiedInput[];
+  onUseEstimate?: (fieldKey: string, amount: string, note: string) => void;
   editingKey: string | null;
   onEdit: (key: string) => void;
   onCancel: () => void;
@@ -289,8 +292,11 @@ function LineRow({
   onSave,
   onClear,
   disabled,
+  unverified,
+  onUseEstimate,
 }: { item: DtiLineItem } & RowControls) {
   const editing = editingKey === item.key;
+  const suggestion = unverified?.find((u) => u.field_key === item.key);
   const [draft, setDraft] = useState<string>(item.amount);
 
   return (
@@ -321,6 +327,14 @@ function LineRow({
             humanize(item.source)
           )}
         </span>
+        {suggestion && onUseEstimate && !item.overridden && (
+          <UseEstimateButton
+            suggestion={suggestion}
+            onUse={onUseEstimate}
+            disabled={disabled}
+            className="mt-1 self-start"
+          />
+        )}
       </div>
 
       {editing ? (
@@ -405,17 +419,7 @@ function LineRow({
 
 /** LP-375: the DTI is FAIL-CLOSED — a required housing input is unknown, so no confident ratio is shown
  * (a $0 there would read confidently too-low). The display agrees with the engine's gate. */
-function GatedBanner({
-  reason,
-  unverified,
-  onUse,
-  disabled,
-}: {
-  reason?: string | null;
-  unverified: UnverifiedInput[];
-  onUse: (fieldKey: string, amount: string, note: string) => void;
-  disabled?: boolean;
-}) {
+function GatedBanner({ reason }: { reason?: string | null }) {
   return (
     <div
       role="alert"
@@ -429,9 +433,6 @@ function GatedBanner({
             "a required housing input is unknown"}
           . It's shown as gated rather than a confident ratio resting on a missing value.
         </span>
-        {unverified.map((u) => (
-          <UseEstimateButton key={u.field_key} suggestion={u} onUse={onUse} disabled={disabled} />
-        ))}
       </div>
     </div>
   );
@@ -452,10 +453,12 @@ function UseEstimateButton({
   suggestion,
   onUse,
   disabled,
+  className,
 }: {
   suggestion: UnverifiedInput;
   onUse: (fieldKey: string, amount: string, note: string) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const note = `Accepted ${suggestion.source_label}'s figure of $${suggestion.annual_amount}/yr — not a verified tax bill.`;
   return (
@@ -466,7 +469,10 @@ function UseEstimateButton({
             type="button"
             disabled={disabled}
             onClick={() => onUse(suggestion.field_key, suggestion.monthly_amount, note)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-warning/10 disabled:opacity-50"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-warning/10 disabled:opacity-50",
+              className,
+            )}
           >
             <Info className="h-3.5 w-3.5 text-warning" aria-hidden />
             Use the estimate (${suggestion.monthly_amount}/mo)
