@@ -66,6 +66,38 @@ judgment:
   load_bearing_tags: [property.appraisal_completion_condition]
   reasoned_over: [property.appraisal_completion_condition, property.condition_rating]
   output_tag: property.appraisal_completeness
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    complete: the appraisal states a final value with no outstanding work
+    subject_to: the appraisal is made subject to repairs, alterations or completion, so it states no final value
+    incomplete: the appraisal does not state a usable completion condition
+    unknown: the appraisal's completion condition could not be read
+  guidance:
+    action:
+      complete: "Confirm the appraisal is complete and states a final value with no outstanding conditions."
+      subject_to: "Obtain a completion report (Form 1004D) verifying the work the appraisal is subject to."
+      incomplete: "Establish the appraisal's completion condition before the file rests on its value."
+      unknown: "Confirm the appraisal states its completion condition and that it is legible."
+    explain_by: property.appraisal_completion_condition
+    explain:
+      subject_to:
+        why: >-
+          The appraisal is made subject to repairs, alterations or completion of construction, so it
+          does not state a final value. The loan cannot close on it until the work is verified.
+        how_to_fix: >-
+          Obtain a completion report — typically Form 1004D — confirming the work is finished, and
+          check that the value it certifies is the one the file is using.
+      default:
+        why: >-
+          An appraisal made subject to work states no final value, so the file cannot rest on it until
+          the completion condition is established.
+        how_to_fix: >-
+          Read the completion condition off the appraisal. If it is subject to work, obtain a Form
+          1004D completion report; if the condition cannot be read, obtain a clean copy.
   value_domain: ["complete", "subject_to", "incomplete", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

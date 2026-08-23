@@ -1255,6 +1255,17 @@ tags:
   # tag_production.yaml entry (the same shape as income.other_income_continues and
   # income.rental_income_supportable).
   # ------------------------------------------------------------------------------------------------- #
+  property.subject_rental_income_monthly:
+    entity: loan
+    value_type: number
+    allowed_values: null
+    description: >-
+      The monthly rental income the application claims for the SUBJECT property, from the MISMO
+      real-estate-owned schedule's is_subject row (LP-596). GROSS where stated, otherwise net — the two
+      are not interchangeable, since Fannie qualifies on 75% of GROSS. "unknown" where no subject row
+      exists, more than one claims to be, or no positive amount is stated. Carried so OC-3's finding can
+      name the figure a processor is being asked to document.
+    produced_by: derived
   occupancy.investment_rental_supported:
     entity: loan
     value_type: enum

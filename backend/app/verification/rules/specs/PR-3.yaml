@@ -73,6 +73,33 @@ judgment:
   load_bearing_tags: [property.appraisal_property_type]
   reasoned_over: [property.appraisal_property_type, property.type]
   output_tag: property.appraisal_eligibility
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    eligible: the appraised property type is one the programme allows and agrees with the file
+    ineligible: the appraised property type is not one this programme allows
+    needs_review: the appraisal and the loan file describe different property types
+    unknown: the property type could not be established from the appraisal or the file
+  guidance:
+    action:
+      eligible: "Confirm the property type on the appraisal matches the file and is allowed by the programme."
+      ineligible: "Confirm whether this programme allows the property type the appraisal states."
+      needs_review: "Reconcile the property type — the appraisal says {appraisal_property_type} and the file says {type}."
+      unknown: "Establish the property type from the appraisal and the loan file."
+    explain_by: property.appraisal_property_type
+    explain:
+      default:
+        why: >-
+          Eligible property types are programme-specific, and the appraisal is what establishes the
+          type for underwriting. Where it disagrees with the type on the file, one of the two is
+          wrong and the disagreement decides which programme rules apply.
+        how_to_fix: >-
+          Read the property type off the appraisal and compare it with the type stated on the loan
+          file. If they disagree, correct the file or ask the appraiser; if the type is unusual for
+          the programme, confirm eligibility before the file goes to underwriting.
   value_domain: ["eligible", "ineligible", "needs_review", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

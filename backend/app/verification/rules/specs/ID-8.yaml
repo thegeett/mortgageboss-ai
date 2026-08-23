@@ -49,6 +49,32 @@ judgment:
   # per_borrower map is assembled from the borrower's OWN facts + the loan-level shared facts.
   reasoned_over: [id.citizenship, program.type]
   output_tag: id.residency_eligible
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": this borrower's citizenship or residency status is eligible for this programme
+    "no": this borrower's citizenship or residency status is not eligible for this programme
+    unknown: the tags do not support a confident judgment about this borrower's eligibility
+  guidance:
+    action:
+      "yes": "Confirm the documentation of this borrower's residency status is in the file and current."
+      "no": "Confirm with the lender whether this programme accepts a borrower whose status is {citizenship}."
+      unknown: "Establish this borrower's citizenship or residency status and document it."
+    explain_by: id.citizenship
+    explain:
+      default:
+        why: >-
+          Eligibility turns on the borrower's citizenship or residency status against the programme.
+          Citizens and permanent residents are generally eligible; a non-permanent resident is
+          eligible for many programmes with valid work authorization, and investor overlays vary.
+        how_to_fix: >-
+          Document the status from the file's identity documents — a permanent resident card, an
+          unexpired visa with work authorization, or an EAD — and confirm the programme and the
+          investor accept it. Where the status is unclear, obtain the document that states it rather
+          than inferring it.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

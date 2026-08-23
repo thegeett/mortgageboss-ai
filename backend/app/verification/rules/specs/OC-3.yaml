@@ -80,7 +80,14 @@ guideline_reference: "Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025)
 # into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any
 # one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
 requires_documents:
-  - [lease_agreement, verification_of_rent]
+  # LP-620 pattern, third instance — THE DECLARED SET WAS NARROWER THAN THE RULE'S OWN ASK. The
+  # producing prompt (tag_production.yaml `occupancy_rental`) weighs "a lease agreement, a rental
+  # agreement, Schedule E on a tax return, an appraisal's rent schedule (Form 1007/1025)", and this
+  # spec's own criteria names the same three. Declaring only two of them meant the request button
+  # asked for a lease when a tax return carrying Schedule E would equally close the gap — and once one
+  # of the undeclared proofs WAS on file, the card would still have reported it as waiting on a lease.
+  # One group: these are alternatives, any one supports the claim.
+  - [lease_agreement, verification_of_rent, rental_income_schedule, tax_return]
 
 spec_version: 1
 
@@ -104,8 +111,65 @@ judgment:
     op: ne
     value: "n/a"
   load_bearing_tags: [occupancy.rental_support]
-  reasoned_over: [occupancy.rental_support, occupancy.stated]
+  # LP-622 — the AMOUNT joins the tags reasoned over, so the finding can state what is riding on the
+  # document. It is evidence for the judgment too: $3,000 a month unsupported and $150 a month
+  # unsupported are not the same file.
+  reasoned_over: [occupancy.rental_support, occupancy.stated, property.subject_rental_income_monthly]
   output_tag: occupancy.investment_rental_supported
+  # LP-622 — WHAT A PROCESSOR READS. Without this block the finding fell to `_verdict_message` and
+  # rendered "the AI judged 'no' — an AI verdict a human must ratify (it never auto-ships)": an
+  # explanation of our engine, not of the loan. It named no rental income, no property, no amount, and
+  # carried how_to_fix NULL, which is the state LP-522's docstring calls "the reason no judgment finding
+  # has ever told anyone what to do". The substance was all present in the provenance and none of it in
+  # the sentence.
+  #
+  # `verdict_labels` is the other half: without it `_verdict_message` states a bare domain value, and on
+  # this rule "no" is the BAD answer — a chip reading "no" beside an item sitting in Needs Attention
+  # tells a processor precisely nothing.
+  verdict_labels:
+    "yes": the investment property's rental income is supported by the file
+    "no": the investment property's rental income has no supporting documentation behind it
+    "unknown": the tags do not support a confident judgment about this loan's rental support
+  guidance:
+    action:
+      "yes": "Confirm the rental documentation on file covers the rental income claimed for this investment property."
+      "no": "Document the rental income claimed on this investment property — obtain a current lease, Schedule E from the tax return, or an appraisal rent schedule (Form 1007 / 1025)."
+      "unknown": "Establish whether the investment occupancy this file declares has rental documentation behind it."
+    # A tag interpolates BARE (`{stated}` -> "investment"), so no template here may put an article in
+    # front of one — "a {stated} occupancy" rendered "a investment occupancy" on the first draft.
+    # Keyed on the SUPPORT tag rather than the verdict: a file with no rental documents at all and one
+    # whose documents were unreadable are the same verdict and a different errand.
+    explain_by: occupancy.rental_support
+    explain:
+      inadequate:
+        why: >-
+          The application claims {subject_rental_income_monthly} in monthly rent on this {stated}
+          property, and the file carries no lease, Schedule E or appraisal rent schedule establishing
+          it. The figure rests on what the application says about itself.
+        how_to_fix: >-
+          Obtain a current lease for the property, Schedule E from the borrower's most recent tax
+          return, or an appraisal rent schedule (Form 1007 for one unit, Form 1025 for two to four). A
+          lease must itself be supported — two consecutive months of bank statements showing the rent
+          arriving for an existing lease, or the security deposit and first full month's rent with
+          proof of deposit for a newly executed one.
+      # NOT the same errand as `inadequate`, and the distinction is the point of keying on the tag: here
+      # something is on file and could not be read, so re-requesting the same document may achieve
+      # nothing.
+      unknown:
+        why: >-
+          The application claims {subject_rental_income_monthly} in monthly rent on this {stated}
+          property, but the rental documentation could not be assessed — either nothing in the file
+          speaks to the rent, or what does could not be read.
+        how_to_fix: >-
+          Check whether a lease, Schedule E or appraisal rent schedule is in the file and legible. If
+          one is present but unreadable, obtain a clean copy; if none is present, request one.
+      default:
+        why: >-
+          The application claims {subject_rental_income_monthly} in monthly rent on this {stated}
+          property, so that figure has to be documented before the file can rest on it.
+        how_to_fix: >-
+          Obtain a current lease, Schedule E from the most recent tax return, or an appraisal rent
+          schedule (Form 1007 / 1025) establishing the rent for the investment property.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

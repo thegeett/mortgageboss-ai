@@ -34,6 +34,38 @@ judgment:
   load_bearing_tags: [income.same_line_of_work]
   reasoned_over: [income.same_line_of_work, income.employment_start]
   output_tag: income.job_change_acceptable
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": the new role continues the borrower's line of work
+    "no": the job change moves the borrower out of their previous line of work
+    unknown: the tags do not support a confident judgment about the job change
+  guidance:
+    action:
+      "yes": "Confirm the new role continues the same line of work and that the income is documented in it."
+      "no": "Establish whether the income from this new line of work is stable enough to qualify."
+      unknown: "Establish whether the borrower's new role continues their previous line of work."
+    explain_by: income.same_line_of_work
+    explain:
+      "no":
+        why: >-
+          The borrower has moved to a different line of work. Continuity of income rests on the
+          history behind it, and a change of field means the earlier history may not predict the new
+          role's earnings.
+        how_to_fix: >-
+          Obtain the offer letter or employment contract showing the role, the pay structure and the
+          start date, plus pay stubs covering the new position. Where the change is recent, a
+          verification of employment and an explanation of the move are what underwriting will want.
+      default:
+        why: >-
+          A job change is reviewed because qualifying income has to be likely to continue, and the
+          history that supports it belongs to the previous role.
+        how_to_fix: >-
+          Document the new position — offer letter or contract, start date, and pay stubs from it —
+          and confirm whether it continues the borrower's established line of work.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

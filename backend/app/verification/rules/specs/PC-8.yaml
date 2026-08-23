@@ -90,6 +90,41 @@ judgment:
   # inputs stop disagreeing; evidence_required below is narrowed to what the rule can actually show.
   reasoned_over: [contract.personal_property]
   output_tag: contract.personal_property_assessment
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    included: the purchase contract includes personal property, which is not real estate
+    fixtures_only: the items the contract names are fixtures, which are part of the real estate
+    none: the contract names no personal property
+    unknown: the contract's wording does not make the personal-property distinction clear
+  guidance:
+    action:
+      included: "Confirm the personal property named in the contract is not supporting the value the loan rests on."
+      fixtures_only: "Confirm the items the contract names are fixtures and are part of the real estate."
+      none: "Confirm the contract names no personal property."
+      unknown: "Establish whether the items the purchase contract names are personal property or fixtures."
+    explain_by: contract.personal_property
+    explain:
+      included:
+        why: >-
+          The purchase contract includes personal property. Personal property is not real estate, so
+          its value does not support the mortgage and it is deducted from the sales price for
+          loan-to-value purposes.
+        how_to_fix: >-
+          Identify the items and their value, and confirm the sales price used for LTV excludes them.
+          Built-in appliances, gas logs and attached fittings are FIXTURES and stay in — the
+          distinction is what decides whether anything has to come out.
+      default:
+        why: >-
+          Personal property in a purchase contract does not support the mortgage, while fixtures are
+          part of the real estate and do. The contract's wording is what separates the two.
+        how_to_fix: >-
+          Read the contract's included-items wording. Where it names loose or movable goods, establish
+          their value and confirm the LTV excludes them; where the wording is unclear, ask for a
+          clarified contract or an addendum.
   value_domain: ["included", "fixtures_only", "none", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

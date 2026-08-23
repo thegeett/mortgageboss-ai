@@ -81,6 +81,31 @@ judgment:
   load_bearing_tags: [title.legal_description, title.property_address]
   reasoned_over: [title.legal_description, title.property_address]
   output_tag: title.legal_description_matches
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": the legal description on the commitment describes the property at the address it states
+    "no": the legal description does not describe the property at the address the commitment states
+    unknown: the legal description or the address could not be read from the commitment
+  guidance:
+    action:
+      "yes": "Confirm the commitment's legal description and property address describe the same parcel."
+      "no": "Have the title company correct the commitment — its legal description does not match the property address it states."
+      unknown: "Confirm the title commitment states both a legal description and a property address, and that both are legible."
+    explain_by: title.legal_description
+    explain:
+      default:
+        why: >-
+          A title commitment insures the parcel its LEGAL DESCRIPTION identifies, not the one in the
+          address line. Where the two do not describe the same property, the policy would cover the
+          wrong parcel.
+        how_to_fix: >-
+          Compare the commitment's legal description against the property address and the appraisal's
+          description of the same parcel. If they disagree, ask the title company for a corrected
+          commitment before closing; if either is missing or unreadable, obtain a clean copy.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

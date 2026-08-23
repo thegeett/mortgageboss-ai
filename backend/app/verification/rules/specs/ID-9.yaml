@@ -45,6 +45,32 @@ judgment:
   reasoned_over:
     - id.poa_present_and_acceptable
   output_tag: id.poa_acceptable
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": the power of attorney appears acceptable for this transaction
+    "no": the power of attorney does not appear acceptable for this transaction
+    unknown: the power of attorney could not be assessed from what is on file
+  guidance:
+    action:
+      "yes": "Confirm the power of attorney is acceptable to the investor and covers this transaction."
+      "no": "Resolve the power of attorney before closing — it does not meet the requirements for this transaction."
+      unknown: "Establish whether the power of attorney covers this transaction and names an acceptable attorney-in-fact."
+    explain_by: id.poa_present_and_acceptable
+    explain:
+      default:
+        why: >-
+          A power of attorney is being used, and it has to name an attorney-in-fact who is not an
+          interested party — not the loan officer, not the realtor — in a durable or specific form
+          that covers this transaction and is dated consistently with the note.
+        how_to_fix: >-
+          Read the POA for the attorney-in-fact's identity and relationship, the powers granted, and
+          the dates. Confirm with the lender that the investor accepts it. Where it names an
+          interested party or does not cover the transaction, a corrected POA is needed before
+          closing.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

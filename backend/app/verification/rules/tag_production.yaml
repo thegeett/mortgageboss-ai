@@ -321,6 +321,8 @@ tags:
   # rules LP-495b activated, so it should be corrected at the next reconciliation:
   #   OC-3,occupancy.rental_support / OC-3,occupancy.stated / IN-14,occupancy.rental_support
   occupancy.rental_support: {mode: ai, subject: loan, data: occupancy_rental}
+  # LP-622 — the amount behind that support question, so OC-3's finding can state it.
+  property.subject_rental_income_monthly: {mode: derived, subject: loan, data: subject_rental_income_monthly}
   # LP-495b — DT-7's producer. This tag was a vocabulary orphan (fact_tags.csv + rule_tags.csv, no
   # producer anywhere), the ADR-289 shape, and LP-405 recorded it as needs-producer. It now materialises
   # at the LOAN subject from the file's whole document set.

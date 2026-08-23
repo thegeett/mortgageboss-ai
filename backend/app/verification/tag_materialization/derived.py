@@ -898,6 +898,57 @@ def _address_as_of_year(entry: DocumentEntry, *, not_after: int | None = None) -
     return None
 
 
+def _subject_rental_income_monthly(
+    snapshot: Snapshot, _subject_id: str, _subject_raw: object
+) -> tuple[JsonValue, str]:
+    """property.subject_rental_income_monthly — the rent the application claims for the SUBJECT (LP-622).
+
+    OC-3 tells a processor their investment property's rental income is undocumented and could not
+    name the figure, because the amount lives in the MISMO real-estate-owned schedule
+    (`owned_property.N.rental_income_*`, LP-596) and a guidance template can only interpolate a TAG.
+    "$3,000 a month is claimed and nothing supports it" is a different sentence from "rental income is
+    unsupported", and it is the one that tells a processor how much is riding on the document.
+
+    ⚠️ THE SUBJECT ROW, NOT THE FIRST ROW. `is_subject` is what picks it out; a borrower with three
+    rentals has three rows and only one is this loan's. No subject row, or more than one claiming to
+    be, abstains rather than picking.
+
+    GROSS IS PREFERRED over net and the choice is recorded, because the two are not interchangeable
+    downstream: Fannie qualifies on 75% OF GROSS (IN-14's cited primary), so a net figure cannot be run
+    through the factor. Reporting which one this is lets the reader see the difference; silently
+    substituting net for gross would apply the haircut to an already-hair-cut number.
+    """
+    if snapshot.mismo.absent:
+        return _UNKNOWN, "the file carries no MISMO section"
+    subjects = [
+        key.rsplit(".", 1)[0]
+        for key, field in snapshot.mismo.facts.items()
+        if key.endswith(".is_subject")
+        and isinstance(field, Field)
+        and field.is_present
+        and str(field.value).strip().lower() in {"true", "1", "yes"}
+    ]
+    if len(subjects) != 1:
+        return _UNKNOWN, (
+            "the real-estate-owned schedule names no subject property"
+            if not subjects
+            else f"{len(subjects)} owned properties are marked as the subject"
+        )
+    okey = subjects[0]
+    for field_name in ("rental_income_gross", "rental_income_net"):
+        raw = _mismo_str(snapshot, f"{okey}.{field_name}")
+        if raw is None:
+            continue
+        try:
+            amount = Decimal(raw)
+        except (ArithmeticError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        return str(amount.quantize(_CENTS)), ""
+    return _UNKNOWN, "the application states no rental income for the subject property"
+
+
 def _subject_property_when_not_occupied(snapshot: Snapshot) -> str | None:
     """The subject property's address WHEN THE BORROWER DOES NOT LIVE THERE, else None (bug-001).
 
@@ -6597,6 +6648,8 @@ _RECIPES: dict[str, Recipe] = {
     # unrecognised value; reads ONLY the typed field, never forms_and_endorsements (the anti-conflation).
     "dwelling_settlement_basis": _dwelling_settlement_basis,
     "property_value_basis": _property_value_basis,  # LP-488 — MI-1
+    # LP-622 — the amount OC-3's finding could not name. Read from the MISMO REO schedule's SUBJECT row.
+    "subject_rental_income_monthly": _subject_rental_income_monthly,
     "loan_ltv_percent": _loan_ltv_percent,
     # LP-597 — MI-1 must not clear an MI requirement off the borrower's own estimate of value.
     "loan_ltv_basis_is_appraised": _loan_ltv_basis_is_appraised,  # LP-488 — MI-1

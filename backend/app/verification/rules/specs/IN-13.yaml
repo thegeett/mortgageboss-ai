@@ -59,6 +59,33 @@ judgment:
   load_bearing_tags: [income.continuance_3yr]
   reasoned_over: [income.continuance_3yr, income.type]
   output_tag: income.other_income_continues
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": this other income meets the history and continuance requirement for its type
+    "no": this other income does not meet the history and continuance requirement for its type
+    unknown: the tags do not support a confident judgment about this income's continuance
+  guidance:
+    action:
+      "yes": "Confirm the documentation for this {type} income establishes its history of receipt and expected continuance."
+      "no": "Obtain documentation establishing that this {type} income will continue, for the period its type requires."
+      unknown: "Establish the history of receipt and expected continuance for this {type} income."
+    # Keyed on the income TYPE, because the requirement differs by type — this is not one three-year
+    # test, and a single sentence would be wrong for most of them.
+    explain_by: income.type
+    explain:
+      default:
+        why: >-
+          Income of this kind may be used to qualify only where its history of receipt and its
+          expected continuance meet the requirement FOR ITS TYPE — child support, a pension, Social
+          Security, a housing allowance and capital gains are each documented differently.
+        how_to_fix: >-
+          Obtain the documentation its type calls for — the award letter, court order, benefit
+          statement or return schedule — showing both the amount and how long it runs. Where the
+          continuance period cannot be established from what is on file, the income cannot be used.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

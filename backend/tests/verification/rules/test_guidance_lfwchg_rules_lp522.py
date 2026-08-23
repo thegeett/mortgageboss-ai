@@ -20,7 +20,9 @@ from app.verification.rules.specs import JudgmentEval, load_rule_spec
 from pydantic import ValidationError
 
 # LP-551 — FR-5 was authored WITH guidance, so it joins the written set rather than the untouched one.
-_RULES = ("AS-12", "OC-2", "DT-7", "CR-8", "FR-5")
+# OC-3 joined in LP-622, once its rental-support text was written against its own guideline
+# citation (B3-3.8-01) and the enum its explanatory tag actually carries.
+_RULES = ("AS-12", "OC-2", "DT-7", "CR-8", "FR-5", "OC-3")
 
 
 @pytest.mark.parametrize("rule_id", _RULES)
@@ -130,20 +132,45 @@ def test_oc2_says_what_a_wrong_occupancy_costs() -> None:
     assert "pricing" in conflict and "reserves" in conflict
 
 
-def test_the_other_judgment_rules_are_untouched() -> None:
-    """ADDITIVE, still. Fourteen active judgment rules keep their LP-520 wording until each gets
-    domain-accurate text — inventing a fix for a rule nobody has read is worse than vague wording,
-    because it sends a processor for the wrong document with confidence."""
+def test_every_active_judgment_rule_has_guidance() -> None:
+    """LP-622 — WAS `test_the_other_judgment_rules_are_untouched`, an allow-list of the five rules that
+    had adopted LP-522. Fourteen had not, and every one of them rendered "the AI judged '<value>' — an
+    AI verdict a human must ratify" with how_to_fix NULL: our engine explained to a processor instead of
+    their loan. OC-3 was the one a processor actually read.
+
+    Inverted deliberately. An allow-list grows quietly and says nothing when a NEW judgment rule ships
+    wordless; this fails the moment one does. LP-522's caution — "inventing a fix for a rule nobody has
+    read is worse than vague wording" — is honoured by having read each spec's criteria, guideline and
+    tag enum, not by leaving the text unwritten."""
     from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
     from app.verification.rules.kinds import RuleKindName, kind_for
 
-    written = {
+    wordless = [
         rule_id
-        for rule_id in ACTIVE_RULE_IDS
+        for rule_id in sorted(ACTIVE_RULE_IDS)
         if (kind := kind_for(rule_id)) is not None
         and kind.kind is RuleKindName.JUDGMENTAL
         and (spec := load_rule_spec(rule_id)).judgment is not None
-        and spec.judgment.guidance is not None
-    }
+        and spec.judgment.guidance is None
+    ]
 
-    assert written == set(_RULES)
+    assert not wordless, (
+        f"these judgment rules would render \"the AI judged '<value>'\" with no fix: {wordless}"
+    )
+
+
+def test_every_judgment_rule_has_an_action_for_every_verdict() -> None:
+    """A verdict with no action raises KeyError at message time — on whichever answer is rarest, which
+    is the one least likely to be seen before a processor does."""
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+    from app.verification.rules.kinds import RuleKindName, kind_for
+
+    for rule_id in sorted(ACTIVE_RULE_IDS):
+        kind = kind_for(rule_id)
+        if kind is None or kind.kind is not RuleKindName.JUDGMENTAL:
+            continue
+        judgment = load_rule_spec(rule_id).judgment
+        if judgment is None or judgment.guidance is None:
+            continue
+        missing = set(judgment.value_domain) - set(judgment.guidance.action)
+        assert not missing, f"{rule_id} has no action for verdict(s) {sorted(missing)}"

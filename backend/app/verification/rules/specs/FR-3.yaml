@@ -119,6 +119,31 @@ judgment:
   load_bearing_tags: [contract.unusual_credits]
   reasoned_over: [contract.unusual_credits]
   output_tag: contract.credits_warrant_review
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": the purchase contract shows credits, concessions or an outside agreement that need review
+    "no": the purchase contract shows no unusual credits or side agreements
+    unknown: the contract's credit and concession terms could not be read
+  guidance:
+    action:
+      "yes": "Review the seller credits and any agreement the contract references outside its own terms."
+      "no": "Confirm the purchase contract carries no credits or concessions beyond its stated terms."
+      unknown: "Confirm the purchase contract's credit and concession terms are stated and legible."
+    explain_by: contract.unusual_credits
+    explain:
+      default:
+        why: >-
+          Seller credits, concessions and any agreement referenced outside the contract change what
+          the buyer is actually paying, and an agreement the file cannot see is one underwriting
+          cannot price.
+        how_to_fix: >-
+          Read the contract's credit and concession terms and obtain any addendum or side agreement it
+          references. Confirm the credits are within the interested-party contribution limit for the
+          occupancy and LTV, and that the Closing Disclosure carries the same figures.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

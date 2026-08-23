@@ -85,6 +85,39 @@ judgment:
   load_bearing_tags: [property.condition_rating]
   reasoned_over: [property.condition_rating, property.appraisal_completion_condition]
   output_tag: property.condition_assessment
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    eligible_as_is: the appraiser's condition rating allows the property to be sold as is
+    requires_repair: the appraiser's condition rating requires repair before the loan can be delivered
+    unknown: the appraisal's condition rating could not be read
+  guidance:
+    action:
+      eligible_as_is: "Confirm the appraisal's condition rating is C5 or better and that no repairs are outstanding."
+      requires_repair: "Obtain evidence the condition deficiencies are repaired and the appraisal recertified to a rating of C5 or better."
+      unknown: "Confirm the appraisal states a condition rating (C1-C6) and that it is legible."
+    explain_by: property.condition_rating
+    explain:
+      C6:
+        why: >-
+          The appraiser rated the property C6. A C6 property is not eligible for sale to Fannie Mae:
+          the deficiencies affecting safety, soundness or structural integrity have to be repaired to a
+          resulting rating of C5 or better.
+        how_to_fix: >-
+          Have the deficiencies repaired and obtain a completion report (Form 1004D) showing the
+          resulting condition rating is C5 or better. The appraisal must be completed subject to that
+          work; the loan cannot be delivered on the C6 report.
+      default:
+        why: >-
+          The appraisal's condition rating drives eligibility — C1 through C5 are deliverable as is,
+          C6 is not — so the rating has to be established before the file can rest on the value.
+        how_to_fix: >-
+          Read the condition rating off the appraisal (C1-C6). If it is C6, obtain repairs and a
+          completion report bringing it to C5 or better; if it cannot be read, obtain a clean copy of
+          the report.
   value_domain: ["eligible_as_is", "requires_repair", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

@@ -278,6 +278,15 @@ def _statement_lines(snapshot: Snapshot) -> dict[str, str]:
     }
 
 
+#: Money-valued tags a guidance template may interpolate, rendered "$3,000.00" rather than "3000.00".
+_MONEY_TAGS = frozenset({"property.subject_rental_income_monthly"})
+
+#: What a money tag renders as when it did not resolve. A NOUN PHRASE, because it lands mid-sentence —
+#: every template interpolating a money tag must read correctly with this substituted in, and
+#: `test_oc3_reads_correctly_however_the_amount_lands` is what holds that.
+_UNSTATED_AMOUNT = "an unstated amount"
+
+
 def _guidance_fields(
     subject_tags: Mapping[str, Tag], reasoned_over: tuple[str, ...], statement_line: str | None
 ) -> dict[str, str]:
@@ -296,6 +305,22 @@ def _guidance_fields(
         fields[short] = "not established" if tag is None else str(tag.value)
     if (amount := _decimal_or_none(subject_tags, "txn.amount")) is not None:
         fields["amount"] = _money(amount)
+    # LP-622 — a MONEY tag must read as money. The `txn.amount` line above is the deposit family's
+    # special case; every other money-valued tag rendered as its raw `str(value)`, so OC-3's rent would
+    # have printed "3000.00" in a sentence asking a processor to go and document it. Explicit set rather
+    # than "anything that parses as a Decimal": a count, a percentage and a number of days all parse,
+    # and none of them takes a dollar sign.
+    for money_tag in _MONEY_TAGS:
+        if money_tag not in reasoned_over:
+            continue
+        value = _decimal_or_none(subject_tags, money_tag)
+        # ⚠️ AN UNRESOLVED MONEY TAG NEEDS A PHRASE, NOT A VALUE. The generic loop above renders a tag as
+        # `str(tag.value)` or "not established" — legible as a bare chip, and NOT inside prose: OC-3
+        # rendered "The application claims unknown a month in rent" the moment the REO schedule named no
+        # amount. That is reachable, not theoretical (an investment file stating occupancy but no rent, or
+        # any file with no REO schedule). A money template has to hold whichever way the tag lands, the
+        # same obligation a `couldnt_check_fix` has to cover both its branches.
+        fields[money_tag.split(".")[-1]] = _money(value) if value is not None else _UNSTATED_AMOUNT
     if (date_text := fields.get("date")) and len(date_text.split("-")) == 3:
         _year, month, day = date_text.split("-")
         fields["date"] = f"{int(month)}/{int(day)}"

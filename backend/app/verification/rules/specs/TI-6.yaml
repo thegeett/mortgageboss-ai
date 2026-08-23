@@ -89,6 +89,43 @@ judgment:
     - title.chain_has_gap
     - title.chain_shortest_interval_days
   output_tag: title.chain_of_title_assessment
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    clean: the chain of title runs continuously with no rapid-transfer pattern
+    rapid_transfer: the chain shows a very short interval between transfers
+    chain_gap: the chain breaks — a transfer's grantee is not the next transfer's grantor
+    insufficient_history: the commitment lists too few transfers to judge the chain
+    unknown: the chain of title could not be read from the commitment
+  guidance:
+    action:
+      clean: "Confirm the chain of title runs continuously through the listed owners."
+      rapid_transfer: "Establish why the property changed hands again so soon, and whether the value reflects the most recent arm's-length sale."
+      chain_gap: "Have the title company explain the break in the chain of title before closing."
+      insufficient_history: "Obtain a title commitment showing the full chain of transfers."
+      unknown: "Confirm the title commitment lists its chain of transfers and that it is legible."
+    explain_by: title.chain_has_gap
+    explain:
+      "yes":
+        why: >-
+          The chain of title breaks — a transfer's grantee is not the grantor of the next transfer, so
+          the record does not run continuously through the listed owners.
+        how_to_fix: >-
+          Ask the title company to account for the break: an intervening deed, a name change, or an
+          estate transfer may explain it. The commitment should be corrected or endorsed before
+          closing.
+      default:
+        why: >-
+          The chain of title has to run continuously through the listed owners, and a very short
+          interval between transfers is reviewed because it can indicate a flip that the value does
+          not support.
+        how_to_fix: >-
+          Read the transfers off the commitment and check each grantee is the next grantor. Where two
+          transfers sit close together, establish what happened between them and whether the current
+          value rests on an arm's-length sale.
   value_domain: ["clean", "rapid_transfer", "chain_gap", "insufficient_history", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

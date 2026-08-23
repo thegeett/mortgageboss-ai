@@ -60,6 +60,43 @@ judgment:
   load_bearing_tags: [income.continuance_3yr, occupancy.rental_support]
   reasoned_over: [income.continuance_3yr, occupancy.rental_support]
   output_tag: income.rental_income_supportable
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    "yes": the rental income used to qualify is supported by the file
+    "no": the rental income used to qualify is not supported by the file
+    unknown: the tags do not support a confident judgment about this borrower's rental income
+  guidance:
+    action:
+      "yes": "Confirm the rental income used to qualify is the documented figure after the vacancy adjustment, not gross rent."
+      "no": "Obtain documentation supporting the rental income used to qualify — a current lease, Schedule E, or an appraisal rent schedule."
+      unknown: "Establish whether the rental income this borrower qualifies on is documented and likely to continue."
+    # Keyed on the SUPPORT tag: a file with no rental documents and one whose documents exist but do
+    # not establish continuance are the same verdict and a different errand.
+    explain_by: occupancy.rental_support
+    explain:
+      inadequate:
+        why: >-
+          Rental income is being used to qualify this borrower, but the file carries no lease,
+          Schedule E or appraisal rent schedule establishing the rent. Gross rent is never qualifying
+          income, and there is nothing here to apply the adjustment to.
+        how_to_fix: >-
+          Obtain a current lease, Schedule E from the most recent tax return, or an appraisal rent
+          schedule (Form 1007 / 1025). Qualifying income is 75% of the GROSS monthly rent — the
+          remaining 25% is absorbed by vacancy and maintenance — so the document has to establish
+          gross rent, not a net figure. A lease must itself be supported by two consecutive months of
+          bank statements showing the rent arriving, or by the security deposit and first full month's
+          rent with proof of deposit for a newly executed one.
+      default:
+        why: >-
+          Rental income counts toward qualifying only when the documents establish the rent and it is
+          likely to continue, and only after the vacancy and maintenance adjustment.
+        how_to_fix: >-
+          Confirm the file carries a lease, Schedule E or appraisal rent schedule establishing GROSS
+          rent, and that the figure used to qualify is 75% of it rather than the gross.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

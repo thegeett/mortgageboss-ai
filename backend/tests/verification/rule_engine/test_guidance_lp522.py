@@ -24,7 +24,7 @@ from uuid import uuid4
 
 import pytest
 from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
-from app.verification.rule_engine.judgment import evaluate_judgment_rule
+from app.verification.rule_engine.judgment import _verdict_message, evaluate_judgment_rule
 from app.verification.rules.specs import JudgmentEval, load_rule_spec
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
@@ -202,14 +202,25 @@ async def test_the_materiality_arithmetic_survives_demoted_from_the_headline() -
     assert not evaluation.reasoning.startswith("$2,000.00 is above")
 
 
-def test_a_rule_without_guidance_is_untouched() -> None:
-    """ADDITIVE — the judgment rules not yet written keep their LP-520 text until each gets
-    domain-accurate wording. OC-2 / CR-8 / DT-7 have since been written (LP-522 phase 2, the three that
-    appear on LF-WCHG), so this now checks rules from further down the list."""
-    for rule_id in ("ID-8", "ID-9", "IN-7"):
-        judgment = load_rule_spec(rule_id).judgment
-        assert judgment is not None
-        assert judgment.guidance is None
+def test_the_no_guidance_fallback_still_produces_a_message() -> None:
+    """LP-622 — WAS an assertion that ID-8 / ID-9 / IN-7 still had NO guidance, which is how this file
+    tracked the un-migrated rules. All 19 active judgment rules now carry guidance, so that assertion
+    inverted into `test_every_active_judgment_rule_has_guidance` and this checks what remains: the
+    fallback branch is unreachable from any shipped spec, but it is still live code, and a rule authored
+    tomorrow reaches it before its guidance is written. It must not crash and must not go wordless."""
+    message = _verdict_message("no", 0.9, 0.5, None, None)
+
+    assert "the AI judged" in message
+    assert message.strip()
+
+
+def test_the_fallback_states_what_the_verdict_MEANS_when_labels_exist() -> None:
+    """The half of LP-520 that survives without guidance. A bare `'no'` beside an item sitting in Needs
+    Attention tells a processor nothing — on OC-3 "no" was the BAD answer and read like a pass."""
+    labelled = _verdict_message("no", 0.9, 0.5, None, {"no": "the rental income is unsupported"})
+
+    assert "the rental income is unsupported" in labelled
+    assert "'no'" not in labelled
 
 
 # --------------------------------------------------------------------------------------------- #

@@ -129,6 +129,47 @@ judgment:
     # for a collection that must be paid.
     - credit.largest_single_collection_balance
   output_tag: credit.collection_treatment
+  # LP-622 — WHAT A PROCESSOR READS. Without guidance this rule fell to `_verdict_message` and
+  # rendered "the AI judged '<value>' — an AI verdict a human must ratify", with how_to_fix NULL:
+  # an explanation of the engine rather than of the loan. Written against this spec's own criteria
+  # and the enum its explanatory tag actually carries. A tag interpolates BARE, so no template here
+  # puts an article in front of one.
+  verdict_labels:
+    no_payoff_required: the collection and charged-off balances do not require payoff under this programme
+    payoff_required: the collection or charged-off balances require payoff under this programme
+    payment_plan_or_5pct_may_apply: a payment plan or the 5% test may apply to these balances
+    manual_underwriting_not_supported: this file is manually underwritten, which this rule does not decide
+    unknown: the occupancy, property type or programme is not stated, so the requirement cannot be placed
+  guidance:
+    action:
+      no_payoff_required: "Confirm the collection and charged-off balances are within what this programme allows to remain open."
+      payoff_required: "Arrange payoff of the collection and charged-off balances, and document it before closing."
+      payment_plan_or_5pct_may_apply: "Confirm with the lender whether a payment plan or the 5% test applies to these balances."
+      manual_underwriting_not_supported: "Refer the collection and charged-off treatment to the underwriter — this file is manually underwritten."
+      unknown: "Establish the occupancy, property type and programme so the collection requirement can be placed."
+    # Keyed on the PROGRAMME, because the requirement is programme-specific — Fannie varies it by
+    # occupancy and property type, FHA applies its own aggregate test, and one sentence covering both
+    # would be wrong for whichever file it was not written for.
+    explain_by: program.type
+    explain:
+      fha:
+        why: >-
+          FHA applies an aggregate test to non-medical collections and charged-off accounts rather
+          than the occupancy-and-property-type rules Fannie uses, so the treatment turns on the total
+          rather than on any single balance.
+        how_to_fix: >-
+          Total the non-medical collection and charged-off balances from the credit report and apply
+          FHA's aggregate test. Medical collections are excluded. Document the payoff, the payment
+          plan, or the basis for leaving the accounts open.
+      default:
+        why: >-
+          How collections and charged-off accounts must be treated varies by occupancy, property type
+          and programme rather than by any single dollar figure. Medical collections are excluded from
+          the Fannie payoff limits.
+        how_to_fix: >-
+          Establish the occupancy, property type and programme, then apply the requirement they select.
+          Document the payoff, the payment plan, or the basis on which the accounts may remain open —
+          and keep medical collections out of the total.
   value_domain:
     - "no_payoff_required"
     - "payoff_required"
