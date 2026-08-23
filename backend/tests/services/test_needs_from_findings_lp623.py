@@ -517,3 +517,63 @@ async def test_an_id_need_already_raised_under_the_old_name_still_clears(db_sess
 
     assert matched is not None and matched.id == legacy.id
     assert legacy.status is NeedsItemStatus.VERIFIED
+
+
+# --------------------------------------------------------------------------------------------- #
+# Found on staging, after deploying LP-623
+# --------------------------------------------------------------------------------------------- #
+async def test_the_floor_recognises_an_id_need_raised_under_the_old_name(db_session) -> None:
+    """THE DUPLICATE, from the real file. Renaming the ID need `drivers_license` -> `government_id`
+    kept the old name MATCHABLE, which is not the same as keeping it RECOGNISED: the floor compared
+    raw types, found no `government_id`, and minted a SECOND ID need beside the one already there.
+    LF-ABRS showed two rows titled "Government ID — Vidulasrri Muruganandam", one verified against the
+    borrower's green card and one rejected against their unreadable licence."""
+    from app.services.needs_engine import seed_floor_needs
+
+    _company, loan_file = await _file(db_session)
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    legacy = await factories.make_needs_item(db_session, loan_file=loan_file)
+    legacy.needs_type = "drivers_license"
+    legacy.borrower_id = borrower.id
+    await db_session.flush()
+
+    created = await seed_floor_needs(db_session, loan_file)
+
+    assert "government_id" not in [n.needs_type for n in created], (
+        "the ID need is already on the list under its previous name"
+    )
+
+
+async def test_a_need_that_leaves_rejected_drops_the_failure_text(db_session) -> None:
+    """ALSO FROM THE REAL FILE. `reason` describes the STATE, so leaving it is a lie once the state
+    moves on: a RECEIVED W-2 need read "a w2 is in the file but could not be processed" and a VERIFIED
+    ID need read "a document arrived but did not pass processing" — both beside the good document that
+    had just satisfied them."""
+    company, loan_file = await _file(db_session)
+    need = await factories.make_needs_item(db_session, loan_file=loan_file)
+    need.needs_type = "w2"
+    await db_session.flush()
+
+    unreadable = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type="w2",
+        status=DocumentStatus.NEEDS_REVIEW,
+    )
+    await db_session.flush()
+    await apply_document_to_needs(db_session, unreadable)
+    assert need.reason, "the rejection must say why while it holds"
+
+    good = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type="w2",
+        status=DocumentStatus.COMPLETED,
+    )
+    await db_session.flush()
+    await apply_document_to_needs(db_session, good)
+
+    assert need.status is NeedsItemStatus.RECEIVED
+    assert need.reason is None, "a satisfied need must not still carry the failure that preceded it"

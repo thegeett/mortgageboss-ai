@@ -108,6 +108,18 @@ async def transition_need(
         raise InvalidNeedTransition(f"{need.status} -> {to_state} is not a valid transition")
 
     need.status = to_state
+    # LP-623 — THE REASON DESCRIBES THE STATE, so leaving it is a lie once the state moves on. It was
+    # written on REJECTED/WAIVED and never cleared, so on LF-ABRS a RECEIVED W-2 need read "a w2 is in
+    # the file but could not be processed" and a VERIFIED ID need read "a document arrived but did not
+    # pass processing" — both beside the good document that had just satisfied them. Cleared on the
+    # states that mean the earlier failure no longer holds; REJECTED and WAIVED set it below.
+    if to_state in (
+        NeedsItemStatus.PENDING,
+        NeedsItemStatus.REQUESTED,
+        NeedsItemStatus.RECEIVED,
+        NeedsItemStatus.VERIFIED,
+    ):
+        need.reason = None
     if to_state is NeedsItemStatus.RECEIVED and document_id is not None:
         need.satisfied_by_document_id = document_id
     if to_state is NeedsItemStatus.VERIFIED:
@@ -276,6 +288,33 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
     "existing_mortgage_statement": "mortgage_statement",
     "verification_of_employment": "voe",
 }
+
+
+#: Need types that are the SAME NEED under different names, mapped to one representative. Distinct
+#: from `_NEED_TYPE_ALIASES` (need type -> DOCUMENT type, for matching): this answers "is this need
+#: already on the list", which is a different question and was answered wrongly.
+_EQUIVALENT_NEED_TYPES: dict[str, str] = {
+    "drivers_license": "government_id",
+}
+
+
+def equivalent_need_type(needs_type: str | None) -> str | None:
+    """The one name under which a need is counted as already present (LP-623).
+
+    ⚠️ WHY THIS EXISTS, on a real file. LP-623 renamed the ID need `drivers_license` -> `government_id`
+    and kept the old name matchable, which is not the same as keeping it RECOGNISED: `seed_floor_needs`
+    compared raw types, found no `government_id`, and minted a SECOND ID need beside the one already
+    there. LF-ABRS then showed two rows titled "Government ID — Vidulasrri Muruganandam", one verified
+    against the borrower's green card and one rejected against their unreadable licence.
+
+    The same collision was caught on the seeding path before deploy (`verification_of_employment` vs
+    `voe`) and fixed there with `canonical_need_type`. The floor asks the same question and was left
+    asking it raw.
+    """
+    if needs_type is None:
+        return None
+    slug = needs_type.strip().lower()
+    return _EQUIVALENT_NEED_TYPES.get(slug, slug)
 
 
 def canonical_need_type(proposed: str | None) -> str | None:
@@ -593,7 +632,9 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
             only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id), NeedsItem)
         )
     ).all()
-    existing_keys = {(n.needs_type, n.borrower_id) for n in existing_needs if n.needs_type}
+    existing_keys = {
+        (equivalent_need_type(n.needs_type), n.borrower_id) for n in existing_needs if n.needs_type
+    }
     existing_types = {needs_type for needs_type, _borrower in existing_keys}
 
     created: list[NeedsItem] = []
@@ -608,10 +649,10 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
         for needs_type, title, category in _PER_BORROWER_UNIVERSAL:
             # PER BORROWER, not per file: a co-borrower added after import needs their own ID, and a
             # file-level type check would read the primary's need as covering them.
-            if (needs_type, borrower.id) in existing_keys:
+            if (equivalent_need_type(needs_type), borrower.id) in existing_keys:
                 continue
-            existing_keys.add((needs_type, borrower.id))
-            existing_types.add(needs_type)
+            existing_keys.add((equivalent_need_type(needs_type), borrower.id))
+            existing_types.add(equivalent_need_type(needs_type))
             created.append(
                 await create_needs_item(
                     db,
@@ -632,9 +673,9 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 )
             )
     for needs_type, title, category in _PER_FILE_UNIVERSAL:
-        if needs_type in existing_types:
+        if equivalent_need_type(needs_type) in existing_types:
             continue
-        existing_types.add(needs_type)
+        existing_types.add(equivalent_need_type(needs_type))
         created.append(
             await create_needs_item(
                 db,
@@ -695,9 +736,9 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
         )
 
     for needs_type, title, category, source_facts in specs:
-        if needs_type in existing_types:
+        if equivalent_need_type(needs_type) in existing_types:
             continue
-        existing_types.add(needs_type)
+        existing_types.add(equivalent_need_type(needs_type))
         created.append(
             await create_needs_item(
                 db,
