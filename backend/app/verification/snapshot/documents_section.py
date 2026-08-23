@@ -558,14 +558,42 @@ def transaction_field_sets(
                 "amount": _txn_field(txn.get("amount")),
                 "direction": _txn_field(_direction(txn), source=FieldSource.DERIVED),
                 "description": _txn_field(_redact_description(txn.get("description"))),
+                # bug-001 — the ACH originator, so two debts owed to ONE institution can be told
+                # apart. A payee name cannot: a Chase card and a Chase auto loan are both "Chase",
+                # and grouping on the name alone would merge them into one obligation and understate
+                # the DTI. Not redacted — `_redact_description` scrubs free text, and this is a
+                # company id printed beside the payee, the same class as the tax ids routed through
+                # `_PII_FIELDS` rather than dropped.
+                "originator_id": _txn_field(txn.get("originator_id")),
             }
         )
     return field_sets
 
 
+#: Fields that do NOT take part in a transaction's identity (bug-001).
+#:
+#: `originator_id` describes WHO the counterparty is, not WHICH ROW this is: within one statement,
+#: date + amount + direction + description already separate every line, and two rows identical in
+#: those four but differing in originator do not occur. Its value is GROUPING across statements.
+#:
+#: Excluded deliberately, because the content id is a FINDING'S IDENTITY. Folding a new field into it
+#: re-keys every per-deposit finding on every file — they retire as `no_longer_applies` and mint
+#: again, stranding any sign-off a processor had made on the old copy. That happened once already in
+#: this ticket, when the borrower re-link changed six documents' ids and doubled the finding count on
+#: a real file. A field that adds nothing to WHICH ROW THIS IS must not cost that.
+_IDENTITY_EXCLUDED_TXN_FIELDS = frozenset({"originator_id"})
+
+
 def _txn_content(field_set: TransactionFieldSet) -> dict[str, Any]:
-    """The content a transaction's id is derived from — its four Fields, JSON-canonical."""
-    return {name: fld.model_dump(mode="json") for name, fld in field_set.items()}
+    """The content a transaction's id is derived from, JSON-canonical.
+
+    See :data:`_IDENTITY_EXCLUDED_TXN_FIELDS` for what is deliberately left out and why.
+    """
+    return {
+        name: fld.model_dump(mode="json")
+        for name, fld in field_set.items()
+        if name not in _IDENTITY_EXCLUDED_TXN_FIELDS
+    }
 
 
 def build_transactions(
@@ -756,7 +784,14 @@ class ListSpec:
 # consumer of the generic list (a later step) must not read this ``direction`` as if it were AS-1's.
 _TRANSACTIONS_LIST = ListSpec(
     name="transactions",
-    fields=("date", "description", "amount", "transaction_type", "running_balance"),
+    fields=(
+        "date",
+        "description",
+        "amount",
+        "transaction_type",
+        "running_balance",
+        "originator_id",  # bug-001
+    ),
     derived=(
         DerivedSpec(
             field="direction",

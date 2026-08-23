@@ -164,6 +164,11 @@ class TransactionRecord(BaseModel):
     amount: Field
     direction: Field
     description: Field
+    # bug-001 — the ACH originator id printed beside the payee ("PPD ID: 4760039224"), when the
+    # statement shows one. ADDITIVE with a default, the LP-421 precedent, so SNAPSHOT_VERSION is not
+    # bumped and existing fixtures still validate. Deliberately NOT part of the content id — see
+    # `_IDENTITY_EXCLUDED_TXN_FIELDS` in documents_section.
+    originator_id: Field | None = None
 
 
 class ScheduleCRecord(BaseModel):

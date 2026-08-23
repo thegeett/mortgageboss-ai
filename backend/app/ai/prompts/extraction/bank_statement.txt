@@ -56,6 +56,13 @@ mix a second account's transactions into the primary transaction list.
      amount            (number)  the amount (positive; use transaction_type for direction)
      transaction_type  (string)  deposit / withdrawal / fee / interest / transfer / ...
      running_balance   (number)  the balance after this transaction, if shown
+     originator_id     (string)  the ACH originator/company id printed WITH the payee, when the
+                                 statement shows one: "PPD ID: 4760039224", "CO ID 1234567890",
+                                 "Company ID: 9876543210" -> the ID ONLY ("4760039224"), not the
+                                 label. It is what tells two debts owed to the SAME institution
+                                 apart, so copy the digits EXACTLY as printed and never invent one.
+                                 null when the line shows no such id (a cheque, a card purchase,
+                                 an in-branch transfer).
    plus page + verbatim snippet for each transaction.
    CRITICAL: extract ONLY transactions actually printed on the statement. If a row
    is unreadable, skip it or null the unreadable field — NEVER invent a transaction
@@ -122,6 +129,7 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
   "transactions": [
     {"date": <YYYY-MM-DD|null>, "description": <string|null>, "amount": <number|null>,
      "transaction_type": <string|null>, "running_balance": <number|null>,
+     "originator_id": <string|null>,
      "page": <int|null>, "snippet": <string|null>}
   ],
   "additional_sections": [
@@ -135,4 +143,4 @@ Respond with ONLY a single JSON object, no markdown fences and no prose, exactly
 }
 
 Example (values illustrative; capture ALL real transactions, use null for anything absent):
-{"typed_core": {"bank_name": {"value": "First Bank", "page": 1, "snippet": "First Bank"}, "ending_balance": {"value": "5230.18", "page": 1, "snippet": "Ending Balance 5,230.18"}}, "transactions": [{"date": "2024-06-03", "description": "Payroll ACME", "amount": "2100.00", "transaction_type": "deposit", "running_balance": "5230.18", "page": 1, "snippet": "06/03 Payroll ACME 2,100.00"}], "additional_sections": [], "confidence": 0.9, "reasoning": "Single-page checking statement with a clear transaction table."}
+{"typed_core": {"bank_name": {"value": "First Bank", "page": 1, "snippet": "First Bank"}, "ending_balance": {"value": "5230.18", "page": 1, "snippet": "Ending Balance 5,230.18"}}, "transactions": [{"date": "2024-06-03", "description": "Payroll ACME", "amount": "2100.00", "transaction_type": "deposit", "running_balance": "5230.18", "originator_id": null, "page": 1, "snippet": "06/03 Payroll ACME 2,100.00"}], "additional_sections": [], "confidence": 0.9, "reasoning": "Single-page checking statement with a clear transaction table."}

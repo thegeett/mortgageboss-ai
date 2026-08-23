@@ -68,6 +68,18 @@ class Transaction(BaseModel):
     amount: Decimal | None = None
     transaction_type: str | None = None  # deposit / withdrawal / fee / interest / ...
     running_balance: Decimal | None = None
+    # bug-001 — THE ACH ORIGINATOR, which is what tells two creditors apart.
+    #
+    # A statement prints "Chase Credit Crd Autopay  PPD ID: 4760039224". The payee name alone cannot
+    # separate two debts owed to one institution — a Chase card and a Chase auto loan are both
+    # "Chase" — and grouping on the name would merge them into one obligation, UNDERSTATING the
+    # debt-to-income ratio, which is the dangerous direction. The originator id is the field that
+    # actually distinguishes them, and it was being dropped.
+    #
+    # On the real file it settled the opposite question: all four Chase payments carry the SAME
+    # PPD ID, so what looked like two accounts (two amounts, two days of the month) is one autopay
+    # charged twice a month, reported four times.
+    originator_id: str | None = None
     source: SourceLocation | None = None
 
 
@@ -223,6 +235,7 @@ def _parse_transactions(raw: Any) -> list[dict[str, Any]]:
             "amount": coerce_decimal(entry.get("amount")),
             "transaction_type": coerce_str(entry.get("transaction_type")),
             "running_balance": coerce_decimal(entry.get("running_balance")),
+            "originator_id": coerce_str(entry.get("originator_id")),
             "source": source_payload(entry),
         }
         # Drop a fully-empty row (junk) — keep any row with at least one read value.
