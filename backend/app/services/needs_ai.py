@@ -209,8 +209,25 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
         income=[
             {"income_type": i.income_type, "employment_income": i.employment_income} for i in income
         ],
+        # LP-624 — THE WHOLE EMPLOYMENT RECORD. The model saw a name and a null `is_current` and had to
+        # infer the rest, so on LF-ABRS it proposed two years of personal tax returns because
+        # "contract-basis income must be qualified from tax history" — on a file whose application says
+        # `SelfEmployedIndicator = false` three times — and described one current plus two previous jobs
+        # as "three employers", which reads as three concurrent ones. Both inferences were reasonable
+        # from what it was given, and both are answered outright by fields the import now carries.
         employers=[
-            {"employer_name": e.employer_name, "is_current": e.is_current} for e in employers
+            {
+                "employer_name": e.employer_name,
+                "is_current": e.is_current,
+                "self_employed": e.self_employed,
+                "classification": e.classification,
+                "position": e.position,
+                "start_date": e.start_date.isoformat() if e.start_date else None,
+                "end_date": e.end_date.isoformat() if e.end_date else None,
+                "monthly_income": str(e.monthly_income) if e.monthly_income is not None else None,
+                "special_relationship": e.special_relationship,
+            }
+            for e in employers
         ],
         assets=[{"asset_type": a.asset_type} for a in assets],
         liabilities=[{"liability_type": liability.liability_type} for liability in liabilities],

@@ -216,8 +216,23 @@ async def create_loan_file_from_mismo(
                     employment_income=inc.employment_income,
                 )
             )
-        for employer_name in pb.employers:
-            db.add(StatedEmployer(borrower_id=borrower.id, employer_name=employer_name))
+        for employer in pb.employers:
+            # LP-624 — the whole record. `is_current` has had a column and a comment naming
+            # `EmploymentStatusType` since the model was written, and nothing ever filled it.
+            db.add(
+                StatedEmployer(
+                    borrower_id=borrower.id,
+                    employer_name=employer.name,
+                    is_current=employer.is_current,
+                    self_employed=employer.self_employed,
+                    classification=employer.classification,
+                    position=employer.position,
+                    start_date=employer.start_date,
+                    end_date=employer.end_date,
+                    monthly_income=employer.monthly_income,
+                    special_relationship=employer.special_relationship,
+                )
+            )
 
     # 4) File-level stated financials (liabilities/assets — deal-level, LP-52).
     for liab in parsed.liabilities:

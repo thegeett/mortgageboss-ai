@@ -32,6 +32,36 @@ class ParsedIncomeItem(BaseModel):
     employment_income: bool | None = None
 
 
+class ParsedEmployer(BaseModel):
+    """One stated EMPLOYMENT for a borrower (LP-624) — the whole record, not just the name.
+
+    The parser kept `FullName` and discarded everything beside it, so a MISMO stating a complete,
+    dated, gapless two-year history imported as three bare strings. On LF-ABRS that left IN-4
+    abstaining ("the file does not establish the dates of employment") over three start dates sitting
+    in the file we had just imported, IN-7 unable to judge a real job change, and the needs AI
+    inferring self-employment the application denies three times over.
+    """
+
+    name: str | None = None
+    #: MISMO ``EmploymentStatusType`` — "Current" / "Previous". The column this fills has existed since
+    #: the model was written and cites this field by name; nothing ever populated it.
+    is_current: bool | None = None
+    #: ``EmploymentBorrowerSelfEmployedIndicator``. Load-bearing: it decides whether tax returns are the
+    #: right ask, and its absence is what let a proposal presume self-employment.
+    self_employed: bool | None = None
+    #: ``EmploymentClassificationType`` — "Primary" / "Secondary".
+    classification: str | None = None
+    #: ``EmploymentPositionDescription`` — the job title, which is what a same-line-of-work judgment
+    #: actually compares ("Product Manager" -> "Associate Director" -> "Senior product manager").
+    position: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    monthly_income: Decimal | None = None
+    #: ``SpecialBorrowerEmployerRelationshipIndicator`` — employment by a relative or an interested
+    #: party, which changes how the income is scrutinised.
+    special_relationship: bool | None = None
+
+
 class ParsedBorrower(BaseModel):
     """A borrower party (``PartyRoleType == "Borrower"``) — typed core."""
 
@@ -52,7 +82,7 @@ class ParsedBorrower(BaseModel):
     address_type: str | None = None
     citizenship: str | None = None
     income_items: list[ParsedIncomeItem] = Field(default_factory=list)
-    employers: list[str] = Field(default_factory=list)
+    employers: list[ParsedEmployer] = Field(default_factory=list)
     # The 1003 declaration indicators (BankruptcyIndicator, IntentToOccupyType, …)
     # — kept as raw string values; they feed Phase-3 cross-source verification.
     declarations: dict[str, str] = Field(default_factory=dict)

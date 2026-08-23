@@ -30,6 +30,20 @@ fact is {"kind", "label", "ref"}:
 List every fact you actually used (a need may cite several). Cite ONLY facts present in
 the JSON — never invent a source. If a need genuinely rests on no single record, use [].
 
+THE EMPLOYMENT RECORDS STATE THESE FACTS — DO NOT INFER THEM (LP-624). Each entry in
+"employers" carries "self_employed", "is_current", "position", "start_date" and
+"end_date" as the APPLICATION states them. Read them:
+  - "self_employed": false means the borrower is NOT self-employed, however their income
+    is typed. Contract or non-employment income on a file that states false is 1099 or
+    contract work FOR someone — ask for the 1099s or the contract, not for business
+    returns and a P&L.
+  - "is_current": false is a PREVIOUS job, part of the two-year history. Three records
+    where one is current and two are previous is ONE job with a work history behind it,
+    not three concurrent employers, and describing it as three misreads the file.
+  - The dates are the history. Where they run continuously, there is no gap to explain
+    and no need to ask for one.
+A fact stated in the JSON is never something to reason around.
+
 Examples of the KIND of reasoning (adapt to the file — do not copy):
   - Self-employment income (a Schedule C / a business name in the stated income) →
     "two years of personal + business tax returns and a year-to-date P&L, because

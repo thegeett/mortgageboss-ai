@@ -125,7 +125,20 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         income_type="W2",
         employment_income=True,
     )
-    emp = ns(id=uuid4(), is_deleted=False, employer_name="e", is_current=True)
+    # LP-624 — the stub carries the whole employment record now, because the section publishes it.
+    emp = ns(
+        id=uuid4(),
+        is_deleted=False,
+        employer_name="e",
+        is_current=True,
+        self_employed=False,
+        classification="Primary",
+        position="Product Manager",
+        start_date=None,
+        end_date=None,
+        monthly_income=None,
+        special_relationship=False,
+    )
     bor = ns(
         id=uuid4(), is_deleted=False, borrower_position=1, first_name="f", middle_name="m", last_name="l",
         date_of_birth=date(1990, 1, 1), marital_status="Married", is_primary=True, dependent_count=0,

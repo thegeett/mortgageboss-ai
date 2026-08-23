@@ -217,6 +217,17 @@ def build_mismo_section(
             ekey = f"{base}.employer.{m}"
             put(f"{ekey}.name", employer.employer_name)
             put(f"{ekey}.is_current", employer.is_current)
+            # LP-624 — the rest of the record. `is_current` was published from a column nothing wrote,
+            # so this loop has been emitting one real field and one permanent null. The dates are what
+            # an employment-gap check needs, the position is what a same-line-of-work judgment compares,
+            # and `self_employed` is what decides whether tax returns are the right ask at all.
+            put(f"{ekey}.self_employed", employer.self_employed)
+            put(f"{ekey}.classification", employer.classification)
+            put(f"{ekey}.position", employer.position)
+            put(f"{ekey}.start_date", employer.start_date)
+            put(f"{ekey}.end_date", employer.end_date)
+            put(f"{ekey}.monthly_income", employer.monthly_income)
+            put(f"{ekey}.special_relationship", employer.special_relationship)
 
         # declarations is a JSON column typed dict[str, str], but JSON can hold any
         # shape — guard against a non-dict value so a malformed row degrades to "no

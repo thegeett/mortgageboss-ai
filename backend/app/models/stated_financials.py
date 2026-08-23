@@ -21,10 +21,11 @@ refined with Priya / as Phase-3 rules firm up. Amounts are never logged.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -68,7 +69,23 @@ class StatedEmployer(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     employer_name: Mapped[str | None] = mapped_column(String(_HOLDER_LEN), nullable=True)
     # Whether this is the borrower's current employer (MISMO EmploymentStatusType
     # == "Current"); nullable — not always present.
+    #
+    # ⚠️ LP-624 — THIS COLUMN AND ITS COMMENT PREDATE ANYTHING POPULATING IT. The parser read only
+    # `FullName`, so every stated employer imported with `is_current` NULL and the comment described an
+    # intention rather than a behaviour. A nullable column nothing writes looks exactly like one that is
+    # legitimately null, which is why it survived that way.
     is_current: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # LP-624 — the rest of the EMPLOYMENT record, which the MISMO states and the import discarded.
+    # `self_employed` decides whether tax returns are the right ask; `position` is what a
+    # same-line-of-work judgment compares; the dates are what an employment-gap check needs and could
+    # not find, so IN-4 abstained over dates sitting in the file it had just imported.
+    self_employed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    classification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    position: Mapped[str | None] = mapped_column(String(_HOLDER_LEN), nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    monthly_income: Mapped[Money | None] = mapped_column(nullable=True)
+    special_relationship: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     borrower: Mapped[Borrower] = relationship(back_populates="stated_employers")
 

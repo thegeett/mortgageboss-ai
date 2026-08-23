@@ -34,6 +34,7 @@ from app.mismo.schema import (
     CatchAllSection,
     ParsedAsset,
     ParsedBorrower,
+    ParsedEmployer,
     ParsedIncomeItem,
     ParsedLiability,
     ParsedLoan,
@@ -216,11 +217,61 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
             )
         )
 
-    employers: list[str] = []
+    # LP-624 — THE WHOLE EMPLOYMENT RECORD, not just the name. Every other leaf under EMPLOYMENT was
+    # left unconsumed and fell to `catch_all`, which the snapshot does not read — so a MISMO stating a
+    # complete, dated, gapless two-year history imported as three bare strings. The identical shape as
+    # LP-596's real-estate-owned schedule, one section over.
+    employers: list[ParsedEmployer] = []
     for emp in party.findall(".//m:EMPLOYERS/m:EMPLOYER", NS):
         name = ctx.text(emp, ".//m:FullName")
-        if name:
-            employers.append(name)
+        employment = emp.find("m:EMPLOYMENT", NS)
+        status = ctx.text(employment, "m:EmploymentStatusType") if employment is not None else None
+        employer = ParsedEmployer(
+            name=name,
+            # "Current" / "Previous". Anything else leaves it None rather than guessing False, which
+            # would assert the job has ended.
+            is_current=(status.casefold() == "current" if status else None),
+            self_employed=_to_bool(
+                ctx.text(employment, "m:EmploymentBorrowerSelfEmployedIndicator")
+                if employment is not None
+                else None
+            ),
+            classification=ctx.text(employment, "m:EmploymentClassificationType")
+            if employment is not None
+            else None,
+            position=ctx.text(employment, "m:EmploymentPositionDescription")
+            if employment is not None
+            else None,
+            start_date=_to_date(
+                ctx.text(employment, "m:EmploymentStartDate") if employment is not None else None
+            ),
+            end_date=_to_date(
+                ctx.text(employment, "m:EmploymentEndDate") if employment is not None else None
+            ),
+            monthly_income=_to_decimal(
+                ctx.text(employment, "m:EmploymentMonthlyIncomeAmount")
+                if employment is not None
+                else None
+            ),
+            special_relationship=_to_bool(
+                ctx.text(employment, "m:SpecialBorrowerEmployerRelationshipIndicator")
+                if employment is not None
+                else None
+            ),
+        )
+        # A record with nothing in it at all is not a record. A name-only one still is — that is what
+        # every file imported before this parsed to, and it must keep importing.
+        if any(
+            value is not None
+            for value in (
+                employer.name,
+                employer.start_date,
+                employer.end_date,
+                employer.position,
+                employer.is_current,
+            )
+        ):
+            employers.append(employer)
 
     declarations: dict[str, str] = {}
     decl_detail = party.find(".//m:DECLARATION/m:DECLARATION_DETAIL", NS)

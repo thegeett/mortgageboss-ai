@@ -21,6 +21,7 @@ from app.mismo.import_service import create_loan_file_from_mismo
 from app.mismo.schema import (
     ParsedAsset,
     ParsedBorrower,
+    ParsedEmployer,
     ParsedIncomeItem,
     ParsedLiability,
     ParsedLoan,
@@ -75,7 +76,8 @@ def _parsed_self_employed_purchase() -> ParsedMismo:
                         employment_income=True,
                     ),
                 ],
-                employers=["Chhotala Realty LLC"],
+                # LP-624 — the whole EMPLOYMENT record, not a bare name.
+                employers=[ParsedEmployer(name="Chhotala Realty LLC", is_current=True)],
             )
         ],
         assets=[

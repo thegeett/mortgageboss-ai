@@ -53,7 +53,8 @@ def test_real_file_income_employers_declarations(fixture_bytes: bytes) -> None:
     amounts = [i.monthly_amount for i in b.income_items]
     assert amounts == [Decimal("7000.00"), Decimal("9400.00")]
     assert all(i.income_type == "Base" and i.employment_income is True for i in b.income_items)
-    assert b.employers == [
+    # LP-624 — employers are the whole EMPLOYMENT record now, not bare names.
+    assert [e.name for e in b.employers] == [
         "Swad Mania LLC",
         "CHHOTALA REALTY LLC",
         "Thermofisher Life Science - PPD Development LP",
