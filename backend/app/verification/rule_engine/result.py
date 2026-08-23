@@ -106,3 +106,15 @@ class RuleEvaluation:
     # EMPTY IS HONEST, not a gap. A loan-level rule over a computed tag (DTI, reserves, LTV) has no
     # document to point at, and inventing one would be worse than silence.
     source_content_ids: tuple[str, ...] = ()
+    # LP-620 — WHAT THIS FINDING IS WAITING ON, when the spec's `requires_documents` cannot say it.
+    #
+    # `requires_documents` is a per-RULE presence test: a group is satisfied the moment ANY member is on
+    # the file. That cannot express "one MORE source than the file already has", which is exactly the
+    # consistency engine's single-source abstention — ID-3 gathers a date of birth from one document,
+    # needs two to compare, and computes "nothing missing" because a driver's licence IS on file. The
+    # finding then landed in "read or clarify" with no request button while its own message read "Obtain
+    # a second document stating the date of birth".
+    #
+    # Set ONLY by an evaluator that knows the answer for THIS subject; the read path falls back to the
+    # spec-derived list when it is empty, so every rule that was already right stays unchanged.
+    requested_documents: tuple[str, ...] = ()

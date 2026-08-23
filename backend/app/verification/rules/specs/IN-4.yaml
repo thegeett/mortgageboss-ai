@@ -34,6 +34,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-3.1-01/02 (Employment/Income h
 # one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
 requires_documents:
   - [pay_stub, w2]
+  # LP-620 — the WRITTEN verification of employment. `finding_prose` already recorded that "IN-4's fix
+  # offers a verification of employment that IN-4 does not declare" and allowed the prose to say so;
+  # the request button reads this list, so the same omission left the ask unactionable. Pay stubs and
+  # W-2s being on file is precisely the case here — they do not carry start and end dates.
+  - [voe]
 
 spec_version: 1
 deterministic:

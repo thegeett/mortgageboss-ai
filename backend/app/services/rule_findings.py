@@ -109,6 +109,13 @@ def _details(result: RuleEvaluation) -> dict[str, object]:
         # LP-563 — the structured change Apply performs. Absent when the rule declares none or a
         # value was unresolvable, which is what keeps the button off a finding it cannot act on.
         **({"apply": result.apply} if result.apply else {}),
+        # LP-620 — what THIS finding is waiting on, when the spec cannot say it. Absent for every
+        # rule whose `requires_documents` already answers correctly, which is nearly all of them.
+        **(
+            {"requested_documents": list(result.requested_documents)}
+            if result.requested_documents
+            else {}
+        ),
         "source_strength": _source_strength(result),
         # Duplicated into details ONLY so LP-93's finding_identity() (which reads details.subject_key)
         # keeps working alongside the new indexed column. Both are written from the SAME

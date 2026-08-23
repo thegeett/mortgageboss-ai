@@ -347,6 +347,7 @@ def _result(
     verdict_confidence: float | None = None,
     how_to_fix: str | None = None,
     ratification_pending: bool = False,
+    requested_documents: tuple[str, ...] = (),
 ) -> RuleEvaluation:
     assert spec.consistency is not None
     return RuleEvaluation(
@@ -367,6 +368,7 @@ def _result(
         # culprit as none of them. These are the sources that SURVIVED the filter and the exclusion,
         # so they are exactly the set the verdict rests on.
         source_content_ids=tuple(inst.source_id for inst in gathered),
+        requested_documents=requested_documents,
     )
 
 
@@ -546,6 +548,16 @@ async def evaluate_consistency_rule(
                     f"{fact_label(con.gather_tag)}{of_type} — a consistency check needs at least two "
                     f"to compare" + excluded_note,
                     gathered,
+                    # LP-620 — THE RULE'S OWN ANSWER TO "request or read?". A spec's
+                    # `requires_documents` is a presence test, so it reports nothing missing the moment
+                    # one qualifying document is on the file — which is precisely this branch's
+                    # situation, and it put ID-2/ID-3 in "read or clarify" under a message that read
+                    # "Obtain a second document stating the date of birth". The count decides the
+                    # wording: one source needs ANOTHER, none needs A FIRST.
+                    requested_documents=(
+                        f"{'Another' if gathered else 'A'} document stating the "
+                        f"{fact_label(con.gather_tag)}{of_type}",
+                    ),
                 )
             )
             continue

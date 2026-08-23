@@ -106,6 +106,10 @@ guideline_reference: "Fannie Mae Selling Guide B7-3-01 — the lender must be na
 # one satisfies it); every group must be satisfied. Nothing in evaluation reads this.
 requires_documents:
   - [homeowners_insurance]
+  # LP-620 — and the document that names the LENDER, which is what a mortgagee clause is checked
+  # against. Declaring only the binder meant the binder's presence answered "nothing missing" while the
+  # finding asked for a Closing Disclosure. Alternatives, because either disclosure names the lender.
+  - [closing_disclosure, loan_estimate]
 
 spec_version: 1
 
@@ -119,6 +123,13 @@ deterministic:
     tag: document.document_type
     op: eq
     value: homeowners_insurance
+  # LP-620 — the GATE's fix, which is the one a real abstention reads: an unknown tag coerces to
+  # couldnt_check before `outcomes` runs, so the catch-all's own how_to_fix below never fires (the
+  # DT-6 lesson). It has to name BOTH sides, because either can be the missing one.
+  couldnt_check_fix: >-
+    Upload a Closing Disclosure or Loan Estimate naming this loan's lender, and confirm the homeowners
+    insurance binder states a mortgagee clause. The clause cannot be compared with the lender until
+    both are in the file — a binder on its own leaves nothing to compare it against.
   load_bearing_tags:
     - ins.mortgagee_clause_correct
   gated_tags:

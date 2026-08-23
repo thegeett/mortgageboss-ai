@@ -11,7 +11,7 @@ mis-sorts a card and can never change a conclusion. That is what makes hand-auth
 from __future__ import annotations
 
 import pytest
-from app.schemas.verification import _missing_documents
+from app.schemas.verification import _missing_documents, _requested_documents
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.rules.specs import RuleSpec, load_rule_spec
 
@@ -103,18 +103,25 @@ _LFWCHG = {
         ("CL-1", ["rate lock agreement"]),
         ("IN-8", ["VOE"]),
         ("ID-7", ["title commitment"]),
+        # LP-620 — MOVED from the read side. IN-4 wants START and END dates, and its own fix offers "a
+        # written verification of employment, or pay stubs and W-2s that establish the dates". Pay stubs
+        # and W-2s being on file was read as "the document is here", but undated ones are the very case
+        # the fix names — so the VOE it had never declared is what actually closes the gap. `finding_prose`
+        # had already recorded the omission ("IN-4's fix offers a verification of employment that IN-4 does
+        # not declare") and worked around it on the prose side; the button had no such workaround.
+        ("IN-4", ["VOE"]),
         # Present — the document is here and does not answer the question. Desk work, not a request.
         ("IH-1", []),
         ("IH-3", []),
         ("IN-3", []),
-        ("IN-4", []),
     ],
 )
 def test_the_real_file_classifies_the_way_a_human_reads_it(
     rule_id: str, expected: list[str]
 ) -> None:
     """The document set is LF-WCHG's actual inventory. Every one of these was couldnt_check on that run
-    and read identically on the card; six were a request and five were something to go and read.
+    and read identically on the card; on LP-541's original classification six were a request and four
+    were something to go and read. IN-4 moved to the request side in LP-620.
 
     The labels are the READABLE forms — "VOE", not "voe" — because they are what the sub-header prints
     and what a processor puts in an email."""
@@ -147,3 +154,38 @@ def test_a_group_with_an_obtainable_alternative_survives_on_a_refinance() -> Non
     assert _missing_documents(load_rule_spec("PR-2"), set(), loan_purpose="refinance") == [
         "appraisal"
     ]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-620 — a finding may answer for itself where the spec cannot
+# --------------------------------------------------------------------------------------------- #
+def test_a_findings_own_request_overrides_the_spec_derived_list() -> None:
+    """The consistency engine's single-source abstention needs one MORE source than the file has, which
+    a presence test can never report. When the evaluator records what it is waiting on, that wins."""
+    assert _requested_documents(
+        {"requested_documents": ["Another document stating the borrower's date of birth"]}
+    ) == ["Another document stating the borrower's date of birth"]
+
+
+def test_a_finding_that_records_nothing_falls_back_to_the_spec() -> None:
+    """Nearly every rule is already classified correctly by its declaration, and must stay that way —
+    the override is an addition to the mechanism, not a replacement for it."""
+    assert _requested_documents({}) == []
+    assert _requested_documents({"requested_documents": []}) == []
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"requested_documents": "appraisal"},  # a string, not a list
+        {"requested_documents": [None, 3]},  # non-strings
+        {"requested_documents": ["", "   "]},  # blank labels
+    ],
+)
+def test_a_malformed_stored_value_falls_through_rather_than_reaching_a_button(
+    stored: dict[str, object],
+) -> None:
+    """`details` is stored JSON and outlives the code that wrote it. A legacy or malformed value must
+    degrade to the spec-derived list — a blank or non-string label would render as "Request " and
+    create a needs item titled after nothing."""
+    assert _requested_documents(stored) == []

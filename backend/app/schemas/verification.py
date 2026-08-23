@@ -8,6 +8,7 @@ findings UI + resolution flow is LP-81.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -309,6 +310,19 @@ def _missing_documents(
     return [document_label(group[0]) for group in groups if not set(group) & on_file]
 
 
+def _requested_documents(details: Mapping[str, Any]) -> list[str]:
+    """What the EVALUATOR recorded this finding is waiting on (LP-620), or empty.
+
+    Written only where the spec's ``requires_documents`` cannot answer — see ``RuleEvaluation``. Typed
+    defensively because ``details`` is stored JSON: a malformed or legacy value must fall through to the
+    spec-derived list rather than put a non-string on a button.
+    """
+    raw = details.get("requested_documents")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, str) and item.strip()]
+
+
 class RuleFindingPublic(BaseModel):
     """One GOVERNED rule-engine finding (LP-316/375) — a DISTINCT shape from :class:`FindingPublic`.
 
@@ -433,8 +447,14 @@ class RuleFindingPublic(BaseModel):
                 for raw_id in (finding.source_document_ids or [])
                 if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
             ],
-            missing_documents=_missing_documents(
-                spec, documents_on_file or set(), loan_purpose=loan_purpose
+            # LP-620 — the FINDING's own answer wins where it has one. `requires_documents` is a
+            # per-rule presence test and cannot express "one more source than the file already has";
+            # an evaluator that knows what this subject is waiting on records it, and everything else
+            # keeps the spec-derived list unchanged.
+            missing_documents=(
+                requested
+                if (requested := _requested_documents(details))
+                else _missing_documents(spec, documents_on_file or set(), loan_purpose=loan_purpose)
             ),
         )
 

@@ -19,7 +19,8 @@ import pytest
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
 from app.verification.rules.specs import load_rule_spec
 
-_NEEDED_TWO_OR_MORE = ("AS-4", "ID-5", "PC-7", "PR-2")
+# IH-2 joined in LP-620, when the disclosure that names the LENDER was declared alongside the binder.
+_NEEDED_TWO_OR_MORE = ("AS-4", "ID-5", "IH-2", "PC-7", "PR-2")
 
 
 @pytest.mark.parametrize("rule_id", _NEEDED_TWO_OR_MORE)

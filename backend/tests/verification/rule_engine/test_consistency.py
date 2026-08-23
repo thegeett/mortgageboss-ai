@@ -171,6 +171,43 @@ async def test_id2_single_source_is_not_agreement() -> None:
     assert results[0].verdict is Verdict.COULDNT_CHECK  # a single source is NOT "satisfied"
 
 
+async def test_a_single_source_records_the_document_it_is_waiting_on() -> None:
+    """LP-620 — THE ABSTENTION THAT COULD NOT BE REQUESTED.
+
+    `requires_documents` is a per-rule PRESENCE test: a group is satisfied the moment one member is on
+    the file. It therefore cannot express this branch's need — one MORE source than the file already
+    has — so ID-2 and ID-3 computed "nothing missing", landed under "In the file — read or clarify
+    these", and offered no request button beneath a message that read "Obtain at least one additional
+    document stating the Social Security number".
+
+    The rule knows the answer here and nowhere else does, so it records it."""
+    results = await _eval_id2(_snapshot([("app", _ssn("H"))]))
+
+    assert results[0].requested_documents == (
+        "Another document stating the borrower's Social Security number",
+    )
+
+
+async def test_no_source_at_all_asks_for_a_first_document_not_another() -> None:
+    """The same branch covers zero sources, where "another" would be simply wrong — there is nothing to
+    be another OF, and a processor reading it would go looking for the first one."""
+    results = await _eval_id2(_snapshot([("app", {}), ("dl", {})]))
+
+    assert results[0].verdict is Verdict.COULDNT_CHECK
+    assert results[0].requested_documents == (
+        "A document stating the borrower's Social Security number",
+    )
+
+
+async def test_a_comparable_pair_records_no_request() -> None:
+    """The field is set ONLY where the spec cannot answer. A rule that reached a real verdict is not
+    waiting on anything, and a stale request label would put a button on a settled finding."""
+    results = await _eval_id2(_snapshot([("app", _ssn("H")), ("dl", _ssn("H"))]))
+
+    assert results[0].verdict is not Verdict.COULDNT_CHECK
+    assert results[0].requested_documents == ()
+
+
 async def test_id2_unknown_value_is_excluded_as_absent_not_compared() -> None:
     # An "unknown" gathered value states no fact → EXCLUDED (absent-for-comparison), never a value
     # that agrees/disagrees. Here only one source states a usable value → <2 → couldnt_check.
