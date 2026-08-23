@@ -44,6 +44,7 @@ from app.services.finding_prose import compose_findings
 from app.services.needs_engine import (
     loan_file_needs_lock,
     rematch_needs_for_file,
+    repair_needs_for_file,
     seed_floor_needs,
 )
 from app.services.needs_from_findings import seed_needs_from_findings
@@ -820,6 +821,11 @@ async def run_verification(
                 await seed_floor_needs(db, loan_file_row)
                 await rematch_needs_for_file(db, loan_file_id)
                 await seed_needs_from_findings(db, loan_file_row)
+                # LP-625 — LAST, because it repairs what the three above leave behind. Preventing a
+                # defect does not undo it: LP-623 stopped a duplicate ID need being minted and
+                # stopped a recovered need keeping its failure text, but neither pass creates or
+                # removes a row, so the pair already on LF-ABRS stayed exactly as it was.
+                await repair_needs_for_file(db, loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
         degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))

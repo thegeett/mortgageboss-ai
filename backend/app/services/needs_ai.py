@@ -40,6 +40,7 @@ context — cost + latency + eval apply).
 """
 
 import json
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -57,7 +58,12 @@ from app.models.document import Document
 from app.models.document_finding import DocumentFinding
 from app.models.helpers import only_active
 from app.models.loan_file import AiNeedsStatus, LoanFile
-from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
+from app.models.needs_item import (
+    NeedsItem,
+    NeedsItemDisposition,
+    NeedsItemOrigin,
+    NeedsItemStatus,
+)
 from app.models.stated_financials import (
     StatedAsset,
     StatedEmployer,
@@ -412,6 +418,23 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
     created: list[NeedsItem] = []
     for p in proposals:
         if p.need_type and p.need_type in existing_types:
+            # LP-625 — REFRESH THE REASONING RATHER THAN DISCARD IT. Skipping outright froze the
+            # first explanation forever: LF-ABRS kept "two years of personal tax returns, because
+            # contract-basis income must be qualified from tax history" — written when the model could
+            # not see `self_employed: false` — long after the import started carrying it. The need is
+            # right; the sentence beside it was not.
+            #
+            # Only where the processor has NOT acted: an untouched PROPOSED need is still the model's
+            # to describe, and one they confirmed, dismissed or adjusted is theirs.
+            stale = _refreshable(existing, p.need_type)
+            if stale is not None and stale.reasoning != p.reasoning:
+                stale.reasoning = p.reasoning
+                stale.source_facts = [f.model_dump() for f in p.triggered_by] or None
+                logger.info(
+                    "ai_need_reasoning_refreshed",
+                    loan_file_id=str(loan_file.id),
+                    needs_type=p.need_type,  # a document type, not PII
+                )
             continue
         if p.need_description.strip().lower() in existing_descs:
             continue
@@ -427,12 +450,14 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
         # CATEGORY: every floor need carried one and no AI need did, so more than half the list could
         # not be grouped. It is derivable from the type — the same catalog the documents use.
         needs_type = canonical_need_type(p.need_type)
+        reasoning = p.reasoning
         if needs_type is None:
             logger.info(
                 "ai_need_without_matchable_type",
                 loan_file_id=str(loan_file.id),
                 proposed_type=p.need_type,  # a type name, not PII
             )
+        reasoning = _unmatchable_note(reasoning, matchable=needs_type is not None)
         need = await create_needs_item(
             db,
             loan_file_id=loan_file.id,
@@ -441,7 +466,7 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
             category=category_for_need_type(needs_type),
             origin=NeedsItemOrigin.AI_REASONING,
             disposition=NeedsItemDisposition.PROPOSED,  # the processor confirms (LP-70)
-            reasoning=p.reasoning,
+            reasoning=reasoning,
             # LP-110: persist the AI's cited source facts (grounded, AI-identified) so the need's
             # reasoning is falsifiable. None (not []) when the model cited nothing, to leave the
             # column NULL for a genuinely source-less proposal.
@@ -454,6 +479,41 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
     if created:
         logger.info("ai_needs_ingested", loan_file_id=str(loan_file.id), count=len(created))
     return created
+
+
+def _unmatchable_note(reasoning: str, *, matchable: bool = False) -> str:
+    """Say on the need that no upload can close it (LP-625).
+
+    Satisfaction-matching keys on ``needs_type``, so a proposal with no catalog type can never be
+    advanced by ANY document — LF-ABRS carried two ("documentation for the 'Other' liability", "for the
+    unspecified asset") that would have sat PENDING forever, indistinguishable on the list from needs a
+    document clears. The ask is real and is KEPT; what changes is that the row stops implying a file
+    will close it.
+    """
+    if matchable:
+        return reasoning
+    return (
+        f"{reasoning}\n\nNo document type matches this request, so uploading a file cannot clear "
+        "it — close it by hand once the question is answered."
+    ).strip()
+
+
+def _refreshable(existing: Sequence[NeedsItem], need_type: str) -> NeedsItem | None:
+    """The AI-proposed need of this type whose reasoning may still be rewritten (LP-625).
+
+    Untouched means untouched: origin AI_REASONING, disposition still PROPOSED, and still open. A need
+    a processor confirmed, dismissed or adjusted carries their judgment, and a later model run has no
+    business editing the reason they acted on.
+    """
+    for need in existing:
+        if (
+            need.needs_type == need_type
+            and need.origin is NeedsItemOrigin.AI_REASONING
+            and need.disposition is NeedsItemDisposition.PROPOSED
+            and need.status in (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
+        ):
+            return need
+    return None
 
 
 async def _load_loan_file(db: AsyncSession, loan_file_id: UUID) -> LoanFile | None:

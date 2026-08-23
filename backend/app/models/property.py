@@ -105,6 +105,9 @@ class Property(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # project); `attachment_type` is NOT — Fannie recognises detached condominiums.
     in_project: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     is_pud: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # LP-627 — PropertyMixedUsageIndicator. PR-3 asks whether the property type is eligible for the
+    # programme, and mixed use is exactly the case where that is programme-specific.
+    mixed_usage: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="property")

@@ -114,6 +114,9 @@ def test_the_schedule_reaches_the_snapshot() -> None:
         amortization_type=None,
         amortization_months=None,
         application_received_date=None,
+        total_mortgaged_properties=None,
+        rate_set_date=None,
+        seller_paid_closing_costs=None,
         refinance_type=None,
         status=None,
     )
@@ -125,6 +128,7 @@ def test_the_schedule_reaches_the_snapshot() -> None:
         liabilities=[],
         assets=[],
         owned_properties=rows,  # type: ignore[arg-type]
+        housing_expenses=[],
     )
 
     upbs = {facts[k].value for k in facts if k.endswith(".lien_upb")}
@@ -146,6 +150,9 @@ def test_a_file_with_no_schedule_projects_nothing_rather_than_zeroes() -> None:
         amortization_type=None,
         amortization_months=None,
         application_received_date=None,
+        total_mortgaged_properties=None,
+        rate_set_date=None,
+        seller_paid_closing_costs=None,
         refinance_type=None,
         status=None,
     )
@@ -157,6 +164,7 @@ def test_a_file_with_no_schedule_projects_nothing_rather_than_zeroes() -> None:
         liabilities=[],
         assets=[],
         owned_properties=[],
+        housing_expenses=[],
     )
 
     assert not [k for k in facts if k.startswith("owned_property.")]

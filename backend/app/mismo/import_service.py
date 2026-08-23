@@ -47,6 +47,7 @@ from app.models.property import OccupancyType
 from app.models.stated_financials import (
     StatedAsset,
     StatedEmployer,
+    StatedHousingExpense,
     StatedIncomeItem,
     StatedLiability,
     StatedOwnedProperty,
@@ -161,6 +162,11 @@ async def create_loan_file_from_mismo(
         loan_file.amortization_type = loan.amortization_type
         loan_file.amortization_months = loan.amortization_months
         loan_file.application_received_date = loan.application_received_date
+        # LP-627 — four facts the export states that nothing read. Assigned straight through:
+        # None stays None, so an unstated count is never persisted as 0.
+        loan_file.total_mortgaged_properties = loan.total_mortgaged_properties
+        loan_file.rate_set_date = loan.rate_set_date
+        loan_file.seller_paid_closing_costs = loan.seller_paid_closing_costs
 
     # The refinance kind (LP-99) — populate ``refinance_type`` so a cash-out refi automatically
     # gets the STRICTER cash-out LTV limit (the LTV consumes it; previously null → the LTV silently
@@ -201,6 +207,7 @@ async def create_loan_file_from_mismo(
         prop.financed_unit_count = prop_in.financed_unit_count
         prop.in_project = prop_in.in_project  # LP-509-B1 — the decisive condo signal
         prop.is_pud = prop_in.is_pud
+        prop.mixed_usage = prop_in.mixed_usage  # LP-627 — PR-3's eligibility question
 
     # 3) Borrowers + their stated income / employers.
     for index, pb in enumerate(parsed.borrowers):
@@ -234,6 +241,18 @@ async def create_loan_file_from_mismo(
                 )
             )
 
+    # LP-627 — the 1003's proposed housing-expense breakdown. STATED, not verified: it feeds the
+    # unverified-input offer beside the AVM estimate, never the fail-closed gate itself.
+    for expense in parsed.housing_expenses:
+        db.add(
+            StatedHousingExpense(
+                loan_file_id=loan_file.id,
+                expense_type=expense.expense_type,
+                timing=expense.timing,
+                payment_amount=expense.payment_amount,
+            )
+        )
+
     # 4) File-level stated financials (liabilities/assets — deal-level, LP-52).
     for liab in parsed.liabilities:
         db.add(
@@ -243,6 +262,10 @@ async def create_loan_file_from_mismo(
                 monthly_payment=liab.monthly_payment,
                 unpaid_balance=liab.unpaid_balance,
                 holder_name=liab.holder_name,
+                # LP-627 — carried straight through: unlike the payoff pair below, this is a
+                # DESCRIPTION of the payment rather than a determination about it, so a stated false
+                # ("P&I only") is as load-bearing as a true.
+                payment_includes_taxes_insurance=liab.payment_includes_taxes_insurance,
                 # LP-568 — only a TRUE from the export sets the flag. A false or an absent
                 # element leaves it None ("not established"), so the rule that asks the
                 # retained-or-paid-off question still fires instead of being silently answered.

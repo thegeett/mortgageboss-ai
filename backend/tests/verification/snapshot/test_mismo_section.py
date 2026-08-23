@@ -71,6 +71,7 @@ def _build(**kw: object) -> dict[str, object]:
         liabilities=kw.get("liabilities", []),  # type: ignore[arg-type]
         assets=kw.get("assets", []),  # type: ignore[arg-type]
         owned_properties=kw.get("owned_properties", []),  # type: ignore[arg-type]
+        housing_expenses=[],
     )
 
 
@@ -102,6 +103,7 @@ def _full_sample() -> tuple[LoanFile, dict[str, object]]:
         liabilities=liabs,
         assets=assets,
         owned_properties=[],
+        housing_expenses=[],
     )
     return lf, section
 

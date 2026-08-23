@@ -48,7 +48,7 @@ from app.verification.rules.specs import (
 )
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import CalculationEntry, DocumentEntry, Snapshot
-from app.verification.snapshot.tag import Tag
+from app.verification.snapshot.tag import Tag, TagProducedBy
 
 _UNKNOWN = "unknown"
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
@@ -161,6 +161,21 @@ def _result(
         gated_pending_signoff=not spec.reference_values.priya_validated,
         reasoning=reasoning,
         how_to_fix=how_to_fix,
+        # LP-626 — THE ARITHMETIC THAT DECIDED IT, where a gated AI tag is what decided it.
+        #
+        # A calculative rule's `reasoning` is a static template, so IN-10 fired on LF-ABRS reading only
+        # "the income is declining year-over-year — stability/continuance must be reviewed" while the
+        # tag behind it carried "2024 full-year wages were $155,443.80 from FINRA; 2025 wages were
+        # $49,674.77 (partial year, ~4 months based on end date 2025-04-27). Annualizing 2025
+        # (~$149,024) still shows decline". All of that sat in the provenance panel.
+        #
+        # That matters because of how the rule was CALIBRATED: its activation bar accepts false
+        # positives explicitly — "FN (uses declining income at face value -> a bad loan ships) >> FP (a
+        # false decline -> a human glances)". The glance is the remedy, and it cost a panel-open.
+        #
+        # `derivation` rather than `reasoning` deliberately: LP-535 made this the field the composer
+        # cannot paraphrase away, for exactly this auditability reason.
+        derivation=_gated_tag_derivation(spec.deterministic, subject_tags),
         # LP-508 / ADR-377 — a DISTRUSTED-field degradation is confirmed by a human, not auto-asserted.
         # `ships` is metadata with no runtime consumer, so this per-finding flag is the only real
         # ratification mechanism (LP-508 Phase A §5).
@@ -280,6 +295,23 @@ def _subject_facts(
     if entry is None:
         return dict.fromkeys(declared, "not stated")
     return {name: _fact_value(entry, fact) or "not stated" for name, fact in declared.items()}
+
+
+def _gated_tag_derivation(det: DeterministicEval, subject_tags: Mapping[str, Tag]) -> str | None:
+    """The reasoning behind the AI tag this verdict rests on, or None (LP-626).
+
+    ONLY where the rule gates on exactly ONE tag and that tag was produced by the AI with a reasoning.
+    A rule comparing several tags has no single "the reason", and a parsed or derived tag's provenance
+    is the arithmetic already stated in the rule's own template — repeating it would be noise, not
+    auditability.
+    """
+    if len(det.gated_tags) != 1:
+        return None
+    tag = subject_tags.get(det.gated_tags[0])
+    if tag is None or tag.produced_by is not TagProducedBy.AI:
+        return None
+    reasoning = (tag.reasoning or "").strip()
+    return reasoning or None
 
 
 def _fix_for(det: DeterministicEval, entry: DocumentEntry | None) -> str | None:

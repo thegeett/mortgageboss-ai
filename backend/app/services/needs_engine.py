@@ -476,6 +476,88 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     return need
 
 
+#: How far along a need is, for deciding which of two equivalent rows survives a merge. A need that a
+#: document has actually reached beats one still waiting, whatever order they were created in.
+_PROGRESS_RANK: dict[NeedsItemStatus, int] = {
+    NeedsItemStatus.VERIFIED: 5,
+    NeedsItemStatus.RECEIVED: 4,
+    NeedsItemStatus.REJECTED: 3,
+    NeedsItemStatus.REQUESTED: 2,
+    NeedsItemStatus.PENDING: 1,
+    NeedsItemStatus.WAIVED: 0,
+}
+
+
+async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
+    """Repair rows an earlier version of this engine left inconsistent (LP-625). Returns rows touched.
+
+    PREVENTING A DEFECT DOES NOT UNDO IT, and LP-623 shipped two fixes that only bind going forward:
+
+      * `equivalent_need_type` stops the floor minting a second ID need under a new name — but LF-ABRS
+        already carried BOTH, one VERIFIED against the borrower's green card and one REJECTED against
+        their unreadable licence. Two rows, one title, contradictory states, and no amount of
+        re-running fixes it because neither pass creates or removes a need.
+      * `transition_need` now clears `reason` when a need leaves REJECTED — but a need that recovered
+        BEFORE that shipped keeps the sentence describing how it failed, and only re-transitions if a
+        new document arrives. LF-ABRS's RECEIVED W-2 still reads "could not be processed".
+
+    So this is the repair half, run beside the other passes on every verification. Both operations are
+    idempotent and neither invents a need: the merge WAIVES a redundant duplicate rather than deleting
+    it, so the row and its history survive and a processor can see what happened.
+    """
+    needs = (
+        await db.scalars(
+            only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id), NeedsItem)
+        )
+    ).all()
+    touched = 0
+
+    # 1. MERGE EQUIVALENT DUPLICATES. Keyed exactly as `seed_floor_needs` now dedupes, so a pair it
+    #    would no longer create is a pair this collapses.
+    by_key: dict[tuple[str | None, object], list[NeedsItem]] = {}
+    for need in needs:
+        if need.status is NeedsItemStatus.WAIVED or not need.needs_type:
+            continue  # a waived row is already out of the way; an untyped one has no equivalent
+        by_key.setdefault((equivalent_need_type(need.needs_type), need.borrower_id), []).append(
+            need
+        )
+
+    for (needs_type, _borrower), group in by_key.items():
+        if len(group) < 2:
+            continue
+        # The furthest-along row wins; ties break on age, so the outcome does not depend on row order.
+        group.sort(key=lambda n: (_PROGRESS_RANK.get(n.status, 0), -n.created_at.timestamp()))
+        keeper = group[-1]
+        for redundant in group[:-1]:
+            await transition_need(
+                db,
+                need=redundant,
+                to_state=NeedsItemStatus.WAIVED,
+                reason=(
+                    f"Merged into the other '{needs_type}' need on this file, which is "
+                    f"{keeper.status.value}. Both asked for the same document under different names."
+                ),
+            )
+            touched += 1
+            logger.info(
+                "needs_duplicate_merged",
+                loan_file_id=str(loan_file_id),
+                needs_type=needs_type,  # a document type, not PII
+                kept=keeper.status.value,
+            )
+
+    # 2. CLEAR A REASON THAT NO LONGER DESCRIBES THE STATE. `reason` belongs to REJECTED and WAIVED;
+    #    anywhere else it is the residue of a failure the need has since recovered from.
+    for need in needs:
+        if need.reason and need.status not in (NeedsItemStatus.REJECTED, NeedsItemStatus.WAIVED):
+            need.reason = None
+            touched += 1
+
+    if touched:
+        await db.flush()
+    return touched
+
+
 async def rematch_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> list[NeedsItem]:
     """Re-run satisfaction-matching over documents ALREADY on the file (LP-623).
 

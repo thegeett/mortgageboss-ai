@@ -15,6 +15,7 @@ parse MISMO (the importer already did) and touches no other section.
     borrower.<n>.employer.<m>.<field>   e.g. borrower.1.employer.1.name
     borrower.<n>.declaration.<slug>     the 1003 declaration indicators
     liability.<k>.<field>               e.g. liability.3.monthly_payment
+    housing_expense.<h>.<field>         the 1003's proposed PITI breakdown (LP-627)
     asset.<k>.<field>                   e.g. asset.2.value
 
 **Deterministic ordering (the indices).** Indices are 1-based over a deterministic
@@ -60,6 +61,7 @@ from app.models.loan_file import LoanFile
 from app.models.property import Property
 from app.models.stated_financials import (
     StatedAsset,
+    StatedHousingExpense,
     StatedLiability,
     StatedOwnedProperty,
 )
@@ -111,6 +113,7 @@ def build_mismo_section(
     liabilities: list[StatedLiability],
     assets: list[StatedAsset],
     owned_properties: list[StatedOwnedProperty],
+    housing_expenses: list[StatedHousingExpense],
 ) -> dict[str, SnapshotField]:
     """Reshape already-loaded MISMO ORM rows into the flat snapshot ``mismo`` map.
 
@@ -156,6 +159,12 @@ def build_mismo_section(
     # of the 28 stored files; nothing emitted it, so no tag and no rule could see it. Keys here are free
     # strings by design ("so new facts never need a schema change"), so SNAPSHOT_VERSION is unaffected.
     put("loan.application_received_date", loan_file.application_received_date)
+    # LP-627 — four loan facts the export states and `catch_all` swallowed, published so the rules that
+    # want them can stop deriving or abstaining. LP-597 derives the financed-property count from the REO
+    # schedule; CL-1 waits on a rate lock while the export dates when the rate was set.
+    put("loan.total_mortgaged_properties", loan_file.total_mortgaged_properties)
+    put("loan.rate_set_date", loan_file.rate_set_date)
+    put("loan.seller_paid_closing_costs", loan_file.seller_paid_closing_costs)
 
     # --- Property ---------------------------------------------------------
     if property_ is not None:
@@ -177,6 +186,7 @@ def build_mismo_section(
         # condominiums exist). Null → the fact is ABSENT, so the derivation abstains.
         put("property.in_project", property_.in_project)
         put("property.is_pud", property_.is_pud)
+        put("property.mixed_usage", property_.mixed_usage)  # LP-627 — PR-3
 
     # --- Borrowers (deterministic order: position, then id) ---------------
     for n, borrower in enumerate(
@@ -257,6 +267,10 @@ def build_mismo_section(
         put(f"{lkey}.monthly_payment", liability.monthly_payment)
         put(f"{lkey}.unpaid_balance", liability.unpaid_balance)
         put(f"{lkey}.holder_name", liability.holder_name)
+        # LP-627 — whether the stated payment is already a PITIA. DT-6 compares this liability's
+        # payment against a servicer's billed figure, and without this the comparison cannot tell a
+        # real discrepancy from a P&I-vs-PITIA difference of exactly the escrow.
+        put(f"{lkey}.payment_includes_taxes_insurance", liability.payment_includes_taxes_insurance)
         # LP-572 — whether this obligation survives closing (LP-568). Projected so a rule can see
         # that a debt has ALREADY been excluded and stop asking. Deliberately NOT part of the
         # liability subject's identity hash: see `_MISMO_LIABILITY_ID_FIELDS` in enumerators.py —
@@ -268,6 +282,18 @@ def build_mismo_section(
         put(f"{akey}.type", asset.asset_type)
         put(f"{akey}.value", asset.value)
         put(f"{akey}.holder_name", asset.holder_name)
+
+    # --- The proposed housing-expense breakdown (LP-627) -------------------
+    # STATED, not verified. Published so a rule and the DTI's unverified-input offer can SEE what the
+    # application says its taxes and insurance are — LF-ABRS reported property taxes as "missing or
+    # unusable input" while this section stated $541.67 a month.
+    for h, expense in enumerate(
+        sorted(_active(housing_expenses), key=lambda x: str(x.id)), start=1
+    ):
+        hkey = f"housing_expense.{h}"
+        put(f"{hkey}.expense_type", expense.expense_type)
+        put(f"{hkey}.timing", expense.timing)
+        put(f"{hkey}.payment_amount", expense.payment_amount)
 
     # --- The real-estate-owned schedule (LP-596) --------------------------
     # THE POINT OF THE TICKET IS THIS LOOP. The parser has always retained these leaves, but only in
@@ -319,6 +345,7 @@ async def load_mismo_section(db: AsyncSession, loan_file: LoanFile) -> dict[str,
     liabilities = await _by_loan_file(StatedLiability)
     assets = await _by_loan_file(StatedAsset)
     owned_properties = await _by_loan_file(StatedOwnedProperty)
+    housing_expenses = await _by_loan_file(StatedHousingExpense)
     return build_mismo_section(
         loan_file=loan_file,
         borrowers=borrowers,
@@ -326,4 +353,5 @@ async def load_mismo_section(db: AsyncSession, loan_file: LoanFile) -> dict[str,
         liabilities=liabilities,
         assets=assets,
         owned_properties=owned_properties,
+        housing_expenses=housing_expenses,
     )

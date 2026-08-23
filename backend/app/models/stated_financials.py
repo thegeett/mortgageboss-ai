@@ -107,6 +107,12 @@ class StatedLiability(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     monthly_payment: Mapped[Money | None] = mapped_column(nullable=True)
     unpaid_balance: Mapped[Money | None] = mapped_column(nullable=True)
     holder_name: Mapped[str | None] = mapped_column(String(_HOLDER_LEN), nullable=True)
+    # LP-627 — MISMO `LiabilityPaymentIncludesTaxesInsuranceIndicator`. DT-6 compares a mortgage
+    # statement's billed payment against the application's stated payment, and whether the two are the
+    # same KIND of figure decides whether that comparison means anything: a P&I-only stated payment and
+    # a servicer's PITIA differ by the escrow and are not a discrepancy. Tri-state — None is "the export
+    # did not say", which is not the same as False.
+    payment_includes_taxes_insurance: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # LP-568 — will this obligation survive closing? A refinance pays off the mortgage it
     # replaces, and a purchase can pay off a departing residence or a debt cleared to qualify;
@@ -150,6 +156,37 @@ class StatedAsset(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     holder_name: Mapped[str | None] = mapped_column(String(_HOLDER_LEN), nullable=True)
 
     loan_file: Mapped[LoanFile] = relationship(back_populates="stated_assets")
+
+
+class StatedHousingExpense(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """One stated housing expense — the 1003's proposed PITI breakdown (LP-627).
+
+    File-level, like liabilities and the REO schedule: MISMO carries HOUSING_EXPENSES under the LOAN.
+
+    WHY THIS TABLE EXISTS, and it is the third instance of one mechanism. The parser retained these
+    leaves in ``catch_all`` from the start and ``catch_all`` never reaches the snapshot, so LF-ABRS's
+    DTI reported "Property taxes / unknown — missing or unusable input (fail-closed, never assumed $0)"
+    while the application stated RealEstateTax at $541.67 a month. That file's ratio sits at 44.8%
+    against a 45% limit, so the gap between a stated figure and an unusable one is the loan.
+
+    STATED, NOT VERIFIED — the distinction this table exists to preserve. An application's tax figure is
+    not a tax bill, and the fail-closed housing gate is right to refuse it as verification. What it
+    feeds is ``_unverified_housing_inputs``, which offers a processor the figure the file states while
+    keeping it out of the gate.
+
+    ``timing`` separates the two questions MISMO answers here: "Proposed" is THIS loan's payment, and
+    "Present" is what the borrower pays today — which is precisely the input a non-occupant borrower's
+    ratio needs and currently has nowhere to come from (LP-621).
+    """
+
+    __tablename__ = "stated_housing_expenses"
+
+    loan_file_id: Mapped[UUID] = mapped_column(
+        ForeignKey("loan_files.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    expense_type: Mapped[str | None] = mapped_column(String(_CATEGORY_LEN), nullable=True)
+    timing: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payment_amount: Mapped[Money | None] = mapped_column(nullable=True)
 
 
 class StatedOwnedProperty(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):

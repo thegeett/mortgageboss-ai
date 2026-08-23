@@ -106,6 +106,16 @@ class ParsedLoan(BaseModel):
     amortization_type: str | None = None  # Fixed / …
     amortization_months: int | None = None
     application_received_date: date | None = None
+    # LP-627 — four loan-level facts the export states and `catch_all` swallowed, each with a named
+    # consumer that is currently abstaining or deriving what is stated outright.
+    #: ``LOAN_DETAIL/TotalMortgagedPropertiesCount`` — LP-597 DERIVES this from the REO schedule to
+    #: size reserves (B3-4.1-01); the application states it.
+    total_mortgaged_properties: int | None = None
+    #: ``CLOSING_INFORMATION_DETAIL/CurrentRateSetDate`` — when the rate was set. CL-1 is waiting on a
+    #: rate lock and cannot see that the export dates one.
+    rate_set_date: date | None = None
+    #: ``URLA_DETAIL/SellerPaidClosingCostsAmount`` — an interested-party contribution, FR-3's remit.
+    seller_paid_closing_costs: Decimal | None = None
 
 
 class ParsedProperty(BaseModel):
@@ -131,6 +141,27 @@ class ParsedProperty(BaseModel):
     # Tri-state on purpose: None = the export did not state it (abstain), never a default of false.
     in_project: bool | None = None
     is_pud: bool | None = None
+    # LP-627 — ``PROPERTY_DETAIL/PropertyMixedUsageIndicator``. PR-3 asks whether the property type is
+    # eligible for the programme, and mixed use is exactly the case that is programme-specific.
+    mixed_usage: bool | None = None
+
+
+class ParsedHousingExpense(BaseModel):
+    """One stated housing expense for the loan (LP-627) — the 1003's proposed PITI breakdown.
+
+    THE THIRD INSTANCE of the catch_all mechanism, and the one with a dollar consequence. LF-ABRS's
+    DTI reported "Property taxes / unknown — missing or unusable input (fail-closed, never assumed
+    $0)" while the application stated RealEstateTax at $541.67 a month, unread. The ratio sits at 44.8%
+    against a 45% limit, so the difference between a stated figure and an unusable one is the loan.
+
+    STATED, NOT VERIFIED, and that distinction is the whole point of carrying it separately: an
+    application's tax figure is not a tax bill. It feeds `_unverified_housing_inputs`, which exists to
+    offer a processor a figure the file states while refusing to let it satisfy the gate on its own.
+    """
+
+    expense_type: str | None = None  # FirstMortgagePrincipalAndInterest / RealEstateTax / …
+    timing: str | None = None  # Proposed / Present — only Proposed describes THIS loan
+    payment_amount: Decimal | None = None
 
 
 class ParsedLiability(BaseModel):
@@ -146,6 +177,11 @@ class ParsedLiability(BaseModel):
     # note in `_parse_liabilities` on why a `false` is not read as "retained".
     payoff_status: bool | None = None
     exclusion_indicator: bool | None = None
+    # LP-627 — `LiabilityPaymentIncludesTaxesInsuranceIndicator`: does the stated monthly payment
+    # already include taxes and insurance? DT-6 asks EXACTLY this of a mortgage statement — whether the
+    # servicer's figure is the PITIA — and had only the statement's side of the comparison. The
+    # application has stated the other side all along, unread, in `catch_all`.
+    payment_includes_taxes_insurance: bool | None = None
 
 
 class ParsedOwnedProperty(BaseModel):
@@ -208,6 +244,7 @@ class ParsedMismo(BaseModel):
     loan: ParsedLoan | None = None
     property: ParsedProperty | None = None
     liabilities: list[ParsedLiability] = Field(default_factory=list)
+    housing_expenses: list[ParsedHousingExpense] = Field(default_factory=list)
     assets: list[ParsedAsset] = Field(default_factory=list)
     owned_properties: list[ParsedOwnedProperty] = Field(default_factory=list)
     catch_all: list[CatchAllSection] = Field(default_factory=list)

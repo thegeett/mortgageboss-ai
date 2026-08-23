@@ -150,13 +150,16 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         loan_amount=Decimal("1"), note_amount=Decimal("1"), note_rate_percent=Decimal("1"),
         amortization_type="Fixed", amortization_months=360,
         application_received_date=date(2026, 6, 8),  # LP-494 — CO-4's date-keyed reserve floor
+        total_mortgaged_properties=None,
+        rate_set_date=None,
+        seller_paid_closing_costs=None,
     )  # fmt: skip
     prop = ns(
         address_line="a", address_line_2="b", city="c", state="ST", postal_code="00000",
         property_type="SFR", occupancy_type="Primary", estimated_value=Decimal("1"),
         purchase_price=Decimal("1"), valuation_amount=Decimal("1"), attachment_type="Detached",
         construction_method="SiteBuilt", financed_unit_count=1,
-        in_project=False, is_pud=False,  # LP-509-B1
+        in_project=False, is_pud=False, mixed_usage=False,  # LP-509-B1, LP-627
     )  # fmt: skip
     liab = ns(
         id=uuid4(),
@@ -166,6 +169,9 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         unpaid_balance=Decimal("1"),
         holder_name="h",
         paid_off_at_closing=None,  # LP-572 — projected, but not part of the identity hash
+        # LP-627 — populated, not None: `put` omits a NULL, so a None would leave the key out of
+        # the universe this test enumerates and the projection would go unchecked.
+        payment_includes_taxes_insurance=False,
     )
     asset = ns(
         id=uuid4(), is_deleted=False, asset_type="Checking", value=Decimal("1"), holder_name="h"
@@ -194,6 +200,7 @@ def _mismo_field_universe() -> tuple[frozenset[str], frozenset[str]]:
         liabilities=[liab],  # type: ignore[list-item]
         assets=[asset],  # type: ignore[list-item]
         owned_properties=[owned],  # type: ignore[list-item]
+        housing_expenses=[],
     )
     loan_keys, borrower_suffixes = set(), set()
     for key in facts:

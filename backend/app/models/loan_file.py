@@ -175,6 +175,16 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     amortization_type: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     amortization_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
     application_received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # LP-627 — four loan-level facts the MISMO states and `catch_all` swallowed, each with a consumer
+    # that is currently abstaining or deriving what the export says outright. Nullable and tri-state:
+    # None is "not stated", which is never the same as 0 or False.
+    #: TotalMortgagedPropertiesCount — LP-597 derives this from the REO schedule to size reserves.
+    total_mortgaged_properties: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: CurrentRateSetDate — when the rate was set. CL-1 is waiting on a rate lock and could not see
+    #: that the export dates one.
+    rate_set_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: SellerPaidClosingCostsAmount — an interested-party contribution (FR-3).
+    seller_paid_closing_costs: Mapped[Money | None] = mapped_column(nullable=True)
 
     # --- Lifecycle ---------------------------------------------------------
     status: Mapped[LoanFileStatus] = mapped_column(

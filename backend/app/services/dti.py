@@ -42,7 +42,11 @@ from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile
-from app.models.stated_financials import StatedIncomeItem, StatedLiability
+from app.models.stated_financials import (
+    StatedHousingExpense,
+    StatedIncomeItem,
+    StatedLiability,
+)
 from app.schemas.dti import (
     DtiCalculation,
     DtiFindingsStatus,
@@ -274,6 +278,36 @@ def _typed_value(data: dict[str, Any] | None, field: str) -> Decimal | None:
         return None
 
 
+async def _stated_housing_expense(
+    db: AsyncSession, loan_file_id: UUID, expense_type: str
+) -> Decimal | None:
+    """The PROPOSED monthly figure the application states for one housing expense (LP-627).
+
+    "Proposed" only: MISMO's HOUSING_EXPENSES carries both what this loan will cost and what the
+    borrower pays TODAY, and reading the present figure as the proposed one would put the borrower's
+    current rent into the new loan's housing payment.
+
+    Returns None when the export states nothing, which is not the same as zero — the whole reason the
+    housing gate fails closed (LP-375).
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(StatedHousingExpense).where(
+                    StatedHousingExpense.loan_file_id == loan_file_id,
+                    StatedHousingExpense.expense_type == expense_type,
+                    StatedHousingExpense.timing == "Proposed",
+                ),
+                StatedHousingExpense,
+            )
+        )
+    ).all()
+    amounts = [row.payment_amount for row in rows if row.payment_amount is not None]
+    # More than one PROPOSED figure for one expense type is a contradictory export, not a total to
+    # sum: adding them would invent a payment the application never states.
+    return amounts[0] if len(amounts) == 1 else None
+
+
 async def _unverified_housing_inputs(
     db: AsyncSession, loan_file_id: UUID, gated_labels: list[str]
 ) -> tuple[UnverifiedInput, ...]:
@@ -290,15 +324,41 @@ async def _unverified_housing_inputs(
     OVERRIDE — which records the processor's id and a note naming the source, so accepting an
     estimate is a decision on the record rather than an assumption the calculator made quietly.
     """
+    # LP-627 — THE APPLICATION IS A SECOND SOURCE, and it was unread. MISMO states the proposed
+    # housing-expense breakdown; on LF-ABRS that is RealEstateTax $541.67 a month, sitting in
+    # `catch_all` while the card said "missing or unusable input". Offered on the SAME footing as the
+    # AVM estimate — a figure the file states, still not verification, still unable to ungate.
+    #
+    # BOTH are offered when both exist, deliberately: they disagreed on that file ($6,500 stated
+    # against $5,579 estimated), and a processor choosing between two named sources is better served
+    # than one handed a single number with the other hidden.
+    stated = await _stated_housing_expense(db, loan_file_id, "RealEstateTax")
+    offers: list[UnverifiedInput] = []
+    if "Property taxes" in gated_labels and stated is not None and stated > 0:
+        offers.append(
+            UnverifiedInput(
+                field_key=HOUSING_TAXES,
+                label="Property taxes",
+                monthly_amount=stated.quantize(_CENTS, rounding=ROUND_HALF_UP),
+                annual_amount=(stated * 12).quantize(_CENTS, rounding=ROUND_HALF_UP),
+                source_label="the application",
+                sentence=(
+                    f"The application states proposed property taxes of ${stated:,.2f} a month. That "
+                    "is the borrower's own figure, not verification — upload the property tax bill."
+                ),
+            )
+        )
+
     if "Property taxes" not in gated_labels:
-        return ()
+        return tuple(offers)
     annual = _typed_value(
         await _current_extracted_data(db, loan_file_id, "home_value_estimate"),
         "annual_property_taxes",
     )
     if annual is None or annual <= 0:
-        return ()
+        return tuple(offers)
     return (
+        *offers,
         UnverifiedInput(
             field_key=HOUSING_TAXES,
             label="Property taxes",

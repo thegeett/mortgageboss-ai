@@ -35,6 +35,7 @@ from app.mismo.schema import (
     ParsedAsset,
     ParsedBorrower,
     ParsedEmployer,
+    ParsedHousingExpense,
     ParsedIncomeItem,
     ParsedLiability,
     ParsedLoan,
@@ -276,7 +277,15 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
     declarations: dict[str, str] = {}
     decl_detail = party.find(".//m:DECLARATION/m:DECLARATION_DETAIL", NS)
     if decl_detail is not None:
-        for child in decl_detail:
+        # LP-627 — ITERATE DESCENDANTS, not direct children. The ULAD extension nests real declarations
+        # three levels down (DECLARATION_DETAIL/EXTENSION/OTHER/ULAD:DECLARATION_DETAIL_EXTENSION), so
+        # a direct-children loop silently skipped every one of them — including
+        # SpecialBorrowerSellerRelationshipIndicator, the non-arm's-length flag, which then sat in
+        # `catch_all` looking like a loan-level fact it is not. It is PER BORROWER, and on a
+        # two-borrower file that distinction is the whole point.
+        for child in decl_detail.iter():
+            if child is decl_detail or len(child):
+                continue  # containers carry no value of their own
             local = etree.QName(child).localname
             if child.text and child.text.strip():
                 declarations[local] = child.text.strip()
@@ -339,6 +348,19 @@ def _parse_loan(deal: etree._Element, ctx: _Ctx) -> ParsedLoan | None:
             ctx.text(loan, ".//m:REFINANCE/m:RefinanceCashOutAmount")
         ),
         mortgage_type=ctx.text(loan, ".//m:TERMS_OF_LOAN/m:MortgageType"),
+        # LP-627 — four facts the export states and `catch_all` swallowed. Each is read from the
+        # LOAN element it lives under; an absent element stays None, never a guessed zero or false.
+        total_mortgaged_properties=_to_int(
+            ctx.text(loan, ".//m:LOAN_DETAIL/m:TotalMortgagedPropertiesCount")
+        ),
+        rate_set_date=_to_date(
+            ctx.text(
+                loan, ".//m:CLOSING_INFORMATION/m:CLOSING_INFORMATION_DETAIL/m:CurrentRateSetDate"
+            )
+        ),
+        seller_paid_closing_costs=_to_decimal(
+            ctx.text(deal, ".//m:URLA/m:URLA_DETAIL/m:SellerPaidClosingCostsAmount")
+        ),
         lien_priority=ctx.text(loan, ".//m:TERMS_OF_LOAN/m:LienPriorityType"),
         amortization_type=ctx.text(
             loan, ".//m:AMORTIZATION/m:AMORTIZATION_RULE/m:AmortizationType"
@@ -374,10 +396,36 @@ def _parse_property(deal: etree._Element, ctx: _Ctx) -> ParsedProperty | None:
         # LP-509-B1 — the project indicators (see ParsedProperty). Absent element → None → abstain.
         in_project=_to_bool(ctx.text(prop, ".//m:PropertyInProjectIndicator")),
         is_pud=_to_bool(ctx.text(prop, ".//m:PUDIndicator")),
+        # LP-627 — PR-3 asks whether the property type is eligible; mixed use is programme-specific.
+        mixed_usage=_to_bool(ctx.text(prop, ".//m:PropertyMixedUsageIndicator")),
     )
     if parsed.estimated_value is None:
         ctx.warnings.append("Subject property is missing an estimated value.")
     return parsed
+
+
+def _parse_housing_expenses(deal: etree._Element, ctx: _Ctx) -> list[ParsedHousingExpense]:
+    """The 1003's PROPOSED housing-expense breakdown (LP-627).
+
+    Every leaf here fell to `catch_all`, so LF-ABRS's DTI reported property taxes as "missing or
+    unusable input (fail-closed, never assumed $0)" while the application stated $541.67 a month.
+
+    Both timings are kept. "Proposed" describes THIS loan and is what a DTI reads; "Present" is the
+    borrower's current housing cost, which is a different question and is exactly what a non-occupant
+    borrower's ratio needs (LP-621). Filtering here would throw away the second answer to save a field.
+    """
+    out: list[ParsedHousingExpense] = []
+    for expense in deal.findall(".//m:HOUSING_EXPENSES/m:HOUSING_EXPENSE", NS):
+        parsed = ParsedHousingExpense(
+            expense_type=ctx.text(expense, "m:HousingExpenseType"),
+            timing=ctx.text(expense, "m:HousingExpenseTimingType"),
+            payment_amount=_to_decimal(ctx.text(expense, "m:HousingExpensePaymentAmount")),
+        )
+        # A row with no type AND no amount states nothing; keeping it would put an empty line in a
+        # breakdown a processor reads as complete.
+        if parsed.expense_type or parsed.payment_amount is not None:
+            out.append(parsed)
+    return out
 
 
 def _parse_liabilities(deal: etree._Element, ctx: _Ctx) -> list[ParsedLiability]:
@@ -404,6 +452,14 @@ def _parse_liabilities(deal: etree._Element, ctx: _Ctx) -> list[ParsedLiability]
                 ),
                 exclusion_indicator=_to_bool(
                     ctx.text(liab, ".//m:LIABILITY_DETAIL/m:LiabilityExclusionIndicator")
+                ),
+                # LP-627 — the application's own answer to whether this payment is already a PITIA.
+                # Tri-state for the same reason as the two above: None means the export did not say.
+                payment_includes_taxes_insurance=_to_bool(
+                    ctx.text(
+                        liab,
+                        ".//m:LIABILITY_DETAIL/m:LiabilityPaymentIncludesTaxesInsuranceIndicator",
+                    )
                 ),
             )
         )
@@ -568,6 +624,7 @@ def parse_mismo(content: bytes | str) -> ParsedMismo:
     loan = _parse_loan(deal, ctx)
     prop = _parse_property(deal, ctx)
     liabilities = _parse_liabilities(deal, ctx)
+    housing_expenses = _parse_housing_expenses(deal, ctx)
     assets = _parse_assets(deal, ctx)
     owned_properties = _parse_owned_properties(deal, ctx)
     catch_all = _parse_catch_all(deal, tree, ctx.consumed)
@@ -589,6 +646,7 @@ def parse_mismo(content: bytes | str) -> ParsedMismo:
         loan=loan,
         property=prop,
         liabilities=liabilities,
+        housing_expenses=housing_expenses,
         assets=assets,
         owned_properties=owned_properties,
         catch_all=catch_all,

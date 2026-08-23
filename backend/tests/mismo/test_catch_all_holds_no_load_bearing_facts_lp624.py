@@ -49,14 +49,7 @@ _LOAD_BEARING = ("Indicator", "Date", "StatusType", "ClassificationType", "Amoun
 _KNOWN_STRANDED: frozenset[str] = frozenset(
     {
         # --- Wanted by a rule that currently cannot answer -------------------------------------- #
-        "LiabilityPaymentIncludesTaxesInsuranceIndicator",  # DT-6 asks exactly this of a statement
-        "TotalMortgagedPropertiesCount",  # LP-597 DERIVES this from the REO schedule; it is stated
-        "SellerPaidClosingCostsAmount",  # FR-3 (interested-party contributions)
         "ClosingAdjustmentItemAmount",  # FR-3
-        "SpecialBorrowerSellerRelationshipIndicator",  # non-arm's-length; the FR family
-        "CurrentRateSetDate",  # CL-1, which is waiting on a rate lock
-        "PropertyMixedUsageIndicator",  # PR-3 (property eligibility)
-        "HousingExpensePaymentAmount",  # the DTI housing side
         # --- Loan features (QM / ATR shape; DT-7's remit) ---------------------------------------- #
         "BalloonIndicator",
         "InterestOnlyIndicator",

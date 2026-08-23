@@ -107,3 +107,35 @@ async def test_only_a_true_indicator_sets_the_stored_flag(db_session) -> None:
     assert flagged[0].payoff_source == "mismo_payoff"  # LP-569: WHICH indicator fired
     # The other nine carried `false` — they must be NULL, not False.
     assert all(r.paid_off_at_closing is None for r in rows if r not in flagged)
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-627 — is the stated payment already a PITIA?
+# --------------------------------------------------------------------------------------------- #
+def test_the_payment_includes_taxes_insurance_indicator_is_read() -> None:
+    """DT-6 compares a mortgage statement's BILLED payment against the application's STATED payment.
+    Whether the two are the same KIND of figure decides whether the comparison means anything: a
+    P&I-only stated payment and a servicer's PITIA differ by exactly the escrow, which is not a
+    discrepancy. The application has stated this all along, in `catch_all`, unread."""
+    import pathlib
+
+    from app.mismo.parser import parse_mismo
+
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/mismo/MISMO16940192.xml"
+    parsed = parse_mismo(fixture.read_bytes())
+
+    stated = [liab.payment_includes_taxes_insurance for liab in parsed.liabilities]
+    assert stated, "the fixture states liabilities"
+    assert any(value is not None for value in stated), (
+        "the indicator is on every LIABILITY_DETAIL in the fixture — reading none of them means the "
+        "XPath is wrong and the field is silently back in catch_all"
+    )
+
+
+def test_an_absent_pitia_indicator_is_none_not_false() -> None:
+    """Tri-state, like the payoff pair beside it. None is "the export did not say", and reading it as
+    False would assert the payment is P&I-only — turning an unstated fact into a claim that changes
+    what a DTI comparison means."""
+    from app.mismo.schema import ParsedLiability
+
+    assert ParsedLiability().payment_includes_taxes_insurance is None
