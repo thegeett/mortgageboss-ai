@@ -951,6 +951,25 @@ def _id_address_role(
     if address is None or str(address.value) == _UNKNOWN:
         return "current_residence", "the document states a residence but no readable address"
 
+    mine = str(address.value)
+    # bug-001 — THE COLLATERAL IS NOT A HOME, and this runs HERE, before the date and borrower-link
+    # guards, because it depends on neither. Placing it after them was a real bug with a visible
+    # cost: a mortgage statement carries no field in `_ADDRESS_AS_OF_FIELDS`, so it returned
+    # `current_residence` at the date guard and never reached this check — while the insurance
+    # binder, which does carry `document_issue_date`, was correctly excluded. Two documents naming
+    # the same investment property, one excluded and one not, and ID-4 went on comparing the
+    # collateral against the borrower's home.
+    #
+    # An investment property was never the borrower's residence. That is not a question about WHEN,
+    # or about whose document it is.
+    if (subject := _subject_property_when_not_occupied(snapshot)) is not None and _addresses_agree(
+        subject, mine
+    ):
+        return "not_residence", (
+            "this is the subject property's address, and the application declares the property an "
+            "investment — the borrower does not live there"
+        )
+
     this_year = snapshot.created_at.year
     my_year = _address_as_of_year(subject_raw, not_after=this_year)
     if my_year is None:
@@ -1011,17 +1030,6 @@ def _id_address_role(
             continue
         siblings.append((other_year, str(other_address.value)))
 
-    mine = str(address.value)
-    # bug-001 — THE COLLATERAL IS NOT A HOME. Checked before the date comparison because it is not a
-    # question about time: an investment property's address was never the borrower's residence, so
-    # there is nothing for a later document to supersede.
-    if (subject := _subject_property_when_not_occupied(snapshot)) is not None and _addresses_agree(
-        subject, mine
-    ):
-        return "not_residence", (
-            "this is the subject property's address, and the application declares the property an "
-            "investment — the borrower does not live there"
-        )
     # The newest document stating THIS address — this one, or a later one that agrees with it.
     latest_mine = max([my_year] + [year for year, addr in siblings if _addresses_agree(addr, mine)])
     after = [addr for year, addr in siblings if year > latest_mine]

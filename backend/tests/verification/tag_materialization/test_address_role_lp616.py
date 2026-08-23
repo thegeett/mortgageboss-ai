@@ -486,3 +486,58 @@ def test_only_the_subject_propertys_own_address_is_excluded() -> None:
     )
 
     assert _role(snap, "stub") == "current_residence"
+
+
+def test_an_undated_document_naming_the_investment_property_is_still_excluded() -> None:
+    """bug-001 — the placement bug, pinned.
+
+    The check ran AFTER the date guard, and a mortgage statement carries no field in
+    `_ADDRESS_AS_OF_FIELDS` — so it returned `current_residence` there and never reached the
+    investment check, while the insurance binder (which has `document_issue_date`) was correctly
+    excluded. Two documents naming the same investment property, one excluded and one not.
+
+    An investment property was never the borrower's residence. That is not a question about WHEN."""
+    snap = _with_property(
+        _snap(
+            [
+                # No date field at all — exactly the mortgage statement's shape.
+                (_doc("stmt", "mortgage_statement"), _SUBJECT, "residence"),
+                (
+                    _doc("stub", "pay_stub", date_field=("pay_date", "2026-08-02")),
+                    _HOME,
+                    "residence",
+                ),
+            ]
+        ),
+        "investment",
+    )
+
+    assert _role(snap, "stmt") == "not_residence"
+
+
+def test_a_zip_plus_four_does_not_hide_the_collateral() -> None:
+    """The real pair: the MISMO carries 34120-3361 (hyphenated by bug-001's own migration) and the
+    mortgage statement prints the 5-digit form. Same property."""
+    snap = _with_property(
+        _snap(
+            [
+                (
+                    _doc("stmt", "mortgage_statement"),
+                    "220 39th Avenue Northwest, Naples, FL 34120",
+                    "residence",
+                )
+            ]
+        ),
+        "investment",
+    )
+
+    assert _role(snap, "stmt") == "not_residence"
+
+
+def test_an_unlinked_document_naming_the_investment_property_is_still_excluded() -> None:
+    """The other guard it used to sit behind. Whose document it is does not change whether the
+    address is a home."""
+    entry = _doc("stmt", "mortgage_statement", borrower=None)
+    snap = _with_property(_snap([(entry, _SUBJECT, "residence")]), "investment")
+
+    assert _role(snap, "stmt") == "not_residence"
