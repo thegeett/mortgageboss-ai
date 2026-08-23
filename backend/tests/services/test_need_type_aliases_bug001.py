@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from app.ai.extraction import EXTRACTORS
 from app.services.needs_engine import (
+    _NEED_ALTERNATIVES,
     _NEED_TYPE_ALIASES,
     _SIMPLE_PRESENCE_NEEDS_TYPES,
     _UMBRELLA_NEED_CATEGORY,
@@ -30,6 +31,10 @@ def test_every_simple_presence_need_can_actually_be_satisfied() -> None:
         if need not in EXTRACTORS
         and need not in _UMBRELLA_NEED_CATEGORY
         and need not in _NEED_TYPE_ALIASES
+        # LP-623 — the fourth way a need can be satisfiable: a named set of ALTERNATIVES, any one of
+        # which answers it. `government_id` is not a document type and never will be; a passport, a
+        # licence, a military ID or a green card each provide it.
+        and need not in _NEED_ALTERNATIVES
     )
     assert not unsatisfiable, (
         "These need types match no document type, no umbrella category and no alias, so uploading "
@@ -138,3 +143,31 @@ async def test_an_unreadable_scan_still_rejects_rather_than_verifies(db_session)
 
     matched = await apply_document_to_needs(db_session, doc)
     assert matched is not None and matched.status is NeedsItemStatus.REJECTED
+
+
+# --------------------------------------------------------------------------- #
+# LP-623 — alternatives
+# --------------------------------------------------------------------------- #
+def test_every_alternative_is_a_real_document_type() -> None:
+    """An alternative that is itself a typo can never be uploaded, which is bug-001's defect wearing a
+    new hat.
+
+    Checked against the CATALOG rather than EXTRACTORS, and the difference matters: 42 of the 163
+    catalog types have no extractor, and `EXTRACTORS.get(document.document_type)` is looked up AFTER
+    classification — so a document CAN be classified `military_id` and simply take the generic
+    extraction path. Requiring an extractor here would drop a veteran's military ID from the documents
+    that answer "Government ID" for no reason that has anything to do with identity."""
+    from app.documents.catalog import CATALOG
+
+    for need_type, documents in _NEED_ALTERNATIVES.items():
+        unknown = sorted(d for d in documents if d not in CATALOG)
+        assert not unknown, f"{need_type} accepts {unknown}, which are not document types"
+
+
+def test_a_government_id_is_not_satisfied_by_any_borrower_info_document() -> None:
+    """The mechanism that already existed — an umbrella CATEGORY — is wrong for identity: BORROWER_INFO
+    also holds divorce decrees, marriage certificates, trust agreements and eight kinds of letter of
+    explanation. Named alternatives are what keep a divorce decree from clearing an ID requirement."""
+    assert "government_id" not in _UMBRELLA_NEED_CATEGORY
+    for not_an_id in ("divorce_decree", "marriage_certificate", "letter_of_explanation"):
+        assert not_an_id not in _NEED_ALTERNATIVES["government_id"]

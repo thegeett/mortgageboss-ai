@@ -343,9 +343,9 @@ async def test_floor_from_stated_employment_and_purchase(db_session: AsyncSessio
 
     created = await seed_floor_needs(db_session, lf)
     types = {n.needs_type for n in created}
-    # universal → drivers_license (per borrower); employment income → pay_stub + w2;
+    # universal → government_id (per borrower, LP-623); employment income → pay_stub + w2;
     # purchase → purchase_agreement; assets → bank_statement
-    assert types == {"drivers_license", "pay_stub", "w2", "purchase_agreement", "bank_statement"}
+    assert types == {"government_id", "pay_stub", "w2", "purchase_agreement", "bank_statement"}
     assert all(n.origin is NeedsItemOrigin.FLOOR for n in created)
     assert all(n.disposition is NeedsItemDisposition.CONFIRMED for n in created)  # near-certain
 
@@ -404,7 +404,7 @@ async def test_floor_seeds_a_government_id_per_borrower(db_session: AsyncSession
     await db_session.flush()
 
     created = await seed_floor_needs(db_session, lf)
-    ids = [n for n in created if n.needs_type == "drivers_license"]
+    ids = [n for n in created if n.needs_type == "government_id"]
     # One ID per borrower (2 borrowers → 2 distinct ID needs), each a FLOOR need.
     assert len(ids) == 2
     assert all(n.origin is NeedsItemOrigin.FLOOR for n in ids)
@@ -419,7 +419,7 @@ async def test_floor_seeds_one_id_for_a_single_borrower(db_session: AsyncSession
     await db_session.flush()
 
     created = await seed_floor_needs(db_session, lf)
-    ids = [n for n in created if n.needs_type == "drivers_license"]
+    ids = [n for n in created if n.needs_type == "government_id"]
     assert len(ids) == 1  # single borrower → one ID
     assert ids[0].category is DocumentCategory.BORROWER_INFO
 
@@ -431,7 +431,7 @@ async def test_id_floor_need_is_deterministic_no_ai(db_session: AsyncSession) ->
     await db_session.flush()
 
     created = await seed_floor_needs(db_session, lf)  # deterministic; no AI call
-    assert any(n.needs_type == "drivers_license" for n in created)
+    assert any(n.needs_type == "government_id" for n in created)
 
 
 async def test_id_floor_need_no_duplicates_on_reseed(db_session: AsyncSession) -> None:
@@ -440,7 +440,7 @@ async def test_id_floor_need_no_duplicates_on_reseed(db_session: AsyncSession) -
     await db_session.flush()
 
     first = await seed_floor_needs(db_session, lf)
-    assert sum(n.needs_type == "drivers_license" for n in first) == 1
+    assert sum(n.needs_type == "government_id" for n in first) == 1
     second = await seed_floor_needs(db_session, lf)
     assert second == []  # already seeded — no duplicate ID
 

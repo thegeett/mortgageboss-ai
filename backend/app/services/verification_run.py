@@ -41,6 +41,8 @@ from app.models.finding import Finding, FindingCategory
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
+from app.services.needs_engine import rematch_needs_for_file, seed_floor_needs
+from app.services.needs_from_findings import seed_needs_from_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
 from app.services.snapshot_findings import Reasoner as SnapshotFindingsReasoner
 from app.services.tag_correlation import (
@@ -766,6 +768,38 @@ async def run_verification(
             )
         except Exception as exc:
             logger.warning("finding_prose_pass_failed", error=type(exc).__name__)
+
+    # LP-623 — THE NEED LIST LEARNS WHAT THE RULES FOUND.
+    #
+    # Two passes, both best-effort and both idempotent, for the same reason the composer above is: they
+    # touch the needs list and nothing the verdicts rest on, so a failure here leaves a fully correct
+    # run. Deliberately AFTER persistence, so they read findings that are committed rather than
+    # in-flight.
+    #
+    #   * floor — re-derive the deterministic floor. It was seeded once at MISMO import and never
+    #     again, so a borrower added later never got a Government ID and a purpose corrected to
+    #     refinance never gained its payoff statement.
+    #   * re-match — replay satisfaction-matching over documents already on file. Matching only ever
+    #     fired on arrival, so every change to WHAT MATCHES skipped everything already there: LF-ABRS
+    #     sat with `existing_mortgage_statement` PENDING beside its mortgage statement because
+    #     bug-001's alias shipped after the upload.
+    #   * seed — put the documents the RULES are waiting on onto the list. That file's needs list named
+    #     no appraisal, title commitment, credit report, rate lock or Closing Disclosure while ten
+    #     findings said each was absent.
+    #
+    # Seeding runs SECOND so it dedupes against needs the re-match just satisfied.
+    try:
+        loan_file_row = await db.get(LoanFile, loan_file_id)
+        if loan_file_row is not None:
+            # Floor FIRST: it is the only pass that reflects a change to the file's own stated
+            # data (a borrower added, a purpose corrected, income or assets entered after import),
+            # and it was one-shot at MISMO import until LP-623 made it re-derivable per need.
+            await seed_floor_needs(db, loan_file_row)
+            await rematch_needs_for_file(db, loan_file_id)
+            await seed_needs_from_findings(db, loan_file_row)
+    except Exception as exc:
+        logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
+        degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))
 
     # Reproducibility: persist the frozen snapshot (best-effort — a persistence hiccup degrades, it
     # does not fail the run). Idempotent by run_id.

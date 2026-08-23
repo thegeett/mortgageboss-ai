@@ -123,13 +123,16 @@ async def test_floor_fires_employment_and_asset_rules_on_import(db_session: Asyn
     assert "w2" in floor  # employment income → W-2
     assert "bank_statement" in floor  # stated assets → bank statements
     assert "purchase_agreement" in floor  # the purchase rule still fires
-    assert "drivers_license" in floor  # universal: a Government ID for the borrower (LP-71.6)
+    # LP-623 — `government_id`, not `drivers_license`. The title always read "Government ID" while the
+    # type named one of the documents that provide it, so a borrower holding a passport or a green card
+    # had an unsatisfiable need.
+    assert "government_id" in floor  # universal: a Government ID for the borrower (LP-71.6)
     assert set(floor) == {
         "pay_stub",
         "w2",
         "bank_statement",
         "purchase_agreement",
-        "drivers_license",
+        "government_id",
     }
 
 

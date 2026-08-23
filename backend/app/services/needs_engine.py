@@ -28,10 +28,11 @@ from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import get_redis_client
+from app.documents.catalog import CATALOG
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document, DocumentCategory, DocumentStatus
@@ -168,7 +169,28 @@ async def record_need_correction(
 # --------------------------------------------------------------------------- #
 
 # A need awaiting a document is in one of these (the orthogonal REQUESTED counts).
-_OPEN_STATES = (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
+#
+# LP-623 — REJECTED IS OPEN. It was not, and that stranded a need beside the document that satisfies
+# it: LF-ABRS carried two W-2s, one COMPLETED and one NEEDS_REVIEW, and whichever was processed first
+# claimed the need. The bad one landed on it, the need went REJECTED, and the good W-2 that followed
+# matched nothing — so the list reported "did not pass processing" next to a perfectly usable
+# document, and a processor would re-ask the borrower for what they already had.
+#
+# `_VALID_TRANSITIONS` has always permitted REJECTED -> RECEIVED ("a rejected need can re-receive").
+# Only the matcher's own query disagreed.
+_OPEN_STATES = (
+    NeedsItemStatus.PENDING,
+    NeedsItemStatus.REQUESTED,
+    NeedsItemStatus.REJECTED,
+)
+
+# Preference when several needs of one type are open: an UNFILLED need before one a bad document
+# already landed on. Without this the plain `created_at` ordering could hand a good document to the
+# rejected need and leave a pending one still waiting.
+_MATCH_PRIORITY = case(
+    (NeedsItem.status == NeedsItemStatus.REJECTED, 1),
+    else_=0,
+)
 
 # HONEST SATISFACTION (LP-108). The matcher can only verify "a document of the right kind is
 # present" — NOT that a graded requirement (N accounts / M months / M years) is fully met. So a
@@ -184,6 +206,7 @@ _OPEN_STATES = (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
 _SIMPLE_PRESENCE_NEEDS_TYPES: frozenset[str] = frozenset(
     {
         "drivers_license",
+        "government_id",  # LP-623 — one ID is the whole requirement, whichever kind it is
         "purchase_agreement",
         "gift_letter",
         "letter_of_explanation",
@@ -205,6 +228,36 @@ _UMBRELLA_NEED_CATEGORY: dict[str, DocumentCategory] = {
     "income_document": DocumentCategory.INCOME_EMPLOYMENT,
 }
 
+# LP-623 — A NEED ANY ONE OF SEVERAL DOCUMENTS SATISFIES.
+#
+# "Government ID" is not a driver's licence. LF-ABRS's borrower holds a PERMANENT RESIDENT CARD — an
+# unexpired government-issued photo ID — and the need, typed `drivers_license` because that is the one
+# slug the floor happened to name, sat REJECTED beside it. The processor is told to chase an ID that
+# is already in the file.
+#
+# NOT AN UMBRELLA CATEGORY, which is the mechanism that already existed and is wrong here: the
+# BORROWER_INFO category also holds divorce decrees, marriage certificates, trust agreements and eight
+# kinds of letter of explanation, any of which would then "satisfy" an identity requirement. These are
+# named ALTERNATIVES — the same shape a rule spec's `requires_documents` group uses, and deliberately
+# the same membership as ID-5's, which asks the identity question on the rules side.
+_GOVERNMENT_ID_DOCUMENTS = frozenset(
+    {
+        "drivers_license",
+        "passport",
+        "government_issued_id",
+        "military_id",
+        "permanent_resident_card",
+    }
+)
+
+_NEED_ALTERNATIVES: dict[str, frozenset[str]] = {
+    "government_id": _GOVERNMENT_ID_DOCUMENTS,
+    # The PRE-LP-623 name for the same need. Every ID need already raised is stored under it, and a
+    # stored row cannot be renamed retroactively without touching live files — so the old name keeps
+    # working and accepts the same alternatives. New needs are minted as `government_id`.
+    "drivers_license": _GOVERNMENT_ID_DOCUMENTS,
+}
+
 
 # bug-001 — NEED TYPES THAT NAME A DOCUMENT NOBODY CAN UPLOAD.
 #
@@ -223,6 +276,32 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
     "existing_mortgage_statement": "mortgage_statement",
     "verification_of_employment": "voe",
 }
+
+
+def canonical_need_type(proposed: str | None) -> str | None:
+    """A proposed need type resolved to a CATALOGED document type, or None (LP-623).
+
+    Lives HERE, beside ``_NEED_TYPE_ALIASES``, because it is the same question the matcher asks and
+    must not be answered twice: a type the catalog does not carry can never match a document, and a
+    near-miss the matcher already forgives (``verification_of_employment`` -> ``voe``) should be
+    STORED under the name the documents use rather than forgiven again on every read.
+
+    Returns None for an unknown type — never a guess. The caller decides what to do with a need the
+    matcher cannot reach; dropping it would lose a real ask.
+    """
+    if not proposed:
+        return None
+    slug = proposed.strip().lower()
+    if slug in CATALOG:
+        return slug
+    aliased = _NEED_TYPE_ALIASES.get(slug)
+    return aliased if aliased is not None and aliased in CATALOG else None
+
+
+def category_for_need_type(needs_type: str | None) -> DocumentCategory | None:
+    """The catalog's category for a need type — None when unknown, never a guess (LP-623)."""
+    entry = CATALOG.get(needs_type or "")
+    return entry[1] if entry is not None else None
 
 
 def is_simple_presence_need(need: NeedsItem) -> bool:
@@ -251,12 +330,17 @@ def documents_matching_need(need: NeedsItem, documents: list[Document]) -> list[
     """
     needs_type = need.needs_type or ""
     umbrella_category = _UMBRELLA_NEED_CATEGORY.get(needs_type)
+    # LP-623 — the matcher accepts alternatives, so the display must show them. A card listing the
+    # documents that satisfy a need while the matcher counts a different set is the same defect in
+    # reverse: the processor sees nothing and re-requests what is already there.
+    alternatives = _NEED_ALTERNATIVES.get(needs_type, frozenset())
     return [
         d
         for d in documents
         if d.status is DocumentStatus.COMPLETED
         and (
             d.document_type == needs_type
+            or d.document_type in alternatives
             or (umbrella_category is not None and d.category is umbrella_category)
         )
     ]
@@ -280,14 +364,19 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
     umbrella_types = [t for t, c in _UMBRELLA_NEED_CATEGORY.items() if c == document.category]
     # bug-001 — a need whose type names this document under another name (see _NEED_TYPE_ALIASES).
     aliased = [n for n, d in _NEED_TYPE_ALIASES.items() if d == document.document_type]
+    # LP-623 — a need this document is one of the accepted ALTERNATIVES for (a passport or a green
+    # card answering "Government ID"), which no equality, umbrella or alias could express.
+    alternatives = [n for n, types in _NEED_ALTERNATIVES.items() if document.document_type in types]
     stmt = (
         select(NeedsItem)
         .where(
             NeedsItem.loan_file_id == document.loan_file_id,
-            NeedsItem.needs_type.in_([document.document_type, *umbrella_types, *aliased]),
+            NeedsItem.needs_type.in_(
+                [document.document_type, *umbrella_types, *aliased, *alternatives]
+            ),
             NeedsItem.status.in_(_OPEN_STATES),
         )
-        .order_by(NeedsItem.created_at)
+        .order_by(_MATCH_PRIORITY, NeedsItem.created_at)
         .limit(1)
     )
     need = await db.scalar(only_active(stmt, NeedsItem))
@@ -301,7 +390,15 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
             db,
             need=need,
             to_state=NeedsItemStatus.REJECTED,
-            reason=f"A document arrived but did not pass processing ({document.status.value}).",
+            # LP-623 — THE DOCUMENT IS IN THE FILE. "Rejected" reads as "the borrower sent the wrong
+            # thing", and the errand it implies (ask again) is the wrong one: what is needed is a
+            # legible copy of a document already here. The state name is a stored enum and is left
+            # alone; the sentence a processor actually reads is not.
+            reason=(
+                f"A {document.document_type or 'document'} is in the file but could not be "
+                f"processed ({document.status.value}) — obtain a clean, legible copy rather than "
+                "re-requesting it."
+            ),
         )
     elif is_simple_presence_need(need):
         # SIMPLE-PRESENCE (LP-108): one document IS the requirement → the match is the verification.
@@ -318,6 +415,47 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
         new_status=need.status,
     )
     return need
+
+
+async def rematch_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> list[NeedsItem]:
+    """Re-run satisfaction-matching over documents ALREADY on the file (LP-623).
+
+    :func:`apply_document_to_needs` fires once, when a document is processed. Nothing ever
+    re-evaluates, so every change to WHAT MATCHES silently skips the documents already there — and
+    that is not hypothetical. bug-001 added ``existing_mortgage_statement -> mortgage_statement`` to
+    ``_NEED_TYPE_ALIASES``; LF-ABRS's mortgage statement had arrived before it shipped, so the need
+    sat PENDING beside the document that answers it, and would have forever.
+
+    Same matcher, same guards, replayed: this calls ``apply_document_to_needs`` per document rather
+    than reimplementing the rules, so an alias, an umbrella type or a state change is picked up here
+    by construction. Oldest document first, so the ordering matches a fresh file's arrival order.
+
+    IDEMPOTENT. A document whose need is already satisfied finds nothing open and is a no-op, so
+    running this on every verification costs a query and changes nothing when nothing is stale.
+    """
+    documents = (
+        await db.scalars(
+            only_active(
+                select(Document)
+                .where(Document.loan_file_id == loan_file_id)
+                .order_by(Document.created_at),
+                Document,
+            )
+        )
+    ).all()
+    advanced: list[NeedsItem] = []
+    for document in documents:
+        need = await apply_document_to_needs(db, document)
+        if need is not None:
+            advanced.append(need)
+    if advanced:
+        logger.info(
+            "needs_rematched",
+            loan_file_id=str(loan_file_id),
+            advanced=len(advanced),
+            documents=len(documents),
+        )
+    return advanced
 
 
 async def confirm_need_coverage(db: AsyncSession, *, need: NeedsItem) -> NeedsItem:
@@ -397,7 +535,10 @@ async def _active_borrowers(db: AsyncSession, loan_file_id: UUID) -> list[Borrow
 #   * a PER-FILE universal need (one per file) → add to ``_PER_FILE_UNIVERSAL``
 # (e.g. a credit authorization or certain initial disclosures, pending Priya's input).
 _PER_BORROWER_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = [
-    ("drivers_license", "Government ID", DocumentCategory.BORROWER_INFO),
+    # LP-623 — `government_id`, not `drivers_license`. The title always said "Government ID"; the type
+    # named one of the documents that provide it, so a borrower holding a passport or a green card had
+    # an unsatisfiable need. See `_NEED_ALTERNATIVES`.
+    ("government_id", "Government ID", DocumentCategory.BORROWER_INFO),
 ]
 _PER_FILE_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = []
 
@@ -413,10 +554,28 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
     reasoning — precisely because they're not distinctive: the AI surfaces what's
     *special* about a file, so it may under-propose an obvious always-true need.
 
-    Idempotent: if the file already has floor needs, this is a no-op (re-importing a
-    MISMO file won't duplicate). The floor is intentionally thin — the bulk of the
-    intelligence is LP-69's AI reasoning, which augments this baseline. Floor needs
-    are ``origin=FLOOR`` and ``disposition=CONFIRMED`` (near-certain). Uses ``flush``.
+    RE-DERIVABLE, PER NEED (LP-623). This was one-shot: the guard asked "does this file have ANY
+    floor need" and bailed, so the deterministic half of the list froze at MISMO import and never
+    moved again. A borrower added afterwards never got a Government ID (the per-borrower loop only
+    ever saw the borrowers who existed at import); a loan purpose corrected from purchase to
+    refinance never gained its mortgage statement and payoff statement; income or assets added later
+    never raised pay stubs, W-2s or bank statements. The AI half re-reasons on every document
+    arrival, but it is asked what is DISTINCTIVE about a file and so is the least likely thing to
+    propose a government ID for a borrower who turned up late.
+
+    Idempotence now lives per NEED rather than per file: a need is skipped when the file already
+    carries one of that type — for a per-borrower universal, of that type FOR THAT BORROWER. Matched
+    against every need in ANY status and ANY origin, so a floor pass can neither duplicate what the
+    AI or a finding already raised, nor resurrect one a processor waived or dismissed.
+
+    ADDS ONLY. A need whose reason has since gone away (the purchase agreement on a file corrected to
+    a refinance) is NOT removed here — a processor may have already requested or received it, and
+    deleting their work under them is worse than a stale line. Surfacing "the reason for this is
+    gone" is the follow-up.
+
+    The floor is intentionally thin — the bulk of the intelligence is LP-69's AI reasoning, which
+    augments this baseline. Floor needs are ``origin=FLOOR`` and ``disposition=CONFIRMED``
+    (near-certain). Uses ``flush``.
 
     Flushes FIRST so the stated-data rules see the caller's just-added rows: the
     session runs ``autoflush=False`` (ADR), so ``StatedIncomeItem`` / ``StatedAsset``
@@ -427,19 +586,15 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
     fires (LP-71.5).
     """
     await db.flush()
-    existing = await db.scalar(
-        only_active(
-            select(NeedsItem.id)
-            .where(
-                NeedsItem.loan_file_id == loan_file.id,
-                NeedsItem.origin == NeedsItemOrigin.FLOOR,
-            )
-            .limit(1),
-            NeedsItem,
+    # Every need already on the file, keyed for the two idempotence questions this function asks:
+    # "does this borrower already have one" and "does the file already have one".
+    existing_needs = (
+        await db.scalars(
+            only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id), NeedsItem)
         )
-    )
-    if existing is not None:
-        return []  # already seeded
+    ).all()
+    existing_keys = {(n.needs_type, n.borrower_id) for n in existing_needs if n.needs_type}
+    existing_types = {needs_type for needs_type, _borrower in existing_keys}
 
     created: list[NeedsItem] = []
 
@@ -451,6 +606,12 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
         # Identify which borrower each ID is for (name in the title + the borrower link).
         name = borrower.full_name.strip() or f"Borrower {borrower.borrower_position}"
         for needs_type, title, category in _PER_BORROWER_UNIVERSAL:
+            # PER BORROWER, not per file: a co-borrower added after import needs their own ID, and a
+            # file-level type check would read the primary's need as covering them.
+            if (needs_type, borrower.id) in existing_keys:
+                continue
+            existing_keys.add((needs_type, borrower.id))
+            existing_types.add(needs_type)
             created.append(
                 await create_needs_item(
                     db,
@@ -471,6 +632,9 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
                 )
             )
     for needs_type, title, category in _PER_FILE_UNIVERSAL:
+        if needs_type in existing_types:
+            continue
+        existing_types.add(needs_type)
         created.append(
             await create_needs_item(
                 db,
@@ -531,6 +695,9 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
         )
 
     for needs_type, title, category, source_facts in specs:
+        if needs_type in existing_types:
+            continue
+        existing_types.add(needs_type)
         created.append(
             await create_needs_item(
                 db,

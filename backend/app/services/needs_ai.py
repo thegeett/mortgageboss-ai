@@ -65,6 +65,7 @@ from app.models.stated_financials import (
     StatedLiability,
 )
 from app.services.implications import suggest_needs_for_loan_file
+from app.services.needs_engine import canonical_need_type, category_for_need_type
 from app.services.needs_items import create_needs_item
 
 logger = structlog.get_logger(__name__)
@@ -397,11 +398,30 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
             continue
         if p.need_description.strip().lower() in existing_descs:
             continue
+        # LP-623 — a need the matcher can never reach, and a need with no place in the list.
+        #
+        # TYPE: satisfaction-matching keys on `needs_type`, so a proposal with none can never be
+        # advanced by ANY upload — LF-ABRS carried two ("documentation for the 'Other' liability",
+        # "for the unspecified asset") that would have sat PENDING forever. They are still real asks,
+        # so they are KEPT rather than dropped; what changes is that the file records the fact, and
+        # `needs_type` is normalised against the document catalog so a model that answered with a
+        # near-miss ("verification_of_employment") still matches.
+        #
+        # CATEGORY: every floor need carried one and no AI need did, so more than half the list could
+        # not be grouped. It is derivable from the type — the same catalog the documents use.
+        needs_type = canonical_need_type(p.need_type)
+        if needs_type is None:
+            logger.info(
+                "ai_need_without_matchable_type",
+                loan_file_id=str(loan_file.id),
+                proposed_type=p.need_type,  # a type name, not PII
+            )
         need = await create_needs_item(
             db,
             loan_file_id=loan_file.id,
             title=p.need_description,
-            needs_type=p.need_type,
+            needs_type=needs_type or p.need_type,
+            category=category_for_need_type(needs_type),
             origin=NeedsItemOrigin.AI_REASONING,
             disposition=NeedsItemDisposition.PROPOSED,  # the processor confirms (LP-70)
             reasoning=p.reasoning,
