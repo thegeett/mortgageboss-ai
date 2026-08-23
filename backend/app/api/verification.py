@@ -7,6 +7,7 @@ and the findings (the uniform shape). Tenant-scoped (cross-company → 404). The
 rich findings UI + resolution flow is LP-81.
 """
 
+from collections.abc import Mapping
 from datetime import timedelta
 from uuid import UUID
 
@@ -49,6 +50,7 @@ from app.schemas.verification import (
     # helpers the row renders with, so the button and the card can never disagree about what is
     # still outstanding.
     _missing_documents,
+    _requested_documents,
     _rule_spec,
 )
 from app.services.aggression import active_cutoff, resolve_aggression_level
@@ -649,9 +651,17 @@ async def bulk_request_docs_endpoint(
         finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
         if finding is None:
             continue
-        for document in _missing_documents(
+        # LP-624 — THE SAME ANSWER THE CARD RENDERED. `RuleFindingPublic.from_model` prefers the
+        # evaluator's own `requested_documents` over the spec-derived list; this recomputed only the
+        # spec-derived one, so for ID-2/ID-3's single-source abstention — where the spec yields [] —
+        # the card showed a request and put the finding in the "request these" bucket, the processor
+        # clicked "Request all N", and nothing was created and nothing marked `docs_requested`. This
+        # endpoint's own docstring promises the button and the card can never disagree; it does now.
+        details = finding.details if isinstance(finding.details, Mapping) else {}
+        documents = _requested_documents(details) or _missing_documents(
             _rule_spec(finding.rule_id), on_file, loan_purpose=purpose
-        ):
+        )
+        for document in documents:
             by_document.setdefault(document, []).append(finding)
 
     await request_documents_in_bulk(

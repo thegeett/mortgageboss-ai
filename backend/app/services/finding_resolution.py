@@ -48,6 +48,7 @@ from app.models.needs_item import (
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
+from app.services.needs_engine import canonical_need_type
 from app.services.needs_items import create_needs_item
 from app.services.verifications import mark_verification_stale
 
@@ -506,13 +507,20 @@ async def request_documents_in_bulk(
         slug = document.strip().lower().replace(" ", "_")
         if not slug or slug in existing:
             continue
+        # LP-624 — A TYPE THE MATCHER CAN REACH, OR NONE. This slugs a DOCUMENT LABEL, which is right
+        # for every entry `_missing_documents` produces. LP-620's `requested_documents` channel now
+        # also reaches here, and it carries a SENTENCE ("Another document stating the date of birth"),
+        # which slugged to `another_document_stating_the_date_of_birth` — a needs_type no document can
+        # ever match, so the need would sit unsatisfiable forever and group under no category. The
+        # title still says what to get; the TYPE stops claiming a match that cannot happen.
+        needs_type = canonical_need_type(slug)
         rules = ", ".join(sorted({f.rule_id for f in findings}))
         first = findings[0]
         item = await create_needs_item(
             db,
             loan_file_id=loan_file.id,
             title=document[:200],
-            needs_type=slug,
+            needs_type=needs_type,
             origin=NeedsItemOrigin.FINDING,
             priority=_STATUS_TO_PRIORITY.get(first.status, NeedsItemPriority.STANDARD),
             disposition=NeedsItemDisposition.CONFIRMED,

@@ -54,11 +54,6 @@ _UNFINISHED = (
     EvaluationOutcome.NEEDS_REVIEW,
 )
 
-_STATUS_TO_PRIORITY = {
-    FindingStatus.RED: NeedsItemPriority.BLOCKING,
-    FindingStatus.YELLOW: NeedsItemPriority.STANDARD,
-}
-
 
 async def seed_needs_from_findings(db: AsyncSession, loan_file: LoanFile) -> list[NeedsItem]:
     """Create one need per DOCUMENT the file's unfinished rule findings are waiting on.
@@ -150,7 +145,11 @@ async def seed_needs_from_findings(db: AsyncSession, loan_file: LoanFile) -> lis
                 ],
             )
         )
-        existing.add(slug)
+        # LP-624 — the CANONICAL form, matching the guard above. Adding the raw slug while checking
+        # the canonical one meant two spec groups whose heads canonicalize to the same document type
+        # would both seed. No spec declares an aliased head today, so this was latent — and a trap for
+        # whoever adds the next alias.
+        existing.add(canonical_need_type(slug) or slug)
 
     if created:
         logger.info(

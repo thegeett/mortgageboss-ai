@@ -301,7 +301,7 @@ _EQUIVALENT_NEED_TYPES: dict[str, str] = {
 def equivalent_need_type(needs_type: str | None) -> str | None:
     """The one name under which a need is counted as already present (LP-623).
 
-    ⚠️ WHY THIS EXISTS, on a real file. LP-623 renamed the ID need `drivers_license` -> `government_id`
+    WHY THIS EXISTS, on a real file. LP-623 renamed the ID need `drivers_license` -> `government_id`
     and kept the old name matchable, which is not the same as keeping it RECOGNISED: `seed_floor_needs`
     compared raw types, found no `government_id`, and minted a SECOND ID need beside the one already
     there. LF-ABRS then showed two rows titled "Government ID — Vidulasrri Muruganandam", one verified
@@ -325,22 +325,42 @@ def canonical_need_type(proposed: str | None) -> str | None:
     near-miss the matcher already forgives (``verification_of_employment`` -> ``voe``) should be
     STORED under the name the documents use rather than forgiven again on every read.
 
+    "REACHABLE" IS WIDER THAN THE CATALOG (LP-624). The matcher also reaches the UMBRELLA types
+    (`asset_statement`, `income_document` — any document of the right category answers them) and the
+    ALTERNATIVE heads (`government_id` — any of a set of equivalents answers it). Neither is in
+    `CATALOG`, so both were reported as unreachable: an AI proposal typed `asset_statement` was logged
+    as `ai_need_without_matchable_type`, "a need the matcher can never reach", when it matches fine —
+    and was left with `category=None`, ungroupable in the list, which is the other half of the defect
+    this function was written to close.
+
     Returns None for an unknown type — never a guess. The caller decides what to do with a need the
     matcher cannot reach; dropping it would lose a real ask.
     """
     if not proposed:
         return None
     slug = proposed.strip().lower()
-    if slug in CATALOG:
+    if slug in CATALOG or slug in _UMBRELLA_NEED_CATEGORY or slug in _NEED_ALTERNATIVES:
         return slug
     aliased = _NEED_TYPE_ALIASES.get(slug)
-    return aliased if aliased is not None and aliased in CATALOG else None
+    if aliased is None:
+        return None
+    reachable = aliased in CATALOG or aliased in _UMBRELLA_NEED_CATEGORY
+    return aliased if reachable or aliased in _NEED_ALTERNATIVES else None
 
 
 def category_for_need_type(needs_type: str | None) -> DocumentCategory | None:
-    """The catalog's category for a need type — None when unknown, never a guess (LP-623)."""
-    entry = CATALOG.get(needs_type or "")
-    return entry[1] if entry is not None else None
+    """The category for a need type — None when unknown, never a guess (LP-623).
+
+    LP-624 — an UMBRELLA type is answered here too. `asset_statement` has no catalog entry (it is not
+    a document type; it is "any document of this category"), so it returned None and the need was left
+    ungroupable in the list — the second half of what `canonical_need_type` was reporting as
+    unreachable. `_UMBRELLA_NEED_CATEGORY` is exactly this mapping and was already in the file.
+    """
+    slug = needs_type or ""
+    entry = CATALOG.get(slug)
+    if entry is not None:
+        return entry[1]
+    return _UMBRELLA_NEED_CATEGORY.get(slug)
 
 
 def is_simple_presence_need(need: NeedsItem) -> bool:
@@ -469,23 +489,55 @@ async def rematch_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> list[N
     than reimplementing the rules, so an alias, an umbrella type or a state change is picked up here
     by construction. Oldest document first, so the ordering matches a fresh file's arrival order.
 
-    IDEMPOTENT. A document whose need is already satisfied finds nothing open and is a no-op, so
-    running this on every verification costs a query and changes nothing when nothing is stale.
+    IDEMPOTENT, AND THAT TOOK TWO GUARDS (LP-624). The claim used to be that "a document whose need is
+    already satisfied finds nothing open and is a no-op", which is only true when there is no OTHER
+    open need of the same type. There usually is:
+
+    * A DOCUMENT IS CONSUMED ONCE. Nothing recorded which document had already satisfied which need,
+      so a pay stub that satisfied need A was offered to need B on the next run — and this runs on
+      every verification, so ONE upload walked down the whole list of same-typed needs, one per run,
+      each marked `satisfied_by_document_id` by the same file.
+    * ONLY A COMPLETED DOCUMENT IS REPLAYED. A FAILED/NEEDS_REVIEW document was replayed too, and
+      `_MATCH_PRIORITY` prefers a non-REJECTED need — so the freshest untouched need is exactly where
+      an old unreadable document landed. A need seeded today (a co-borrower added, a finding's
+      request) was rejected with "a pay_stub is in the file but could not be processed … obtain a
+      clean, legible copy", about a document that was never for it and was already accounted for
+      elsewhere. Arrival-time matching still sees those documents; it is the REPLAY that must not
+      re-litigate them.
     """
     documents = (
         await db.scalars(
             only_active(
                 select(Document)
-                .where(Document.loan_file_id == loan_file_id)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.status == DocumentStatus.COMPLETED,
+                )
                 .order_by(Document.created_at),
                 Document,
             )
         )
     ).all()
+    consumed = set(
+        (
+            await db.scalars(
+                only_active(
+                    select(NeedsItem.satisfied_by_document_id).where(
+                        NeedsItem.loan_file_id == loan_file_id,
+                        NeedsItem.satisfied_by_document_id.is_not(None),
+                    ),
+                    NeedsItem,
+                )
+            )
+        ).all()
+    )
     advanced: list[NeedsItem] = []
     for document in documents:
+        if document.id in consumed:
+            continue  # already answered a need — it cannot answer a second one
         need = await apply_document_to_needs(db, document)
         if need is not None:
+            consumed.add(document.id)
             advanced.append(need)
     if advanced:
         logger.info(

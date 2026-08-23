@@ -87,7 +87,15 @@ requires_documents:
   # asked for a lease when a tax return carrying Schedule E would equally close the gap — and once one
   # of the undeclared proofs WAS on file, the card would still have reported it as waiting on a lease.
   # One group: these are alternatives, any one supports the claim.
-  - [lease_agreement, verification_of_rent, rental_income_schedule, tax_return]
+  #
+  # LP-624 — `tax_return` REMOVED. `_missing_documents` satisfies a group when ANY member is on file
+  # and it tests the document TYPE, not its contents — so a borrower's personal 1040 with no Schedule
+  # E marked this group satisfied. OC-3's couldnt_check then reported nothing missing, lost its
+  # request button, and dropped out of the seeding pass, while the rule's own guidance still said
+  # "obtain a current lease, Schedule E, or an appraisal rent schedule": the exact defect LP-620/623
+  # set out to remove, re-created here. `rental_income_schedule` is the Schedule E alternative and
+  # stays; a type that is usually present and usually insufficient cannot stand for it.
+  - [lease_agreement, verification_of_rent, rental_income_schedule]
 
 spec_version: 1
 

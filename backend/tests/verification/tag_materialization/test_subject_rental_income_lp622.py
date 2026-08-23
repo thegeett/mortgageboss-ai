@@ -45,7 +45,8 @@ def test_the_subject_rows_rent_is_what_is_read() -> None:
         }
     )
 
-    assert (value, reason) == ("1250.50", "")
+    assert value == "1250.50"
+    assert "1250.50" in reason, "the reasoning carries the tag's provenance (LP-624)"
 
 
 def test_gross_is_preferred_over_net() -> None:
@@ -73,7 +74,11 @@ def test_net_is_used_when_no_gross_is_stated() -> None:
         }
     )
 
-    assert (value, reason) == ("3000.00", "")
+    assert value == "3000.00"
+    # LP-624 — the reasoning names the BASIS. It used to be empty, which stored no provenance at all:
+    # OC-3 rendered "The application claims $3,000.00 in monthly rent" with no trace the figure was
+    # NET, the exact confusion the recipe's docstring warns about (Fannie qualifies on 75% OF GROSS).
+    assert "net" in reason and "3000.00" in reason
 
 
 @pytest.mark.parametrize(

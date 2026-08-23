@@ -41,7 +41,11 @@ from app.models.finding import Finding, FindingCategory
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
-from app.services.needs_engine import rematch_needs_for_file, seed_floor_needs
+from app.services.needs_engine import (
+    loan_file_needs_lock,
+    rematch_needs_for_file,
+    seed_floor_needs,
+)
 from app.services.needs_from_findings import seed_needs_from_findings
 from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
 from app.services.snapshot_findings import Reasoner as SnapshotFindingsReasoner
@@ -788,15 +792,34 @@ async def run_verification(
     #     findings said each was absent.
     #
     # Seeding runs SECOND so it dedupes against needs the re-match just satisfied.
+    #
+    # LP-624 — UNDER THE LOCK, AND IN A SAVEPOINT. Two containment failures, both of them the shape
+    # this file has already had to fix once:
+    #
+    #   * `apply_document_to_needs` says in its own docstring that it "runs serialized per loan file …
+    #     so concurrent arrivals never race on the shared state", and both other callers
+    #     (app/tasks/needs.py) hold `loan_file_needs_lock`. This one did not. A document finishing
+    #     mid-run means the needs task and this rematch can match different documents to the SAME
+    #     need — duplicate transitions, a lost `satisfied_by_document_id`, or an InvalidNeedTransition
+    #     that aborts the rest of the sync.
+    #   * these are DB writes behind a bare `except`, which is only "best-effort" for non-DB errors.
+    #     A SQLAlchemy error poisons the session, so the degradation is recorded and then
+    #     `persist_snapshot` and the caller's commit raise PendingRollbackError — taking the rule
+    #     findings, the snapshot and the COMPLETED status with them. The snapshot-findings pass below
+    #     documents this exact failure and contains it with `begin_nested()`; so does this now.
+    #
+    # The lock is advisory (it yields whether it was acquired and the caller proceeds either way), so
+    # a missed lock degrades to today's behaviour rather than skipping the sync.
     try:
-        loan_file_row = await db.get(LoanFile, loan_file_id)
-        if loan_file_row is not None:
-            # Floor FIRST: it is the only pass that reflects a change to the file's own stated
-            # data (a borrower added, a purpose corrected, income or assets entered after import),
-            # and it was one-shot at MISMO import until LP-623 made it re-derivable per need.
-            await seed_floor_needs(db, loan_file_row)
-            await rematch_needs_for_file(db, loan_file_id)
-            await seed_needs_from_findings(db, loan_file_row)
+        async with loan_file_needs_lock(loan_file_id), db.begin_nested():
+            loan_file_row = await db.get(LoanFile, loan_file_id)
+            if loan_file_row is not None:
+                # Floor FIRST: it is the only pass that reflects a change to the file's own stated
+                # data (a borrower added, a purpose corrected, income or assets entered after import),
+                # and it was one-shot at MISMO import until LP-623 made it re-derivable per need.
+                await seed_floor_needs(db, loan_file_row)
+                await rematch_needs_for_file(db, loan_file_id)
+                await seed_needs_from_findings(db, loan_file_row)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
         degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))

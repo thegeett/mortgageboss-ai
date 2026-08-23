@@ -314,7 +314,7 @@ def _guidance_fields(
         if money_tag not in reasoned_over:
             continue
         value = _decimal_or_none(subject_tags, money_tag)
-        # ⚠️ AN UNRESOLVED MONEY TAG NEEDS A PHRASE, NOT A VALUE. The generic loop above renders a tag as
+        # AN UNRESOLVED MONEY TAG NEEDS A PHRASE, NOT A VALUE. The generic loop above renders a tag as
         # `str(tag.value)` or "not established" — legible as a bare chip, and NOT inside prose: OC-3
         # rendered "The application claims unknown a month in rent" the moment the REO schedule named no
         # amount. That is reachable, not theoretical (an investment file stating occupancy but no rent, or

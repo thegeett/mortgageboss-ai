@@ -909,7 +909,7 @@ def _subject_rental_income_monthly(
     "$3,000 a month is claimed and nothing supports it" is a different sentence from "rental income is
     unsupported", and it is the one that tells a processor how much is riding on the document.
 
-    ⚠️ THE SUBJECT ROW, NOT THE FIRST ROW. `is_subject` is what picks it out; a borrower with three
+    THE SUBJECT ROW, NOT THE FIRST ROW. `is_subject` is what picks it out; a borrower with three
     rentals has three rows and only one is this loan's. No subject row, or more than one claiming to
     be, abstains rather than picking.
 
@@ -945,7 +945,16 @@ def _subject_rental_income_monthly(
             continue
         if amount <= 0:
             continue
-        return str(amount.quantize(_CENTS)), ""
+        # LP-624 — SAY WHICH BASIS THIS IS. The empty string here was stored as the tag's whole
+        # provenance, so OC-3 rendered "The application claims $1,800.00 in monthly rent" with no
+        # trace that the figure was NET — which is the confusion this function's own docstring warns
+        # about, since Fannie qualifies on 75% OF GROSS and a net figure cannot be run through that
+        # factor. Every other recipe in this file returns a sentence; this one returned nothing.
+        basis = "gross" if field_name == "rental_income_gross" else "net (no gross figure stated)"
+        return str(amount.quantize(_CENTS)), (
+            f"the owned-property schedule states {amount.quantize(_CENTS)} monthly rent for the "
+            f"subject property, {basis}"
+        )
     return _UNKNOWN, "the application states no rental income for the subject property"
 
 
