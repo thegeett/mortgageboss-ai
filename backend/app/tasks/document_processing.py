@@ -43,6 +43,7 @@ from uuid import UUID
 
 import structlog
 from celery import Task
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -609,8 +610,32 @@ async def _mark_document_failed(document_id: str) -> None:
             await _mark_failed(db, document, document_id)
 
 
+# The document pipeline's OWN time limits (LP-625). The global default is 120s
+# (``celery_app.py``, "Generous for V1; tune once real task latencies are known") and a bank statement
+# does not fit inside it — measured on LF-AWBB, staging, 2026-08-23:
+#
+#     classification                       ~8s
+#     extraction @ max_tokens=16384        65s   -> `extraction_truncated`
+#     retry      @ max_tokens=32768        longer again (roughly 2x the output)
+#
+# The truncation retry is what makes a long statement extractable at all, and it is exactly what pushes
+# the task past 120s. The soft limit fired mid-retry, Celery restarted the task from classification,
+# and it truncated again: a clean 2-minute sawtooth, 8 classifications and 7 kills across 4 documents,
+# ending in FAILED once MAX_RETRIES ran out. Every re-attempt re-paid for the classification call too.
+#
+# Sized the way RULE_ENGINE_SOFT_LIMIT_SECONDS is: generously above the worst measured path (~220s),
+# because the ceiling only has to be high enough that a legitimate document finishes — a task that
+# genuinely hangs is caught by the hard limit, not by a tight soft one.
+DOCUMENT_SOFT_LIMIT_SECONDS = 600  # 10 min — a truncate-and-retry statement finishes with headroom
+DOCUMENT_HARD_LIMIT_SECONDS = 660  # the SIGKILL ceiling, above the soft limit's graceful mark
+
+
 @celery_app.task(  # type: ignore[untyped-decorator]
-    bind=True, name="documents.process_document", max_retries=MAX_RETRIES
+    bind=True,
+    name="documents.process_document",
+    max_retries=MAX_RETRIES,
+    soft_time_limit=DOCUMENT_SOFT_LIMIT_SECONDS,
+    time_limit=DOCUMENT_HARD_LIMIT_SECONDS,
 )
 def process_document(self: Task, document_id: str) -> None:
     """Celery task: process one uploaded document end-to-end (sync→async bridge).
@@ -624,11 +649,29 @@ def process_document(self: Task, document_id: str) -> None:
         lambda: run_async(_run(document_id)),
         on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
         event="process_document_exhausted",
+        # LP-625 — A TIME LIMIT IS TERMINAL, NOT TRANSIENT, and this is the half of the bug that the
+        # raised ceiling above does not fix. `retry_or_terminal`'s own docstring says a task time
+        # limit belongs here, and `verification.run_rule_engine` has passed it since LP-377-C; the
+        # document tasks never did. So a SoftTimeLimitExceeded fell into the generic transient branch
+        # and Celery re-ran the task FROM THE TOP — re-classifying, re-extracting, truncating again,
+        # and being killed again on a two-minute cycle until MAX_RETRIES ran out.
+        #
+        # Retrying a timeout cannot work: nothing about the document changed, so the same work takes
+        # the same time and hits the same wall. It only multiplies the cost. And raising the ceiling
+        # WITHOUT this would have made it worse — four attempts at 600s is forty minutes of a serial
+        # worker instead of eight, with every other document on the file queued behind it.
+        terminal_on=(SoftTimeLimitExceeded,),
     )
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]
-    bind=True, name="documents.reprocess_document", max_retries=MAX_RETRIES
+    bind=True,
+    name="documents.reprocess_document",
+    max_retries=MAX_RETRIES,
+    # Re-extraction runs the same extractor, so it meets the same truncation retry and needs the same
+    # ceiling. It skips classification, which only makes it cheaper, never longer.
+    soft_time_limit=DOCUMENT_SOFT_LIMIT_SECONDS,
+    time_limit=DOCUMENT_HARD_LIMIT_SECONDS,
 )
 def reprocess_document(self: Task, document_id: str) -> None:
     """Celery task: re-extract a document after a manual type override (LP-44).
@@ -642,4 +685,7 @@ def reprocess_document(self: Task, document_id: str) -> None:
         lambda: run_async(_run_reprocess(document_id)),
         on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
         event="reprocess_document_exhausted",
+        # Same reasoning as `process_document`: re-running the same extraction after a timeout takes
+        # the same time and meets the same wall.
+        terminal_on=(SoftTimeLimitExceeded,),
     )

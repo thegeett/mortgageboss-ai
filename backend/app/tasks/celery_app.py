@@ -46,9 +46,22 @@ celery_app.conf.update(
     enable_utc=True,
     # Mark tasks STARTED (not just PENDING→SUCCESS) so progress is observable.
     task_track_started=True,
-    # Time limits sized for a document task (PDF read + up to two AI calls).
-    # Soft limit raises inside the task for graceful handling; hard limit kills it.
-    # Generous for V1; tune once real task latencies are known.
+    # The DEFAULT time limits — for a task that does no AI work. Soft raises inside the task for
+    # graceful handling; hard kills it.
+    #
+    # LP-625 — THESE ARE NOT SIZED FOR AN AI TASK, and the comment here used to say they were ("sized
+    # for a document task (PDF read + up to two AI calls) … tune once real task latencies are known").
+    # The latencies are known now: one bank-statement extraction call took 65s and its truncation
+    # retry took longer again, so `documents.process_document` never finished inside 120s. It was
+    # killed mid-retry and restarted from classification on a 2-minute cycle until MAX_RETRIES ran out
+    # and the document was marked FAILED — a document that was extracting correctly, every time.
+    #
+    # A task that calls a model sets its OWN limit next to the measurement that justifies it:
+    # `DOCUMENT_SOFT_LIMIT_SECONDS` (document_processing.py), `RULE_ENGINE_SOFT_LIMIT_SECONDS`
+    # (verification_rules.py). Two AI tasks still inherit these defaults —
+    # `verification.run_cross_source` (the sweep, ~65s measured, so it fits with little headroom) and
+    # `needs.propose_ai_needs` — and both should be measured and given their own before they meet a
+    # document that takes longer than today's.
     task_soft_time_limit=120,
     task_time_limit=180,
 )
