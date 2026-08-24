@@ -104,9 +104,18 @@ class Settings(BaseSettings):
     anthropic_model_reasoning: str = (
         "claude-sonnet-4-5"  # STAYS Sonnet — the live bars are calibrated on it
     )
-    anthropic_model_analysis: str = (
-        "claude-sonnet-4-5"  # Tier-3 generic analysis — Sonnet, but its own knob (LP-457 review)
-    )
+    # Tier-3 generic analysis. Haiku 4.5 as of LP-628, down from Sonnet 4.5 — a deliberate cost
+    # choice: Tier 3 runs on documents that already failed structured extraction, so it is a
+    # best-effort salvage pass rather than the reading the loan file depends on, and it was 3x the
+    # per-token cost of the extraction it backstops (on LF-AWBB, $0.112 of a $0.468 failure).
+    # Still its OWN knob, not shared with `reasoning` (LP-457 review): re-pointing the calibrated
+    # reasoning tier must never drag Tier 3 along, or vice versa.
+    # This value must remain one of the OTHER tiers' values while `resolve_model` keys on the model
+    # string — an analysis-only value has no BEDROCK_MODEL_* of its own and would raise
+    # ModelResolutionError under Bedrock (the gap recorded in docs/secrets-audit.md). Haiku 4.5
+    # matches the classification/extraction tiers, so it resolves; an arbitrary third model
+    # would not.
+    anthropic_model_analysis: str = "claude-haiku-4-5"
 
     # --- Provider selection (B1) ------------------------------------------------------ #
     # Which API the SDK client talks to. Both paths stay LIVE: "anthropic" is the direct

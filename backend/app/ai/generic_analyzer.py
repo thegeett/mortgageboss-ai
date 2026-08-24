@@ -25,7 +25,7 @@ low-value feature that carried the boilerplate — the ``full_text`` field remai
 back-compat but the prompt no longer produces it.)
 
 One mechanism for all Tier 3 docs (no per-type logic). Runs the ANALYSIS tier
-(``settings.anthropic_model_analysis``, Sonnet by default, env-overridable — its own knob,
+(``settings.anthropic_model_analysis``, Haiku 4.5 as of LP-628, env-overridable — its own knob,
 decoupled from the calibrated reasoning tier, LP-457 review) — it is
 *understanding*, not a cheap one-liner — but it is *surfacing for a human*, not
 calculation-grade extraction, so accuracy is **moderate-stakes**). Like the other
@@ -201,7 +201,7 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
 
     try:
         result = await complete(
-            model=settings.anthropic_model_analysis,  # analysis tier (Sonnet by default) — its OWN knob, not the calibrated reasoning tier (LP-457 review)
+            model=settings.anthropic_model_analysis,  # analysis tier (Haiku 4.5, LP-628) — its OWN knob, not the calibrated reasoning tier (LP-457 review)
             system=system_prompt,
             messages=[message],
             max_tokens=_MAX_TOKENS,

@@ -92,7 +92,9 @@ async def test_analyze_success_uses_sonnet_and_generous_budget(
     # LP-457 review: the generic analyzer runs on the ANALYSIS tier — Sonnet by default (Tier-3
     # understanding, not extraction), but its OWN knob, decoupled from the CALIBRATED reasoning tier so a
     # reasoning re-point for calibration never drags this perception task along.
-    assert kwargs["model"] == analyzer_module.settings.anthropic_model_analysis  # Sonnet, own knob
+    assert (
+        kwargs["model"] == analyzer_module.settings.anthropic_model_analysis
+    )  # Haiku 4.5, own knob
     assert kwargs["max_tokens"] >= 8000  # generous (the analysis incl. full text)
     block = kwargs["messages"][0]["content"][0]
     assert block["type"] == "document"  # reads the doc natively

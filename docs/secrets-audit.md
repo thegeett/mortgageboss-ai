@@ -82,7 +82,7 @@ So the corrected staging set is **three or four secret containers**, not four:
 | `anthropic_model_classification` | `config.py:102` | CONFIG | Tier identity; also the *lookup key* under Bedrock (`config.py:428-434`). |
 | `anthropic_model_extraction` | `config.py:103` | CONFIG | |
 | `anthropic_model_reasoning` | `config.py:104` | CONFIG | Do not re-point — the 37 rules are calibrated on it. |
-| `anthropic_model_analysis` | `config.py:107` | CONFIG | ⚠️ Re-pointing it raises `ModelResolutionError` under Bedrock (known gap, commit `a0034bc`). |
+| `anthropic_model_analysis` | `config.py:118` | CONFIG | Haiku 4.5 as of LP-628. Re-pointing it to a value that is NOT also one of the other three tiers raises `ModelResolutionError` under Bedrock — it has no `BEDROCK_MODEL_*` of its own (known gap, commit `a0034bc`). |
 | `ai_provider` | `config.py:116` | CONFIG | `bedrock` for staging. |
 | `bedrock_region` | `config.py:117` | CONFIG | |
 | `bedrock_model_classification` | `config.py:129` | CONFIG | Required when provider is bedrock (`config.py:335-349`). |
