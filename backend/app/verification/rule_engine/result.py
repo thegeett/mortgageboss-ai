@@ -77,6 +77,20 @@ class RuleEvaluation:
     # clause from four of five AS-12 findings — so a field it cannot paraphrase away is the only way
     # the requirement actually holds.
     derivation: str | None = None
+    # LP-626 (corrected) — the AI tag's own reasoning, where ONE gated AI tag is what decided this
+    # verdict ("2024 full-year wages were $155,443.80 from FINRA; 2025 wages were $49,674.77 …").
+    #
+    # ITS OWN FIELD, NOT `derivation`, and the distinction is not cosmetic. `derivation` means one
+    # specific thing — the MATERIALITY arithmetic that put a subject in scope — and its sole consumer
+    # (`finding_prose._with_derivation`) prefixes it with the word "Threshold:" because that is what it
+    # has always held. Routing a tag's free-text reasoning through the same field made 51 deterministic
+    # rules (every one gating on a single tag: IN-10, CR-1/4/5/12/13, the IH family, PR-2/6/7, TI-1 …)
+    # render a multi-sentence explanation under a label that does not describe it.
+    #
+    # They also differ in SHAPE, which is why one formatter cannot serve both: a derivation is a clause
+    # we compose and never terminate; evidence is a model's prose and usually ends in a full stop. The
+    # composer has to know which it is holding.
+    evidence: str | None = None
     # LP-563 — the structured change this finding declares, resolved for THIS subject. `None` when the
     # rule declares none, or when a value it needs is absent — a half-resolved change must never reach
     # the loan, so the button simply does not appear.

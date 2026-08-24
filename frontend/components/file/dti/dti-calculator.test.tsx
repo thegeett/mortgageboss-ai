@@ -231,7 +231,9 @@ describe("bug-001 — using a stated estimate", () => {
     render(<DtiCalculator fileId="LF-ABRS" />);
 
     expect(
-      screen.getByRole("button", { name: /Use the estimate \(\$464\.92\/mo\)/ }),
+      screen.getByRole("button", {
+        name: /Use the home value estimate's figure \(\$464\.92\/mo\)/,
+      }),
     ).toBeDefined();
   });
 
@@ -239,7 +241,7 @@ describe("bug-001 — using a stated estimate", () => {
     mockDti({ data: { ...gated, unverified_inputs: [suggestion] } });
     render(<DtiCalculator fileId="LF-ABRS" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Use the estimate/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Use the home value estimate/ }));
 
     expect(setMutate).toHaveBeenCalledTimes(1);
     const call = setMutate.mock.calls[0]?.[0];
@@ -251,12 +253,38 @@ describe("bug-001 — using a stated estimate", () => {
     expect(call.input.note).toContain("not a verified tax bill");
   });
 
+  it("offers BOTH sources for one line, not whichever the backend listed first", () => {
+    // LP-627 — the two disagreed on LF-ABRS ($6,500 stated against $5,579 estimated) and the backend
+    // emits both deliberately. `.find` rendered one: the AVM offer that had been there all along
+    // vanished the moment MISMO stated a figure, and the survivor read "Use the estimate" over the
+    // borrower's own self-report.
+    const stated = {
+      field_key: "housing.taxes",
+      label: "Property taxes",
+      monthly_amount: "541.67",
+      annual_amount: "6500.04",
+      source_label: "the application",
+      sentence: "The application states proposed property taxes of $541.67 a month.",
+    };
+    mockDti({ data: { ...gated, unverified_inputs: [stated, suggestion] } });
+    render(<DtiCalculator fileId="LF-ABRS" />);
+
+    expect(
+      screen.getByRole("button", { name: /Use the application's figure \(\$541\.67\/mo\)/ }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("button", {
+        name: /Use the home value estimate's figure \(\$464\.92\/mo\)/,
+      }),
+    ).toBeDefined();
+  });
+
   it("offers nothing when the file states no such figure", () => {
     mockDti({ data: gated });
     render(<DtiCalculator fileId="LF-ABRS" />);
 
     expect(screen.getByRole("alert")).toBeDefined(); // the gate banner renders...
-    expect(screen.queryByRole("button", { name: /Use the estimate/ })).toBeNull(); // ...with no offer
+    expect(screen.queryByRole("button", { name: /figure \(\$/ })).toBeNull(); // ...with no offer
   });
 
   it("offers nothing once the line has already been overridden", () => {
@@ -272,6 +300,6 @@ describe("bug-001 — using a stated estimate", () => {
     mockDti({ data: { ...overridden, unverified_inputs: [suggestion] } });
     render(<DtiCalculator fileId="LF-ABRS" />);
 
-    expect(screen.queryByRole("button", { name: /Use the estimate/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /figure \(\$/ })).toBeNull();
   });
 });

@@ -111,3 +111,18 @@ def downgrade() -> None:
         FROM public.properties
         """
     )
+    # RE-GRANT, as the upgrade and both sibling migrations do. A grant does not survive DROP VIEW, so
+    # a downgrade that recreates the views without this leaves `mbai_readonly` with no SELECT on the
+    # two most-queried tables — `./scripts/deploy staging query` then fails with a permission error on
+    # anything touching loan files or properties, which reads as a broken tool rather than as the
+    # downgrade that caused it.
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mbai_readonly') THEN
+                EXECUTE 'GRANT SELECT ON readonly.loan_files TO mbai_readonly';
+                EXECUTE 'GRANT SELECT ON readonly.properties TO mbai_readonly';
+            END IF;
+        END
+        $$;
+    """)

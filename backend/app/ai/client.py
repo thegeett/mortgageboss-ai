@@ -44,6 +44,13 @@ from anthropic import (
     AsyncAnthropicBedrock,
 )
 
+# LP-625 — the worker's out-of-time signal, so it can be let through rather than retyped (see the
+# handler in `complete`). This is the only Celery coupling in the AI layer, and it is a deliberate one:
+# the signal ORIGINATES in the worker that runs these calls, and a module that swallows it silently
+# defeats its own task's time limit. Importing it costs nothing outside a worker — the request path
+# simply never raises it.
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.ai.rate_limit import get_rate_limiter
 from app.core.config import ModelResolutionError, resolve_model, settings
 
@@ -437,6 +444,18 @@ async def complete(
             # STREAMING: assemble the final message from a streamed connection (no non-streaming
             # 10-min/max_tokens ceiling). The final Message is identical to a one-shot response.
             resp = await asyncio.wait_for(_stream_final_message(client, kwargs), timeout=timeout_s)
+        except SoftTimeLimitExceeded:
+            # LP-625 (corrected) — THE ONE EXCEPTION TO THE "everything leaves as AIClientError"
+            # CONTRACT ABOVE, and it has to be, because this is not an error at all: it is the worker
+            # telling us the task is out of time. Wrapping it as an AIClientError made it indistinguishable
+            # from a provider failure, so the caller recorded a failed extraction and the task returned
+            # SUCCESS — which is precisely why `terminal_on=(SoftTimeLimitExceeded,)` on the document
+            # tasks could never fire. A soft limit is most likely to land mid-extraction, i.e. here.
+            #
+            # Retrying is equally wrong: the deadline has passed, so an attempt made after it cannot
+            # finish either, and `_is_transient` had no opinion on a class it never expected to see.
+            # Re-raised BEFORE the handler below so neither the retype nor the backoff can reach it.
+            raise
         except Exception as exc:
             latency_ms = int((time.perf_counter() - start) * 1000)
             transient = _is_transient(exc)

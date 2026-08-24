@@ -296,7 +296,15 @@ function LineRow({
   onUseEstimate,
 }: { item: DtiLineItem } & RowControls) {
   const editing = editingKey === item.key;
-  const suggestion = unverified?.find((u) => u.field_key === item.key);
+  // LP-627 (corrected) — EVERY offer for this line, not the first.
+  //
+  // The backend emits one per SOURCE and, since LP-627, property taxes can have two: the application's
+  // stated figure and the home-value estimate's. `.find` rendered whichever came first and silently
+  // dropped the other — so the AVM offer that had been there all along disappeared the moment MISMO
+  // stated a figure, and the surviving button read "Use the estimate" over the borrower's own
+  // self-report. That is the opposite of what the backend comment says it is offering, and it
+  // mislabels a self-report as an estimate.
+  const suggestions = unverified?.filter((u) => u.field_key === item.key) ?? [];
   const [draft, setDraft] = useState<string>(item.amount);
 
   return (
@@ -327,14 +335,17 @@ function LineRow({
             humanize(item.source)
           )}
         </span>
-        {suggestion && onUseEstimate && !item.overridden && (
-          <UseEstimateButton
-            suggestion={suggestion}
-            onUse={onUseEstimate}
-            disabled={disabled}
-            className="mt-1 self-start"
-          />
-        )}
+        {onUseEstimate &&
+          !item.overridden &&
+          suggestions.map((suggestion) => (
+            <UseEstimateButton
+              key={`${suggestion.field_key}:${suggestion.source_label}`}
+              suggestion={suggestion}
+              onUse={onUseEstimate}
+              disabled={disabled}
+              className="mt-1 self-start"
+            />
+          ))}
       </div>
 
       {editing ? (
@@ -475,7 +486,11 @@ function UseEstimateButton({
             )}
           >
             <Info className="h-3.5 w-3.5 text-warning" aria-hidden />
-            Use the estimate (${suggestion.monthly_amount}/mo)
+            {/* LP-627 (corrected) — NAME THE SOURCE. With one offer "the estimate" was unambiguous;
+                with two it is both ambiguous and, over the application's stated figure, wrong — a
+                borrower's self-report is not an estimate. The source_label the backend already sends
+                ("the application" / "the home value estimate") is what distinguishes them. */}
+            Use {suggestion.source_label}'s figure (${suggestion.monthly_amount}/mo)
           </button>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">

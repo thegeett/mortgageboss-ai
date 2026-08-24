@@ -10,6 +10,8 @@ their unreadable licence, and a RECEIVED W-2 need still reading "could not be pr
 from __future__ import annotations
 
 from app.models.needs_item import (
+    NeedsItemDisposition,
+    NeedsItemOrigin,
     NeedsItemStatus,
 )
 from app.services.needs_engine import repair_needs_for_file, transition_need
@@ -21,11 +23,25 @@ async def _file(db):
     return company, await factories.make_loan_file(db, company=company)
 
 
-async def _need(db, loan_file, *, needs_type, status=NeedsItemStatus.PENDING, borrower_id=None):
+async def _need(
+    db,
+    loan_file,
+    *,
+    needs_type,
+    status=NeedsItemStatus.PENDING,
+    borrower_id=None,
+    # FLOOR by default: every merge case here models a pair the FLOOR minted, which is the only
+    # origin the repair may waive. The factory's own default is MANUAL, and a manual need is
+    # deliberately out of scope — see `test_a_processors_own_need_is_never_merged_away`.
+    origin=NeedsItemOrigin.FLOOR,
+    disposition=NeedsItemDisposition.CONFIRMED,
+):
     need = await factories.make_needs_item(db, loan_file=loan_file)
     need.needs_type = needs_type
     need.status = status
     need.borrower_id = borrower_id
+    need.origin = origin
+    need.disposition = disposition
     await db.flush()
     return need
 
@@ -99,6 +115,98 @@ async def test_two_borrowers_ids_are_not_merged_into_one(db_session) -> None:
     assert b.status is NeedsItemStatus.PENDING
 
 
+async def test_a_processors_own_need_is_never_merged_away(db_session) -> None:
+    """THE SAFETY BOUNDARY. Merging on (type, borrower) alone put a processor's own need in scope.
+
+    The floor's `bank_statement` need is RECEIVED with a Chase statement attached; the processor adds
+    "Bank statement — Wells Fargo, November" for the same borrower and the same type. RECEIVED
+    outranks PENDING, so the manual row was the loser: waived, and its disposition flipped CONFIRMED
+    -> WAIVED. A real requirement silently left the open list and the second statement was never
+    collected. The same shape covers every legitimately multi-instance type.
+    """
+    _company, loan_file = await _file(db_session)
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    floor_need = await _need(
+        db_session,
+        loan_file,
+        needs_type="bank_statement",
+        status=NeedsItemStatus.RECEIVED,
+        borrower_id=borrower.id,
+    )
+    manual = await _need(
+        db_session,
+        loan_file,
+        needs_type="bank_statement",
+        status=NeedsItemStatus.PENDING,
+        borrower_id=borrower.id,
+        origin=NeedsItemOrigin.MANUAL,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    assert manual.status is NeedsItemStatus.PENDING, (
+        "a processor's need is not the floor's duplicate"
+    )
+    assert manual.disposition is NeedsItemDisposition.CONFIRMED
+    assert floor_need.status is NeedsItemStatus.RECEIVED, "and nothing else moved either"
+
+
+async def test_an_ai_proposal_is_never_merged_away(db_session) -> None:
+    """Same boundary, the other non-floor origin. An AI proposal the processor confirmed is a
+    decision; only the floor's own duplicate is provably redundant."""
+    _company, loan_file = await _file(db_session)
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    await _need(
+        db_session,
+        loan_file,
+        needs_type="w2",
+        status=NeedsItemStatus.VERIFIED,
+        borrower_id=borrower.id,
+    )
+    proposal = await _need(
+        db_session,
+        loan_file,
+        needs_type="w2",
+        status=NeedsItemStatus.PENDING,
+        borrower_id=borrower.id,
+        origin=NeedsItemOrigin.AI_REASONING,
+        disposition=NeedsItemDisposition.PROPOSED,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    assert proposal.status is NeedsItemStatus.PENDING
+
+
+async def test_a_floor_duplicate_still_merges_into_a_manual_keeper(db_session) -> None:
+    """The restriction is on the LOSER, not the pair. A floor row is still redundant when the row it
+    duplicates happens to be the processor's — otherwise the repair would stop working the moment a
+    processor touched the file."""
+    _company, loan_file = await _file(db_session)
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    manual = await _need(
+        db_session,
+        loan_file,
+        needs_type="government_id",
+        status=NeedsItemStatus.VERIFIED,
+        borrower_id=borrower.id,
+        origin=NeedsItemOrigin.MANUAL,
+    )
+    floor_dupe = await _need(
+        db_session,
+        loan_file,
+        needs_type="drivers_license",
+        status=NeedsItemStatus.PENDING,
+        borrower_id=borrower.id,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    assert floor_dupe.status is NeedsItemStatus.WAIVED
+    assert manual.status is NeedsItemStatus.VERIFIED
+
+
 async def test_a_recovered_need_drops_the_failure_text_it_kept(db_session) -> None:
     """`reason` describes the STATE. A need that recovered BEFORE the clearing shipped keeps the
     sentence describing how it failed, and only re-transitions if a new document happens to arrive."""
@@ -158,6 +266,40 @@ async def test_an_untyped_need_is_never_merged(db_session) -> None:
 
     assert a.status is NeedsItemStatus.PENDING
     assert b.status is NeedsItemStatus.PENDING
+
+
+async def test_the_refresh_keeps_the_unmatchable_note_it_would_otherwise_strip(
+    db_session, monkeypatch
+) -> None:
+    """A LOOP, not a one-off. The create path appends the note; the refresh path assigned
+    `p.reasoning` raw and took it back off — and it fired on EVERY run, because the appended note is
+    exactly what makes `stale.reasoning != p.reasoning` true. Two runs of the same proposal restored
+    the state LP-625 set out to fix.
+    """
+    from app.services import needs_ai
+    from app.services.needs_ai import ProposedNeed, apply_ai_needs
+
+    _company, loan_file = await _file(db_session)
+    proposal = ProposedNeed(
+        need_description="Documentation for the 'Other' liability",
+        need_type="other_liability_documentation",  # no catalog match — nothing can close it
+        reasoning="The application lists an 'Other' liability with no supporting document.",
+    )
+
+    async def _propose(_db, _loan_file):
+        return [proposal]
+
+    monkeypatch.setattr(needs_ai, "propose_needs", _propose)
+
+    created = await apply_ai_needs(db_session, loan_file)
+    assert len(created) == 1
+    assert "cannot clear it" in created[0].reasoning, "the create path adds the note"
+
+    await apply_ai_needs(db_session, loan_file)  # the same proposal, one run later
+
+    assert "cannot clear it" in created[0].reasoning, (
+        "the refresh must not strip the note the create path just added"
+    )
 
 
 def test_an_unmatchable_ai_need_says_a_document_cannot_close_it() -> None:

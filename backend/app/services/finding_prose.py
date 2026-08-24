@@ -272,6 +272,36 @@ def _with_derivation(message: str, finding: Finding) -> str:
     return f"{message} Threshold: {derivation}."
 
 
+def _with_evidence(message: str, finding: Finding) -> str:
+    """Re-attach the gated AI tag's own reasoning, if the composition lost it (LP-626).
+
+    THE SAME ARGUMENT AS :func:`_with_derivation`, ON A DIFFERENT FACT — and deliberately NOT the same
+    function. A derivation is a clause this codebase composes, always shaped "X is above the Y floor",
+    which is why "Threshold: …." reads correctly over it. Evidence is a model's prose about the
+    document, of arbitrary length and already punctuated. Passing one through the other's formatter
+    produced "… Threshold: 2024 full-year wages were $155,443.80 from FINRA; … still shows decline.."
+    on every deterministic rule that gates on a single AI tag — a wrong label, and a doubled full stop.
+
+    So: a neutral lead-in, and no added terminator when the prose already carries one.
+    """
+    details = finding.details or {}
+    evidence = details.get("evidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        return message
+    evidence = evidence.strip()
+    # Already carried by the composition (the model often quotes it well) → nothing to re-attach.
+    # Compared on a whitespace-normalised form, because the composer reflows lines freely.
+    if _squeeze(evidence) in _squeeze(message):
+        return message
+    tail = "" if evidence.endswith((".", "!", "?", "…")) else "."
+    return f"{message} Basis: {evidence}{tail}"
+
+
+def _squeeze(text: str) -> str:
+    """Whitespace-normalised, for containment checks that must survive the composer's reflowing."""
+    return " ".join(text.split())
+
+
 async def compose_findings(
     db: AsyncSession,
     findings: list[Finding],
@@ -391,7 +421,7 @@ async def compose_findings(
         composition = cache.get(keys.get(finding.id, ""))
         if composition is None:
             continue  # rejected, failed, or not summarizable — the template stands
-        finding.message = _with_derivation(composition.message, finding)
+        finding.message = _with_evidence(_with_derivation(composition.message, finding), finding)
         changed += 1
 
     logger.info(

@@ -173,9 +173,14 @@ def _result(
         # positives explicitly — "FN (uses declining income at face value -> a bad loan ships) >> FP (a
         # false decline -> a human glances)". The glance is the remedy, and it cost a panel-open.
         #
-        # `derivation` rather than `reasoning` deliberately: LP-535 made this the field the composer
-        # cannot paraphrase away, for exactly this auditability reason.
-        derivation=_gated_tag_derivation(spec.deterministic, subject_tags),
+        # A STRUCTURED FIELD rather than `reasoning` deliberately: LP-535 established that a fact the
+        # composer must not paraphrase away needs a field of its own.
+        #
+        # `evidence`, NOT `derivation` (the correction): `derivation` holds LP-535's MATERIALITY
+        # arithmetic and the composer renders it under the literal label "Threshold:". A tag's
+        # explanation is not a threshold, and it arrives already punctuated as prose — so it needs its
+        # own field and its own formatting. See `RuleEvaluation.evidence`.
+        evidence=_gated_tag_derivation(spec.deterministic, subject_tags),
         # LP-508 / ADR-377 — a DISTRUSTED-field degradation is confirmed by a human, not auto-asserted.
         # `ships` is metadata with no runtime consumer, so this per-finding flag is the only real
         # ratification mechanism (LP-508 Phase A §5).

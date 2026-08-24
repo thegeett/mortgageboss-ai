@@ -504,6 +504,10 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
     So this is the repair half, run beside the other passes on every verification. Both operations are
     idempotent and neither invents a need: the merge WAIVES a redundant duplicate rather than deleting
     it, so the row and its history survive and a processor can see what happened.
+
+    THE MERGE ONLY EVER WAIVES A FLOOR-ORIGIN ROW. That is the defect's own boundary — the floor is
+    what minted the duplicate — and it is what keeps a processor's manually-added need, or an AI
+    proposal they confirmed, out of scope no matter how the statuses rank. See the loop below.
     """
     needs = (
         await db.scalars(
@@ -529,6 +533,32 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
         group.sort(key=lambda n: (_PROGRESS_RANK.get(n.status, 0), -n.created_at.timestamp()))
         keeper = group[-1]
         for redundant in group[:-1]:
+            # ONLY A ROW THE FLOOR MINTED MAY BE MERGED AWAY. The defect being repaired is the FLOOR
+            # creating a second row under a renamed type, so a floor-origin duplicate is provably
+            # redundant: `seed_floor_needs` now dedupes on this exact key and would no longer create
+            # the pair. Nothing else in the group is.
+            #
+            # Without this the merge waived on `(equivalent_need_type, borrower_id)` alone, and a
+            # processor's own need was in scope. Concretely: the floor's `bank_statement` need for a
+            # borrower is RECEIVED with a Chase statement attached; the processor adds "Bank statement
+            # — Wells Fargo, November" through POST /needs (origin MANUAL, disposition CONFIRMED, the
+            # same needs_type). RECEIVED outranks PENDING, so the next run waived the manual need AND
+            # `transition_need` flipped its disposition CONFIRMED -> WAIVED. A real requirement left
+            # the open list and the Wells Fargo statement is never collected. The same shape covers
+            # every legitimately multi-instance type — two years of `w2`, successive `paystub`s.
+            #
+            # This is the boundary `needs_dedup` states for LP-111 ("a confirmed / waived / adjusted /
+            # received need is a fixed point"), applied to the axis that matters here. It is NOT that
+            # module's PROPOSED+PENDING test: the floor ships CONFIRMED, so that test would make this
+            # repair a no-op against its own motivating case — LF-ABRS's pair is VERIFIED + REJECTED.
+            if redundant.origin is not NeedsItemOrigin.FLOOR:
+                logger.info(
+                    "needs_duplicate_merge_skipped",
+                    loan_file_id=str(loan_file_id),
+                    needs_type=needs_type,  # a document type, not PII
+                    origin=redundant.origin.value,
+                )
+                continue
             await transition_need(
                 db,
                 need=redundant,

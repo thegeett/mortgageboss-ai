@@ -106,6 +106,9 @@ def _details(result: RuleEvaluation) -> dict[str, object]:
         "how_to_fix": result.how_to_fix,
         # LP-535 — kept out of `message` deliberately, so the composer cannot drop it (see result.py).
         "derivation": result.derivation,
+        # LP-626 — the gated AI tag's own reasoning, on its own key for the same reason and rendered
+        # differently (it is prose, not a threshold). Never merged into `derivation`.
+        "evidence": result.evidence,
         # LP-563 — the structured change Apply performs. Absent when the rule declares none or a
         # value was unresolvable, which is what keeps the button off a finding it cannot act on.
         **({"apply": result.apply} if result.apply else {}),

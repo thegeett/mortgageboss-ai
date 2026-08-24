@@ -286,9 +286,21 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
         for child in decl_detail.iter():
             if child is decl_detail or len(child):
                 continue  # containers carry no value of their own
+            # NON-ELEMENT NODES FIRST. `iter()` yields comments and processing instructions as well as
+            # elements, and both slip past the two guards above — they have no children and can carry
+            # text. `QName` then raises ValueError on them, so a single XML comment anywhere under
+            # DECLARATION_DETAIL would abort the whole import, against this module's contract that it
+            # never crashes on structural variation. The direct-children loop this replaced happened
+            # not to reach them; widening to descendants is what exposed it.
+            # lxml marks a non-element by giving `.tag` a callable rather than a string.
+            if not isinstance(child.tag, str):
+                continue
             local = etree.QName(child).localname
             if child.text and child.text.strip():
-                declarations[local] = child.text.strip()
+                # LOCALNAME COLLAPSES NAMESPACES, so a ULAD extension leaf sharing a name with a base
+                # MISMO one would overwrite it. First write wins: the base declaration is reached first
+                # in document order and is the more authoritative of the two.
+                declarations.setdefault(local, child.text.strip())
                 ctx.consume(child)
 
     return ParsedBorrower(
@@ -567,6 +579,12 @@ def _parse_catch_all(
     order: list[str] = []
     for el in deal.iter():
         if len(el):  # not a leaf (has element children)
+            continue
+        # A COMMENT IS A CHILDLESS NODE WITH TEXT, so it clears both leaf guards and then raises out of
+        # `QName` below. This walker has always covered the WHOLE deal, so the exposure predates the
+        # LP-627 declaration loop that made the same mistake visible — any comment anywhere in the
+        # document aborted the import. Found by the regression test written for that loop.
+        if not isinstance(el.tag, str):
             continue
         if not (el.text and el.text.strip()):
             continue

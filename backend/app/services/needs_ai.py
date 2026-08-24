@@ -426,9 +426,19 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
             #
             # Only where the processor has NOT acted: an untouched PROPOSED need is still the model's
             # to describe, and one they confirmed, dismissed or adjusted is theirs.
+            # THROUGH `_unmatchable_note`, NOT RAW. The create path appends "No document type matches
+            # this request, so uploading a file cannot clear it — close it by hand…" to a proposal with
+            # no catalog type; assigning `p.reasoning` here stripped it back off on the very next run,
+            # permanently. The mechanism is a loop: `existing_types` holds the RAW type (the create path
+            # stores `needs_type or p.need_type`), so `_refreshable` matches it, and the appended note
+            # is precisely what makes `stale.reasoning != p.reasoning` true — so the refresh fires every
+            # time and every time removes it. That restores exactly the LF-ABRS state LP-625 fixed.
+            refreshed = _unmatchable_note(
+                p.reasoning, matchable=canonical_need_type(p.need_type) is not None
+            )
             stale = _refreshable(existing, p.need_type)
-            if stale is not None and stale.reasoning != p.reasoning:
-                stale.reasoning = p.reasoning
+            if stale is not None and stale.reasoning != refreshed:
+                stale.reasoning = refreshed
                 stale.source_facts = [f.model_dump() for f in p.triggered_by] or None
                 logger.info(
                     "ai_need_reasoning_refreshed",

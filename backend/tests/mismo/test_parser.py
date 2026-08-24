@@ -65,6 +65,46 @@ def test_real_file_income_employers_declarations(fixture_bytes: bytes) -> None:
     assert b.declarations["UndisclosedMortgageApplicationIndicator"] == "false"
 
 
+def test_a_comment_in_the_declarations_does_not_abort_the_import(fixture_bytes: bytes) -> None:
+    """LP-627 review — `iter()` reaches nodes a direct-children loop never did.
+
+    lxml yields comments and processing instructions from `iter()`, and both pass the two guards in
+    the declaration loop: they have no children and they carry text. `etree.QName` then raises
+    `ValueError`, so ONE comment anywhere under DECLARATION_DETAIL would abort `parse_mismo` — against
+    this module's contract that it degrades on structural variation rather than crashing. An exporter
+    that annotates its output is not exotic.
+    """
+    tree = etree.fromstring(fixture_bytes)
+    detail = tree.find(".//m:DECLARATION/m:DECLARATION_DETAIL", NS)
+    assert detail is not None
+    detail.insert(0, etree.Comment(" exported by a system that annotates its output "))
+    detail.append(etree.ProcessingInstruction("target", "data"))
+
+    parsed = parse_mismo(etree.tostring(tree))
+
+    # Unchanged: the real declarations still parse, and no comment text became one.
+    assert parsed.borrowers[0].declarations["BankruptcyIndicator"] == "false"
+    assert not any("exported by" in key for key in parsed.borrowers[0].declarations)
+
+
+def test_a_namespace_collision_keeps_the_base_declaration(fixture_bytes: bytes) -> None:
+    """Declarations are keyed by LOCALNAME, so a ULAD extension leaf can collide with a base MISMO one.
+
+    First write wins — `iter()` is document order and the base children precede the EXTENSION subtree,
+    so the authoritative value is the one kept rather than whichever came last.
+    """
+    tree = etree.fromstring(fixture_bytes)
+    detail = tree.find(".//m:DECLARATION/m:DECLARATION_DETAIL", NS)
+    assert detail is not None
+    extension = etree.SubElement(detail, "{http://www.example.org/ULAD}EXTENSION_COLLIDER")
+    shadow = etree.SubElement(extension, "{http://www.example.org/ULAD}BankruptcyIndicator")
+    shadow.text = "true"
+
+    parsed = parse_mismo(etree.tostring(tree))
+
+    assert parsed.borrowers[0].declarations["BankruptcyIndicator"] == "false"
+
+
 def test_real_file_loan_exact(fixture_bytes: bytes) -> None:
     loan = parse_mismo(fixture_bytes).loan
     assert loan is not None

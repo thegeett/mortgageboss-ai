@@ -107,7 +107,11 @@ def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
 
 
 async def _process_document(db: AsyncSession, document_id: str) -> None:
-    """The core pipeline for one document. Never raises; always reaches a terminal status.
+    """The core pipeline for one document. Always reaches a terminal status.
+
+    Raises ONLY ``SoftTimeLimitExceeded`` (LP-625) — the worker's out-of-time signal, which the task
+    wrapper classifies as terminal and never retries; its ``on_exhausted`` still marks the document
+    FAILED, so the terminal-status guarantee holds. Every other exception is absorbed into FAILED here.
 
     Takes the session explicitly so it is unit-testable with the test session;
     the Celery task wraps it with a worker session (:func:`task_session`).
@@ -240,6 +244,16 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # The document is now terminal + committed; advance any matching need in a
         # separate per-file-serialized task (concurrent arrivals never race).
         _enqueue_needs_update(document.loan_file_id, document.id)
+    except SoftTimeLimitExceeded:
+        # LP-625 (corrected) — OUT OF TIME IS NOT A PROCESSING ERROR, so it must not be handled as one
+        # here. The handler below marks the document FAILED and returns normally, which means nothing
+        # propagates out of `_run` — and `terminal_on=(SoftTimeLimitExceeded,)` on the task therefore
+        # never saw the exception it was added to catch.
+        #
+        # Deliberately BEFORE `_mark_failed`: the task wrapper's `on_exhausted` marks the document
+        # failed on its own, so re-raising loses nothing and gains the terminal (never-retried)
+        # classification. Retrying a timeout re-runs identical work against the same wall.
+        raise
     except Exception as exc:
         # UNEXPECTED (storage/DB/etc.) — never crash the worker or the batch.
         logger.warning(
@@ -448,6 +462,11 @@ async def _extract_branch(
         try:
             async with db.begin_nested():
                 links = await assign_document_borrower_links(db, document)
+        except SoftTimeLimitExceeded:
+            # LP-625 (corrected) — the last swallow point on this path. Deterministic DB work, so a
+            # soft limit landing here is unlikely; included anyway because ONE remaining broad handler
+            # is all it takes for the task's terminal classification to go quiet again.
+            raise
         except Exception as exc:
             logger.warning(
                 "document_borrower_link_failed",
@@ -563,7 +582,11 @@ async def reprocess_document_extraction(db: AsyncSession, document: Document) ->
     extractor for the (new) type through the same ``_extract_branch`` — so a manual
     correction to any of the three types re-extracts correctly, and an unregistered
     type falls back to classified-only. Retry-safe (versioned extraction; needs not
-    double-satisfied) and resilient (unexpected error → FAILED). Never raises.
+    double-satisfied) and resilient (unexpected error → FAILED).
+
+    Raises ONLY ``SoftTimeLimitExceeded`` (LP-625): the worker's out-of-time signal is not an
+    extraction failure and must reach the task, which classifies it as terminal rather than retrying
+    identical work against the same deadline. Every other exception is still absorbed into FAILED.
 
     The LP-44 override **endpoint/UI** is not built here — this is the core it uses.
     """
@@ -575,6 +598,12 @@ async def reprocess_document_extraction(db: AsyncSession, document: Document) ->
     try:
         content = await get_storage_backend().read(document.storage_path)
         await _extract_branch(db, document, content, extractor)
+    except SoftTimeLimitExceeded:
+        # LP-625 (corrected) — same reasoning as `_process_document`: the worker's out-of-time signal
+        # is not an extraction failure. Swallowing it here made line 690's `terminal_on` unconditionally
+        # dead, since this function documents "Never raises" and delivered on that too literally.
+        # `on_exhausted` still marks the document failed, so the visible outcome is unchanged.
+        raise
     except Exception as exc:
         logger.warning(
             "reprocess_document_failed",
