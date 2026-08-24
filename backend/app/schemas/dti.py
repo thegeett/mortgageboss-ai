@@ -34,6 +34,12 @@ class DtiLineItem(BaseModel):
     # display must render it struck-through with the reason, never omit the row.
     excluded: bool = False
     excluded_reason: str | None = None
+    # LP-621 review — the arithmetic behind a COMPUTED line, carried with it. The net rental figure is
+    # the first line whose amount a processor cannot check by reading a document: it is 75% of a gross
+    # rent, less a PITIA that is itself a sum of five other lines. `rental_treatment` composed exactly
+    # that sentence and nothing consumed it, so the ticket's promise that the processor would see the
+    # working was computed and thrown away. None for every line whose label already explains it.
+    derivation: str | None = None
 
 
 class DtiLimit(BaseModel):

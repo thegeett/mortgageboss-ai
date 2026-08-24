@@ -41,9 +41,24 @@ from app.models.extraction import ExtractionStatus
 _PDF = b"%PDF-1.4 fake"
 
 
-def _resp(text: str, *, stop_reason: str = "end_turn") -> SimpleNamespace:
+def _resp(
+    text: str,
+    *,
+    stop_reason: str = "end_turn",
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> SimpleNamespace:
+    # The cache fields are non-optional on the real `AICompletion` and this path READS them (it is the
+    # only caller that sends `cache=True`), so the double has to carry them. Defaulting to 0 keeps
+    # every existing test unchanged while letting the accounting tests set real figures.
     return SimpleNamespace(
-        text=text, input_tokens=100, output_tokens=50, model="m", stop_reason=stop_reason
+        text=text,
+        input_tokens=100,
+        output_tokens=50,
+        model="m",
+        stop_reason=stop_reason,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
     )
 
 
@@ -501,3 +516,210 @@ async def test_an_untruncated_statement_never_takes_the_chunked_path(
     assert calls == 1
     page_count.assert_not_awaited(), "chunking never engaged"
     assert [str(t.amount) for t in result.data.transactions] == ["10.00"]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-628 review — the plan has to fit the overflow, and a failure has to say which one it was
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_the_plan_is_sized_against_the_overflow_not_a_fixed_halving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE SIZING DEFECT. `min(per, ceil(n/2))` yields exactly TWO ranges for every page count from
+    2 to 10 at the default chunk size — and two is the one number that cannot work here.
+
+    This path is reached only after the whole document overflowed the 32,768 retry ceiling, and each
+    chunk runs at 16,384. Half of more-than-32,768 is more than 16,384, so both halves truncate and
+    the run fails having spent two further full-document calls to discover it.
+    """
+    monkeypatch.setattr(chunked_module, "pdf_page_count", AsyncMock(return_value=8))
+    ranges_seen: list[str] = []
+
+    async def _fake(**kwargs: Any) -> SimpleNamespace:
+        ranges_seen.append(kwargs["messages"][0]["content"][1]["text"])
+        return _resp(_statement_json(transactions=[]))
+
+    monkeypatch.setattr(model_call, "complete", _fake)
+
+    result = await run_chunked_extraction(
+        content=_PDF,
+        media_type="application/pdf",
+        system="S",
+        max_tokens=16384,
+        log_label="bank_statement",
+        instruction_for=_chunk_instruction,
+        pages_per_chunk=5,
+        observed_output_tokens=32768,  # what the retry produced before it was cut off
+    )
+
+    # 32,768 observed x2 headroom / 16,384 per chunk -> at least 4 ranges, not 2.
+    assert result.ok and len(result.parts) >= 4, f"planned {len(ranges_seen)} ranges"
+
+
+def test_without_an_observed_overflow_the_plan_is_unchanged() -> None:
+    """The parameter is additive: a caller that cannot say what overflowed still gets the old floor
+    of two, which is right for a document that never truncated in the first place."""
+    assert chunked_module._minimum_chunks(None, 16384) == 2
+    assert chunked_module._minimum_chunks(0, 16384) == 2
+    # And a pathological max_tokens cannot produce a zero or negative plan.
+    assert chunked_module._minimum_chunks(32768, 0) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_range_is_split_and_retried_rather_than_failing_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `extraction_chunk_truncated` log has always said "the fix is a smaller range" and nothing
+    acted on it, so a plan one step too coarse threw away every chunk that had already succeeded."""
+    monkeypatch.setattr(chunked_module, "pdf_page_count", AsyncMock(return_value=4))
+    seen: list[str] = []
+
+    async def _fake(**kwargs: Any) -> SimpleNamespace:
+        instruction = kwargs["messages"][0]["content"][1]["text"]
+        seen.append(instruction)
+        # The first range (two pages) is too dense; each single page fits.
+        truncate = "PAGES 1 TO 2" in instruction
+        return _resp(
+            _statement_json(transactions=[]),
+            stop_reason="max_tokens" if truncate else "end_turn",
+        )
+
+    monkeypatch.setattr(model_call, "complete", _fake)
+
+    result = await run_chunked_extraction(
+        content=_PDF,
+        media_type="application/pdf",
+        system="S",
+        max_tokens=8192,
+        log_label="bank_statement",
+        instruction_for=_chunk_instruction,
+        pages_per_chunk=2,
+    )
+
+    assert result.ok, "the dense range is split, not the whole run abandoned"
+    assert any("PAGES 1 TO 1" in i for i in seen) and any("PAGES 2 TO 2" in i for i in seen)
+    # Page order survives the re-split: 1, 2, then the originally-planned 3-4.
+    assert len(result.parts) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_range_that_cannot_be_split_further_fails_honestly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Splitting is bounded. A single page that still overflows is the SINGLE_PAGE argument arriving
+    one level down: the pages themselves are too dense, and a partial merge is never the answer."""
+    monkeypatch.setattr(chunked_module, "pdf_page_count", AsyncMock(return_value=2))
+
+    async def _fake(**kwargs: Any) -> SimpleNamespace:
+        return _resp(_statement_json(transactions=[]), stop_reason="max_tokens")
+
+    monkeypatch.setattr(model_call, "complete", _fake)
+
+    result = await run_chunked_extraction(
+        content=_PDF,
+        media_type="application/pdf",
+        system="S",
+        max_tokens=8192,
+        log_label="bank_statement",
+        instruction_for=_chunk_instruction,
+        pages_per_chunk=1,
+    )
+
+    assert not result.ok and result.parts == ()
+    assert result.failure_reason == chunked_module.TRUNCATED_RANGE_REASON
+
+
+@pytest.mark.asyncio
+async def test_a_throttled_chunk_stays_re_runnable_instead_of_rejecting_the_need(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE LP-464 CORROSION. `_extract_in_chunks` collapsed every failure to None, so the caller fell
+    back on the ORIGINAL truncation reason and a rate-limited chunk was persisted as a CONTENT
+    failure. `document_processing` gates its re-runnable branch on `reasoning == INFRA_RATE_LIMITED`,
+    so the matching OPEN need went to REJECTED — and REJECTED is not re-matched, so the successful
+    re-run could never advance it.
+    """
+    from app.ai.client import INFRA_RATE_LIMITED, AIClientError
+
+    monkeypatch.setattr(chunked_module, "pdf_page_count", AsyncMock(return_value=4))
+    monkeypatch.setattr(bs_module, "pdf_page_count", AsyncMock(return_value=4))
+    seen = 0
+
+    async def _fake(**kwargs: Any) -> SimpleNamespace:
+        nonlocal seen
+        seen += 1
+        if seen <= 2:  # the guard's two attempts, both truncating
+            return _resp("{truncated", stop_reason="max_tokens")
+        raise AIClientError("AI call failed: RateLimitError")
+
+    monkeypatch.setattr(model_call, "complete", _fake)
+    monkeypatch.setattr(model_call, "infra_failure_kind", lambda _err: INFRA_RATE_LIMITED)
+
+    result = await extract_bank_statement(_PDF, "application/pdf")
+
+    assert result.status is ExtractionStatus.FAILED
+    assert result.reasoning == INFRA_RATE_LIMITED, (
+        "a throttle is re-runnable infrastructure, not an unreadable document"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_chunked_path_records_its_tokens_including_the_cached_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two accounting holes at once.
+
+    The cached halves were read for a log line and dropped, so a cost built from `input_tokens` alone
+    excluded the document itself — chunk 1 bills its bytes as a cache WRITE and every later chunk as
+    a READ. And the merge's own summing was dead code: it summed `part.input_tokens` over PARSED
+    results that were never given the call's tokens, so every term was None and the chunked path
+    recorded no tokens at all.
+    """
+    monkeypatch.setattr(chunked_module, "pdf_page_count", AsyncMock(return_value=4))
+    monkeypatch.setattr(bs_module, "pdf_page_count", AsyncMock(return_value=4))
+    seen = 0
+
+    async def _fake(**kwargs: Any) -> SimpleNamespace:
+        nonlocal seen
+        seen += 1
+        if seen <= 2:
+            return _resp("{truncated", stop_reason="max_tokens")
+        first_chunk = seen == 3
+        return _resp(
+            _statement_json(transactions=[_txn(1, "10.00")]),
+            cache_write_tokens=30000 if first_chunk else 0,
+            cache_read_tokens=0 if first_chunk else 30000,
+        )
+
+    monkeypatch.setattr(model_call, "complete", _fake)
+
+    result = await extract_bank_statement(_PDF, "application/pdf")
+
+    assert result.input_tokens, "the chunked path records tokens at all"
+    assert result.cache_write_tokens == 30000
+    assert result.cache_read_tokens == 30000, "one read per chunk after the first"
+
+
+def test_a_partial_chunk_makes_the_merge_partial() -> None:
+    """The merge hard-coded `coercion_lost=False`, discarding each chunk's own status: a statement
+    with an unparseable printed balance reported as a clean extraction ONLY when it took the chunked
+    path. Same document, two different stories, decided by a code path the reader cannot see."""
+    clean = _parsed(_statement_json(transactions=[_txn(1, "10.00")]))
+    partial = _parsed(_statement_json(transactions=[_txn(2, "20.00")]))
+    partial.status = ExtractionStatus.PARTIAL
+
+    merged = _merge_chunk_results([clean, partial])
+
+    assert merged is not None and merged.status is ExtractionStatus.PARTIAL
+
+
+def test_all_clean_chunks_still_merge_to_succeeded() -> None:
+    """The inherit must not be a one-way ratchet that marks every chunked run PARTIAL."""
+    parts = [
+        _parsed(_statement_json(transactions=[_txn(1, "10.00")])),
+        _parsed(_statement_json(transactions=[_txn(2, "20.00")])),
+    ]
+
+    merged = _merge_chunk_results(parts)
+
+    assert merged is not None and merged.status is ExtractionStatus.SUCCEEDED

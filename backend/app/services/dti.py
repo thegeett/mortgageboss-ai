@@ -82,6 +82,11 @@ HOUSING_HOA = "housing.hoa"
 # LP-621 — Fannie's net-rental figure for an investment SUBJECT: income when positive, an obligation
 # when negative. One key for both, because it is one computation with a sign.
 RENTAL_NET = "rental.net_subject"
+# LP-621 review — the borrower's OWN housing cost, which replaces the subject's PITIA on an investment
+# file. Its own key rather than an override of the PITIA components, because it is a different fact
+# from a different source (the 1003's PRESENT expenses, not the loan being underwritten) and a
+# processor overriding it is correcting THAT figure, not the subject's taxes.
+HOUSING_PRESENT = "housing.present_borrower"
 
 # LP-375 — the REQUIRED housing inputs whose absence must FAIL-CLOSED (absent≠0), mirroring the snapshot
 # path's ``_REQUIRED_DTI_TAGS`` (calculations_section.py): a missing tax figure or hazard binder understates
@@ -110,7 +115,7 @@ class _AutoLine:
     unrecognized frequency (we must not assume monthly, the 12x risk, nor drop it to 0, an understatement).
     Absent-HOA (no dues) stays ``unknown=False`` → a legitimate $0 line."""
 
-    __slots__ = ("auto", "excluded_reason", "key", "label", "source", "unknown")
+    __slots__ = ("auto", "derivation", "excluded_reason", "key", "label", "source", "unknown")
 
     def __init__(
         self,
@@ -121,12 +126,15 @@ class _AutoLine:
         *,
         unknown: bool = False,
         excluded_reason: str | None = None,
+        derivation: str | None = None,
     ) -> None:
         self.key = key
         self.label = label
         self.auto = auto
         self.source = source
         self.unknown = unknown
+        # LP-621 review — the working behind a computed amount (see `DtiLineItem.derivation`).
+        self.derivation = derivation
         # LP-568: set → the line is SHOWN but not summed, and this says why. Distinct from
         # ``unknown`` (a figure we could not derive) and from a $0 line (a figure that is zero):
         # the amount here is known and real, it simply does not survive closing.
@@ -520,6 +528,7 @@ def _to_items(
                 ),
                 excluded=excluded,
                 excluded_reason=auto.excluded_reason if excluded else None,
+                derivation=auto.derivation,
             )
         )
         # LP-568: the ITEM is still emitted (a processor must see the line and why it dropped
@@ -567,24 +576,74 @@ async def build_dti_calculation(
         db, loan_file=loan_file, subject_pitia=housing_total or None
     )
     if rental.applies and rental.net_monthly is not None:
-        # A named line, not a bare amount: the breakdown a processor reads has to show WHERE a figure
-        # this large came from, and `derivation` carries the arithmetic behind it.
-        if rental.net_monthly > 0:
-            income_lines = [
-                *income_lines,
-                DtiLine(
-                    RENTAL_NET, "Net rental income (75% of gross, less PITIA)", rental.net_monthly
-                ),
-            ]
-        else:
-            debt_lines = [
-                *debt_lines,
-                DtiLine(
+        # `present_housing` is set together with `net_monthly` — a treatment that could not establish
+        # the borrower's own cost gates instead of computing (see `subject_rental_treatment`).
+        assert rental.present_housing is not None
+
+        # --- 1. THE HOUSING SIDE. Substituted, not merely supplemented. ------------------------- #
+        # The subject's PITIA is ALREADY SUBTRACTED inside the net that just went to income, so leaving
+        # it here charges the borrower for it twice — on a property they do not occupy. The first
+        # version added the net and left housing alone, which kept both halves of the defect LP-621
+        # was written to fix and added a double count on top.
+        #
+        # EXCLUDED, NOT DROPPED (the LP-568 principle, applied to housing): the processor must see the
+        # PITIA was considered and why it is not in the total. A line that silently vanishes is worse
+        # than one counted wrongly, because nobody can tell it was weighed at all.
+        #
+        # ⚠️ The exclusion is applied AFTER `_to_items`, not through `excluded_reason`, and the
+        # difference matters. `_to_items` treats an override as DISPUTING an exclusion and re-includes
+        # the line (LP-569) — right for a debt, where the exclusion is a claim about the file. Here it
+        # is structural: the borrower does not live in the subject, and correcting its tax figure does
+        # not change that. An override still shows on the line; it just cannot put the PITIA back into
+        # a ratio Fannie computes another way.
+        occupancy_note = "the borrower does not occupy the subject — its PITIA is netted against the rent instead"
+        housing_items = [
+            item.model_copy(update={"excluded": True, "excluded_reason": occupancy_note})
+            for item in housing_items
+        ]
+        housing_lines = []
+        present_items, present_lines = _to_items(
+            [
+                _AutoLine(
+                    HOUSING_PRESENT,
+                    "Present housing (the borrower's own)",
+                    rental.present_housing,
+                    "stated",
+                )
+            ],
+            overrides,
+        )
+        housing_items = [*housing_items, *present_items]
+        housing_lines = [*housing_lines, *present_lines]
+
+        # --- 2. THE INCOME / DEBT SIDE, through `_to_items` like every other line. --------------- #
+        # A named ITEM, not a bare engine line. Appending only to `*_lines` put the figure in the
+        # headline but not the breakdown, so the itemized list stopped summing to the number beside it
+        # (the transparency this module calls the feature), the snapshot published a headline its own
+        # breakdown could not reproduce, and the line could not be overridden — a figure this large
+        # that a processor cannot correct is worse than no figure. Routing it through `_to_items` buys
+        # all three at once.
+        positive = rental.net_monthly > 0
+        rental_items, rental_lines = _to_items(
+            [
+                _AutoLine(
                     RENTAL_NET,
-                    "Net rental shortfall (subject PITIA over 75% of gross)",
-                    abs(rental.net_monthly),
-                ),
-            ]
+                    "Net rental income (75% of gross, less the subject's PITIA)"
+                    if positive
+                    else "Net rental shortfall (the subject's PITIA over 75% of gross)",
+                    rental.net_monthly if positive else abs(rental.net_monthly),
+                    "computed",
+                    derivation=rental.derivation,
+                )
+            ],
+            overrides,
+        )
+        if positive:
+            income_items = [*income_items, *rental_items]
+            income_lines = [*income_lines, *rental_lines]
+        else:
+            debt_items = [*debt_items, *rental_items]
+            debt_lines = [*debt_lines, *rental_lines]
 
     result = compute_dti(income_lines, housing_lines, debt_lines)
 
@@ -702,15 +761,22 @@ class UnknownDtiFieldError(Exception):
 
 
 async def _auto_amount_for(db: AsyncSession, loan_file: LoanFile, field_key: str) -> Decimal | None:
-    """The auto-populated value for one field_key (for the audit's prior value)."""
-    autos = (
-        await _auto_income_lines(db, loan_file.id)
-        + await _auto_housing_lines(db, loan_file)
-        + await _auto_debt_lines(db, loan_file.id)
-    )
-    for auto in autos:
-        if auto.key == field_key:
-            return auto.auto
+    """The auto-populated value for one field_key (for the audit's prior value).
+
+    LP-621 review — RESOLVED FROM THE BUILT CALCULATION, not by re-listing the three ``_auto_*``
+    builders. Those three are no longer the whole input set: the net-rental and present-housing lines
+    are assembled inside ``build_dti_calculation`` (they depend on the post-override housing total, so
+    they cannot be produced by a bare auto-builder). Re-listing the builders here made this function a
+    SECOND, narrower answer to "what are the calculator's fields", and the two disagreed the moment the
+    set grew — an override on a line the card renders was rejected as an unknown field.
+
+    One source of truth, at the cost of one extra build on an override action. The alternative — a
+    hand-maintained list of the extra keys — is the drift this just demonstrated.
+    """
+    calculation = await build_dti_calculation(db, loan_file=loan_file)
+    for item in (*calculation.income_items, *calculation.housing_items, *calculation.debt_items):
+        if item.key == field_key:
+            return item.auto_amount
     raise UnknownDtiFieldError(field_key)
 
 

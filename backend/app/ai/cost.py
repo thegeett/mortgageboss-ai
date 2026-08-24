@@ -51,16 +51,41 @@ PRICING: dict[str, tuple[float, float]] = {
 DEFAULT_RATE: tuple[float, float] = (0.0, 0.0)
 
 
-def estimate_cost(*, model: str, input_tokens: int, output_tokens: int) -> float:
-    """Estimate the USD cost of a call: ``input*in_rate + output*out_rate``.
+#: Prompt-cache multipliers on the base INPUT rate. A cache write costs more than an ordinary input
+#: token (the provider stores the prefix); a read costs a small fraction. Applied to whatever the
+#: model's input rate is, rather than duplicating the whole PRICING table at two more rates.
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.10
+
+
+def estimate_cost(
+    *,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> float:
+    """Estimate the USD cost of a call, including any prompt-cache traffic.
 
     An unknown model falls back to :data:`DEFAULT_RATE` (``0.0``) and logs
     ``ai_cost_unknown_model`` so the missing entry is noticed. The result is an
     estimate for tracking, not a billing figure.
+
+    LP-628 review — THE CACHE TOKENS ARE NOT OPTIONAL DETAIL ON THE CHUNKED PATH. ``input_tokens`` is
+    the uncached remainder, so on a cached call it excludes the document itself: a 3-chunk statement
+    bills its bytes once as a write and twice as reads, none of which used to reach this function. The
+    stored estimate was low by roughly an order of magnitude for exactly the documents the chunking
+    work was built for. Both default to 0, so an uncached caller is unchanged.
     """
     rates = PRICING.get(model)
     if rates is None:
         logger.warning("ai_cost_unknown_model", model=model)
         rates = DEFAULT_RATE
     in_rate, out_rate = rates
-    return input_tokens * in_rate + output_tokens * out_rate
+    return (
+        input_tokens * in_rate
+        + cache_write_tokens * in_rate * CACHE_WRITE_MULTIPLIER
+        + cache_read_tokens * in_rate * CACHE_READ_MULTIPLIER
+        + output_tokens * out_rate
+    )

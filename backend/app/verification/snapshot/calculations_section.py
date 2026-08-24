@@ -219,13 +219,26 @@ def _entry(
     nullable_headlines: tuple[str, ...] = (),
     confidence_of: _ConfidenceOf = _no_tag_confidence,
     unverified_inputs: tuple[UnverifiedInput, ...] = (),
+    upstream_gate_reason: str | None = None,
 ) -> CalculationEntry:
     """Assemble a CalculationEntry with confidence + fail-closed gating over its breakdown.
 
     When gated, the ``nullable_headlines`` (the ratio/premium a rule would trust) are set to None so
     the calc emits the gated marker + reason, NOT a confident-but-wrong number.
+
+    ``upstream_gate_reason`` (LP-621 review) is a gate the CALCULATOR itself raised, which this
+    breakdown-derived check cannot see. The two are independent and either one gates: the local check
+    knows about absent/unknown INPUT LINES, while a calculator can gate for a reason no line expresses
+    — LP-621's is "this is an investment subject and the method that applies to it cannot be computed",
+    which is a fact about the LOAN, not about a missing figure. Without this the snapshot published a
+    confident 44.8% to the calibrated rules while the /dti card showed the gate, so the only consumer
+    that could act on the ratio was the one not told it was unsound.
     """
     reason = _gate_reason(lines, required)
+    if upstream_gate_reason is not None:
+        # Both, when both apply — a reader who is told only one of two reasons will fix that one and
+        # expect the gate to lift.
+        reason = f"{reason}  {upstream_gate_reason}" if reason else upstream_gate_reason
     # bug-001 — the SAME note the /dti card shows, carried on the calculation rather than rebuilt, so
     # the two gate-reason producers cannot drift. It reaches the AI cross-check through this, which is
     # where a processor read "DTI calculation gated due to missing property tax amount" about a figure
@@ -269,6 +282,13 @@ def map_dti(dti: DtiCalculation) -> CalculationEntry | None:
         required=_REQUIRED_DTI_TAGS,
         nullable_headlines=("front_end_dti", "back_end_dti"),
         unverified_inputs=dti.unverified_inputs,
+        # LP-621 review — the calculator's OWN gate, which this module's breakdown-derived check cannot
+        # reproduce. `_gate_reason` looks for a required tag that is absent or unknown; LP-621 gates on
+        # something no line expresses — an investment subject whose Fannie treatment is not computable.
+        # `dti.gated` was set, `gate_display_ratios` nulled the ratios at the API boundary, and this
+        # path read neither, so the rule engine kept receiving the confident ratio the ticket says it
+        # stops publishing.
+        upstream_gate_reason=dti.gate_reason if dti.gated else None,
     )
 
 

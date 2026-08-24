@@ -162,6 +162,15 @@ class BankStatementExtractionResult(BaseModel):
     reasoning: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # LP-628 review — the cached halves of the input, carried so the pipeline can price them.
+    #
+    # ON THIS RESULT TYPE ONLY, deliberately. Prompt caching is used by exactly one path (chunked
+    # extraction, which only this extractor takes), so widening the shared `ExtractionResult` Protocol
+    # would force 118 extractors to declare a field none of them can ever set. The pipeline reads them
+    # with a 0 default for the same reason. If a second extractor starts caching, the Protocol is the
+    # right place and this comment is the note saying so.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     @classmethod
     def failed(cls, reason: str) -> "BankStatementExtractionResult":
@@ -404,7 +413,17 @@ def _merge_chunk_results(
         return None
 
     non_null = sum(1 for key, _ in _CORE_SPEC if getattr(data, key).value is not None)
-    status = derive_status(non_null + len(transactions) + len(additional_accounts), False)
+    # COERCION LOSS IS INHERITED FROM THE PARTS, not asserted to be absent. The literal `False` here
+    # discarded each chunk's own status: a chunk whose typed core lost a field to coercion is PARTIAL
+    # on the whole-document path (the sibling call at `_parse_bank_statement_json` passes the real
+    # flag) and merged to SUCCEEDED here. A statement with an unparseable printed balance therefore
+    # reported as a clean extraction ONLY when it took the chunked path — the same document, two
+    # different stories, decided by a code path the reader cannot see.
+    #
+    # ANY part being PARTIAL makes the merge PARTIAL: the merged typed core contains that part's
+    # fields, so the loss is genuinely present in what is returned.
+    coercion_lost = any(part.status is ExtractionStatus.PARTIAL for part in parts)
+    status = derive_status(non_null + len(transactions) + len(additional_accounts), coercion_lost)
     confidence = min(part.confidence for part in parts)
     if conflicts:
         confidence = round(confidence / 2, 4)
@@ -420,16 +439,28 @@ def _merge_chunk_results(
     )
     result.input_tokens = sum(part.input_tokens or 0 for part in parts) or None
     result.output_tokens = sum(part.output_tokens or 0 for part in parts) or None
+    # Summed the same way, and separately: the cached halves are billed at their own rates, so the
+    # cost estimate needs them apart rather than folded into the input total.
+    result.cache_read_tokens = sum(part.cache_read_tokens for part in parts)
+    result.cache_write_tokens = sum(part.cache_write_tokens for part in parts)
     return result
 
 
 async def _extract_in_chunks(
-    content: bytes, media_type: str, system_prompt: str
-) -> BankStatementExtractionResult | None:
-    """Run the chunked path and merge it. ``None`` when chunking could not produce a whole result.
+    content: bytes, media_type: str, system_prompt: str, *, observed_output_tokens: int | None
+) -> tuple[BankStatementExtractionResult | None, str | None]:
+    """Run the chunked path and merge it — ``(result, failure_reason)``, exactly one of them set.
 
-    Returning ``None`` rather than a partial merge is the point: the caller then fails with the
-    honest truncation reason and falls back exactly as it does today.
+    Returning the merged result rather than a partial one is the point: on failure the caller falls
+    back exactly as it does today.
+
+    THE REASON TRAVELS WITH THE FAILURE. This returned a bare ``None`` for every outcome, so the
+    caller had nothing to report and fell back on the ORIGINAL truncation reason — which meant a
+    rate-limited chunk was persisted as a CONTENT failure. `document_processing` gates its
+    re-runnable branch on `reasoning == INFRA_RATE_LIMITED` (LP-464), so that mislabelling drove the
+    matching OPEN need to REJECTED, and REJECTED is not re-matched: the successful re-run could never
+    advance it. `TOO_MANY_CHUNKS_REASON`, `SINGLE_PAGE_REASON` and the per-range truncation reason
+    were lost the same way — each one describes a different fix, and all three read as "truncated".
     """
     chunked = await run_chunked_extraction(
         content=content,
@@ -438,23 +469,35 @@ async def _extract_in_chunks(
         max_tokens=_MAX_TOKENS,
         log_label="bank_statement",
         instruction_for=_chunk_instruction,
+        # What the truncated attempt(s) actually produced, so the plan is sized against the overflow
+        # we watched rather than a fixed halving that cannot fit it.
+        observed_output_tokens=observed_output_tokens,
     )
     if not chunked.ok:
-        return None
+        return None, chunked.failure_reason
 
     parsed: list[BankStatementExtractionResult] = []
     for part in chunked.parts:
         if part.text is None:
-            return None
+            return None, "a page chunk returned no content"
         one = _parse_bank_statement_json(part.text)
         if one is None:
             # One unparseable chunk means the merged list would be short by that page range, with
             # nothing to show it. Fail the whole extraction (module docstring: partial is total).
             logger.warning("bank_statement_chunk_parse_failed", chunks=len(chunked.parts))
-            return None
+            return None, "could not parse a page chunk's extraction"
+        # THE CALL'S TOKENS ONTO ITS PARSED RESULT, without which `_merge_chunk_results`' summing is
+        # dead code: it sums `part.input_tokens` over these PARSED results, and `_parse_bank_statement_
+        # _json` has no call to read them from, so every term was None and the merged total was None.
+        # The chunked path therefore recorded NO tokens at all — a wider hole than the cache accounting
+        # this was found next to, and invisible because a None total simply reads as "not measured".
+        one.input_tokens = part.input_tokens
+        one.output_tokens = part.output_tokens
+        one.cache_read_tokens = part.cache_read_tokens
+        one.cache_write_tokens = part.cache_write_tokens
         parsed.append(one)
 
-    return _merge_chunk_results(parsed)
+    return _merge_chunk_results(parsed), None
 
 
 async def extract_bank_statement(content: bytes, media_type: str) -> BankStatementExtractionResult:
@@ -489,11 +532,19 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
         # `run_extraction_completion` have already been spent proving that. Splitting the WORK by
         # page range is the only thing that bounds the response; raising the ceiling again just
         # moves the cliff. On success this replaces the truncation failure entirely.
-        result = await _extract_in_chunks(content, media_type, system_prompt)
+        result, chunk_reason = await _extract_in_chunks(
+            content, media_type, system_prompt, observed_output_tokens=call.output_tokens
+        )
         if result is None:
-            # Chunking could not produce a WHOLE result. Surface the original honest truncation
-            # reason — never a partial extraction (see chunked.py on partial results).
-            return BankStatementExtractionResult.failed(call.failure_reason or "AI call failed")
+            # Chunking could not produce a WHOLE result — never a partial extraction (see chunked.py
+            # on partial results). THE CHUNKED REASON WINS where there is one: it describes what
+            # actually stopped this attempt, and the original truncation reason is by now the least
+            # informative fact available. It also carries INFRA_RATE_LIMITED through to the caller's
+            # re-runnable branch, which the truncation reason silently converted into a content
+            # failure — and a content failure rejects the need permanently.
+            return BankStatementExtractionResult.failed(
+                chunk_reason or call.failure_reason or "AI call failed"
+            )
     elif call.text is None:
         return BankStatementExtractionResult.failed(call.failure_reason or "AI call failed")
     else:
@@ -509,9 +560,16 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
         # cost estimate that hides them would understate every document that took this path.
         result.input_tokens = (result.input_tokens or 0) + (call.input_tokens or 0) or None
         result.output_tokens = (result.output_tokens or 0) + (call.output_tokens or 0) or None
+        # The truncated attempts were uncached (only the chunked path sends a cache marker), so this
+        # ADDS nothing on that side today — written as an addition anyway so it stays correct if the
+        # whole-document call ever caches too.
+        result.cache_read_tokens += call.cache_read_tokens
+        result.cache_write_tokens += call.cache_write_tokens
     else:
         result.input_tokens = call.input_tokens
         result.output_tokens = call.output_tokens
+        result.cache_read_tokens = call.cache_read_tokens
+        result.cache_write_tokens = call.cache_write_tokens
 
     # LP-381 (AS-9): page_count_present is the DETERMINISTIC page total — computed from the PDF, never a model
     # read (a model can miscount, and completeness must not be fabricated). Absent for non-PDF statements →

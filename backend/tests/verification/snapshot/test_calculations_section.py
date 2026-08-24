@@ -80,6 +80,12 @@ def _dti(back_end: Decimal | None = Decimal("43.10")) -> NS:
         # bug-001 — the note the gate reason appends when the file STATES a figure for a gated input
         # that is not acceptable verification. Empty here: this double is a complete, ungated file.
         unverified_inputs=(),
+        # LP-621 review — the CALCULATOR's own gate, which `map_dti` now honours alongside its
+        # breakdown-derived one. False here: a complete, ungated file. The real `DtiCalculation`
+        # always carries both fields; the double has to as well, which is the recurring cost of a
+        # SimpleNamespace stub this file already warns about twice.
+        gated=False,
+        gate_reason=None,
     )
 
 

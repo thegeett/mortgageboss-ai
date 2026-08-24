@@ -100,6 +100,18 @@ class ExtractionCall:
     #: reads it (via the extractor's ``reasoning``, which carries ``failure_reason``) to record a throttled
     #: extraction as re-runnable, not a coverage gap. ``None`` on success or a truncation give-up.
     infra_failure: str | None = None
+    #: LP-628 review — the prompt-cache halves of the input, which `input_tokens` EXCLUDES once caching
+    #: is in play. Carried so a cost estimate can price them at their own rates (a write ~1.25x an input
+    #: token, a read ~0.1x) instead of pricing only the uncached remainder — which on a cached call is
+    #: everything except the document itself.
+    #:
+    #: LEFT AT 0 ON THIS PATH, and that is a statement of fact rather than an omission: caching is
+    #: requested by exactly one caller (`chunked.py`, via `cache=True`), and it builds its own
+    #: `ExtractionCall`. A whole-document call sends no cache marker, so both are genuinely zero. If
+    #: that ever changes, populate them from the completion HERE — and note that the 128 extractor
+    #: tests stub the completion as a SimpleNamespace, so they will need the fields too.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 async def _attempt(

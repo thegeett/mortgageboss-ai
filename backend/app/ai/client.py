@@ -90,6 +90,30 @@ class AICompletion:
     output_tokens: int
     model: str
     stop_reason: str | None = None
+    # LP-628 review — THE CACHED HALVES OF THE PROMPT, carried rather than only logged.
+    #
+    # `input_tokens` is the UNCACHED REMAINDER once caching is in play, so on the chunked path — the
+    # one caching was introduced for — it excludes almost the entire document: chunk 1 bills its bytes
+    # as a cache WRITE and every later chunk as a cache READ, and neither appeared here. The caller
+    # computes `tokens_used` and `cost_estimate` from `input_tokens` alone, so a 3-chunk statement
+    # stored a cost roughly an order of magnitude below what it actually cost. The diff that added
+    # caching also fixed a token-summing bug for exactly this reason; this is the same bug one layer
+    # down.
+    #
+    # Zero on both is the honest reading for an uncached call, and also for a cached one whose prefix
+    # fell under the model's cache minimum — which is a real no-op worth being able to see.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    @property
+    def billed_input_tokens(self) -> int:
+        """Every input token the provider charged for, at any rate — the size a cost must start from.
+
+        Kept as a property rather than folded into `input_tokens`: the three are billed at DIFFERENT
+        rates (a cache write is ~1.25x, a read ~0.1x), so a consumer that needs a cost has to see them
+        apart, and one that only needs a payload size has one number to ask for.
+        """
+        return self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
 
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +562,10 @@ async def complete(
             # is what a cost estimate and a persisted ``model_used`` should reflect.
             model=resolved_model,
             stop_reason=stop_reason,
+            # LP-628 review — carried, not merely logged. These were read for the log line and then
+            # dropped, so every consumer's cost estimate excluded the bulk of a cached call's input.
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
 
     # Unreachable: the loop either returns or raises. Belt-and-suspenders for mypy.

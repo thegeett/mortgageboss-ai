@@ -60,6 +60,13 @@ class RentalTreatment:
     net_monthly: Decimal | None = None
     gate_reason: str | None = None
     derivation: str | None = None
+    #: The borrower's OWN monthly housing cost — what belongs on the housing side, because they do not
+    #: occupy the subject. Set only alongside `net_monthly`: the caller substitutes the two together or
+    #: neither, since adding the net to income while leaving the subject's PITIA in housing counts that
+    #: PITIA twice (it is already subtracted inside the net). Returning it here rather than making the
+    #: caller re-query is deliberate — this module already fetched it to decide whether to gate, and a
+    #: second read is a second chance for the two to disagree.
+    present_housing: Decimal | None = None
 
 
 _NOT_APPLICABLE = RentalTreatment(applies=False)
@@ -74,7 +81,14 @@ async def subject_rental_treatment(
     a second home are occupied by the borrower and their PITIA IS the housing expense, which is what
     the calculator already does.
     """
-    occupancy = await _subject_occupancy(db, loan_file.id)
+    occupancy, undetermined = await _subject_occupancy(db, loan_file.id)
+    if undetermined is not None:
+        # GATE, as `_subject_occupancy`'s contract has always said — not `applies=False`. Mapping an
+        # undetermined occupancy to not-applicable silently reverted the file to the pre-LP-621
+        # treatment: the wrong ratio, with nothing on screen to say a judgement had been skipped. That
+        # is the §8 distinction the rule engine is built on, arriving in the calculator: "this is not
+        # an investment subject" and "we cannot tell what this subject is" are different answers.
+        return RentalTreatment(applies=True, gate_reason=undetermined)
     if occupancy is not OccupancyType.INVESTMENT:
         return _NOT_APPLICABLE
 
@@ -104,11 +118,13 @@ async def subject_rental_treatment(
         )
 
     assert gross is not None and subject_pitia is not None  # guarded above
+    assert own_housing is not None  # guarded above (a missing figure lands in `missing`)
     qualifying = (gross * QUALIFYING_FACTOR).quantize(_CENTS, rounding=ROUND_HALF_UP)
     net = (qualifying - subject_pitia).quantize(_CENTS, rounding=ROUND_HALF_UP)
     return RentalTreatment(
         applies=True,
         net_monthly=net,
+        present_housing=own_housing,
         derivation=(
             f"75% of ${gross:,.2f} gross rent is ${qualifying:,.2f}, less the subject's "
             f"${subject_pitia:,.2f} PITIA — "
@@ -121,18 +137,44 @@ async def subject_rental_treatment(
     )
 
 
-async def _subject_occupancy(db: AsyncSession, loan_file_id: UUID) -> OccupancyType | None:
-    """The subject property's stated occupancy.
+async def _subject_occupancy(
+    db: AsyncSession, loan_file_id: UUID
+) -> tuple[OccupancyType | None, str | None]:
+    """``(occupancy, undetermined_reason)`` — exactly one is ever set.
 
-    More than one property row on a file is a data error, not a choice to make: returning None gates
-    rather than picking one, because the whole treatment turns on this answer.
+    THREE OUTCOMES, NOT TWO, and collapsing them is what the previous version did wrong. It returned a
+    bare ``None`` for every non-single-row case and the caller read that as "not an investment
+    subject", so an ambiguous file quietly got the old, wrong treatment with no gate and no signal:
+
+      * NO property row      -> ``(None, None)``. There is no subject to treat. Genuinely
+        not-applicable, and the only case where a bare None was right.
+      * ONE row, occupancy NULL -> a reason. The whole treatment turns on this answer and the file
+        does not give it. Distinct from "the borrower occupies it", which is what the old return
+        collapsed it into.
+      * MORE THAN ONE row    -> a reason. UNREACHABLE TODAY: ``uq_properties_loan_file_id`` is a plain
+        UNIQUE on ``loan_file_id`` with no ``deleted_at`` predicate, so a file cannot hold two property
+        rows even across soft deletes. Kept as a guard against that constraint being relaxed, not as a
+        live path — and stated as such so nobody writes a test for it and finds it untriggerable.
     """
     rows = (
         await db.scalars(
             only_active(select(Property).where(Property.loan_file_id == loan_file_id), Property)
         )
     ).all()
-    return rows[0].occupancy_type if len(rows) == 1 else None
+    if not rows:
+        return None, None
+    if len(rows) > 1:
+        return None, (
+            f"the file carries {len(rows)} property records, so which one is the subject — and "
+            "whether the borrower occupies it — cannot be determined"
+        )
+    occupancy = rows[0].occupancy_type
+    if occupancy is None:
+        return None, (
+            "the subject property's occupancy is not stated, so whether the borrower lives there "
+            "cannot be determined"
+        )
+    return occupancy, None
 
 
 async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:

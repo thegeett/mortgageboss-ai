@@ -74,6 +74,36 @@ TOO_MANY_CHUNKS_REASON = "document too long to extract in page chunks"
 #: ceiling is a genuinely unextractable page, not a chunking problem.
 SINGLE_PAGE_REASON = "single-page document - too dense to extract and cannot be split"
 
+#: The honest reason when a range truncated and could not be split any finer.
+TRUNCATED_RANGE_REASON = "response truncated - page range too dense to extract in full"
+
+#: How much output we assume is still UNSEEN beyond an observed truncation. The observed figure is a
+#: floor, not a measurement: the response stopped at the ceiling with the document unfinished, so the
+#: true size is unknown and strictly larger. Sizing the plan against the floor is what produced the
+#: two-chunk plan that could not fit — half of "more than 32,768" is still more than 16,384.
+_OVERFLOW_HEADROOM = 2
+
+#: How many times one range may be split when it truncates. One level takes a 5-page range to two
+#: ~2-page ranges, which is a large step; a second is allowed for a genuinely dense document, and past
+#: that the honest answer is that the pages themselves are too dense (the SINGLE_PAGE argument).
+MAX_SPLIT_DEPTH = 2
+
+
+def _minimum_chunks(observed_output_tokens: int | None, max_tokens: int) -> int:
+    """How many chunks the plan needs AT LEAST, given output we already watched overflow.
+
+    Two is the floor (a plan that does not split is not a plan), and was previously also the ceiling
+    for every document of 10 pages or fewer — `min(per, ceil(n/2))` yields exactly two ranges for every
+    page count from 2 to 10 at the default 5. That is the one number that cannot work here: this path
+    is only reached AFTER the whole document overflowed the 32,768 retry ceiling, and each chunk runs
+    at `max_tokens` (16,384 for a bank statement). Half of more-than-32,768 is more than 16,384, so
+    both chunks truncated and the run failed having spent two more full-document calls to learn it.
+    """
+    if not observed_output_tokens or max_tokens <= 0:
+        return 2
+    needed = -(-observed_output_tokens * _OVERFLOW_HEADROOM // max_tokens)
+    return max(2, needed)
+
 
 @dataclass(frozen=True)
 class PageRange:
@@ -84,6 +114,17 @@ class PageRange:
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"{self.start}-{self.end}"
+
+
+def _split(page_range: PageRange) -> tuple[PageRange, ...] | None:
+    """Halve a range, or ``None`` when it is a single page and cannot be split further."""
+    if page_range.start >= page_range.end:
+        return None
+    midpoint = page_range.start + (page_range.end - page_range.start) // 2
+    return (
+        PageRange(page_range.start, midpoint),
+        PageRange(midpoint + 1, page_range.end),
+    )
 
 
 @dataclass(frozen=True)
@@ -132,6 +173,7 @@ async def run_chunked_extraction(
     log_label: str,
     instruction_for: Callable[[PageRange, int], str],
     pages_per_chunk: int = DEFAULT_PAGES_PER_CHUNK,
+    observed_output_tokens: int | None = None,
 ) -> ChunkedExtraction:
     """Extract ``content`` one page range at a time, sending the WHOLE document to each chunk.
 
@@ -168,7 +210,13 @@ async def run_chunked_extraction(
     # everything — same request, same output, same truncation, one more call's cost. Whenever the
     # natural plan does not split, tighten the range so it does: a dense 4-page statement is
     # exactly the case that needs splitting, and it is invisible to a page-count threshold.
-    effective_per = min(max(1, pages_per_chunk), -(-page_count // 2))
+    #
+    # SIZED AGAINST THE OVERFLOW WE ACTUALLY SAW, not against a fixed halving — see `_minimum_chunks`
+    # for why halving is the one factor guaranteed not to work on the path that reaches here.
+    effective_per = min(
+        max(1, pages_per_chunk),
+        -(-page_count // _minimum_chunks(observed_output_tokens, max_tokens)),
+    )
 
     ranges = plan_page_ranges(page_count, effective_per)
     if len(ranges) > MAX_CHUNKS:
@@ -190,7 +238,27 @@ async def run_chunked_extraction(
     )
 
     parts: list[ExtractionCall] = []
-    for index, page_range in enumerate(ranges, start=1):
+    # A WORK QUEUE, not a plain loop over the plan, so a range that truncates can be SPLIT and retried
+    # rather than failing the run. The `extraction_chunk_truncated` log has always said "the fix is a
+    # smaller range"; nothing acted on it, so a plan that came up one step short threw away every
+    # chunk that had already succeeded. Halves are pushed to the FRONT, and every range still pending
+    # covers later pages, so `parts` stays in page order without a sort.
+    pending: list[tuple[PageRange, int]] = [(page_range, 0) for page_range in ranges]
+    calls_made = 0
+    while pending:
+        page_range, depth = pending.pop(0)
+        # The same ceiling the plan is checked against, now covering re-splits too: a document that
+        # keeps truncating must not fan out indefinitely at a full document's cost per call.
+        calls_made += 1
+        if calls_made > MAX_CHUNKS:
+            logger.warning(
+                "extraction_chunk_budget_exhausted",
+                extractor=log_label,
+                page_count=page_count,
+                max_chunks=MAX_CHUNKS,
+            )
+            return ChunkedExtraction((), page_count, TOO_MANY_CHUNKS_REASON)
+        index = calls_made
         try:
             message = build_document_message(
                 content=content,
@@ -208,34 +276,44 @@ async def run_chunked_extraction(
             message=message,
             max_tokens=max_tokens,
             log_label=log_label,
-            phase=f"chunk {index}/{len(ranges)}",
+            # Planned count, not a denominator: a re-split makes the true total larger
+            # than the plan, and "chunk 3/2" is more confusing than an open count.
+            phase=f"chunk {index} (planned {len(ranges)})",
         )
         if completion is None:
             logger.warning(
                 "extraction_chunk_failed",
                 extractor=log_label,
                 chunk=index,
-                of=len(ranges),
+                planned=len(ranges),
                 pages=str(page_range),
                 error_kind=infra_kind,
             )
             return ChunkedExtraction((), page_count, _failure_reason(infra_kind))
 
         if completion.stop_reason == "max_tokens":
-            # A single range overflowing its budget means pages_per_chunk is too coarse for this
-            # document. Report it as itself rather than as a parse failure — the fix is a smaller
-            # range, and that is only discoverable if this is distinguishable in the logs.
+            # A single range overflowing its budget means the range is too coarse for this document.
+            # SPLIT IT AND RETRY, rather than failing the run: the pages this range covers are dense,
+            # which says nothing about the ranges already extracted or still queued. Reported as
+            # itself either way — a truncation is not a parse failure, and only a distinguishable log
+            # makes the density discoverable.
+            halves = _split(page_range) if depth < MAX_SPLIT_DEPTH else None
             logger.warning(
                 "extraction_chunk_truncated",
                 extractor=log_label,
                 chunk=index,
-                of=len(ranges),
                 pages=str(page_range),
                 max_tokens=max_tokens,
+                depth=depth,
+                retrying_as=len(halves) if halves else 0,
             )
-            return ChunkedExtraction(
-                (), page_count, "response truncated - page range too dense to extract in full"
-            )
+            if halves is None:
+                # Out of splits, or a single page: the pages themselves are too dense, which is the
+                # SINGLE_PAGE argument arriving one level down. Fail honestly and let the caller fall
+                # back — never a partial merge (see the module docstring).
+                return ChunkedExtraction((), page_count, TRUNCATED_RANGE_REASON)
+            pending[0:0] = [(half, depth + 1) for half in halves]
+            continue
 
         parts.append(
             ExtractionCall(
@@ -244,6 +322,11 @@ async def run_chunked_extraction(
                 completion.output_tokens,
                 None,
                 False,
+                # The whole point of the cached prefix: on every chunk after the first, the document
+                # is billed here rather than in `input_tokens`. Dropping these made the cheaper
+                # strategy look free instead of cheap.
+                cache_read_tokens=completion.cache_read_tokens,
+                cache_write_tokens=completion.cache_write_tokens,
             )
         )
 

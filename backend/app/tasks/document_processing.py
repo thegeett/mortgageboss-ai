@@ -410,11 +410,24 @@ async def _extract_branch(
     tokens_used: int | None = None
     cost_estimate: float | None = None
     if result.input_tokens is not None and result.output_tokens is not None:
-        tokens_used = result.input_tokens + result.output_tokens
+        # LP-628 review — THE CACHED HALVES COUNT. `input_tokens` is the UNCACHED REMAINDER once a call
+        # uses prompt caching, so on the chunked path it excludes the document itself: chunk 1 bills
+        # its bytes as a cache write and every later chunk as a read. Counting only the remainder
+        # stored a cost roughly an order of magnitude below what the run actually cost, for exactly
+        # the documents chunking exists to handle.
+        #
+        # `getattr` because caching is used by ONE extractor today, and widening the shared
+        # `ExtractionResult` Protocol would force 118 others to declare a field they can never set.
+        # See the note on `BankStatementExtractionResult`.
+        cache_read = getattr(result, "cache_read_tokens", 0)
+        cache_write = getattr(result, "cache_write_tokens", 0)
+        tokens_used = result.input_tokens + result.output_tokens + cache_read + cache_write
         cost_estimate = estimate_cost(
             model=invoked_model,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
         )
 
     # LP-201: persist the document-level confidence honestly — a failed/defaulted
