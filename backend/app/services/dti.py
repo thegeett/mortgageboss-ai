@@ -58,6 +58,7 @@ from app.schemas.dti import (
 from app.services.activity_log import log_activity
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.mi import compute_loan_mi
+from app.services.rental_treatment import subject_rental_treatment
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.dti import (
     BACK_END_FORMULA,
@@ -78,6 +79,9 @@ HOUSING_TAXES = "housing.taxes"
 HOUSING_INSURANCE = "housing.insurance"
 HOUSING_MORTGAGE_INSURANCE = "housing.mortgage_insurance"
 HOUSING_HOA = "housing.hoa"
+# LP-621 — Fannie's net-rental figure for an investment SUBJECT: income when positive, an obligation
+# when negative. One key for both, because it is one computation with a sign.
+RENTAL_NET = "rental.net_subject"
 
 # LP-375 — the REQUIRED housing inputs whose absence must FAIL-CLOSED (absent≠0), mirroring the snapshot
 # path's ``_REQUIRED_DTI_TAGS`` (calculations_section.py): a missing tax figure or hazard binder understates
@@ -548,6 +552,40 @@ async def build_dti_calculation(
     housing_items, housing_lines = _to_items(housing_auto, overrides)
     debt_items, debt_lines = _to_items(debt_auto, overrides)
 
+    # LP-621 — FANNIE'S RENTAL TREATMENT FOR AN INVESTMENT SUBJECT. Until now the subject's PITI was
+    # the housing expense whoever lived there, which on an investment refinance is wrong in BOTH
+    # directions: the full payment in the numerator with no credit for rent that arrives, and the
+    # borrower's own housing cost missing entirely. B3-3.1-08 nets (gross x 75%) against the PITIA and
+    # puts the borrower's OWN cost on the housing side.
+    #
+    # Computed AFTER the housing lines, because the treatment needs the PITIA they sum to.
+    # POST-OVERRIDE (`housing_lines`, not `housing_auto`): a processor who corrected the tax figure
+    # has corrected the PITIA this nets against, and netting against the pre-override number would
+    # quietly ignore their correction.
+    housing_total = sum((line.amount for line in housing_lines), Decimal(0))
+    rental = await subject_rental_treatment(
+        db, loan_file=loan_file, subject_pitia=housing_total or None
+    )
+    if rental.applies and rental.net_monthly is not None:
+        # A named line, not a bare amount: the breakdown a processor reads has to show WHERE a figure
+        # this large came from, and `derivation` carries the arithmetic behind it.
+        if rental.net_monthly > 0:
+            income_lines = [
+                *income_lines,
+                DtiLine(
+                    RENTAL_NET, "Net rental income (75% of gross, less PITIA)", rental.net_monthly
+                ),
+            ]
+        else:
+            debt_lines = [
+                *debt_lines,
+                DtiLine(
+                    RENTAL_NET,
+                    "Net rental shortfall (subject PITIA over 75% of gross)",
+                    abs(rental.net_monthly),
+                ),
+            ]
+
     result = compute_dti(income_lines, housing_lines, debt_lines)
 
     # LP-375 — FAIL-CLOSED gating: a REQUIRED housing input (taxes/insurance) unknown (auto None, not
@@ -557,17 +595,23 @@ async def build_dti_calculation(
     # DISPLAY nulls the ratios instead (``gate_display_ratios`` at the API boundary), so the /dti card
     # agrees with the engine WITHOUT this shared function altering the snapshot path.
     gated_labels = [item.label for item in housing_items if item.unknown]
-    gated = bool(gated_labels)
+    # LP-621 — an investment subject whose treatment cannot be computed GATES, rather than reporting a
+    # ratio produced by a method that does not apply to the loan. LF-ABRS read 44.8% against a 45%
+    # limit that way; the honest output names the two figures the file does not state.
+    gated = bool(gated_labels) or bool(rental.gate_reason)
     # bug-001 — name what the file DOES state for a gated input, so the gate reads as caution rather
     # than as a system that cannot see its own documents.
     unverified = await _unverified_housing_inputs(db, loan_file.id, gated_labels)
-    gate_reason = (
-        "calculation gated (fail-closed): "
-        + "; ".join(f"{label} is unknown" for label in gated_labels)
-        + ("  " + " ".join(u.sentence for u in unverified) if unverified else "")
-        if gated
-        else None
-    )
+    reasons: list[str] = []
+    if gated_labels:
+        reasons.append(
+            "calculation gated (fail-closed): "
+            + "; ".join(f"{label} is unknown" for label in gated_labels)
+            + ("  " + " ".join(u.sentence for u in unverified) if unverified else "")
+        )
+    if rental.gate_reason:
+        reasons.append(rental.gate_reason)
+    gate_reason = "  ".join(reasons) if reasons else None
 
     lender_slug = await _lender_slug(db, loan_file)
     limit = _resolve_limit(loan_file.loan_program, lender_slug, result.back_end_pct)
