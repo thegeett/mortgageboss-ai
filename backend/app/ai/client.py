@@ -108,7 +108,7 @@ def _normalize_media_type(media_type: str) -> str:
     return "image/jpeg" if mt == "image/jpg" else mt
 
 
-def build_document_block(*, content: bytes, media_type: str) -> dict[str, Any]:
+def build_document_block(*, content: bytes, media_type: str, cache: bool = False) -> dict[str, Any]:
     """Build a base64 ``document`` (PDF) or ``image`` (JPEG/PNG) content block.
 
     The block shape is verified against the installed anthropic SDK (0.109.1):
@@ -119,24 +119,44 @@ def build_document_block(*, content: bytes, media_type: str) -> dict[str, Any]:
 
     The bytes are base64-encoded (utf-8 decoded for JSON). The base64 payload is
     document content (borrower PII) — it is **never** logged.
+
+    ``cache=True`` marks this block as a prompt-cache breakpoint (LP-628), so the prefix
+    ``system`` + this document is written to cache on the first call and read back on
+    later calls that repeat it byte-for-byte. Only the CHUNKED extraction path sets it,
+    because that is the only path that deliberately sends one document more than once
+    (once per page range, with only the trailing instruction differing).
+
+    Placement is deliberate and load-bearing. Bedrock evaluates the cache minimum against
+    the CUMULATIVE ``tools`` → ``system`` → ``messages`` prefix, not per section, and for
+    Haiku 4.5 that minimum is **4,096 tokens**. Our largest extraction system prompt is
+    ~3,120 tokens, so a breakpoint on the system block alone would be under the minimum and
+    would silently cache NOTHING — no error, ``cache_creation_input_tokens: 0``. Marking the
+    document block instead puts system + document (~34K) behind one breakpoint, far above
+    the minimum, and leaves the per-chunk instruction after it where it belongs.
     """
     mt = _normalize_media_type(media_type)
     data = base64.standard_b64encode(content).decode("utf-8")
     if mt == _PDF_MEDIA_TYPE:
-        return {
+        block: dict[str, Any] = {
             "type": "document",
             "source": {"type": "base64", "media_type": _PDF_MEDIA_TYPE, "data": data},
         }
-    if mt in _IMAGE_MEDIA_TYPES:
-        return {
+    elif mt in _IMAGE_MEDIA_TYPES:
+        block = {
             "type": "image",
             "source": {"type": "base64", "media_type": mt, "data": data},
         }
-    raise ValueError(f"Unsupported media type for AI document input: {media_type!r}")
+    else:
+        raise ValueError(f"Unsupported media type for AI document input: {media_type!r}")
+    if cache:
+        # Explicit per-block marker, NOT the top-level auto-placement convenience field — that
+        # field is exposed only on the newest Bedrock models and is rejected on Haiku 4.5.
+        block["cache_control"] = {"type": "ephemeral"}
+    return block
 
 
 def build_document_message(
-    *, content: bytes, media_type: str, instruction: str | None = None
+    *, content: bytes, media_type: str, instruction: str | None = None, cache: bool = False
 ) -> dict[str, Any]:
     """Assemble a ``user`` message carrying a document/image block + optional text.
 
@@ -144,8 +164,14 @@ def build_document_message(
     instruction}]`` (the text block is omitted when ``instruction`` is empty/None).
     Callers pass the returned dict straight into ``complete(messages=[...])``;
     standalone instructions can also go in ``complete(system=...)``.
+
+    ``cache=True`` puts a prompt-cache breakpoint on the document block (see
+    :func:`build_document_block`). The instruction block deliberately sits AFTER it, so a
+    per-chunk instruction can vary freely without invalidating the cached prefix.
     """
-    blocks: list[dict[str, Any]] = [build_document_block(content=content, media_type=media_type)]
+    blocks: list[dict[str, Any]] = [
+        build_document_block(content=content, media_type=media_type, cache=cache)
+    ]
     if instruction:
         blocks.append({"type": "text", "text": instruction})
     return {"role": "user", "content": blocks}
@@ -482,6 +508,13 @@ async def complete(
         input_tokens = resp.usage.input_tokens
         output_tokens = resp.usage.output_tokens
         stop_reason = _normalize_stop_reason(getattr(resp, "stop_reason", None))
+        # LP-628 — prompt-cache accounting. Absent on responses that used no caching, and absent
+        # from older/stub usage objects, so both read through getattr with a 0 default rather than
+        # assuming the fields exist. NOTE `input_tokens` is the UNCACHED REMAINDER once caching is
+        # in play: the true prompt size is input + cache_read + cache_creation. Anything reasoning
+        # about payload size (or comparing against a previous run) must add all three.
+        cache_read = getattr(resp.usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(resp.usage, "cache_creation_input_tokens", 0) or 0
         # METADATA ONLY — token counts, timing, finish reason; never the content.
         logger.info(
             "ai_call_succeeded",
@@ -489,6 +522,10 @@ async def complete(
             provider=settings.ai_provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            # Zero on BOTH when a marker was sent means the prefix fell under the model's cache
+            # minimum — the silent no-op this path is designed to make visible.
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
             latency_ms=latency_ms,
             attempt=attempt,
             stop_reason=stop_reason,

@@ -24,6 +24,7 @@ logged**, and **displayed masked** (last-4) — the LP-39b SSN pattern, generali
 
 import datetime
 import json
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -31,6 +32,7 @@ import structlog
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai.client import build_document_message
+from app.ai.extraction.chunked import PageRange, run_chunked_extraction
 from app.ai.extraction.model_call import run_extraction_completion
 from app.ai.extraction.parsing import (
     CoreSpec,
@@ -293,6 +295,168 @@ def _parse_bank_statement_json(text: str) -> BankStatementExtractionResult | Non
     )
 
 
+def _chunk_instruction(page_range: PageRange, page_count: int) -> str:
+    """The per-chunk instruction (LP-628). Sits AFTER the cached document block, so it varies
+    freely without invalidating the cached prefix.
+
+    Says BEGINS deliberately. A transaction printed across a page break belongs to exactly one
+    chunk — the one whose pages contain its first line — which makes double counting impossible
+    without needing to identify duplicate rows afterwards (two real $4.50 charges on one day are
+    indistinguishable from a duplicate, so no de-duplicator could be trusted here).
+
+    Everything OTHER than transactions stays whole-document. Each chunk sees the entire file, so
+    the account header, the printed period totals and the "Page 1 of N" footer are read the same
+    way in every chunk; the merge takes the first non-null and cross-checks the rest.
+    """
+    return (
+        f"This document has {page_count} pages. You are extracting it in parts, and this part "
+        f"covers PAGES {page_range.start} TO {page_range.end}.\n\n"
+        f"For the `transactions` list: include a transaction ONLY if its row BEGINS on pages "
+        f"{page_range.start}-{page_range.end}. If a transaction's row starts on an earlier page "
+        f"and continues onto page {page_range.start}, it belongs to an earlier part - omit it. "
+        f"If a row starts on page {page_range.end} and continues past it, INCLUDE it here, in "
+        f"full. Do not repeat transactions from other pages.\n\n"
+        f"Every OTHER field - the account holder, account number, statement period, the printed "
+        f"balances and period totals, the printed page count - describes the whole statement, "
+        f"not this page range. Read them from wherever they appear in the document, exactly as "
+        f"you would if you were extracting it in one pass."
+    )
+
+
+def _first_stated(parts: Sequence[BankStatementExtractionResult], field: str) -> tuple[Any, int]:
+    """The first non-null value for ``field`` across chunks, plus a count of chunks that stated a
+    DIFFERENT one.
+
+    Disagreement is reported rather than resolved. Every chunk read the same whole document, so
+    two chunks returning different account numbers does not mean one misread a page — it means
+    the file is not one statement. That is a fact for a human, not something to average away.
+    """
+    chosen: Any = None
+    conflicts = 0
+    for part in parts:
+        value = getattr(part.data, field).value
+        if value is None:
+            continue
+        if chosen is None:
+            chosen = value
+        elif value != chosen:
+            conflicts += 1
+    return chosen, conflicts
+
+
+def _merge_chunk_results(
+    parts: Sequence[BankStatementExtractionResult],
+) -> BankStatementExtractionResult | None:
+    """Merge per-page-range results into the one result that gets persisted (LP-628).
+
+    Two rules, and only two:
+
+    * ``transactions`` CONCATENATE, in page order. This is the only field that accumulates, and
+      the only reason chunking exists.
+    * Everything else is a WHOLE-DOCUMENT read — first non-null wins, later chunks cross-check.
+      This includes the printed period totals: the prompt asks for the statement's own stated
+      figures (each carries a ``page`` and ``snippet``), not for a sum the model computed, so a
+      chunk reports the same printed total as every other chunk. There is nothing to recompute.
+
+    Confidence is the MINIMUM across chunks, then halved if any chunk contradicted another. The
+    merged result is no more trustworthy than its weakest part, and a contradiction is a reason
+    for a human to look rather than a number to smooth over.
+
+    Returns ``None`` if ``parts`` is empty (the caller then fails honestly).
+    """
+    if not parts:
+        return None
+
+    merged: dict[str, Any] = {}
+    conflicts = 0
+    for field, _coerce in _CORE_SPEC:
+        value, field_conflicts = _first_stated(parts, field)
+        conflicts += field_conflicts
+        if value is not None:
+            # Keep the whole TypedField (value + source), not just the value, so provenance
+            # survives the merge — a finding that cites a page must still be able to.
+            for part in parts:
+                if getattr(part.data, field).value == value:
+                    merged[field] = getattr(part.data, field)
+                    break
+
+    transactions = [txn for part in parts for txn in part.data.transactions]
+
+    # Whole-document reads like the typed core: every chunk saw the same combined-statement rows
+    # and the same catch-all sections, so concatenating would duplicate them.
+    additional_accounts = next(
+        (part.data.additional_accounts for part in parts if part.data.additional_accounts), []
+    )
+    sections = next(
+        (part.data.additional_sections for part in parts if part.data.additional_sections), []
+    )
+
+    try:
+        data = BankStatementExtraction.model_validate(
+            {
+                **merged,
+                "transactions": transactions,
+                "additional_accounts": additional_accounts,
+                "additional_sections": sections,
+            }
+        )
+    except ValidationError:
+        return None
+
+    non_null = sum(1 for key, _ in _CORE_SPEC if getattr(data, key).value is not None)
+    status = derive_status(non_null + len(transactions) + len(additional_accounts), False)
+    confidence = min(part.confidence for part in parts)
+    if conflicts:
+        confidence = round(confidence / 2, 4)
+        logger.warning(
+            "bank_statement_chunk_conflict",
+            conflicts=conflicts,
+            chunks=len(parts),
+        )
+
+    reasoning = next((part.reasoning for part in parts if part.reasoning), None)
+    result = BankStatementExtractionResult(
+        data=data, status=status, confidence=confidence, reasoning=reasoning
+    )
+    result.input_tokens = sum(part.input_tokens or 0 for part in parts) or None
+    result.output_tokens = sum(part.output_tokens or 0 for part in parts) or None
+    return result
+
+
+async def _extract_in_chunks(
+    content: bytes, media_type: str, system_prompt: str
+) -> BankStatementExtractionResult | None:
+    """Run the chunked path and merge it. ``None`` when chunking could not produce a whole result.
+
+    Returning ``None`` rather than a partial merge is the point: the caller then fails with the
+    honest truncation reason and falls back exactly as it does today.
+    """
+    chunked = await run_chunked_extraction(
+        content=content,
+        media_type=media_type,
+        system=system_prompt,
+        max_tokens=_MAX_TOKENS,
+        log_label="bank_statement",
+        instruction_for=_chunk_instruction,
+    )
+    if not chunked.ok:
+        return None
+
+    parsed: list[BankStatementExtractionResult] = []
+    for part in chunked.parts:
+        if part.text is None:
+            return None
+        one = _parse_bank_statement_json(part.text)
+        if one is None:
+            # One unparseable chunk means the merged list would be short by that page range, with
+            # nothing to show it. Fail the whole extraction (module docstring: partial is total).
+            logger.warning("bank_statement_chunk_parse_failed", chunks=len(chunked.parts))
+            return None
+        parsed.append(one)
+
+    return _merge_chunk_results(parsed)
+
+
 async def extract_bank_statement(content: bytes, media_type: str) -> BankStatementExtractionResult:
     """Extract a bank statement (incl. its transactions) from bytes. Never raises.
 
@@ -317,16 +481,37 @@ async def extract_bank_statement(content: bytes, media_type: str) -> BankStateme
         max_tokens=_MAX_TOKENS,
         log_label="bank_statement",
     )
-    if call.text is None:
-        return BankStatementExtractionResult.failed(call.failure_reason or "AI call failed")
 
-    result = _parse_bank_statement_json(call.text)
+    result: BankStatementExtractionResult | None = None
+    if call.truncated:
+        # LP-628 — the document's OUTPUT is longer than any ceiling we can name, because it scales
+        # with transaction count. Both the first attempt and the high-ceiling retry inside
+        # `run_extraction_completion` have already been spent proving that. Splitting the WORK by
+        # page range is the only thing that bounds the response; raising the ceiling again just
+        # moves the cliff. On success this replaces the truncation failure entirely.
+        result = await _extract_in_chunks(content, media_type, system_prompt)
+        if result is None:
+            # Chunking could not produce a WHOLE result. Surface the original honest truncation
+            # reason — never a partial extraction (see chunked.py on partial results).
+            return BankStatementExtractionResult.failed(call.failure_reason or "AI call failed")
+    elif call.text is None:
+        return BankStatementExtractionResult.failed(call.failure_reason or "AI call failed")
+    else:
+        result = _parse_bank_statement_json(call.text)
+
     if result is None:
         logger.warning("bank_statement_extraction_parse_failed")  # truncated/malformed
         return BankStatementExtractionResult.failed("could not parse extraction")
 
-    result.input_tokens = call.input_tokens
-    result.output_tokens = call.output_tokens
+    if call.truncated:
+        # The chunked merge already summed its own chunks. ADD the truncated attempt(s) rather than
+        # overwriting with them: those tokens were genuinely spent before chunking started, and a
+        # cost estimate that hides them would understate every document that took this path.
+        result.input_tokens = (result.input_tokens or 0) + (call.input_tokens or 0) or None
+        result.output_tokens = (result.output_tokens or 0) + (call.output_tokens or 0) or None
+    else:
+        result.input_tokens = call.input_tokens
+        result.output_tokens = call.output_tokens
 
     # LP-381 (AS-9): page_count_present is the DETERMINISTIC page total — computed from the PDF, never a model
     # read (a model can miscount, and completeness must not be fabricated). Absent for non-PDF statements →
