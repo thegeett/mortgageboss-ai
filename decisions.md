@@ -15491,3 +15491,42 @@ double-firing.
 
 *Applies to.* Any rule whose outcomes do not all depend on the same inputs. The tell is an outcome whose
 reasoning never mentions a tag the rule gates on.
+
+## ADR-387
+
+**A resource holding a credential Terraform does not manage cannot be put on a destroy/recreate schedule.**
+
+*Context.* LP-630 set out to cut staging cost by taking idle resources down overnight. ECS services and RDS
+both have a single-call stop API, so scheduling them is four lines of IAM and eight EventBridge schedules.
+ElastiCache has no stop operation at all — only delete — so the equivalent saving would require destroying and
+recreating the replication group every morning. On the face of it that looked acceptable, because nothing in
+the cache is durable: it holds a Celery queue, expiring results, and an auto-expiring lock, and losing all
+three in staging costs nothing. The blocker turned out to be somewhere else entirely. `modules/data/main.tf`
+carries `ignore_changes = [auth_token, auth_token_update_strategy]` so the AUTH token never lands in Terraform
+state; it is applied out of band and hand-written into the `redis-url` secret. A recreated group therefore
+comes up with no token while Secrets Manager still holds the old one, and `scripts/deploy` repairs that
+through an interactive stage that polls for `AuthTokenEnabled=true` and refuses to write a URL it cannot
+verify. The credential, not the data, is what cannot be recreated unattended.
+
+*Decision.* Before scheduling a resource off, ask what has to be true for it to come back — not what is lost
+when it goes away. A resource qualifies for a recreate schedule only if every credential in its boot path is
+either managed by Terraform or absent. Where it is not, the resource is either left running, or resized
+permanently, or moved somewhere the credential does not exist. LP-630 takes the middle option: ElastiCache
+drops from `cache.t4g.small` to `cache.t4g.micro` and stays up, capturing half the saving for one tfvars line
+and no operational risk.
+
+*Consequences.* Some idle spend is left on the table by choice — about $7/month here — and the reason is
+recorded so it is not rediscovered as an oversight. The rule also cuts the other way: it is an argument for
+managing credentials in Terraform where the security posture allows it, since an out-of-band secret quietly
+removes the resource from every automation that would otherwise recreate it. Note that the escape hatch of
+turning the credential off (`redis_auth_enabled = false`) does not work by itself: `ignore_changes` means the
+flag never reaches the cluster, so flipping it leaves the cache still demanding a token while the app stops
+sending one, and disarms the check that would have said so.
+
+*Applies to.* Any resource with an out-of-band credential in the path an application takes to reach it. The
+tell is an `ignore_changes` on something that looks like a secret, paired with a deploy stage that asks a
+human to apply it. LP-629's worker sizing is unaffected; ECS and RDS scheduling proceeds as specified.
+
+**Related:** LP-630, the `check "redis_auth_token_applied"` block in `modules/data/main.tf` that makes the
+gap visible, ADR-385, which solves the same problem by elimination -- the read-only role has no password anywhere, so
+there is nothing to apply out of band in the first place.
