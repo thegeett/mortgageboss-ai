@@ -42,6 +42,14 @@ locals {
     "/ecs/${var.name_prefix}/worker",
     "/ecs/${var.name_prefix}/frontend",
   ]
+
+  # LP-629 — every Celery child paces independently, so the environment's Bedrock
+  # request rate is (per-process value) x tasks x children. Deriving the per-process
+  # value from the environment budget makes that arithmetic automatic: raising
+  # worker_concurrency tightens each process's pacing in the same plan, so the total
+  # stays put.
+  worker_slots            = var.worker_desired_count * var.worker_concurrency
+  bedrock_rpm_per_process = max(floor(var.bedrock_rpm_budget / local.worker_slots), 1)
 }
 
 data "aws_caller_identity" "current" {}
@@ -418,7 +426,11 @@ module "compute" {
   worker_memory   = var.worker_memory
   frontend_cpu    = var.frontend_cpu
   frontend_memory = var.frontend_memory
-  desired_count   = var.desired_count
+
+  api_desired_count      = var.api_desired_count
+  frontend_desired_count = var.frontend_desired_count
+  worker_desired_count   = var.worker_desired_count
+  worker_concurrency     = var.worker_concurrency
 
   # Every one of these has an application default that silently behaves like local
   # development — see docs/secrets-audit.md Note 5. STORAGE_BACKEND is the sharpest:
@@ -449,7 +461,15 @@ module "compute" {
     BEDROCK_MODEL_EXTRACTION     = var.bedrock_model_ids["extraction"]
     BEDROCK_MODEL_REASONING      = var.bedrock_model_ids["reasoning"]
 
-    AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(var.ai_requests_per_minute_bedrock)
+    # LP-629 — COMPUTED, never hand-set. The limiter is per PROCESS
+    # (app/ai/rate_limit.py), so the environment's real rate is this value x tasks x
+    # concurrency. Dividing the budget here means raising either knob cannot silently
+    # multiply the request rate, which is precisely what a comment saying "remember to
+    # divide this" failed to prevent.
+    #
+    # max(...,1) because a budget smaller than the slot count would floor to 0, and a
+    # 0 RPM limiter would pace to infinity rather than to nothing.
+    AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(local.bedrock_rpm_per_process)
 
     # LP-527 — the finding COMPOSER. After the verdicts are decided, a model rewrites each
     # finding's TEXT from a fixed fact summary; it cannot introduce a fact (every number in

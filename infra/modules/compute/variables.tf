@@ -116,15 +116,52 @@ variable "frontend_memory" {
   type        = number
 }
 
-variable "desired_count" {
-  description = <<-EOT
-    Task count for every service. There is deliberately NO autoscaling — see the
-    module README.
+variable "api_desired_count" {
+  description = "API task count. There is deliberately NO autoscaling — see the module README."
+  type        = number
+}
 
-    ⚠️ Raising this for the worker requires DIVIDING ai_requests_per_minute_bedrock
-    by the new count: that limiter is per-process, so N tasks pace at N x the value.
+variable "frontend_desired_count" {
+  description = "Frontend task count. There is deliberately NO autoscaling — see the module README."
+  type        = number
+}
+
+variable "worker_desired_count" {
+  description = <<-EOT
+    Worker task count. Split from the API's and the frontend's in LP-629: one shared
+    `desired_count` meant scaling the worker also scaled the web tier, at triple the
+    cost and for no reason.
+
+    Total parallel background jobs = worker_desired_count x worker_concurrency.
+
+    A worker task is the EXPENSIVE way to add parallelism (a whole Fargate task);
+    worker_concurrency is the free way, up to the task's memory. Raise concurrency
+    first.
   EOT
   type        = number
+}
+
+variable "worker_concurrency" {
+  description = <<-EOT
+    Celery child processes per worker task — how many background jobs run at once
+    inside ONE task.
+
+    Set EXPLICITLY, never inherited. Celery defaults to os.cpu_count(), so before
+    LP-629 a `worker_cpu` of 1024 silently meant a concurrency of 1 and the whole
+    environment ran one job at a time. A change to task CPU must not change
+    throughput as a side effect.
+
+    Sizing, measured on staging 2026-08-24: one concurrent job peaks at ~32% of a
+    vCPU and the container peaked at 445 MB of 2048 MB. Prefork forks the process,
+    so children share the interpreter copy-on-write and then diverge — budget
+    memory, not CPU, as the ceiling.
+  EOT
+  type        = number
+
+  validation {
+    condition     = var.worker_concurrency >= 1
+    error_message = "worker_concurrency must be at least 1."
+  }
 }
 
 # --- Configuration --------------------------------------------------------- #

@@ -161,15 +161,39 @@ allowed_deploy_branches = ["bedrock_integration", "bedrock_integration_with_rule
 # fails with `exec format error`, visible only in the CloudWatch log stream.
 cpu_architecture = "ARM64"
 
-api_cpu       = 512
-api_memory    = 1024
+api_cpu    = 512
+api_memory = 1024
+
+# LP-629 — memory 2048 -> 4096 to carry four concurrent jobs.
+#
+# Measured on the single-slot worker (2026-08-24): peak 445 MB of 2048 (21.75%),
+# average ~20%. Prefork forks the process, so four children share the interpreter
+# copy-on-write and then diverge as each loads a document — and each can hold a
+# 50 MB PDF plus its ~67 MB base64 encoding at once. The headroom is what stops an
+# OOM, and an OOM kills the WHOLE task: at concurrency 4 that is four jobs lost, not
+# one.
+#
+# CPU stays 1024, knowingly. One job peaked at 32% of a vCPU, so four want ~128% and
+# will contend. That is a SLOWDOWN, not a failure, and 1024 CPU already permits up to
+# 8192 MB of memory — so the OOM risk is bought off for ~$5/month while the CPU
+# question waits for a real reading at concurrency 4.
 worker_cpu    = 1024
-worker_memory = 2048
+worker_memory = 4096
 
 frontend_cpu    = 256
 frontend_memory = 512
 
-desired_count = 1
+api_desired_count      = 1
+frontend_desired_count = 1
+
+# LP-629 — split from the API's and the frontend's. One shared `desired_count` meant
+# scaling the worker also scaled the web tier, at triple the cost for no benefit.
+#
+# 1 task x 4 children = 4 parallel jobs. Concurrency is the free lever (the task is
+# already paid for and sits at ~2% CPU average); a second task is ~$29/month. Raise
+# concurrency until memory says otherwise, then add tasks.
+worker_desired_count = 1
+worker_concurrency   = 4
 
 enable_container_insights = false
 
@@ -201,18 +225,25 @@ deregistration_delay_seconds = 30
 # counts against the quota, so pacing at the ceiling turns one burst of throttling
 # into a self-sustaining one.
 #
-# ⚠️ THE LIMITER IS PER PROCESS, NOT PER ENVIRONMENT. At desired_count = 1 this IS
-# the effective rate; at N worker tasks the effective rate is N x this value.
-# Raising the worker count REQUIRES dividing this by the new count — scaling the
-# worker otherwise multiplies the request rate silently.
+# LP-629 — this is now the ENVIRONMENT's budget, not a per-process value.
 #
-# Kept rather than unset. At 10,000 RPM it is mostly insurance, but a runaway loop
-# is far cheaper to notice at 2000 than unbounded.
+# The limiter itself is still per process (app/ai/rate_limit.py), but main.tf divides
+# this by worker_desired_count x worker_concurrency, so the number here is the one
+# that is actually true of the environment. Previously it was the per-process value
+# and the multiplication was defended only by a comment saying "remember to divide
+# this by the new count" — a defence that fails the first time someone changes a knob
+# without reading it, which is exactly what LP-629 exists to prevent.
 #
-# Was 8, tuned for the old ceiling of 10. At 10,000 that pacing made the limiter
-# the constraint rather than the backstop: a full loan file spent minutes waiting
-# for no reason.
-ai_requests_per_minute_bedrock = 2000
+# 2000 total is unchanged in effect: it was 2000 at one slot before, and it is 2000
+# across four slots (500 each) now. Raising concurrency does not raise the spend rate.
+#
+# Kept rather than unset. At 10,000 RPM it is mostly insurance, but a runaway loop is
+# far cheaper to notice at 2000 than unbounded.
+#
+# Was 8, tuned for the old ceiling of 10. At 10,000 that pacing made the limiter the
+# constraint rather than the backstop: a full loan file spent minutes waiting for no
+# reason.
+bedrock_rpm_budget = 2000
 
 bedrock_model_ids = {
   classification = "us.anthropic.claude-haiku-4-5-20251001-v1:0"

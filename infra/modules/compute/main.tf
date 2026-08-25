@@ -82,8 +82,14 @@ locals {
     "--port", tostring(var.api_port),
   ]
 
+  # --concurrency is DECLARED, never inherited (LP-629). Without it Celery falls back to
+  # os.cpu_count(), so a 1024-CPU task silently ran ONE job at a time and every document
+  # extraction, verification run and needs update in the environment queued behind each
+  # other. Measured before the fix: six documents from one upload took 2m53s of strictly
+  # serial work against a ~35s critical path.
   worker_command = [
     "uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info",
+    "--concurrency=${var.worker_concurrency}",
   ]
 
   migration_command = ["uv", "run", "alembic", "upgrade", "head"]
@@ -380,7 +386,7 @@ resource "aws_ecs_service" "api" {
   name            = "${var.name_prefix}-api"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.api.arn
-  desired_count   = var.desired_count
+  desired_count   = var.api_desired_count
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command
@@ -417,7 +423,7 @@ resource "aws_ecs_service" "worker" {
   name            = "${var.name_prefix}-worker"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.worker.arn
-  desired_count   = var.desired_count
+  desired_count   = var.worker_desired_count
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command
@@ -440,7 +446,7 @@ resource "aws_ecs_service" "frontend" {
   name            = "${var.name_prefix}-frontend"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.frontend.arn
-  desired_count   = var.desired_count
+  desired_count   = var.frontend_desired_count
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command

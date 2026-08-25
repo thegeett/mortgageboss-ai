@@ -46,6 +46,25 @@ celery_app.conf.update(
     enable_utc=True,
     # Mark tasks STARTED (not just PENDING→SUCCESS) so progress is observable.
     task_track_started=True,
+    # LP-629 — a child takes a task only when a slot is genuinely free.
+    #
+    # `worker_prefetch_multiplier` defaults to 4, so each child RESERVES four tasks and
+    # holds them while a sibling sits idle. With this workload that is head-of-line
+    # blocking measured in minutes, not milliseconds: a rule-engine pass runs ~405-445s
+    # and a document extraction ~30s, so four reserved tasks behind one verification is
+    # a 30-second upload waiting a quarter of an hour.
+    #
+    # Celery's own guidance for long tasks is a multiplier of 1. `worker_disable_prefetch`
+    # is strictly better — it removes the reservation rather than shrinking it — and its
+    # Redis-broker-only restriction is satisfied here.
+    #
+    # Deliberately WITHOUT `task_acks_late`. That is the usual companion, and it changes
+    # delivery to at-least-once: a hard-killed task is redelivered and re-run. Re-running
+    # a ~7-minute, ~$0.30 verification on a worker restart is a different proposition from
+    # re-running a 30-second extraction, and a duplicate run is the same collision the
+    # in-flight guard in `api/verification.py` exists to prevent. Its own decision, with
+    # its own evidence.
+    worker_disable_prefetch=True,
     # The DEFAULT time limits — for a task that does no AI work. Soft raises inside the task for
     # graceful handling; hard kills it.
     #

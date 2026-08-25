@@ -60,6 +60,12 @@ locals {
     "/ecs/${var.name_prefix}/worker",
     "/ecs/${var.name_prefix}/frontend",
   ]
+
+  # LP-629 — the Bedrock limiter is per PROCESS, so the environment's real rate is
+  # this value x tasks x children. Deriving it from the budget keeps that arithmetic
+  # automatic rather than leaving it to a comment nobody re-reads.
+  worker_slots            = var.worker_desired_count * var.worker_concurrency
+  bedrock_rpm_per_process = max(floor(var.bedrock_rpm_budget / local.worker_slots), 1)
 }
 
 data "aws_caller_identity" "current" {}
@@ -288,13 +294,16 @@ module "compute" {
   frontend_image   = "${data.aws_ecr_repository.frontend.repository_url}:${var.image_tag}"
   cpu_architecture = var.cpu_architecture
 
-  api_cpu         = var.api_cpu
-  api_memory      = var.api_memory
-  worker_cpu      = var.worker_cpu
-  worker_memory   = var.worker_memory
-  frontend_cpu    = var.frontend_cpu
-  frontend_memory = var.frontend_memory
-  desired_count   = var.desired_count
+  api_cpu                = var.api_cpu
+  api_memory             = var.api_memory
+  worker_cpu             = var.worker_cpu
+  worker_memory          = var.worker_memory
+  frontend_cpu           = var.frontend_cpu
+  frontend_memory        = var.frontend_memory
+  api_desired_count      = var.api_desired_count
+  frontend_desired_count = var.frontend_desired_count
+  worker_desired_count   = var.worker_desired_count
+  worker_concurrency     = var.worker_concurrency
 
   # Every one of these has an application default that silently behaves like local
   # development — see docs/secrets-audit.md Note 5. STORAGE_BACKEND is the sharpest:
@@ -315,7 +324,7 @@ module "compute" {
     BEDROCK_MODEL_EXTRACTION     = var.bedrock_model_ids["extraction"]
     BEDROCK_MODEL_REASONING      = var.bedrock_model_ids["reasoning"]
 
-    AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(var.ai_requests_per_minute_bedrock)
+    AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(local.bedrock_rpm_per_process)
 
     # REDIS_URL is CONFIG rather than a secret while the cache has no AUTH token:
     # the URL is topology only. ⚠️ Both parts of this value matter — transit

@@ -115,6 +115,23 @@ _SHOWN_ORIGINS = (FindingOrigin.AI_CROSS_SOURCE, FindingOrigin.DETERMINISTIC_RUL
 _STUCK_RUN_TIMEOUT_SECONDS = 1500
 
 
+async def _latest_run(db: DbSession, loan_file_id: UUID) -> Verification | None:
+    """The file's most recent active run, or ``None``.
+
+    Extracted in LP-629 so the watchdog and the new in-flight guard read the SAME row by the
+    same ordering. Two copies of this query that drifted would let the guard refuse a run the
+    watchdog had just failed, or the reverse.
+    """
+    stmt = (
+        only_active(
+            select(Verification).where(Verification.loan_file_id == loan_file_id), Verification
+        )
+        .order_by(Verification.created_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
     """Mark a RUNNING run that has exceeded the watchdog timeout as FAILED (LP-89).
 
@@ -122,14 +139,7 @@ async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
     recovery. On read, if the latest run has been RUNNING past the timeout, fail it (with a
     legible error) + commit, so ``get_verification`` returns a FAILED run the UI can re-run.
     """
-    stmt = (
-        only_active(
-            select(Verification).where(Verification.loan_file_id == loan_file.id), Verification
-        )
-        .order_by(Verification.created_at.desc())
-        .limit(1)
-    )
-    latest = (await db.execute(stmt)).scalars().first()
+    latest = await _latest_run(db, loan_file.id)
     if latest is None or latest.status is not VerificationStatus.RUNNING:
         return
     started = latest.started_at or latest.created_at
@@ -196,6 +206,39 @@ async def run_verification(
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
+
+    # LP-629 — REFUSE A SECOND CONCURRENT RUN ON THIS FILE, and return the one already
+    # in flight instead.
+    #
+    # Two clicks on Run created two runs. That was harmless only because the worker had a
+    # single slot and serialised them; with `worker_concurrency > 1` they execute TOGETHER
+    # and collide on the findings partial-unique index over
+    # ``(loan_file_id, rule_id, subject_key)`` — and a finding-persistence collision is one
+    # of the two failures ``run_verification`` deliberately PROPAGATES rather than degrades
+    # (services/verification_run.py). So enabling parallelism without this turns a benign
+    # double-click into a failed run.
+    #
+    # Different files are unaffected: the check is scoped to this loan file, which is the
+    # whole point — parallelism ACROSS files is what LP-629 exists to deliver.
+    #
+    # The stale case is handled first and by the SAME watchdog the read path uses, so
+    # "stuck" has one definition: a run past ``_STUCK_RUN_TIMEOUT_SECONDS`` is failed here
+    # and a fresh one may proceed. A run six minutes into its AI calls looks identical to a
+    # wedged one from the outside, and superseding it would destroy real work and real spend.
+    #
+    # Returning the in-flight run (rather than a 409) keeps the client's contract unchanged:
+    # it already polls the returned run to completion, so a double-click simply lands on the
+    # run that is genuinely happening. ``force`` deliberately does NOT override this — it
+    # bypasses the input-fingerprint CACHE, not the one-run-per-file invariant.
+    await _reconcile_stuck_run(db, loan_file)
+    in_flight = await _latest_run(db, loan_file.id)
+    if in_flight is not None and in_flight.status is VerificationStatus.RUNNING:
+        log.info(
+            "verification_run_already_in_flight",
+            loan_file_id=str(loan_file.id),
+            run_id=str(in_flight.id),
+        )
+        return VerificationRunPublic.from_model(in_flight)
 
     # Compare the CURRENT inputs to the last completed run's fingerprint.
     fingerprint = compute_input_fingerprint(await assemble_cross_source_context(db, loan_file))

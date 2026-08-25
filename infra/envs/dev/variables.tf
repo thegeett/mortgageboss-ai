@@ -253,8 +253,23 @@ variable "frontend_memory" {
   type        = number
 }
 
-variable "desired_count" {
-  description = "Task count per service. ⚠️ Raising the worker's requires dividing ai_requests_per_minute_bedrock by it."
+variable "api_desired_count" {
+  description = "API task count."
+  type        = number
+}
+
+variable "frontend_desired_count" {
+  description = "Frontend task count."
+  type        = number
+}
+
+variable "worker_desired_count" {
+  description = "Worker task count. Parallel jobs = worker_desired_count x worker_concurrency."
+  type        = number
+}
+
+variable "worker_concurrency" {
+  description = "Celery children per worker task — jobs running at once inside ONE task."
   type        = number
 }
 
@@ -288,10 +303,14 @@ variable "deregistration_delay_seconds" {
   type        = number
 }
 
-variable "ai_requests_per_minute_bedrock" {
+variable "bedrock_rpm_budget" {
   description = <<-EOT
-    Client-side pacing for Bedrock. ⚠️ PER PROCESS — N worker tasks pace at N x this
-    value. The account quota is 10 RPM, so at desired_count = 1 this must be <= 8.
+    The requests-per-minute this ENVIRONMENT may spend against Bedrock, in total.
+    main.tf divides it by worker_desired_count x worker_concurrency to get the
+    per-process pacing value (LP-629).
+
+    This account's granted quota is 10 RPM, so the budget must stay <= 8. Dev cannot
+    be tuned by copying staging — its cap is set by the quota, not by taste.
   EOT
   type        = number
 }

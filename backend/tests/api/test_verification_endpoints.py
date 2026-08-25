@@ -6,9 +6,11 @@ the cross-source findings. Cross-company → 404.
 """
 
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from datetime import timedelta
+from uuid import UUID, uuid4
 
 import pytest_asyncio
+from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
@@ -1188,3 +1190,141 @@ async def test_run_history_counts_exclude_what_the_panel_hides(
 
     [row] = [r for r in resp.json() if r["id"] == str(run.id)]
     assert row["attention_count"] == 1, "the badge counted findings the panel does not show"
+
+
+# --------------------------------------------------------------------------- #
+# LP-629 — one run per file in flight
+#
+# The guard exists because `worker_concurrency > 1` makes a double-click DANGEROUS
+# rather than merely wasteful: two runs on one file execute together and collide on
+# the findings partial-unique index over (loan_file_id, rule_id, subject_key), and
+# that collision is one of the two failures run_verification propagates rather than
+# degrades.
+# --------------------------------------------------------------------------- #
+
+
+async def test_second_run_on_same_file_returns_the_in_flight_run(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """A second POST while one is RUNNING returns THAT run and enqueues nothing more."""
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token)
+    )
+    assert first.json()["status"] == "running"
+
+    second = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token)
+    )
+
+    assert second.status_code == 200
+    # The SAME run, not a second one — the client polls it to completion either way.
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["status"] == "running"
+    # And no second pass was enqueued: the collision cannot happen if it never runs.
+    assert len(calls) == 1
+
+
+async def test_force_does_not_override_the_in_flight_guard(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """`force` bypasses the input-fingerprint CACHE, not the one-run-per-file invariant.
+
+    Pinned because the two are easy to conflate: both are 'run it anyway' affordances,
+    and only one of them is safe to honour while a run is in flight.
+    """
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token)
+    )
+    forced = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run?force=true", headers=_auth(token)
+    )
+
+    assert forced.json()["id"] == first.json()["id"]
+    assert len(calls) == 1
+
+
+async def test_a_run_on_another_file_is_unaffected(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """The guard is per FILE. Parallelism ACROSS files is the entire point of LP-629, so a
+    guard that serialised the environment would defeat the change it ships with."""
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    file_a = await create_loan_file(db, company_id=company.id)
+    file_b = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    run_a = await client.post(f"{API}/{file_a.display_id}/verification/run", headers=_auth(token))
+    run_b = await client.post(f"{API}/{file_b.display_id}/verification/run", headers=_auth(token))
+
+    assert run_a.json()["id"] != run_b.json()["id"]
+    assert run_a.json()["status"] == run_b.json()["status"] == "running"
+    assert len(calls) == 2  # both enqueued; neither blocked the other
+
+
+async def test_a_stuck_run_does_not_block_a_new_one(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """A run past the watchdog timeout is failed and superseded, not treated as in flight.
+
+    Without this the guard would be a trap: a worker that died mid-run would make the file
+    permanently un-runnable, which is strictly worse than the double-click it prevents.
+    """
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.delay",
+        lambda loan_file_id, run_id: None,
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token)
+    )
+    stale_run = await db.get(Verification, UUID(first.json()["id"]))
+    assert stale_run is not None
+    # Age it past the watchdog rather than sleeping for 25 minutes.
+    stale_run.started_at = utcnow() - timedelta(seconds=_STUCK_RUN_TIMEOUT_SECONDS + 60)
+    await db.commit()
+
+    second = await client.post(
+        f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token)
+    )
+
+    assert second.json()["id"] != first.json()["id"]
+    assert second.json()["status"] == "running"
+    await db.refresh(stale_run)
+    assert stale_run.status is VerificationStatus.FAILED

@@ -162,7 +162,13 @@ frontend_cpu    = 256
 frontend_memory = 512
 
 # One of each. There is NO autoscaling — see the result doc.
-desired_count = 1
+api_desired_count      = 1
+frontend_desired_count = 1
+
+# LP-629 — 1 task x 2 children = 2 parallel jobs. Lower than staging's 4 because the
+# account's Bedrock quota is 10 RPM total: dev's cap is set by the quota, not by taste.
+worker_desired_count = 1
+worker_concurrency   = 2
 
 # Costs money per metric; off for a cost-sensitive throwaway environment.
 enable_container_insights = false
@@ -182,9 +188,11 @@ worker_stop_timeout_seconds = 120
 # The AWS default of 300s makes every deploy crawl.
 deregistration_delay_seconds = 30
 
-# ⚠️ PER PROCESS. The account is at 10 RPM and desired_count is 1, so 8 leaves
-# headroom. Raising desired_count REQUIRES dividing this by the new count.
-ai_requests_per_minute_bedrock = 8
+# LP-629 — the ENVIRONMENT's total budget; main.tf divides it across the worker slots
+# (here 2, so each process paces at 4). The account is at 10 RPM, so 8 leaves headroom
+# whatever the slot count is — which is the point of budgeting the total rather than
+# the per-process value.
+bedrock_rpm_budget = 8
 
 # The `us.` cross-region inference profile ids the application sends.
 bedrock_model_ids = {

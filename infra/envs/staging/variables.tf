@@ -290,8 +290,30 @@ variable "frontend_memory" {
   type        = number
 }
 
-variable "desired_count" {
-  description = "Task count per service. ⚠️ Raising the worker's requires dividing ai_requests_per_minute_bedrock by it."
+variable "api_desired_count" {
+  description = "API task count."
+  type        = number
+}
+
+variable "frontend_desired_count" {
+  description = "Frontend task count."
+  type        = number
+}
+
+variable "worker_desired_count" {
+  description = <<-EOT
+    Worker task count. Total parallel background jobs =
+    worker_desired_count x worker_concurrency, and bedrock_rpm_budget is divided by
+    that product automatically (main.tf), so neither knob can silently break the
+    other.
+
+    A task is the expensive way to add parallelism; concurrency is the free way.
+  EOT
+  type        = number
+}
+
+variable "worker_concurrency" {
+  description = "Celery children per worker task — jobs running at once inside ONE task."
   type        = number
 }
 
@@ -325,10 +347,26 @@ variable "deregistration_delay_seconds" {
   type        = number
 }
 
-variable "ai_requests_per_minute_bedrock" {
+variable "bedrock_rpm_budget" {
   description = <<-EOT
-    Client-side pacing for Bedrock. ⚠️ PER PROCESS — N worker tasks pace at N x this
-    value. The account quota is 10 RPM, so at desired_count = 1 this must be <= 8.
+    The requests-per-minute this ENVIRONMENT may spend against Bedrock, in total.
+
+    LP-629 replaced the old per-process `ai_requests_per_minute_bedrock`. That value
+    was the number one Python process paced at, so the environment's real rate was
+    silently `value x tasks x concurrency` — a trap that only a comment defended, and
+    one that gets worse every time either knob moves. This states the number that
+    actually matters and main.tf does the division.
+
+    The account's granted quota (058190633983, us-east-1, verified 2026-08-24) is
+    10,000 RPM on BOTH models via the `us.` cross-region profiles. This budget is
+    deliberately a fraction of it: a REJECTED request still counts against the quota,
+    so pacing at the ceiling turns one burst of throttling into a self-sustaining one.
+
+    Note the limiter counts REQUESTS, and Bedrock also enforces TOKENS per minute
+    (5,000,000 on both models). AWS's guidance is that TPM binds first on
+    document-heavy workloads, and one bank-statement extraction measured ~51k tokens
+    — so this budget is not the real ceiling. Nothing measures TPM yet; that is its
+    own ticket, and it is the constraint that decides how far concurrency can go.
   EOT
   type        = number
 }
