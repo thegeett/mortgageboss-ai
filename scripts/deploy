@@ -3016,7 +3016,11 @@ stage_status() {
   local running_td running_image running_tag wt_branch wt_sha wt_dirty expected
   wt_branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '?')
   wt_sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf '?')
-  wt_dirty=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | grep -c . | tr -d '[:space:]')
+  # wc -l, not `grep -c .`: grep exits 1 when it counts zero, and this script runs
+  # `set -euo pipefail`, so a CLEAN working tree killed the whole stage right here
+  # -- silently, with no message and exit 1. `status` is the one stage documented as
+  # safe to run at any time, and it was broken in the normal post-commit state.
+  wt_dirty=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')
   expected="${ENV_NAME}-${wt_sha}"
 
   running_tag=""
