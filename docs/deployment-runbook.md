@@ -246,11 +246,68 @@ any point.
 Read-only, runnable at any time, never changes anything. Reports: state bucket,
 phase-1 applied, phase flags, certificate present, DNS delegation, both images
 (pushed + tag), every secret (populated, byte count), the last migration task's exit
-code, and each service's running/desired count.
+code, each service's running/desired count, and the RDS instance's status.
 
 `unknown` appears where a check genuinely cannot be made — an expired SSO session,
 or a stopped migration task that has aged out of the ECS API after about an hour.
 `unknown` never means "fine".
+
+A service reported as `SHUT DOWN -- desired 0` and a `database  STOPPED` line mean
+the environment was taken down with `down`, not that something failed.
+
+### `down` and `up`
+
+`down` takes the environment offline; `up` brings it back. Neither is part of a
+deployment — they exist so staging does not bill for the hours nobody is using it.
+About **$0.10 an hour**, which over a night and a weekend is most of what the
+environment costs.
+
+```
+./scripts/deploy staging down     # end of the day
+./scripts/deploy staging up       # next morning
+```
+
+`down` scales the three ECS services to desired 0, waits for the tasks to actually
+stop (the worker gets its SIGTERM window to finish or re-queue what it is holding),
+and only then stops RDS. If the tasks have not drained inside
+`DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS` it leaves the database running rather than cut
+their connections mid-task; re-running `down` picks up where it left off.
+
+`up` reverses it, database first — a task that starts before Postgres answers fails
+its readiness check, and the deployment circuit breaker can roll it back. It waits
+for RDS to reach `available`, then scales each service to the count in that
+environment's `terraform.tfvars`.
+
+**Nothing durable is lost.** RDS keeps its storage and its backups (they keep
+billing, which is why they are not part of the saving), and Redis holds nothing
+durable.
+
+**ElastiCache and the ALB stay up in both directions**, deliberately. A replication
+group has no stop operation, only delete, and its AUTH token is applied out of band —
+a recreated one would come up with no token while Secrets Manager still held the old
+URL, and every API and worker container would fail on connect. The ALB is not worth
+churning its ACM, Cognito and Route 53 associations for. So while the environment is
+down the site answers with **503**, with no targets behind it.
+
+Two things to know:
+
+- **`deploy` and `migrate` refuse to run while the environment is down**, and say so.
+  Both would otherwise fail confusingly: Terraform can fail mid-apply against a
+  stopped instance, and a service left at desired 0 reaches steady state instantly,
+  so `deploy` would report success for an image no task is running.
+- **AWS force-starts an instance left stopped for seven days**, so it does not miss a
+  maintenance window. A nightly shutdown never reaches that; a long holiday one does,
+  and the instance then stays up until someone stops it again.
+
+This depends on `lifecycle { ignore_changes = [desired_count] }` on all three
+services in `infra/modules/compute/main.tf`. Without it the next `terraform apply`
+would silently scale everything back up. See
+[`docs/tickets/LP-630.md`](tickets/LP-630.md).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS` | 300 | `down`: how long to wait for tasks to stop |
+| `DEPLOY_RDS_START_TIMEOUT_SECONDS` | 900 | `up`: how long to wait for RDS |
 
 ---
 

@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo verify"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo verify down up"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -137,6 +137,15 @@ ARGUMENTS
                introduces any, writes the tag into terraform.tfvars, applies, and
                waits for all three services to finish rolling.
 
+    down       Take the environment offline: the three ECS services to desired 0,
+               then RDS stopped, in that order. Costs about $0.10/hour less while
+               it stays that way. Loses nothing -- RDS keeps its storage and its
+               backups. ElastiCache and the ALB stay up (Redis has no stop API,
+               and the ALB is not worth churning), so the site returns 503.
+    up         The reverse, database first: start RDS, wait for it to be
+               available, then scale the services back to the counts in the
+               environment's terraform.tfvars.
+
 OPTIONS
   --yes            Answer every confirmation with yes. Still prints what it does.
   --profile NAME   AWS profile. Default: $AWS_PROFILE, else mbai-<env>-admin.
@@ -155,6 +164,8 @@ ENVIRONMENT
   DEPLOY_DNS_POLL_SECONDS            default 30
   DEPLOY_MIGRATE_TIMEOUT_SECONDS     default 900
   DEPLOY_REDIS_AUTH_TIMEOUT_SECONDS  default 900
+  DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS  default 300   (down: wait for tasks to stop)
+  DEPLOY_RDS_START_TIMEOUT_SECONDS   default 900   (up: wait for RDS)
   NO_COLOR                           disable colour
 
 See docs/deployment-runbook.md for the full sequence and recovery steps.
@@ -1276,6 +1287,7 @@ stage_migrate() {
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
+  require_env_up "a migration"
 
   local cluster taskdef subnets sgs netcfg arn task_id status exit_code elapsed=0
   cluster=$(out ecs_cluster_name)
@@ -2595,6 +2607,7 @@ stage_deploy() {
   require_domain
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
+  require_env_up "a deploy"
 
   # --- 1 + 2. git preflight ------------------------------------------------ #
   local branch sha
@@ -3106,12 +3119,36 @@ stage_status() {
       running=$(printf '%s' "$running" | awk -F'\t' '{print $1}')
       if [ "$running" = "$desired" ] && [ "$running" != "0" ] && [ "$running" != "?" ]; then
         status_line "service:$svc" "healthy -- $running/$desired running"
+      elif [ "$desired" = "0" ]; then
+        status_line "service:$svc" "SHUT DOWN -- desired 0; run: deploy $ENV_NAME up"
       else
         status_line "service:$svc" "$running/$desired running -- check the log stream, not ECS events"
       fi
     done
   else
     status_line "services" "unknown (no AWS access)"
+  fi
+
+  # --- database ---
+  # Worth a line of its own now that `down` can stop it: a stopped instance makes
+  # every service unhealthy and every migration fail, for a reason nothing else
+  # here would show.
+  if [ "$have_aws" = "1" ]; then
+    local db db_status
+    db=$(rds_identifier_opt)
+    if [ -z "$db" ]; then
+      status_line "database" "unknown (no rds_instance_identifier or rds_address output)"
+    else
+      db_status=$(rds_status "$db")
+      case "$db_status" in
+        available) status_line "database" "available -- $db" ;;
+        stopped)   status_line "database" "STOPPED -- $db; run: deploy $ENV_NAME up" ;;
+        unknown)   status_line "database" "unknown -- could not describe $db" ;;
+        *)         status_line "database" "$db_status -- $db" ;;
+      esac
+    fi
+  else
+    status_line "database" "unknown (no AWS access)"
   fi
 
   # --- url ---
@@ -3122,6 +3159,300 @@ stage_status() {
   hr
   info "status is read-only. Nothing above was changed."
   return 0
+}
+
+# --------------------------------------------------------------------------- #
+# Stages: down / up
+#
+# The manual half of LP-630. `down` scales the three ECS services to zero and
+# stops RDS; `up` reverses it, database first. Together they take $0.1011 off
+# every hour the environment is not being used -- Fargate bills per second of
+# task runtime, and a stopped instance stops billing instance hours.
+#
+# Nothing durable is touched. RDS storage and its backups keep billing (which is
+# why they stay in the floor), and Postgres comes back with the same data.
+#
+# ElastiCache stays up in both directions, deliberately. A replication group has
+# no stop operation, only delete, and its AUTH token is applied out of band and
+# hand-written into the redis-url secret -- a recreated group would come up with
+# no token while Secrets Manager still holds the old URL, and every API and
+# worker container would fail on connect. docs/tickets/LP-630.md has the detail.
+# The ALB stays up too: the site answers, with no targets behind it, so it
+# returns 503 until `up`.
+#
+# Both stages depend on `lifecycle { ignore_changes = [desired_count] }` on all
+# three services in infra/modules/compute/main.tf. Without it the next
+# `terraform apply` -- including every `deploy` -- silently scales the
+# environment back up and the bill stays high.
+# --------------------------------------------------------------------------- #
+
+# How long `down` waits for tasks to drain before it gives up rather than pull
+# the database out from under them, and how long `up` waits for RDS.
+DOWN_DRAIN_TIMEOUT_SECONDS="${DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS:-300}"
+RDS_START_TIMEOUT_SECONDS="${DEPLOY_RDS_START_TIMEOUT_SECONDS:-900}"
+
+# The instance identifier, or empty if this environment exposes neither the
+# output nor an address. The fallback is not a guess: an RDS endpoint hostname is
+# <identifier>.<hash>.<region>.rds.amazonaws.com, so its first label IS the
+# identifier. It exists so `down` works on an environment applied before the
+# rds_instance_identifier output was added.
+rds_identifier_opt() {
+  local id addr
+  id=$(out_opt rds_instance_identifier)
+  if [ -n "$id" ]; then printf '%s' "$id"; return 0; fi
+  addr=$(out_opt rds_address)
+  [ -n "$addr" ] || return 0
+  printf '%s' "${addr%%.*}"
+}
+
+rds_identifier() {
+  local id
+  id=$(rds_identifier_opt)
+  [ -n "$id" ] || die \
+    "Cannot determine the RDS instance identifier for '$ENV_NAME'." \
+    "Neither \`rds_instance_identifier\` nor \`rds_address\` is in the outputs," \
+    "which means the environment has not been applied. Apply it first:" \
+    "  ./scripts/deploy $ENV_NAME phase2   (or phase1, if TLS is off)"
+  printf '%s' "$id"
+}
+
+# 'available', 'stopped', 'starting', 'stopping', ... or 'unknown' if the call
+# fails. Never fatal on its own: the callers decide what an unknown means.
+rds_status() {
+  awsx rds describe-db-instances --db-instance-identifier "$1" \
+    --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || printf 'unknown'
+}
+
+# tfvars stays the source of truth for "how many tasks when the environment is
+# up", even though Terraform no longer writes the count to the service.
+service_desired_from_tfvars() {
+  tfvar "$TFVARS" "${1}_desired_count" || printf '1'
+}
+
+ecs_service_desired() {
+  awsx ecs describe-services --cluster "$1" --services "$2" \
+    --query 'services[0].desiredCount' --output text 2>/dev/null || printf 'unknown'
+}
+
+scale_services() {
+  local cluster="$1" mode="$2" svc name count
+  for svc in api worker frontend; do
+    name=$(out_map_opt ecs_service_names "$svc")
+    [ -n "$name" ] || { warn "No service name for '$svc' in the outputs; skipped."; continue; }
+    if [ "$mode" = "down" ]; then
+      count=0
+    else
+      count=$(service_desired_from_tfvars "$svc")
+    fi
+    would "aws ecs update-service $name --desired-count $count"
+    awsx ecs update-service --cluster "$cluster" --service "$name" \
+      --desired-count "$count" >/dev/null \
+      || die "Could not set '$name' to desired $count."
+    ok "$svc -> desired $count"
+  done
+}
+
+# Waits for runningCount to reach zero on all three. Not wait_for_services_steady:
+# that one is satisfied by desired == running, which 0 == 0 meets the instant the
+# update lands, while tasks are still shutting down.
+wait_for_services_drained() {
+  local cluster="$1" elapsed=0 svc name running total pending
+  local names=""
+  for svc in api worker frontend; do
+    name=$(out_map_opt ecs_service_names "$svc")
+    [ -n "$name" ] && names="$names $name"
+  done
+  [ -n "$names" ] || { warn "No service names in the outputs; nothing to drain."; return 0; }
+
+  while [ "$elapsed" -lt "$DOWN_DRAIN_TIMEOUT_SECONDS" ]; do
+    total=0
+    pending=""
+    for name in $names; do
+      running=$(awsx ecs describe-services --cluster "$cluster" --services "$name" \
+        --query 'services[0].runningCount' --output text 2>/dev/null || printf '0')
+      case "$running" in '' | *[!0-9]*) running=0 ;; esac
+      if [ "$running" != "0" ]; then
+        pending="$pending $name($running)"
+        total=$((total + running))
+      fi
+    done
+    [ "$total" = "0" ] && { ok "all tasks stopped after ${elapsed}s"; return 0; }
+    note "  ${elapsed}s: draining —$pending"
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  warn "Still running after ${DOWN_DRAIN_TIMEOUT_SECONDS}s:$pending"
+  return 1
+}
+
+wait_for_rds_available() {
+  local db="$1" elapsed=0 status=""
+  info ""
+  info "Waiting for $db to reach 'available'. A db.t4g.small usually takes 3-7 minutes."
+  while [ "$elapsed" -lt "$RDS_START_TIMEOUT_SECONDS" ]; do
+    status=$(rds_status "$db")
+    [ "$status" = "available" ] && { ok "$db available after ${elapsed}s"; return 0; }
+    note "  ${elapsed}s: $status"
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+  die "$db did not reach 'available' within ${RDS_START_TIMEOUT_SECONDS}s (last: $status)." \
+    "The services were NOT scaled up, so nothing is crash-looping against a" \
+    "database that is not there. Re-run \`up\` once it settles."
+}
+
+# Guard for the stages that need a live environment. Both failure modes are
+# silent and confusing without it: Terraform can fail mid-apply against a stopped
+# instance, a one-off migration task against one fails obscurely, and a service
+# left at desired 0 reaches "steady state" immediately -- so `deploy` would
+# report success for an image that is not running anywhere.
+require_env_up() {
+  local what="$1" cluster db status svc name desired
+  db=$(rds_identifier_opt)
+  if [ -n "$db" ]; then
+    status=$(rds_status "$db")
+    case "$status" in
+      available | unknown | None | '') : ;;
+      *) die "$ENV_NAME is shut down: the database is '$status', not 'available'." \
+           "Bring it back before $what:" \
+           "  ./scripts/deploy $ENV_NAME up" ;;
+    esac
+  fi
+
+  cluster=$(out_opt ecs_cluster_name)
+  [ -n "$cluster" ] || return 0
+  for svc in api worker frontend; do
+    name=$(out_map_opt ecs_service_names "$svc")
+    [ -n "$name" ] || continue
+    desired=$(ecs_service_desired "$cluster" "$name")
+    if [ "$desired" = "0" ]; then
+      die "$ENV_NAME is shut down: service '$name' is at desired 0." \
+        "A service at zero reaches steady state instantly, so $what would report" \
+        "success for an image no task is running. Bring it back first:" \
+        "  ./scripts/deploy $ENV_NAME up"
+    fi
+  done
+}
+
+stage_down() {
+  banner "down -- take $ENV_NAME offline (account $ACCOUNT_ID, $AWS_REGION)"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local cluster db status
+  cluster=$(out ecs_cluster_name)
+  db=$(rds_identifier)
+
+  hr
+  info "  ECS services : api, worker, frontend -> desired 0"
+  info "  RDS          : $db -> stopped"
+  info "  Untouched    : ElastiCache, the ALB, Cognito, S3, every secret"
+  hr
+  info "The site returns 503 until \`up\`. No data is lost: RDS keeps its storage"
+  info "and its backups, and Redis holds nothing durable."
+  info ""
+  confirm "Take $ENV_NAME down now?" || die "Aborted. Nothing changed."
+
+  banner "down -- services"
+  scale_services "$cluster" down
+  info ""
+  info "Waiting for the tasks to stop. The worker gets its SIGTERM window"
+  info "(worker_stop_timeout_seconds) to finish or re-queue what it is holding."
+  wait_for_services_drained "$cluster" || die \
+    "Tasks had not stopped after ${DOWN_DRAIN_TIMEOUT_SECONDS}s, so RDS was left running." \
+    "Stopping it under a live worker would cut its connections mid-task." \
+    "The services are already at desired 0. Re-run \`down\` once they have drained;" \
+    "it will skip the scaling and go straight to the database."
+
+  banner "down -- database"
+  status=$(rds_status "$db")
+  case "$status" in
+    available)
+      would "aws rds stop-db-instance --db-instance-identifier $db"
+      awsx rds stop-db-instance --db-instance-identifier "$db" >/dev/null \
+        || die "Could not stop $db."
+      ok "$db is stopping. It reaches 'stopped' in a few minutes."
+      ;;
+    stopped | stopping)
+      note "$db is already '$status'. Nothing to do."
+      ;;
+    *)
+      warn "$db is '$status', not 'available'."
+      warn "  RDS only accepts a stop from 'available'. Instance hours are still"
+      warn "  billing. Re-run \`down\` once it settles."
+      ;;
+  esac
+
+  hr
+  ok "$ENV_NAME is down. That is about \$0.10 an hour it is no longer costing."
+  info ""
+  info "Back up:  ./scripts/deploy $ENV_NAME up"
+  info "Check:    ./scripts/deploy $ENV_NAME status"
+  hazard "Do not run \`terraform apply\` or \`deploy\` while it is down --"
+  hazard "modifying a stopped RDS instance can fail mid-apply. Bring it up first."
+  hazard "AWS force-starts an instance left stopped for seven days. If this is a"
+  hazard "long shutdown, re-run \`down\` within the week."
+}
+
+stage_up() {
+  banner "up -- bring $ENV_NAME back (account $ACCOUNT_ID, $AWS_REGION)"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_outputs "$ENV_DIR"
+
+  local cluster db status svc
+  cluster=$(out ecs_cluster_name)
+  db=$(rds_identifier)
+
+  hr
+  info "  RDS          : $db -> available   (first)"
+  for svc in api worker frontend; do
+    info "  ECS $svc$(printf '%*s' $((9 - ${#svc})) '') : desired $(service_desired_from_tfvars "$svc")   (from $(basename "$TFVARS"))"
+  done
+  hr
+  info "Database first: a task that starts before Postgres answers fails its"
+  info "readiness check, and the deployment circuit breaker can roll it back."
+  info ""
+  confirm "Bring $ENV_NAME up now?" || die "Aborted. Nothing changed."
+
+  banner "up -- database"
+  status=$(rds_status "$db")
+  case "$status" in
+    available)
+      note "$db is already available."
+      ;;
+    stopped)
+      would "aws rds start-db-instance --db-instance-identifier $db"
+      awsx rds start-db-instance --db-instance-identifier "$db" >/dev/null \
+        || die "Could not start $db."
+      ok "$db is starting."
+      wait_for_rds_available "$db"
+      ;;
+    starting | configuring-enhanced-monitoring | modifying | backing-up)
+      note "$db is '$status'; waiting rather than issuing a start."
+      wait_for_rds_available "$db"
+      ;;
+    stopping)
+      die "$db is 'stopping'. RDS will not accept a start until it has stopped." \
+        "Wait a few minutes and re-run \`up\`."
+      ;;
+    *)
+      die "$db is '$status'. Not starting it from here." \
+        "Check the instance in the console before going further."
+      ;;
+  esac
+
+  banner "up -- services"
+  scale_services "$cluster" up
+  wait_for_services_steady "$cluster"
+  report_service_revisions "$cluster"
+
+  hr
+  ok "$ENV_NAME is up."
+  info ""
+  info "Verify:  ./scripts/deploy $ENV_NAME status"
+  info "         ./scripts/deploy $ENV_NAME smoke"
 }
 
 # --------------------------------------------------------------------------- #
@@ -3210,6 +3541,8 @@ main() {
     backfill-mismo) stage_backfill_mismo ;;
     verify)         stage_verify ;;
     deploy)    stage_deploy ;;
+    down)      stage_down ;;
+    up)        stage_up ;;
     *)         die "Unhandled stage: $STAGE" ;;
   esac
 }

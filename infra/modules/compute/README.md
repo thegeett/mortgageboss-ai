@@ -99,6 +99,60 @@ This only works if the signal actually reaches Celery, and the container's PID 1
 child** — a probe with a SIGTERM handler under `uv run` fired the handler and exited
 0, identical to running the interpreter directly. So the timeout does what it says.
 
+## `desired_count` is not managed after creation
+
+All three services carry:
+
+```hcl
+lifecycle { ignore_changes = [desired_count] }
+```
+
+The counts in tfvars set the value **once, when the service is created**, and the
+count on an existing service is ignored by every apply after that.
+
+That is the point. Staging is scaled to zero when nobody is using it
+(`./scripts/deploy staging down`, and LP-630's overnight schedule). Without this,
+any apply that landed while it was down — every `./scripts/deploy staging deploy` —
+would silently restore all three services and the environment would run all night.
+
+**Editing the tfvar is not a no-op, though, and this is the trap.** In `envs/staging`
+the count also feeds the Bedrock rate limiter:
+
+```hcl
+worker_slots            = var.worker_desired_count * var.worker_concurrency
+bedrock_rpm_per_process = max(floor(var.bedrock_rpm_budget / local.worker_slots), 1)
+```
+
+That value reaches the container as `AI_REQUESTS_PER_MINUTE_BEDROCK`. So editing
+`worker_desired_count` from 1 to 3 and applying now **divides each worker's pacing by
+three while the service stays at one task** — the one running worker throttles to a
+third of the intended rate, and nothing says so. Before the lifecycle block the two
+moved together, which is why the arithmetic was safe to derive this way.
+
+So changing a count is **two steps, in this order**:
+
+```bash
+# 1. edit worker_desired_count in infra/envs/<env>/terraform.tfvars, then:
+terraform -chdir=infra/envs/<env> apply     # reprices the limiter, rolls the task defs
+./scripts/deploy <env> up                   # sets the count from that same tfvar
+```
+
+`up` reads the counts straight out of tfvars, so it is what makes the file effective
+again. By hand it is the same thing:
+
+```bash
+aws ecs update-service --cluster <name_prefix> \
+  --service <name_prefix>-worker --desired-count 3
+```
+
+Skipping step 2 leaves the limiter and the task count disagreeing. Skipping step 1
+leaves N workers each pacing at the full budget, which is the LP-629 failure the
+derivation exists to prevent.
+
+The module is shared with `envs/dev`, which has no shutdown schedule; the lifecycle
+block applies there too, because Terraform will not take a variable in a `lifecycle`
+block.
+
 ## No autoscaling, deliberately
 
 There is one tester, and worker autoscaling would need a **queue-depth metric that

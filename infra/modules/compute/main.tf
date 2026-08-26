@@ -414,6 +414,16 @@ resource "aws_ecs_service" "api" {
   # first fails its initial deployment.
   depends_on = [aws_lb_listener.http]
 
+  # LP-630: the overnight scheduler sets this to zero at 22:00 and back to one
+  # at 09:00. Terraform must not fight it — without this, any apply that lands
+  # while staging is down (every ./scripts/deploy staging deploy) restores the
+  # count to var.api_desired_count and the environment quietly runs all night.
+  # Changing the intended count now means editing this and scaling by hand, or
+  # via ./scripts/deploy staging up.
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
   tags = merge(var.tags, { Name = "${var.name_prefix}-api" })
 }
 
@@ -437,6 +447,16 @@ resource "aws_ecs_service" "worker" {
   deployment_circuit_breaker {
     enable   = true
     rollback = true
+  }
+
+  # LP-630: the overnight scheduler sets this to zero at 22:00 and back to one
+  # at 09:00. Terraform must not fight it — without this, any apply that lands
+  # while staging is down (every ./scripts/deploy staging deploy) restores the
+  # count to var.worker_desired_count and the environment quietly runs all night.
+  # Changing the intended count now means editing this and scaling by hand, or
+  # via ./scripts/deploy staging up.
+  lifecycle {
+    ignore_changes = [desired_count]
   }
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-worker" })
@@ -469,6 +489,16 @@ resource "aws_ecs_service" "frontend" {
   }
 
   depends_on = [aws_lb_listener.http]
+
+  # LP-630: the overnight scheduler sets this to zero at 22:00 and back to one
+  # at 09:00. Terraform must not fight it — without this, any apply that lands
+  # while staging is down (every ./scripts/deploy staging deploy) restores the
+  # count to var.frontend_desired_count and the environment quietly runs all night.
+  # Changing the intended count now means editing this and scaling by hand, or
+  # via ./scripts/deploy staging up.
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-frontend" })
 }

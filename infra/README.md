@@ -301,6 +301,11 @@ reading the cluster name in the command.
 
 `desired_count` is 1 for all three. Bring them up only after 1–4 are green.
 
+The services carry `lifecycle { ignore_changes = [desired_count] }`, so tfvars sets
+the count at creation and is ignored by every apply after that — scaling is
+`./scripts/deploy <env> up` / `down`, or `aws ecs update-service` by hand. See
+[`modules/compute/README.md`](modules/compute/README.md).
+
 ⚠️ **Raising the worker's count requires dividing `AI_REQUESTS_PER_MINUTE_BEDROCK`
 by the new count.** That limiter is per-process: N tasks pace at N × the value,
 against an account quota of 10 RPM.

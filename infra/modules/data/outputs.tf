@@ -101,3 +101,17 @@ output "db_instance_resource_id" {
   description = "RDS DBI resource id, for rds-db:connect resource ARNs."
   value       = aws_db_instance.this.resource_id
 }
+
+# The instance IDENTIFIER, not the resource id above. This is what the RDS control
+# plane takes: stop-db-instance, start-db-instance, describe-db-instances. LP-630's
+# overnight shutdown needs both this and the ARN — the ARN to scope the scheduler's
+# IAM role to this one instance.
+output "db_instance_identifier" {
+  description = "RDS instance identifier, for start/stop/describe calls."
+  value       = aws_db_instance.this.identifier
+}
+
+output "db_instance_arn" {
+  description = "RDS instance ARN, for scoping IAM policies to this instance."
+  value       = aws_db_instance.this.arn
+}

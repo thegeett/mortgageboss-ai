@@ -54,6 +54,16 @@ output "rds_address" {
   value       = module.data.db_address
 }
 
+output "rds_instance_identifier" {
+  description = "RDS instance identifier. What start/stop/describe take (LP-630)."
+  value       = module.data.db_instance_identifier
+}
+
+output "rds_instance_arn" {
+  description = "RDS instance ARN, for IAM policies scoped to this instance."
+  value       = module.data.db_instance_arn
+}
+
 output "rds_database_name" {
   description = "Initial database name."
   value       = module.data.db_name
