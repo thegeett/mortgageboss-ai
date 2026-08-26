@@ -11,6 +11,8 @@ rather than repeated here.
 2. [AWS](#2-aws) — SSO login, token lifetime, Bedrock check
 3. [Extraction bench](#3-extraction-bench) — run a corpus through the live pipeline
 4. [Worktree for a long run](#4-worktree-for-a-long-run) — isolate a run from your edits
+5. [Staging on and off](#5-staging-on-and-off) — `down` / `up`, and what refuses while it is down
+6. [Staging day to day](#6-staging-day-to-day) — deploy, query, verify, logs
 
 ---
 
@@ -346,8 +348,155 @@ git worktree list
 git worktree remove ~/Geet/project/loan-processing/mbai-bench
 ```
 
-## 5. Backend worker ECS log
+## 5. Staging on and off
+
+Staging bills ~$0.108/hour for things that can be switched off — three Fargate tasks
+and the RDS instance. Nobody uses it overnight, so turn it off. Nothing is lost:
+RDS keeps its storage and its backups, and Redis holds nothing durable.
+
+**The three you actually need.**
 
 ```bash
-AWS_PROFILE=mbai-staging-admin aws logs tail /ecs/mbai-staging/worker --follow
+./scripts/deploy staging down     # end of the day
+./scripts/deploy staging status   # what state is it in?
+./scripts/deploy staging up       # next morning
 ```
+
+Background and the cost arithmetic: [`../tickets/LP-630.md`](../tickets/LP-630.md).
+Stage-by-stage detail: [`../deployment-runbook.md`](../deployment-runbook.md).
+
+### What each one does
+
+`down` — three ECS services to desired 0, waits for the tasks to actually stop,
+checks no one-off task is still running, then stops RDS. The command returns as soon
+as the stop is issued: on an idle worker the drain took **10 seconds** in practice,
+and up to ~2 minutes if it is mid-task and uses its full 120s SIGTERM window. The
+instance itself keeps `stopping` in the background for a few minutes after that.
+
+`up` — the reverse, **database first**. Starts RDS, waits for `available` (3–7 minutes
+for a `db.t4g.small`), then scales the services back to the counts in
+`infra/envs/staging/terraform.tfvars`. It scales nothing if RDS does not come back, so
+you never get tasks crash-looping against a database that is not there.
+
+`status` — read-only, safe at any time. `SHUT DOWN -- desired 0` and
+`database  STOPPED` mean it was taken down deliberately, not that something broke.
+
+### While it is down
+
+The site returns **503**. The ALB, Cognito, DNS and ElastiCache stay up; only the
+tasks and the database go away.
+
+Every stage that touches Postgres or runs an apply **refuses**, and tells you to run
+`up`: `deploy`, `migrate`, `query`, `query-setup`, `add-user`, `bootstrap-admin`,
+`backfill-mismo`, `verify`, `phase1`, `phase2`. Do not `terraform apply` by hand
+either — modifying a stopped instance can fail mid-apply.
+
+### Things that will bite
+
+| | |
+| --- | --- |
+| `up` says `'stopping'` and refuses | A stop takes a few minutes. AWS rejects a start until it reads `stopped`. Wait and re-run — `up` is idempotent and changes nothing when it refuses. |
+| `down` refuses over a one-off task | A `migrate`, `query`, `backfill` or `verify` task is still running. Scaling services to zero does not stop those. Let it finish. |
+| Seven days stopped | AWS force-starts an instance left stopped that long so it does not miss maintenance. On a long shutdown, re-run `down` within the week. |
+| Only `staging` and `dev` | `SHUTDOWN_ENVIRONMENTS` in `scripts/deploy` is a fixed list. Any other environment is refused, `--yes` or not. |
+| Changing a task count | Edit the tfvar **and** run `up`. Terraform no longer writes `desired_count` (LP-630 Phase A), but the tfvar still feeds the Bedrock rate limiter — see [`../../infra/modules/compute/README.md`](../../infra/modules/compute/README.md). |
+
+### Timeouts
+
+```bash
+DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS=300   # down: wait for tasks to stop
+DEPLOY_RDS_START_TIMEOUT_SECONDS=900    # up: wait for RDS
+DEPLOY_STEADY_TIMEOUT_SECONDS=900       # up/deploy: wait for the rollout
+```
+
+### The raw AWS equivalents
+
+For when you want to look rather than act.
+
+```bash
+export AWS_PROFILE=mbai-staging-admin AWS_DEFAULT_REGION=us-east-1
+
+# is the database up?
+aws rds describe-db-instances --db-instance-identifier mbai-staging \
+  --query 'DBInstances[0].DBInstanceStatus' --output text
+
+# running/desired per service
+for s in api worker frontend; do
+  printf '%s ' "$s"
+  aws ecs describe-services --cluster mbai-staging --services "mbai-staging-$s" \
+    --query 'services[0].[runningCount,desiredCount]' --output text
+done
+
+# anything still running on the cluster (services AND one-off tasks)
+aws ecs list-tasks --cluster mbai-staging --desired-status RUNNING \
+  --query 'length(taskArns)' --output text
+```
+
+Prefer `down` / `up` over scaling by hand: they order the database and the services
+correctly, and they refuse the states where acting would break something.
+
+---
+
+## 6. Staging day to day
+
+All of these need staging **up** (§5). `--yes` skips confirmations; `--profile NAME`
+overrides the default `mbai-staging-admin`.
+
+### Ship code
+
+```bash
+./scripts/deploy staging deploy     # build, push, migrate if needed, apply, wait
+./scripts/deploy staging status     # in sync? -- deployed tag vs this worktree
+./scripts/deploy staging smoke      # the post-deploy checks
+```
+
+`deploy` refuses a dirty tree and a branch `allowed_deploy_branches` does not list
+(`--allow-branch` overrides the branch check, and still records it in the image
+labels).
+
+### Read the database
+
+One read-only `SELECT` per run, as a one-off ECS task, as a role that can see only the
+scrubbed `readonly.*` views. Safe to read into a transcript. Full detail:
+[`query-stage.md`](query-stage.md) and [`../querying-staging.md`](../querying-staging.md).
+
+```bash
+./scripts/deploy staging query -c "select count(*) from loan_files"
+./scripts/deploy staging query path/to/file.sql
+./scripts/deploy staging query -c "..." --max-rows 500
+```
+
+### Run a verification
+
+```bash
+./scripts/deploy staging verify LF-WCHG      # enqueue and follow the worker log
+VERIFY_FORCE=0 ./scripts/deploy staging verify LF-WCHG   # respect the input cache
+```
+
+### Migrations and backfills
+
+```bash
+./scripts/deploy staging migrate                       # alembic upgrade head
+
+# report only unless BACKFILL_APPLY=1; every variant is idempotent
+BACKFILL=property-indicators ./scripts/deploy staging backfill-mismo
+BACKFILL=owned-properties    ./scripts/deploy staging backfill-mismo
+BACKFILL=relink-borrowers RELINK_FILE=LF-WCHG ./scripts/deploy staging backfill-mismo
+```
+
+### Logs
+
+```bash
+export AWS_PROFILE=mbai-staging-admin
+aws logs tail /ecs/mbai-staging/worker   --follow   # extraction, verification, Celery
+aws logs tail /ecs/mbai-staging/api      --follow
+aws logs tail /ecs/mbai-staging/frontend --follow
+```
+
+Add `--since 30m` to start further back, `--format short` for less noise.
+
+### Everything else
+
+`./scripts/deploy --help` lists every stage. `bootstrap`, `phase1`, `dns`, `images`,
+`secrets`, `phase2` and `all` are the first-build sequence and are documented in
+[`../deployment-runbook.md`](../deployment-runbook.md), not here.
