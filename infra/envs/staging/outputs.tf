@@ -217,3 +217,22 @@ output "documents_bucket" {
   description = "Documents bucket name — the application's S3_BUCKET setting."
   value       = module.documents.bucket_name
 }
+
+# --------------------------------------------------------------------------- #
+# Overnight shutdown (LP-630)
+# --------------------------------------------------------------------------- #
+
+output "shutdown_schedule" {
+  description = "What the overnight schedules do and when, in their own timezone."
+  value       = module.scheduler.schedule_summary
+}
+
+output "shutdown_dlq_url" {
+  description = <<-EOT
+    Dead-letter queue for the shutdown schedules.
+
+    A schedule that fails is silent -- no console banner, no log group. This is
+    where a broken one shows up before the bill does.
+  EOT
+  value       = module.scheduler.dead_letter_queue_url
+}

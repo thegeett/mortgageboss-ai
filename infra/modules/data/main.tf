@@ -142,8 +142,19 @@ resource "aws_db_instance" "this" {
   multi_az            = var.rds_multi_az
 
   backup_retention_period = var.rds_backup_retention_days
-  deletion_protection     = var.rds_deletion_protection
-  skip_final_snapshot     = var.rds_skip_final_snapshot
+
+  # Pinned, not left to AWS. Both windows are UTC and RDS will not take a
+  # timezone, so on an environment that is stopped overnight (LP-630) an
+  # AWS-assigned window lands inside the shutdown: a stopped instance takes no
+  # automated backup, so the nightly snapshot would be skipped every night, and
+  # the weekly maintenance window would never come round while the instance was
+  # up. Set these to sit inside the environment's RUNNING window, allowing for
+  # both sides of the DST boundary, and keep them from overlapping each other --
+  # RDS rejects that.
+  backup_window       = var.rds_backup_window
+  maintenance_window  = var.rds_maintenance_window
+  deletion_protection = var.rds_deletion_protection
+  skip_final_snapshot = var.rds_skip_final_snapshot
 
   # A final snapshot needs a name; AWS rejects the pair (skip=false, identifier
   # unset). Only set it when a snapshot will actually be taken.

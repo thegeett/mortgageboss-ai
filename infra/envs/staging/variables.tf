@@ -562,3 +562,96 @@ variable "activate_environment_cost_allocation_tag" {
   EOT
   type        = bool
 }
+
+# --------------------------------------------------------------------------- #
+# Overnight shutdown (LP-630)
+# --------------------------------------------------------------------------- #
+
+variable "shutdown_enabled" {
+  description = "Whether the overnight schedules fire. false keeps them in state, described and reviewable, but DISABLED."
+  type        = bool
+  default     = true
+}
+
+variable "shutdown_timezone" {
+  description = <<-EOT
+    IANA timezone the shutdown schedules are written in.
+
+    NOT derived from aws_region: us-east-1 is where the infrastructure runs, not
+    where anyone works. This environment is used on US Eastern hours.
+  EOT
+  type        = string
+  default     = "America/New_York"
+}
+
+variable "shutdown_stop_hour" {
+  description = "Local hour the services scale to zero."
+  type        = number
+  default     = 22
+}
+
+variable "shutdown_stop_minute" {
+  description = "Local minute the services scale to zero."
+  type        = number
+  default     = 0
+}
+
+variable "shutdown_start_hour" {
+  description = "Local hour the services scale back up."
+  type        = number
+  default     = 9
+}
+
+variable "shutdown_start_minute" {
+  description = "Local minute the services scale back up."
+  type        = number
+  default     = 0
+}
+
+variable "shutdown_stop_grace_minutes" {
+  description = "Minutes between the services scaling to zero and the database stopping. Stands in for the drain wait a schedule cannot perform."
+  type        = number
+  default     = 15
+}
+
+variable "shutdown_start_lead_minutes" {
+  description = "Minutes the database is started before the services scale up. An RDS start took ~4.5 min here on 2026-08-26; AWS documents 3-7."
+  type        = number
+  default     = 15
+}
+
+variable "shutdown_stop_retry_after_minutes" {
+  description = "Minutes after the first database stop to try a second one. 0 (default) creates none -- the first stop already retries for two hours, and a second schedule would undo a manual `up`."
+  type        = number
+  default     = 0
+}
+
+variable "shutdown_stop_days" {
+  description = "Days the stop runs. Every day by default -- weekend stops are free no-ops and reap AWS's seven-day force-start."
+  type        = string
+  default     = "MON-SUN"
+}
+
+variable "shutdown_start_days" {
+  description = "Days the start runs. Weekdays by default, so Friday night through Monday morning is one shutdown."
+  type        = string
+  default     = "MON-FRI"
+}
+
+variable "rds_backup_window" {
+  description = "Daily backup window, UTC. Pinned so it does not fall inside the overnight shutdown, when a stopped instance takes no backup."
+  type        = string
+  default     = null
+}
+
+variable "rds_maintenance_window" {
+  description = "Weekly maintenance window, UTC. Pinned for the same reason as rds_backup_window."
+  type        = string
+  default     = null
+}
+
+variable "shutdown_probe_at" {
+  description = "UTC timestamp for a one-off schedule that proves the scheduler wiring without waiting for 22:00. null creates nothing. See modules/scheduler."
+  type        = string
+  default     = null
+}

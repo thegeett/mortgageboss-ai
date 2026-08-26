@@ -156,3 +156,29 @@ variable "log_retention_days" {
   description = "Retention for every log group above."
   type        = number
 }
+
+variable "rds_backup_window" {
+  description = <<-EOT
+    Daily automated-backup window, UTC, "hh:mm-hh:mm". null lets AWS choose.
+
+    Pin it on any environment that is stopped on a schedule: a stopped instance
+    takes no automated backup, and an AWS-assigned window commonly falls in the
+    early hours, which is exactly when such an environment is down. Must not
+    overlap `rds_maintenance_window`.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "rds_maintenance_window" {
+  description = <<-EOT
+    Weekly maintenance window, UTC, "ddd:hh:mm-ddd:hh:mm". null lets AWS choose.
+
+    Same reasoning as `rds_backup_window`. Maintenance is not applied while an
+    instance is stopped, so a window inside a nightly shutdown means pending
+    updates accumulate until AWS's seven-day rule force-starts the instance and
+    applies them unattended.
+  EOT
+  type        = string
+  default     = null
+}

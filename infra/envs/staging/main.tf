@@ -190,6 +190,8 @@ module "data" {
   rds_deletion_protection          = var.rds_deletion_protection
   rds_skip_final_snapshot          = var.rds_skip_final_snapshot
   rds_backup_retention_days        = var.rds_backup_retention_days
+  rds_backup_window                = var.rds_backup_window
+  rds_maintenance_window           = var.rds_maintenance_window
   rds_performance_insights_enabled = var.rds_performance_insights_enabled
   database_name                    = var.database_name
   database_username                = var.database_username
@@ -565,4 +567,51 @@ module "compute" {
   cognito_mfa_configuration           = var.cognito_mfa_configuration
   cognito_session_timeout_seconds     = var.cognito_session_timeout_seconds
   cognito_refresh_token_validity_days = var.cognito_refresh_token_validity_days
+}
+
+# --------------------------------------------------------------------------- #
+# Scheduler -- LP-630. Takes the environment offline overnight and at weekends.
+#
+# Last in the file because it depends on both compute and data, and because it is
+# the only module that acts on the others rather than creating anything they use.
+#
+# Depends on `ignore_changes = [desired_count]` in modules/compute (Phase A):
+# without it the next apply undoes every scale-down.
+# --------------------------------------------------------------------------- #
+
+module "scheduler" {
+  source = "../../modules/scheduler"
+
+  name_prefix = var.name_prefix
+  tags        = local.tags
+  account_id  = var.aws_account_id
+
+  cluster_name  = module.compute.cluster_name
+  service_names = module.compute.service_names
+  service_arns  = values(module.compute.service_arns)
+
+  # The same tfvars values the services were CREATED with. Since Phase A those no
+  # longer reach a running service on apply, so this schedule is what makes them
+  # effective again each morning.
+  desired_counts = {
+    api      = var.api_desired_count
+    worker   = var.worker_desired_count
+    frontend = var.frontend_desired_count
+  }
+
+  db_instance_identifier = module.data.db_instance_identifier
+  db_instance_arn        = module.data.db_instance_arn
+
+  timezone                 = var.shutdown_timezone
+  stop_hour                = var.shutdown_stop_hour
+  stop_minute              = var.shutdown_stop_minute
+  start_hour               = var.shutdown_start_hour
+  start_minute             = var.shutdown_start_minute
+  stop_grace_minutes       = var.shutdown_stop_grace_minutes
+  start_lead_minutes       = var.shutdown_start_lead_minutes
+  stop_retry_after_minutes = var.shutdown_stop_retry_after_minutes
+  stop_days                = var.shutdown_stop_days
+  start_days               = var.shutdown_start_days
+  enabled                  = var.shutdown_enabled
+  probe_at                 = var.shutdown_probe_at
 }

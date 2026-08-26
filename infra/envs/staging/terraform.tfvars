@@ -314,3 +314,53 @@ ecr_force_delete = false
 # Up to 24 hours before it begins reporting. The budget alarm is INERT until then.
 # Tracked in infra/README.md (apply order) and the C5 pre-handover checklist.
 activate_environment_cost_allocation_tag = false
+
+# --------------------------------------------------------------------------- #
+# Overnight shutdown -- LP-630
+#
+# Staging is scaled to zero and the database stopped between 22:00 and 09:00
+# local, and all weekend. Worth ~$48/month against a ~$161 bill. Nothing durable
+# is lost: RDS keeps its storage and its backups.
+#
+# The manual equivalents are `./scripts/deploy staging down` / `up`, which do the
+# same two sequences with an operator watching. Prefer them when a human is
+# driving -- they wait for the tasks to actually drain and refuse to stop the
+# database under a one-off task, neither of which a schedule can do.
+#
+# Set shutdown_enabled = false to keep the schedules in state but stop them
+# firing. Do not comment the module out -- that deletes the dead-letter queue.
+# --------------------------------------------------------------------------- #
+
+shutdown_enabled = true
+
+# US Eastern. NOT inferred from aws_region -- that is where the infrastructure
+# runs, not where the people using this are.
+shutdown_timezone = "America/New_York"
+
+shutdown_stop_hour  = 22
+shutdown_start_hour = 9
+
+# 22:00 services -> 22:15 database, and 08:45 database -> 09:00 services.
+shutdown_stop_grace_minutes = 15
+shutdown_start_lead_minutes = 15
+
+# No second stop schedule. The 22:15 stop already retries for two hours on its own
+# (maximum_event_age_in_seconds = 7200), which covers an instance that was
+# mid-backup. A separate later stop would add almost nothing and would create a
+# window in which running `./scripts/deploy staging up` to work late gets silently
+# undone -- the database stopped again underneath services that stay running.
+shutdown_stop_retry_after_minutes = 0
+
+# Stop every day, start on weekdays: Friday 22:00 to Monday 09:00 is one shutdown,
+# and the weekend stops mean anyone who runs `up` on a Saturday gets it put back
+# down that night instead of leaving it running until Monday.
+shutdown_stop_days  = "MON-SUN"
+shutdown_start_days = "MON-FRI"
+
+# Both UTC, and both deliberately inside the RUNNING window on both sides of the
+# DST boundary. The running window is 13:00-02:00 UTC under EDT and 14:00-03:00
+# under EST, so only 14:00-02:00 UTC is inside both. AWS had assigned 07:30 UTC
+# and Fri 09:36 UTC, which are inside the shutdown: a stopped instance takes no
+# automated backup, so the nightly snapshot would have been skipped every night.
+rds_backup_window      = "14:30-15:00"         # 10:30 EDT / 09:30 EST
+rds_maintenance_window = "wed:15:30-wed:16:00" # 11:30 EDT / 10:30 EST

@@ -37,6 +37,18 @@ output "service_names" {
   }
 }
 
+# ARNs as well as names: the API takes names, IAM takes ARNs, and deriving one
+# from the other in a consumer would hardcode a partition. LP-630's scheduler
+# scopes ecs:UpdateService to exactly these three.
+output "service_arns" {
+  description = "Map of service key to ECS service ARN."
+  value = {
+    api      = aws_ecs_service.api.id
+    worker   = aws_ecs_service.worker.id
+    frontend = aws_ecs_service.frontend.id
+  }
+}
+
 output "task_definition_arns" {
   description = "Map of task key to task definition ARN, including the run-once migration task."
   value = {
