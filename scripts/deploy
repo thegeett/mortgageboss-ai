@@ -388,6 +388,9 @@ stage_phase1() {
   banner "phase1 -- environment '$ENV_NAME' with TLS and Cognito OFF"
   need_cmd terraform; need_cmd aws; need_cmd jq
   require_identity "$ACCOUNT_ID"
+  # Modifying a stopped RDS instance can fail mid-apply, and this is the stage
+  # `deploy` and deploy_rollback_hint both route through.
+  require_db_up "an apply"
   assert_phase_flags "false"
 
   local plan rc acm
@@ -1287,7 +1290,7 @@ stage_migrate() {
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
-  require_env_up "a migration"
+  require_db_up "a migration"
 
   local cluster taskdef subnets sgs netcfg arn task_id status exit_code elapsed=0
   cluster=$(out ecs_cluster_name)
@@ -1615,6 +1618,7 @@ stage_bootstrap_admin() {
   # Outputs first: require_cognito_enabled reads one.
   require_outputs "$ENV_DIR"
   require_cognito_enabled
+  require_db_up "this stage"
 
   local cluster taskdef container subnets sgs netcfg request
   cluster=$(out ecs_cluster_name)
@@ -1712,6 +1716,7 @@ stage_add_user() {
   # Outputs first: require_cognito_enabled reads one.
   require_outputs "$ENV_DIR"
   require_cognito_enabled
+  require_db_up "this stage"
 
   local cluster taskdef container subnets sgs netcfg request
   cluster=$(out ecs_cluster_name)
@@ -1807,6 +1812,7 @@ stage_query_setup() {
   require_identity "$ACCOUNT_ID"
   require_query_environment
   require_outputs "$ENV_DIR"
+  require_db_up "query-setup"
 
   local cluster taskdef container subnets sgs netcfg request drop_flag
   cluster=$(out ecs_cluster_name)
@@ -1887,6 +1893,8 @@ stage_verify() {
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
+  # Needs both: the API to accept the enqueue, and a worker to run it and log.
+  require_env_up "a verification run"
 
   local cluster taskdef container subnets sgs netcfg request group started
   cluster=$(out ecs_cluster_name)
@@ -1988,6 +1996,7 @@ stage_backfill_mismo() {
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
   require_outputs "$ENV_DIR"
+  require_db_up "a backfill"
 
   local cluster taskdef container subnets sgs netcfg request apply_flag
   cluster=$(out ecs_cluster_name)
@@ -2085,6 +2094,7 @@ stage_query() {
   require_identity "$ACCOUNT_ID"
   require_query_environment
   require_outputs "$ENV_DIR"
+  require_db_up "a query"
 
   local sql
   if [ -n "$QUERY_SQL_INLINE" ] && [ -n "$QUERY_FILE" ]; then
@@ -2158,6 +2168,8 @@ stage_phase2() {
   need_cmd terraform; need_cmd aws; need_cmd jq; need_cmd dig
   require_domain
   require_identity "$ACCOUNT_ID"
+  # As phase1: an apply against a stopped instance can fail part-way through.
+  require_db_up "an apply"
 
   # The refusal that matters most in this stage.
   local count
@@ -2530,7 +2542,14 @@ wait_for_services_steady() {
         --query 'services[0].[length(deployments),deployments[0].rolloutState,runningCount,desiredCount]' \
         --output text 2>/dev/null || printf '? ? ? ?')
       count=$(printf '%s' "$state" | awk '{print $1}')
+      # desired != 0 as well as running == desired. Scaling 0 -> N changes only
+      # desiredCount and creates no new deployment, so PRIMARY stays
+      # (deployments=1, COMPLETED); a poll that raced the update and still saw
+      # 0/0 would satisfy every other condition and report "steady after 0s"
+      # with nothing running. This is the same hole wait_for_services_drained
+      # documents on the way down.
       if [ "$count" = "1" ] && [ "$(printf '%s' "$state" | awk '{print $2}')" = "COMPLETED" ] \
+         && [ "$(printf '%s' "$state" | awk '{print $4}')" != "0" ] \
          && [ "$(printf '%s' "$state" | awk '{print $3}')" = "$(printf '%s' "$state" | awk '{print $4}')" ]; then
         continue
       fi
@@ -3186,6 +3205,29 @@ stage_status() {
 # environment back up and the bill stays high.
 # --------------------------------------------------------------------------- #
 
+# Environments `down` and `up` may target, as a FIXED list -- the same convention
+# as QUERY_ENVIRONMENTS and PROVISIONING_ENVIRONMENTS above, and for the same
+# reason. `down` takes an environment offline and `--yes` answers its one
+# confirmation, so `./scripts/deploy production down --yes` must not become
+# possible the moment infra/envs/production/ exists -- which, by this script's own
+# contract, is a tfvars file and an AWS profile away.
+# Comma-separated: the case pattern below matches ",$ENV_NAME," against this
+# wrapped in commas, so a space-separated list would never match.
+SHUTDOWN_ENVIRONMENTS="staging,dev"
+
+require_shutdown_environment() {
+  case ",$SHUTDOWN_ENVIRONMENTS," in
+    *",$ENV_NAME,"*) return 0 ;;
+  esac
+  die "Refusing: scheduled shutdown is not enabled for environment '$ENV_NAME'." \
+    "These stages take an environment offline, and \`--yes\` answers the only" \
+    "confirmation, so the environments they may run against are listed explicitly" \
+    "in this script rather than taken from the command line." \
+    "Permitted: $SHUTDOWN_ENVIRONMENTS." \
+    "To add one, edit SHUTDOWN_ENVIRONMENTS in scripts/deploy -- deliberately, in a" \
+    "commit someone reviews."
+}
+
 # How long `down` waits for tasks to drain before it gives up rather than pull
 # the database out from under them, and how long `up` waits for RDS.
 DOWN_DRAIN_TIMEOUT_SECONDS="${DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS:-300}"
@@ -3225,8 +3267,13 @@ rds_status() {
 
 # tfvars stays the source of truth for "how many tasks when the environment is
 # up", even though Terraform no longer writes the count to the service.
+# tfvar_required, not a default of 1: `up` is now the only thing that sets the live
+# count, and the Bedrock limiter is still derived from this same tfvar at apply time
+# (see modules/compute/README.md). A renamed or commented-out entry silently
+# defaulting to 1 would put the two out of step in exactly the direction that is
+# hard to notice.
 service_desired_from_tfvars() {
-  tfvar "$TFVARS" "${1}_desired_count" || printf '1'
+  tfvar_required "$TFVARS" "${1}_desired_count"
 }
 
 ecs_service_desired() {
@@ -3256,33 +3303,75 @@ scale_services() {
 # that one is satisfied by desired == running, which 0 == 0 meets the instant the
 # update lands, while tasks are still shutting down.
 wait_for_services_drained() {
-  local cluster="$1" elapsed=0 svc name running total pending
+  local cluster="$1" elapsed=0 svc name running total pending unreadable=0
   local names=""
   for svc in api worker frontend; do
     name=$(out_map_opt ecs_service_names "$svc")
     [ -n "$name" ] && names="$names $name"
   done
-  [ -n "$names" ] || { warn "No service names in the outputs; nothing to drain."; return 0; }
+  # Not a warning-and-continue: the caller stops the database next. If the names
+  # cannot be resolved the services were never scaled either (scale_services skips
+  # them the same way), so "nothing to drain" would mean three services still
+  # running into a database about to stop.
+  [ -n "$names" ] || die \
+    "No service names in the outputs for '$ENV_NAME', so nothing could be scaled or drained." \
+    "Refusing to stop the database: the services may still be running." \
+    "Apply the environment so \`ecs_service_names\` is in the outputs, then re-run."
 
   while [ "$elapsed" -lt "$DOWN_DRAIN_TIMEOUT_SECONDS" ]; do
     total=0
+    unreadable=0
     pending=""
     for name in $names; do
+      # A failed describe must NOT read as zero. Throttling, a transient 5xx, an
+      # expired SSO session and a stale service name all return nothing here, and
+      # every one of them would otherwise look exactly like "fully drained" --
+      # which is the one conclusion that lets the caller stop the database under
+      # a live worker. Unknown counts as not-drained, so this fails closed.
       running=$(awsx ecs describe-services --cluster "$cluster" --services "$name" \
-        --query 'services[0].runningCount' --output text 2>/dev/null || printf '0')
-      case "$running" in '' | *[!0-9]*) running=0 ;; esac
-      if [ "$running" != "0" ]; then
-        pending="$pending $name($running)"
-        total=$((total + running))
-      fi
+        --query 'services[0].runningCount' --output text 2>/dev/null || printf '')
+      case "$running" in
+        '' | *[!0-9]*)
+          unreadable=$((unreadable + 1))
+          pending="$pending $name(unreadable)"
+          ;;
+        0) : ;;
+        *)
+          pending="$pending $name($running)"
+          total=$((total + running))
+          ;;
+      esac
     done
-    [ "$total" = "0" ] && { ok "all tasks stopped after ${elapsed}s"; return 0; }
+    if [ "$total" = "0" ] && [ "$unreadable" = "0" ]; then
+      ok "all tasks stopped after ${elapsed}s"
+      return 0
+    fi
     note "  ${elapsed}s: draining —$pending"
     sleep 10
     elapsed=$((elapsed + 10))
   done
-  warn "Still running after ${DOWN_DRAIN_TIMEOUT_SECONDS}s:$pending"
+  if [ "${unreadable:-0}" != "0" ]; then
+    warn "Could not read the running count for one or more services after ${DOWN_DRAIN_TIMEOUT_SECONDS}s:$pending"
+    warn "  Treating that as NOT drained. An unreadable count is not a zero count."
+  else
+    warn "Still running after ${DOWN_DRAIN_TIMEOUT_SECONDS}s:$pending"
+  fi
   return 1
+}
+
+# `update-service --desired-count 0` does not touch a task started by `run-task`,
+# and wait_for_services_drained does not observe one. A `migrate` mid-Alembic or a
+# `verify` inside its 1500s tail would keep its database connection while the next
+# step stopped the instance -- a half-applied migration, in the migrate case. Under
+# Phase C this runs unattended, so it has to be checked rather than assumed.
+oneoff_tasks_running() {
+  local cluster="$1" n
+  n=$(awsx ecs list-tasks --cluster "$cluster" --desired-status RUNNING \
+    --query 'length(taskArns)' --output text 2>/dev/null || printf 'unknown')
+  case "$n" in
+    '' | *[!0-9]*) printf 'unknown' ;;
+    *) printf '%s' "$n" ;;
+  esac
 }
 
 wait_for_rds_available() {
@@ -3301,24 +3390,33 @@ wait_for_rds_available() {
     "database that is not there. Re-run \`up\` once it settles."
 }
 
-# Guard for the stages that need a live environment. Both failure modes are
-# silent and confusing without it: Terraform can fail mid-apply against a stopped
-# instance, a one-off migration task against one fails obscurely, and a service
-# left at desired 0 reaches "steady state" immediately -- so `deploy` would
-# report success for an image that is not running anywhere.
-require_env_up() {
-  local what="$1" cluster db status svc name desired
-  db=$(rds_identifier_opt)
-  if [ -n "$db" ]; then
-    status=$(rds_status "$db")
-    case "$status" in
-      available | unknown | None | '') : ;;
-      *) die "$ENV_NAME is shut down: the database is '$status', not 'available'." \
-           "Bring it back before $what:" \
-           "  ./scripts/deploy $ENV_NAME up" ;;
-    esac
-  fi
+# Two separate preconditions, because the stages need different ones. A `query`
+# needs the database and does not care that the services are at zero; a `deploy`
+# needs both. Calling the wrong one refuses work that would have succeeded.
 
+# Refuses ONLY on the states that mean the instance is not there. Everything else
+# passes, including `backing-up`, `modifying` and `storage-optimization`: those are
+# states of a reachable instance, and staging takes a backup after every start
+# (rds_backup_retention_days = 30). Refusing on them would tell the operator to run
+# `up` immediately after `up` had just succeeded.
+require_db_up() {
+  local what="$1" db status
+  db=$(rds_identifier_opt)
+  [ -n "$db" ] || return 0
+  status=$(rds_status "$db")
+  case "$status" in
+    stopped | stopping | starting)
+      die "$ENV_NAME is shut down: the database is '$status'." \
+        "Bring it back before $what:" \
+        "  ./scripts/deploy $ENV_NAME up" ;;
+    *) return 0 ;;
+  esac
+}
+
+# A service at desired 0 reaches "steady state" instantly, so a stage that waits
+# for a rollout would report success for an image no task is running.
+require_services_up() {
+  local what="$1" cluster svc name desired
   cluster=$(out_opt ecs_cluster_name)
   [ -n "$cluster" ] || return 0
   for svc in api worker frontend; do
@@ -3334,10 +3432,16 @@ require_env_up() {
   done
 }
 
+require_env_up() {
+  require_db_up "$1"
+  require_services_up "$1"
+}
+
 stage_down() {
   banner "down -- take $ENV_NAME offline (account $ACCOUNT_ID, $AWS_REGION)"
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
+  require_shutdown_environment
   require_outputs "$ENV_DIR"
 
   local cluster db status
@@ -3362,8 +3466,25 @@ stage_down() {
   wait_for_services_drained "$cluster" || die \
     "Tasks had not stopped after ${DOWN_DRAIN_TIMEOUT_SECONDS}s, so RDS was left running." \
     "Stopping it under a live worker would cut its connections mid-task." \
-    "The services are already at desired 0. Re-run \`down\` once they have drained;" \
-    "it will skip the scaling and go straight to the database."
+    "The services are already at desired 0, so re-running \`down\` once they have" \
+    "drained re-issues that harmlessly and then stops the database."
+
+  # The services are drained; anything still RUNNING on the cluster is a one-off.
+  local oneoffs
+  oneoffs=$(oneoff_tasks_running "$cluster")
+  case "$oneoffs" in
+    0) : ;;
+    unknown)
+      die "Could not list the cluster's running tasks, so a one-off task cannot be ruled out." \
+        "The services are already at desired 0; the database was left running." \
+        "Re-run \`down\` when the ECS API is reachable." ;;
+    *)
+      die "$oneoffs task(s) are still RUNNING on '$cluster' after the services drained." \
+        "That is a one-off task -- a migrate, query, backfill or verify -- and scaling" \
+        "the services to zero does not stop it. Stopping the database now would cut it" \
+        "mid-work; a migration caught this way is left half-applied." \
+        "The services are already at desired 0. Wait for it to finish and re-run \`down\`." ;;
+  esac
 
   banner "down -- database"
   status=$(rds_status "$db")
@@ -3399,6 +3520,7 @@ stage_up() {
   banner "up -- bring $ENV_NAME back (account $ACCOUNT_ID, $AWS_REGION)"
   need_cmd aws; need_cmd jq; need_cmd terraform
   require_identity "$ACCOUNT_ID"
+  require_shutdown_environment
   require_outputs "$ENV_DIR"
 
   local cluster db status svc

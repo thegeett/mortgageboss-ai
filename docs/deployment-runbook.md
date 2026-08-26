@@ -269,9 +269,20 @@ environment costs.
 
 `down` scales the three ECS services to desired 0, waits for the tasks to actually
 stop (the worker gets its SIGTERM window to finish or re-queue what it is holding),
-and only then stops RDS. If the tasks have not drained inside
-`DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS` it leaves the database running rather than cut
-their connections mid-task; re-running `down` picks up where it left off.
+checks that no one-off task is still running on the cluster, and only then stops RDS.
+If the tasks have not drained inside `DEPLOY_DOWN_DRAIN_TIMEOUT_SECONDS`, or a
+`migrate` / `query` / `backfill` / `verify` task is still going, it leaves the
+database running rather than cut their connections mid-task. Re-running `down` then
+re-issues the scaling harmlessly and stops the database.
+
+Every wait fails closed. A count it cannot read — throttling, a transient 5xx, an
+expired SSO session — is treated as "still running", never as zero, because those
+look identical to fully drained and only one of them makes it safe to stop the
+database.
+
+`down` and `up` refuse any environment not in `SHUTDOWN_ENVIRONMENTS` (`staging dev`),
+the same fixed-list convention `query` and `bootstrap-admin` use — `--yes` answers
+`down`'s only confirmation, so the target must not come from the command line alone.
 
 `up` reverses it, database first — a task that starts before Postgres answers fails
 its readiness check, and the deployment circuit breaker can roll it back. It waits
@@ -291,10 +302,14 @@ down the site answers with **503**, with no targets behind it.
 
 Two things to know:
 
-- **`deploy` and `migrate` refuse to run while the environment is down**, and say so.
-  Both would otherwise fail confusingly: Terraform can fail mid-apply against a
+- **Every stage that touches the database or runs an apply refuses while the
+  environment is down**, and says so: `deploy`, `migrate`, `query`, `query-setup`,
+  `add-user`, `bootstrap-admin`, `backfill-mismo`, `verify`, `phase1` and `phase2`.
+  They would otherwise fail confusingly — Terraform can fail mid-apply against a
   stopped instance, and a service left at desired 0 reaches steady state instantly,
-  so `deploy` would report success for an image no task is running.
+  so `deploy` would report success for an image no task is running. The database
+  check refuses only `stopped`, `stopping` and `starting`; `backing-up` and
+  `modifying` are states of a reachable instance and pass.
 - **AWS force-starts an instance left stopped for seven days**, so it does not miss a
   maintenance window. A nightly shutdown never reaches that; a long holiday one does,
   and the instance then stays up until someone stops it again.
