@@ -256,8 +256,11 @@ resource "aws_scheduler_schedule" "stop_database" {
     # member name. The failure mode is the worst kind: the schedule is created
     # happily, `terraform plan` is clean, and the invocation fails at 22:00 every
     # night with a validation error nobody sees. The DLQ above exists so that
-    # this class of mistake reports itself. Verify after the first apply --
-    # see the module README.
+    # this class of mistake reports itself.
+    #
+    # Verified on staging 2026-08-26 with `probe_at`: the queue returned
+    # InvalidDBInstanceState against a running instance, which is RDS answering,
+    # not Scheduler rejecting. Re-run the probe if this input ever changes.
     input = jsonencode({
       DbInstanceIdentifier = var.db_instance_identifier
     })

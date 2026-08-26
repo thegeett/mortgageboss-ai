@@ -364,3 +364,10 @@ shutdown_start_days = "MON-FRI"
 # automated backup, so the nightly snapshot would have been skipped every night.
 rds_backup_window      = "14:30-15:00"         # 10:30 EDT / 09:30 EST
 rds_maintenance_window = "wed:15:30-wed:16:00" # 11:30 EDT / 10:30 EST
+
+# The probe ran 2026-08-26T04:01:25Z and PASSED: the dead-letter queue came back
+# with ERROR_CODE=InvalidDBInstanceState and the body
+# {"DbInstanceIdentifier":"mbai-staging"}, which is RDS itself refusing to start an
+# already-running instance -- so the universal target really does reach the RDS
+# API with that spelling. Left null; set it again if the target input ever changes.
+# shutdown_probe_at = "YYYY-MM-DDTHH:MM:SS"

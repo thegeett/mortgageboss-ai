@@ -138,6 +138,13 @@ cannot check. RDS is the trap: the API reference spells the parameter
 wants the SDK's spelling. Get it wrong and the schedule is created happily, plans
 clean, and does nothing every night.
 
+**Verified on staging, 2026-08-26.** The probe returned
+`ERROR_CODE=InvalidDBInstanceState` with the body
+`{"DbInstanceIdentifier":"mbai-staging"}` — RDS itself refusing to start an
+instance that was already running, which is only reachable if the parameter was
+understood. `DbInstanceIdentifier` is right; re-run the probe if the target input
+is ever changed.
+
 `probe_at` settles it. Set it to a UTC timestamp a few minutes ahead and apply:
 
 ```hcl

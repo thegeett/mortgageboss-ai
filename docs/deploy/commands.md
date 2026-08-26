@@ -401,6 +401,46 @@ either — modifying a stopped instance can fail mid-apply.
 | Only `staging` and `dev` | `SHUTDOWN_ENVIRONMENTS` in `scripts/deploy` is a fixed list. Any other environment is refused, `--yes` or not. |
 | Changing a task count | Edit the tfvar **and** run `up`. Terraform no longer writes `desired_count` (LP-630 Phase A), but the tfvar still feeds the Bedrock rate limiter — see [`../../infra/modules/compute/README.md`](../../infra/modules/compute/README.md). |
 
+### It also happens on a schedule
+
+Staging goes down at **22:00** and comes back at **09:00 America/New_York**,
+weekdays, and stays down all weekend (Fri 22:00 → Mon 09:00). Eight EventBridge
+Scheduler schedules, no Lambda. Details: [`../../infra/modules/scheduler/README.md`](../../infra/modules/scheduler/README.md).
+
+```bash
+cd infra/envs/staging
+terraform output shutdown_schedule     # what fires when, for the applied values
+```
+
+**Running `down` / `up` by hand is safe alongside it, in both directions.** The
+schedules act unconditionally, and acting on something already in the wanted state
+is either a silent no-op (`updateService` to a count it already has) or a benign
+`InvalidDBInstanceState` that lands in the dead-letter queue.
+
+The one thing to know: **a manual `down` does not keep it down** — the next weekday
+09:00 brings it back. For a longer hold set `shutdown_enabled = false` in tfvars
+and apply.
+
+### When the schedule does not fire
+
+A failing schedule is **silent** — no console banner, no log group, no alarm. The
+dead-letter queue is the only place it shows up before the bill does.
+
+```bash
+aws sqs receive-message \
+  --queue-url "$(terraform output -raw shutdown_dlq_url)" \
+  --message-attribute-names All --max-number-of-messages 10
+```
+
+Read the error code, not the message count:
+
+| In the queue | Meaning |
+| --- | --- |
+| `InvalidDBInstanceState` on a stop | Expected — the instance was already stopped (every weekend night, or after a manual `down`). |
+| `InvalidDBInstanceState` on a start | Expected — someone ran `up` before the morning schedule. |
+| Anything from a **service** schedule | Real. `updateService` succeeds even when the count is already right. |
+| A validation or parse error | Real, and the bad one: that schedule has never done anything. |
+
 ### Timeouts
 
 ```bash

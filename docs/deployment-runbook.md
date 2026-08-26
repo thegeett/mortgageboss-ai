@@ -280,7 +280,22 @@ expired SSO session — is treated as "still running", never as zero, because th
 look identical to fully drained and only one of them makes it safe to stop the
 database.
 
-`down` and `up` refuse any environment not in `SHUTDOWN_ENVIRONMENTS` (`staging dev`),
+Since LP-630 Phase C this also happens **on a schedule**: staging goes down at
+22:00 and comes back at 09:00 `America/New_York`, weekdays, and stays down from
+Friday night to Monday morning. Eight EventBridge Scheduler schedules, no Lambda.
+See [`../infra/modules/scheduler/README.md`](../infra/modules/scheduler/README.md).
+
+Running these commands by hand alongside the schedule is safe in both directions —
+the schedules act unconditionally, and acting on something already in the wanted
+state is a no-op or a benign error that lands in the dead-letter queue. But a
+manual `down` does **not** hold: the next weekday morning brings the environment
+back. Set `shutdown_enabled = false` for a longer hold.
+
+A schedule that fails is silent. `terraform output shutdown_dlq_url` gives the
+queue where failures report themselves, and the module README says which errors
+are expected there and which are not.
+
+`down` and `up` refuse any environment not in `SHUTDOWN_ENVIRONMENTS` (`staging,dev`),
 the same fixed-list convention `query` and `bootstrap-admin` use — `--yes` answers
 `down`'s only confirmation, so the target must not come from the command line alone.
 
