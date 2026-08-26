@@ -128,7 +128,27 @@ database_username = "mbai_admin"
 
 # --- Cache -------------------------------------------------------------------- #
 
-redis_node_type = "cache.t4g.small"
+# LP-630 Phase B. Halved from cache.t4g.small, saving $11.68/month -- every hour of
+# every day, including the hours staging is in use, unlike the overnight shutdown.
+#
+# Measured before changing it, not assumed: BytesUsedForCache peaked at 9.7 MiB
+# across 14 days (flat, every day) against micro's ~512 MiB. About 53x headroom.
+# It cannot creep the way a cache would, because nothing here is cached -- this is
+# a Celery broker, a result backend, one lock and a health check, and a Celery
+# message is a few KB.
+#
+# Safe because it is an in-place modification, NOT a replacement: `terraform plan`
+# is "0 to add, 1 to change, 0 to destroy" with node_type the only attribute in the
+# diff. That distinction is the whole ticket where Redis is concerned -- a
+# RECREATED replication group would come up with no AUTH token while Secrets
+# Manager still held `rediss://:OLD_TOKEN@...`, and every API and worker container
+# would fail on connect. Resizing keeps the group, the token and the endpoint.
+#
+# apply_immediately is false on the replication group, so this lands in the
+# cluster's maintenance window -- tue:08:30-09:30 UTC, which is 04:30 Eastern and
+# therefore inside the overnight shutdown. The brief failover happens while all
+# three services are at desired 0 and nothing is connected.
+redis_node_type = "cache.t4g.micro"
 redis_version   = "7.1"
 redis_family    = "redis7"
 
