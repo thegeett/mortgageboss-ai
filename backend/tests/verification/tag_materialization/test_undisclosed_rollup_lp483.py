@@ -44,7 +44,7 @@ def _tag(value: str) -> Tag:
     )
 
 
-def _credit_report(rows: int = 2) -> DocumentEntry:
+def _credit_report(rows: int = 2, *, payments: list[str] | None = None) -> DocumentEntry:
     return DocumentEntry(
         content_id="cr1",
         document_type="credit_report",
@@ -53,7 +53,18 @@ def _credit_report(rows: int = 2) -> DocumentEntry:
         lists={
             "tradelines": tuple(
                 ListRow(
-                    fields={"creditor_name": Field.present(f"C{i}", source=FieldSource.EXTRACTED)},
+                    fields={
+                        "creditor_name": Field.present(f"C{i}", source=FieldSource.EXTRACTED),
+                        **(
+                            {
+                                "monthly_payment": Field.present(
+                                    payments[i], source=FieldSource.EXTRACTED
+                                )
+                            }
+                            if payments is not None
+                            else {}
+                        ),
+                    },
                     row_id=f"r{i}",
                 )
                 for i in range(rows)
@@ -173,3 +184,54 @@ def test_mismo_liabilities_are_not_counted_as_reported_tradelines() -> None:
     value, reason = _rollup(snapshot)
     assert value == _UNKNOWN
     assert "no credit-report tradelines" in reason
+
+
+# --------------------------------------------------------------------------- #
+# bug-002 — a $0 tradeline is not a debt, and CR-1/CR-4 must agree about that
+# --------------------------------------------------------------------------- #
+
+
+def test_a_zero_payment_tradeline_is_not_counted_as_undisclosed() -> None:
+    """LF-AWBB, reduced. A $0 account is nothing owed and nothing due — B3-6-01's "debts of a
+    recurring nature" does not reach it, so the 1003 is right to omit it and the rollup must not call
+    the file incomplete over it."""
+    report = _credit_report(2, payments=["0", "438"])
+    tags = {
+        "r0": {"liab.in_application": _tag("no")},  # the $0 account, absent from the 1003
+        "r1": {"liab.in_application": _tag("yes")},  # the real debt, stated
+    }
+    value, reason = _rollup(_snapshot([report], tags))
+    assert value == "no"
+    assert "1 judged" in reason, "only the payment-bearing tradeline is aggregated"
+
+
+def test_a_zero_payment_tradeline_does_not_mask_a_real_undisclosed_debt() -> None:
+    """The filter narrows the population; it must not soften the answer for what remains."""
+    report = _credit_report(2, payments=["0", "438"])
+    tags = {
+        "r0": {"liab.in_application": _tag("no")},
+        "r1": {"liab.in_application": _tag("no")},  # a REAL undisclosed debt
+    }
+    value, _ = _rollup(_snapshot([report], tags))
+    assert value == "yes"
+
+
+def test_an_all_zero_report_abstains_and_says_which_case_it_is() -> None:
+    """Fail-closed holds: with every tradeline filtered out there is nothing to aggregate, so this
+    abstains rather than reading as an all-clear. The reason must not say the report is MISSING — it
+    is present and unremarkable, and telling a processor otherwise sends them chasing it."""
+    report = _credit_report(2, payments=["0", "0"])
+    tags = {"r0": {"liab.in_application": _tag("no")}, "r1": {"liab.in_application": _tag("no")}}
+    value, reason = _rollup(_snapshot([report], tags))
+    assert value == _UNKNOWN
+    assert "$0 monthly payment" in reason
+    assert "no credit-report tradelines" not in reason
+
+
+def test_an_absent_payment_still_counts() -> None:
+    """ABSENT IS NOT ZERO. A tradeline reporting no payment field is not known to be immaterial, and
+    dropping it would let a real undisclosed debt vanish through a data gap."""
+    report = _credit_report(1)  # no monthly_payment field at all
+    tags = {"r0": {"liab.in_application": _tag("no")}}
+    value, _ = _rollup(_snapshot([report], tags))
+    assert value == "yes"

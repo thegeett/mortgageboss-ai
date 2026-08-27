@@ -2888,11 +2888,25 @@ def _credit_undisclosed_tradeline(
 
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized, so no per-liability judgment to aggregate"
-    reported = [r for r in liability_rows(snapshot) if r.source == _SOURCE_CREDIT_REPORT]
-    if not reported:
+    on_report = [r for r in liability_rows(snapshot) if r.source == _SOURCE_CREDIT_REPORT]
+    if not on_report:
         return (
             _UNKNOWN,
             "no credit-report tradelines on the file — nothing to compare against the 1003",
+        )
+    # bug-002 — the SAME population CR-1 scopes itself to, through the SAME helper. A $0 tradeline is
+    # not a debt, and counting it here while CR-1 skips it is precisely the CR-1/CR-4 divergence
+    # `test_cr1_and_cr4_cannot_disagree` exists to catch.
+    #
+    # Kept as a SECOND stage rather than folded into the filter above: "there is no credit report" and
+    # "the report's tradelines are all $0" are different facts, and one message covering both would
+    # tell a processor the report is missing when it is present and unremarkable.
+    reported = [r for r in on_report if _payment_bearing(r)[0] != "no"]
+    if not reported:
+        return (
+            _UNKNOWN,
+            f"all {len(on_report)} credit-report tradelines report a $0 monthly payment — none is a "
+            "recurring debt to compare against the 1003",
         )
     judged = 0
     undisclosed = 0
@@ -3528,6 +3542,73 @@ def liability_creditor_name(
     if not scrubbed:
         return _UNKNOWN, "this liability's holder resolved to nothing once scrubbed"
     return scrubbed[:_CREDITOR_NAME_MAX], f"the account is held by {scrubbed[:_CREDITOR_NAME_MAX]}"
+
+
+# --------------------------------------------------------------------------- #
+# bug-002 — A ZERO-PAYMENT TRADELINE IS NOT A DEBT.
+#
+# CR-1 enumerates every credit-report tradeline and asks "is this on the application?". LF-AWBB's
+# report carries 24; FOUR have a payment, and all four are stated and matched correctly. The other
+# twenty report $0 — open cards with no balance, and several of them duplicate spellings of each
+# other (MACYS/CBNA and MACYSCBNA) or of a debt already stated (UNITED WHSLE MORT beside the UWM
+# mortgage the 1003 lists at $3,907). All twenty fired RED as undisclosed liabilities "that change
+# the debt-to-income picture", which a $0 payment cannot do, and each offered an Apply that would
+# write a $0 liability onto the 1003.
+#
+# B3-6-01 scopes liabilities to debts "of a recurring nature". Nothing owed and nothing due is not
+# one. CR-1's own `criteria` already said "every PAYMENT-BEARING debt" — the prose carried the filter
+# and the machine-readable body did not.
+#
+# ONE DEFINITION, TWO READERS. CR-1 scopes its subjects on this tag; CR-4's rollup
+# (`_credit_undisclosed_tradeline`) filters its population with the same helper. They read the same
+# judgment because `test_cr1_and_cr4_cannot_disagree` requires it — filtering one and not the other
+# is exactly the divergence that test exists to catch.
+#
+# ABSENT IS NOT ZERO. A tradeline reporting no payment field at all resolves "unknown", so CR-1
+# couldnt_checks it rather than silently dropping it: we do not know whether it is material, and §8
+# says not_applicable must never absorb a data gap.
+#
+# WHAT THIS DOES NOT DO: a real balance with no reported payment — a charge-off, a collection, a
+# deferred student loan — is a genuine question this filter would silence if it ever keyed on payment
+# alone. It cannot check that today because no `liab.unpaid_balance` tag exists; LF-AWBB's tradelines
+# carried no balance in the extraction either. Recorded in bug-002 rather than half-built here.
+# --------------------------------------------------------------------------- #
+
+
+def _payment_bearing(subject_raw: object) -> tuple[str, str]:
+    """Does this liability carry a recurring payment? ``("yes"|"no"|"unknown", reason)``.
+
+    The shared half of bug-002's filter, called by the tag recipe AND by CR-4's rollup, so the two
+    rules cannot disagree about which tradelines are debts.
+    """
+    # LAZY import (init-order: rule_engine <-> tag_materialization, as the recipes above do).
+    from app.verification.rule_engine.enumerators import LiabilityRow
+
+    if not isinstance(subject_raw, LiabilityRow):
+        return _UNKNOWN, "not a liability subject"
+    field = subject_type("liability").read_field(subject_raw, "monthly_payment")
+    if field is None or not field.is_present:
+        return _UNKNOWN, "this liability reports no monthly payment, so its materiality is unknown"
+    raw = field.display if isinstance(field, PiiField) else field.value
+    try:
+        payment = Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
+        return (
+            _UNKNOWN,
+            f"this liability's monthly payment ({raw!r}) could not be read as an amount",
+        )
+    if payment > 0:
+        return "yes", f"this liability carries a monthly payment of ${payment:,.2f}"
+    return "no", (
+        "this liability reports a $0 monthly payment, so it is not a recurring debt obligation"
+    )
+
+
+def _liability_is_payment_bearing(
+    _snapshot: Snapshot, _subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """liab.is_payment_bearing — is this liability a recurring debt, or a $0 account (bug-002)?"""
+    return _payment_bearing(subject_raw)
 
 
 # --------------------------------------------------------------------------- #
@@ -6738,6 +6819,7 @@ _RECIPES: dict[str, Recipe] = {
     "reo_statement_matched_holder": _reo_statement_matched_holder,
     "reo_statement_billed_payment": _reo_statement_billed_payment,
     "liability_stated_is_mortgage": _liability_stated_is_mortgage,
+    "liability_is_payment_bearing": _liability_is_payment_bearing,  # bug-002
     "liability_payoff_marked": _liability_payoff_marked,
     "liability_payoff_contradicted": _liability_payoff_contradicted,
     "contract_days_until_closing": _contract_days_until_closing,

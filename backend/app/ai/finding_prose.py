@@ -39,7 +39,55 @@ logger = get_logger(__name__)
 
 _MAX_TOKENS = 400
 
-SYSTEM_PROMPT = """\
+
+# Imperatives that turn a PASS into a chore, and — read the other way — the words that make an
+# UNSETTLED finding's action an action. One list serving both directions, which is what `asks_for_work`
+# is for.
+#
+# bug-002 — NOT EVERY REMEDIATION IS A DOCUMENT REQUEST. The list held only the words for chasing
+# paper, so a fix that CHANGES THE APPLICATION failed the second reading. CR-1's own how_to_fix begins
+# "Add the liability to the 1003" and its Apply action is literally `add_liability`; the model wrote
+# exactly that, `asks_for_work` saw no approved verb, and all nineteen of LF-AWBB's CR-1 findings were
+# rejected as `stating_on_a_review` and shipped the raw template instead. The retry could not rescue
+# them either, because `_REJECTION_GUIDANCE` named the same short list back to the model — it was
+# steering away from the one verb that fit. 25 of that run's 130 findings went uncomposed.
+#
+# Widening serves BOTH readings, which is why it is safe to keep one list: a SETTLED finding whose
+# action opens "Add …" or "Correct …" is asking for work on a pass, and rejecting it is right.
+_ASKING = (
+    "obtain",
+    "confirm",
+    "verify",
+    "review",
+    "check",
+    "upload",
+    "provide",
+    "request",
+    "get ",
+    # The application-edit half (bug-002): the remediation is a change to the 1003, not a document.
+    "add",
+    "correct",
+    "disclose",
+    "include",
+    "update",
+    "reconcile",
+    "document",
+    "remove",
+)
+
+
+def _asking_phrase() -> str:
+    """ "Obtain, Confirm, … or Remove" — the ONE rendering of `_ASKING` every reader of it shares.
+
+    bug-002 — three places named these verbs and only one of them was a list. The system prompt and the
+    retry guidance each restated a hand-written subset, so widening `_ASKING` fixed the guard while both
+    instructions went on steering the model toward the old words. Same defect twice; rendered once now.
+    """
+    verbs = [verb.strip().capitalize() for verb in _ASKING]
+    return ", ".join(verbs[:-1]) + f" or {verbs[-1]}"
+
+
+_SYSTEM_PROMPT_TEMPLATE = """\
 You rewrite one mortgage loan-file finding so a loan processor can act on it.
 
 You are given a JSON summary of a finding that a deterministic rule engine has ALREADY decided. Your
@@ -58,7 +106,7 @@ RULES, all mandatory:
       what is in order, and settled. "Reserves are fully documented." "Employment is verified for the
       full two-year history." "This payment is on the application's liability list."
     * "why" becomes the EVIDENCE that settles it, in the same plain language.
-  NEVER begin the action with Obtain, Confirm, Verify, Review, Check, Upload, Provide or Request. A
+  NEVER begin the action with any of: __ASKING_VERBS__. A
   task that is already done reads as work outstanding, and it wastes the one signal a passing finding
   exists to give.
   Write it so a processor reading it feels the file is SOLID on this point — not merely that a check
@@ -306,9 +354,9 @@ def leaked_identifiers(composition: Composition) -> set[str]:
     )
 
 
-# Imperatives that turn a PASS into a chore. Only checked on a settled finding — everywhere else these
-# are exactly the words an action should start with.
-_ASKING = ("obtain", "confirm", "verify", "review", "check", "upload", "provide", "request", "get ")
+#: The prompt with the verb list rendered in — built here rather than inline, because the template is
+#: defined above `_ASKING` and carries JSON braces that rule an f-string out.
+SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.replace("__ASKING_VERBS__", _asking_phrase())
 
 
 def asks_for_work(composition: Composition) -> bool:
@@ -405,10 +453,15 @@ _REJECTION_GUIDANCE = {
         "what a system or a check did."
     ),
     "identifier": "you included an identifier that must never reach a processor. Remove it.",
+    # bug-002 — DERIVED FROM `_ASKING`, never restated. The two drifted apart the moment the list
+    # needed a new verb: the guidance kept naming the document-chasing words back to the model, so a
+    # retry on a rule whose fix EDITS the application was steered away from the only verb that fit and
+    # failed the same guard twice.
     "stating_on_a_review": (
         "this check is NOT resolved — something is still outstanding — and you wrote it as a "
-        "statement. Begin the action with what the processor must DO about it: Obtain, Confirm, "
-        "Verify, Review, Check, Upload, Provide or Request."
+        "statement. Begin the action with what the processor must DO about it: "
+        + _asking_phrase()
+        + "."
     ),
     "editorialising": (
         "you wrote that something was done correctly, properly or accurately. Say what the file "

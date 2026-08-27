@@ -370,6 +370,9 @@ tags:
   reo.statement_matched_holder: {mode: derived, subject: document, data: reo_statement_matched_holder}
   reo.statement_billed_payment: {mode: derived, subject: document, data: reo_statement_billed_payment}
   liab.stated_is_mortgage: {mode: derived, subject: liability, data: liability_stated_is_mortgage}
+  # bug-002 — is this a recurring debt, or a $0 account? CR-1 scopes its subjects on it; CR-4's
+  # rollup filters its population with the same helper, so the two cannot disagree.
+  liab.is_payment_bearing: {mode: derived, subject: liability, data: liability_is_payment_bearing}
   liab.payoff_marked: {mode: derived, subject: liability, data: liability_payoff_marked}
   # LP-597 — DT-8's guard: does the REO schedule contradict the payoff marking?
   liab.payoff_contradicted: {mode: derived, subject: liability, data: liability_payoff_contradicted}

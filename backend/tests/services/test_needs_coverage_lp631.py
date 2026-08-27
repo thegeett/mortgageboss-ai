@@ -519,3 +519,64 @@ async def test_the_kill_switch_covers_the_retraction_path(db_session, monkeypatc
         await apply_retraction(db_session, need=need, why="Covered by the credit report.") is False
     )
     assert need.coverage_note is None
+
+
+# --------------------------------------------------------------------------- #
+# The note a processor actually reads — pinned verbatim, from the first real run
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_note_names_the_liability_in_english(db_session) -> None:
+    """LF-AWBB's first real flag read "matching the stated leasepayment liability on the
+    application" — the raw MISMO token dropped into a sentence a processor is meant to check. The
+    whole argument for this flag is that someone READS it; prose that reads like a formatting
+    accident undermines that."""
+    company, loan_file = await _file(db_session)
+    need = await _need(db_session, loan_file, needs_type="lease_agreement")
+    await _liability(
+        db_session, loan_file, liability_type="LeasePayment", holder="ALLY FINANCIAL", payment="438"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "ALLY FINANCIAL", "monthly_payment": 438}],
+    )
+
+    await flag_covered_needs(db_session, loan_file_id=loan_file.id)
+    await db_session.refresh(need)
+    assert need.coverage_note == (
+        "The credit report lists ALLY FINANCIAL at $438/mo, matching the stated lease payment "
+        "liability on the application. Fannie Mae B3-6-01 asks for separate documentation only "
+        "for a liability that is NOT shown on a credit report."
+    )
+
+
+async def test_the_plural_note_is_grammatical(db_session) -> None:
+    """The same run produced "matching every stated revolving liabilities" — `every` takes a
+    singular noun."""
+    company, loan_file = await _file(db_session)
+    need = await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="BANK OF AMERICA", payment="25"
+    )
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="SYNCB/ROOMS TO GO", payment="301"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[
+            {"creditor_name": "BANK OF AMERICA", "monthly_payment": 25},
+            {"creditor_name": "SYNCB/ROOMS TO GO", "monthly_payment": 301},
+        ],
+    )
+
+    await flag_covered_needs(db_session, loan_file_id=loan_file.id)
+    await db_session.refresh(need)
+    assert need.coverage_note == (
+        "The credit report lists BANK OF AMERICA at $25/mo and SYNCB/ROOMS TO GO at $301/mo, "
+        "matching all 2 stated revolving liabilities on the application. Fannie Mae B3-6-01 asks "
+        "for separate documentation only for a liability that is NOT shown on a credit report."
+    )

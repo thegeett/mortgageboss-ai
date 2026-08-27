@@ -45,11 +45,13 @@ criteria: >-
   every debt to be useful on the others.
 
 applicability:
-  scope: each credit-report tradeline
+  scope: each payment-bearing credit-report tradeline
   trigger: >-
-    Any tradeline reported on a credit report in the file. A file with no credit report yields no
-    tradeline subjects. A MISMO stated liability is out of scope — CR-1 checks report-against-application,
-    not the reverse.
+    Any tradeline reported on a credit report in the file that carries a monthly payment. A file with no
+    credit report yields no tradeline subjects. A MISMO stated liability is out of scope — CR-1 checks
+    report-against-application, not the reverse. A tradeline reporting $0 is out of scope too (bug-002):
+    nothing is owed and nothing is due, so B3-6-01's "debts of a recurring nature" does not reach it, and
+    the 1003 is correct to omit it.
 
 reference_values:
   priya_validated: false          # must equal rule_kinds.csv
@@ -96,10 +98,26 @@ deterministic:
   # question to answer. Without this predicate every stated liability became a permanent, unfixable
   # couldnt_check. This narrows the SUBJECTS, never the abstain: a tradeline the AI could not resolve
   # still gates to couldnt_check.
+  # A CONJUNCTION (LP-517). Both predicates narrow the SUBJECT SET; neither narrows the abstain.
   applicability:
-    tag: liability.source
-    op: eq
-    value: credit_report_reported
+    - tag: liability.source
+      op: eq
+      value: credit_report_reported
+    # bug-002 — A $0 TRADELINE IS NOT A DEBT. LF-AWBB's report carries 24 tradelines; four have a
+    # payment and all four are stated and matched. The other twenty report $0 — open cards with no
+    # balance, several of them duplicate spellings of each other or of a debt already stated — and all
+    # twenty fired RED as undisclosed liabilities "that change the debt-to-income picture", which a $0
+    # payment cannot do. Each also offered an Apply that would have written a $0 liability onto the
+    # 1003; §5.8's guard tests for an ABSENT value, and "0" is present.
+    #
+    # B3-6-01 scopes liabilities to debts "of a recurring nature". The `criteria` above already said
+    # "every PAYMENT-BEARING debt" — the prose carried this filter and the body did not.
+    #
+    # A tradeline reporting NO payment resolves the tag "unknown", so it couldnt_checks rather than
+    # being silently dropped: whether it is material is exactly what we do not know.
+    - tag: liab.is_payment_bearing
+      op: eq
+      value: "yes"
   load_bearing_tags:
     # LP-556 — provenance only, NOT gated: it names WHICH debt this finding is about. Gating on it
     # would make a liability with no holder name abstain instead of being evaluated.

@@ -285,14 +285,20 @@ async def test_cr1_and_cr4_cannot_disagree(
 # --------------------------------------------------------------------------- #
 # Structure
 # --------------------------------------------------------------------------- #
-def test_cr1_is_scoped_to_reported_tradelines() -> None:
+def test_cr1_is_scoped_to_payment_bearing_reported_tradelines() -> None:
+    """TWO predicates now, and both narrow the SUBJECT SET rather than the abstain.
+
+    `liability.source` is CR-12's lesson (a stated-only liability must produce no finding rather than a
+    permanent couldnt_check). `liab.is_payment_bearing` is bug-002's: LF-AWBB's report carried 24
+    tradelines, four with a payment and twenty at $0, and all twenty fired RED as undisclosed debts
+    "that change the debt-to-income picture" — which a $0 payment cannot do.
+    """
     applicability = load_rule_spec("CR-1").deterministic.applicability
-    assert applicability is not None
-    assert (applicability.tag, applicability.op, applicability.value) == (
-        "liability.source",
-        "eq",
-        "credit_report_reported",
-    )
+    assert isinstance(applicability, tuple)
+    assert [(c.tag, c.op, c.value) for c in applicability] == [
+        ("liability.source", "eq", "credit_report_reported"),
+        ("liab.is_payment_bearing", "eq", "yes"),
+    ]
 
 
 def test_the_catch_all_is_an_abstain_not_a_pass() -> None:

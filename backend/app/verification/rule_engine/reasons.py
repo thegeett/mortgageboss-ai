@@ -168,6 +168,7 @@ _FACT_LABELS: dict[str, str] = {
         "whether the liability this statement matches is marked as paid off at closing"
     ),
     "liab.stated_is_mortgage": "the type the application states for this liability",
+    "liab.is_payment_bearing": "whether this liability carries a recurring monthly payment",
     "liab.payoff_marked": "whether this obligation is marked as paid off at closing",
     "txn.is_recurring": "whether this payment recurs across months",
     "txn.stated_liability_match": "whether this payee matches a liability on the application",

@@ -75,6 +75,17 @@ CoveragePredicate = Callable[
 
 #: Need type -> the MISMO ``LiabilityType`` it exists to document. A need outside this map is not
 #: something a credit report can answer, whatever it cites.
+#: How each MISMO ``LiabilityType`` is NAMED in the note a processor reads. The raw key is a MISMO
+#: token lower-cased — "leasepayment" — and it shipped straight into an English sentence on the first
+#: real run ("the stated leasepayment liability on the application"). The whole argument for this flag
+#: is that someone reads the sentence and CHECKS it; prose that reads like a formatting accident
+#: undermines exactly that.
+_LIABILITY_LABEL: dict[str, str] = {
+    "leasepayment": "lease payment",
+    "installment": "installment",
+    "revolving": "revolving",
+}
+
 _LIABILITY_DOC_NEEDS: dict[str, str] = {
     "lease_agreement": "leasepayment",  # a real CATALOG type
     "installment_loan_statement": "installment",  # the CATALOG type `canonical_need_type` stores
@@ -296,14 +307,25 @@ async def liability_documented_by_credit_report(
                     document_id=document.id,
                     note=(
                         f"The credit report lists {_join(matched)}, matching "
-                        f"{'the' if len(matched) == 1 else 'every'} stated "
-                        f"{liability_type} liabilit{'y' if len(matched) == 1 else 'ies'} on the "
-                        "application. Fannie Mae B3-6-01 asks for separate documentation only for a "
-                        "liability that is NOT shown on a credit report."
+                        f"{_matched_phrase(liability_type, len(matched))} on the application. "
+                        "Fannie Mae B3-6-01 asks for separate documentation only for a liability "
+                        "that is NOT shown on a credit report."
                     ),
                 )
             )
     return findings
+
+
+def _matched_phrase(liability_type: str, count: int) -> str:
+    """ "the stated lease payment liability" / "all 2 stated revolving liabilities".
+
+    Not "every ... liabilities": `every` takes a singular noun, and the first real run said "matching
+    every stated revolving liabilities on the application".
+    """
+    label = _LIABILITY_LABEL.get(liability_type, liability_type)
+    if count == 1:
+        return f"the stated {label} liability"
+    return f"all {count} stated {label} liabilities"
 
 
 def _join(parts: list[str]) -> str:

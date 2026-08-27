@@ -96,6 +96,18 @@ tags:
       LiabilityType and DECLINED on a credit-report tradeline, whose bureau codes would need the
       open-vocabulary classification ADR-353 defers.
     produced_by: derived
+  # bug-002 — the materiality filter CR-1's `criteria` always described and its body never applied.
+  liab.is_payment_bearing:
+    entity: liability
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      Does this liability carry a recurring monthly payment? A tradeline reporting $0 is an open
+      account with nothing owed and nothing due, which B3-6-01's "debts of a recurring nature" does
+      not reach — so the 1003 is correct to omit it and CR-1 must not call it undisclosed. "unknown"
+      when no payment is reported at all: absent is not zero, and whether such a row is material is
+      exactly what we cannot tell.
+    produced_by: derived
   liab.payoff_marked:
     entity: liability
     value_type: enum

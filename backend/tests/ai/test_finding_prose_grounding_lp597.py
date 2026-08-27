@@ -361,3 +361,54 @@ def test_the_rejection_is_retried_rather_than_shipping_the_template() -> None:
     from app.ai.finding_prose import _RETRYABLE
 
     assert "identifier" in _RETRYABLE
+
+
+# --------------------------------------------------------------------------- #
+# bug-002 — a remediation that EDITS THE APPLICATION is still an action
+# --------------------------------------------------------------------------- #
+
+
+def test_an_application_edit_counts_as_asking_for_work() -> None:
+    """THE REPORTED FAILURE. CR-1's own how_to_fix begins "Add the liability to the 1003" and its Apply
+    action is literally `add_liability` — so the model wrote exactly that, `asks_for_work` saw no
+    approved verb, and all nineteen of LF-AWBB's CR-1 findings were rejected as `stating_on_a_review`
+    and shipped the raw template. 25 of that run's 130 findings went uncomposed."""
+    from app.ai.finding_prose import rejection_reason
+
+    unresolved = _summary(settled=False)
+    for action in (
+        "Add the missing account to the application's liability list",
+        "Correct the stated purchase price to match the contract",
+        "Disclose the undisclosed liability on the application",
+        "Update the application's stated income",
+        "Reconcile the credit report against the stated liabilities",
+        "Remove the duplicate liability from the application",
+    ):
+        assert rejection_reason(unresolved, _composition(action)) is None, action
+
+
+def test_an_application_edit_on_a_pass_is_still_a_chore() -> None:
+    """Widening the list has to serve BOTH readings, which is what makes one list safe to keep: an
+    action opening "Add …" on a SETTLED finding is work on a pass, and rejecting it is right."""
+    from app.ai.finding_prose import rejection_reason
+
+    settled = _summary(settled=True)
+    assert (
+        rejection_reason(settled, _composition("Add the account to the application"))
+        == "asking_on_a_pass"
+    )
+    assert rejection_reason(settled, _composition("This payment is on the liability list")) is None
+
+
+def test_every_place_that_names_the_verbs_reads_the_same_list() -> None:
+    """bug-002's SECOND half. Three places named these verbs and only one was a list — the system
+    prompt and the retry guidance each restated a hand-written subset, so widening `_ASKING` fixed the
+    guard while both instructions went on steering the model toward the old words. A retry could not
+    rescue a composition the guidance was telling it to write the rejected way."""
+    from app.ai.finding_prose import _ASKING, _REJECTION_GUIDANCE, SYSTEM_PROMPT
+
+    guidance = _REJECTION_GUIDANCE["stating_on_a_review"]
+    for verb in _ASKING:
+        word = verb.strip().capitalize()
+        assert word in guidance, f"{word} missing from the retry guidance"
+        assert word in SYSTEM_PROMPT, f"{word} missing from the system prompt"
