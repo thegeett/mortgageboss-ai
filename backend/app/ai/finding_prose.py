@@ -359,9 +359,28 @@ def leaked_identifiers(composition: Composition) -> set[str]:
 SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.replace("__ASKING_VERBS__", _asking_phrase())
 
 
+#: The opening verb, matched on a WORD BOUNDARY.
+#:
+#: bug-002 review — `startswith` over bare stems was fine while every entry was a word nobody starts a
+#: statement with ("obtain", "upload"). Widening the list to the application-edit verbs broke it in
+#: both directions at once, because `add`, `document`, `update`, `include`, `correct` and `remove` are
+#: all prefixes of ordinary nouns and participles:
+#:
+#:   "Documentation of the full two-year employment history is in the file."  -> read as a task
+#:   "Updated pay stubs for both borrowers are in the file."                  -> read as a task
+#:   "Additional reserves beyond the requirement are documented."             -> read as a task
+#:   "Included in the ratio is the full PITI on the subject property."        -> read as a task
+#:
+#: Each of those is a correct PASS sentence rejected as `asking_on_a_pass`, and the same slip runs the
+#: other way: "Documentation for the gift funds is not in the file." satisfied `stating_on_a_review`,
+#: reopening the hole LP-603 closed when OC-2 shipped a pass-reading sentence into Needs attention.
+#: The prompt's own worked example, "Reserves are fully documented.", is one rewrite from it.
+_ASKING_RE = re.compile(rf"^(?:{'|'.join(verb.strip() for verb in _ASKING)})\b", re.IGNORECASE)
+
+
 def asks_for_work(composition: Composition) -> bool:
     """Does this action ask for something, when nothing is being asked for?"""
-    return composition.action.strip().lower().startswith(_ASKING)
+    return _ASKING_RE.match(composition.action.strip()) is not None
 
 
 def _parse(text: str) -> Composition | None:
@@ -467,9 +486,16 @@ _REJECTION_GUIDANCE = {
         "you wrote that something was done correctly, properly or accurately. Say what the file "
         "SHOWS, never whether a figure or a calculation is right — that is not yours to assert."
     ),
+    # bug-002 review — THE FOURTH SITE, and the one the first fix missed while its own commit message
+    # claimed all three were done. This entry still named the pre-widening nine, so a settled finding
+    # composed as "Add the account to the application" was rejected `asking_on_a_pass` and then handed
+    # guidance that never mentioned "Add" — at temperature 0 the retry re-emits the same opener, the
+    # second rejection is final, and the raw template ships. Exactly the retry-cannot-rescue-it defect
+    # bug-002 set out to remove, left standing in the opposite direction.
     "asking_on_a_pass": (
         "this check PASSED, and you wrote it as a task. State what is in order, and never begin with "
-        "Obtain, Confirm, Verify, Review, Check, Upload, Provide or Request."
+        + _asking_phrase()
+        + "."
     ),
     "malformed": 'you did not return a single JSON object of exactly {"action": "...", "why": "..."}.',
 }

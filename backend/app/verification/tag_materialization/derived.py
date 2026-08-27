@@ -2901,12 +2901,18 @@ def _credit_undisclosed_tradeline(
     # Kept as a SECOND stage rather than folded into the filter above: "there is no credit report" and
     # "the report's tradelines are all $0" are different facts, and one message covering both would
     # tell a processor the report is missing when it is present and unremarkable.
-    reported = [r for r in on_report if _payment_bearing(r)[0] != "no"]
+    # `== "yes"`, NOT `!= "no"`. CR-1's applicability resolves an "unknown" predicate to
+    # couldnt_check, so an unresolvable row is one CR-1 does NOT evaluate. Keeping it here let CR-4
+    # fire a borrower-level "undisclosed debt" with no per-liability finding naming which debt —
+    # the exact divergence `test_cr1_and_cr4_cannot_disagree` exists to prevent, reintroduced by an
+    # asymmetry between two filters that were supposed to be one. Both sides now aggregate exactly
+    # the rows CR-1 judges.
+    reported = [r for r in on_report if _payment_bearing(r)[0] == "yes"]
     if not reported:
         return (
             _UNKNOWN,
-            f"all {len(on_report)} credit-report tradelines report a $0 monthly payment — none is a "
-            "recurring debt to compare against the 1003",
+            f"none of the {len(on_report)} credit-report tradelines is a payment-bearing debt — nothing "
+            "owed and nothing due, or their amounts could not be read",
         )
     judged = 0
     undisclosed = 0
@@ -3575,32 +3581,64 @@ def liability_creditor_name(
 # --------------------------------------------------------------------------- #
 
 
+def _liability_amount(subject_raw: object, field_name: str) -> Decimal | None:
+    """One money field off a liability, through the canonical alias map. ``None`` when unreadable.
+
+    The alias map is why this reads ``balance`` rather than a source's own column: a tradeline calls it
+    ``balance`` and a MISMO stated liability calls it ``unpaid_balance``, and reading either directly
+    would abstain on half the subjects — the ADR-376 lesson `liab.is_disputed` records.
+    """
+    field = subject_type("liability").read_field(subject_raw, field_name)
+    if field is None or not field.is_present:
+        return None
+    raw = field.display if isinstance(field, PiiField) else field.value
+    try:
+        return Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
 def _payment_bearing(subject_raw: object) -> tuple[str, str]:
-    """Does this liability carry a recurring payment? ``("yes"|"no"|"unknown", reason)``.
+    """Is this liability a real debt? ``("yes"|"no"|"unknown", reason)``.
 
     The shared half of bug-002's filter, called by the tag recipe AND by CR-4's rollup, so the two
     rules cannot disagree about which tradelines are debts.
+
+    NO PAYMENT **AND** NO BALANCE — not payment alone, which was the first cut and was a false negative
+    in the one rule whose job is catching undisclosed debt. A charged-off account or a collection is
+    routinely reported at $0/mo with a five-figure balance still owed; keying materiality on the
+    payment silenced exactly that, and CR-1 used to fire on it.
+
+    The first cut recorded the balance as unreachable "because no `liab.unpaid_balance` tag exists".
+    That was the wrong constraint twice over: this reads the FIELD through the alias map rather than a
+    tag, `balance` is aliased for both sources in the same map `monthly_payment` comes from, and the
+    query said to have found no balance on LF-AWBB had simply asked for the MISMO column name.
+
+    ABSENT IS NOT ZERO, in either field. Both must be KNOWN and zero to call a row immaterial; anything
+    else is "unknown", so CR-1 couldnt_checks the row rather than dropping it silently.
     """
     # LAZY import (init-order: rule_engine <-> tag_materialization, as the recipes above do).
     from app.verification.rule_engine.enumerators import LiabilityRow
 
     if not isinstance(subject_raw, LiabilityRow):
         return _UNKNOWN, "not a liability subject"
-    field = subject_type("liability").read_field(subject_raw, "monthly_payment")
-    if field is None or not field.is_present:
-        return _UNKNOWN, "this liability reports no monthly payment, so its materiality is unknown"
-    raw = field.display if isinstance(field, PiiField) else field.value
-    try:
-        payment = Decimal(str(raw))
-    except (InvalidOperation, ValueError, TypeError):
-        return (
-            _UNKNOWN,
-            f"this liability's monthly payment ({raw!r}) could not be read as an amount",
-        )
-    if payment > 0:
+    payment = _liability_amount(subject_raw, "monthly_payment")
+    balance = _liability_amount(subject_raw, "balance")
+    if payment is not None and payment > 0:
         return "yes", f"this liability carries a monthly payment of ${payment:,.2f}"
+    if balance is not None and balance > 0:
+        return "yes", (
+            f"this liability reports no monthly payment but ${balance:,.2f} still owed — a "
+            "charged-off or collection account is still a debt"
+        )
+    if payment is None or balance is None:
+        missing = "monthly payment" if payment is None else "balance"
+        return _UNKNOWN, (
+            f"this liability reports no {missing}, so whether it is a real debt cannot be decided"
+        )
     return "no", (
-        "this liability reports a $0 monthly payment, so it is not a recurring debt obligation"
+        "this liability reports a $0 monthly payment and a $0 balance, so nothing is owed and "
+        "nothing is due"
     )
 
 

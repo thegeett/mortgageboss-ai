@@ -44,7 +44,23 @@ def _tag(value: str) -> Tag:
     )
 
 
-def _credit_report(rows: int = 2, *, payments: list[str] | None = None) -> DocumentEntry:
+def _credit_report(
+    rows: int = 2,
+    *,
+    payments: list[str] | None = None,
+    balances: list[str] | None = None,
+    amounts: bool = True,
+) -> DocumentEntry:
+    """A credit report whose tradelines are ORDINARY payment-bearing debts by default.
+
+    bug-002 gave materiality a definition, so a fixture's amounts stopped being decoration: a row with
+    neither a payment nor a balance is now "unknown", which is the honest answer and not what these
+    rollup tests are about. The default gives each row a real payment; `amounts=False` is the explicit
+    "the extraction got no figures at all" case.
+    """
+    default = ["100"] * rows if amounts else None
+    pay = payments if payments is not None else default
+    bal = balances if balances is not None else (["1000"] * rows if amounts else None)
     return DocumentEntry(
         content_id="cr1",
         document_type="credit_report",
@@ -56,12 +72,13 @@ def _credit_report(rows: int = 2, *, payments: list[str] | None = None) -> Docum
                     fields={
                         "creditor_name": Field.present(f"C{i}", source=FieldSource.EXTRACTED),
                         **(
-                            {
-                                "monthly_payment": Field.present(
-                                    payments[i], source=FieldSource.EXTRACTED
-                                )
-                            }
-                            if payments is not None
+                            {"monthly_payment": Field.present(pay[i], source=FieldSource.EXTRACTED)}
+                            if pay is not None
+                            else {}
+                        ),
+                        **(
+                            {"balance": Field.present(bal[i], source=FieldSource.EXTRACTED)}
+                            if bal is not None
                             else {}
                         ),
                     },
@@ -195,7 +212,7 @@ def test_a_zero_payment_tradeline_is_not_counted_as_undisclosed() -> None:
     """LF-AWBB, reduced. A $0 account is nothing owed and nothing due — B3-6-01's "debts of a
     recurring nature" does not reach it, so the 1003 is right to omit it and the rollup must not call
     the file incomplete over it."""
-    report = _credit_report(2, payments=["0", "438"])
+    report = _credit_report(2, payments=["0", "438"], balances=["0", "5258"])
     tags = {
         "r0": {"liab.in_application": _tag("no")},  # the $0 account, absent from the 1003
         "r1": {"liab.in_application": _tag("yes")},  # the real debt, stated
@@ -207,7 +224,7 @@ def test_a_zero_payment_tradeline_is_not_counted_as_undisclosed() -> None:
 
 def test_a_zero_payment_tradeline_does_not_mask_a_real_undisclosed_debt() -> None:
     """The filter narrows the population; it must not soften the answer for what remains."""
-    report = _credit_report(2, payments=["0", "438"])
+    report = _credit_report(2, payments=["0", "438"], balances=["0", "5258"])
     tags = {
         "r0": {"liab.in_application": _tag("no")},
         "r1": {"liab.in_application": _tag("no")},  # a REAL undisclosed debt
@@ -220,18 +237,44 @@ def test_an_all_zero_report_abstains_and_says_which_case_it_is() -> None:
     """Fail-closed holds: with every tradeline filtered out there is nothing to aggregate, so this
     abstains rather than reading as an all-clear. The reason must not say the report is MISSING — it
     is present and unremarkable, and telling a processor otherwise sends them chasing it."""
-    report = _credit_report(2, payments=["0", "0"])
+    report = _credit_report(2, payments=["0", "0"], balances=["0", "0"])
     tags = {"r0": {"liab.in_application": _tag("no")}, "r1": {"liab.in_application": _tag("no")}}
     value, reason = _rollup(_snapshot([report], tags))
     assert value == _UNKNOWN
-    assert "$0 monthly payment" in reason
+    assert "payment-bearing" in reason
     assert "no credit-report tradelines" not in reason
 
 
-def test_an_absent_payment_still_counts() -> None:
-    """ABSENT IS NOT ZERO. A tradeline reporting no payment field is not known to be immaterial, and
-    dropping it would let a real undisclosed debt vanish through a data gap."""
-    report = _credit_report(1)  # no monthly_payment field at all
+def test_an_absent_payment_is_unknown_not_immaterial() -> None:
+    """ABSENT IS NOT ZERO — but nor is it material. This test asserted `value == "yes"` when the filter
+    keyed on payment alone; with the balance dimension the honest answer for a row carrying NEITHER
+    figure is that we cannot tell, so both rules abstain on it together. The debt is not silenced: CR-1
+    couldnt_checks that row by name, which is where the signal now lives."""
+    report = _credit_report(1, amounts=False)
+    tags = {"r0": {"liab.in_application": _tag("no")}}
+    value, _ = _rollup(_snapshot([report], tags))
+    assert value == _UNKNOWN
+
+
+def test_a_zero_payment_account_with_a_balance_is_still_a_debt() -> None:
+    """THE FALSE NEGATIVE the first cut introduced. A charged-off account or a collection is routinely
+    reported at $0/mo with a five-figure balance still owed; keying materiality on the payment alone
+    silenced exactly that — in the one rule whose job is catching undisclosed debt, and on a case that
+    used to fire."""
+    report = _credit_report(1, payments=["0"], balances=["12000"])
     tags = {"r0": {"liab.in_application": _tag("no")}}
     value, _ = _rollup(_snapshot([report], tags))
     assert value == "yes"
+
+
+def test_an_unreadable_row_is_excluded_from_both_rules_not_just_one() -> None:
+    """CR-1's applicability resolves an "unknown" predicate to couldnt_check, so an unresolvable row is
+    one CR-1 does NOT evaluate. The first cut kept it here (`!= "no"`) while CR-1 required `eq yes`,
+    which let CR-4 fire a borrower-level "undisclosed debt" with no per-liability finding naming which
+    debt — the divergence `test_cr1_and_cr4_cannot_disagree` exists to prevent, reintroduced by an
+    asymmetry between two filters that were meant to be one."""
+    report = _credit_report(1, amounts=False)  # neither payment nor balance reported
+    tags = {"r0": {"liab.in_application": _tag("no")}}
+    value, reason = _rollup(_snapshot([report], tags))
+    assert value == _UNKNOWN
+    assert "payment-bearing" in reason

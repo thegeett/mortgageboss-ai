@@ -400,15 +400,73 @@ def test_an_application_edit_on_a_pass_is_still_a_chore() -> None:
     assert rejection_reason(settled, _composition("This payment is on the liability list")) is None
 
 
+def test_a_noun_form_of_an_action_verb_is_not_an_action() -> None:
+    """`startswith` over bare stems was safe while every verb was a word nobody opens a statement with.
+    Widening to the application-edit verbs broke it BOTH ways at once, because add / document / update /
+    include / correct are prefixes of ordinary nouns and participles."""
+    from app.ai.finding_prose import asks_for_work
+
+    for statement in (
+        "Documentation of the full two-year employment history is in the file.",
+        "Updated pay stubs for both borrowers are in the file.",
+        "Additional reserves beyond the requirement are documented.",
+        "Included in the ratio is the full PITI on the subject property.",
+        "Corrections to the application are reflected in the final 1003.",
+        "Removal of the disputed tradeline is documented.",
+    ):
+        assert not asks_for_work(_composition(statement)), statement
+
+
+def test_a_pass_sentence_is_not_rejected_as_a_chore() -> None:
+    """The `asking_on_a_pass` half of the same slip: each of these is a correct PASS sentence, and each
+    was rejected — then retried with guidance that named none of the words it had tripped on."""
+    from app.ai.finding_prose import rejection_reason
+
+    settled = _summary(settled=True)
+    for statement in (
+        "Documentation of the full two-year employment history is in the file.",
+        "Updated pay stubs for both borrowers are in the file.",
+        "Additional reserves beyond the requirement are documented.",
+    ):
+        assert rejection_reason(settled, _composition(statement)) is None, statement
+
+
+def test_a_statement_on_a_review_is_still_caught() -> None:
+    """LP-603's guard must survive the widening: `document` and `update` as bare prefixes let a pure
+    statement pass the "does this ask for work" test on an UNRESOLVED finding — the hole OC-2 opened by
+    shipping a pass-reading sentence into Needs attention."""
+    from app.ai.finding_prose import rejection_reason
+
+    unresolved = _summary(settled=False)
+    for statement in (
+        "Documentation for the gift funds is not in the file.",
+        "Updated appraisal is not in the file.",
+    ):
+        assert rejection_reason(unresolved, _composition(statement)) == "stating_on_a_review", (
+            statement
+        )
+
+
 def test_every_place_that_names_the_verbs_reads_the_same_list() -> None:
     """bug-002's SECOND half. Three places named these verbs and only one was a list — the system
     prompt and the retry guidance each restated a hand-written subset, so widening `_ASKING` fixed the
     guard while both instructions went on steering the model toward the old words. A retry could not
-    rescue a composition the guidance was telling it to write the rejected way."""
+    rescue a composition the guidance was telling it to write the rejected way.
+
+    FOUR sites, not three. The first fix rendered `stating_on_a_review` and the system prompt from the
+    list and left `asking_on_a_pass` naming the pre-widening nine — while its own commit message said
+    all three were done. A settled finding opening "Add ..." was rejected and then handed guidance that
+    never mentioned "Add", so the retry re-emitted it and the raw template shipped. This test asserted
+    two sites, so it passed throughout.
+    """
     from app.ai.finding_prose import _ASKING, _REJECTION_GUIDANCE, SYSTEM_PROMPT
 
-    guidance = _REJECTION_GUIDANCE["stating_on_a_review"]
+    sites = {
+        "stating_on_a_review guidance": _REJECTION_GUIDANCE["stating_on_a_review"],
+        "asking_on_a_pass guidance": _REJECTION_GUIDANCE["asking_on_a_pass"],
+        "system prompt": SYSTEM_PROMPT,
+    }
     for verb in _ASKING:
         word = verb.strip().capitalize()
-        assert word in guidance, f"{word} missing from the retry guidance"
-        assert word in SYSTEM_PROMPT, f"{word} missing from the system prompt"
+        for name, text in sites.items():
+            assert word in text, f"{word} missing from the {name}"
