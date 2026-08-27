@@ -28,13 +28,22 @@ import {
   useConfirmNeed,
   useDismissNeed,
   useMergeDuplicate,
+  useNotCovered,
   useNotDuplicate,
   useWaiveNeed,
 } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { isProposed } from "@/lib/loan-files/needs";
 import type { NeedsItemPriority, NeedsItemPublic } from "@/lib/types/needs-item";
-import { Check, Copy, MoreHorizontal, Pencil, SlashSquare, XCircle } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FileCheck2,
+  MoreHorizontal,
+  Pencil,
+  SlashSquare,
+  XCircle,
+} from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 
@@ -87,6 +96,76 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
           }
         >
           Keep both
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The coverage flag (LP-631). A predicate concluded the file ALREADY ANSWERS this need — on the file
+ * that prompted the work, a credit report listing the leased-vehicle liability at the stated payment,
+ * which Fannie Mae B3-6-01 says needs no separate documentation.
+ *
+ * It FLAGS; it never closes (ADR-388). The note carries the WHY so the processor checks the claim
+ * rather than takes it: **Dismiss** removes the need, **Keep it** clears the flag and records the
+ * judgement so no later pass asks again.
+ */
+export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
+  const dismiss = useDismissNeed(fileId);
+  const keep = useNotCovered(fileId);
+  const pending = dismiss.isPending || keep.isPending;
+
+  return (
+    <div className="mt-2.5 ml-4 rounded-md border border-info/30 bg-info/[0.06] px-3 py-2">
+      <div className="flex items-start gap-2">
+        <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
+        <div className="text-xs leading-relaxed text-gray-600">
+          <p>
+            <span className="font-medium text-gray-700">The file may already answer this.</span>{" "}
+            {need.coverage_note}
+          </p>
+          {need.possibly_covered_by && (
+            <p className="mt-1 text-gray-500">
+              Checked against{" "}
+              <span className="font-medium text-gray-700">{need.possibly_covered_by.filename}</span>
+              .
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="mt-2 flex gap-1.5 pl-5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1.5 text-xs"
+          disabled={pending}
+          onClick={() =>
+            dismiss.mutate(
+              { needId: need.id },
+              {
+                onSuccess: () => toast.success("Need dismissed"),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
+            )
+          }
+        >
+          {dismiss.isPending ? <Spinner className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+          Dismiss need
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs text-gray-500"
+          disabled={pending}
+          onClick={() =>
+            keep.mutate(need.id, {
+              onSuccess: () => toast.success("Kept — we won't ask again"),
+              onError: (error) => toast.error(getErrorMessage(error)),
+            })
+          }
+        >
+          Keep it
         </Button>
       </div>
     </div>

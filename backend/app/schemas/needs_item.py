@@ -157,6 +157,11 @@ class NeedsItemPublic(BaseModel):
     # a "possible duplicate of …" indicator the processor confirms (merge) or dismisses (keep both).
     # Never a silent merge; the deterministic-certain duplicates were already merged before this.
     possible_duplicate_of: UUID | None = None
+    # LP-631: set when a coverage predicate concluded the file ALREADY ANSWERS this need — the
+    # document that appears to answer it, plus the WHY the processor checks it against. A flag, never
+    # a close (ADR-388): they dismiss the need or keep it. Both null when nothing flagged it.
+    possibly_covered_by: MatchedDocument | None = None
+    coverage_note: str | None = None
 
     @classmethod
     def from_model(
@@ -170,6 +175,7 @@ class NeedsItemPublic(BaseModel):
         from app.services.needs_engine import needs_coverage_confirmation
 
         doc = item.satisfied_by_document
+        covering = item.covered_by_document
         matches = [
             MatchedDocument(id=d.id, filename=d.original_filename)
             for d in (matching_documents or [])
@@ -195,6 +201,12 @@ class NeedsItemPublic(BaseModel):
             matching_documents=matches,
             source=build_need_source(item),
             possible_duplicate_of=item.duplicate_of_id,
+            possibly_covered_by=(
+                MatchedDocument(id=covering.id, filename=covering.original_filename)
+                if covering is not None
+                else None
+            ),
+            coverage_note=item.coverage_note,
         )
 
 

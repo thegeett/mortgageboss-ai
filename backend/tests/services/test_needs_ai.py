@@ -156,7 +156,7 @@ async def test_propose_needs_returns_proposals_with_reasoning(
             },
         ],
     )
-    proposals = await propose_needs(db_session, lf)
+    proposals = (await propose_needs(db_session, lf)).proposals
 
     assert {p.need_type for p in proposals} == {"tax_return", "gift_letter"}
     # GUARDRAIL 1: every proposal carries non-empty, file-grounded reasoning.
@@ -176,7 +176,7 @@ async def test_proposal_without_reasoning_is_rejected(
             {"need_description": "Tax returns", "need_type": "tax_return", "reasoning": "self-emp"},
         ],
     )
-    proposals = await propose_needs(db_session, lf)
+    proposals = (await propose_needs(db_session, lf)).proposals
     assert [p.need_type for p in proposals] == ["tax_return"]
 
 
@@ -188,7 +188,7 @@ async def test_ai_failure_is_graceful_and_records_failed(
 
     lf = await _self_employed_file(db_session)
     monkeypatch.setattr(needs_ai_module, "complete", AsyncMock(side_effect=AIClientError("boom")))
-    assert await propose_needs(db_session, lf) == []  # never raises
+    assert (await propose_needs(db_session, lf)).proposals == []  # never raises
     assert lf.ai_needs_status is AiNeedsStatus.FAILED  # the failure is visible, not silent
 
 

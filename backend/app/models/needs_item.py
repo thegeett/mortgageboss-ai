@@ -223,10 +223,40 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # both") — so the AI flag pass never re-flags a pair the human already judged.
     duplicate_reviewed: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    # --- Coverage (LP-631) -------------------------------------------------
+    # A need is PROVISIONAL when it is written: LP-69 reasons at MISMO import, when the file has no
+    # documents by construction, and the ingest path can only ever add. These three columns are how a
+    # later pass says "the file already answers this" WITHOUT closing it (ADR-388) — the processor
+    # disposes, exactly as they do for the duplicate flag above.
+    #
+    # Set by any source that reaches that conclusion: a deterministic guideline predicate (LP-632's
+    # stated-liability vs credit-report tradelines), or the reasoner withdrawing its own proposal
+    # (LP-633). SET NULL so removing the document does not strand the flag.
+    covered_by_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    # WHY, in words the processor can check against the document — "the credit report lists ALLY
+    # FINANCIAL at $438/mo, matching the stated lease payment". A flag saying only "possibly covered"
+    # asks them to redo the work the predicate just did.
+    coverage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # True once the processor has DISPOSED of a coverage flag (dismissed the need, or kept it) — so no
+    # pass re-flags a judgement already made. Mirrors ``duplicate_reviewed``.
+    coverage_reviewed: Mapped[bool] = mapped_column(default=False, nullable=False)
+
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="needs_items")
     borrower: Mapped["Borrower | None"] = relationship()
-    satisfied_by_document: Mapped["Document | None"] = relationship()
+    # Both of these point at ``documents``, so each names its own FK — without that SQLAlchemy
+    # cannot tell which column either relationship traverses (LP-631 added the second one).
+    satisfied_by_document: Mapped["Document | None"] = relationship(
+        foreign_keys=[satisfied_by_document_id]
+    )
+    # LP-631: the document a coverage flag points at, for display beside the note.
+    covered_by_document: Mapped["Document | None"] = relationship(
+        foreign_keys=[covered_by_document_id]
+    )
     # The finding a SUGGESTION need derives from (LP-67) — LP-110 exposes its provenance
     # (the finding's description + its source document) as the need's source.
     source_finding: Mapped["DocumentFinding | None"] = relationship()

@@ -180,6 +180,11 @@ class Settings(BaseSettings):
     # semantic-duplicate residue for the processor to confirm (never a silent delete). Gated so the
     # extra per-run classification call can be turned off; the deterministic layers run regardless.
     needs_duplicate_flagging_enabled: bool = True
+    # Needs coverage flagging (LP-631/632): a deterministic pass FLAGS an AI-proposed need whose
+    # guideline precondition the file already answers — e.g. a liability the credit report lists at
+    # the stated payment, which B3-6-01 says needs no separate documentation. It never closes a need
+    # (ADR-388); the processor disposes. Gated so a predicate can be turned off without a redeploy.
+    needs_coverage_flagging_enabled: bool = True
     # Per-document AI-group gating (LP-377-D): skip an AI structuring group on a document its declared
     # `applies_to` doc-types exclude — a paid call the group would only abstain on (and, for income_amounts,
     # over-produce on). ALWAYS fails open (unknown / no-match document → runs every group). Set

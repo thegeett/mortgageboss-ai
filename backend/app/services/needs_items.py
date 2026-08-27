@@ -119,6 +119,8 @@ async def list_needs_items(db: AsyncSession, *, loan_file_id: UUID) -> list[Need
     stmt = only_active(stmt, NeedsItem)
     stmt = stmt.options(
         selectinload(NeedsItem.satisfied_by_document),
+        # LP-631: the document a coverage flag points at, so the card can name it beside the note.
+        selectinload(NeedsItem.covered_by_document),
         # LP-110: the suggestion chain (finding → its source document) for the need's source.
         selectinload(NeedsItem.source_finding).selectinload(DocumentFinding.document),
     )
@@ -141,6 +143,7 @@ async def get_needs_item(
         .where(NeedsItem.id == needs_item_id, NeedsItem.loan_file_id == loan_file_id)
         .options(
             selectinload(NeedsItem.satisfied_by_document),
+            selectinload(NeedsItem.covered_by_document),  # LP-631
             selectinload(NeedsItem.source_finding).selectinload(DocumentFinding.document),
         )
     )

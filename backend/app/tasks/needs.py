@@ -25,6 +25,7 @@ from app.models.document import Document
 from app.models.helpers import only_active
 from app.models.loan_file import AiNeedsStatus, LoanFile
 from app.services.needs_ai import apply_ai_needs_for_file_id
+from app.services.needs_coverage import flag_covered_needs
 from app.services.needs_dedup import consolidate_and_flag
 from app.services.needs_engine import apply_document_to_needs, loan_file_needs_lock
 from app.tasks.base import run_async, task_session
@@ -75,6 +76,9 @@ async def _run_needs_update(loan_file_id: str, document_id: str) -> None:
         await apply_document_to_needs(db, document)  # LP-68 deterministic match
         await apply_ai_needs_for_file_id(db, UUID(loan_file_id))  # LP-69 re-reason
         await consolidate_and_flag(db, loan_file_id=UUID(loan_file_id))  # LP-111 dedup
+        # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
+        # to ask whether the file already answers it. It flags; it never closes (ADR-388).
+        await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
 
@@ -83,6 +87,9 @@ async def _run_propose_ai_needs(loan_file_id: str) -> None:
     async with loan_file_needs_lock(loan_file_id), task_session() as db:
         await apply_ai_needs_for_file_id(db, UUID(loan_file_id))
         await consolidate_and_flag(db, loan_file_id=UUID(loan_file_id))  # LP-111 dedup
+        # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
+        # to ask whether the file already answers it. It flags; it never closes (ADR-388).
+        await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
 

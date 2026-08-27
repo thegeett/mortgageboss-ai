@@ -30,6 +30,7 @@ from app.schemas.needs_item import (
 )
 from app.services.activity_log import log_activity
 from app.services.documents import list_documents
+from app.services.needs_coverage import keep_need_despite_coverage
 from app.services.needs_dedup import confirm_duplicate_merge, dismiss_duplicate_flag
 from app.services.needs_engine import (
     confirm_need_coverage,
@@ -219,6 +220,27 @@ async def not_duplicate(
     """
     need = await _scoped_need(db, loan_file.id, needs_item_id)
     await dismiss_duplicate_flag(db, need=need)
+    await db.commit()
+    return await _public_one(db, loan_file.id, need)
+
+
+@router.post("/{needs_item_id}/not-covered", response_model=NeedsItemPublic)
+async def not_covered(
+    loan_file: ScopedLoanFile,
+    needs_item_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> NeedsItemPublic:
+    """Keep a need a coverage predicate flagged (LP-631): "the file does not actually answer this".
+
+    Clears ``possibly_covered_by`` and marks it reviewed, so no later pass re-flags a judgement the
+    processor has already made — without that the flag returns on the next document to arrive and
+    they are asked the same question forever. The need itself is untouched and stays open; a
+    processor who agrees with the flag dismisses the need instead (ADR-388 — the system never closes
+    one on its own).
+    """
+    need = await _scoped_need(db, loan_file.id, needs_item_id)
+    await keep_need_despite_coverage(db, need=need)
     await db.commit()
     return await _public_one(db, loan_file.id, need)
 

@@ -129,6 +129,17 @@ export function useNotDuplicate(fileId: string) {
   });
 }
 
+/** LP-631: keep a need a coverage predicate flagged — "the file does not actually answer this".
+ * Clears the flag and records the judgement, so no later pass re-flags it. */
+export function useNotCovered(fileId: string) {
+  const invalidate = useNeedsInvalidation(fileId);
+  return useMutation({
+    mutationFn: async (needId: string) =>
+      (await apiClient.post<NeedsItemPublic>(`${needsPath(fileId)}/${needId}/not-covered`)).data,
+    onSuccess: invalidate,
+  });
+}
+
 /** Adjust a need's content (a correction signal). */
 export function useAdjustNeed(fileId: string) {
   const invalidate = useNeedsInvalidation(fileId);

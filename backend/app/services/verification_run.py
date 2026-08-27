@@ -41,6 +41,7 @@ from app.models.finding import Finding, FindingCategory
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
+from app.services.needs_coverage import flag_covered_needs
 from app.services.needs_engine import (
     loan_file_needs_lock,
     rematch_needs_for_file,
@@ -826,6 +827,10 @@ async def run_verification(
                 # stopped a recovered need keeping its failure text, but neither pass creates or
                 # removes a row, so the pair already on LF-ABRS stayed exactly as it was.
                 await repair_needs_for_file(db, loan_file_id)
+                # LP-631 — after the repair, because it reads the list the four passes settled
+                # on. A verification is the deploy-run-read loop staging actually uses, so the
+                # coverage flag has to be reachable from it, not only from a document arrival.
+                await flag_covered_needs(db, loan_file_id=loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
         degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))

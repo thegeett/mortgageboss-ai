@@ -15530,3 +15530,45 @@ human to apply it. LP-629's worker sizing is unaffected; ECS and RDS scheduling 
 **Related:** LP-630, the `check "redis_auth_token_applied"` block in `modules/data/main.tf` that makes the
 gap visible, ADR-385, which solves the same problem by elimination -- the read-only role has no password anywhere, so
 there is nothing to apply out of band in the first place.
+
+## ADR-388
+
+**A need whose precondition has become false is flagged for a human, never closed by the system.**
+
+*Context.* LP-631 found that an AI-proposed need is immortal once written. LP-69 reasons at MISMO import,
+when the file has no documents by construction, so every proposal it makes is provisional; but the ingest
+path only ever creates a row or refreshes its reasoning, and the JSON contract has one key, `needs`, with no
+channel to withdraw anything. Staging carries 32 such open proposals. The obvious fix — let the re-run's
+output replace the list, or let a coverage check close what it disproves — is available and is wrong in both
+directions. Reading the model's *silence* as withdrawal cannot work at all: the prompt orders it to stay
+quiet about anything in `already_covered`, so "not mentioned" and "no longer needed" are the same output.
+And even an explicit, correct-looking retraction is a judgement about whether a document will be collected.
+LF-AWBB's lease need is genuinely answered by the credit report under B3-6-01; the four sibling needs on
+other files, matched by the same predicate, are answered by nothing, because those files have no credit
+report. The predicate distinguishes them — but a predicate that is right four times out of six is a good
+flag and a bad actuator.
+
+*Decision.* Every automated conclusion that a need no longer applies sets a flag carrying its evidence and
+its reasoning, and a processor disposes of it. This holds regardless of the conclusion's source: a
+deterministic guideline predicate (LP-632), the reasoner's own retraction (LP-633), or anything later. The
+flag is confined to needs no human has touched — origin `AI_REASONING`, disposition still `PROPOSED`, still
+open — reusing LP-625's `_refreshable` boundary verbatim. Where a need is removed, it is **waived, not
+deleted**: the row and its history survive. This last point is not ours; it is the practitioner convention in
+the LOS world, where deleting a condition destroys traceability and waiving preserves the audit trail.
+
+*Consequences.* The needs list will show flags a processor has to clear, and a coverage predicate that is
+merely usually right is therefore cheap to add — its worst case is a click, which is what makes the predicate
+registry in LP-631 a safe place to keep adding to. The cost is that a stale need is not *gone* until someone
+says so, so the list does not self-clean; LP-631 accepts that as the price of never dropping a required
+document. The symmetry with LP-69's guardrail 2 is deliberate and worth naming: the AI never self-confirms a
+need, and by the same argument it never self-closes one. Both directions are the processor's call, and the
+closing direction is not obviously safer merely because it removes work rather than creating it.
+
+*Applies to.* Any automated write that would retire, suppress, or satisfy a needs-list row. It does not apply
+to satisfaction matching, which is not a judgement about whether a need applies but an observation that a
+document of the right type arrived -- and which LP-108 already made honest in the same spirit, stopping a
+graded need at RECEIVED rather than claiming a coverage it cannot verify.
+
+**Related:** LP-631, LP-632, LP-633, ADR-069 (a need survives its document), LP-108 (honest satisfaction;
+never over-claim), LP-111 (flag the duplicate, let the processor merge), LP-625 (`_refreshable` — an untouched
+proposal is the model's, a touched one is the processor's).

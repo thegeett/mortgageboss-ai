@@ -5,11 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The dashboard fetches via hooks; mock the two data layers it depends on so the
 // test drives the data and asserts the rendered checklist + the disposition wiring.
-const { confirmMutate, coverageMutate, mergeMutate, keepBothMutate } = vi.hoisted(() => ({
+const {
+  confirmMutate,
+  coverageMutate,
+  mergeMutate,
+  keepBothMutate,
+  dismissMutate,
+  notCoveredMutate,
+} = vi.hoisted(() => ({
   confirmMutate: vi.fn(),
   coverageMutate: vi.fn(),
   mergeMutate: vi.fn(),
   keepBothMutate: vi.fn(),
+  dismissMutate: vi.fn(),
+  notCoveredMutate: vi.fn(),
 }));
 
 const useNeeds = vi.fn();
@@ -21,11 +30,12 @@ vi.mock("@/lib/api/needs", () => ({
   useConfirmNeed: () => ({ mutate: confirmMutate, isPending: false }),
   useConfirmCoverage: () => ({ mutate: coverageMutate, isPending: false }),
   useAdjustNeed: () => ({ mutate: vi.fn(), isPending: false }),
-  useDismissNeed: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissNeed: () => ({ mutate: dismissMutate, isPending: false }),
   useWaiveNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useAddNeed: () => ({ mutate: vi.fn(), isPending: false }),
   useMergeDuplicate: () => ({ mutate: mergeMutate, isPending: false }),
   useNotDuplicate: () => ({ mutate: keepBothMutate, isPending: false }),
+  useNotCovered: () => ({ mutate: notCoveredMutate, isPending: false }),
 }));
 
 vi.mock("@/lib/api/documents", () => ({
@@ -59,6 +69,8 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     matching_documents: [],
     source: null,
     possible_duplicate_of: null,
+    possibly_covered_by: null,
+    coverage_note: null,
     created_at: "2026-06-19T12:00:00Z",
     ...overrides,
   };
@@ -286,6 +298,38 @@ describe("NeedsDashboard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /keep both/i }));
     expect(keepBothMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  // LP-631 — a coverage predicate concluded the file already answers the need. It FLAGS (ADR-388):
+  // the note carries the WHY, and the processor either dismisses the need or keeps it.
+  it("shows a coverage flag with its reasoning and dismiss / keep actions", () => {
+    setDocuments(false);
+    setNeeds({
+      data: [
+        need({
+          possibly_covered_by: { id: "d9", filename: "credit-report.pdf" },
+          coverage_note:
+            "The credit report lists ALLY FINANCIAL at $438/mo, matching the stated leasepayment liability on the application.",
+        }),
+      ],
+    });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.getByText(/may already answer this/i)).toBeDefined();
+    expect(screen.getByText(/ALLY FINANCIAL at \$438\/mo/)).toBeDefined();
+    expect(screen.getByText("credit-report.pdf")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss need/i }));
+    expect(dismissMutate).toHaveBeenCalledWith({ needId: "n1" }, expect.anything());
+
+    fireEvent.click(screen.getByRole("button", { name: /keep it/i }));
+    expect(notCoveredMutate).toHaveBeenCalledWith("n1", expect.anything());
+  });
+
+  it("shows no coverage flag when nothing flagged the need", () => {
+    setDocuments(false);
+    setNeeds({ data: [need()] });
+    render(<NeedsDashboard fileId="f1" />);
+    expect(screen.queryByText(/may already answer this/i)).toBeNull();
   });
 
   it("shows no duplicate flag when the need isn't flagged", () => {

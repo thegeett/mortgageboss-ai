@@ -71,6 +71,7 @@ from app.models.stated_financials import (
     StatedLiability,
 )
 from app.services.implications import suggest_needs_for_loan_file
+from app.services.needs_coverage import apply_retraction
 from app.services.needs_engine import canonical_need_type, category_for_need_type
 from app.services.needs_items import create_needs_item
 
@@ -114,6 +115,42 @@ class ProposedNeed(BaseModel):
     need_type: str | None = None
     reasoning: str
     triggered_by: list[TriggeredByFact] = Field(default_factory=list)
+
+
+class RetractedNeed(BaseModel):
+    """LP-633 — a need the model now judges the file no longer needs.
+
+    Keyed on the need's ``id``, not its type. The ticket first specified type, on the reasoning that
+    ids are opaque to the model — but LP-110 already hands it finding ids and it refs them correctly,
+    and keying on type would have excluded exactly the population this exists for: the six untyped
+    needs on staging, the largest single bucket, and the only ones no document can EVER clear.
+
+    ``document_id`` is optional. A retraction may rest on a document ("the credit report lists it") or
+    on an argument ("the employment record states self_employed: false"); ``why`` is what makes it
+    checkable either way, so that one is required.
+    """
+
+    need_id: str
+    why: str
+    document_id: str | None = None
+
+
+class ReasonedNeeds(BaseModel):
+    """One reasoning pass: what the model proposes, and what it withdraws (LP-633).
+
+    Two keys because silence cannot carry the second one. The prompt ORDERS the model to stay quiet
+    about anything in ``already_covered``, so an omitted need means "I was told not to restate it" —
+    indistinguishable from "it is no longer needed". Reading omission as withdrawal would delete every
+    correct need on every re-run.
+    """
+
+    proposals: list[ProposedNeed] = Field(default_factory=list)
+    retractions: list[RetractedNeed] = Field(default_factory=list)
+    # What the model proposed BEFORE reconciliation. Needed because `reconcile` drops a proposal whose
+    # type is already covered — which is precisely the shape of a self-contradiction ("propose
+    # tax_return" beside "retract the tax_return need"), so by the time `proposals` is built the signal
+    # that the model still wants the ask has already been discarded.
+    raw_proposals: list[ProposedNeed] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -238,7 +275,10 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
         assets=[{"asset_type": a.asset_type} for a in assets],
         liabilities=[{"liability_type": liability.liability_type} for liability in liabilities],
         documents_present=[
-            {"document_type": d.document_type, "status": d.status.value} for d in documents
+            # LP-633: the id, so a retraction can CITE the document that answers the need and the
+            # processor sees "checked against credit-report.pdf" rather than an unsourced assertion.
+            {"id": str(d.id), "document_type": d.document_type, "status": d.status.value}
+            for d in documents
         ],
         findings=[
             # LP-110: carry the finding id so the AI can REF a finding it cites as a need's source
@@ -251,7 +291,21 @@ async def assemble_file_context(db: AsyncSession, loan_file: LoanFile) -> FileCo
         ],
         already_covered=sorted(c for c in covered if c),
         # LP-111: the needs already on the list, so the model doesn't reword them into duplicates.
-        existing_needs=[{"needs_type": n.needs_type, "title": n.title} for n in needs],
+        # LP-633 widens this from {needs_type, title}: a model cannot sensibly judge whether to
+        # WITHDRAW a claim it cannot read, so it also gets the id (what a retraction names), the
+        # reasoning (the argument it would be overturning), and origin/disposition (whose row it is —
+        # a processor-confirmed need is not the model's to revisit, and it should not try).
+        existing_needs=[
+            {
+                "id": str(n.id),
+                "needs_type": n.needs_type,
+                "title": n.title,
+                "reasoning": (n.reasoning or "")[:400],
+                "origin": n.origin.value,
+                "disposition": n.disposition.value,
+            }
+            for n in needs
+        ],
     )
 
 
@@ -296,6 +350,51 @@ def _parse_proposals(text: str) -> list[ProposedNeed]:
             )
         )
     return proposals
+
+
+def _parse_retractions(text: str) -> list[RetractedNeed]:
+    """Parse the model's ``{"retract": [...]}`` into withdrawals. Never raises ([] on junk).
+
+    Absence of the key is the overwhelmingly common case and means nothing was withdrawn — which is
+    also what a model that ignores the instruction produces, so the failure mode of this whole
+    feature is "behaves exactly as it did before LP-633".
+
+    A retraction without a ``why`` is dropped, the mirror of guardrail 1 on the proposal side: an
+    unexplained withdrawal cannot be checked, and this flag exists to be checked.
+    """
+    snippet = extract_json_object(text)
+    if snippet is None:
+        return []
+    try:
+        payload: Any = json.loads(snippet)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    rows = payload.get("retract") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    retractions: list[RetractedNeed] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        need_id = row.get("need_id")
+        why = row.get("why")
+        if not isinstance(need_id, str) or not need_id.strip():
+            continue
+        if not isinstance(why, str) or not why.strip():
+            continue
+        document_id = row.get("document_id")
+        retractions.append(
+            RetractedNeed(
+                need_id=need_id.strip(),
+                why=why.strip(),
+                document_id=(
+                    document_id.strip()
+                    if isinstance(document_id, str) and document_id.strip()
+                    else None
+                ),
+            )
+        )
+    return retractions
 
 
 def _parse_triggered_by(raw: Any) -> list[TriggeredByFact]:
@@ -352,12 +451,13 @@ def reconcile(proposals: list[ProposedNeed], *, already_covered: set[str]) -> li
     return out
 
 
-async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedNeed]:
-    """Reason over the whole file → proposed needs with reasoning. Never raises ([] on failure).
+async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> ReasonedNeeds:
+    """Reason over the whole file → what it still needs, and what it no longer does. Never raises.
 
-    Assembles the context, calls the Opus reasoner, parses defensively, and
-    reconciles against what's already covered. The assembled context (PII) and the
-    raw response are never logged — only counts.
+    Assembles the context, calls the reasoner, parses defensively, and reconciles the PROPOSALS
+    against what's already covered. Retractions (LP-633) are not reconciled — ``already_covered``
+    exists to stop the model re-proposing, and a withdrawal is the opposite move. The assembled
+    context (PII) and the raw response are never logged — only counts.
     """
     context = await assemble_file_context(db, loan_file)
     system_prompt = load_prompt(_PROMPT_PATH)
@@ -379,17 +479,19 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> list[ProposedN
         logger.warning("needs_reasoning_ai_failed", loan_file_id=str(loan_file.id))
         loan_file.ai_needs_status = AiNeedsStatus.FAILED
         await db.flush()
-        return []
+        return ReasonedNeeds()
 
     proposals = _parse_proposals(result.text)
     reconciled = reconcile(proposals, already_covered=set(context.already_covered))
+    retractions = _parse_retractions(result.text)
     logger.info(
         "needs_reasoning_done",
         loan_file_id=str(loan_file.id),
         proposed=len(proposals),
         after_reconcile=len(reconciled),  # counts only — never the reasoning text (PII-adjacent)
+        retracted=len(retractions),
     )
-    return reconciled
+    return ReasonedNeeds(proposals=reconciled, retractions=retractions, raw_proposals=proposals)
 
 
 # --------------------------------------------------------------------------- #
@@ -406,12 +508,15 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
     the file (so re-reasoning on document arrivals doesn't pile up duplicates). Runs
     inside LP-68's per-file lock (the caller in :mod:`app.tasks.needs` holds it).
     """
-    proposals = await propose_needs(db, loan_file)
+    reasoned = await propose_needs(db, loan_file)
+    proposals = reasoned.proposals
     existing = (
         await db.scalars(
             only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id), NeedsItem)
         )
     ).all()
+    # The RAW proposals, not the reconciled ones — see `ReasonedNeeds.raw_proposals`.
+    await _apply_retractions(db, loan_file, reasoned.retractions, existing, reasoned.raw_proposals)
     existing_types = {n.needs_type for n in existing if n.needs_type}
     existing_descs = {n.title.strip().lower() for n in existing}
 
@@ -489,6 +594,72 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
     if created:
         logger.info("ai_needs_ingested", loan_file_id=str(loan_file.id), count=len(created))
     return created
+
+
+async def _apply_retractions(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    retractions: Sequence[RetractedNeed],
+    existing: Sequence[NeedsItem],
+    proposals: Sequence[ProposedNeed],
+) -> int:
+    """LP-633 — land the model's withdrawals as LP-631 coverage flags. Returns how many stuck.
+
+    A need the same response ALSO proposes is not retracted. The model can contradict itself in one
+    answer — argue for the ask under ``needs`` and against it under ``retract`` — and the flag would
+    then sit on a row the same run just argued for, telling the processor two opposite things at once.
+    It resolves toward KEEPING the ask, the direction that cannot lose a document. Matched on type and
+    on description, because an untyped need collides only by wording — and against the model's RAW
+    proposals, because `reconcile` has already dropped any whose type the file covers, which is every
+    re-proposal of a need that exists.
+
+    A retraction naming an id that is not on this file, or a need a processor has touched, is dropped
+    silently — the model is answering about a list it was given, and neither case is worth failing a
+    needs update over. ``apply_retraction`` re-checks eligibility itself; this only resolves the ids.
+    """
+    if not retractions:
+        return 0
+    re_proposed_types = {p.need_type for p in proposals if p.need_type}
+    re_proposed_descs = {p.need_description.strip().lower() for p in proposals}
+    by_id = {str(need.id): need for need in existing}
+    documents_on_file = {
+        str(document_id)
+        for document_id in (
+            await db.scalars(
+                only_active(
+                    select(Document.id).where(Document.loan_file_id == loan_file.id), Document
+                )
+            )
+        ).all()
+    }
+    applied = 0
+    for retraction in retractions:
+        need = by_id.get(retraction.need_id)
+        if need is None:
+            continue
+        if need.needs_type in re_proposed_types or need.title.strip().lower() in re_proposed_descs:
+            logger.info(
+                "ai_need_retraction_contradicted",
+                loan_file_id=str(loan_file.id),
+                needs_type=need.needs_type,  # a document type, not PII
+            )
+            continue
+        # Only a document actually on this file may be cited. The model is quoting an id back at us
+        # and a wrong one would point the processor's "checked against" line at another file's
+        # document — so an unrecognised id drops to None and the note stands on its own.
+        document_id = (
+            UUID(retraction.document_id)
+            if retraction.document_id in documents_on_file and retraction.document_id
+            else None
+        )
+        if await apply_retraction(db, need=need, why=retraction.why, document_id=document_id):
+            applied += 1
+            logger.info(
+                "ai_need_retracted",
+                loan_file_id=str(loan_file.id),
+                needs_type=need.needs_type,  # a document type, not PII
+            )
+    return applied
 
 
 def _unmatchable_note(reasoning: str, *, matchable: bool = False) -> str:

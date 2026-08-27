@@ -277,7 +277,7 @@ async def test_the_refresh_keeps_the_unmatchable_note_it_would_otherwise_strip(
     the state LP-625 set out to fix.
     """
     from app.services import needs_ai
-    from app.services.needs_ai import ProposedNeed, apply_ai_needs
+    from app.services.needs_ai import ProposedNeed, ReasonedNeeds, apply_ai_needs
 
     _company, loan_file = await _file(db_session)
     proposal = ProposedNeed(
@@ -287,7 +287,7 @@ async def test_the_refresh_keeps_the_unmatchable_note_it_would_otherwise_strip(
     )
 
     async def _propose(_db, _loan_file):
-        return [proposal]
+        return ReasonedNeeds(proposals=[proposal])
 
     monkeypatch.setattr(needs_ai, "propose_needs", _propose)
 

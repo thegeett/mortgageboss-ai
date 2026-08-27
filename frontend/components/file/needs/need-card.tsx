@@ -1,4 +1,8 @@
-import { NeedActions, NeedDuplicateFlag } from "@/components/file/needs/need-actions";
+import {
+  NeedActions,
+  NeedCoverageFlag,
+  NeedDuplicateFlag,
+} from "@/components/file/needs/need-actions";
 import {
   PRIORITY_META,
   SOURCE_ATTRIBUTION_META,
@@ -145,6 +149,13 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
       {/* The possible-duplicate flag (LP-111) — the AI SURFACES a likely duplicate; the processor
           disposes (merge / keep both). Never a silent merge. */}
       {need.possible_duplicate_of && <NeedDuplicateFlag fileId={fileId} need={need} />}
+
+      {/* The coverage flag (LP-631) — a predicate concluded the file ALREADY ANSWERS this need.
+          Sits after the source, because it is an argument AGAINST the source above it. Flag, never
+          a close (ADR-388): the processor dismisses the need or keeps it. Gated on the NOTE, not the
+          document: LP-633's retraction may rest on an argument rather than a document, and a flag
+          with no note would be a row saying "possibly covered" with nothing to check. */}
+      {need.coverage_note && <NeedCoverageFlag fileId={fileId} need={need} />}
 
       {/* HONEST SATISFACTION (LP-108): a graded need with documents attached (received) says so —
           the system verified a document is PRESENT, not that the full requirement (all accounts /

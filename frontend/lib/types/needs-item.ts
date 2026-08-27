@@ -72,6 +72,11 @@ export interface NeedsItemPublic {
    * the processor confirms the merge or keeps both. Never a silent merge (the deterministic-certain
    * duplicates were already merged before this). */
   possible_duplicate_of: string | null;
+  /** LP-631: set when a coverage predicate concluded the FILE ALREADY ANSWERS this need — the
+   * document that appears to answer it, plus the reasoning to check it against. A flag, never a
+   * close (ADR-388): the processor dismisses the need or keeps it. */
+  possibly_covered_by: MatchedDocument | null;
+  coverage_note: string | null;
 }
 
 /** One document matching a need (LP-109) — id (for a link) + display filename. */
