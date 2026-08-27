@@ -17,12 +17,14 @@ from decimal import Decimal
 
 from app.models.document import DocumentStatus
 from app.models.needs_item import (
+    NeedsItem,
     NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemStatus,
 )
 from app.models.stated_financials import StatedLiability
 from app.services.needs_coverage import flag_covered_needs, keep_need_despite_coverage
+from sqlalchemy import select
 from tests.integration import factories
 
 
@@ -354,3 +356,166 @@ async def test_the_pass_can_be_turned_off(db_session, monkeypatch) -> None:
     monkeypatch.setattr(settings, "needs_coverage_flagging_enabled", False)
 
     assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Review regressions — each of these shipped broken and is pinned here
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_short_creditor_name_still_matches_exactly(db_session) -> None:
+    """The length floor guarded the EQUALITY branch too, so identical short names never matched.
+    ALLY, AMEX, CHASE and USAA all normalise below six characters — and because one non-match breaks
+    the all-must-match loop, a single short-named liability suppressed the flag for the whole need."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(db_session, loan_file, liability_type="Revolving", holder="AMEX", payment="50")
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "AMEX", "monthly_payment": 50}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+
+
+async def test_a_short_name_still_needs_more_than_a_shared_first_letter(db_session) -> None:
+    """The floor still does its job on the PREFIX branch: short names match only when equal."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(db_session, loan_file, liability_type="Revolving", holder="AMEX", payment="50")
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "AMER", "monthly_payment": 50}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+
+
+async def test_one_tradeline_cannot_answer_two_liabilities(db_session) -> None:
+    """THE FALSE-GREEN. Two stated CAPITAL ONE cards at $25/mo against the single $25 row the report
+    carries: re-scanning the full list matched both against the one row, the loop completed, and the
+    second card was documented by nothing while the need read fully covered."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="CAPITAL ONE", payment="25"
+    )
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="CAPITAL ONE", payment="25"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "CAPITAL ONE", "monthly_payment": 25}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+
+
+async def test_two_tradelines_do_answer_two_liabilities(db_session) -> None:
+    """The other half — consuming a row must not make a genuinely covered pair look uncovered."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="CAPITAL ONE", payment="25"
+    )
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="CAPITAL ONE", payment="25"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[
+            {"creditor_name": "CAPITAL ONE", "monthly_payment": 25},
+            {"creditor_name": "CAPITAL ONE", "monthly_payment": 25},
+        ],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+
+
+async def test_the_catalogued_installment_type_is_reached(db_session) -> None:
+    """`installment_loan_statement` is the CATALOG type, so it is what `canonical_need_type` stores —
+    and the map named only the uncatalogued `installment_statement`, reaching just the rows whose type
+    failed canonicalisation and was stored raw."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="installment_loan_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Installment", holder="ALLY FINANCIAL", payment="300"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "ALLY FINANCIAL", "monthly_payment": 300}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+
+
+async def test_a_value_wrapped_tradeline_row_is_read_not_crashed(db_session) -> None:
+    """Rows ship bare, but the snapshot's own reader unwraps `{"value": ...}` defensively because a
+    hand-written extractor could store either. Here a wrapped row handed `_normalize_creditor` a dict,
+    raised AttributeError, and was swallowed into a silently disabled predicate for that file."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="lease_agreement")
+    await _liability(
+        db_session, loan_file, liability_type="LeasePayment", holder="ALLY FINANCIAL", payment="438"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[
+            {
+                "creditor_name": {"value": "ALLY FINANCIAL"},
+                "monthly_payment": {"value": "438.00"},
+            }
+        ],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+
+
+async def test_a_failing_predicate_leaves_the_session_usable(db_session, monkeypatch) -> None:
+    """A bare `except` around a DB read is best-effort only for NON-DB errors. A SQLAlchemy error
+    poisons the session, so the warning was logged and then the CALLER's commit raised
+    PendingRollbackError — discarding the LP-68 match and the LP-69 needs written before it. An
+    optimisation would have destroyed the work it runs after."""
+    from app.services import needs_coverage
+    from sqlalchemy import text
+
+    _company, loan_file = await _flaggable_file(db_session)
+    need = await _need(db_session, loan_file)
+
+    async def _explode(db, _loan_file_id, _needs):
+        await db.execute(text("SELECT * FROM a_table_that_does_not_exist"))
+        return []
+
+    monkeypatch.setattr(needs_coverage, "_PREDICATES", (_explode,))
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+    # The session survives: the caller can still read and write, which is the whole point.
+    assert await db_session.scalar(select(NeedsItem.id).where(NeedsItem.id == need.id)) == need.id
+
+
+async def test_the_kill_switch_covers_the_retraction_path(db_session, monkeypatch) -> None:
+    """One switch that turns off only half the flags is a switch that does not do what it says: the
+    deterministic source goes quiet while the model keeps writing the same columns on every run."""
+    from app.core.config import settings
+    from app.services.needs_coverage import apply_retraction
+
+    _company, loan_file = await _flaggable_file(db_session)
+    need = await _need(db_session, loan_file)
+    monkeypatch.setattr(settings, "needs_coverage_flagging_enabled", False)
+
+    assert (
+        await apply_retraction(db_session, need=need, why="Covered by the credit report.") is False
+    )
+    assert need.coverage_note is None

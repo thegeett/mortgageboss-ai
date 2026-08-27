@@ -72,7 +72,11 @@ from app.models.stated_financials import (
 )
 from app.services.implications import suggest_needs_for_loan_file
 from app.services.needs_coverage import apply_retraction
-from app.services.needs_engine import canonical_need_type, category_for_need_type
+from app.services.needs_engine import (
+    canonical_need_type,
+    category_for_need_type,
+    equivalent_need_type,
+)
 from app.services.needs_items import create_needs_item
 
 logger = structlog.get_logger(__name__)
@@ -596,6 +600,20 @@ async def apply_ai_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsIte
     return created
 
 
+def _comparable_need_type(needs_type: str | None) -> str | None:
+    """One name for a need type, so a STORED type and a model's RAW string compare as equal.
+
+    `canonical_need_type` resolves an alias to the name the documents use (`voe`), and
+    `equivalent_need_type` folds the pairs that are the same need under two names
+    (`drivers_license` / `government_id`). An uncatalogued type falls back to itself, which is what
+    `apply_ai_needs` stores for it.
+    """
+    if not needs_type:
+        return None
+    canonical = canonical_need_type(needs_type) or needs_type.strip().lower()
+    return equivalent_need_type(canonical) or canonical
+
+
 async def _apply_retractions(
     db: AsyncSession,
     loan_file: LoanFile,
@@ -613,13 +631,23 @@ async def _apply_retractions(
     proposals, because `reconcile` has already dropped any whose type the file covers, which is every
     re-proposal of a need that exists.
 
+    Both sides are normalised through `canonical_need_type` then `equivalent_need_type` before they
+    are compared. The STORED type is already canonical (`apply_ai_needs` writes
+    `canonical_need_type(p.need_type) or p.need_type`), so comparing it against the model's raw string
+    missed every aliased pair: a response proposing `verification_of_employment` and retracting the
+    need it created — stored as `voe` — read as no contradiction at all, and the flag landed on the
+    row that same response argued for. `existing_mortgage_statement` -> `mortgage_statement` and
+    `drivers_license` -> `government_id` fail the same way.
+
     A retraction naming an id that is not on this file, or a need a processor has touched, is dropped
     silently — the model is answering about a list it was given, and neither case is worth failing a
     needs update over. ``apply_retraction`` re-checks eligibility itself; this only resolves the ids.
     """
     if not retractions:
         return 0
-    re_proposed_types = {p.need_type for p in proposals if p.need_type}
+    re_proposed_types = {
+        key for p in proposals if (key := _comparable_need_type(p.need_type)) is not None
+    }
     re_proposed_descs = {p.need_description.strip().lower() for p in proposals}
     by_id = {str(need.id): need for need in existing}
     documents_on_file = {
@@ -637,7 +665,10 @@ async def _apply_retractions(
         need = by_id.get(retraction.need_id)
         if need is None:
             continue
-        if need.needs_type in re_proposed_types or need.title.strip().lower() in re_proposed_descs:
+        if (
+            _comparable_need_type(need.needs_type) in re_proposed_types
+            or need.title.strip().lower() in re_proposed_descs
+        ):
             logger.info(
                 "ai_need_retraction_contradicted",
                 loan_file_id=str(loan_file.id),

@@ -76,10 +76,20 @@ CoveragePredicate = Callable[
 #: Need type -> the MISMO ``LiabilityType`` it exists to document. A need outside this map is not
 #: something a credit report can answer, whatever it cites.
 _LIABILITY_DOC_NEEDS: dict[str, str] = {
-    "lease_agreement": "leasepayment",
+    "lease_agreement": "leasepayment",  # a real CATALOG type
+    "installment_loan_statement": "installment",  # the CATALOG type `canonical_need_type` stores
+    # Neither of these is in `CATALOG`, so `canonical_need_type` returns None and
+    # `apply_ai_needs` stores the model's raw string — which is why staging carries needs typed
+    # exactly this way. They are kept because those are the rows that exist, not because the names
+    # are good; if a catalogued credit-card-statement type ever lands, add it beside them.
     "installment_statement": "installment",
     "credit_card_statement": "revolving",
 }
+
+#: DELIBERATELY ABSENT: `student_loan_statement`, though a student loan is an Installment liability.
+#: The statement is chased for the IBR/deferment payment terms, which a credit report routinely
+#: misreports — so "it is on the credit report" does not answer that ask the way it answers a car
+#: lease's. Adding it would suppress a need the report cannot actually satisfy.
 
 #: A creditor name shorter than this carries too little signal to match on a prefix, which keeps the
 #: rule from collapsing to "starts with the same letter".
@@ -94,13 +104,38 @@ _LIABILITY_DOC_NEEDS: dict[str, str] = {
 _MIN_NAME_CHARS = 6
 
 
-def _normalize_creditor(name: str | None) -> str:
+def _unwrap(raw: Any) -> Any:
+    """A list-row value, whether it was stored bare or ``{"value": ...}``-wrapped.
+
+    Tradeline rows are BARE scalars (LP-443 capture), and that is what ships. The snapshot's own
+    reader (``verification/snapshot/documents_section.py::_list_field``) unwraps defensively anyway
+    because "a hand-written extractor could store either", and it is right to: a wrapped row here
+    would hand ``_normalize_creditor`` a dict, raise ``AttributeError``, and be swallowed into a
+    silently disabled predicate for that file.
+    """
+    if isinstance(raw, dict):
+        return raw.get("value")
+    return raw
+
+
+def _normalize_creditor(name: Any) -> str:
     """Upper-case, alphanumerics only. ``SYNCB/ROOMS TO GO`` -> ``SYNCBROOMSTOGO``."""
-    return re.sub(r"[^A-Z0-9]", "", (name or "").upper())
+    return re.sub(r"[^A-Z0-9]", "", name.upper()) if isinstance(name, str) else ""
 
 
 def _names_match(stated: str, reported: str) -> bool:
-    """Prefix match in either direction, because either side may be the truncated one."""
+    """Equal, or a prefix match in either direction because either side may be truncated.
+
+    The length floor guards the PREFIX branch only. Applying it to equality too rejected identical
+    short names — ``ALLY``, ``AMEX``, ``CHASE``, ``USAA`` all normalise below six characters, and an
+    exact creditor match with an exact payment match is the strongest evidence this predicate can
+    have. Worse, one short-named liability broke the all-must-match loop and suppressed the flag for
+    the whole need.
+    """
+    if not stated or not reported:
+        return False
+    if stated == reported:
+        return True
     if len(stated) < _MIN_NAME_CHARS or len(reported) < _MIN_NAME_CHARS:
         return False
     return stated.startswith(reported) or reported.startswith(stated)
@@ -164,8 +199,8 @@ def _reported_obligations(payload: dict[str, Any]) -> list[tuple[str, int]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        name = _normalize_creditor(row.get("creditor_name"))
-        payment = _dollars(row.get("monthly_payment"))
+        name = _normalize_creditor(_unwrap(row.get("creditor_name")))
+        payment = _dollars(_unwrap(row.get("monthly_payment")))
         if name and payment is not None:
             obligations.append((name, payment))
     return obligations
@@ -230,6 +265,12 @@ async def liability_documented_by_credit_report(
         liabilities = by_type.get(liability_type, [])
         if not liabilities:
             continue
+        # A WORKING COPY, because each tradeline may answer only ONE stated liability. Re-scanning
+        # the full list let two stated CAPITAL ONE cards at $25/mo both match the single $25 row the
+        # report actually carries — the loop completed, the need read fully covered, and the second
+        # card was documented by nothing. That is precisely the false-green "every liability of the
+        # type must match, not any" exists to prevent, arriving through the back door.
+        unclaimed = list(reported)
         matched: list[str] = []
         for liability in liabilities:
             stated_name = _normalize_creditor(liability.holder_name)
@@ -238,15 +279,16 @@ async def liability_documented_by_credit_report(
                 break  # nothing to match on — treat the need as unanswered
             hit = next(
                 (
-                    payment
-                    for name, payment in reported
+                    index
+                    for index, (name, payment) in enumerate(unclaimed)
                     if payment == stated_payment and _names_match(stated_name, name)
                 ),
                 None,
             )
             if hit is None:
                 break
-            matched.append(_describe(liability, hit))
+            _name, payment = unclaimed.pop(hit)
+            matched.append(_describe(liability, payment))
         else:
             findings.append(
                 CoverageFinding(
@@ -301,10 +343,21 @@ def is_flaggable(need: NeedsItem) -> bool:
 async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
     """Run every coverage predicate over the file and FLAG what they answer. Returns rows flagged.
 
-    Best-effort and idempotent: a flagged need is no longer eligible, so a second run over an
-    unchanged file flags nothing. Never raises — a predicate that fails flags nothing rather than
-    failing the needs update it runs inside. Gated by ``settings.needs_coverage_flagging_enabled``.
-    Uses ``flush``; the caller owns the transaction and the per-file lock.
+    Idempotent: a flagged need is no longer eligible, so a second run over an unchanged file flags
+    nothing. Gated by ``settings.needs_coverage_flagging_enabled``. Uses ``flush``; the caller owns
+    the transaction and the per-file lock.
+
+    **A FAILING PREDICATE IS CONTAINED IN A SAVEPOINT.** A predicate reads the database, and a bare
+    ``except`` around a DB read is only "best-effort" for non-DB errors: a SQLAlchemy error poisons
+    the session, so the warning is logged and then the CALLER's ``commit`` two lines later raises
+    ``PendingRollbackError`` — taking the LP-68 document match and the LP-69 needs written earlier in
+    the same session with it. An optimisation would have destroyed the work it runs after.
+    ``verification_run`` documents this exact failure twice and contains it with ``begin_nested()``;
+    so does this.
+
+    The initial load is NOT defended, deliberately. If selecting the file's needs fails, the session
+    is already unusable and there is nothing left to protect — the caller's commit is the right place
+    for that to surface, rather than here disguised as "flagged nothing".
     """
     if not settings.needs_coverage_flagging_enabled:
         return 0
@@ -321,7 +374,8 @@ async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
     flagged = 0
     for predicate in _PREDICATES:
         try:
-            findings = await predicate(db, loan_file_id, eligible)
+            async with db.begin_nested():
+                findings = await predicate(db, loan_file_id, eligible)
         except Exception:  # a predicate is an optimisation; it never breaks the needs update
             logger.warning(
                 "needs_coverage_predicate_failed",
@@ -361,7 +415,14 @@ async def apply_retraction(
     ``document_id`` is optional and often absent: a predicate always has a document to point at, but
     a retraction may rest on an argument ("the file's income is documented three other ways"). The
     note is what makes the flag checkable, so it is required.
+
+    Gated by the SAME ``needs_coverage_flagging_enabled`` as the predicate pass. The switch exists to
+    stop coverage flags reaching processors; a retraction writes the identical columns and renders as
+    the identical card, so leaving it ungated would have turned the switch off halfway — flags gone
+    from the deterministic source, still arriving from the model on every AI needs run.
     """
+    if not settings.needs_coverage_flagging_enabled:
+        return False
     if not is_flaggable(need) or not why.strip():
         return False
     need.coverage_note = why.strip()

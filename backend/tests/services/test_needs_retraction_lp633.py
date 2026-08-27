@@ -402,3 +402,32 @@ async def test_an_untyped_need_re_proposed_by_wording_is_not_retracted(
     await apply_ai_needs(db_session, loan_file)
     await db_session.refresh(need)
     assert need.coverage_note is None
+
+
+async def test_an_aliased_re_proposal_still_blocks_its_retraction(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REVIEW REGRESSION. The STORED type is canonical — `apply_ai_needs` writes
+    `canonical_need_type(p.need_type) or p.need_type` — so comparing it against the model's RAW string
+    missed every aliased pair. A response proposing `verification_of_employment` while retracting the
+    need it created (stored as `voe`) read as no contradiction, and the flag landed on the row that
+    same response argued for."""
+    _company, loan_file = await _file(db_session)
+    need = await _ai_need(db_session, loan_file, needs_type="voe")
+    _mock_ai(
+        monkeypatch,
+        {
+            "needs": [
+                {
+                    "need_description": "A verification of employment",
+                    "need_type": "verification_of_employment",  # aliases to the stored `voe`
+                    "reasoning": "The borrower's current employment needs verifying.",
+                }
+            ],
+            "retract": [{"need_id": str(need.id), "why": "Actually covered."}],
+        },
+    )
+
+    await apply_ai_needs(db_session, loan_file)
+    await db_session.refresh(need)
+    assert need.coverage_note is None, "the ask wins; no contradictory flag is left behind"
