@@ -408,3 +408,45 @@ async def test_refiling_does_not_disturb_a_humans_resolution(db_session: AsyncSe
     [carried] = result.carried_forward
     assert carried.category is FindingCategory.INCOME
     assert carried.resolution_status is FindingResolutionStatus.ACCEPTED_RISK
+
+
+async def test_a_retired_finding_stops_reading_as_a_concern(db_session: AsyncSession) -> None:
+    """bug-004 — retiring set the outcome, the status and the run id and left ``message`` alone, so a
+    green row went on reading as the concern it no longer is.
+
+    On LF-AWBB twenty CR-1 findings retired correctly and still said "the credit report reports this
+    debt but the application does not state it — an undisclosed liability that changes the
+    debt-to-income picture". A processor scanning the list saw twenty undisclosed liabilities on a file
+    that has none. Same defect LP-625 fixed for ``reason``: a sentence that no longer describes the
+    state is residue, and residue reading as an open problem is worse than none.
+
+    The prior wording is not lost — it moves to the event detail, where a finding's history lives.
+    """
+    from app.services.rule_findings import _RETIRED_MESSAGE
+
+    lf = await _loan_file_id(db_session)
+    [f1] = (await _reconcile(db_session, lf, [_as1("dep1", Verdict.FIRED, has_source="no")])).minted
+    original = f1.message
+    assert original
+
+    result = await reconcile_evaluation_findings(
+        db_session,
+        loan_file_id=lf,
+        verification_id=None,
+        run_id=uuid4(),
+        results=[],
+        evaluated_rule_ids=_RULES,
+        category_by_rule=_CATS,
+        retire_eligible_rule_ids=_RULES,
+    )
+
+    [retired] = result.retired
+    assert retired.evaluation_outcome is EvaluationOutcome.NO_LONGER_APPLIES
+    assert retired.message == _RETIRED_MESSAGE
+    assert retired.message != original
+
+    events = (
+        await db_session.scalars(select(FindingEvent).where(FindingEvent.finding_id == retired.id))
+    ).all()
+    superseded = [e.detail.get("superseded_message") for e in events if e.detail]
+    assert original in superseded, "the prior wording must survive in the event history"

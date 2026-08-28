@@ -580,3 +580,77 @@ async def test_the_plural_note_is_grammatical(db_session) -> None:
         "matching all 2 stated revolving liabilities on the application. Fannie Mae B3-6-01 asks "
         "for separate documentation only for a liability that is NOT shown on a credit report."
     )
+
+
+# --------------------------------------------------------------------------- #
+# bug-004 — a corrected note must reach the rows that already carry the old one
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_corrected_note_heals_an_existing_flag(db_session, monkeypatch) -> None:
+    """LP-625's lesson arriving here. `is_flaggable` requires `coverage_note is None`, so a flagged
+    need was never looked at again and its first wording froze: LF-AWBB's flags still read "the stated
+    leasepayment liability" and "every stated revolving liabilities" long after both were corrected.
+    Preventing a defect does not undo it."""
+    from app.services import needs_coverage
+
+    _company, loan_file = await _flaggable_file(db_session)
+    need = await _need(db_session, loan_file)
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+    await db_session.refresh(need)
+    stale = need.coverage_note
+    assert stale is not None
+
+    async def _reworded(_db, _loan_file_id, needs):
+        return [
+            needs_coverage.CoverageFinding(
+                need_id=n.id, document_id=need.covered_by_document_id, note="Reworded, and better."
+            )
+            for n in needs
+            if n.id == need.id
+        ]
+
+    monkeypatch.setattr(needs_coverage, "_PREDICATES", (_reworded,))
+    # Zero NEW flags — the row was already flagged; the processor has one thing to decide, not two.
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+    await db_session.refresh(need)
+    assert need.coverage_note == "Reworded, and better."
+
+
+async def test_a_reviewed_flag_is_never_reworded(db_session, monkeypatch) -> None:
+    """The boundary this module draws everywhere: a flag the processor has judged is theirs, and a
+    later pass has no business rewording the sentence they read."""
+    from app.services import needs_coverage
+
+    _company, loan_file = await _flaggable_file(db_session)
+    need = await _need(db_session, loan_file)
+    await flag_covered_needs(db_session, loan_file_id=loan_file.id)
+    await db_session.refresh(need)
+    need.coverage_reviewed = True
+    kept = need.coverage_note
+    await db_session.flush()
+
+    async def _reworded(_db, _loan_file_id, needs):
+        return [
+            needs_coverage.CoverageFinding(need_id=n.id, document_id=None, note="Rewritten.")
+            for n in needs
+        ]
+
+    monkeypatch.setattr(needs_coverage, "_PREDICATES", (_reworded,))
+    await flag_covered_needs(db_session, loan_file_id=loan_file.id)
+    await db_session.refresh(need)
+    assert need.coverage_note == kept
+
+
+async def test_an_unchanged_note_is_left_alone(db_session) -> None:
+    """Idempotence survives the healing path: a second run over an unchanged file rewrites nothing and
+    reports nothing."""
+    _company, loan_file = await _flaggable_file(db_session)
+    need = await _need(db_session, loan_file)
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+    await db_session.refresh(need)
+    first = need.coverage_note
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+    await db_session.refresh(need)
+    assert need.coverage_note == first

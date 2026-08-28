@@ -59,6 +59,14 @@ _OUTCOME_BY_VERDICT: dict[Verdict, tuple[EvaluationOutcome, FindingStatus]] = {
     Verdict.PENDING_AUTOMATION: (EvaluationOutcome.PENDING_AUTOMATION, FindingStatus.YELLOW),
 }
 
+#: What a retired finding SAYS once it is no longer a concern (bug-004). Deliberately generic: the
+#: reconciler knows only that the subject stopped being detected, and inventing a specific reason for
+#: that would be a claim nothing checked. Short, and it never reads as an outstanding problem.
+_RETIRED_MESSAGE = (
+    "This no longer applies to the file — the item it concerned is not among the ones this check "
+    "covers any more."
+)
+
 # The color a retired finding wears — no_longer_applies is not a live concern (green triage).
 _RETIRED_STATUS = FindingStatus.GREEN
 
@@ -497,6 +505,20 @@ async def reconcile_evaluation_findings(
         if prior_finding.resolution_status.is_resolved:
             continue  # a completed human action → RETAIN (Undo/audit depend on it), do not retire
         was = prior_finding.evaluation_outcome or EvaluationOutcome.OPEN
+        # bug-004 — THE TEXT MUST LEAVE WITH THE VERDICT. Retiring set the outcome, the status and the
+        # run id and left `message` alone, so a green row went on reading as the concern it no longer
+        # is. On LF-AWBB twenty CR-1 findings retired correctly and still said "the credit report
+        # reports this debt but the application does not state it — an undisclosed liability that
+        # changes the debt-to-income picture". A processor scanning the list sees twenty undisclosed
+        # liabilities on a file that has none.
+        #
+        # Same defect LP-625 fixed for `reason`: a sentence that no longer describes the state is
+        # residue, and residue that reads as an open problem is worse than none.
+        #
+        # The old text is not lost — it goes into the event's detail, which is where a finding's
+        # history lives and where an Undo or an audit would look for it.
+        superseded = prior_finding.message
+        prior_finding.message = _RETIRED_MESSAGE
         prior_finding.evaluation_outcome = EvaluationOutcome.NO_LONGER_APPLIES
         prior_finding.status = _RETIRED_STATUS
         prior_finding.verification_id = verification_id
@@ -507,7 +529,11 @@ async def reconcile_evaluation_findings(
                 FindingEventType.RETIRED,
                 was,
                 EvaluationOutcome.NO_LONGER_APPLIES,
-                {**run_detail, "reason": "subject no longer detected in this run"},
+                {
+                    **run_detail,
+                    "reason": "subject no longer detected in this run",
+                    "superseded_message": superseded,
+                },
             )
         )
 

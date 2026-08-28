@@ -362,6 +362,27 @@ def is_flaggable(need: NeedsItem) -> bool:
     )
 
 
+def is_note_refreshable(need: NeedsItem) -> bool:
+    """An ALREADY-FLAGGED need whose note a later pass may still rewrite (bug-004).
+
+    LP-625's lesson arriving here: skipping an already-flagged need froze its first wording forever.
+    LF-AWBB's flags still read "matching the stated **leasepayment** liability" and "matching **every
+    stated revolving liabilities**" long after both were corrected, because `is_flaggable` requires
+    `coverage_note is None` and a flagged need is never looked at again. Preventing a defect does not
+    undo it.
+
+    The same boundary as everywhere else in this module: only where the processor has NOT acted. A flag
+    they reviewed is their judgment, and a later pass has no business rewording the thing they read.
+    """
+    return (
+        need.origin is NeedsItemOrigin.AI_REASONING
+        and need.disposition is NeedsItemDisposition.PROPOSED
+        and need.status in (NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED)
+        and need.coverage_note is not None
+        and not need.coverage_reviewed
+    )
+
+
 async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
     """Run every coverage predicate over the file and FLAG what they answer. Returns rows flagged.
 
@@ -388,12 +409,17 @@ async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
             only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id), NeedsItem)
         )
     ).all()
-    eligible = [n for n in needs if is_flaggable(n)]
+    # Both populations reach the predicates: the unflagged ones so they CAN be flagged, and the
+    # already-flagged-but-unreviewed ones so a corrected note reaches rows that already carry the old
+    # one. A predicate is a pure function of the file, so re-running it over a flagged need costs a
+    # comparison and heals wording that would otherwise be frozen at whatever shipped first.
+    eligible = [n for n in needs if is_flaggable(n) or is_note_refreshable(n)]
     if not eligible:
         return 0
 
     by_id = {n.id: n for n in eligible}
     flagged = 0
+    refreshed = 0
     for predicate in _PREDICATES:
         try:
             async with db.begin_nested():
@@ -408,7 +434,22 @@ async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
             continue
         for finding in findings:
             need = by_id.get(finding.need_id)
-            if need is None or need.coverage_note is not None:
+            if need is None or need.coverage_note == finding.note:
+                continue  # gone, or unchanged — nothing to write and nothing to report
+            if is_note_refreshable(need):
+                # Already flagged and the wording has changed: rewrite in place. NOT counted as a new
+                # flag — the processor has one thing to decide, not two, and a count that grew on a
+                # re-run would read as the file having found something.
+                need.coverage_note = finding.note
+                need.covered_by_document_id = finding.document_id
+                refreshed += 1
+                logger.info(
+                    "needs_coverage_note_refreshed",
+                    loan_file_id=str(loan_file_id),
+                    needs_type=need.needs_type,  # a document type, not PII
+                )
+                continue
+            if need.coverage_note is not None:
                 continue  # already flagged by an earlier predicate this pass
             need.covered_by_document_id = finding.document_id
             need.coverage_note = finding.note
@@ -419,7 +460,7 @@ async def flag_covered_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
                 needs_type=need.needs_type,  # a document type, not PII
                 predicate=predicate.__name__,
             )
-    if flagged:
+    if flagged or refreshed:
         await db.flush()
     return flagged
 
