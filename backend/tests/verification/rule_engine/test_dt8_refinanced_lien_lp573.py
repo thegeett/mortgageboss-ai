@@ -128,3 +128,21 @@ async def test_the_apply_targets_the_holder() -> None:
     assert apply is not None
     assert apply.action == "exclude_liability_paid_off"
     assert apply.fields["holder_name"].tag == "liab.creditor_name"
+
+
+def test_dt8_is_scoped_to_the_applications_own_liabilities() -> None:
+    """bug-003 — `per_liability` unions credit-report tradelines with MISMO stated liabilities, and
+    `liab.stated_is_mortgage` reads MISMO's LiabilityType, so it DECLINES on a tradeline. An unknown
+    applicability predicate is couldnt_check, not not_applicable, so LF-AWBB's 24 tradelines produced
+    24 findings asking whether a Rooms To Go store card was the mortgage being refinanced.
+
+    CR-12 carries the same predicate in the mirror direction for the same reason.
+    """
+    from app.verification.rules.specs import load_rule_spec
+
+    applicability = load_rule_spec("DT-8").deterministic.applicability
+    assert isinstance(applicability, tuple)
+    predicates = {(c.tag or c.loan_tag, c.op, c.value) for c in applicability}
+    assert ("loan.purpose", "eq", "refinance") in predicates
+    assert ("liability.source", "eq", "mismo_stated") in predicates
+    assert ("liab.stated_is_mortgage", "eq", "yes") in predicates

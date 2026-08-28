@@ -119,6 +119,20 @@ deterministic:
     # liability, so the eq guard never holds and every subject couldnt_checks. That is exactly the
     # trap `reject_loan_tag` documents, and it is what this spec did on its first run.
     - {loan_tag: loan.purpose, op: eq, value: refinance}
+    # bug-003 — SCOPE TO THE APPLICATION'S OWN LIABILITIES. `per_liability` unions the credit report's
+    # tradelines with the MISMO stated liabilities, and `liab.stated_is_mortgage` reads MISMO's
+    # LiabilityType — it DECLINES on a tradeline, because deciding what a bureau's `REV` means is the
+    # open-vocabulary judgment ADR-353 defers. So on a credit-report tradeline that predicate is
+    # "unknown", and an unknown predicate is couldnt_check, not not_applicable.
+    #
+    # LF-AWBB has 24 tradelines and produced 24 of them, asking a processor to "confirm whether the
+    # Rooms To Go account is the mortgage being refinanced" — a furniture store card — and the same of a
+    # $0 Sound Credit Union auto line. One real finding was buried under 24.
+    #
+    # This is CR-12's lesson in the mirror direction, and its spec already carries the same predicate
+    # with the same reasoning written out. Scope-false beats data-missing in a conjunction, so this
+    # resolves not_applicable on a tradeline whatever `liab.stated_is_mortgage` says about it.
+    - {tag: liability.source, op: eq, value: mismo_stated}
     - {tag: liab.stated_is_mortgage, op: eq, value: "yes"}
   # A file with no refinance purpose is genuinely out of scope, not missing data.
   applicability_expected: false

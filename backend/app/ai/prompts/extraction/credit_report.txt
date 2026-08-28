@@ -44,6 +44,14 @@ CAPTURE EVERYTHING ON THE DOCUMENT — lose nothing. There are two buckets:
 
 3. NESTED LISTS — one FLAT ROW per repeating item (bare values + a page/snippet):
      tradelines — each row: creditor_name, account_type, account_number_masked, account_ownership, date_opened, balance, credit_limit_or_high_credit, monthly_payment, past_due_amount, account_status, payment_status, payment_history_24mo, worst_delinquency, is_disputed
+
+     is_disputed — write "no" when you can SEE the account's dispute/remarks area and it carries no
+     dispute wording, and the dispute wording itself (e.g. "consumer disputes this account
+     information") when it does. Leave it null ONLY when the account's remarks are absent, cut off or
+     unreadable. This distinction is load-bearing: a null means "I could not look", and a rule
+     downstream must then ask a human about every account on the report rather than reading a clean
+     account as clean. Do not infer a dispute from a delinquency or a charge-off — a dispute is the
+     consumer's own statement, printed as a remark.
      public_records — each row: record_type, filing_date, discharge_or_satisfied_date, status, amount, court_or_jurisdiction
      inquiries — each row: inquiry_date, creditor_name, inquiry_type
    List EVERY item in full — never stop at a summary count. Fill a total/count field ONLY from a total the document explicitly states; if only a partial or filtered count is shown (e.g. OPEN vs ALL), leave that field null rather than inferring or summing one. A stated total that disagrees with the number of rows you list marks the extraction PARTIAL.
