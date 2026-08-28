@@ -93,10 +93,29 @@ judgment:
   # LOAD-BEARING, and the gate trips on absent/unknown, never on a confident "no". So every credit card and
   # auto loan passed, spent an AI call, and produced a needs_review finding titled with a mortgage-payment
   # verdict; the prompt has no branch for is_mortgage == "no" at all.
+  # bug-005 — SCOPE TO THE CREDIT REPORT, which this spec's own `applicability.scope` has said since it
+  # was written: "each credit-report tradeline the model identifies as a mortgage". The predicate did
+  # not say it, and `per_liability` unions tradelines with the application's MISMO liabilities — so the
+  # MISMO liability got a subject too and LF-AWBB produced THREE findings for ONE mortgage: two
+  # tradelines and the stated liability, all asking for the same UWM payment history.
+  #
+  # A payment history is a credit-report fact. MISMO carries type, monthly_payment, unpaid_balance and
+  # holder_name — there is no history on a stated liability and there never will be, so that subject
+  # could only ever ask for something it cannot receive. Same defect as DT-8's, and CR-12 carries this
+  # same predicate for the same reason.
   applicability:
-    tag: liab.is_mortgage
-    op: eq
-    value: "yes"
+    - {tag: liability.source, op: eq, value: credit_report_reported}
+    - {tag: liab.is_mortgage, op: eq, value: "yes"}
+  # ⚠️ DELIBERATELY NOT SCOPED ON `liab.is_payment_bearing`, and this is the opposite call to bug-002's.
+  # That filter is right for CR-1, where a $0/$0 account is not a debt to disclose. It is WRONG here: a
+  # mortgage transferred to a new servicer leaves the old tradeline at a zero balance, and that
+  # tradeline still carries the borrower's payment history for the months it covers. The lookback is
+  # about the BORROWER's twelve months, not the account's current balance, so filtering on materiality
+  # would hide a delinquency on a transferred loan — the one thing this rule exists to catch.
+  #
+  # The cost is stated: LF-AWBB keeps two findings for one mortgage, the active UWM tradeline and the
+  # $0 UNITED WHSLE MORT duplicate. Two reads of the same loan's history is a mild annoyance; a missed
+  # 60-day late is not.
   load_bearing_tags: [liab.is_mortgage, liab.structured_history_confident, liab.creditor_name]  # LP-556 — names WHICH debt (provenance only, not gated)
   reasoned_over:
     - liab.is_mortgage

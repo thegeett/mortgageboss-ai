@@ -146,3 +146,45 @@ def test_dt8_is_scoped_to_the_applications_own_liabilities() -> None:
     assert ("loan.purpose", "eq", "refinance") in predicates
     assert ("liability.source", "eq", "mismo_stated") in predicates
     assert ("liab.stated_is_mortgage", "eq", "yes") in predicates
+
+
+def test_cr8_is_scoped_to_credit_report_tradelines() -> None:
+    """bug-005 — the same defect as DT-8's, in a rule whose own prose already stated the scope.
+
+    CR-8's `applicability.scope` has said "each credit-report tradeline the model identifies as a
+    mortgage" since it was written, but the predicate only gated on `liab.is_mortgage`. `per_liability`
+    unions tradelines with the application's MISMO liabilities, so the stated liability got a subject
+    too and LF-AWBB produced THREE findings for ONE mortgage — two tradelines and the MISMO row, all
+    asking for the same UWM payment history.
+
+    A payment history is a credit-report fact; MISMO carries type, payment, balance and holder and
+    nothing else, so that subject could only ever ask for something it cannot receive.
+    """
+    from app.verification.rules.specs import load_rule_spec
+
+    spec = load_rule_spec("CR-8")
+    assert spec.judgment is not None
+    applicability = spec.judgment.applicability
+    assert isinstance(applicability, tuple)
+    predicates = {(c.tag or c.loan_tag, c.op, c.value) for c in applicability}
+    assert ("liability.source", "eq", "credit_report_reported") in predicates
+    assert ("liab.is_mortgage", "eq", "yes") in predicates
+
+
+def test_cr8_is_not_scoped_on_materiality() -> None:
+    """THE OPPOSITE CALL TO bug-002's, and it has to stay that way.
+
+    `liab.is_payment_bearing` is right for CR-1, where a $0/$0 account is not a debt to disclose. It is
+    wrong here: a mortgage transferred to a new servicer leaves the old tradeline at a zero balance,
+    and that tradeline still carries the borrower's payment history for the months it covers. The
+    lookback is about the BORROWER's twelve months, not the account's current balance — so filtering on
+    materiality would hide a delinquency on a transferred loan, which is the one thing CR-8 exists to
+    catch.
+    """
+    from app.verification.rules.specs import load_rule_spec
+
+    spec = load_rule_spec("CR-8")
+    assert spec.judgment is not None
+    applicability = spec.judgment.applicability
+    assert isinstance(applicability, tuple)
+    assert not any(c.tag == "liab.is_payment_bearing" for c in applicability)
