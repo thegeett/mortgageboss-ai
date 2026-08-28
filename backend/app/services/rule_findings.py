@@ -552,9 +552,59 @@ async def reconcile_evaluation_findings(
     return res
 
 
+async def repair_retired_finding_text(db: AsyncSession, loan_file_id: UUID) -> int:
+    """Rewrite the text of findings retired BEFORE bug-004 shipped. Returns rows touched (bug-005).
+
+    PREVENTING A DEFECT DOES NOT UNDO IT — the lesson LP-625 wrote down, and the one bug-004 walked
+    straight back into. Its fix rewrites `message` at the MOMENT of retirement, and the retire loop
+    skips anything already retired (`if prior_finding.evaluation_outcome is NO_LONGER_APPLIES:
+    continue`), so it only ever reached findings retired after it deployed.
+
+    On LF-AWBB the four CR-1 rows retired after the deploy read correctly and the nineteen retired
+    before it still said "the credit report reports this debt but the application does not state it —
+    an undisclosed liability that changes the debt-to-income picture": twenty-three rows, one
+    behaviour, two texts, and the older ones are the ones a processor has been looking at longest.
+
+    Idempotent; a file with nothing to repair reports zero. The superseded wording goes to the event
+    history exactly as the retire path sends it, so nothing is lost here either.
+    """
+    stale = (
+        await db.scalars(
+            select(Finding).where(
+                Finding.loan_file_id == loan_file_id,
+                Finding.deleted_at.is_(None),
+                Finding.evaluation_outcome == EvaluationOutcome.NO_LONGER_APPLIES,
+                Finding.message != _RETIRED_MESSAGE,
+            )
+        )
+    ).all()
+    for finding in stale:
+        db.add(
+            FindingEvent(
+                finding_id=finding.id,
+                event_type=FindingEventType.RETIRED,
+                from_outcome=EvaluationOutcome.NO_LONGER_APPLIES,
+                to_outcome=EvaluationOutcome.NO_LONGER_APPLIES,
+                detail={
+                    "reason": "retired-text repair (bug-005): the message still described the "
+                    "verdict this finding no longer holds",
+                    "superseded_message": finding.message,
+                },
+            )
+        )
+        finding.message = _RETIRED_MESSAGE
+    if stale:
+        await db.flush()
+        logger.info(
+            "retired_finding_text_repaired", loan_file_id=str(loan_file_id), repaired=len(stale)
+        )
+    return len(stale)
+
+
 __all__ = [
     "ReconcileRunResult",
     "outcome_for_verdict",
     "persist_evaluation_findings",
     "reconcile_evaluation_findings",
+    "repair_retired_finding_text",
 ]

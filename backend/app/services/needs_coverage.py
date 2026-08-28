@@ -55,6 +55,19 @@ from app.models.stated_financials import StatedLiability
 logger = structlog.get_logger(__name__)
 
 
+def leaked_identifiers_in(text: str) -> set[str]:
+    """Tag ids, content ids and UUIDs in text a processor will read (bug-005).
+
+    The SAME three patterns the composer refuses (`app/ai/finding_prose.py`), imported rather than
+    restated: a fourth spelling of "what an identifier looks like" is how one of them drifts.
+    """
+    from app.ai.finding_prose import CONTENT_ID, IDENTIFIER, UUID_ID
+
+    return (
+        set(IDENTIFIER.findall(text)) | set(CONTENT_ID.findall(text)) | set(UUID_ID.findall(text))
+    )
+
+
 @dataclass(frozen=True)
 class CoverageFinding:
     """One predicate's conclusion: this need looks answered by that document, for this reason."""
@@ -487,6 +500,23 @@ async def apply_retraction(
     if not settings.needs_coverage_flagging_enabled:
         return False
     if not is_flaggable(need) or not why.strip():
+        return False
+    # bug-005 — AN IDENTIFIER MUST NOT REACH A PROCESSOR. LP-633 hands the model document ids so a
+    # retraction can CITE what answers the need, and the model duly quoted them back INSIDE the prose:
+    # LF-AWBB shipped "Two completed credit reports are already present on the file (id
+    # 70f2f69d-238e-460e-9243-576db98ba86d and id 8b6068…)". The composer has refused this since
+    # LP-377-B; this path was written later and had no equivalent guard, so the same rule the rest of
+    # the product obeys did not apply to the one text a coverage flag exists to be read.
+    #
+    # DROPPED, not scrubbed: a sentence with a redaction marker in it reads worse than the note the
+    # predicate would have written, and the need simply stays unflagged — the safe direction.
+    if leaked := leaked_identifiers_in(why):
+        logger.warning(
+            "needs_coverage_retraction_leaked_identifier",
+            loan_file_id=str(need.loan_file_id),
+            needs_type=need.needs_type,  # a document type, not PII
+            count=len(leaked),  # never the identifiers themselves
+        )
         return False
     need.coverage_note = why.strip()
     need.covered_by_document_id = document_id

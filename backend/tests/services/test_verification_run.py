@@ -537,3 +537,66 @@ def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
     # they contribute no AI group.)
     groups = _required_ai_groups()
     assert {"id_address", "id_name", "id_title", "id_poa"} <= groups
+
+
+def _evaluation(rule_id: str, subject_id: str, verdict):
+    """A minimal RuleEvaluation for the collapse tests (bug-005)."""
+    from app.verification.rule_engine.result import RuleEvaluation
+
+    return RuleEvaluation(
+        rule_id=rule_id,
+        subject_id=subject_id,
+        verdict=verdict,
+        verdict_confidence=0.9,
+        load_bearing_tags=(),
+        threshold_used=None,
+        priya_validated=False,
+        gated_pending_signoff=True,
+        reasoning="the subject's own reasoning",
+        how_to_fix=None,
+    )
+
+
+def test_a_uniform_pass_collapses_to_one_row() -> None:
+    """bug-005 — CR-12 asks one question per credit-report tradeline, so a CLEAN report produced 24
+    green rows each saying a version of "this account is not under dispute". Individually correct,
+    collectively a wall, and a processor scrolling past 24 identical passes is being trained to scroll
+    past the rule."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+    from app.verification.rule_engine.result import Verdict
+
+    passes = [_evaluation("CR-12", f"lst{i:016x}", Verdict.SATISFIED) for i in range(24)]
+    [collapsed] = _collapse_uniform_passes(passes)
+
+    assert collapsed.rule_id == "CR-12"
+    assert collapsed.subject_id == LOAN_SUBJECT
+    assert collapsed.verdict is Verdict.SATISFIED
+    assert "dispute remark" in collapsed.reasoning
+    assert collapsed.load_bearing_tags == (), "they belong to subjects this row no longer names"
+    assert collapsed.how_to_fix is None, "a pass has nothing to remediate"
+
+
+def test_one_dissenting_verdict_keeps_every_subject() -> None:
+    """THE FALSE-GREEN THIS MUST NOT BECOME. Naming WHICH account is the entire point of asking per
+    account; a summary hiding one disputed tradeline behind 23 clean ones is exactly the shape this
+    codebase refuses everywhere else."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    group = [_evaluation("CR-12", f"lst{i:016x}", Verdict.SATISFIED) for i in range(23)]
+    group.append(_evaluation("CR-12", "lstdisputed00001", Verdict.FIRED))
+
+    kept = _collapse_uniform_passes(group)
+    assert len(kept) == 24
+    assert any(r.verdict is Verdict.FIRED for r in kept)
+
+
+def test_a_rule_that_does_not_declare_it_is_untouched() -> None:
+    """Absent means "show every subject", and that stays the default: most per-subject rules are worth
+    seeing per subject even when they pass — CR-1's four satisfied liabilities name four real debts."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    group = [_evaluation("CR-1", f"lst{i:016x}", Verdict.SATISFIED) for i in range(4)]
+    assert len(_collapse_uniform_passes(group)) == 4

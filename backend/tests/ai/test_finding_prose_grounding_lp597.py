@@ -470,3 +470,39 @@ def test_every_place_that_names_the_verbs_reads_the_same_list() -> None:
         word = verb.strip().capitalize()
         for name, text in sites.items():
             assert word in text, f"{word} missing from the {name}"
+
+
+def test_every_specs_fix_verb_is_recognised() -> None:
+    """bug-005 — bug-002 widened `_ASKING` by hand and stopped when the rule in front of it composed.
+    RE-1 and DT-6 went on shipping raw templates because both open their fixes with "Compare" and
+    nobody had looked at what the OTHER specs open with.
+
+    This reads every `how_to_fix` / `couldnt_check_fix` in the corpus, so the next rule that
+    introduces an unrecognised verb is a red test rather than findings a processor reads as
+    engineering notes.
+    """
+    import re
+    from pathlib import Path
+
+    from app.ai.finding_prose import _AMBIGUOUS_FIX_VERBS, _ASKING
+
+    spec_dir = Path("app/verification/rules/specs")
+    assert spec_dir.is_dir(), "run from the backend/ directory"
+    known = {v.strip() for v in _ASKING} | _AMBIGUOUS_FIX_VERBS
+    unknown: dict[str, set[str]] = {}
+    for path in sorted(spec_dir.glob("*.yaml")):
+        text = path.read_text(encoding="utf-8")
+        openers = re.findall(r"(?:how_to_fix|couldnt_check_fix): (?:>-\n\s+)?([A-Za-z]+)", text)
+        for verb in openers:
+            low = verb.lower()
+            # "This"/"The" open a fix that is a sentence rather than an imperative — a spec-wording
+            # issue, not a vocabulary gap, and not something this list can fix.
+            if low in {"this", "the"} or low in known:
+                continue
+            unknown.setdefault(low, set()).add(path.stem)
+
+    assert not unknown, (
+        "These rule specs open a fix with a verb `asks_for_work` does not recognise, so their "
+        "compositions are rejected as `stating_on_a_review` and the raw template ships:\n  "
+        + "\n  ".join(f"{v} — {', '.join(sorted(rules))}" for v, rules in sorted(unknown.items()))
+    )

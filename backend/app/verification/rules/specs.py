@@ -1013,6 +1013,27 @@ class ConsistencyEval(BaseModel):
         return self
 
 
+class CollapseSatisfied(BaseModel):
+    """Declare that a rule showing the SAME pass on every subject should show it once (bug-005).
+
+    CR-12 asks one question per credit-report tradeline. On a clean report every answer is the same
+    answer, so LF-AWBB's 24 tradelines produced 24 green rows all saying a version of "this account is
+    not under dispute". Individually correct, collectively a wall — and a processor scrolling past 24
+    identical passes is being trained to scroll past this rule.
+
+    ONLY WHEN EVERY SUBJECT PASSES. The moment one does not, the per-subject findings stand as they
+    are: the whole value of a per-subject rule is naming WHICH one, and a summary that hid a single
+    disputed account behind 23 clean ones would be the false-green this codebase refuses everywhere.
+
+    The wording lives here rather than in code because it is prose about a domain, and one summary
+    sentence per rule is exactly the kind of thing a spec is for.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    reasoning: str = PydField(min_length=1)
+
+
 class RuleSpec(BaseModel):
     """A frozen, validated Stage-2 rule spec — every prompt-spine slot populated.
 
@@ -1032,6 +1053,9 @@ class RuleSpec(BaseModel):
     required_inputs: tuple[RequiredInput, ...] = PydField(min_length=1)
     reference_values: ReferenceValues
     subject_enumeration: str = PydField(min_length=1)  # an EXECUTABLE enumerator key (LP-324)
+    # bug-005 — collapse a uniform pass to one row. Absent means "show every subject", which stays the
+    # default: most per-subject rules are worth seeing per subject even when they pass.
+    collapse_satisfied: CollapseSatisfied | None = None
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)

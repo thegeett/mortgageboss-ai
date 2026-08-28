@@ -73,7 +73,34 @@ _ASKING = (
     "reconcile",
     "document",
     "remove",
+    # bug-005 — THE REST OF THE CORPUS. bug-002 widened this list by hand and stopped when the rule in
+    # front of it composed, which is how RE-1 and DT-6 went on shipping raw templates: both open their
+    # fixes with "Compare", and nobody had looked at what the OTHER specs open with. Collected from
+    # every `how_to_fix` and `couldnt_check_fix` in `rules/specs/`, and `test_every_specs_fix_verb_is_
+    # recognised` now fails when a new rule introduces a verb this list does not carry — so the next
+    # gap is a red test, not eight findings a processor reads as engineering notes.
+    "read",
+    "compare",
+    "ask",
+    "order",
+    "identify",
+    "recompute",
+    "establish",
+    "match",
+    "exclude",
+    "analyze",
+    "source",
+    "have",
 )
+
+#: Verbs a spec opens a fix with that are DELIBERATELY not in `_ASKING`, each because it is also an
+#: ordinary way to begin a passing statement, and a word boundary cannot tell the two apart:
+#: "Complete the form" against "Complete documentation is in the file", "Total the deposits" against
+#: "Total reserves are documented", "Open a claim" against "Open accounts are current". Adding them
+#: would trade five findings shipping templates on a review for an unknown number shipping templates
+#: on a pass. The rules using them are one apiece; when one of them matters, the fix is to reword the
+#: spec's opener, not to loosen this.
+_AMBIGUOUS_FIX_VERBS = frozenset({"complete", "total", "open"})
 
 
 def _asking_phrase() -> str:

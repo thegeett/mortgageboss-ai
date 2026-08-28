@@ -1991,6 +1991,31 @@ def _normalise_lender_name(raw: str) -> list[str]:
     return [tok for tok in expanded if tok not in _CORPORATE_SUFFIX_TOKENS]
 
 
+def _is_acronym_of(short: list[str], full: list[str]) -> bool:
+    """Is ``short`` a single token spelling out the initials of ``full``? (bug-005)
+
+    THE CASE THAT FOUND THIS. LF-AWBB's application states its mortgage holder as "UWM" and both
+    mortgage statements name "United Wholesale Mortgage" — the same loan, the one being refinanced.
+    The token-prefix rule needs two tokens in common and an acronym is one, so RE-1 read the statements
+    as evidencing a debt the application never disclosed and asked a processor twice to chase a payoff
+    that was already documented. A false NEEDS_REVIEW on the busiest fact in a refinance file.
+
+    The abbreviation map above cannot reach this: it expands a WORD ("whsle" -> "wholesale"), and an
+    acronym is not a word. Adding "uwm" to it by hand would fix this file and none of the next ones.
+
+    Deliberately strict — every initial in order, and the token counts must match exactly. "UW" does
+    not match "United Wholesale Mortgage" and "UWMC" does not either. That keeps it from becoming a
+    fuzzy matcher: `_lender_names_agree` already accepts one known false-satisfied direction (two
+    tokens of prefix), and a loose acronym rule would stack a second on top of it.
+    """
+    if len(short) != 1 or len(full) < 2:
+        return False
+    letters = short[0]
+    if len(letters) != len(full) or not letters.isalpha():
+        return False
+    return all(word.startswith(letter) for letter, word in zip(letters, full, strict=True))
+
+
 def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
     """Do two normalised names refer to the same entity?
 
@@ -2010,6 +2035,8 @@ def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
     if not clause or not lender:
         return False
     if clause == lender:
+        return True
+    if _is_acronym_of(clause, lender) or _is_acronym_of(lender, clause):
         return True
     shorter, longer = (clause, lender) if len(clause) < len(lender) else (lender, clause)
     return len(shorter) >= _IH2_MIN_PREFIX_TOKENS and longer[: len(shorter)] == shorter

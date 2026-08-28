@@ -478,3 +478,43 @@ def test_a_condo_with_no_master_policy_document_still_reports_absent() -> None:
     snap = _snap([], loan={"property.type": _tag("condo")})
     value, why = _condo_master_policy(snap, "loan", None)
     assert value == "absent", why
+
+
+# --------------------------------------------------------------------------- #
+# bug-005 — an acronym is the same lender
+# --------------------------------------------------------------------------- #
+
+
+def test_an_acronym_matches_the_spelled_out_lender() -> None:
+    """THE CASE THAT FOUND THIS. LF-AWBB's application states its mortgage holder as "UWM" and both
+    mortgage statements name "United Wholesale Mortgage" — the same loan, the one being refinanced.
+    The token-prefix rule needs two tokens in common and an acronym is one, so RE-1 read the statements
+    as evidencing a debt the application never disclosed and asked a processor twice to chase a payoff
+    that was already documented.
+
+    The abbreviation map cannot reach this: it expands a WORD ("whsle" -> "wholesale"), and an acronym
+    is not a word.
+    """
+    from app.verification.tag_materialization.derived import (
+        _lender_names_agree,
+        _normalise_lender_name,
+    )
+
+    uwm = _normalise_lender_name("UWM")
+    spelled = _normalise_lender_name("United Wholesale Mortgage")
+    assert _lender_names_agree(uwm, spelled)
+    assert _lender_names_agree(spelled, uwm), "and symmetrically"
+
+
+def test_the_acronym_rule_is_strict() -> None:
+    """Every initial, in order, and the token counts must match exactly — `_lender_names_agree` already
+    accepts one known false-satisfied direction (two tokens of prefix), and a loose acronym rule would
+    stack a second on top of it."""
+    from app.verification.tag_materialization.derived import (
+        _lender_names_agree,
+        _normalise_lender_name,
+    )
+
+    spelled = _normalise_lender_name("United Wholesale Mortgage")
+    for wrong in ("UW", "UWMC", "UMW", "AWM"):
+        assert not _lender_names_agree(_normalise_lender_name(wrong), spelled), wrong

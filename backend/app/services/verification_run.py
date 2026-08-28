@@ -49,7 +49,11 @@ from app.services.needs_engine import (
     seed_floor_needs,
 )
 from app.services.needs_from_findings import seed_needs_from_findings
-from app.services.rule_findings import ReconcileRunResult, reconcile_evaluation_findings
+from app.services.rule_findings import (
+    ReconcileRunResult,
+    reconcile_evaluation_findings,
+    repair_retired_finding_text,
+)
 from app.services.snapshot_findings import Reasoner as SnapshotFindingsReasoner
 from app.services.tag_correlation import (
     Reasoner as StageBReasoner,
@@ -73,13 +77,14 @@ from app.services.verification_progress import clear_progress, report_phase
 from app.verification.rule_engine.consistency import Reasoner as ConsistencyReasoner
 from app.verification.rule_engine.engine import DEFAULT_CONFIDENCE_FLOOR
 from app.verification.rule_engine.enumerators import (
+    LOAN_SUBJECT,
     enumerate_subjects,
     per_liability_source_is_degraded,
 )
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
-from app.verification.rule_engine.result import RuleEvaluation
-from app.verification.rules.specs import load_rule_spec
+from app.verification.rule_engine.result import RuleEvaluation, Verdict
+from app.verification.rules.specs import RuleSpecNotFound, load_rule_spec
 from app.verification.snapshot.builder import build_snapshot
 from app.verification.snapshot.documents_section import document_id_by_content_id
 from app.verification.snapshot.model import Snapshot, TagsSection
@@ -527,6 +532,62 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     return frozenset(eligible)
 
 
+def _collapse_uniform_passes(
+    results: list[RuleEvaluation],
+) -> list[RuleEvaluation]:
+    """A rule that passes on EVERY subject and declares `collapse_satisfied` shows one row (bug-005).
+
+    CR-12 asks one question per credit-report tradeline; on a clean report every answer is the same
+    answer, and LF-AWBB's 24 tradelines produced 24 green rows each saying a version of "this account
+    is not under dispute". Individually correct, collectively a wall — and a processor scrolling past
+    24 identical passes is being trained to scroll past the rule.
+
+    ONLY WHEN EVERY SUBJECT PASSES, and only above one subject. One dissenting verdict and the
+    per-subject findings stand untouched: naming WHICH account is the whole point of asking per
+    account, and a summary hiding one disputed tradeline behind 23 clean ones is the false-green this
+    codebase refuses everywhere else. The collapsed row carries no load-bearing tags — they belong to
+    subjects it no longer names — and no apply, because there is nothing to remediate on a pass.
+    """
+    by_rule: dict[str, list[RuleEvaluation]] = {}
+    for result in results:
+        by_rule.setdefault(result.rule_id, []).append(result)
+
+    collapsed: list[RuleEvaluation] = []
+    for rule_id, group in by_rule.items():
+        try:
+            spec = load_rule_spec(rule_id)
+        except RuleSpecNotFound:
+            collapsed.extend(group)
+            continue
+        summary = spec.collapse_satisfied
+        if summary is None or len(group) < 2:
+            collapsed.extend(group)
+            continue
+        if any(r.verdict is not Verdict.SATISFIED for r in group):
+            collapsed.extend(group)  # one dissent and every subject speaks for itself again
+            continue
+        first = group[0]
+        collapsed.append(
+            RuleEvaluation(
+                rule_id=rule_id,
+                subject_id=LOAN_SUBJECT,
+                verdict=Verdict.SATISFIED,
+                verdict_confidence=min(
+                    (r.verdict_confidence for r in group if r.verdict_confidence is not None),
+                    default=None,
+                ),
+                load_bearing_tags=(),
+                threshold_used=first.threshold_used,
+                priya_validated=first.priya_validated,
+                gated_pending_signoff=first.gated_pending_signoff,
+                reasoning=summary.reasoning,
+                how_to_fix=None,
+            )
+        )
+        logger.info("rule_uniform_pass_collapsed", rule_id=rule_id, subjects=len(group))
+    return collapsed
+
+
 def _attach_document_provenance(
     results: list[RuleEvaluation], snapshot: Snapshot
 ) -> list[RuleEvaluation]:
@@ -747,6 +808,7 @@ async def run_verification(
             Degradation("document_provenance", f"findings carry no document links: {exc}")
         )
     results = _attach_document_provenance(results, snapshot)
+    results = _collapse_uniform_passes(results)
     reconciliation = await _persist(
         db,
         document_id_by_content_id=document_ids,
@@ -831,6 +893,10 @@ async def run_verification(
                 # on. A verification is the deploy-run-read loop staging actually uses, so the
                 # coverage flag has to be reachable from it, not only from a document arrival.
                 await flag_covered_needs(db, loan_file_id=loan_file_id)
+                # bug-005 — the retired-text repair, beside the other passes that fix what earlier
+                # versions left behind. bug-004 rewrites a message as a finding retires; this reaches
+                # the ones retired before it existed, which is every one on every file already run.
+                await repair_retired_finding_text(db, loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
         degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))

@@ -35,9 +35,11 @@ from uuid import UUID
 import structlog
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import utcnow
+from app.models.finding import Finding, FindingStatus
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus
 from app.services.verification_run import run_verification
@@ -106,7 +108,43 @@ async def _run(loan_file_id: str, run_id: str) -> None:
         if locked_status is not VerificationStatus.FAILED:
             run.status = VerificationStatus.COMPLETED
             run.completed_at = utcnow()
+            await _stamp_triage_counts(db, run)
         await db.commit()
+
+
+async def _stamp_triage_counts(db: AsyncSession, run: Verification) -> None:
+    """Fill the run's red / yellow / green counts from the findings it left (bug-005).
+
+    These columns have existed since the first verification and were never written: EVERY completed run
+    on staging back to 2026-08-23 reads 0/0/0, including one carrying 130 findings and 21 reds. A
+    default of zero is the worst possible wrong answer here — anything reading these to summarise a run
+    reports a clean file, which is the one direction this codebase refuses everywhere else.
+
+    Counted over the file's ACTIVE findings rather than the ones this run restamped: `verification_id`
+    marks what a run CHANGED, so counting by it would report 20 findings on a run that touched 20 and
+    left 110 standing. The number a processor wants is what the file says now.
+    """
+    # BEST-EFFORT, AND CONTAINED IN A SAVEPOINT. This is a summary: a run whose verdicts are correct
+    # and persisted must not fail because a count did not come back. And the containment is not
+    # optional — a bare `except` around a DB read is best-effort only for non-DB errors, since a
+    # SQLAlchemy error poisons the session and the caller's `commit` two lines down would then take
+    # the COMPLETED status with it. bug-002 shipped exactly that mistake in `flag_covered_needs`.
+    try:
+        async with db.begin_nested():
+            rows = (
+                await db.execute(
+                    select(Finding.status, func.count())
+                    .where(Finding.loan_file_id == run.loan_file_id, Finding.deleted_at.is_(None))
+                    .group_by(Finding.status)
+                )
+            ).all()
+    except Exception:
+        logger.warning("verification_triage_counts_failed", run_id=str(run.id), exc_info=True)
+        return
+    counts: dict[FindingStatus, int] = dict(rows)  # type: ignore[arg-type]
+    run.red_count = counts.get(FindingStatus.RED, 0)
+    run.yellow_count = counts.get(FindingStatus.YELLOW, 0)
+    run.green_count = counts.get(FindingStatus.GREEN, 0)
 
 
 async def _mark_failed(run_id: str) -> None:
