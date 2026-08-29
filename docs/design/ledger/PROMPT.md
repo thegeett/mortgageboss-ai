@@ -14,6 +14,9 @@ We are implementing a frontend redesign called **Ledger**. Everything you need i
    switcher across the top. Every ticket names the screen it must match — when a
    ticket says "Mockup: Verification", open that screen and match it. Do not
    improvise a layout.
+4. `docs/design/ledger/AMENDMENTS.md` — corrections made after work started.
+   Where it disagrees with `TICKETS.md`, it wins. Check it at the start of
+   every ticket, not just once.
 
 **First, before LP-UI-001:** `docs/design/` is untracked. Commit it so it cannot be
 lost — `git add docs/design/ledger && git commit -m "docs: Ledger design system and

@@ -27,6 +27,16 @@ export default {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     container: { center: true, padding: "2rem", screens: { "2xl": "1400px" } },
+    // fontWeight sits at theme level, NOT theme.extend. `extend` MERGES with the
+    // default scale, so `bold: 700` would survive and `font-bold` would still
+    // resolve — which is exactly what happened the first time. Replacing the
+    // scale is what makes the cap real. 700 does not exist in this system;
+    // hierarchy comes from size, colour and space.
+    fontWeight: {
+      normal: "400",
+      medium: "500",
+      semibold: "600",
+    },
     extend: {
       fontFamily: {
         // Set by next/font in app/layout.tsx — see assets/fonts.ts.
@@ -43,12 +53,6 @@ export default {
         lg: ["1rem", { lineHeight: "1.5rem", letterSpacing: "-0.01em" }],
         xl: ["1.25rem", { lineHeight: "1.6rem", letterSpacing: "-0.018em" }],
         "2xl": ["1.625rem", { lineHeight: "1.95rem", letterSpacing: "-0.022em" }],
-      },
-      fontWeight: {
-        // 700 does not exist in this system. Hierarchy comes from size, colour, space.
-        normal: "400",
-        medium: "500",
-        semibold: "600",
       },
       colors: {
         background: token("background"),

@@ -1,5 +1,9 @@
 # LP-UI — frontend redesign tickets
 
+> **Amendments:** `AMENDMENTS.md` records changes made after implementation
+> started — currently affecting **LP-UI-002**, **LP-UI-004** and **LP-UI-011**.
+> Where it disagrees with this file, it wins.
+
 Forty tickets, seven epics. Each names the mockup screen it must match, the files
 it touches, and what "done" means. Ticket records go in `docs/tickets/LP-UI-XXX.md`
 per the convention in `CLAUDE.md`; ADRs go in `decisions.md`.

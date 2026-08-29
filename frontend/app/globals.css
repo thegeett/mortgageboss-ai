@@ -30,7 +30,7 @@
     --secondary: 180.0 9.1% 95.7%;
     --secondary-foreground: 188.6 17.9% 7.6%;
     --muted: 180.0 9.1% 95.7%;
-    --muted-foreground: 168.0 4.4% 44.3%;
+    --muted-foreground: 168.0 4.4% 41.0%;
     /* shadcn's `accent` is the HOVER surface, not the brand accent. Left alone deliberately. */
     --accent: 180.0 8.6% 93.1%;
     --accent-foreground: 188.6 17.9% 7.6%;

@@ -69,11 +69,16 @@ state, not a token defect.
 **CI.** `pnpm biome check --write .` (2 files reformatted), `pnpm tsc --noEmit`,
 `pnpm test` (47 files, 386 tests), `pnpm build` — all green.
 
-## Findings raised, not fixed
+## Findings raised
 
-Three things surfaced during verification. None was changed here: the assets are
-drop-in by instruction, and SPEC rule 8 says to raise a problem on the ticket
-rather than edit the palette under it.
+Three things surfaced during verification. None was changed unilaterally: the
+assets are drop-in by instruction, and SPEC rule 8 says to raise a problem on the
+ticket rather than edit the palette under it.
+
+**All three were reviewed, confirmed and dispositioned the same day** — see
+[`docs/design/ledger/AMENDMENTS.md`](../design/ledger/AMENDMENTS.md). Two were
+defects in the assets and the assets were corrected; the third became acceptance
+criteria on LP-UI-004. The corrections are folded into this ticket.
 
 1. **`font-bold` still resolves to 700.** `fontWeight` sits under `theme.extend`,
    and Tailwind *merges* `extend` with the default theme rather than replacing it,
@@ -83,6 +88,14 @@ rather than edit the palette under it.
    existing `font-bold` call sites still render at 700 in violation of SPEC rule 2.
    Moving the `fontWeight` block from `theme.extend` to `theme` (one level up)
    makes the cap real and turns those 12 sites into a build-visible break.
+
+   **Resolved (A1).** `fontWeight` now sits at `theme` level in both the asset and
+   `frontend/tailwind.config.ts`. Re-verified through the Tailwind CLI:
+   `font-bold` emits nothing at all, while `font-normal` / `font-medium` /
+   `font-semibold` emit 400 / 500 / 600. The consequence is that the 12 call sites
+   now resolve to nothing and silently inherit their weight, which is worse than
+   700 — so replacing them with `font-semibold` moved into LP-UI-002's scope
+   rather than being left for a later screen ticket.
 2. **`muted-foreground` on `muted` is 4.29:1 in light** — the one pair under the
    4.5:1 floor the SPEC declares verified. It does not bite yet (2 `bg-muted`
    usages, and no element pairs them today), but the LP-UI-004 codemod maps
@@ -91,6 +104,13 @@ rather than edit the palette under it.
    Dark is fine at 5.38:1. Dropping light `--muted-foreground` from `44.3%` to
    `43.0%` lightness clears it at 4.50:1. `41.5%` (`#656E6D`) also clears the
    `accent` hover surface, which is 4.05:1 today and 4.26:1 at 43.0%.
+
+   **Resolved (A2).** Light `--muted-foreground` is now `168.0 4.4% 41.0%`
+   (`#646D6B`) in both the asset and `frontend/app/globals.css` — 41.0% rather
+   than the 41.5% proposed here, because 41.5% reaches only 4.53:1 on `accent`
+   and hex rounding could push that under. Re-measured at 41.0%: 5.17:1 on
+   `background`, 5.32:1 on `card`, 4.86:1 on `muted`, 4.60:1 on `accent`. Dark is
+   unchanged.
 3. **Two hardcoded colour literals the codemod cannot see.**
    `app/page.tsx:143` and `app/(auth)/login/page.tsx:18` both carry
    `bg-[radial-gradient(circle_at_top,_hsl(217_91%_60%_/_0.08),_transparent_55%)]`
@@ -99,6 +119,12 @@ rather than edit the palette under it.
    while these two survive. They belong to LP-UI-012 (login) and the landing page.
    Otherwise the palette is clean: zero hex literals and zero non-`gray` Tailwind
    palette colours anywhere in `app/`, `components/` or `lib/`.
+
+   **Resolved (A3).** Kept as a finding rather than patched here. LP-UI-004 gains
+   two acceptance criteria — `rg "217 91%|217_91%"` and a hex-literal grep must
+   both come back empty — and the two gradients become `hsl(var(--primary) / 0.08)`
+   in that ticket. LP-UI-011 separately picks up the question of whether
+   `app/page.tsx` should survive at all.
 
 ## Assumptions and decisions
 
@@ -118,6 +144,7 @@ rather than edit the palette under it.
 
 ## Files
 
-- `frontend/app/globals.css` (replaced)
-- `frontend/tailwind.config.ts` (replaced)
+- `frontend/app/globals.css` (replaced, then A2 applied)
+- `frontend/tailwind.config.ts` (replaced, then A1 applied)
+- `docs/design/ledger/AMENDMENTS.md` (new — the review's dispositions)
 - `decisions.md` — ADR-389
