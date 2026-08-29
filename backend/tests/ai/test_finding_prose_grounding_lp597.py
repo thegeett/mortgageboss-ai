@@ -489,10 +489,24 @@ def test_every_specs_fix_verb_is_recognised() -> None:
     spec_dir = Path("app/verification/rules/specs")
     assert spec_dir.is_dir(), "run from the backend/ directory"
     known = {v.strip() for v in _ASKING} | _AMBIGUOUS_FIX_VERBS
+    # bug-006 — AND THE SCAN MUST SEE EVERY KEY. The first cut matched a bare or `>-` scalar only, so
+    # AS-1's two quoted fixes (`how_to_fix: "Document this deposit's source…"`) were skipped in
+    # silence: 157 keys in the corpus, 155 read. A spec authored as `how_to_fix: "Escalate …"` — or
+    # with `|` or `>` — would introduce exactly the unrecognised-verb gap this test promises to catch,
+    # and the test would stay green. The count assertion below is what makes an unreadable scalar
+    # style fail loudly instead.
+    key_re = re.compile(r"^\s*(?:how_to_fix|couldnt_check_fix):", re.MULTILINE)
+    opener_re = re.compile(
+        r"(?:how_to_fix|couldnt_check_fix):\s*(?:[>|][-+]?\s*\n\s+)?[\"\']?([A-Za-z]+)"
+    )
+    keys = 0
+    openers_found = 0
     unknown: dict[str, set[str]] = {}
     for path in sorted(spec_dir.glob("*.yaml")):
         text = path.read_text(encoding="utf-8")
-        openers = re.findall(r"(?:how_to_fix|couldnt_check_fix): (?:>-\n\s+)?([A-Za-z]+)", text)
+        keys += len(key_re.findall(text))
+        openers = opener_re.findall(text)
+        openers_found += len(openers)
         for verb in openers:
             low = verb.lower()
             # "This"/"The" open a fix that is a sentence rather than an imperative — a spec-wording
@@ -501,6 +515,10 @@ def test_every_specs_fix_verb_is_recognised() -> None:
                 continue
             unknown.setdefault(low, set()).add(path.stem)
 
+    assert openers_found == keys, (
+        f"read the opening verb of only {openers_found} of {keys} fix keys — a scalar style this scan "
+        "cannot parse hides a rule from the check entirely, which is the failure it exists to prevent"
+    )
     assert not unknown, (
         "These rule specs open a fix with a verb `asks_for_work` does not recognise, so their "
         "compositions are rejected as `stating_on_a_review` and the raw template ships:\n  "

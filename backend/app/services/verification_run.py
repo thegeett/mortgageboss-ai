@@ -609,6 +609,21 @@ def _collapse_uniform_passes(
                 threshold_used=first.threshold_used,
                 priya_validated=first.priya_validated,
                 gated_pending_signoff=first.gated_pending_signoff,
+                # bug-006 — RATIFICATION IS NOT A DEFAULT. Dropping `load_bearing_tags` and `apply` is
+                # deliberate (they belong to subjects this row no longer names); dropping this was not.
+                # ADR-378 calls ratification "the ENTIRE safety substitute for measurement", and
+                # `ratifies_every_finding` forces it True on every ratify-pending rule — so a collapsed
+                # pass built with the field defaulted would ship as a TRUSTED verdict with no human in
+                # the loop. CR-12 has no AI dependency so it is latent there, and this helper is
+                # generic: the next ratify-pending rule to declare `collapse_uniform` would be the one
+                # that found out. ANY means any — one subject needing ratification makes the summary of
+                # them need it too.
+                ratification_pending=any(r.ratification_pending for r in in_scope),
+                # And the provenance `_attach_document_provenance` set on the line above: the union of
+                # what every collapsed subject rested on, so the row can still name its sources.
+                source_content_ids=tuple(
+                    dict.fromkeys(cid for r in in_scope for cid in r.source_content_ids)
+                ),
                 reasoning=shared,
                 # A pass has nothing to remediate; any other uniform outcome keeps the shared fix,
                 # which is the same sentence every subject was carrying.

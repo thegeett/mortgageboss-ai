@@ -373,12 +373,22 @@ CONTENT_ID = re.compile(r"\b(?:doc|lia|txn|acct)[0-9a-f]{8,}\b")
 UUID_ID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 
 
-def leaked_identifiers(composition: Composition) -> set[str]:
-    """Tag ids, MISMO paths, or CONTENT IDS in the output — LP-377-B's rule, applied to generated text."""
-    text = composition.message
+def leaked_identifiers_in(text: str) -> set[str]:
+    """Tag ids, MISMO paths, content ids or UUIDs in any text bound for a processor.
+
+    THE ONE UNION — bug-006. These three patterns were added one at a time (LP-377-B, LP-607, LP-611),
+    and the coverage-flag path grew a second copy of the union with a comment claiming it had imported
+    rather than restated them. It had restated them: a fourth pattern here would have left that copy
+    checking three while the retraction path leaked the new shape. Every caller reads this.
+    """
     return (
         set(IDENTIFIER.findall(text)) | set(CONTENT_ID.findall(text)) | set(UUID_ID.findall(text))
     )
+
+
+def leaked_identifiers(composition: Composition) -> set[str]:
+    """LP-377-B's rule, applied to generated text."""
+    return leaked_identifiers_in(composition.message)
 
 
 #: The prompt with the verb list rendered in — built here rather than inline, because the template is

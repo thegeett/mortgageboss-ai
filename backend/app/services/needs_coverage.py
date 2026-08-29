@@ -58,14 +58,16 @@ logger = structlog.get_logger(__name__)
 def leaked_identifiers_in(text: str) -> set[str]:
     """Tag ids, content ids and UUIDs in text a processor will read (bug-005).
 
-    The SAME three patterns the composer refuses (`app/ai/finding_prose.py`), imported rather than
-    restated: a fourth spelling of "what an identifier looks like" is how one of them drifts.
+    DELEGATES to the composer's own check rather than rebuilding the union from its patterns — bug-006.
+    The first cut imported the three regexes and re-spelled `IDENTIFIER | CONTENT_ID | UUID_ID` here,
+    with a comment claiming that was "imported rather than restated". It was restated: the union was
+    the duplicated part, and `finding_prose.py` records those three patterns being added ONE AT A TIME
+    (LP-377-B, LP-607, LP-611). A fourth would have left this copy checking three while the retraction
+    path leaked the new shape — the exact drift the comment said it was preventing.
     """
-    from app.ai.finding_prose import CONTENT_ID, IDENTIFIER, UUID_ID
+    from app.ai.finding_prose import leaked_identifiers_in as _shared
 
-    return (
-        set(IDENTIFIER.findall(text)) | set(CONTENT_ID.findall(text)) | set(UUID_ID.findall(text))
-    )
+    return _shared(text)
 
 
 @dataclass(frozen=True)

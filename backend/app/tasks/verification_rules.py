@@ -39,7 +39,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import utcnow
-from app.models.finding import Finding, FindingStatus
+from app.models.finding import (
+    EvaluationOutcome,
+    Finding,
+    FindingResolutionStatus,
+    FindingStatus,
+)
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus
 from app.services.verification_run import run_verification
@@ -105,46 +110,78 @@ async def _run(loan_file_id: str, run_id: str) -> None:
         locked_status = await db.scalar(
             select(Verification.status).where(Verification.id == run.id).with_for_update()
         )
+        # bug-006 — THE COUNTS ARE READ BEFORE THE STATUS IS SET, and that ordering is the whole point.
+        # A savepoint rollback expires every DIRTY object in the session (`_restore_snapshot`), so
+        # taking one AFTER `run.status = COMPLETED` put the pending status inside what the rollback
+        # would discard: a failed count query would leave a run whose findings all persisted sitting
+        # non-COMPLETED until the stuck-run watchdog failed it. The savepoint added to protect the
+        # commit was the one thing that could destroy it.
+        #
+        # The flush is the other half: it settles anything `run_verification` left dirty, so the
+        # savepoint below has no unflushed state to expire either.
+        await db.flush()
+        counts = await _triage_counts(db, run.loan_file_id)
         if locked_status is not VerificationStatus.FAILED:
             run.status = VerificationStatus.COMPLETED
             run.completed_at = utcnow()
-            await _stamp_triage_counts(db, run)
+            if counts is not None:
+                run.red_count, run.yellow_count, run.green_count = counts
         await db.commit()
 
 
-async def _stamp_triage_counts(db: AsyncSession, run: Verification) -> None:
-    """Fill the run's red / yellow / green counts from the findings it left (bug-005).
+async def _triage_counts(db: AsyncSession, loan_file_id: UUID) -> tuple[int, int, int] | None:
+    """The file's red / yellow / green counts, or ``None`` if they could not be read (bug-005).
 
     These columns have existed since the first verification and were never written: EVERY completed run
-    on staging back to 2026-08-23 reads 0/0/0, including one carrying 130 findings and 21 reds. A
-    default of zero is the worst possible wrong answer here — anything reading these to summarise a run
-    reports a clean file, which is the one direction this codebase refuses everywhere else.
+    on staging back to 2026-08-23 read 0/0/0, including one carrying 130 findings and 21 reds. A default
+    of zero is the worst possible wrong answer — anything reading them to summarise a run reports a
+    clean file, the one direction this codebase refuses everywhere else.
 
-    Counted over the file's ACTIVE findings rather than the ones this run restamped: `verification_id`
-    marks what a run CHANGED, so counting by it would report 20 findings on a run that touched 20 and
-    left 110 standing. The number a processor wants is what the file says now.
+    Counted over the file rather than over what this run RESTAMPED: `verification_id` marks what a run
+    CHANGED, so counting by it would report 20 on a run that touched 20 and left 110 standing.
+
+    bug-006 — AND "ACTIVE" HAD TO MEAN WHAT THIS SAID. The first cut filtered on `deleted_at` alone,
+    which is neither of the things that make a finding count:
+
+      * a RETIRED finding is not soft-deleted — reconciliation sets `NO_LONGER_APPLIES` and a green
+        status and leaves the row live — so LF-AWBB's retired CR-1 rows would have landed in
+        `green_count`, inflating it with rows the engine had already decided were not concerns;
+      * a RESOLVED finding keeps its severity, because `_update_finding` deliberately never touches
+        `resolution_status` — so a file whose reds a processor had APPLIED or OVERRIDDEN would still
+        report them, which is the number they worked to clear.
+
+    Both are excluded. What is left is what is still open and still applies.
+
+    BEST-EFFORT, AND CONTAINED IN A SAVEPOINT. A summary must not fail a run whose verdicts are correct
+    and persisted, and a bare `except` around a DB read is best-effort only for non-DB errors: a
+    SQLAlchemy error poisons the session and the caller's `commit` would take the COMPLETED status with
+    it. bug-002 shipped exactly that mistake in `flag_covered_needs`.
     """
-    # BEST-EFFORT, AND CONTAINED IN A SAVEPOINT. This is a summary: a run whose verdicts are correct
-    # and persisted must not fail because a count did not come back. And the containment is not
-    # optional — a bare `except` around a DB read is best-effort only for non-DB errors, since a
-    # SQLAlchemy error poisons the session and the caller's `commit` two lines down would then take
-    # the COMPLETED status with it. bug-002 shipped exactly that mistake in `flag_covered_needs`.
     try:
         async with db.begin_nested():
             rows = (
                 await db.execute(
                     select(Finding.status, func.count())
-                    .where(Finding.loan_file_id == run.loan_file_id, Finding.deleted_at.is_(None))
+                    .where(
+                        Finding.loan_file_id == loan_file_id,
+                        Finding.deleted_at.is_(None),
+                        Finding.evaluation_outcome != EvaluationOutcome.NO_LONGER_APPLIES,
+                        Finding.resolution_status == FindingResolutionStatus.OPEN,
+                    )
                     .group_by(Finding.status)
                 )
             ).all()
     except Exception:
-        logger.warning("verification_triage_counts_failed", run_id=str(run.id), exc_info=True)
-        return
+        logger.warning(
+            "verification_triage_counts_failed", loan_file_id=str(loan_file_id), exc_info=True
+        )
+        return None
     counts: dict[FindingStatus, int] = dict(rows)  # type: ignore[arg-type]
-    run.red_count = counts.get(FindingStatus.RED, 0)
-    run.yellow_count = counts.get(FindingStatus.YELLOW, 0)
-    run.green_count = counts.get(FindingStatus.GREEN, 0)
+    return (
+        counts.get(FindingStatus.RED, 0),
+        counts.get(FindingStatus.YELLOW, 0),
+        counts.get(FindingStatus.GREEN, 0),
+    )
 
 
 async def _mark_failed(run_id: str) -> None:

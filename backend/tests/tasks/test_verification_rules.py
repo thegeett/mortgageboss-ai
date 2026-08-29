@@ -28,10 +28,19 @@ _COMPANY = uuid4()
 def _fake_session(objects: dict[object, object], *, locked_status=VerificationStatus.RUNNING):
     """A task_session replacement: an async CM yielding a db whose .get returns the mapped object and whose
     .scalar returns ``locked_status`` (the LP-377-C row-lock re-read the rule pass uses before COMPLETED)."""
+    # bug-006 — `flush` and `execute` are here because the real session has them and the completion path
+    # now uses both: it settles pending state before taking a savepoint, and reads the run's triage
+    # counts. A double that omits a method the code under test calls does not prove the code is wrong,
+    # it just stops the test at the first line that touches it.
     db = SimpleNamespace(
         get=AsyncMock(side_effect=lambda _model, key: objects.get(key)),
         scalar=AsyncMock(return_value=locked_status),
         commit=AsyncMock(),
+        flush=AsyncMock(),
+        # No `begin_nested`: `_triage_counts` is best-effort and contained, so a double without it
+        # exercises the degraded path — the counts are skipped and the run still completes, which is
+        # the property that matters here.
+        execute=AsyncMock(),
     )
 
     @asynccontextmanager
@@ -45,7 +54,9 @@ async def test_task_calls_orchestrator_with_run_params_and_no_stub(monkeypatch) 
     from app.tasks import verification_rules as vr
 
     loan_file = SimpleNamespace(id=_LF, company_id=_COMPANY)
-    run = SimpleNamespace(id=_RUN, status=VerificationStatus.RUNNING, completed_at=None)
+    run = SimpleNamespace(
+        id=_RUN, loan_file_id=_LF, status=VerificationStatus.RUNNING, completed_at=None
+    )
     cm, _db = _fake_session({_LF: loan_file, _RUN: run})
     monkeypatch.setattr(vr, "task_session", cm)
     orchestrator = AsyncMock()
@@ -73,7 +84,9 @@ async def test_governed_pass_does_not_complete_over_a_committed_failed(monkeypat
     from app.tasks import verification_rules as vr
 
     loan_file = SimpleNamespace(id=_LF, company_id=_COMPANY)
-    run = SimpleNamespace(id=_RUN, status=VerificationStatus.FAILED, completed_at=None)
+    run = SimpleNamespace(
+        id=_RUN, loan_file_id=_LF, status=VerificationStatus.FAILED, completed_at=None
+    )
     cm, _db = _fake_session({_LF: loan_file, _RUN: run}, locked_status=VerificationStatus.FAILED)
     monkeypatch.setattr(vr, "task_session", cm)
     monkeypatch.setattr(vr, "run_verification", AsyncMock())
