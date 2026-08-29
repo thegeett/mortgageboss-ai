@@ -529,3 +529,26 @@ def test_every_specs_fix_verb_is_recognised() -> None:
         "compositions are rejected as `stating_on_a_review` and the raw template ships:\n  "
         + "\n  ".join(f"{v} — {', '.join(sorted(rules))}" for v, rules in sorted(unknown.items()))
     )
+
+
+def test_the_prompt_demands_an_action_even_with_no_suggested_fix() -> None:
+    """bug-007 — the composition failures that survived every verb-list fix were all findings with NO
+    `how_to_fix`, and only 17 of the 84 specs declare a `couldnt_check_fix`.
+
+    The prompt's absent-fix branch said "ask ONLY for what problem says is missing" — a scope
+    instruction the model read as licence to hand the problem back. LF-AWBB shipped "whether this
+    income will continue long enough to be used could not be read from the documents" and "which
+    statement corresponds to the stated obligation cannot be determined": status reports, not tasks.
+    `asks_for_work` then rejected them, the retry produced the same shape, and the raw template shipped.
+
+    The fix is in the PROMPT, not in the specs. Authoring "Confirm…" prose per rule would make the
+    FALLBACK prettier while leaving composition failing — and what a processor reads should be composed
+    for their file, not a sentence an engineer wrote once for every file.
+    """
+    from app.ai.finding_prose import SYSTEM_PROMPT
+
+    assert "IS ABSENT, IT IS STILL AN ACTION" in SYSTEM_PROMPT
+    assert "never hand back the problem as a sentence" in SYSTEM_PROMPT
+    # The scope instruction has to survive alongside it — absent narrows WHAT may be asked for, and
+    # losing that would reopen the OC-2 miss where the model reasoned its way to a different question.
+    assert 'ask ONLY for what "problem" says is missing' in SYSTEM_PROMPT

@@ -142,7 +142,17 @@ RULES, all mandatory:
 - The action must make THE SAME REQUEST as "suggested_fix". Sharpen its wording, name the document it
   names — but never ask for a document or a step it does not ask for. "evidence" is context for the
   "why"; it is NOT a list of things to request. A document mentioned there may not exist for this loan.
-- WHEN "suggested_fix" IS ABSENT, ask ONLY for what "problem" says is missing, and introduce NO new
+- WHEN "suggested_fix" IS ABSENT, IT IS STILL AN ACTION. Absent narrows the SCOPE of what you may
+  ask for; it does not change the FORM. Begin with what the processor must DO about the thing
+  "problem" says is missing, and never hand back the problem as a sentence:
+    * "The payment history could not be read from the credit report."   <- the PROBLEM, not an action
+    * "Obtain a readable payment history for this mortgage."            <- the action
+    * "Which statement matches the stated liability cannot be determined." <- the PROBLEM
+    * "Identify which statement matches the liability on the application." <- the action
+  A check that could not complete is a task: someone has to go and resolve it, and the sentence you
+  write is what tells them to. Restating what the engine could not do reads as a status report and
+  leaves them nothing to act on.
+- WITH "suggested_fix" ABSENT, ask ONLY for what "problem" says is missing, and introduce NO new
   question. A rule that could not complete its check states what it could not resolve; that, and
   nothing beyond it, is the request. Do not reason from the situation to a DIFFERENT thing a
   processor might want to know — another rule may own that question and be asking it already, and two

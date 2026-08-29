@@ -16,6 +16,8 @@ The four constraints, in the order they matter:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from app.ai.finding_prose import (
     Composition,
@@ -563,3 +565,44 @@ def test_the_summary_says_whether_the_finding_is_a_pass() -> None:
     assert "already_resolved" in settled.to_json()
     # ...and an unsettled one does not carry the flag at all, so every existing cache key is unchanged.
     assert "already_resolved" not in _SUMMARY.to_json()
+
+
+def test_a_document_already_on_the_file_is_not_unrequested() -> None:
+    """bug-007 — LP-613's fix had never once fired.
+
+    `documents_named` returns catalog SLUGS ("w2"); `document_kinds_on_file` holds readable LABELS
+    ("W-2"), because that is what the prompt shows the model. Subtracting labels from slugs cancels
+    nothing, so the comment describing the fix outlived any behaviour matching it.
+
+    IN-13 is what it cost on LF-AWBB: the prompt tells the model in as many words that naming a kind
+    from the on-file list is allowed, it named a W-2 on a file carrying THREE of them, the guard called
+    that unrequested, and the raw template shipped — the exact text LP-609/610/613 were replacing.
+    """
+    from app.services.finding_prose import documents_named, unrequested_documents
+    from app.verification.rule_engine.reasons import document_label
+
+    label = document_label("w2")
+    assert documents_named(label) == {"w2"}, "the label must read back as its slug"
+
+    finding = SimpleNamespace(rule_id="IN-13")
+    summary = SimpleNamespace(
+        problem="the income continuation could not be established",
+        fix=None,
+        document_kinds_on_file=(label, document_label("pay_stub")),
+    )
+    assert (
+        unrequested_documents(finding, summary, "Obtain the borrower's W-2 for the prior year")
+        == set()
+    )
+
+
+def test_a_document_the_file_does_not_have_is_still_caught() -> None:
+    """The guard's actual job survives the fix: OC-2 asking a REFINANCE for a purchase contract that
+    does not exist and never will is what it was written to stop."""
+    from app.services.finding_prose import unrequested_documents
+
+    finding = SimpleNamespace(rule_id="IN-13")
+    summary = SimpleNamespace(problem="x", fix=None, document_kinds_on_file=("W-2",))
+    assert unrequested_documents(finding, summary, "Obtain the purchase contract") == {
+        "purchase_agreement"
+    }

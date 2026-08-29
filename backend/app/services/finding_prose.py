@@ -221,7 +221,18 @@ def unrequested_documents(finding: Finding, summary: FactSummary, action: str) -
     # composition that followed the instruction was discarded as unrequested and the raw template
     # shipped instead — the exact text LP-609/610 were replacing. Naming a document the file HAS is not
     # a shopping list; it is the opposite.
-    on_file = set(summary.document_kinds_on_file)
+    # bug-007 — ONE VOCABULARY ON BOTH SIDES. `documents_named` returns catalog SLUGS ("w2");
+    # `document_kinds_on_file` holds readable LABELS ("W-2"), because that is what the prompt shows the
+    # model. Subtracting labels from slugs cancels nothing, so LP-613's fix has never once fired: the
+    # comment above describes behaviour the code did not have.
+    #
+    # IN-13 is what it cost. The prompt tells the model in as many words that naming a kind from the
+    # on-file list is allowed; it named a W-2 on a file carrying THREE of them, the guard called that
+    # unrequested, and the raw template shipped — the exact text LP-609/610/613 were replacing.
+    #
+    # Reading the labels back through the SAME matcher is what makes the two sides one vocabulary by
+    # construction, rather than by a mapping that can drift.
+    on_file = documents_named(" ".join(summary.document_kinds_on_file))
     return documents_named(action) - declared - template - on_file
 
 
