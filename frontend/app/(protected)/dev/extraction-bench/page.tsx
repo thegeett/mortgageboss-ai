@@ -120,7 +120,7 @@ export default function ExtractionBenchPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
+        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900">
           <FlaskConical className="h-6 w-6 text-primary" />
           Extraction bench
         </h2>
@@ -338,7 +338,7 @@ export default function ExtractionBenchPage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-2xl font-bold text-gray-900">{value}</div>
+      <div className="text-2xl font-semibold text-gray-900">{value}</div>
       <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
     </div>
   );

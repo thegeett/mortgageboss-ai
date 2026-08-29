@@ -8,7 +8,7 @@ export default function LoanFilesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900">Loan files</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-gray-900">Loan files</h2>
         <p className="mt-1 text-gray-500">Assemble, verify, and submit your loan files.</p>
       </div>
 

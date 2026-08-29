@@ -159,7 +159,7 @@ export default function HomePage() {
               </span>
             </div>
             <div className="space-y-2">
-              <CardTitle className="text-3xl font-bold tracking-tight text-gray-900">
+              <CardTitle className="text-3xl font-semibold tracking-tight text-gray-900">
                 Loan processing, organized.
               </CardTitle>
               <CardDescription className="mx-auto max-w-md text-base text-gray-500">

@@ -27,7 +27,7 @@ export default function AdminLendersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
+        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900">
           <SlidersHorizontal className="h-6 w-6 text-primary" />
           Lender overlays
         </h2>

@@ -44,7 +44,7 @@ export default function ValidationAidPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
+        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900">
           <FlaskConical className="h-6 w-6 text-primary" />
           Rule &amp; calculator validation
         </h2>

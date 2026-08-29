@@ -466,6 +466,22 @@ describe("VerificationPanel", () => {
       expect(screen.getByText(/Verification didn't complete/)).toBeDefined();
     });
 
+    it("is styled as a failure, not as neutral text", () => {
+      // LP-UI-002. The banner carried `border-danger/40 bg-danger/5 text-danger`
+      // against a colour tailwind.config.ts never defined, so the classes compiled
+      // to nothing and a dead six-minute run announced itself in grey. This pins
+      // the markup; `tailwind.config.test.ts` pins the token those classes need,
+      // which is the half a DOM test cannot see.
+      mock({
+        data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: "boom" } },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      const banner = screen.getByRole("alert");
+      expect(banner.className).toContain("border-danger/40");
+      expect(banner.className).toContain("bg-danger/5");
+      expect(banner.querySelector(".text-danger")).not.toBeNull();
+    });
+
     it("falls back to a generic reason when the run carries no detail", () => {
       mock({
         data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: null } },

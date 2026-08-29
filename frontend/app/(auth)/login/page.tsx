@@ -39,7 +39,7 @@ export default function LoginPage() {
 
         <Card className="border-gray-200/80 shadow-xl shadow-gray-900/5">
           <CardHeader className="space-y-1.5">
-            <CardTitle className="text-2xl font-bold tracking-tight text-gray-900">
+            <CardTitle className="text-2xl font-semibold tracking-tight text-gray-900">
               Sign in
             </CardTitle>
             <CardDescription className="text-gray-500">

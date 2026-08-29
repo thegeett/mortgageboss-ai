@@ -117,7 +117,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900">{view.name}</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-gray-900">{view.name}</h2>
         <p className="mt-1 text-sm text-gray-500">
           Overlay overrides — the lender&apos;s deviations from the investor default. Editing a
           threshold changes what enforcement uses for this lender.

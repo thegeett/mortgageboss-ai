@@ -25,7 +25,7 @@ export default function NewLoanFilePage() {
           <ArrowLeft className="h-4 w-4" />
           Back to dashboard
         </Link>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight text-gray-900">New loan file</h1>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-gray-900">New loan file</h1>
         <p className="mt-1 text-sm text-gray-500">
           Import the MISMO file from your loan origination system — or enter the application by
           hand.

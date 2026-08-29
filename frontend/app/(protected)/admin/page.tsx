@@ -17,7 +17,7 @@ export default function AdminPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900">Administration</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-gray-900">Administration</h2>
         <p className="mt-1 text-gray-500">Manage your company&apos;s users and configuration.</p>
       </div>
 
