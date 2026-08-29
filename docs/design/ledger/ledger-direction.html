@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Ledger Direction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root {
+  --paper:   #FBFCFC;
+  --surface: #FFFFFF;
+  --sunken:  #F3F5F5;
+  --ink:     #101617;
+  --ink-2:   #3D4746;
+  --ink-3:   #6C7674;
+  --line:    #E3E7E6;
+  --line-2:  #CDD3D2;
+  --accent:  #12545E;
+  --accent-hi: #17707D;
+  --accent-soft: #E4EFF0;
+  --crit:    #B23A2A;
+  --crit-soft: #FAEDEA;
+  --att:     #8F5D08;
+  --att-soft:#FAF2E1;
+  --ver:     #1B6E52;
+  --ver-soft:#E6F2EC;
+  --ai:      #5B4FA8;
+  --ai-soft: #EEECF9;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #0C1011;
+    --surface: #121818;
+    --sunken:  #182020;
+    --ink:     #E9EEED;
+    --ink-2:   #BAC4C2;
+    --ink-3:   #8B9592;
+    --line:    #222B2B;
+    --line-2:  #2E3838;
+    --accent:  #4FB3C0;
+    --accent-hi: #6DC9D5;
+    --accent-soft: #122B2E;
+    --crit:    #EC8375;
+    --crit-soft: #2B1815;
+    --att:     #D9A03E;
+    --att-soft:#2A2113;
+    --ver:     #52C093;
+    --ver-soft:#12241C;
+    --ai:      #A99BEE;
+    --ai-soft: #1E1B2E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:   #0C1011;
+  --surface: #121818;
+  --sunken:  #182020;
+  --ink:     #E9EEED;
+  --ink-2:   #BAC4C2;
+  --ink-3:   #8B9592;
+  --line:    #222B2B;
+  --line-2:  #2E3838;
+  --accent:  #4FB3C0;
+  --accent-hi: #6DC9D5;
+  --accent-soft: #122B2E;
+  --crit:    #EC8375;
+  --crit-soft: #2B1815;
+  --att:     #D9A03E;
+  --att-soft:#2A2113;
+  --ver:     #52C093;
+  --ver-soft:#12241C;
+  --ai:      #A99BEE;
+  --ai-soft: #1E1B2E;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1024px; margin: 0 auto; padding: 0 28px 96px; }
+.col  { max-width: 70ch; }
+.wide { max-width: 100%; }
+
+/* ---- masthead ---- */
+header.mast { padding: 62px 0 34px; border-bottom: 1px solid var(--line-2); margin-bottom: 34px; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--accent); font-weight: 500; margin: 0 0 14px;
+}
+h1 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: clamp(34px, 5.2vw, 52px); line-height: 1.06; letter-spacing: -.022em;
+  margin: 0; color: var(--ink); text-wrap: balance; max-width: 17ch;
+}
+.standfirst { font-size: 17.5px; line-height: 1.58; color: var(--ink-3); margin: 18px 0 0; max-width: 62ch; }
+.byline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin: 22px 0 0; }
+
+/* ---- structure ---- */
+h2 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: 27px; line-height: 1.2; letter-spacing: -.016em; color: var(--ink);
+  margin: 62px 0 6px; text-wrap: balance;
+}
+h2 .n {
+  display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
+  font-weight: 500; margin-bottom: 9px;
+}
+h3 { font-size: 16px; font-weight: 600; color: var(--ink); margin: 34px 0 6px; letter-spacing: -.008em; }
+h4 { font-size: 14px; font-weight: 600; color: var(--ink); margin: 22px 0 4px; }
+p { margin: 0 0 15px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .88em; }
+p code, li code, td code { background: var(--sunken); border: 1px solid var(--line); border-radius: 3px; padding: .5px 4px; color: var(--ink); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0 0 15px; padding-left: 20px; }
+li { margin-bottom: 7px; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 46px 0; }
+
+/* ---- findings list: numbering encodes a real audit sequence ---- */
+.finding { max-width: 76ch; display: grid; grid-template-columns: 36px 1fr; gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
+.finding:last-of-type { border-bottom: 1px solid var(--line); }
+.fn { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.fh { font-size: 15.5px; font-weight: 600; color: var(--ink); margin: 0 0 4px; letter-spacing: -.008em; }
+.fw { margin: 0; font-size: 14.5px; }
+.where { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin-top: 7px; }
+.sev { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; vertical-align: 2px; margin-left: 7px; font-weight: 500; }
+.sev.bug { background: var(--crit-soft); color: var(--crit); }
+.sev.friction { background: var(--att-soft); color: var(--att); }
+.sev.absent { background: var(--ai-soft); color: var(--ai); }
+
+/* ---- pull box ---- */
+.rule { max-width: 68ch; border-left: 3px solid var(--accent); padding: 4px 0 4px 20px; margin: 26px 0; }
+.rule p { font-family: "IBM Plex Serif", Georgia, serif; font-size: 19px; line-height: 1.45; color: var(--ink); margin: 0; }
+
+.callout { max-width: 74ch; border: 1px solid var(--line); border-left: 3px solid var(--att); background: var(--surface); border-radius: 0 6px 6px 0; padding: 14px 18px; margin: 24px 0; font-size: 14.5px; }
+.callout.acc { border-left-color: var(--accent); }
+.callout .lab { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+
+/* ---- code ---- */
+pre {
+  max-width: 100%;
+  background: var(--sunken); border: 1px solid var(--line); border-radius: 7px;
+  padding: 16px 18px; overflow-x: auto; margin: 20px 0;
+  font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.62; color: var(--ink-2);
+}
+pre .c { color: var(--ink-3); font-style: italic; }
+pre .k { color: var(--accent); }
+pre .v { color: var(--ink); }
+
+/* ---- tables ---- */
+.tw { overflow-x: auto; margin: 22px 0; border: 1px solid var(--line); border-radius: 7px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; background: var(--surface); }
+th {
+  text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600; padding: 9px 14px; background: var(--sunken);
+  border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.now { color: var(--ink-3); }
+td.next { color: var(--ink); }
+td strong { font-weight: 500; }
+
+/* ---- phase list ---- */
+.phase { max-width: 76ch; border-top: 1px solid var(--line); padding: 20px 0; display: grid; grid-template-columns: 122px 1fr; gap: 20px; }
+.phase:last-child { border-bottom: 1px solid var(--line); }
+.phase .tag { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent); font-weight: 500; }
+.phase .tag em { display: block; font-style: normal; color: var(--ink-3); margin-top: 3px; font-size: 11px; }
+.phase h4 { margin: 0 0 5px; }
+.phase p { margin: 0; font-size: 14.5px; }
+
+/* ---- question block ---- */
+.q { max-width: 76ch; border-top: 1px solid var(--line); padding: 16px 0; }
+.q:last-child { border-bottom: 1px solid var(--line); }
+.q h4 { margin: 0 0 3px; }
+.q p { margin: 0; font-size: 14.5px; }
+.q .rec { color: var(--accent); font-weight: 500; }
+
+footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line-2); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); }
+@media (max-width: 640px) {
+  .finding, .phase { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+<header class="mast">
+  <p class="eyebrow">Design direction · mortgageboss-ai frontend</p>
+  <h1>The product is a reconciliation. The UI should look like one.</h1>
+  <p class="standfirst">A read of all 125 components, a look at what dense professional tools do in 2026, and a proposed system — <span class="mono" style="color:var(--accent)">Ledger</span> — with four screens built to prove it.</p>
+  <p class="byline">Next.js 15 · Tailwind · shadcn/ui · 125 components · Phase 3 complete</p>
+</header>
+
+<div class="col">
+
+<h2><span class="n">01 — What's actually there</span>The engineering is ahead of the interface</h2>
+
+<p>This is not a codebase in trouble. The rule engine distinguishes <code>open</code> from <code>couldnt_check</code> from <code>pending_automation</code> so a gap in evidence can never read as a pass. Findings carry their guideline citation from the spec rather than from the model's memory. Needs carry falsifiable source facts. Calculators show their arithmetic and let a processor override any input. The comments in <code>rule-findings.ts</code> argue about whether "violation" is a word processors actually use.</p>
+
+<p>That is a rare amount of care about telling the truth to a human being. The interface does not yet carry it. Nine things stand between the two, found by reading rather than guessing.</p>
+
+</div>
+
+<div class="finding">
+  <div class="fn">01</div>
+  <div>
+    <p class="fh">The failure banner has no colour<span class="sev bug">bug</span></p>
+    <p class="fw">Twenty class names across four files use a <code>danger</code> colour that does not exist. <code>tailwind.config.ts</code> defines <code>destructive</code>, <code>success</code>, <code>warning</code> and <code>info</code> — never <code>danger</code>. So <code>border-danger/40 bg-danger/5 text-danger</code> compiles to nothing. The component it silently disarms is <code>FailedRunBanner</code>: the one that tells a processor a six-minute verification run died on the worker. It currently renders as plain grey text.</p>
+    <span class="where">verification-panel.tsx:553 · calculator-card.tsx:35,37 · admin/lenders/[id]/page.tsx:181,208,217</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">02</div>
+  <div>
+    <p class="fh">Six status vocabularies, none aware of the others<span class="sev friction">friction</span></p>
+    <p class="fw"><code>STATUS_META</code> (8 loan states), <code>DOCUMENT_STATUS_META</code> (7), <code>STATE_META</code> (6 needs states), <code>OUTCOME_META</code> (7 evaluation outcomes), <code>PRIORITY_META</code> (3) and two ad-hoc maps inside the calculators. Each invents its own colour mapping. A processor learns amber six times, and "amber" means a different thing each time.</p>
+    <span class="where">lib/loan-files/status.ts · documents.ts · needs.ts · lib/verification/rule-findings.ts</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">03</div>
+  <div>
+    <p class="fh">The app is capped at 1152px<span class="sev friction">friction</span></p>
+    <p class="fw"><code>AppShell</code> wraps every page in <code>max-w-6xl</code>. On the verification screen — six calculators, five outcome tabs, findings with sources, actions and provenance — that cap is the reason everything nests. A processor with a 27-inch monitor gets grey margins on both sides of the densest screen in the product.</p>
+    <span class="where">components/layout/app-shell.tsx:21</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">04</div>
+  <div>
+    <p class="fh">Cards inside cards inside cards<span class="sev friction">friction</span></p>
+    <p class="fw">Verification renders <code>Card</code> → <code>CardContent</code> → <code>RuleFindingsTabs</code> → per-finding bordered row → nested tag panel. Four rounded borders and four shadows to reach one sentence of meaning. Sixteen files import <code>ui/card</code>; on a dense screen a card is a wall, and the app is mostly walls.</p>
+    <span class="where">verification-panel.tsx · rule-findings-tabs.tsx · finding-card.tsx</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">05</div>
+  <div>
+    <p class="fh">Rows are 53px tall<span class="sev friction">friction</span></p>
+    <p class="fw">shadcn's default <code>TableCell</code> is <code>p-4</code> and <code>TableHead</code> is <code>h-12</code>. A processor scanning forty files sees fifteen of them. At 28px they see twenty-four. This is the single cheapest change in the list.</p>
+    <span class="where">components/ui/table.tsx:63,77</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">06</div>
+  <div>
+    <p class="fh">Four network calls to render four numbers you can't click<span class="sev friction">friction</span></p>
+    <p class="fw"><code>StatsCards</code> fires <code>useLoanFiles</code> four times with <code>pageSize: 1</code> purely to read <code>total</code> off each response. The counts are honest — the comment says so, proudly — but they are not filters. Clicking "Action needed: 6" does nothing. Below them sit filter pills that do the same job and work.</p>
+    <span class="where">components/dashboard/stats-cards.tsx</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">07</div>
+  <div>
+    <p class="fh">Colour is doing status work alone<span class="sev friction">friction</span></p>
+    <p class="fw">The calculator tiles and the needs list encode state as a bare coloured dot — <code>bg-destructive</code> against <code>bg-success</code> — with no glyph and no word. Roughly one in twelve men cannot separate those two reliably, and neither can a printed loan file.</p>
+    <span class="where">calculators-section.tsx:33 · lib/loan-files/needs.ts STATE_META.dotClass</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">08</div>
+  <div>
+    <p class="fh">Dark mode is configured but never written<span class="sev absent">absent</span></p>
+    <p class="fw"><code>darkMode: ["class"]</code> is set in the Tailwind config. <code>globals.css</code> contains zero <code>.dark</code> declarations. Half the tooling is in place for a mode that cannot be turned on.</p>
+    <span class="where">tailwind.config.ts:5 · app/globals.css</span>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="fn">09</div>
+  <div>
+    <p class="fh">There is no document viewer<span class="sev absent">absent</span></p>
+    <p class="fw">The extraction shape already carries <code>SourceLocation { page, snippet }</code> on every field. Findings carry <code>source_page</code>, <code>source_snippet</code> and the full <code>source_documents</code> set. The backend knows exactly where each number came from. The UI spends that provenance on a text link to a drawer. Nobody can see the number on the page it was read from.</p>
+    <span class="where">lib/types/document.ts SourceLocation · finding-card.tsx SourceDocLink</span>
+  </div>
+</div>
+
+<div class="col">
+<p style="margin-top:26px">Two of these are the interesting ones. Everything else is housekeeping.</p>
+</div>
+
+<div class="rule">
+  <p>The product's whole job is putting a stated number next to a found number and saying whether they agree. That comparison never appears on screen as a comparison.</p>
+</div>
+
+<div class="col">
+<p>Stated financials live on the Overview. Extracted values live in a document drawer. The verdict lives in a finding on the Verification tab. The processor holds the comparison in their head across three routes. Everything below follows from fixing that.</p>
+
+<h2><span class="n">02 — The direction</span>Ledger</h2>
+
+<p>The name is the structural idea, not decoration. A ledger has two columns that must reconcile, a rule between them, and a hand in the margin where they don't. That is literally what a loan file is, and it gives the system a shape that is specific to this product rather than borrowed from whatever dashboard shipped last week.</p>
+
+<h3>Six rules, enforceable in review</h3>
+
+<ol>
+  <li><strong>Hairlines, not cards.</strong> One pixel of <code>--line</code> and a surface step do every job a border-radius-plus-shadow was doing. Shadows are reserved for things that genuinely float: menus, dialogs, tooltips. This alone removes about a third of the visual weight of the verification screen.</li>
+  <li><strong>Weight stops at 600.</strong> No 700 exists in the system. Hierarchy comes from size, colour and space. On a screen with forty labels, bold is not emphasis — it is noise with a reputation.</li>
+  <li><strong>One accent, spent only on primary action and active state.</strong> Not on links, not on headings, not on icons. Petrol <code>#12545E</code> because it sits far from red, amber and green in hue and therefore never argues with a status.</li>
+  <li><strong>Status is three channels: colour, glyph shape, word.</strong> Always all three. Remove the colour and the row still reads.</li>
+  <li><strong>AI state is a left rail and an icon, never a background fill.</strong> Fills stack badly — what does a hovered, focused, low-confidence, conflicting field look like? — and they cost contrast. A 2px rail scans vertically down a forty-field form and composes with everything.</li>
+  <li><strong>Every number that lines up in a column is <code>tabular-nums</code>.</strong> Money, rates, dates, ratios, file IDs. Non-negotiable.</li>
+</ol>
+
+<h3>Typeface</h3>
+
+<p>The current stack is <code>-apple-system, BlinkMacSystemFont, "Segoe UI"</code> — which is to say, no decision. <strong>IBM Plex Sans</strong> instead: engineered for product UI at 13px, real personality in the sheared terminals and the single-storey <code>g</code>, and it brings <strong>IBM Plex Mono</strong> for the thing this app does constantly — money, ratios, loan IDs, source citations, formulas. A third face, <strong>IBM Plex Serif</strong>, appears in exactly one place: quoted text lifted verbatim from a document. A serif in italic makes "this is the document speaking, not the app" legible without a label.</p>
+
+<div class="callout acc">
+  <span class="lab">Why not Inter</span>
+  Inter is the default every AI-assisted redesign reaches for, and it would make this app look like every other B2B tool. Plex costs nothing extra and gives the product a face. It is also, not incidentally, a typeface commissioned for an institution that sells trust in systems.
+</div>
+
+<h3>The tokens</h3>
+
+<p>This replaces the <code>:root</code> block in <code>app/globals.css</code> wholesale. Two changes of principle: there are now <strong>two border tokens</strong>, because the hairline that is beautiful as a table rule fails WCAG 1.4.11 as an input border; and there is a <strong>separate AI hue</strong> that is not a status and never means "bad".</p>
+
+<pre><span class="c">/* Ledger — light. Dark redefines only these values. */</span>
+:root {
+  <span class="c">/* neutrals, biased faintly cool so they read as chosen */</span>
+  --background:       <span class="v">#FBFCFC</span>;   --surface:      <span class="v">#FFFFFF</span>;
+  --surface-2:        <span class="v">#F3F5F5</span>;   --surface-3:    <span class="v">#ECEFEF</span>;
+  --foreground:       <span class="v">#101617</span>;   --foreground-2: <span class="v">#47514F</span>;
+  --muted-foreground: <span class="v">#6C7674</span>;   <span class="c">/* 4.6:1 — the floor for 13px */</span>
+
+  <span class="c">/* two borders, deliberately */</span>
+  --border:           <span class="v">#E3E7E6</span>;   <span class="c">/* decorative: rules, dividers */</span>
+  --border-strong:    <span class="v">#CDD3D2</span>;
+  --border-control:   <span class="v">#A9B1AF</span>;   <span class="c">/* ≥3:1 — inputs, checkboxes, selects */</span>
+
+  <span class="c">/* one accent */</span>
+  --primary:          <span class="v">#12545E</span>;   --primary-hover: <span class="v">#17707D</span>;
+  --primary-soft:     <span class="v">#E4EFF0</span>;   --ring:          <span class="v">#12545E</span>;
+
+  <span class="c">/* status — always paired with a glyph and a word */</span>
+  --blocking:         <span class="v">#B23A2A</span>;   --blocking-soft:  <span class="v">#FAEDEA</span>;
+  --attention:        <span class="v">#8F5D08</span>;   --attention-soft: <span class="v">#FAF2E1</span>;
+  --verified:         <span class="v">#1B6E52</span>;   --verified-soft:  <span class="v">#E6F2EC</span>;
+
+  <span class="c">/* provenance — NOT a status */</span>
+  --ai:               <span class="v">#5B4FA8</span>;   --ai-soft:        <span class="v">#EEECF9</span>;
+
+  <span class="c">/* geometry: tool, not marketing site */</span>
+  --radius:           <span class="v">5px</span>;       --radius-container: <span class="v">8px</span>;
+  --row-compact:      <span class="v">28px</span>;      --row-comfortable:  <span class="v">36px</span>;
+  --row-relaxed:      <span class="v">44px</span>;
+
+  <span class="c">/* shared with the backend's thresholds */</span>
+  --confidence-standard: <span class="v">0.85</span>;   --confidence-critical: <span class="v">0.97</span>;
+}</pre>
+
+<p>Radius is the quiet one. shadcn ships <code>0.5rem</code> and the app kept it; 5px for controls and 8px for containers is the difference between "product" and "landing page", and nobody will be able to say why the new one looks more serious.</p>
+
+<h2><span class="n">03 — Screen by screen</span>What changes, and why</h2>
+
+<h3>Shell</h3>
+
+<p>Three regions replace the fixed sidebar and centred column: a 52px icon rail that collapses with <code>⌘B</code>, a context column whose contents depend on where you are (saved views on the pipeline, file sections inside a file), and a full-bleed work surface. Inside a loan file, a fourth region appears on the right: a context rail carrying loan amount, DTI, LTV, reserves and the blocking count. Those four numbers are the reason a processor switches tabs today. Pin them and the tab switching mostly stops.</p>
+
+</div>
+
+<div class="tw wide">
+<table>
+  <thead><tr><th style="width:24%">Screen</th><th style="width:38%">Today</th><th style="width:38%">Ledger</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Dashboard</strong></td><td class="now">Four stat cards (4 queries, not clickable), four hard-coded filter pills, 53px rows, six columns</td><td class="next">Saved views in the rail, including "current user" so one shared view serves the team. 28px rows. An <strong>Attention</strong> column that says what is wrong, and a needs-progress bar.</td></tr>
+    <tr><td><strong>/loan-files</strong></td><td class="now">A stub that says the feature arrives in Epic 4, reachable from the main nav</td><td class="next">Delete the route. The dashboard is the list. A nav item that leads to an apology is worse than no nav item.</td></tr>
+    <tr><td><strong>File overview</strong></td><td class="now">Three cards, a stated-financials section, a needs dashboard, an activity feed, two "coming in Phase 6" placeholders</td><td class="next">Identity strip, then the <strong>reconciliation ledger</strong> — stated against found, rail-coded per row, each value linked to its page. Documents and needs below. Placeholders removed.</td></tr>
+    <tr><td><strong>Verification</strong></td><td class="now">Six calculator tiles, then a Card containing tabs containing cards; the legacy AI sweep quarantined in tab five</td><td class="next">Calculator strip with one expanded and its arithmetic visible. Outcome tabs at the top level. Findings as rail-coded rows. Missing-document requests batched in the context rail.</td></tr>
+    <tr><td><strong>Documents</strong></td><td class="now">Grouped list; clicking opens a drawer with metadata and an extraction table</td><td class="next">Three panes: document list, page canvas with boxes, extracted fields. Field ↔ box linking both directions. The drawer becomes the fallback for a document with no page image.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="col">
+<h3>The document reviewer, in detail</h3>
+
+<p>This is the one that does not exist yet and pays for itself fastest. Four decisions worth stating up front:</p>
+
+<p><strong>State lives on the left rail, not the background.</strong> A field that was extracted with high confidence and passes its rules gets <em>no chrome at all</em> — no yellow, no badge, nothing. Rossum-style products colour every freshly extracted field amber, which works for a twelve-field invoice and is useless for a loan file with 150 fields across fifteen documents, where everything is amber on load. Amber here means "a human needs to look at this", and it is rare enough to mean something.</p>
+
+<p><strong>Criticality overrides confidence.</strong> A 0.97-confidence loan amount, note rate, SSN or income figure still gets flagged. Two thresholds, both already expressible in the token block above: 0.85 for ordinary fields, 0.97 for the ones that move a decision.</p>
+
+<p><strong>Confidence is words and a location, never a decimal.</strong> "Matched to the paystub, page 2, YTD line" is worth more than "0.91", and "99.73%" is worse than both — false precision reads as a system that does not know what it does not know. The number belongs in a hover, next to the grounding excerpt.</p>
+
+<p><strong>An inferred value is badged as inferred.</strong> A figure the model carried over or derived, rather than read off a page, must not look identical to one it read. That is the difference between a defensible file and an audit finding, and the extraction shape already has the field to drive it.</p>
+
+<div class="callout">
+  <span class="lab">One guardrail worth copying exactly</span>
+  When a field is selected and the processor clicks a <em>different</em> value on the document, navigate to that other field rather than overwriting the selected field's value. It is the single most common destructive misclick in this entire interaction pattern.
+</div>
+
+<h3>Keyboard</h3>
+
+<p>The review loop should be operable without the mouse, because the metric that matters is flagged fields per minute: <code>Tab</code> to the next field needing attention (skipping confident ones), <code>Enter</code> to accept, <code>E</code> to edit, <code>R</code> to reject, <code>[</code> and <code>]</code> between documents, <code>⌘Enter</code> to mark reviewed and advance. Underneath it, the tables need the ARIA grid pattern with a roving tabindex — a 40-row, 9-column table must not be 360 tab stops, which is what <code>tabIndex={0}</code> on every row in <code>file-table.tsx</code> currently produces.</p>
+
+<h2><span class="n">04 — Sequence</span>Five phases, each shippable alone</h2>
+
+<div class="phase">
+  <div class="tag">Phase A<em>~2 days</em></div>
+  <div>
+    <h4>Fix what's broken, land the tokens</h4>
+    <p>Add the missing <code>danger</code> colour or replace all twenty usages with <code>destructive</code> — the failure banner has been invisible for a while. Land the token block, the Plex faces, and the dark palette the config already promises. Collapse the six status maps into one <code>StatusToken</code> component taking a semantic state and rendering rail, glyph and word. Nothing visual ships yet except that the colours are now real.</p>
+  </div>
+</div>
+<div class="phase">
+  <div class="tag">Phase B<em>~3 days</em></div>
+  <div>
+    <h4>Shell and density</h4>
+    <p>Drop <code>max-w-6xl</code>. Replace the sidebar with the shadcn sidebar block at <code>collapsible="icon"</code>, cookie-persisted so it doesn't re-expand on every navigation. Add the context rail on file routes. Set table rows to 28px with a persisted per-person density preference. Delete the <code>/loan-files</code> stub. This is where the app starts feeling different.</p>
+  </div>
+</div>
+<div class="phase">
+  <div class="tag">Phase C<em>~4 days</em></div>
+  <div>
+    <h4>Verification, de-nested</h4>
+    <p>Lift the outcome tabs to the top level of the page. Findings become rail-coded rows rather than cards. Calculator strip with the arithmetic shown. Group the six <code>couldnt_check</code> findings by the document they are missing so "request all four" is one action instead of six. No backend change — every field this needs is already on <code>RuleFinding</code>.</p><p style="margin-top:9px;font-size:13.5px;color:var(--ink-3)">Two deliberate departures in the mockup: <code>couldnt_check</code> gets its own tab rather than sitting inside <strong>Needs attention</strong> (the batched request action in the context rail is what makes that safe — the gaps stay loud, they just stop crowding the real findings), and <strong>Needs</strong> gets its own route instead of living halfway down the Overview.</p>
+  </div>
+</div>
+<div class="phase">
+  <div class="tag">Phase D<em>~2 weeks</em></div>
+  <div>
+    <h4>The document reviewer</h4>
+    <p>The real work, and the differentiator. Three resizable panes with the split persisted, container queries on the fields panel so it reflows to its own width rather than the window's, bidirectional field ↔ box linking, provenance chips, and the keyboard rhythm. Needs page images and box coordinates from the extraction pipeline — worth scoping against the backend before committing to the date.</p>
+  </div>
+</div>
+<div class="phase">
+  <div class="tag">Phase E<em>~3 days</em></div>
+  <div>
+    <h4>Accessibility pass</h4>
+    <p>Contrast audit at 13px against every surface including zebra rows. <code>:focus-visible</code> rings at 2px with 2px offset, plus <code>scroll-margin-block</code> so focus never lands behind the sticky header. 24px minimum for icon buttons. Keyboard alternatives for column and pane resize. A colour-vision-deficiency simulation pass over every status state.</p>
+  </div>
+</div>
+
+<h3>On Tailwind v4</h3>
+
+<p>Worth doing, and worth doing <em>separately</em> from the visual work so a regression has one obvious cause. The upgrade codemod handles most of it; five changes silently alter appearance and need a hand audit: default border colour becomes <code>currentColor</code>, ring width drops from 3px to 1px, <code>shadow-sm</code> becomes <code>shadow-xs</code>, <code>outline-none</code> becomes <code>outline-hidden</code> (and <code>outline-none</code> now genuinely removes the outline — an accessibility regression waiting in migrated code), and the important modifier moves to the end. Check the browser floor first: v4 needs Safari 16.4+, Chrome 111+, Firefox 128+, which matters if any of your processing companies run managed machines.</p>
+
+<h2><span class="n">05 — Decisions I'd want from you</span>Four forks</h2>
+
+<div class="q">
+  <h4>Petrol, or keep the blue?</h4>
+  <p>The current <code>#2563EB</code> is Tailwind's default blue — the most common accent on the web. Petrol is a real choice and clears every status hue. <span class="rec">Recommended: petrol.</span> If there's brand equity in the blue I don't know about, the rest of the system works with it unchanged, minus a little separation from the "info" state.</p>
+</div>
+<div class="q">
+  <h4>Dark mode now, or later?</h4>
+  <p>The tokens are written either way, so it costs one CSS block plus a toggle. Processors work in bright offices, so light stays the default. <span class="rec">Recommended: ship both in Phase A</span> — it is nearly free now and expensive to retrofit after 125 components pick up hard-coded greys.</p>
+</div>
+<div class="q">
+  <h4>Base UI or stay on Radix?</h4>
+  <p>shadcn now initialises on Base UI and Radix is not deprecated; both ship for every component. With this much existing Radix surface, migrating during a visual redesign means two variables and one bug. <span class="rec">Recommended: stay on Radix</span> and revisit as its own project.</p>
+</div>
+<div class="q">
+  <h4>Does the extraction pipeline store box coordinates?</h4>
+  <p><code>SourceLocation</code> currently carries <code>page</code> and <code>snippet</code>. The reviewer's highlight needs a rectangle. If the coordinates aren't stored, Phase D starts in the backend, and a snippet-match fallback (find the snippet in the page's text layer, highlight it) is a decent interim. <span class="rec">This is the one answer that changes the plan.</span></p>
+</div>
+
+<h2><span class="n">06 — What's in the mockups</span>Four screens, real data</h2>
+
+<p>The companion page has working HTML at the real density: the pipeline, the file overview with the reconciliation ledger, the verification screen with the DTI arithmetic exposed, and the document reviewer with live field-to-box linking. Everything is built on the app's actual routes, statuses and seed data — Morgan Ellis, LF-AWBB, 88 Marigold Way, the UWM overlay — so what you are looking at is what the screens would hold, not placeholder text. Both themes are wired. A Foundations tab carries the tokens, the type scale and the state vocabulary in one place.</p>
+
+<p>Nothing there needs a backend change except the reviewer's bounding boxes.</p>
+
+</div>
+
+<footer>
+  Read: 125 components across app/, components/, lib/ · Researched: Linear, Vercel Geist, Stripe, Attio, Carbon, TanStack Table v9, shadcn/ui 2026, Rossum, WCAG 2.2 · Built: 4 screens, both themes
+</footer>
+</div>
+
+</body>
+</html>

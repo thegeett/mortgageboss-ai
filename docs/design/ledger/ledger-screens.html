@@ -1,0 +1,2340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger Screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<style>
+/* ============================================================
+   LEDGER — a design system for mortgageboss·ai
+   Light palette on :root. Dark redefines tokens only.
+   ============================================================ */
+:root {
+  --paper:      #FBFCFC;
+  --surface:    #FFFFFF;
+  --surface-2:  #F3F5F5;
+  --surface-3:  #ECEFEF;
+  --ink:        #101617;
+  --ink-2:      #47514F;
+  --ink-3:      #6C7674;
+  --line:       #E3E7E6;
+  --line-2:     #CDD3D2;
+  --line-ctl:   #A9B1AF;
+
+  --accent:      #12545E;
+  --accent-hi:   #17707D;
+  --accent-soft: #E4EFF0;
+  --on-accent:   #FFFFFF;
+
+  --critical:      #B23A2A;
+  --critical-soft: #FAEDEA;
+  --attention:     #8F5D08;
+  --attention-soft:#FAF2E1;
+  --verified:      #1B6E52;
+  --verified-soft: #E6F2EC;
+  --ai:            #5B4FA8;
+  --ai-soft:       #EEECF9;
+  --neutral-soft:  #EEF1F1;
+  --skel:          #E2E7E6;
+
+  --shadow-pop: 0 0 0 1px rgba(16,22,23,.06), 0 6px 16px -4px rgba(16,22,23,.12);
+  --r-ctl: 5px;
+  --r-box: 8px;
+
+  --row: 32px;
+  --rail: 52px;
+  --nav: 216px;
+  --ctx: 288px;
+
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:      #0C1011;
+    --surface:    #121818;
+    --surface-2:  #182020;
+    --surface-3:  #1F2727;
+    --ink:        #E9EEED;
+    --ink-2:      #AFB9B7;
+    --ink-3:      #8B9592;
+    --line:       #222B2B;
+    --line-2:     #2E3838;
+    --line-ctl:   #485252;
+
+    --accent:      #4FB3C0;
+    --accent-hi:   #6DC9D5;
+    --accent-soft: #122B2E;
+    --on-accent:   #04191C;
+
+    --critical:      #EC8375;
+    --critical-soft: #2B1815;
+    --attention:     #D9A03E;
+    --attention-soft:#2A2113;
+    --verified:      #52C093;
+    --verified-soft: #12241C;
+    --ai:            #A99BEE;
+    --ai-soft:       #1E1B2E;
+    --neutral-soft:  #1E2626;
+  --skel:          #293231;
+    --skel:          #293231;
+
+    --shadow-pop: 0 0 0 1px rgba(0,0,0,.5), 0 8px 22px -6px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:      #0C1011;
+  --surface:    #121818;
+  --surface-2:  #182020;
+  --surface-3:  #1F2727;
+  --ink:        #E9EEED;
+  --ink-2:      #AFB9B7;
+  --ink-3:      #8B9592;
+  --line:       #222B2B;
+  --line-2:     #2E3838;
+  --line-ctl:   #485252;
+
+  --accent:      #4FB3C0;
+  --accent-hi:   #6DC9D5;
+  --accent-soft: #122B2E;
+  --on-accent:   #04191C;
+
+  --critical:      #EC8375;
+  --critical-soft: #2B1815;
+  --attention:     #D9A03E;
+  --attention-soft:#2A2113;
+  --verified:      #52C093;
+  --verified-soft: #12241C;
+  --ai:            #A99BEE;
+  --ai-soft:       #1E1B2E;
+  --neutral-soft:  #1E2626;
+
+  --shadow-pop: 0 0 0 1px rgba(0,0,0,.5), 0 8px 22px -6px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.num, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+.num { font-variant-numeric: tabular-nums; }
+table { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+button { font: inherit; color: inherit; }
+
+/* ---------- presentation chrome (not part of the product) ---------- */
+.deck {
+  max-width: 1620px; margin: 0 auto; padding: 26px 20px 64px;
+}
+.deck-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.deck-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.deck-sub { margin: 4px 0 0; color: var(--ink-3); font-size: 13px; max-width: 62ch; }
+.deck-mark {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--accent); font-weight: 600;
+}
+.switch { display: flex; flex-wrap: wrap; gap: 4px; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 3px; }
+.switch button {
+  border: 0; background: transparent; padding: 6px 12px; border-radius: 5px;
+  font-size: 12.5px; font-weight: 500; color: var(--ink-3); cursor: pointer;
+}
+.switch button:hover { color: var(--ink); background: var(--surface-2); }
+.switch button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.caption { margin: 0 0 12px; color: var(--ink-3); font-size: 12.5px; max-width: 74ch; }
+.caption b { color: var(--ink-2); font-weight: 500; }
+
+/* the mock viewport */
+.viewport {
+  border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden;
+  background: var(--surface); box-shadow: 0 1px 2px rgba(16,22,23,.05);
+}
+.scroller { overflow-x: auto; }
+.app { min-width: 1180px; height: 720px; display: grid; grid-template-columns: var(--rail) var(--nav) 1fr; background: var(--paper); }
+.app.with-ctx { grid-template-columns: var(--rail) var(--nav) 1fr var(--ctx); }
+.app.review { grid-template-columns: var(--rail) 232px 1fr 372px; }
+
+/* ---------- icon rail ---------- */
+.rail { border-right: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.brand-tile {
+  width: 30px; height: 30px; border-radius: 7px; background: var(--accent); color: var(--on-accent);
+  display: grid; place-items: center; font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 13px;
+  margin-bottom: 10px;
+}
+.rail-btn { width: 32px; height: 32px; border-radius: 6px; border: 0; background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; }
+.rail-btn:hover { background: var(--surface-3); color: var(--ink); }
+.rail-btn.on { background: var(--accent-soft); color: var(--accent); }
+.rail-spacer { flex: 1; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-size: 10.5px; font-weight: 600; }
+
+/* ---------- nav column ---------- */
+.nav { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-width: 0; }
+.nav-head { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.nav-head strong { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+.kbd { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 4px; }
+.nav-body { padding: 10px 8px; overflow-y: auto; flex: 1; }
+.nav-label { font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); padding: 8px 8px 5px; }
+.nav-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; padding: 5px 8px; border-radius: var(--r-ctl); color: var(--ink-2); cursor: pointer; font-size: 13px; }
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.nav-item.on .count { color: var(--accent); }
+.nav-foot { border-top: 1px solid var(--line); padding: 9px 12px; font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+
+/* ---------- work surface ---------- */
+.work { display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
+.topbar { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.crumbs { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-3); min-width: 0; }
+.crumbs b { color: var(--ink); font-weight: 500; }
+.crumbs .sep { color: var(--line-2); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.search {
+  display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 9px; min-width: 220px;
+  border: 1px solid var(--line-2); border-radius: var(--r-ctl); background: var(--paper); color: var(--ink-3); font-size: 12.5px;
+}
+.toolbar { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.surface-scroll { flex: 1; overflow-y: auto; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-ctl); border: 1px solid var(--line-ctl); background: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--ink-3); }
+.btn.quiet:hover { background: var(--surface-2); color: var(--ink); }
+.btn.sm { height: 24px; padding: 0 8px; font-size: 12px; }
+
+/* view tabs / segmented */
+.views { display: flex; align-items: center; gap: 2px; }
+.view { border: 0; background: transparent; padding: 5px 9px; border-radius: var(--r-ctl); font-size: 12.5px; color: var(--ink-3); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.view:hover { background: var(--surface-2); color: var(--ink); }
+.view.on { background: var(--surface-3); color: var(--ink); font-weight: 500; }
+.view .n { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* ---------- table ---------- */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.tbl thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--surface-2);
+  text-align: left; font-size: 10.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-3); padding: 0 12px; height: 30px; border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+.tbl tbody td { height: var(--row); padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.tbl tbody tr:hover td { background: var(--surface-2); }
+.tbl td.id { padding-left: 14px; }
+.tbl .name { color: var(--ink); font-weight: 500; }
+.tbl .r { text-align: right; }
+.stripe { border-left: 2px solid transparent; }
+.stripe.crit { border-left-color: var(--critical); }
+.stripe.att  { border-left-color: var(--attention); }
+.stripe.ver  { border-left-color: var(--verified); }
+.stripe.idle { border-left-color: var(--line-2); }
+
+/* status token: rail + glyph + word, never a fill */
+.st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.st .g { width: 13px; height: 13px; flex: none; }
+.st.crit { color: var(--critical); }
+.st.att  { color: var(--attention); }
+.st.ver  { color: var(--verified); }
+.st.mut  { color: var(--ink-3); }
+.st.ai   { color: var(--ai); }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 10px; font-size: 11px; font-weight: 500; background: var(--neutral-soft); color: var(--ink-2); white-space: nowrap; }
+.chip.crit { background: var(--critical-soft); color: var(--critical); }
+.chip.att  { background: var(--attention-soft); color: var(--attention); }
+.chip.ver  { background: var(--verified-soft); color: var(--verified); }
+.chip.ai   { background: var(--ai-soft); color: var(--ai); }
+.chip.acc  { background: var(--accent-soft); color: var(--accent); }
+.chip.mono { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .01em; }
+
+.bar { height: 4px; width: 62px; border-radius: 2px; background: var(--surface-3); overflow: hidden; display: inline-block; vertical-align: middle; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.bar i.att { background: var(--attention); }
+.bar i.ver { background: var(--verified); }
+
+/* ---------- section / panel primitives (hairline, not cards) ---------- */
+.section { border-bottom: 1px solid var(--line); background: var(--surface); }
+.section-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px 9px; }
+.section-head h3 { margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+.section-head .spacer { flex: 1; }
+.pad { padding: 0 16px 16px; }
+
+/* the reconciliation ledger — stated | verified */
+.ledger { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.ledger th { text-align: left; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: 0 10px 6px; }
+.ledger th.r, .ledger td.r { text-align: right; }
+.ledger td { padding: 6px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+.ledger tr:first-child td { border-top: 0; }
+.ledger .k { color: var(--ink-3); width: 34%; }
+.ledger .v { color: var(--ink); font-weight: 500; }
+.ledger .match { color: var(--ink-2); }
+.lrail { display: block; border-left: 2px solid transparent; padding-left: 9px; margin-left: -11px; }
+.lrail.att { border-left-color: var(--attention); }
+.lrail.crit { border-left-color: var(--critical); }
+.lrail.ver { border-left-color: var(--verified); }
+.src { display: inline-flex; align-items: center; gap: 4px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-3); }
+.src:hover { color: var(--accent); }
+
+/* ---------- context rail ---------- */
+.ctx { border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
+.ctx-block { padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.ctx-block h4 { margin: 0 0 9px; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+.metric { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.metric .lab { font-size: 12.5px; color: var(--ink-3); }
+.metric .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 500; color: var(--ink); }
+.metric .val.crit { color: var(--critical); }
+.metric .val.att { color: var(--attention); }
+.metric .val.ver { color: var(--verified); }
+.headline { font-family: "IBM Plex Mono", monospace; font-size: 26px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.hint { font-size: 11.5px; color: var(--ink-3); margin: 4px 0 0; }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { display: flex; gap: 9px; padding: 5px 0; font-size: 12px; color: var(--ink-2); }
+.timeline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); margin-top: 5px; flex: none; }
+.timeline .when { color: var(--ink-3); font-size: 11px; }
+
+/* ---------- verification ---------- */
+.calcstrip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.calc { background: var(--surface); padding: 9px 12px; text-align: left; border: 0; cursor: pointer; border-top: 2px solid transparent; }
+.calc:hover { background: var(--surface-2); }
+.calc.on { background: var(--surface); border-top-color: var(--accent); }
+.calc .lab { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-3); }
+.calc .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 500; margin-top: 2px; letter-spacing: -.01em; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--line-2); }
+.dot.crit { background: var(--critical); } .dot.att { background: var(--attention); } .dot.ver { background: var(--verified); }
+
+.otabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.otab { border: 0; background: transparent; padding: 9px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: 12.5px; color: var(--ink-3); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.otab:hover { color: var(--ink); }
+.otab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.otab .n { font-size: 11px; padding: 0 5px; border-radius: 9px; background: var(--neutral-soft); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.otab .n.crit { background: var(--critical-soft); color: var(--critical); }
+.otab .n.att { background: var(--attention-soft); color: var(--attention); }
+
+.finding { display: grid; grid-template-columns: 3px 1fr; background: var(--surface); border-bottom: 1px solid var(--line); }
+.finding > .fr { background: var(--line-2); }
+.finding.crit > .fr { background: var(--critical); }
+.finding.att  > .fr { background: var(--attention); }
+.finding.ver  > .fr { background: var(--verified); }
+.fbody { padding: 11px 16px 12px; min-width: 0; }
+.fhead { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.ftitle { font-size: 13.5px; font-weight: 500; color: var(--ink); letter-spacing: -.005em; }
+.fmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--ink-3); }
+.fmsg { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-2); max-width: 78ch; }
+.fquote { margin: 9px 0 0; border-left: 2px solid var(--line-2); padding: 3px 0 3px 11px; font-family: "IBM Plex Serif", Georgia, serif; font-size: 12.5px; color: var(--ink-2); font-style: italic; max-width: 74ch; }
+.facts { margin: 9px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.factions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+
+/* ---------- document review ---------- */
+.doclist { border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
+.docitem { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; background: transparent; padding: 9px 12px; cursor: pointer; }
+.docitem:hover { background: var(--surface-2); }
+.docitem.on { background: var(--accent-soft); border-left-color: var(--accent); }
+.docitem .dn { font-size: 12.5px; color: var(--ink); font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docitem .dm { font-size: 11px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; margin-top: 3px; }
+
+.canvas { background: var(--surface-3); overflow: auto; padding: 18px; display: flex; justify-content: center; }
+.page {
+  width: 480px; min-height: 620px; background: #fff; color: #1a1a1a; position: relative;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 8px 24px -8px rgba(0,0,0,.25);
+  padding: 26px 30px; font-size: 10px; line-height: 1.6; flex: none;
+}
+.page h5 { margin: 0 0 2px; font-size: 13px; letter-spacing: -.01em; }
+.page .co { color: #666; font-size: 9px; }
+.page hr { border: 0; border-top: 1px solid #ddd; margin: 12px 0; }
+.page table { width: 100%; border-collapse: collapse; font-size: 9.5px; font-variant-numeric: tabular-nums; color: inherit; }
+.page table td { padding: 2.5px 0; }
+.page table td:last-child { text-align: right; }
+.page .sechead { font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase; color: #888; margin: 14px 0 4px; }
+.bbox { position: absolute; border: 1.5px solid rgba(91,79,168,.55); background: rgba(91,79,168,.10); border-radius: 2px; cursor: pointer; }
+.bbox.live { border-color: var(--accent-hi); background: rgba(23,112,125,.16); box-shadow: 0 0 0 3px rgba(23,112,125,.18); }
+.bbox.flag { border-color: rgba(143,93,8,.7); background: rgba(143,93,8,.13); }
+
+.fields { border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
+.field { border-bottom: 1px solid var(--line); border-left: 2px solid transparent; padding: 8px 14px; }
+.field.att { border-left-color: var(--attention); background: var(--surface); }
+.field.crit { border-left-color: var(--critical); }
+.field.live { background: var(--accent-soft); border-left-color: var(--accent); }
+.field .fk { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.field .fv { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13.5px; color: var(--ink); font-weight: 500; margin-top: 2px; display: flex; align-items: center; gap: 8px; }
+.field .fs { font-size: 10.5px; color: var(--ink-3); font-family: "IBM Plex Mono", monospace; margin-top: 3px; }
+.field .conflict { color: var(--critical); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+/* ---------- foundations screen ---------- */
+.found { padding: 24px 26px 40px; background: var(--paper); overflow-y: auto; }
+.found h3 { margin: 26px 0 12px; font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+.found h3:first-child { margin-top: 0; }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px,1fr)); gap: 10px; }
+.sw { border: 1px solid var(--line); border-radius: var(--r-box); overflow: hidden; background: var(--surface); }
+.sw .cap { height: 54px; }
+.sw .meta { padding: 7px 9px; }
+.sw .nm { font-size: 12px; font-weight: 500; }
+.sw .hx { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-3); }
+.typerow { border-top: 1px solid var(--line); padding: 10px 0; display: flex; align-items: baseline; gap: 18px; }
+.typerow .spec { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-3); width: 190px; flex: none; }
+.demorow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+.note { border-left: 2px solid var(--accent); background: var(--accent-soft); padding: 9px 13px; border-radius: 0 var(--r-box) var(--r-box) 0; font-size: 12.5px; color: var(--ink-2); max-width: 80ch; }
+
+
+/* ---------- login ---------- */
+.auth { min-height: 720px; display: grid; grid-template-columns: minmax(0,1fr) 452px; background: var(--paper); }
+.auth-art { position: relative; overflow: hidden; min-width: 0; background: var(--surface-2); border-right: 1px solid var(--line); padding: 46px 48px; display: flex; flex-direction: column; }
+.auth-art .mark { display: flex; align-items: center; gap: 10px; }
+.auth-art .mark .tile { width: 30px; height: 30px; border-radius: 7px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 13px; }
+.auth-art .mark span { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; }
+.auth-quote { max-width: 42ch; }
+.auth-quote p { font-family: "IBM Plex Serif", Georgia, serif; font-size: 21px; line-height: 1.42; color: var(--ink); margin: 0; letter-spacing: -.012em; }
+.auth-quote cite { display: block; margin-top: 12px; font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.auth-figure { flex: 1; display: flex; align-items: center; justify-content: center; padding: 26px 0; min-height: 0; }
+.auth-figure svg { width: 100%; max-width: 460px; height: auto; }
+.auth-form { display: flex; flex-direction: column; justify-content: center; padding: 46px 52px; background: var(--surface); }
+.auth-form h2 { margin: 0 0 4px; font-size: 21px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+.auth-form .sub { margin: 0 0 26px; font-size: 13px; color: var(--ink-3); }
+.auth-foot { margin-top: 26px; font-size: 11.5px; color: var(--ink-3); }
+
+/* ---------- forms ---------- */
+.fgrid { display: grid; gap: 12px 14px; }
+.fgrid.c2 { grid-template-columns: 1fr 1fr; }
+.fgrid.c3 { grid-template-columns: 1fr 1fr 1fr; }
+.fld { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fld > label { font-size: 11px; font-weight: 500; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+.fld > label .req { color: var(--critical); }
+.inp { height: 30px; padding: 0 9px; border: 1px solid var(--line-ctl); border-radius: var(--r-ctl); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; width: 100%; }
+.inp::placeholder { color: var(--ink-3); }
+.inp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.inp.sel { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%); background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 26px; }
+.inp.err { border-color: var(--critical); }
+.fld .msg { font-size: 11px; color: var(--critical); }
+.fld .hint2 { font-size: 11px; color: var(--ink-3); }
+
+/* ---------- dropzones ---------- */
+.drop { border: 1.5px dashed var(--line-ctl); border-radius: var(--r-box); background: var(--surface-2); padding: 26px 20px; text-align: center; }
+.drop.hero { border-color: var(--accent); background: var(--accent-soft); padding: 34px 24px; }
+.drop .ic { width: 40px; height: 40px; border-radius: 10px; display: inline-grid; place-items: center; background: var(--surface); color: var(--ink-3); border: 1px solid var(--line); }
+.drop.hero .ic { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.drop h4 { margin: 11px 0 3px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.drop p { margin: 0; font-size: 12px; color: var(--ink-3); }
+
+/* upload progress rows */
+.uprow { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.uprow .nm { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uprow .pb { width: 96px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; flex: none; }
+.uprow .pb i { display: block; height: 100%; background: var(--accent); }
+
+/* ---------- board (conditions) ---------- */
+.board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); height: 100%; }
+.bcol { background: var(--paper); display: flex; flex-direction: column; min-width: 0; }
+.bcol-head { display: flex; align-items: center; gap: 7px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.bcol-head h4 { margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.bcol-body { padding: 8px; display: flex; flex-direction: column; gap: 7px; overflow-y: auto; }
+.ccard { background: var(--surface); border: 1px solid var(--line); border-left: 2px solid var(--line-2); border-radius: var(--r-ctl); padding: 9px 11px; }
+.ccard.crit { border-left-color: var(--critical); }
+.ccard.att { border-left-color: var(--attention); }
+.ccard.ver { border-left-color: var(--verified); }
+.ccard .t { font-size: 12.5px; color: var(--ink); font-weight: 500; line-height: 1.35; }
+.ccard .m { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; align-items: center; }
+
+/* ---------- thread (communication) ---------- */
+.thread { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; max-width: 74ch; }
+.msg .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--surface-3); color: var(--ink-2); }
+.msg.out { margin-left: auto; }
+.msg.out .av { background: var(--accent-soft); color: var(--accent); }
+.msg .bub { border: 1px solid var(--line); border-radius: var(--r-box); background: var(--surface); padding: 9px 12px; }
+.msg.out .bub { background: var(--accent-soft); border-color: transparent; }
+.msg .who { font-size: 11px; color: var(--ink-3); margin-bottom: 3px; display: flex; gap: 7px; align-items: center; }
+.msg .bd { font-size: 13px; color: var(--ink-2); }
+.msg .att-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.composer { border-top: 1px solid var(--line); background: var(--surface); padding: 11px 20px; }
+.composer .box { border: 1px solid var(--line-ctl); border-radius: var(--r-box); padding: 9px 11px; color: var(--ink-3); font-size: 13px; min-height: 56px; }
+
+/* ---------- package ---------- */
+.pkgrow { display: grid; grid-template-columns: 22px 1fr 130px 96px; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12.5px; }
+.pkgrow .nm { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkgrow.off { opacity: .55; }
+.cb { width: 15px; height: 15px; border-radius: 3px; border: 1px solid var(--line-ctl); display: grid; place-items: center; background: var(--surface); }
+.cb.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* ---------- states gallery ---------- */
+.sgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+.scell { background: var(--surface); padding: 16px; min-height: 200px; display: flex; flex-direction: column; }
+.scell .cap2 { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 14px; }
+.empty .ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--surface-2); color: var(--ink-3); border: 1px solid var(--line); }
+.empty h5 { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.empty p { margin: 0; font-size: 12px; color: var(--ink-3); max-width: 32ch; }
+.sk { display: inline-block; background: var(--skel); border-radius: 3px; height: 9px; }
+.modal { border: 1px solid var(--line); border-radius: var(--r-box); background: var(--surface); box-shadow: var(--shadow-pop); padding: 16px; }
+.toast { border: 1px solid var(--line); border-left: 2px solid var(--verified); border-radius: var(--r-ctl); background: var(--surface); box-shadow: var(--shadow-pop); padding: 10px 12px; display: flex; gap: 9px; align-items: flex-start; }
+.toast.err { border-left-color: var(--critical); }
+
+/* screen wrappers that are not the 3-col app */
+.plain { min-height: 720px; display: flex; flex-direction: column; background: var(--paper); }
+.phase-note { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-family: "IBM Plex Mono", monospace; color: var(--ai); background: var(--ai-soft); padding: 2px 8px; border-radius: 10px; }
+.sgrp { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); padding: 0 7px 0 10px; align-self: center; }
+
+.hidden { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+
+<div class="deck">
+  <div class="deck-head">
+    <div>
+      <div class="deck-mark">Ledger — proposed UI for mortgageboss·ai</div>
+      <h1 class="deck-title">Screens</h1>
+      <p class="deck-sub">Sixteen screens at the real density, built on the app's actual routes, statuses and seed data — the whole processor flow, the three tabs that arrive in later phases, admin, and the loading/empty/error states. The calculator strip, outcome tabs and document fields are live.</p>
+    </div>
+    <div class="switch" role="group" aria-label="Screen">
+      <span class="sgrp">Flow</span>
+      <button type="button" data-screen="login" aria-pressed="true">Login</button>
+      <button type="button" data-screen="pipeline" aria-pressed="false">Pipeline</button>
+      <button type="button" data-screen="new" aria-pressed="false">New file</button>
+      <button type="button" data-screen="overview" aria-pressed="false">Overview</button>
+      <button type="button" data-screen="docs" aria-pressed="false">Documents</button>
+      <button type="button" data-screen="review" aria-pressed="false">Review</button>
+      <button type="button" data-screen="verify" aria-pressed="false">Verification</button>
+      <button type="button" data-screen="needs" aria-pressed="false">Needs</button>
+      <span class="sgrp">Next phases</span>
+      <button type="button" data-screen="comm" aria-pressed="false">Communication</button>
+      <button type="button" data-screen="cond" aria-pressed="false">Conditions</button>
+      <button type="button" data-screen="pkg" aria-pressed="false">Package</button>
+      <span class="sgrp">Admin</span>
+      <button type="button" data-screen="lenders" aria-pressed="false">Lenders</button>
+      <button type="button" data-screen="overlay" aria-pressed="false">Overlay</button>
+      <button type="button" data-screen="validation" aria-pressed="false">Validation</button>
+      <span class="sgrp">System</span>
+      <button type="button" data-screen="states" aria-pressed="false">States</button>
+      <button type="button" data-screen="found" aria-pressed="false">Foundations</button>
+    </div>
+  </div>
+
+  <p class="caption" id="cap"></p>
+
+  <div class="viewport">
+    <div class="scroller">
+
+      <!-- ============================ PIPELINE ============================ -->
+      <div class="app hidden" id="s-pipeline">
+        <!-- rail -->
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn on" title="Pipeline" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" title="Documents" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn" title="Verification" aria-label="Verification"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg></button>
+          <button class="rail-btn" title="Lenders" aria-label="Lenders"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6.5 8 3l6 3.5M3.5 6.5v6M12.5 6.5v6M2 13h12"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <!-- nav -->
+        <div class="nav">
+          <div class="nav-head"><strong>Pipeline</strong><span class="kbd">⌘K</span></div>
+          <div class="nav-body">
+            <div class="nav-label">Saved views</div>
+            <button class="nav-item on"><span>My files</span><span class="count">18</span></button>
+            <button class="nav-item"><span>Blocked to submit</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Waiting on borrower</span><span class="count">7</span></button>
+            <button class="nav-item"><span>Docs stale &gt; 30d</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Ready to submit</span><span class="count">2</span></button>
+            <div class="nav-label">Team</div>
+            <button class="nav-item"><span>All open files</span><span class="count">41</span></button>
+            <button class="nav-item"><span>Unassigned</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Closed this month</span><span class="count">11</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot ver"></span> Extraction queue clear</div>
+        </div>
+        <!-- work -->
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><b>My files</b><span class="sep">/</span><span>18 files · sorted by attention</span></div>
+            <div class="topbar-right">
+              <div class="search"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>Search files, borrowers, addresses<span class="kbd" style="margin-left:auto">/</span></div>
+              <button class="btn primary"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg>New file</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="views">
+              <button class="view on">All <span class="n">18</span></button>
+              <button class="view">Needs action <span class="n">6</span></button>
+              <button class="view">In review <span class="n">5</span></button>
+              <button class="view">Submitted <span class="n">4</span></button>
+              <button class="view">Closed <span class="n">3</span></button>
+            </div>
+            <div style="flex:1"></div>
+            <button class="btn sm"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12L9.5 9v4l-3 1.5V9z"/></svg>Filter</button>
+            <button class="btn sm">Columns</button>
+            <button class="btn sm">Density</button>
+          </div>
+          <div class="surface-scroll" style="background:var(--surface);overflow-x:auto">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width:92px">File</th>
+                  <th style="width:150px">Borrower</th>
+                  <th>Subject property</th>
+                  <th style="width:96px" class="r">Amount</th>
+                  <th style="width:132px">Stage</th>
+                  <th style="width:186px">Attention</th>
+                  <th style="width:112px">Needs</th>
+                  <th style="width:92px">Lender</th>
+                  <th style="width:76px" class="r">Touched</th>
+                </tr>
+              </thead>
+              <tbody id="pipe-rows"></tbody>
+            </table>
+          </div>
+          <div class="toolbar" style="border-top:1px solid var(--line);border-bottom:0">
+            <span style="font-size:12px;color:var(--ink-3)">18 files · <b style="color:var(--critical);font-weight:500">4 blocked</b> · 6 waiting on borrower</span>
+            <div style="flex:1"></div>
+            <span style="font-size:12px;color:var(--ink-3)" class="num">1–18 of 18</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ OVERVIEW ============================ -->
+      <div class="app with-ctx hidden" id="s-overview">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn on" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn" aria-label="Verification"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="chip ver">Ready</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item on"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count" style="color:var(--critical)">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+            <div class="nav-label">Recent files</div>
+            <button class="nav-item"><span>Priya Nair</span></button>
+            <button class="nav-item"><span>Jordan Rivera</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot att"></span> Verification 4 days old</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Pipeline</span><span class="sep">/</span><b>Morgan Ellis</b><span class="chip mono">LF-AWBB</span></div>
+            <div class="topbar-right">
+              <button class="btn sm">Share</button>
+              <button class="btn sm">Export</button>
+              <button class="btn primary sm">Submit to UWM</button>
+            </div>
+          </div>
+          <div class="surface-scroll">
+            <!-- identity strip -->
+            <div class="section" style="padding:16px 18px 15px">
+              <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
+                <div style="min-width:0">
+                  <h2 style="margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em">Morgan Ellis</h2>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:7px;align-items:center">
+                    <span class="chip mono">LF-AWBB</span>
+                    <span class="chip">Conventional</span>
+                    <span class="chip">Refinance · rate &amp; term</span>
+                    <span class="chip acc">UWM</span>
+                    <span class="st ver"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Ready to submit</span>
+                  </div>
+                </div>
+                <div style="flex:1"></div>
+                <div style="text-align:right">
+                  <div class="headline">$540,000</div>
+                  <p class="hint">88 Marigold Way, Bellevue WA 98006</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- the reconciliation ledger -->
+            <div class="section">
+              <div class="section-head">
+                <h3>Reconciliation — stated against documents</h3>
+                <span class="spacer"></span>
+                <span class="st mut" style="font-size:11.5px">14 of 17 agree</span>
+                <button class="btn sm">Re-verify</button>
+              </div>
+              <div class="pad" style="overflow-x:auto">
+                <table class="ledger">
+                  <thead>
+                    <tr><th style="width:26%">Field</th><th style="width:22%">Stated (1003 / MISMO)</th><th style="width:22%">Found in documents</th><th style="width:30%">Source</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="k"><span class="lrail ver">Base monthly income</span></td>
+                      <td class="v num">$11,416.67</td>
+                      <td class="match num">$11,416.67</td>
+                      <td><a class="src" href="#">ellis-paystub-scan.pdf · p.1 · YTD</a></td>
+                    </tr>
+                    <tr>
+                      <td class="k"><span class="lrail att">Bonus income</span></td>
+                      <td class="v num">$1,250.00</td>
+                      <td class="num" style="color:var(--attention)">$980.42 <span style="font-weight:400">avg 24 mo</span></td>
+                      <td><a class="src" href="#">ellis-w2-2025.pdf · p.1 · box 1</a></td>
+                    </tr>
+                    <tr>
+                      <td class="k"><span class="lrail ver">Employer</span></td>
+                      <td class="v">Cascade Robotics</td>
+                      <td class="match">Cascade Robotics Inc.</td>
+                      <td><a class="src" href="#">ellis-paystub-scan.pdf · p.1</a></td>
+                    </tr>
+                    <tr>
+                      <td class="k"><span class="lrail crit">Checking balance</span></td>
+                      <td class="v num">$48,200.00</td>
+                      <td class="num" style="color:var(--critical)">$31,845.19</td>
+                      <td><a class="src" href="#">ellis-bank-feb.pdf · p.2 · closing bal</a></td>
+                    </tr>
+                    <tr>
+                      <td class="k"><span class="lrail ver">Appraised value</span></td>
+                      <td class="v num">$720,000</td>
+                      <td class="match num">$720,000</td>
+                      <td><a class="src" href="#">MISMO import · VALUATION</a></td>
+                    </tr>
+                    <tr>
+                      <td class="k"><span class="lrail att">Homeowner's insurance</span></td>
+                      <td class="v" style="color:var(--ink-3)">—</td>
+                      <td style="color:var(--attention)">Not found</td>
+                      <td><span class="src">Requested from borrower · 3 days ago</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- documents + needs, side by side, no cards -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)">
+              <div class="section" style="border-bottom:0">
+                <div class="section-head"><h3>Documents</h3><span class="spacer"></span><button class="btn sm quiet">View all 12</button></div>
+                <div class="pad" style="padding-bottom:12px">
+                  <div style="display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+                    <div style="background:var(--surface);padding:8px 11px;display:flex;align-items:center;gap:9px">
+                      <span class="dot ver"></span><span style="flex:1;min-width:0;font-size:12.5px">ellis-bank-feb.pdf</span><span class="chip">Feb 1 – 28</span>
+                    </div>
+                    <div style="background:var(--surface);padding:8px 11px;display:flex;align-items:center;gap:9px">
+                      <span class="dot att"></span><span style="flex:1;min-width:0;font-size:12.5px">ellis-paystub-scan.pdf</span><span class="chip att">Needs review</span>
+                    </div>
+                    <div style="background:var(--surface);padding:8px 11px;display:flex;align-items:center;gap:9px">
+                      <span class="dot ver"></span><span style="flex:1;min-width:0;font-size:12.5px">ellis-id.pdf</span><span class="chip">Driver's license</span>
+                    </div>
+                    <div style="background:var(--surface);padding:8px 11px;display:flex;align-items:center;gap:9px">
+                      <span class="dot"></span><span style="flex:1;min-width:0;font-size:12.5px;color:var(--ink-3)">ellis-hoi-decl.pdf</span><span class="chip">Awaiting</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="section" style="border-bottom:0">
+                <div class="section-head"><h3>Needs</h3><span class="spacer"></span><span class="st att" style="font-size:11.5px">2 blocking</span></div>
+                <div class="pad" style="padding-bottom:12px">
+                  <div style="display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+                    <div style="background:var(--surface);padding:8px 11px;border-left:2px solid var(--critical)">
+                      <div style="font-size:12.5px;color:var(--ink);font-weight:500">Homeowners insurance declaration</div>
+                      <div style="font-size:11px;color:var(--ink-3);margin-top:2px">Baseline · requested 3 days ago</div>
+                    </div>
+                    <div style="background:var(--surface);padding:8px 11px;border-left:2px solid var(--critical)">
+                      <div style="font-size:12.5px;color:var(--ink);font-weight:500">Second month of bank statements</div>
+                      <div style="font-size:11px;color:var(--ink-3);margin-top:2px"><span class="chip ai">AI</span> Reserves fall short with one month</div>
+                    </div>
+                    <div style="background:var(--surface);padding:8px 11px;border-left:2px solid var(--attention)">
+                      <div style="font-size:12.5px;color:var(--ink);font-weight:500">Confirm bonus income continuance</div>
+                      <div style="font-size:11px;color:var(--ink-3);margin-top:2px">From finding IN-4 · VOE requested</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- context rail -->
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>Submission</h4>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="st crit"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="7" width="9" height="6" rx="1.2"/><path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7"/></svg>Blocked</span>
+            </div>
+            <p class="hint">3 open findings must be resolved or overridden at Balanced thoroughness.</p>
+            <div style="margin-top:9px"><span class="bar"><i style="width:72%"></i></span> <span class="num" style="font-size:11px;color:var(--ink-3)">14 / 17 reconciled</span></div>
+          </div>
+          <div class="ctx-block">
+            <h4>Key ratios</h4>
+            <div class="metric"><span class="lab">Back-end DTI</span><span class="val att">43.8%</span></div>
+            <div class="metric"><span class="lab">Front-end DTI</span><span class="val">28.1%</span></div>
+            <div class="metric"><span class="lab">LTV</span><span class="val ver">75.0%</span></div>
+            <div class="metric"><span class="lab">Reserves</span><span class="val crit">1.4 mo</span></div>
+            <p class="hint">DTI is 1.2pts under UWM's 45% overlay. Reserves need 2.0 months.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Loan</h4>
+            <div class="metric"><span class="lab">Amount</span><span class="val">$540,000</span></div>
+            <div class="metric"><span class="lab">Appraised</span><span class="val">$720,000</span></div>
+            <div class="metric"><span class="lab">Note rate</span><span class="val">6.375%</span></div>
+            <div class="metric"><span class="lab">Term</span><span class="val">360 mo</span></div>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Activity</h4>
+            <ul class="timeline">
+              <li><span class="dot"></span><div>Verification run completed<div class="when">4 days ago · 6m 20s</div></div></li>
+              <li><span class="dot"></span><div>ellis-bank-feb.pdf extracted<div class="when">4 days ago</div></div></li>
+              <li><span class="dot"></span><div>Casey requested HOI declaration<div class="when">3 days ago</div></div></li>
+              <li><span class="dot"></span><div>Bonus income overridden<div class="when">2 days ago</div></div></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ VERIFICATION ============================ -->
+      <div class="app with-ctx hidden" id="s-verify">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn on" aria-label="Verification"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="chip att">Blocked</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item on"><span>Verification</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+            <div class="nav-label">Run history</div>
+            <button class="nav-item on"><span>Aug 25, 14:02</span><span class="count">current</span></button>
+            <button class="nav-item"><span>Aug 21, 09:47</span></button>
+            <button class="nav-item"><span>Aug 18, 16:15</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot att"></span> File changed since run</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Pipeline</span><span class="sep">/</span><span>Morgan Ellis</span><span class="sep">/</span><b>Verification</b></div>
+            <div class="topbar-right">
+              <span style="font-size:11.5px;color:var(--ink-3)">Conventional · UWM overlay</span>
+              <button class="btn sm">Thoroughness: Balanced</button>
+              <button class="btn primary sm"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M4 3l9 5-9 5z"/></svg>Run verification</button>
+            </div>
+          </div>
+
+          <!-- staleness banner: rail, not a filled box -->
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);border-left:2px solid var(--attention)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--attention)" stroke-width="1.6" style="margin-top:2px;flex:none"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3M8 11.4v.1"/></svg>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">The file changed since this run.</b> Two documents were added after Aug 25 — these findings don't reflect them.</div>
+            </div>
+            <button class="btn sm">Re-run</button>
+          </div>
+
+          <!-- calculator strip -->
+          <div class="calcstrip" id="calcstrip">
+            <button class="calc on" data-calc="dti"><span class="lab"><span class="dot att"></span>Back-end DTI</span><span class="val" style="color:var(--attention)">43.8%</span></button>
+            <button class="calc" data-calc="ltv"><span class="lab"><span class="dot ver"></span>LTV</span><span class="val">75.0%</span></button>
+            <button class="calc" data-calc="mi"><span class="lab"><span class="dot"></span>Mortgage ins.</span><span class="val">Not required</span></button>
+            <button class="calc" data-calc="se"><span class="lab"><span class="dot ver"></span>Self-employed</span><span class="val">N/A</span></button>
+            <button class="calc" data-calc="res"><span class="lab"><span class="dot crit"></span>Reserves</span><span class="val" style="color:var(--critical)">1.4 mo</span></button>
+            <button class="calc" data-calc="max"><span class="lab"><span class="dot ver"></span>Max loan</span><span class="val">$576,000</span></button>
+          </div>
+
+          <!-- expanded calculator: the math, shown not hidden -->
+          <div class="section" id="calcpanel">
+            <div class="section-head">
+              <h3>Back-end DTI — the math</h3>
+              <span class="spacer"></span>
+              <span class="chip att">1.2 pts under UWM's 45% overlay</span>
+              <button class="btn sm quiet">Collapse</button>
+            </div>
+            <div class="pad" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+              <div>
+                <table class="ledger">
+                  <tbody>
+                    <tr><td class="k">Base monthly income</td><td class="r v num">$11,416.67</td><td style="width:78px;color:var(--ink-3);font-size:11px">paystub</td></tr>
+                    <tr><td class="k">Bonus (24-mo avg)</td><td class="r v num" style="color:var(--accent)">$980.42</td><td style="width:78px"><span class="chip acc">override</span></td></tr>
+                    <tr><td class="k">Total qualifying income</td><td class="r v num">$12,397.09</td><td></td></tr>
+                    <tr><td class="k">Proposed housing (PITIA)</td><td class="r v num">$3,486.11</td><td style="font-size:11px;color:var(--ink-3)">computed</td></tr>
+                    <tr><td class="k">Revolving + installment</td><td class="r v num">$1,943.00</td><td style="font-size:11px;color:var(--ink-3)">credit</td></tr>
+                    <tr><td class="k" style="color:var(--ink);font-weight:500">Total obligations</td><td class="r v num" style="font-size:14px">$5,429.11</td><td></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <div style="border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;background:var(--surface-2)">
+                  <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600">Result</div>
+                  <div class="headline" style="color:var(--attention);margin-top:2px">43.79%</div>
+                  <p class="mono" style="font-size:11px;color:var(--ink-3);margin:8px 0 0">5,429.11 ÷ 12,397.09 × 100</p>
+                  <div style="margin-top:11px;height:6px;border-radius:3px;background:var(--surface-3);position:relative;overflow:hidden">
+                    <div style="position:absolute;inset:0 27% 0 0;background:var(--attention);border-radius:3px"></div>
+                    <div style="position:absolute;top:-3px;bottom:-3px;left:73%;width:2px;background:var(--ink-2)"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);margin-top:5px" class="num"><span>0%</span><span>UWM cap 45%</span><span>60%</span></div>
+                </div>
+                <div class="note" style="margin-top:12px">One override is in play. Bonus income was reduced from the stated $1,250.00 to a 24-month average of $980.42 by Casey on Aug 27 — <a href="#" style="color:var(--accent)">revert to automatic</a>.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- outcome tabs -->
+          <div class="otabs" id="otabs">
+            <button class="otab on" data-tab="attention">Needs attention <span class="n crit">3</span></button>
+            <button class="otab" data-tab="satisfied">Satisfied <span class="n">34</span></button>
+            <button class="otab" data-tab="couldnt">Couldn't check <span class="n att">6</span></button>
+            <button class="otab" data-tab="cross">Cross-checks <span class="n">4</span></button>
+            <button class="otab" data-tab="archive">No longer applies</button>
+          </div>
+
+          <div class="surface-scroll" id="findings"></div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>This run</h4>
+            <div class="metric"><span class="lab">Rules evaluated</span><span class="val">176</span></div>
+            <div class="metric"><span class="lab">Needs attention</span><span class="val crit">3</span></div>
+            <div class="metric"><span class="lab">Couldn't check</span><span class="val att">6</span></div>
+            <div class="metric"><span class="lab">Satisfied</span><span class="val ver">34</span></div>
+            <p class="hint">Aug 25, 14:02 · 6m 20s · $0.47 · conventional + UWM overlay v12</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Thoroughness</h4>
+            <div style="display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+              <button style="border:0;background:var(--surface);text-align:left;padding:7px 10px;cursor:pointer"><div style="font-size:12.5px">Conservative</div><div style="font-size:11px;color:var(--ink-3)">≥ 0.80 confidence · 1 shown</div></button>
+              <button style="border:0;background:var(--accent-soft);text-align:left;padding:7px 10px;cursor:pointer"><div style="font-size:12.5px;color:var(--accent);font-weight:500">Balanced</div><div style="font-size:11px;color:var(--accent)">≥ 0.50 confidence · 3 shown</div></button>
+              <button style="border:0;background:var(--surface);text-align:left;padding:7px 10px;cursor:pointer"><div style="font-size:12.5px">Thorough</div><div style="font-size:11px;color:var(--ink-3)">every finding · 7 shown</div></button>
+            </div>
+            <p class="hint">Moving the dial re-filters what's already been found. It never re-runs the AI.</p>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Missing documents</h4>
+            <p class="hint" style="margin-top:0">Six rules couldn't reach a verdict because the file doesn't hold what they need.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
+              <span class="chip att">Credit report</span>
+              <span class="chip att">VOE</span>
+              <span class="chip att">HOI declaration</span>
+              <span class="chip att">2nd bank statement</span>
+            </div>
+            <button class="btn sm" style="margin-top:11px;width:100%;justify-content:center">Request all four</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ DOCUMENT REVIEW ============================ -->
+      <div class="app review hidden" id="s-review">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn" aria-label="Verification"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="doclist">
+          <div class="nav-head" style="padding:0 12px"><strong>12 documents</strong><span class="kbd">[ ]</span></div>
+          <div class="nav-label" style="padding:9px 12px 4px">Income &amp; employment</div>
+          <button class="docitem on"><span class="dn">Pay stub — Ellis — Feb 2026</span><span class="dm"><span class="dot att"></span>Needs review · 4 of 11 fields</span></button>
+          <button class="docitem"><span class="dn">W-2 — Cascade Robotics — 2025</span><span class="dm"><span class="dot ver"></span>Verified</span></button>
+          <div class="nav-label" style="padding:9px 12px 4px">Assets</div>
+          <button class="docitem"><span class="dn">Bank statement — Feb 2026</span><span class="dm"><span class="dot ver"></span>Verified</span></button>
+          <button class="docitem"><span class="dn">Bank statement — Jan 2026</span><span class="dm"><span class="dot"></span>Awaiting upload</span></button>
+          <div class="nav-label" style="padding:9px 12px 4px">Borrower info</div>
+          <button class="docitem"><span class="dn">Driver's license — Ellis</span><span class="dm"><span class="dot ver"></span>Verified</span></button>
+          <div class="nav-label" style="padding:9px 12px 4px">Property</div>
+          <button class="docitem"><span class="dn">Appraisal — 88 Marigold Way</span><span class="dm"><span class="dot ver"></span>Verified</span></button>
+        </div>
+        <div class="work" style="min-width:0">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><span>Documents</span><span class="sep">/</span><b>ellis-paystub-scan.pdf</b></div>
+            <div class="topbar-right">
+              <span style="font-size:11.5px;color:var(--ink-3)" class="num">Page 1 of 2</span>
+              <button class="btn sm quiet">−</button><button class="btn sm quiet">+</button>
+              <button class="btn sm">Download</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-bottom:1px solid var(--line);background:var(--surface);font-size:11.5px;color:var(--ink-3)">
+            <span class="chip ai">AI extracted</span>
+            <span>11 fields · <b style="color:var(--attention);font-weight:500">4 need a look</b></span>
+            <span style="flex:1"></span>
+            <span>Hold <span class="kbd">⌥</span> to reveal every candidate the model found</span>
+          </div>
+          <div class="canvas">
+            <div class="page">
+              <h5><span data-anchor="employer">Cascade Robotics, Inc.</span></h5>
+              <div class="co">1200 Terrace Ave, Redmond WA 98052 · EIN 91-0000000</div>
+              <hr>
+              <table>
+                <tr><td>Employee</td><td><span data-anchor="employee">Morgan Ellis</span></td></tr>
+                <tr><td>Employee ID</td><td>CR-04188</td></tr>
+                <tr><td>Pay period</td><td><span data-anchor="period">Feb 1 – Feb 15, 2026</span></td></tr>
+                <tr><td>Pay date</td><td>Feb 20, 2026</td></tr>
+              </table>
+              <div class="sechead">Earnings</div>
+              <table>
+                <tr><td>Regular — 80.00 hrs @ 65.865</td><td>5,269.20</td></tr>
+                <tr><td>Bonus</td><td><span data-anchor="bonus">452.50</span></td></tr>
+                <tr><td>Overtime — 0.00 hrs</td><td>0.00</td></tr>
+                <tr><td><b>Gross this period</b></td><td><b><span data-anchor="gross">5,721.70</span></b></td></tr>
+                <tr><td>Gross year to date</td><td><span data-anchor="ytd">22,833.34</span></td></tr>
+              </table>
+              <div class="sechead">Deductions</div>
+              <table>
+                <tr><td>Federal income tax</td><td>1,043.11</td></tr>
+                <tr><td>Social security</td><td>354.75</td></tr>
+                <tr><td>Medicare</td><td>82.96</td></tr>
+                <tr><td>401(k) — 6%</td><td>343.30</td></tr>
+                <tr><td>Medical — pre-tax</td><td>218.40</td></tr>
+                <tr><td><b>Net pay</b></td><td><b>3,679.18</b></td></tr>
+              </table>
+              <div class="sechead">Year to date</div>
+              <table>
+                <tr><td>Gross</td><td>22,833.34</td></tr>
+                <tr><td>Taxes</td><td>5,923.28</td></tr>
+                <tr><td>Deductions</td><td>2,246.80</td></tr>
+              </table>
+              <!-- bounding boxes are computed from the anchors below, never hardcoded -->
+            </div>
+          </div>
+        </div>
+        <div class="fields">
+          <div class="nav-head" style="padding:0 14px"><strong>Extracted fields</strong><span class="kbd">↹ next flag</span></div>
+          <div class="field">
+            <div class="fk">Employer</div>
+            <div class="fv">Cascade Robotics, Inc.</div>
+            <div class="fs">p.1 · header</div>
+          </div>
+          <div class="field">
+            <div class="fk">Employee</div>
+            <div class="fv">Morgan Ellis</div>
+            <div class="fs">p.1 · "Employee"</div>
+          </div>
+          <div class="field">
+            <div class="fk">Pay period</div>
+            <div class="fv">Feb 1 – 15, 2026</div>
+            <div class="fs">p.1 · "Pay period"</div>
+          </div>
+          <div class="field att">
+            <div class="fk"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--attention)" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.8v3"/></svg>Bonus this period</div>
+            <div class="fv">$452.50</div>
+            <div class="fs">p.1 · "Bonus" · check this</div>
+            <div style="display:flex;gap:5px;margin-top:7px"><button class="btn sm">Confirm</button><button class="btn sm quiet">Edit</button></div>
+          </div>
+          <div class="field att">
+            <div class="fk"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--attention)" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.8v3"/></svg>Gross this period</div>
+            <div class="fv">$5,721.70</div>
+            <div class="fs">p.1 · scan quality low on this line</div>
+            <div style="display:flex;gap:5px;margin-top:7px"><button class="btn sm">Confirm</button><button class="btn sm quiet">Edit</button></div>
+          </div>
+          <div class="field live">
+            <div class="fk" style="color:var(--accent)">Gross year to date <span style="margin-left:auto" class="chip acc">selected</span></div>
+            <div class="fv">$22,833.34</div>
+            <div class="fs" style="color:var(--accent)">p.1 · "Gross year to date"</div>
+          </div>
+          <div class="field crit">
+            <div class="fk"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--critical)" stroke-width="1.7"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>Monthly base income</div>
+            <div class="fv"><span>$11,416.67</span><span class="chip crit">1003 says $12,666.67</span></div>
+            <div class="fs">Derived from 80 hrs @ $65.865 × 26 ÷ 12</div>
+            <div style="display:flex;gap:5px;margin-top:7px"><button class="btn sm">Use document</button><button class="btn sm quiet">Keep stated</button></div>
+          </div>
+          <div class="field">
+            <div class="fk">Federal income tax</div>
+            <div class="fv">$1,043.11</div>
+            <div class="fs">p.1 · deductions</div>
+          </div>
+          <div class="field">
+            <div class="fk">401(k) contribution</div>
+            <div class="fv">$343.30</div>
+            <div class="fs">p.1 · deductions</div>
+          </div>
+          <div class="field" style="border-left-color:var(--line-2)">
+            <div class="fk">Overtime — 12-month average</div>
+            <div class="fv" style="color:var(--ink-3)">Not on this document</div>
+            <div class="fs"><span class="chip ai">Inferred</span> needs a second stub to average</div>
+          </div>
+          <div style="padding:12px 14px;display:flex;gap:6px">
+            <button class="btn primary" style="flex:1;justify-content:center">Mark reviewed</button>
+            <button class="btn">Skip</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ FOUNDATIONS ============================ -->
+      <div class="found hidden" id="s-found" style="height:720px">
+        <h3>Palette — light</h3>
+        <div class="swatches">
+          <div class="sw"><div class="cap" style="background:#12545E"></div><div class="meta"><div class="nm">Accent — petrol</div><div class="hx">#12545E</div></div></div>
+          <div class="sw"><div class="cap" style="background:#B23A2A"></div><div class="meta"><div class="nm">Blocking</div><div class="hx">#B23A2A</div></div></div>
+          <div class="sw"><div class="cap" style="background:#8F5D08"></div><div class="meta"><div class="nm">Needs attention</div><div class="hx">#8F5D08</div></div></div>
+          <div class="sw"><div class="cap" style="background:#1B6E52"></div><div class="meta"><div class="nm">Verified</div><div class="hx">#1B6E52</div></div></div>
+          <div class="sw"><div class="cap" style="background:#5B4FA8"></div><div class="meta"><div class="nm">AI provenance</div><div class="hx">#5B4FA8</div></div></div>
+          <div class="sw"><div class="cap" style="background:#101617"></div><div class="meta"><div class="nm">Ink</div><div class="hx">#101617</div></div></div>
+          <div class="sw"><div class="cap" style="background:#6C7674"></div><div class="meta"><div class="nm">Muted ink — 4.6:1</div><div class="hx">#6C7674</div></div></div>
+          <div class="sw"><div class="cap" style="background:#E3E7E6;border-bottom:1px solid #CDD3D2"></div><div class="meta"><div class="nm">Hairline</div><div class="hx">#E3E7E6</div></div></div>
+        </div>
+
+        <h3>Palette — dark</h3>
+        <div class="swatches">
+          <div class="sw"><div class="cap" style="background:#4FB3C0"></div><div class="meta"><div class="nm">Accent — petrol</div><div class="hx">#4FB3C0</div></div></div>
+          <div class="sw"><div class="cap" style="background:#EC8375"></div><div class="meta"><div class="nm">Blocking</div><div class="hx">#EC8375</div></div></div>
+          <div class="sw"><div class="cap" style="background:#D9A03E"></div><div class="meta"><div class="nm">Needs attention</div><div class="hx">#D9A03E</div></div></div>
+          <div class="sw"><div class="cap" style="background:#52C093"></div><div class="meta"><div class="nm">Verified</div><div class="hx">#52C093</div></div></div>
+          <div class="sw"><div class="cap" style="background:#A99BEE"></div><div class="meta"><div class="nm">AI provenance</div><div class="hx">#A99BEE</div></div></div>
+          <div class="sw"><div class="cap" style="background:#E9EEED"></div><div class="meta"><div class="nm">Ink</div><div class="hx">#E9EEED</div></div></div>
+          <div class="sw"><div class="cap" style="background:#8B9592"></div><div class="meta"><div class="nm">Muted ink — 4.8:1</div><div class="hx">#8B9592</div></div></div>
+          <div class="sw"><div class="cap" style="background:#0C1011;border-bottom:1px solid #222B2B"></div><div class="meta"><div class="nm">Ground</div><div class="hx">#0C1011</div></div></div>
+        </div>
+        <div class="note" style="margin-top:14px">Petrol sits far from red, amber and green in hue, so the accent never competes with a status. Violet is reserved exclusively for AI provenance — it is not a status and never means "bad". Every status hue clears 4.5:1 as text on its own ground in both themes.</div>
+
+        <h3>Type</h3>
+        <div class="typerow"><span class="spec">Plex Sans 26 / 600 / −.02em</span><span style="font-size:26px;font-weight:600;letter-spacing:-.02em">Morgan Ellis</span></div>
+        <div class="typerow"><span class="spec">Plex Sans 20 / 600 / −.02em</span><span style="font-size:20px;font-weight:600;letter-spacing:-.02em">Reconciliation</span></div>
+        <div class="typerow"><span class="spec">Plex Sans 13 / 400 — workhorse</span><span style="font-size:13px">Bonus income of $1,250.00 is not supported by the 24-month average.</span></div>
+        <div class="typerow"><span class="spec">Plex Sans 10.5 / 600 / +.09em caps</span><span style="font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)">Needs attention</span></div>
+        <div class="typerow"><span class="spec">Plex Mono 13.5 / 500 tabular</span><span class="num mono" style="font-size:13.5px;font-weight:500">$11,416.67 · 43.79% · LF-AWBB</span></div>
+        <div class="typerow"><span class="spec">Plex Serif 12.5 italic — quoted source</span><span style="font-family:'IBM Plex Serif',Georgia,serif;font-style:italic;font-size:12.5px;color:var(--ink-2)">"Gross year to date 22,833.34"</span></div>
+        <div class="note" style="margin-top:12px">Weight never exceeds 600, and 700 does not exist in the system. Hierarchy comes from size, color and space — a dense screen with bold labels everywhere reads as noise.</div>
+
+        <h3>Status — three channels, always</h3>
+        <div class="demorow">
+          <span class="st crit"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>Blocking</span>
+          <span class="st att"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Needs attention</span>
+          <span class="st ver"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span>
+          <span class="st mut"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"><circle cx="8" cy="8" r="5.6"/></svg>Not found</span>
+          <span class="st ai"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2.5 9.5 6.5 13.5 8 9.5 9.5 8 13.5 6.5 9.5 2.5 8 6.5 6.5z"/></svg>AI proposed</span>
+        </div>
+        <div class="note">Color, glyph shape and word all carry the state. Drop the color and the row still reads — which is what happens for the 1 in 12 men with a color vision deficiency, and on a printed file.</div>
+
+        <h3>Controls</h3>
+        <div class="demorow">
+          <button class="btn primary">Run verification</button>
+          <button class="btn">Request documents</button>
+          <button class="btn sm">Filter</button>
+          <button class="btn quiet">Cancel</button>
+          <span class="chip mono">LF-AWBB</span>
+          <span class="chip acc">UWM</span>
+          <span class="chip ai">AI</span>
+          <span class="chip att">Needs review</span>
+          <span class="chip ver">Verified</span>
+          <span class="bar"><i style="width:72%"></i></span>
+        </div>
+
+        <h3>Density</h3>
+        <div style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+          <table class="tbl">
+            <thead><tr><th>Row height</th><th>Type</th><th>Padding</th><th class="r">Rows on a 1080p pane</th></tr></thead>
+            <tbody>
+              <tr><td class="name">Compact — 28px</td><td>13px</td><td class="num">6 / 12</td><td class="r num">24</td></tr>
+              <tr><td class="name">Comfortable — 36px</td><td>13px</td><td class="num">10 / 12</td><td class="r num">19</td></tr>
+              <tr><td class="name">Relaxed — 44px</td><td>14px</td><td class="num">14 / 16</td><td class="r num">15</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note" style="margin-top:12px">Compact ships as the default and the choice persists per person, not per view. The current app's rows are 52px — a processor scanning 40 files pays for that on every screen.</div>
+      </div>
+
+      <!-- ============================ LOGIN ============================ -->
+      <div class="auth" id="s-login">
+        <div class="auth-art">
+          <div class="mark"><span class="tile">m</span><span>mortgageboss<span style="color:var(--accent)">·ai</span></span></div>
+
+          <div class="auth-figure">
+            <svg viewBox="0 0 460 250" role="img" aria-label="Two columns of a loan file, reconciled row by row">
+              <g font-family="IBM Plex Mono, monospace" font-size="9" fill="var(--ink-3)" letter-spacing="1.2">
+                <text x="16" y="14">STATED</text>
+                <text x="250" y="14">FOUND IN DOCUMENTS</text>
+              </g>
+              <line x1="16" y1="24" x2="444" y2="24" stroke="var(--line-2)" stroke-width="1"/>
+              <line x1="230" y1="24" x2="230" y2="240" stroke="var(--line-ctl)" stroke-width="1"/>
+              <g stroke="var(--line)" stroke-width="1">
+                <line x1="16" y1="60" x2="444" y2="60"/><line x1="16" y1="96" x2="444" y2="96"/>
+                <line x1="16" y1="132" x2="444" y2="132"/><line x1="16" y1="168" x2="444" y2="168"/>
+                <line x1="16" y1="204" x2="444" y2="204"/><line x1="16" y1="240" x2="444" y2="240"/>
+              </g>
+              <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-2)">
+                <text x="16" y="49">$11,416.67</text><text x="250" y="49">$11,416.67</text>
+                <text x="16" y="85">$1,250.00</text><text x="250" y="85" fill="var(--attention)">$980.42</text>
+                <text x="16" y="121">$720,000</text><text x="250" y="121">$720,000</text>
+                <text x="16" y="157">$48,200.00</text><text x="250" y="157" fill="var(--critical)">$31,845.19</text>
+                <text x="16" y="193">Cascade Robotics</text><text x="250" y="193">Cascade Robotics</text>
+                <text x="16" y="229" fill="var(--ink-3)">—</text><text x="250" y="229" fill="var(--attention)">Not found</text>
+              </g>
+              <g>
+                <rect x="222" y="40" width="4" height="12" rx="1" fill="var(--verified)"/>
+                <rect x="222" y="76" width="4" height="12" rx="1" fill="var(--attention)"/>
+                <rect x="222" y="112" width="4" height="12" rx="1" fill="var(--verified)"/>
+                <rect x="222" y="148" width="4" height="12" rx="1" fill="var(--critical)"/>
+                <rect x="222" y="184" width="4" height="12" rx="1" fill="var(--verified)"/>
+                <rect x="222" y="220" width="4" height="12" rx="1" fill="var(--attention)"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="auth-quote">
+            <p>A loan file is two columns that have to agree. Everything here exists to show you where they don't.</p>
+            <cite>The reconciliation principle</cite>
+          </div>
+        </div>
+        <div class="auth-form">
+          <h2>Sign in</h2>
+          <p class="sub">Loan processing for <span class="mono">Cascade Processing Group</span>.</p>
+
+          <div style="display:flex;gap:9px;align-items:flex-start;padding:9px 12px;border:1px solid var(--line);border-left:2px solid var(--attention);border-radius:0 var(--r-ctl) var(--r-ctl) 0;background:var(--surface);margin-bottom:18px">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--attention)" stroke-width="1.6" style="margin-top:2px;flex:none"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>
+            <span style="font-size:12.5px;color:var(--ink-2)">Your session expired. Sign in again to pick up where you left off.</span>
+          </div>
+
+          <div class="fgrid" style="gap:16px">
+            <div class="fld">
+              <label for="lg-e">Email</label>
+              <input class="inp" id="lg-e" type="email" value="casey@cascadeprocessing.com" readonly>
+            </div>
+            <div class="fld">
+              <label for="lg-p">Password</label>
+              <div style="position:relative">
+                <input class="inp" id="lg-p" type="password" value="passwordvalue" readonly style="padding-right:34px">
+                <button class="btn quiet" style="position:absolute;right:2px;top:2px;height:26px;width:28px;padding:0;justify-content:center" aria-label="Show password">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.8"/></svg>
+                </button>
+              </div>
+            </div>
+            <button class="btn primary" style="height:32px;justify-content:center">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2H3.5v12H6M10 5l3 3-3 3M13 8H6.5"/></svg>
+              Sign in
+            </button>
+          </div>
+          <p class="auth-foot">Accounts are provisioned by your administrator. Trouble signing in? <span style="color:var(--accent)">Contact your admin</span>.</p>
+        </div>
+      </div>
+
+      <!-- ============================ NEW FILE ============================ -->
+      <div class="app hidden" id="s-new">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn on" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>New file</strong></div>
+          <div class="nav-body">
+            <div class="nav-label">Two ways in</div>
+            <button class="nav-item on"><span>Import MISMO</span><span class="count">fast</span></button>
+            <button class="nav-item"><span>Enter by hand</span></button>
+            <div class="nav-label">What import fills</div>
+            <div style="padding:2px 8px 0;display:flex;flex-direction:column;gap:5px">
+              <span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Borrowers &amp; SSNs</span>
+              <span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Subject property</span>
+              <span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Loan terms</span>
+              <span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Income, assets, liabilities</span>
+            </div>
+          </div>
+          <div class="nav-foot">Nothing is created until you import or save.</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Pipeline</span><span class="sep">/</span><b>New file</b></div>
+            <div class="topbar-right"><button class="btn sm quiet">Cancel</button><button class="btn primary sm">Create draft</button></div>
+          </div>
+          <div class="surface-scroll" style="background:var(--surface)">
+            <div style="padding:20px 22px 26px;max-width:960px">
+              <div class="drop hero">
+                <span class="ic"><svg width="19" height="19" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 11V3M5 6l3-3 3 3"/><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></svg></span>
+                <h4>Drop the MISMO file from your LOS</h4>
+                <p>The application data fills in automatically — borrowers, property, loan terms, income, assets and liabilities.</p>
+                <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center">
+                  <button class="btn primary">Choose MISMO file</button>
+                  <span style="font-size:11px;color:var(--ink-3)" class="mono">.xml or .html · up to 10 MB</span>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:12px;margin:22px 0 18px">
+                <span style="flex:1;height:1px;background:var(--line)"></span>
+                <span style="font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600">or start it by hand</span>
+                <span style="flex:1;height:1px;background:var(--line)"></span>
+              </div>
+
+              <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:70ch">Only the borrower's first and last name are required. A loan file is allowed to start sparse — everything else can arrive with the documents.</p>
+
+              <div class="section" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+                <div class="section-head"><h3>Primary borrower</h3></div>
+                <div class="pad">
+                  <div class="fgrid c3">
+                    <div class="fld"><label for="n1">First name <span class="req">*</span></label><input class="inp" id="n1" value="Morgan" readonly></div>
+                    <div class="fld"><label for="n2">Last name <span class="req">*</span></label><input class="inp" id="n2" value="Ellis" readonly></div>
+                    <div class="fld"><label for="n3">Middle name</label><input class="inp" id="n3" placeholder="Optional" readonly></div>
+                    <div class="fld"><label for="n4">SSN</label><input class="inp" id="n4" value="900-12-3456" readonly><span class="hint2">Encrypted at rest; only the last four are ever shown.</span></div>
+                    <div class="fld"><label for="n5">Date of birth</label><input class="inp" id="n5" value="1984-03-19" readonly></div>
+                    <div class="fld"><label for="n6">Marital status</label><select class="inp sel" id="n6"><option>Married</option></select></div>
+                    <div class="fld"><label for="n7">Email</label><input class="inp err" id="n7" value="morgan.ellis@" readonly><span class="msg">Enter a valid email address</span></div>
+                    <div class="fld"><label for="n8">Phone</label><input class="inp" id="n8" value="(425) 555-0142" readonly></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="section" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden;margin-top:14px">
+                <div class="section-head"><h3>Subject property</h3></div>
+                <div class="pad">
+                  <div class="fgrid c3">
+                    <div class="fld" style="grid-column:span 2"><label for="p1">Street address</label><input class="inp" id="p1" value="88 Marigold Way" readonly></div>
+                    <div class="fld"><label for="p2">Apt / unit</label><input class="inp" id="p2" placeholder="Optional" readonly></div>
+                    <div class="fld"><label for="p3">City</label><input class="inp" id="p3" value="Bellevue" readonly></div>
+                    <div class="fld"><label for="p4">State</label><input class="inp" id="p4" value="WA" readonly></div>
+                    <div class="fld"><label for="p5">ZIP code</label><input class="inp" id="p5" value="98006" readonly></div>
+                    <div class="fld"><label for="p6">Property type</label><select class="inp sel" id="p6"><option>Single family</option></select></div>
+                    <div class="fld"><label for="p7">Occupancy</label><select class="inp sel" id="p7"><option>Primary residence</option></select></div>
+                    <div class="fld"><label for="p8">Estimated value</label><input class="inp" id="p8" value="720000" readonly></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="section" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden;margin-top:14px">
+                <div class="section-head"><h3>Loan</h3></div>
+                <div class="pad">
+                  <div class="fgrid c3">
+                    <div class="fld"><label for="l1">Program</label><select class="inp sel" id="l1"><option>Conventional</option></select></div>
+                    <div class="fld"><label for="l2">Purpose</label><select class="inp sel" id="l2"><option>Refinance</option></select></div>
+                    <div class="fld"><label for="l3">Loan amount</label><input class="inp" id="l3" value="540000" readonly></div>
+                    <div class="fld"><label for="l4">Target lender</label><select class="inp sel" id="l4"><option>UWM</option></select><span class="hint2">Selects the verification overlay.</span></div>
+                    <div class="fld"><label for="l5">Loan officer</label><input class="inp" id="l5" value="Dana Brooks" readonly></div>
+                    <div class="fld"><label for="l6">LO email</label><input class="inp" id="l6" value="dana.brooks@uwm-demo.com" readonly></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ DOCUMENTS ============================ -->
+      <div class="app with-ctx hidden" id="s-docs">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn" aria-label="Verification"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="chip att">Blocked</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item on"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count" style="color:var(--critical)">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+            <div class="nav-label">Categories</div>
+            <button class="nav-item"><span>Income &amp; employment</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Assets</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Borrower info</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Property</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Disclosures</span><span class="count">1</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot att"></span> 2 documents processing</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><b>Documents</b></div>
+            <div class="topbar-right">
+              <div class="search" style="min-width:180px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>Filter documents</div>
+              <button class="btn primary sm">Upload</button>
+            </div>
+          </div>
+
+          <div style="padding:14px 16px 0;background:var(--paper)">
+            <div class="drop">
+              <span class="ic"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 11V3M5 6l3-3 3 3"/><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></svg></span>
+              <h4>Drag documents here</h4>
+              <p>PDF, JPG or PNG · up to 50 MB each · several at once</p>
+            </div>
+          </div>
+
+          <div style="margin:12px 16px 0;border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+            <div style="padding:7px 12px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)">Uploading — 2 of 3</div>
+            <div class="uprow"><span class="dot ver"></span><span class="nm">ellis-hoi-decl.pdf</span><span class="st ver" style="font-size:11.5px">Classified · homeowners insurance</span></div>
+            <div class="uprow"><span class="dot att"></span><span class="nm">ellis-bank-jan.pdf</span><span class="mono" style="font-size:11px;color:var(--ink-3)">Extracting</span><span class="pb"><i style="width:62%"></i></span></div>
+            <div class="uprow" style="border-bottom:0"><span class="dot"></span><span class="nm">ellis-voe.pdf</span><span class="mono" style="font-size:11px;color:var(--ink-3)">Uploading</span><span class="pb"><i style="width:24%"></i></span></div>
+          </div>
+
+          <div class="surface-scroll" style="padding:16px">
+            <div class="section" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+              <div class="section-head"><h3>Income &amp; employment</h3><span class="chip">4</span><span class="spacer"></span></div>
+              <table class="tbl">
+                <thead><tr><th style="width:44%">Document</th><th style="width:140px">Period</th><th style="width:120px">Type</th><th style="width:150px">Status</th><th style="width:78px" class="r">Size</th></tr></thead>
+                <tbody>
+                  <tr><td class="id stripe att"><span class="name">Pay stub — Ellis — Feb 2026</span></td><td class="num">Feb 1 – 15</td><td>Pay stub</td><td><span class="st att"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>4 fields to check</span></td><td class="r num">248 KB</td></tr>
+                  <tr><td class="id stripe ver"><span class="name">Pay stub — Ellis — Jan 2026</span></td><td class="num">Jan 16 – 31</td><td>Pay stub</td><td><span class="st ver"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span></td><td class="r num">241 KB</td></tr>
+                  <tr><td class="id stripe ver"><span class="name">W-2 — Cascade Robotics — 2025</span> <span class="chip">v2</span></td><td class="num">2025</td><td>W-2</td><td><span class="st ver"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span></td><td class="r num">96 KB</td></tr>
+                  <tr><td class="id stripe idle"><span class="name" style="color:var(--ink-3)">VOE — Cascade Robotics</span></td><td class="num" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">—</td><td><span class="st mut"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"><circle cx="8" cy="8" r="5.6"/></svg>Requested 3 days ago</span></td><td class="r num" style="color:var(--ink-3)">—</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden;margin-top:14px">
+              <div class="section-head"><h3>Assets</h3><span class="chip">3</span><span class="spacer"></span></div>
+              <table class="tbl">
+                <thead><tr><th style="width:44%">Document</th><th style="width:140px">Period</th><th style="width:120px">Type</th><th style="width:150px">Status</th><th style="width:78px" class="r">Size</th></tr></thead>
+                <tbody>
+                  <tr><td class="id stripe att"><span class="name">Bank statement — Feb 2026</span></td><td class="num">Feb 1 – 28</td><td>Bank statement</td><td><span class="st att"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>60 days old at close</span></td><td class="r num">1.2 MB</td></tr>
+                  <tr><td class="id stripe att"><span class="name">Bank statement — Jan 2026</span></td><td class="num">Jan 1 – 31</td><td>Bank statement</td><td><span class="st att"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Extracting</span></td><td class="r num">1.1 MB</td></tr>
+                  <tr><td class="id stripe ver"><span class="name">Brokerage statement — Q4 2025</span></td><td class="num">Oct – Dec</td><td>Brokerage</td><td><span class="st ver"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span></td><td class="r num">640 KB</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>Coverage</h4>
+            <div class="metric"><span class="lab">Package-qualified</span><span class="val ver">8</span></div>
+            <div class="metric"><span class="lab">Needs a look</span><span class="val att">3</span></div>
+            <div class="metric"><span class="lab">Awaiting</span><span class="val">4</span></div>
+            <p class="hint">A document is package-qualified when it is current, fresh, typed and extracted.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Freshness</h4>
+            <p class="hint" style="margin-top:0">Two documents pass their window before the Sep 12 closing target.</p>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:9px">
+              <span class="st att" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Bank statement — Feb</span>
+              <span class="st att" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Bank statement — Jan</span>
+            </div>
+            <button class="btn sm" style="margin-top:11px;width:100%;justify-content:center">Request refreshed copies</button>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Duplicates</h4>
+            <p class="hint" style="margin-top:0">Two W-2s for the same employer and year. The newer one is current; the older is kept in version history.</p>
+            <button class="btn sm" style="margin-top:9px;width:100%;justify-content:center">Review versions</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ NEEDS ============================ -->
+      <div class="app with-ctx hidden" id="s-needs">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="Needs"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="chip att">Blocked</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count" style="color:var(--critical)">3</span></button>
+            <button class="nav-item on"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot ai" style="background:var(--ai)"></span> 2 AI proposals to confirm</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><b>Needs</b><span style="color:var(--ink-3)">· the self-maintaining checklist</span></div>
+            <div class="topbar-right">
+              <button class="btn sm">Add a need</button>
+              <button class="btn primary sm">Request all outstanding</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="views">
+              <button class="view on">Needs action <span class="n">3</span></button>
+              <button class="view">In review <span class="n">1</span></button>
+              <button class="view">Complete <span class="n">6</span></button>
+              <button class="view">Set aside <span class="n">1</span></button>
+            </div>
+            <div style="flex:1"></div>
+            <span style="font-size:11.5px;color:var(--ink-3)">Two proposals await your confirm or dismiss</span>
+          </div>
+          <div class="surface-scroll">
+            <div class="finding crit"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Homeowners insurance declaration</span><span class="chip crit">Blocking</span></div>
+              <div class="fmeta"><span class="chip acc">Baseline</span><span>Required because the property is the security for the loan</span><span style="color:var(--line-2)">·</span><span class="st mut" style="font-size:11.5px">Requested 3 days ago</span></div>
+              <p class="fmsg">A declarations page naming the lender as mortgagee, effective on or before the closing date.</p>
+              <div class="factions"><button class="btn sm primary">Send a reminder</button><button class="btn sm">Mark received</button><button class="btn sm quiet">Waive with reason</button></div>
+            </div></div>
+
+            <div class="finding crit"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Second month of bank statements</span><span class="chip crit">Blocking</span><span class="chip ai">AI proposed</span></div>
+              <div class="fmeta"><span class="chip ai">AI identified</span><span>Reserves cover 1.4 months against a two-month requirement</span></div>
+              <p class="fmsg">The February statement alone leaves reserves $1,127.03 short. A January statement would likely close the gap — this is the AI's reading, so check it before sending.</p>
+              <div class="facts"><span class="chip mono">Finding AS-3</span><span class="chip mono">ellis-bank-feb.pdf</span><span class="chip mono">Short $1,127.03</span></div>
+              <div class="factions"><button class="btn sm primary">Confirm and request</button><button class="btn sm">Keep, don't send yet</button><button class="btn sm quiet">Dismiss</button></div>
+            </div></div>
+
+            <div class="finding att"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Verification of employment</span></div>
+              <div class="fmeta"><span class="chip">From finding</span><span>Triggered by EM-2 — employment can't be verified without it</span></div>
+              <p class="fmsg">A verbal or written VOE dated within ten business days of closing.</p>
+              <div class="factions"><button class="btn sm primary">Request from employer</button><button class="btn sm quiet">Add a note</button></div>
+            </div></div>
+
+            <div class="finding att"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Two months of bank statements — all accounts</span><span class="chip att">Documents attached</span></div>
+              <div class="fmeta"><span class="chip acc">Baseline</span><span>Graded need — one document can't prove the whole requirement</span></div>
+              <p class="fmsg">Two statements are attached, covering the checking account. Confirm they cover every account used for reserves, or say which are still missing.</p>
+              <div class="facts"><span class="chip mono">ellis-bank-feb.pdf</span><span class="chip mono">ellis-bank-jan.pdf</span></div>
+              <div class="factions"><button class="btn sm primary">Confirm coverage</button><button class="btn sm">Request another account</button></div>
+            </div></div>
+
+            <div class="finding ver"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Government-issued photo ID</span></div>
+              <div class="fmeta"><span class="chip acc">Baseline</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span><span style="color:var(--line-2)">·</span><a class="src" href="#">ellis-id.pdf</a></div>
+            </div></div>
+
+            <div class="finding ver"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Most recent pay stub</span></div>
+              <div class="fmeta"><span class="chip acc">Baseline</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Verified</span><span style="color:var(--line-2)">·</span><a class="src" href="#">ellis-paystub-scan.pdf</a></div>
+            </div></div>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>Where the file stands</h4>
+            <div class="metric"><span class="lab">Outstanding</span><span class="val crit">3</span></div>
+            <div class="metric"><span class="lab">In review</span><span class="val att">1</span></div>
+            <div class="metric"><span class="lab">Satisfied</span><span class="val ver">6</span></div>
+            <div style="margin-top:9px"><span class="bar" style="width:100%"><i class="att" style="width:60%"></i></span></div>
+            <p class="hint">6 of 10 needs satisfied.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Where needs come from</h4>
+            <div class="metric"><span class="lab">Baseline (MISMO)</span><span class="val">5</span></div>
+            <div class="metric"><span class="lab">From a finding</span><span class="val">2</span></div>
+            <div class="metric"><span class="lab">AI proposed</span><span class="val" style="color:var(--ai)">2</span></div>
+            <div class="metric"><span class="lab">Added by you</span><span class="val">1</span></div>
+            <p class="hint">An AI proposal is never acted on until you confirm it.</p>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Ready to send</h4>
+            <p class="hint" style="margin-top:0">Three outstanding needs can go to the borrower in a single message.</p>
+            <button class="btn primary sm" style="margin-top:10px;width:100%;justify-content:center">Compose request</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ COMMUNICATION ============================ -->
+      <div class="app with-ctx hidden" id="s-comm">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="File"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="phase-note">Phase 4</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item on"><span>Communication</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+            <div class="nav-label">Threads</div>
+            <button class="nav-item on"><span>Morgan Ellis</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Dana Brooks · LO</span><span class="count">2</span></button>
+            <button class="nav-item"><span>UWM underwriting</span></button>
+          </div>
+          <div class="nav-foot">Borrower inbox: <span class="mono">awbb@files.mb.ai</span></div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><b>Communication</b></div>
+            <div class="topbar-right"><span class="phase-note">Designed ahead — Phase 4</span><button class="btn sm">Templates</button></div>
+          </div>
+          <div class="surface-scroll" style="background:var(--paper)">
+            <div class="thread">
+              <div class="msg out">
+                <div class="bub">
+                  <div class="who"><b style="color:var(--ink-2);font-weight:500">Casey Demo</b><span>Aug 26, 09:14</span><span class="chip acc">Document request</span></div>
+                  <div class="bd">Hi Morgan — two things to close out the file: a homeowners insurance declarations page naming UWM as mortgagee, and your January bank statement. Reply to this email with both attached and they'll land on the file automatically.</div>
+                  <div class="att-list"><span class="chip mono">Needs · HOI declaration</span><span class="chip mono">Needs · Jan statement</span></div>
+                </div>
+                <div class="av">CD</div>
+              </div>
+
+              <div class="msg">
+                <div class="av">ME</div>
+                <div class="bub">
+                  <div class="who"><b style="color:var(--ink-2);font-weight:500">Morgan Ellis</b><span>Aug 27, 18:41</span></div>
+                  <div class="bd">Insurance is attached. The January statement I'll have to pull from the bank — should be Friday.</div>
+                  <div class="att-list"><span class="chip ver">ellis-hoi-decl.pdf · matched to a need</span></div>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="av" style="background:var(--ai-soft);color:var(--ai)">AI</div>
+                <div class="bub" style="border-left:2px solid var(--ai)">
+                  <div class="who"><b style="color:var(--ai);font-weight:500">Automatic</b><span>Aug 27, 18:41</span></div>
+                  <div class="bd">The attachment was classified as a homeowners insurance declaration and matched to the need "Homeowners insurance declaration". Effective date Sep 1, 2026, mortgagee reads UWM — the need is now satisfied.</div>
+                </div>
+              </div>
+
+              <div class="msg out">
+                <div class="bub">
+                  <div class="who"><b style="color:var(--ink-2);font-weight:500">Casey Demo</b><span>Aug 29, 08:02</span><span class="chip">Draft</span></div>
+                  <div class="bd">Perfect, thank you. One more when you have it — your employer needs to complete a verification of employment. I've sent the form directly to Cascade Robotics' HR; nothing needed from you unless they come back to you first.</div>
+                </div>
+                <div class="av">CD</div>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="box">Write to Morgan… attachments they reply with are classified and matched to needs automatically.</div>
+            <div style="display:flex;gap:7px;margin-top:9px;align-items:center">
+              <button class="btn sm">Attach a need</button>
+              <button class="btn sm">Use a template</button>
+              <span style="flex:1"></span>
+              <button class="btn sm quiet">Save draft</button>
+              <button class="btn primary sm">Send</button>
+            </div>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>This thread</h4>
+            <div class="metric"><span class="lab">Messages</span><span class="val">4</span></div>
+            <div class="metric"><span class="lab">Documents received</span><span class="val ver">1</span></div>
+            <div class="metric"><span class="lab">Awaiting reply</span><span class="val att">1</span></div>
+            <p class="hint">Last reply from Morgan two days ago.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Attached to this request</h4>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span class="st ver" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>HOI declaration</span>
+              <span class="st att" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>January bank statement</span>
+            </div>
+            <p class="hint">A need closes itself when a matching document arrives on the thread.</p>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Templates</h4>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <button class="btn sm" style="justify-content:flex-start">Initial document request</button>
+              <button class="btn sm" style="justify-content:flex-start">Chase — no reply in 5 days</button>
+              <button class="btn sm" style="justify-content:flex-start">Large deposit explanation</button>
+              <button class="btn sm" style="justify-content:flex-start">Conditions from underwriting</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ CONDITIONS ============================ -->
+      <div class="app hidden" id="s-cond">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="File"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="phase-note">Phase 4.5</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span><span class="count">4</span></button>
+            <button class="nav-item on"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Lender package</span></button>
+            <div class="nav-label">Filter</div>
+            <button class="nav-item on"><span>All conditions</span><span class="count">9</span></button>
+            <button class="nav-item"><span>Prior to docs</span><span class="count">6</span></button>
+            <button class="nav-item"><span>Prior to funding</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Past due</span><span class="count" style="color:var(--critical)">2</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot crit"></span> 2 past due</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><b>Conditions</b><span style="color:var(--ink-3)">· UWM · received Aug 26</span></div>
+            <div class="topbar-right"><span class="phase-note">Designed ahead — Phase 4.5</span><button class="btn sm">Import from UWM</button><button class="btn primary sm">Submit cleared</button></div>
+          </div>
+          <div style="flex:1;min-height:0">
+            <div class="board">
+              <div class="bcol">
+                <div class="bcol-head"><span class="dot crit"></span><h4>Outstanding</h4><span class="chip crit">4</span></div>
+                <div class="bcol-body">
+                  <div class="ccard crit"><div class="t">Provide a second month of bank statements evidencing two months reserves</div><div class="m"><span class="chip mono">UW-114</span><span class="chip crit">Past due 2d</span><span class="chip">Prior to docs</span></div></div>
+                  <div class="ccard crit"><div class="t">Verbal VOE within 10 business days of note date</div><div class="m"><span class="chip mono">UW-118</span><span class="chip crit">Past due 1d</span><span class="chip">Prior to funding</span></div></div>
+                  <div class="ccard att"><div class="t">Letter of explanation for the $2,400 deposit on 02/11</div><div class="m"><span class="chip mono">UW-121</span><span class="chip">Due Sep 3</span><span class="chip ai">From cross-check</span></div></div>
+                  <div class="ccard att"><div class="t">Signed 4506-C for tax years 2024 and 2025</div><div class="m"><span class="chip mono">UW-109</span><span class="chip">Due Sep 5</span></div></div>
+                </div>
+              </div>
+              <div class="bcol">
+                <div class="bcol-head"><span class="dot att"></span><h4>Awaiting borrower</h4><span class="chip att">2</span></div>
+                <div class="bcol-body">
+                  <div class="ccard att"><div class="t">Homeowners insurance binder naming UWM as mortgagee</div><div class="m"><span class="chip mono">UW-103</span><span class="chip">Requested Aug 26</span></div></div>
+                  <div class="ccard att"><div class="t">Most recent quarterly 401(k) statement — all pages</div><div class="m"><span class="chip mono">UW-116</span><span class="chip">Requested Aug 28</span></div></div>
+                </div>
+              </div>
+              <div class="bcol">
+                <div class="bcol-head"><span class="dot" style="background:var(--accent)"></span><h4>Submitted to UW</h4><span class="chip acc">1</span></div>
+                <div class="bcol-body">
+                  <div class="ccard"><div class="t">Updated 1003 with corrected bonus income</div><div class="m"><span class="chip mono">UW-107</span><span class="chip acc">Sent Aug 28</span></div></div>
+                </div>
+              </div>
+              <div class="bcol">
+                <div class="bcol-head"><span class="dot ver"></span><h4>Cleared</h4><span class="chip ver">2</span></div>
+                <div class="bcol-body">
+                  <div class="ccard ver"><div class="t">Government-issued photo identification</div><div class="m"><span class="chip mono">UW-101</span><span class="chip ver">Cleared Aug 27</span></div></div>
+                  <div class="ccard ver"><div class="t">Executed appraisal with no subject-to repairs</div><div class="m"><span class="chip mono">UW-104</span><span class="chip ver">Cleared Aug 27</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ LENDER PACKAGE ============================ -->
+      <div class="app with-ctx hidden" id="s-pkg">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn on" aria-label="File"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>LF-AWBB</strong><span class="phase-note">Phase 6</span></div>
+          <div class="nav-body">
+            <div class="nav-label">File</div>
+            <button class="nav-item"><span>Overview</span></button>
+            <button class="nav-item"><span>Documents</span><span class="count">12</span></button>
+            <button class="nav-item"><span>Verification</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Needs</span><span class="count">5</span></button>
+            <button class="nav-item"><span>Communication</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Conditions</span><span class="count">2</span></button>
+            <button class="nav-item on"><span>Lender package</span></button>
+            <div class="nav-label">Package sections</div>
+            <button class="nav-item on"><span>Borrower &amp; loan</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Income</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Assets</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Property</span><span class="count">2</span></button>
+            <button class="nav-item"><span>Disclosures</span><span class="count">1</span></button>
+          </div>
+          <div class="nav-foot"><span class="dot att"></span> 3 findings still open</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Morgan Ellis</span><span class="sep">/</span><b>Lender package</b></div>
+            <div class="topbar-right"><span class="phase-note">Designed ahead — Phase 6</span><button class="btn sm">Preview PDF</button><button class="btn primary sm" disabled style="opacity:.5">Submit to UWM</button></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);border-left:2px solid var(--critical)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--critical)" stroke-width="1.7" style="margin-top:2px;flex:none"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>
+            <div style="flex:1"><div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">Submission is blocked.</b> Three verification findings are open at Balanced thoroughness, and one required document is missing.</div></div>
+            <button class="btn sm">Review findings</button>
+          </div>
+          <div class="surface-scroll">
+            <div class="section">
+              <div class="section-head"><h3>Borrower &amp; loan</h3><span class="spacer"></span><span style="font-size:11.5px;color:var(--ink-3)">3 of 3 included</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Uniform Residential Loan Application (1003)</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">8 pp</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Driver's license — Morgan Ellis</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">1 p</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Credit authorization</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">2 pp</span></div>
+            </div>
+            <div class="section">
+              <div class="section-head"><h3>Income</h3><span class="spacer"></span><span style="font-size:11.5px;color:var(--attention)">3 of 4 included</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Pay stub — Feb 1–15, 2026</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">1 p</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Pay stub — Jan 16–31, 2026</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">1 p</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">W-2 — Cascade Robotics — 2025</span><span class="st mut" style="font-size:11.5px">v2 supersedes v1</span><span class="num" style="text-align:right;color:var(--ink-3)">1 p</span></div>
+              <div class="pkgrow off"><span class="cb"></span><span class="nm">Verification of employment</span><span class="st mut" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"><circle cx="8" cy="8" r="5.6"/></svg>Not received</span><span class="num" style="text-align:right;color:var(--ink-3)">—</span></div>
+            </div>
+            <div class="section" style="border-bottom:0">
+              <div class="section-head"><h3>Assets</h3><span class="spacer"></span><span style="font-size:11.5px;color:var(--attention)">2 of 3 included</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Bank statement — Feb 2026</span><span class="st att" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Stale at close</span><span class="num" style="text-align:right;color:var(--ink-3)">4 pp</span></div>
+              <div class="pkgrow"><span class="cb on"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 8.5 6.8 11.2 12 5.5"/></svg></span><span class="nm">Brokerage statement — Q4 2025</span><span class="st ver" style="font-size:11.5px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>Current</span><span class="num" style="text-align:right;color:var(--ink-3)">6 pp</span></div>
+              <div class="pkgrow off"><span class="cb"></span><span class="nm">Bank statement — Jan 2026</span><span class="st att" style="font-size:11.5px">Extracting</span><span class="num" style="text-align:right;color:var(--ink-3)">—</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>Package</h4>
+            <div class="metric"><span class="lab">Documents</span><span class="val">8 of 11</span></div>
+            <div class="metric"><span class="lab">Pages</span><span class="val">24</span></div>
+            <div class="metric"><span class="lab">Estimated size</span><span class="val">6.4 MB</span></div>
+            <p class="hint">Only current, fresh, typed and extracted documents are eligible.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Blocking submission</h4>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <span class="st crit" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>Reserves short by $1,127.03</span>
+              <span class="st crit" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>Bonus income unsupported</span>
+              <span class="st att" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>Bank statement ages out</span>
+              <span class="st att" style="font-size:12px"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>VOE not received</span>
+            </div>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Cover sheet</h4>
+            <p class="hint" style="margin-top:0">Generated from the file: borrower, loan terms, ratios, the overlay applied, and every override with its reason.</p>
+            <button class="btn sm" style="margin-top:10px;width:100%;justify-content:center">Preview cover sheet</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ ADMIN · LENDERS ============================ -->
+      <div class="app hidden" id="s-lenders">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn on" aria-label="Administration"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8 13.2 4v4c0 3.2-2.2 5.2-5.2 6.2C5 13.2 2.8 11.2 2.8 8V4z"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>Administration</strong></div>
+          <div class="nav-body">
+            <div class="nav-label">Company</div>
+            <button class="nav-item on"><span>Lenders</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Verification overlays</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Rule validation</span><span class="count">176</span></button>
+            <button class="nav-item"><span>Users</span></button>
+            <button class="nav-item"><span>Company</span></button>
+          </div>
+          <div class="nav-foot">Cascade Processing Group</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Administration</span><span class="sep">/</span><b>Lenders</b></div>
+            <div class="topbar-right"><button class="btn primary sm">Add a lender</button></div>
+          </div>
+          <div class="surface-scroll" style="background:var(--surface)">
+            <table class="tbl">
+              <thead><tr><th style="width:210px">Lender</th><th style="width:110px">Programs</th><th style="width:110px" class="r">Overrides</th><th>Most recent change</th><th style="width:130px">Changed by</th><th style="width:96px" class="r">When</th></tr></thead>
+              <tbody>
+                <tr><td class="id stripe ver"><span class="name">UWM</span></td><td>Conventional</td><td class="r num">12</td><td>Reserves on a rate-and-term refinance raised to 2 months</td><td>Priya Desai</td><td class="r num" style="color:var(--ink-3)">3d</td></tr>
+                <tr><td class="id stripe ver"><span class="name">Sun-West</span></td><td>Conventional, FHA</td><td class="r num">8</td><td>Maximum back-end DTI lowered to 43%</td><td>Priya Desai</td><td class="r num" style="color:var(--ink-3)">11d</td></tr>
+                <tr><td class="id stripe idle"><span class="name">Pennymac</span></td><td>FHA</td><td class="r num" style="color:var(--ink-3)">0</td><td style="color:var(--ink-3)">No overrides — agency defaults apply</td><td style="color:var(--ink-3)">—</td><td class="r num" style="color:var(--ink-3)">—</td></tr>
+                <tr><td class="id stripe idle"><span class="name">Rocket Pro TPO</span></td><td>Conventional</td><td class="r num" style="color:var(--ink-3)">0</td><td style="color:var(--ink-3)">No overrides — agency defaults apply</td><td style="color:var(--ink-3)">—</td><td class="r num" style="color:var(--ink-3)">—</td></tr>
+              </tbody>
+            </table>
+            <div style="padding:16px">
+              <div class="note">A lender with no overrides is not a gap. It means the agency guideline applies unchanged, which is the correct default and is exactly what verification will use.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ ADMIN · OVERLAY ============================ -->
+      <div class="app with-ctx hidden" id="s-overlay">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn on" aria-label="Administration"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8 13.2 4v4c0 3.2-2.2 5.2-5.2 6.2C5 13.2 2.8 11.2 2.8 8V4z"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>UWM</strong><span class="chip acc">12</span></div>
+          <div class="nav-body">
+            <div class="nav-label">Company</div>
+            <button class="nav-item"><span>Lenders</span><span class="count">4</span></button>
+            <button class="nav-item on"><span>Verification overlays</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Rule validation</span><span class="count">176</span></button>
+            <button class="nav-item"><span>Users</span></button>
+            <button class="nav-item"><span>Company</span></button>
+            <div class="nav-label">Categories</div>
+            <button class="nav-item on"><span>Assets &amp; reserves</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Credit &amp; DTI</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Income</span><span class="count">3</span></button>
+            <button class="nav-item"><span>Property</span><span class="count">2</span></button>
+          </div>
+          <div class="nav-foot">Applies to every UWM file on the next run.</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Administration</span><span class="sep">/</span><span>Lenders</span><span class="sep">/</span><b>UWM overlay</b></div>
+            <div class="topbar-right"><button class="btn sm quiet">Discard</button><button class="btn primary sm">Save with a reason</button></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);border-left:2px solid var(--accent)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.6" style="margin-top:2px;flex:none"><circle cx="8" cy="8" r="6"/><path d="M8 7.4v3.6M8 5.2v.1"/></svg>
+            <span style="font-size:12.5px;color:var(--ink-2)">An overlay only ever makes a rule <b style="font-weight:500">stricter</b> than the agency default. The base value is always shown beside it, so the effect of the change is legible without opening the audit trail.</span>
+          </div>
+          <div class="surface-scroll" style="background:var(--surface)">
+            <table class="tbl">
+              <thead><tr><th style="width:96px">Rule</th><th style="width:32%">Guideline</th><th style="width:112px" class="r">Agency</th><th style="width:130px" class="r">This lender</th><th>Reason</th><th style="width:44px"></th></tr></thead>
+              <tbody>
+                <tr><td class="id stripe att"><span class="mono" style="color:var(--ink)">AS-3</span></td><td>Reserves after closing — rate &amp; term, owner-occupied</td><td class="r num" style="color:var(--ink-3)">0 mo</td><td class="r"><span class="num" style="color:var(--attention);font-weight:500">2 mo</span></td><td style="color:var(--ink-3)">UWM bulletin 2026-04</td><td class="r"><button class="btn sm quiet" aria-label="Remove override">×</button></td></tr>
+                <tr><td class="id stripe att"><span class="mono" style="color:var(--ink)">CR-2</span></td><td>Maximum back-end debt-to-income ratio</td><td class="r num" style="color:var(--ink-3)">50%</td><td class="r"><span class="num" style="color:var(--attention);font-weight:500">45%</span></td><td style="color:var(--ink-3)">Standing UWM overlay</td><td class="r"><button class="btn sm quiet" aria-label="Remove override">×</button></td></tr>
+                <tr><td class="id stripe att"><span class="mono" style="color:var(--ink)">CR-7</span></td><td>Minimum representative FICO — conventional</td><td class="r num" style="color:var(--ink-3)">620</td><td class="r"><span class="num" style="color:var(--attention);font-weight:500">640</span></td><td style="color:var(--ink-3)">Standing UWM overlay</td><td class="r"><button class="btn sm quiet" aria-label="Remove override">×</button></td></tr>
+                <tr><td class="id stripe att"><span class="mono" style="color:var(--ink)">DOC-11</span></td><td>Maximum age of asset documentation at closing</td><td class="r num" style="color:var(--ink-3)">120 d</td><td class="r"><span class="num" style="color:var(--attention);font-weight:500">60 d</span></td><td style="color:var(--ink-3)">UWM bulletin 2026-01</td><td class="r"><button class="btn sm quiet" aria-label="Remove override">×</button></td></tr>
+                <tr style="background:var(--surface-2)"><td class="id stripe"><span class="mono" style="color:var(--ink-3)">Add…</span></td><td><input class="inp" placeholder="Search rules by id or guideline" readonly></td><td class="r num" style="color:var(--ink-3)">—</td><td class="r"><input class="inp num" style="text-align:right" placeholder="Value" readonly></td><td><input class="inp" placeholder="Why this lender is stricter" readonly></td><td></td></tr>
+              </tbody>
+            </table>
+            <div style="padding:16px 16px 24px">
+              <h3 style="margin:0 0 10px;font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)">Change history</h3>
+              <div style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+                <div style="background:var(--surface);padding:10px 13px;border-bottom:1px solid var(--line)">
+                  <div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">Priya Desai</b> raised reserves on rate-and-term refinances from <span class="num">0 mo</span> to <span class="num" style="color:var(--attention)">2 mo</span></div>
+                  <div style="font-size:11px;color:var(--ink-3);margin-top:3px" class="mono">Aug 26, 11:04 · AS-3 · "UWM bulletin 2026-04"</div>
+                </div>
+                <div style="background:var(--surface);padding:10px 13px;border-bottom:1px solid var(--line)">
+                  <div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">Priya Desai</b> lowered maximum asset-document age from <span class="num">120 d</span> to <span class="num" style="color:var(--attention)">60 d</span></div>
+                  <div style="font-size:11px;color:var(--ink-3);margin-top:3px" class="mono">Aug 12, 09:37 · DOC-11 · "UWM bulletin 2026-01"</div>
+                </div>
+                <div style="background:var(--surface);padding:10px 13px">
+                  <div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">Priya Desai</b> created the UWM overlay with 10 overrides</div>
+                  <div style="font-size:11px;color:var(--ink-3);margin-top:3px" class="mono">Jun 2, 15:22 · "Initial import from the UWM seller guide"</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ctx">
+          <div class="ctx-block">
+            <h4>Effect of this overlay</h4>
+            <div class="metric"><span class="lab">Open UWM files</span><span class="val">14</span></div>
+            <div class="metric"><span class="lab">Would newly block</span><span class="val crit">3</span></div>
+            <div class="metric"><span class="lab">Would newly clear</span><span class="val ver">0</span></div>
+            <p class="hint">Estimated against the last completed run on each file. Saving does not re-run verification — the next run picks it up.</p>
+          </div>
+          <div class="ctx-block">
+            <h4>Files this would newly block</h4>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span class="mono" style="font-size:12px;color:var(--accent)">LF-AWBB · Morgan Ellis</span>
+              <span class="mono" style="font-size:12px;color:var(--accent)">LF-DTHM · Avery Stone</span>
+              <span class="mono" style="font-size:12px;color:var(--accent)">LF-VNPK · Hollis Chen</span>
+            </div>
+          </div>
+          <div class="ctx-block" style="border-bottom:0">
+            <h4>Reason for this change</h4>
+            <p class="hint" style="margin-top:0">A reason is required. It is written to the audit trail and shown on every finding this overlay adjusts.</p>
+            <div style="margin-top:9px"><input class="inp" placeholder="e.g. UWM bulletin 2026-04" readonly></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ ADMIN · VALIDATION ============================ -->
+      <div class="app hidden" id="s-validation">
+        <div class="rail">
+          <div class="brand-tile">m</div>
+          <button class="rail-btn" aria-label="Pipeline"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h7"/></svg></button>
+          <button class="rail-btn" aria-label="Documents"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg></button>
+          <button class="rail-btn on" aria-label="Administration"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8 13.2 4v4c0 3.2-2.2 5.2-5.2 6.2C5 13.2 2.8 11.2 2.8 8V4z"/></svg></button>
+          <div class="rail-spacer"></div>
+          <div class="avatar">CD</div>
+        </div>
+        <div class="nav">
+          <div class="nav-head"><strong>Rule validation</strong></div>
+          <div class="nav-body">
+            <div class="nav-label">Company</div>
+            <button class="nav-item"><span>Lenders</span><span class="count">4</span></button>
+            <button class="nav-item"><span>Verification overlays</span><span class="count">3</span></button>
+            <button class="nav-item on"><span>Rule validation</span><span class="count">176</span></button>
+            <button class="nav-item"><span>Users</span></button>
+            <button class="nav-item"><span>Company</span></button>
+            <div class="nav-label">Filter</div>
+            <button class="nav-item on"><span>Awaiting a verdict</span><span class="count">104</span></button>
+            <button class="nav-item"><span>Validated</span><span class="count">52</span></button>
+            <button class="nav-item"><span>Corrected</span><span class="count">14</span></button>
+            <button class="nav-item"><span>Flagged to remove</span><span class="count">6</span></button>
+          </div>
+          <div class="nav-foot">Reviewer: Priya Desai · domain expert</div>
+        </div>
+        <div class="work">
+          <div class="topbar">
+            <div class="crumbs"><span>Administration</span><span class="sep">/</span><b>Rule validation</b><span style="color:var(--ink-3)">· conventional</span></div>
+            <div class="topbar-right">
+              <div class="search" style="min-width:180px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>Search rules</div>
+              <button class="btn sm">Propose a rule</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);border-left:2px solid var(--attention)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--attention)" stroke-width="1.6" style="margin-top:2px;flex:none"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>
+            <span style="font-size:12.5px;color:var(--ink-2)">A rule marked <b style="font-weight:500">grounded starter</b> has a citation but no human verdict yet. It runs, and every finding it produces says so. It is not the same as validated.</span>
+          </div>
+          <div class="calcstrip" style="grid-template-columns:repeat(5,1fr)">
+            <div class="calc"><span class="lab">Total rules</span><span class="val">176</span></div>
+            <div class="calc"><span class="lab"><span class="dot"></span>Grounded starter</span><span class="val">104</span></div>
+            <div class="calc"><span class="lab"><span class="dot ver"></span>Validated</span><span class="val" style="color:var(--verified)">52</span></div>
+            <div class="calc"><span class="lab"><span class="dot att"></span>Corrected</span><span class="val" style="color:var(--attention)">14</span></div>
+            <div class="calc"><span class="lab"><span class="dot crit"></span>Flagged to remove</span><span class="val" style="color:var(--critical)">6</span></div>
+          </div>
+          <div class="surface-scroll" style="background:var(--surface)">
+            <div class="finding att"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Reserves after closing — owner-occupied rate and term</span></div>
+              <div class="fmeta"><span class="chip mono">AS-3</span><span>Assets</span><span style="color:var(--line-2)">·</span><span class="chip att">Grounded starter</span><span style="color:var(--line-2)">·</span><span class="mono" style="font-size:10.5px">Fannie Mae B3-4.1-01</span></div>
+              <p class="fmsg">Currently encoded as <span class="mono" style="color:var(--ink)">reserves ≥ 0 months</span> for a rate-and-term refinance on a primary residence, with lender overlays free to raise it.</p>
+              <div class="factions">
+                <button class="btn sm primary">Validated as written</button>
+                <button class="btn sm">Correct the value</button>
+                <button class="btn sm quiet">Flag to remove</button>
+              </div>
+            </div></div>
+            <div class="finding att"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Bonus income requires a 24-month history</span></div>
+              <div class="fmeta"><span class="chip mono">IN-4</span><span>Income</span><span style="color:var(--line-2)">·</span><span class="chip att">Grounded starter</span><span style="color:var(--line-2)">·</span><span class="mono" style="font-size:10.5px">Fannie Mae B3-3.1-01</span></div>
+              <p class="fmsg">Currently encoded as <span class="mono" style="color:var(--ink)">bonus history ≥ 24 months</span>, averaged over the same period.</p>
+              <div class="factions">
+                <button class="btn sm primary">Validated as written</button>
+                <button class="btn sm">Correct the value</button>
+                <button class="btn sm quiet">Flag to remove</button>
+              </div>
+            </div></div>
+            <div class="finding ver"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Maximum LTV — rate and term, primary residence</span></div>
+              <div class="fmeta"><span class="chip mono">LT-1</span><span>Property</span><span style="color:var(--line-2)">·</span><span class="chip ver">Validated</span><span style="color:var(--line-2)">·</span><span class="mono" style="font-size:10.5px">Fannie Mae B2-1.2-02</span></div>
+              <p class="fmsg">Confirmed at <span class="mono" style="color:var(--ink)">LTV ≤ 80%</span> by Priya Desai on Aug 14, 2026.</p>
+            </div></div>
+            <div class="finding crit"><div class="fr"></div><div class="fbody">
+              <div class="fhead"><span class="ftitle">Gift funds require a donor bank statement in every case</span></div>
+              <div class="fmeta"><span class="chip mono">AS-11</span><span>Assets</span><span style="color:var(--line-2)">·</span><span class="chip crit">Flagged to remove</span></div>
+              <p class="fmsg">Priya's note: "Too broad. A donor statement is only required when the gift is not wired directly to escrow. As written this fires on every gift and trains processors to ignore it."</p>
+              <div class="factions"><button class="btn sm">Reopen for correction</button></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ STATES ============================ -->
+      <div class="found hidden" id="s-states" style="height:720px">
+        <h3>Loading — skeletons match the real row height, so nothing shifts on arrival</h3>
+        <div style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden;background:var(--surface)">
+          <table class="tbl">
+            <thead><tr><th style="width:92px">File</th><th style="width:150px">Borrower</th><th>Subject property</th><th style="width:96px" class="r">Amount</th><th style="width:170px">Attention</th></tr></thead>
+            <tbody>
+              <tr><td class="id"><span class="sk" style="width:56px"></span></td><td><span class="sk" style="width:96px"></span></td><td><span class="sk" style="width:180px"></span></td><td class="r"><span class="sk" style="width:64px;margin-left:auto"></span></td><td><span class="sk" style="width:130px"></span></td></tr>
+              <tr><td class="id"><span class="sk" style="width:56px"></span></td><td><span class="sk" style="width:84px"></span></td><td><span class="sk" style="width:210px"></span></td><td class="r"><span class="sk" style="width:58px;margin-left:auto"></span></td><td><span class="sk" style="width:104px"></span></td></tr>
+              <tr><td class="id"><span class="sk" style="width:56px"></span></td><td><span class="sk" style="width:104px"></span></td><td><span class="sk" style="width:158px"></span></td><td class="r"><span class="sk" style="width:70px;margin-left:auto"></span></td><td><span class="sk" style="width:142px"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Empty — say what goes here and offer the one action that fills it</h3>
+        <div class="sgrid" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden">
+          <div class="scell">
+            <span class="cap2">No files yet</span>
+            <div class="empty">
+              <span class="ic"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4.5h4.2l1.3 1.6H14v6.4H2z"/></svg></span>
+              <h5>No loan files yet</h5>
+              <p>Drop a MISMO file from your LOS and the first one builds itself.</p>
+              <button class="btn primary sm" style="margin-top:8px">Import a MISMO file</button>
+            </div>
+          </div>
+          <div class="scell">
+            <span class="cap2">Filtered to nothing</span>
+            <div class="empty">
+              <span class="ic"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/><path d="M5.4 5.4l3.2 3.2M8.6 5.4 5.4 8.6"/></svg></span>
+              <h5>No files match</h5>
+              <p>Nothing in "Blocked to submit" matches "ellis". Clear the search to see all four.</p>
+              <button class="btn sm" style="margin-top:8px">Clear the search</button>
+            </div>
+          </div>
+          <div class="scell">
+            <span class="cap2">Structurally empty</span>
+            <div class="empty">
+              <span class="ic"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.8"/><path d="M4.4 11.6 11.6 4.4"/></svg></span>
+              <h5>Nothing here, and that's correct</h5>
+              <p>Rules that don't apply to this file are never recorded, so this tab stays empty by design.</p>
+            </div>
+          </div>
+        </div>
+
+        <h3>Error — name what failed, why, and the way out</h3>
+        <div class="sgrid" style="border:1px solid var(--line);border-radius:var(--r-box);overflow:hidden;grid-template-columns:1fr 1fr">
+          <div class="scell" style="min-height:0">
+            <span class="cap2">A section failed</span>
+            <div style="display:flex;gap:10px;align-items:flex-start;border-left:2px solid var(--critical);padding:10px 13px;background:var(--surface)">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--critical)" stroke-width="1.7" style="margin-top:2px;flex:none"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>
+              <div style="flex:1"><div style="font-size:12.5px;color:var(--ink)"><b style="font-weight:500">Couldn't load the borrowers.</b> The request timed out. The rest of the file loaded fine.</div></div>
+              <button class="btn sm">Retry</button>
+            </div>
+          </div>
+          <div class="scell" style="min-height:0">
+            <span class="cap2">The whole page failed</span>
+            <div class="empty" style="padding:6px">
+              <span class="ic" style="color:var(--critical);border-color:var(--critical)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg></span>
+              <h5>This file wouldn't open</h5>
+              <p>It may have been deleted, or it belongs to another company. Nothing was changed.</p>
+              <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm">Try again</button><button class="btn primary sm">Back to the pipeline</button></div>
+            </div>
+          </div>
+        </div>
+
+        <h3>Confirmations and toasts</h3>
+        <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:start">
+          <div class="modal">
+            <div style="display:flex;gap:11px;align-items:flex-start">
+              <span style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--critical-soft);color:var(--critical);flex:none"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 9h5.8l.6-9"/></svg></span>
+              <div style="flex:1">
+                <h4 style="margin:0;font-size:14.5px;font-weight:600;color:var(--ink)">Delete LF-AWBB?</h4>
+                <p style="margin:5px 0 0;font-size:12.5px;color:var(--ink-2);max-width:52ch">Morgan Ellis · 88 Marigold Way. Twelve documents, three open findings and the whole activity trail go with it. The file is recoverable by an administrator for 30 days.</p>
+                <div class="fld" style="margin-top:12px"><label for="del">Type <span class="mono" style="color:var(--ink)">LF-AWBB</span> to confirm</label><input class="inp" id="del" placeholder="LF-AWBB" readonly></div>
+                <div style="display:flex;gap:7px;margin-top:13px;justify-content:flex-end"><button class="btn sm">Cancel</button><button class="btn sm" style="background:var(--critical);border-color:var(--critical);color:#fff">Delete the file</button></div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <div class="toast">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--verified)" stroke-width="1.7" style="margin-top:1px;flex:none"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>
+              <div><div style="font-size:12.5px;color:var(--ink);font-weight:500">Loan file imported</div><div style="font-size:11.5px;color:var(--ink-3)">Two fields need a look — they're flagged on the file.</div></div>
+            </div>
+            <div class="toast err">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--critical)" stroke-width="1.7" style="margin-top:1px;flex:none"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>
+              <div><div style="font-size:12.5px;color:var(--ink);font-weight:500">ellis-appraisal.pdf couldn't be uploaded</div><div style="font-size:11.5px;color:var(--ink-3)">It's 68 MB; the limit is 50 MB. Split it or reduce the scan quality.</div></div>
+            </div>
+            <div class="toast" style="border-left-color:var(--accent)">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" style="margin-top:1px;flex:none"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+              <div><div style="font-size:12.5px;color:var(--ink);font-weight:500">Bonus income set to the 24-month average</div><div style="font-size:11.5px;color:var(--ink-3)">Back-end DTI moved from 44.7% to 43.8%. <span style="color:var(--accent)">Undo</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:18px">Every error names the thing that failed and offers the next move. None of them apologise, and none of them say "something went wrong" — that sentence tells a processor nothing they can act on.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var CAPTIONS = {
+    login: "Where the day starts. The ledger motif is stated once, quietly, in the panel beside the form — two columns, a rule between them, and a mark in the margin wherever they disagree. The expired-session notice is a rail, not a yellow box.",
+    pipeline: "The worklist, re-cut as a pipeline. Saved views replace the four hard-coded filter pills; the four stat cards are gone because a count you can't click is a poster, not a tool. Every row carries an attention column that says what is actually wrong, and a left stripe that encodes it without color alone.",
+    new: "Two ways into a file, honestly ranked. The MISMO drop is the primary action because it fills in everything the hand-entry form asks for; the form sits below it for the files that arrive without one. Only two fields are required, which matches the model — a loan file is allowed to start sparse.",
+    overview: "The file, with the loan's vital signs pinned to a context rail that never scrolls away. The centrepiece is the reconciliation ledger — stated against found, side by side, each row rail-coded and each value linked to the page it came from. That comparison is the product; today it is scattered across three tabs.",
+    docs: "Upload, classification and freshness in one place. The processing rows sit above the list rather than inside it, so watching three uploads land doesn't disturb the nine documents already there. Freshness and duplicates move to the context rail, where they are answerable in one action instead of noticed one row at a time.",
+    review: "The pattern that does not exist in the app today and pays for itself fastest: the document beside its extracted fields, each field linked to the box it was read from. Confidence is stated in words and location, never as a decimal.",
+    verify: "The screen the app is really about. Calculators become a strip you expand one at a time, with the arithmetic shown rather than hidden. Findings are rail-coded rows, not nested cards: outcome, reason, guideline citation, the exact source, then the actions.",
+    needs: "The self-maintaining checklist, promoted out of the middle of the Overview into its own route. Every need says where it came from and how much to trust it — a baseline requirement reads differently from the AI's reading, and an AI proposal is never acted on until a processor confirms it.",
+    comm: "Designed ahead of Phase 4. The thread is the request mechanism: a message carries the needs it is asking for, and a reply's attachment is classified, matched and closed against them automatically — with the automatic step shown in the thread as its own turn, never silently.",
+    cond: "Designed ahead of Phase 4.5. Underwriting conditions have a state machine the needs list does not — outstanding, awaiting the borrower, submitted, cleared — so they get a board rather than a list, with past-due sorted to the top of the first column.",
+    pkg: "Designed ahead of Phase 6. Assembly is a checklist over what the file already holds, and the submit button stays disabled with its reasons named beside it. Only current, fresh, typed and extracted documents are eligible — the rule the backend already computes.",
+    lenders: "Overlays are the highest-leverage thing an admin touches: one change moves every file at that lender. So the list leads with the override count and the most recent change, not the lender's contact details.",
+    overlay: "The base value sits beside the overridden one on every row, so the effect of the change is legible without opening the audit trail. The context rail estimates the blast radius before you save — three open files would newly block.",
+    validation: "The honesty screen. A rule with a citation but no human verdict is a grounded starter, and the screen says so rather than letting it pass for validated. The reviewer's own words are kept on a flagged rule, because the reason a rule is wrong is worth more than the flag.",
+    states: "Loading, empty, error, confirmation and toast — the states that decide whether the app feels solid. Skeletons match real row heights so nothing shifts; every error names what failed and offers the next move.",
+    found: "The tokens, type scale and state vocabulary the screens are built from — the thing that actually ships into globals.css."
+  };
+  var cap = document.getElementById("cap");
+  var screens = ["login","pipeline","new","overview","docs","review","verify","needs","comm","cond","pkg","lenders","overlay","validation","states","found"];
+
+  document.querySelectorAll(".switch button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var want = b.dataset.screen;
+      document.querySelectorAll(".switch button").forEach(function (o) {
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+      screens.forEach(function (s) {
+        document.getElementById("s-" + s).classList.toggle("hidden", s !== want);
+      });
+      cap.textContent = CAPTIONS[want];
+      document.querySelector(".scroller").scrollTop = 0;
+    });
+  });
+  cap.textContent = CAPTIONS.login;
+
+  /* ---------- pipeline rows ---------- */
+  var FILES = [
+    ["LF-AWBB","Morgan Ellis","88 Marigold Way, Bellevue WA","540,000","ver","Ready to submit","crit","3 findings block submission","2 / 5","UWM","4d"],
+    ["LF-ABRS","Priya Nair","3307 Lakeshore Drive, Kent WA","312,500","att","In processing","att","Pay stub failed extraction","3 / 6","Sun-West","2h"],
+    ["LF-KQVN","Jordan Rivera","1420 Alder Court, Tacoma WA","425,000","idle","Draft","mut","No documents yet","0 / 3","UWM","1d"],
+    ["LF-DTHM","Avery Stone","912 Ridgeline Ave, Renton WA","288,000","att","In conditions","crit","2 lender conditions past due","4 / 7","UWM","6h"],
+    ["LF-PLWX","Priya Desai","55 Harbor Steps, Seattle WA","1,120,000","att","In processing","att","Reserves fall short by 1.1 mo","6 / 9","Sun-West","3h"],
+    ["LF-JRTC","Elena Marsh","2140 Birchwood Ln, Everett WA","362,400","ver","Submitted","ver","Clear at Balanced","8 / 8","UWM","1d"],
+    ["LF-GBNQ","Theo Alvarez","77 Fernpath Way, Olympia WA","249,900","att","In processing","att","Bank statement is 46 days old","2 / 4","Sun-West","5h"],
+    ["LF-XMDR","Rosa Beckett","410 Cedar Bluff Rd, Auburn WA","495,000","crit","In conditions","crit","Appraisal below contract price","5 / 8","UWM","22m"],
+    ["LF-VNPK","Hollis Chen","1809 Quarry Park Dr, Kirkland WA","688,000","ver","Ready to submit","ver","Clear at Balanced","7 / 7","UWM","2d"],
+    ["LF-SWQA","Nadia Okafor","326 Willow Bend, Puyallup WA","331,750","idle","Draft","mut","Awaiting MISMO import","0 / 0","—","3d"],
+    ["LF-BHFL","Dominic Reyes","64 Summit Terrace, Issaquah WA","754,000","att","In processing","att","Self-employed income unproven","5 / 11","Sun-West","8h"],
+    ["LF-CTEZ","Ingrid Sandoval","1533 Dogwood Ct, Federal Way WA","276,300","ver","Closed","mut","Closed Aug 14","6 / 6","UWM","15d"]
+  ];
+  var GLYPH = {
+    crit: '<svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>',
+    att:  '<svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.6v3"/></svg>',
+    ver:  '<svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10l3.5-3.8"/></svg>',
+    mut:  '<svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"><circle cx="8" cy="8" r="5.6"/></svg>'
+  };
+  var rows = FILES.map(function (f) {
+    var pct = (function () {
+      var p = f[8].split(" / ");
+      var d = Number(p[1]); return d ? Math.round((Number(p[0]) / d) * 100) : 0;
+    })();
+    var barTone = pct === 100 ? "ver" : (pct < 50 ? "att" : "");
+    return '<tr>' +
+      '<td class="id stripe ' + f[4] + '"><span class="mono" style="color:var(--ink)">' + f[0] + '</span></td>' +
+      '<td class="name">' + f[1] + '</td>' +
+      '<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis">' + f[2] + '</td>' +
+      '<td class="r num" style="color:var(--ink)">$' + f[3] + '</td>' +
+      '<td>' + f[5] + '</td>' +
+      '<td><span class="st ' + f[6] + '">' + GLYPH[f[6]] + f[7] + '</span></td>' +
+      '<td><span class="bar"><i class="' + barTone + '" style="width:' + pct + '%"></i></span> <span class="num" style="font-size:11px;color:var(--ink-3)">' + f[8] + '</span></td>' +
+      '<td>' + f[9] + '</td>' +
+      '<td class="r num" style="color:var(--ink-3)">' + f[10] + '</td>' +
+      '</tr>';
+  }).join("");
+  document.getElementById("pipe-rows").innerHTML = rows;
+
+  /* ---------- calculator strip ---------- */
+  document.querySelectorAll("#calcstrip .calc").forEach(function (c) {
+    c.addEventListener("click", function () {
+      document.querySelectorAll("#calcstrip .calc").forEach(function (o) { o.classList.toggle("on", o === c); });
+    });
+  });
+
+  /* ---------- findings ---------- */
+  var FINDINGS = {
+    attention: [
+      {
+        tone: "crit", rule: "AS-3", name: "Reserves after closing",
+        title: "Reserves fall 0.6 months short of the required two",
+        outcome: "Open", conf: "Deterministic",
+        msg: "Verified liquid assets of $31,845.19 cover 1.4 months of the proposed $3,486.11 PITIA. UWM requires two months on a rate-and-term refinance of an owner-occupied property.",
+        guide: "UWM Conventional Overlay §4.2 — reserves",
+        quote: "Closing balance 31,845.19 — statement period Feb 1 – Feb 28, 2026",
+        src: "ellis-bank-feb.pdf · p.2",
+        facts: ["PITIA $3,486.11", "Assets $31,845.19", "Required $6,972.22", "Short $1,127.03"],
+        acts: ["Request second statement", "Override with reason", "Accept risk", "Add note"]
+      },
+      {
+        tone: "crit", rule: "IN-4", name: "Bonus income continuance",
+        title: "Stated bonus income exceeds the 24-month average by $269.58",
+        outcome: "Open", conf: "AI · high confidence · awaiting ratification",
+        msg: "The 1003 states $1,250.00 per month in bonus income. The 2025 W-2 and the two available pay stubs support a 24-month average of $980.42. A VOE confirming continuance would let the stated figure stand.",
+        guide: "Fannie Mae B3-3.1-01 — variable income",
+        quote: "Bonus 452.50 — period Feb 1 – Feb 15, 2026",
+        src: "ellis-paystub-scan.pdf · p.1 · earnings",
+        facts: ["Stated $1,250.00", "24-mo avg $980.42", "DTI impact +0.9 pts"],
+        acts: ["Apply the average", "Request VOE", "Override with reason", "Add note"]
+      },
+      {
+        tone: "att", rule: "DOC-11", name: "Document freshness",
+        title: "The bank statement will be 60 days old at the projected closing",
+        outcome: "Open", conf: "Deterministic",
+        msg: "The February statement is dated Feb 28, 2026. At the Sep 12 closing target it exceeds the 60-day window, and a refreshed statement will be required at submission regardless.",
+        guide: "UWM Conventional Overlay §2.7 — asset documentation age",
+        quote: null,
+        src: "ellis-bank-feb.pdf",
+        facts: ["Statement Feb 28", "Closing Sep 12", "Age at close 196 days"],
+        acts: ["Request refreshed statement", "Waive with reason", "Add note"]
+      }
+    ],
+    satisfied: [
+      { tone: "ver", rule: "LT-1", name: "LTV within program limit", title: "LTV of 75.0% is within the 80% rate-and-term limit", outcome: "Satisfied", conf: "Deterministic", msg: "Loan amount $540,000 against an appraised value of $720,000.", guide: "Fannie Mae B2-1.2-02", quote: null, src: "MISMO import · VALUATION", facts: ["LTV 75.0%", "Limit 80%"], acts: [] },
+      { tone: "ver", rule: "ID-2", name: "Government photo identification", title: "A current government-issued photo ID is on file", outcome: "Satisfied", conf: "Deterministic", msg: "Washington driver's license, expires Nov 2029, name matches the 1003 exactly.", guide: "USA PATRIOT Act §326 — CIP", quote: null, src: "ellis-id.pdf · p.1", facts: ["Expires 2029-11-04", "Name match exact"], acts: [] }
+    ],
+    couldnt: [
+      { tone: "att", rule: "CR-8", name: "Payment history on the existing mortgage", title: "No credit report in the file, so the payment history can't be checked", outcome: "Couldn't check", conf: "Deterministic", msg: "This rule needs a tri-merge credit report pulled within 120 days. Nothing in the file supplies it. This is a gap in evidence, not a pass.", guide: "Fannie Mae B3-5.3-03", quote: null, src: null, facts: ["Missing: credit report"], acts: ["Request credit report", "Add note"] },
+      { tone: "att", rule: "EM-2", name: "Employment verification", title: "Employment can't be verified without a VOE", outcome: "Couldn't check", conf: "Deterministic", msg: "A verbal or written verification of employment dated within ten business days of closing is required. The pay stub establishes income, not current employment at closing.", guide: "Fannie Mae B3-3.1-07", quote: null, src: null, facts: ["Missing: VOE"], acts: ["Request VOE", "Add note"] }
+    ],
+    cross: [
+      { tone: "ai", rule: "XS", name: "Cross-check", title: "The employer name is spelled two ways across three documents", outcome: "Observation", conf: "AI · no rule behind this", msg: "The pay stub reads \"Cascade Robotics, Inc.\", the W-2 reads \"Cascade Robotics Inc\" and the 1003 reads \"Cascade Robotics\". Almost certainly one employer, but an underwriter may ask.", guide: null, quote: null, src: "3 documents", facts: ["3 sources compared"], acts: ["Sign off", "Not an issue"] },
+      { tone: "ai", rule: "XS", name: "Cross-check", title: "A $2,400 deposit in February has no stated source", outcome: "Observation", conf: "AI · no rule behind this", msg: "A single deposit of $2,400.00 on Feb 11 does not match payroll cadence or any stated income. Large-deposit sourcing is usually asked for above 50% of monthly qualifying income; this is below that, so it is surfaced rather than flagged.", guide: null, quote: "02/11  ACH CREDIT  2,400.00  34,245.19", src: "ellis-bank-feb.pdf · p.2", facts: ["Deposit $2,400.00", "Threshold $6,198.55"], acts: ["Sign off", "Request explanation"] }
+    ],
+    archive: []
+  };
+
+  function renderFindings(tab) {
+    var list = FINDINGS[tab] || [];
+    var host = document.getElementById("findings");
+    if (!list.length) {
+      host.innerHTML = '<div style="padding:44px 20px;text-align:center;color:var(--ink-3);background:var(--surface);height:100%"><div style="font-size:13px;color:var(--ink-2)">113 subjects left the file since an earlier run</div><p style="font-size:12px;max-width:52ch;margin:6px auto 0">Reachable, not advertised — the count stays hidden until the tab is open, because the largest number on the page should not be the least useful fact.</p></div>';
+      return;
+    }
+    host.innerHTML = list.map(function (f) {
+      var facts = f.facts.map(function (x) { return '<span class="chip mono">' + x + '</span>'; }).join("");
+      var acts = f.acts.map(function (a, i) {
+        return '<button class="btn sm' + (i === 0 ? " primary" : "") + '">' + a + '</button>';
+      }).join("");
+      return '<div class="finding ' + f.tone + '"><div class="fr"></div><div class="fbody">' +
+        '<div class="fhead"><span class="ftitle">' + f.title + '</span></div>' +
+        '<div class="fmeta">' +
+          '<span class="chip mono">' + f.rule + '</span>' +
+          '<span>' + f.name + '</span><span style="color:var(--line-2)">·</span>' +
+          '<span class="st ' + f.tone + '" style="font-size:11.5px">' + (GLYPH[f.tone] || GLYPH.mut) + f.outcome + '</span>' +
+          '<span style="color:var(--line-2)">·</span><span>' + f.conf + '</span>' +
+          (f.guide ? '<span style="color:var(--line-2)">·</span><span class="mono" style="font-size:10.5px">' + f.guide + '</span>' : "") +
+        '</div>' +
+        '<p class="fmsg">' + f.msg + '</p>' +
+        (f.quote ? '<blockquote class="fquote">' + f.quote + '<div class="src" style="margin-top:5px;font-style:normal">' + f.src + '</div></blockquote>'
+                 : (f.src ? '<div class="fmeta"><a class="src" href="#">' + f.src + '</a></div>' : "")) +
+        (facts ? '<div class="facts">' + facts + '</div>' : "") +
+        (acts ? '<div class="factions">' + acts + '</div>' : "") +
+        '</div></div>';
+    }).join("");
+  }
+  document.querySelectorAll("#otabs .otab").forEach(function (t) {
+    t.addEventListener("click", function () {
+      document.querySelectorAll("#otabs .otab").forEach(function (o) { o.classList.toggle("on", o === t); });
+      renderFindings(t.dataset.tab);
+      document.getElementById("findings").scrollTop = 0;
+    });
+  });
+  renderFindings("attention");
+
+  /* ---------- document review: boxes computed from the document itself ---------- */
+  var LINK = ["employer", "employee", "period", "bonus", "gross", "ytd"];
+  var FLAG = { bonus: 1, gross: 1 };
+  var page = document.querySelector("#s-review .page");
+  var fields = document.querySelectorAll("#s-review .field");
+  var boxes = {};
+
+  function drawBoxes() {
+    Object.keys(boxes).forEach(function (k) { boxes[k].remove(); });
+    boxes = {};
+    LINK.forEach(function (key) {
+      var anchor = page.querySelector('[data-anchor="' + key + '"]');
+      if (!anchor) return;
+      var a = anchor.getBoundingClientRect();
+      var p = page.getBoundingClientRect();
+      var el = document.createElement("div");
+      el.className = "bbox" + (FLAG[key] ? " flag" : "");
+      el.style.left = (a.left - p.left - 3) + "px";
+      el.style.top = (a.top - p.top - 2) + "px";
+      el.style.width = (a.width + 6) + "px";
+      el.style.height = (a.height + 4) + "px";
+      el.dataset.key = key;
+      page.appendChild(el);
+      boxes[key] = el;
+      el.addEventListener("mouseenter", function () { select(key); });
+    });
+    select("ytd");
+  }
+
+  function select(key) {
+    Object.keys(boxes).forEach(function (k) { boxes[k].classList.toggle("live", k === key); });
+    fields.forEach(function (f, i) { f.classList.toggle("live", LINK[i] === key); });
+  }
+
+  fields.forEach(function (fld, i) {
+    if (!LINK[i]) return;
+    fld.style.cursor = "pointer";
+    fld.addEventListener("mouseenter", function () { select(LINK[i]); });
+  });
+
+  if (page) {
+    drawBoxes();
+    if (document.fonts && document.fonts.ready) { document.fonts.ready.then(drawBoxes); }
+    window.addEventListener("resize", drawBoxes);
+    document.querySelector('.switch button[data-screen="review"]').addEventListener("click", function () {
+      requestAnimationFrame(drawBoxes);
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The LP-UI Ticket Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root {
+  --paper:   #FBFCFC;
+  --surface: #FFFFFF;
+  --sunken:  #F3F5F5;
+  --ink:     #101617;
+  --ink-2:   #3D4746;
+  --ink-3:   #6C7674;
+  --line:    #E3E7E6;
+  --line-2:  #CDD3D2;
+  --accent:  #12545E;
+  --accent-hi: #17707D;
+  --accent-soft: #E4EFF0;
+  --crit:    #B23A2A;
+  --crit-soft: #FAEDEA;
+  --att:     #8F5D08;
+  --att-soft:#FAF2E1;
+  --ver:     #1B6E52;
+  --ver-soft:#E6F2EC;
+  --ai:      #5B4FA8;
+  --ai-soft: #EEECF9;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #0C1011;
+    --surface: #121818;
+    --sunken:  #182020;
+    --ink:     #E9EEED;
+    --ink-2:   #BAC4C2;
+    --ink-3:   #8B9592;
+    --line:    #222B2B;
+    --line-2:  #2E3838;
+    --accent:  #4FB3C0;
+    --accent-hi: #6DC9D5;
+    --accent-soft: #122B2E;
+    --crit:    #EC8375;
+    --crit-soft: #2B1815;
+    --att:     #D9A03E;
+    --att-soft:#2A2113;
+    --ver:     #52C093;
+    --ver-soft:#12241C;
+    --ai:      #A99BEE;
+    --ai-soft: #1E1B2E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:   #0C1011;
+  --surface: #121818;
+  --sunken:  #182020;
+  --ink:     #E9EEED;
+  --ink-2:   #BAC4C2;
+  --ink-3:   #8B9592;
+  --line:    #222B2B;
+  --line-2:  #2E3838;
+  --accent:  #4FB3C0;
+  --accent-hi: #6DC9D5;
+  --accent-soft: #122B2E;
+  --crit:    #EC8375;
+  --crit-soft: #2B1815;
+  --att:     #D9A03E;
+  --att-soft:#2A2113;
+  --ver:     #52C093;
+  --ver-soft:#12241C;
+  --ai:      #A99BEE;
+  --ai-soft: #1E1B2E;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1024px; margin: 0 auto; padding: 0 28px 96px; }
+.col  { max-width: 70ch; }
+.wide { max-width: 100%; }
+
+/* ---- masthead ---- */
+header.mast { padding: 62px 0 34px; border-bottom: 1px solid var(--line-2); margin-bottom: 34px; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--accent); font-weight: 500; margin: 0 0 14px;
+}
+h1 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: clamp(34px, 5.2vw, 52px); line-height: 1.06; letter-spacing: -.022em;
+  margin: 0; color: var(--ink); text-wrap: balance; max-width: 17ch;
+}
+.standfirst { font-size: 17.5px; line-height: 1.58; color: var(--ink-3); margin: 18px 0 0; max-width: 62ch; }
+.byline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin: 22px 0 0; }
+
+/* ---- structure ---- */
+h2 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: 27px; line-height: 1.2; letter-spacing: -.016em; color: var(--ink);
+  margin: 62px 0 6px; text-wrap: balance;
+}
+h2 .n {
+  display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
+  font-weight: 500; margin-bottom: 9px;
+}
+h3 { font-size: 16px; font-weight: 600; color: var(--ink); margin: 34px 0 6px; letter-spacing: -.008em; }
+h4 { font-size: 14px; font-weight: 600; color: var(--ink); margin: 22px 0 4px; }
+p { margin: 0 0 15px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .88em; }
+p code, li code, td code { background: var(--sunken); border: 1px solid var(--line); border-radius: 3px; padding: .5px 4px; color: var(--ink); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0 0 15px; padding-left: 20px; }
+li { margin-bottom: 7px; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 46px 0; }
+
+/* ---- findings list: numbering encodes a real audit sequence ---- */
+.finding { max-width: 76ch; display: grid; grid-template-columns: 36px 1fr; gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
+.finding:last-of-type { border-bottom: 1px solid var(--line); }
+.fn { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.fh { font-size: 15.5px; font-weight: 600; color: var(--ink); margin: 0 0 4px; letter-spacing: -.008em; }
+.fw { margin: 0; font-size: 14.5px; }
+.where { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin-top: 7px; }
+.sev { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; vertical-align: 2px; margin-left: 7px; font-weight: 500; }
+.sev.bug { background: var(--crit-soft); color: var(--crit); }
+.sev.friction { background: var(--att-soft); color: var(--att); }
+.sev.absent { background: var(--ai-soft); color: var(--ai); }
+
+/* ---- pull box ---- */
+.rule { max-width: 68ch; border-left: 3px solid var(--accent); padding: 4px 0 4px 20px; margin: 26px 0; }
+.rule p { font-family: "IBM Plex Serif", Georgia, serif; font-size: 19px; line-height: 1.45; color: var(--ink); margin: 0; }
+
+.callout { max-width: 74ch; border: 1px solid var(--line); border-left: 3px solid var(--att); background: var(--surface); border-radius: 0 6px 6px 0; padding: 14px 18px; margin: 24px 0; font-size: 14.5px; }
+.callout.acc { border-left-color: var(--accent); }
+.callout .lab { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+
+/* ---- code ---- */
+pre {
+  max-width: 100%;
+  background: var(--sunken); border: 1px solid var(--line); border-radius: 7px;
+  padding: 16px 18px; overflow-x: auto; margin: 20px 0;
+  font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.62; color: var(--ink-2);
+}
+pre .c { color: var(--ink-3); font-style: italic; }
+pre .k { color: var(--accent); }
+pre .v { color: var(--ink); }
+
+/* ---- tables ---- */
+.tw { overflow-x: auto; margin: 22px 0; border: 1px solid var(--line); border-radius: 7px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; background: var(--surface); }
+th {
+  text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600; padding: 9px 14px; background: var(--sunken);
+  border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.now { color: var(--ink-3); }
+td.next { color: var(--ink); }
+td strong { font-weight: 500; }
+
+/* ---- phase list ---- */
+.phase { max-width: 76ch; border-top: 1px solid var(--line); padding: 20px 0; display: grid; grid-template-columns: 122px 1fr; gap: 20px; }
+.phase:last-child { border-bottom: 1px solid var(--line); }
+.phase .tag { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent); font-weight: 500; }
+.phase .tag em { display: block; font-style: normal; color: var(--ink-3); margin-top: 3px; font-size: 11px; }
+.phase h4 { margin: 0 0 5px; }
+.phase p { margin: 0; font-size: 14.5px; }
+
+/* ---- question block ---- */
+.q { max-width: 76ch; border-top: 1px solid var(--line); padding: 16px 0; }
+.q:last-child { border-bottom: 1px solid var(--line); }
+.q h4 { margin: 0 0 3px; }
+.q p { margin: 0; font-size: 14.5px; }
+.q .rec { color: var(--accent); font-weight: 500; }
+
+footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line-2); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); }
+@media (max-width: 640px) {
+  .finding, .phase { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<style>
+.wrap { max-width: 1180px; }
+.inv { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px,1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin: 24px 0; }
+.inv > div { background: var(--surface); padding: 13px 15px; }
+.inv .fn2 { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent); font-weight: 500; }
+.inv p { margin: 5px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.epic { margin: 34px 0 0; }
+.epic-head { display: flex; align-items: baseline; gap: 12px; padding: 0 0 8px; border-bottom: 1px solid var(--line-2); }
+.epic-head .k { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 500; }
+.epic-head h3 { margin: 0; font-size: 17px; font-weight: 600; color: var(--ink); letter-spacing: -.012em; }
+.epic-head .est { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); }
+.tk { display: grid; grid-template-columns: 94px 1fr 34px 118px; gap: 14px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.tk .id { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-2); }
+.tk .ti { color: var(--ink); }
+.tk .ti span { color: var(--ink-3); font-size: 12.5px; }
+.tk .sz { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-3); text-align: center; }
+.tk .dp { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-3); text-align: right; }
+.tk.block { background: linear-gradient(90deg, var(--crit-soft), transparent 70%); }
+.tk.block .id { color: var(--crit); }
+.tk.bug .id { color: var(--crit); }
+.flowbox { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 20px 18px; margin: 24px 0; overflow-x: auto; }
+.flowbox svg { display: block; min-width: 720px; width: 100%; height: auto; }
+.wk { display: grid; grid-template-columns: 92px 1fr; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); align-items: baseline; }
+.wk:last-of-type { border-bottom: 1px solid var(--line); }
+.wk .w { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent); font-weight: 500; }
+.wk p { margin: 0; font-size: 14px; }
+.wk .ids { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); display: block; margin-top: 3px; }
+.promptbox { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 0 7px 7px 0; background: var(--sunken); padding: 15px 18px; margin: 22px 0; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.7; color: var(--ink-2); }
+.promptbox b { color: var(--ink); font-weight: 500; }
+@media (max-width: 720px) { .tk { grid-template-columns: 1fr; gap: 2px; } .tk .sz, .tk .dp { text-align: left; } }
+</style>
+<div class="wrap">
+<header class="mast">
+  <p class="eyebrow">Implementation plan · LP-UI-001 … LP-UI-040</p>
+  <h1>Forty tickets, seven epics, and a package you can hand over as it is.</h1>
+  <p class="standfirst">The whole redesign broken into work, with the token file, the status component and the codemod already written and verified against the repo.</p>
+  <p class="byline">Everything lives in docs/design/ledger/ · start with PROMPT.md</p>
+</header>
+
+<div class="col">
+<h2><span class="n">01 — The handoff</span>What's in the repo right now</h2>
+<p>All of this is already written to <code>docs/design/ledger/</code>. The files marked <em>drop-in</em> are finished code, not starting points — the palette is converted to the HSL form your opacity modifiers depend on, and the contrast is verified in both themes.</p>
+</div>
+
+<div class="inv">
+  <div><div class="fn2">PROMPT.md</div><p>Paste this into Claude Code. It sets the rules and points at everything else.</p></div>
+  <div><div class="fn2">SPEC.md</div><p>Nine design rules and the definition of done. Read before every ticket.</p></div>
+  <div><div class="fn2">TICKETS.md</div><p>All forty tickets in full — files, acceptance criteria, mockup references.</p></div>
+  <div><div class="fn2">ledger-screens.html</div><p>The sixteen screens. Every ticket names the one it must match.</p></div>
+  <div><div class="fn2">screens/*.png</div><p>A still per screen, for pasting into a ticket or a Slack thread.</p></div>
+  <div><div class="fn2">assets/globals.css</div><p><em>Drop-in.</em> Tokens, dark palette, geometry, focus rules.</p></div>
+  <div><div class="fn2">assets/tailwind.config.ts</div><p><em>Drop-in.</em> Type scale, weight cap at 600, and the missing <code>danger</code>.</p></div>
+  <div><div class="fn2">assets/fonts.ts</div><p><em>Drop-in.</em> IBM Plex Sans, Mono and Serif, self-hosted.</p></div>
+  <div><div class="fn2">assets/lib/status.ts</div><p><em>Drop-in.</em> Six status maps become six tones, labels preserved.</p></div>
+  <div><div class="fn2">assets/components/status-token.tsx</div><p><em>Drop-in.</em> Colour + glyph + word, with the rail variant.</p></div>
+  <div><div class="fn2">assets/codemod-gray-to-token.mjs</div><p>Dry-run against your repo: <b>811 replacements, 70 files, 3 by hand</b>.</p></div>
+</div>
+
+<div class="col">
+<div class="callout acc">
+  <span class="lab">Already verified against your repo, not assumed</span>
+  Every text tone clears 4.5:1 against its own ground in both themes. <code>--input</code> clears 3:1 as a control border. The codemod's dry run produced the numbers above on 2026-08-29, and <code>lib/status.ts</code> compiles clean under <code>--strict</code>.
+</div>
+
+<h2><span class="n">02 — The critical path</span>Where the order actually matters</h2>
+<p>Only three things in forty tickets are genuinely sequential. Everything else can move.</p>
+</div>
+
+<div class="flowbox">
+<svg viewBox="0 0 760 210" role="img" aria-label="Dependency flow: Epic A gates everything, two backend tickets gate two screens, and LP-UI-029 gates the whole document reviewer epic">
+  <defs>
+    <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="var(--line-2)"/>
+    </marker>
+  </defs>
+  <g font-family="IBM Plex Mono, monospace" font-size="10">
+    <g stroke="var(--line-2)" stroke-width="1.4" fill="none" marker-end="url(#ar)">
+      <path d="M118 40 H166"/><path d="M292 40 H340"/><path d="M466 40 H514"/>
+      <path d="M118 105 H340"/><path d="M118 170 H514"/>
+    </g>
+    <g>
+      <rect x="8" y="22" width="110" height="36" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="63" y="38" text-anchor="middle" fill="var(--accent)" font-weight="500">EPIC A</text>
+      <text x="63" y="50" text-anchor="middle" fill="var(--accent)" font-size="9">001 → 005</text>
+
+      <rect x="170" y="22" width="122" height="36" rx="5" fill="var(--surface)" stroke="var(--line-2)"/>
+      <text x="231" y="38" text-anchor="middle" fill="var(--ink-2)" font-weight="500">EPIC B</text>
+      <text x="231" y="50" text-anchor="middle" fill="var(--ink-3)" font-size="9">shell + primitives</text>
+
+      <rect x="344" y="22" width="122" height="36" rx="5" fill="var(--surface)" stroke="var(--line-2)"/>
+      <text x="405" y="38" text-anchor="middle" fill="var(--ink-2)" font-weight="500">EPIC C</text>
+      <text x="405" y="50" text-anchor="middle" fill="var(--ink-3)" font-size="9">core screens</text>
+
+      <rect x="518" y="22" width="122" height="36" rx="5" fill="var(--surface)" stroke="var(--line-2)"/>
+      <text x="579" y="38" text-anchor="middle" fill="var(--ink-2)" font-weight="500">EPIC D · F</text>
+      <text x="579" y="50" text-anchor="middle" fill="var(--ink-3)" font-size="9">admin, states, a11y</text>
+
+      <rect x="344" y="87" width="122" height="36" rx="5" fill="var(--surface)" stroke="var(--line-2)"/>
+      <text x="405" y="103" text-anchor="middle" fill="var(--ink-2)" font-weight="500">015 · 017</text>
+      <text x="405" y="115" text-anchor="middle" fill="var(--ink-3)" font-size="9">backend, in parallel</text>
+
+      <rect x="518" y="152" width="122" height="36" rx="5" fill="var(--crit-soft)" stroke="var(--crit)"/>
+      <text x="579" y="168" text-anchor="middle" fill="var(--crit)" font-weight="500">EPIC E</text>
+      <text x="579" y="180" text-anchor="middle" fill="var(--crit)" font-size="9">gated on 029</text>
+
+      <rect x="8" y="152" width="110" height="36" rx="5" fill="var(--surface)" stroke="var(--crit)" stroke-dasharray="3 2"/>
+      <text x="63" y="168" text-anchor="middle" fill="var(--crit)" font-weight="500">LP-UI-029</text>
+      <text x="63" y="180" text-anchor="middle" fill="var(--crit)" font-size="9">bbox? answer it</text>
+
+      <rect x="8" y="87" width="110" height="36" rx="5" fill="var(--surface)" stroke="var(--line-2)" stroke-dasharray="3 2"/>
+      <text x="63" y="103" text-anchor="middle" fill="var(--ink-3)" font-weight="500">4 decisions</text>
+      <text x="63" y="115" text-anchor="middle" fill="var(--ink-3)" font-size="9">baked into tokens</text>
+    </g>
+  </g>
+</svg>
+</div>
+
+<div class="col">
+<p><strong>Epic A must land in order and must land first.</strong> Everything after it assumes tokens exist and no <code>gray-*</code> remains. Two backend tickets — saved views and the reconciliation read model — can start immediately and in parallel, because the two screens that need them come later. And one ticket gates an entire epic: until <code>LP-UI-029</code> is answered, the document reviewer cannot be scheduled honestly.</p>
+
+<div class="callout">
+  <span class="lab">Expect this, and don't fight it</span>
+  The app will look <em>worse</em> between LP-UI-001 and LP-UI-004. 784 hardcoded greys are still fighting the new tokens during those three tickets. Do not tune the palette to compensate — LP-UI-004 is what resolves it.
+</div>
+
+<h2><span class="n">03 — The tickets</span>Forty, by epic</h2>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic A</span><h3>Foundation</h3><span class="est">~3 days</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-001</span><span class="ti">Land the Ledger design tokens <span>· Tokens, dark palette, 5px radius, 13px scale</span></span><span class="sz">M</span><span class="dp">—</span></div>
+<div class="tk bug"><span class="id">LP-UI-002</span><span class="ti">Define the missing danger colour <span>· The failed-run banner has been grey</span></span><span class="sz">S</span><span class="dp">001</span></div>
+<div class="tk"><span class="id">LP-UI-003</span><span class="ti">IBM Plex via next/font <span>· Sans, Mono, and Serif for quoted text</span></span><span class="sz">S</span><span class="dp">001</span></div>
+<div class="tk"><span class="id">LP-UI-004</span><span class="ti">Codemod: gray-* to tokens <span>· 811 replacements, 70 files, 3 by hand</span></span><span class="sz">M</span><span class="dp">001</span></div>
+<div class="tk"><span class="id">LP-UI-005</span><span class="ti">One status vocabulary <span>· Six colour maps collapse to six tones</span></span><span class="sz">M</span><span class="dp">001</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic B</span><h3>Primitives and shell</h3><span class="est">~4 days</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-006</span><span class="ti">Density retune of the ui/ primitives <span>· 28px controls, 5px radius, hairlines</span></span><span class="sz">M</span><span class="dp">001,003</span></div>
+<div class="tk"><span class="id">LP-UI-007</span><span class="ti">Table: 28px rows, sticky header, grid semantics <span>· 40 rows stop being 40 tab stops</span></span><span class="sz">M</span><span class="dp">006</span></div>
+<div class="tk"><span class="id">LP-UI-008</span><span class="ti">App shell: full-bleed, icon rail, ⌘B <span>· max-w-6xl goes; state persists in a cookie</span></span><span class="sz">L</span><span class="dp">006</span></div>
+<div class="tk"><span class="id">LP-UI-009</span><span class="ti">File context rail <span>· The four numbers that cause tab-switching</span></span><span class="sz">M</span><span class="dp">008</span></div>
+<div class="tk"><span class="id">LP-UI-010</span><span class="ti">Density preference, persisted <span>· Per person, not per view</span></span><span class="sz">S</span><span class="dp">007</span></div>
+<div class="tk"><span class="id">LP-UI-011</span><span class="ti">Delete the /loan-files stub <span>· A nav item that leads to an apology</span></span><span class="sz">S</span><span class="dp">008</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic C</span><h3>Core screens</h3><span class="est">~3 weeks</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-012</span><span class="ti">Login <span>· The smallest real test of the token set</span></span><span class="sz">S</span><span class="dp">003,006</span></div>
+<div class="tk"><span class="id">LP-UI-013</span><span class="ti">Pipeline: table and attention column <span>· Stats cards out, what's-wrong column in</span></span><span class="sz">L</span><span class="dp">007,008</span></div>
+<div class="tk"><span class="id">LP-UI-014</span><span class="ti">Saved views (frontend) <span>· Flat filters, with 'current user' as a value</span></span><span class="sz">M</span><span class="dp">013</span></div>
+<div class="tk"><span class="id">LP-UI-015</span><span class="ti">Saved views (backend) <span>· Company-scoped, tenant-isolated</span></span><span class="sz">M</span><span class="dp">—</span></div>
+<div class="tk"><span class="id">LP-UI-016</span><span class="ti">File overview: identity strip <span>· Tabs move into the shell</span></span><span class="sz">S</span><span class="dp">008,009</span></div>
+<div class="tk"><span class="id">LP-UI-017</span><span class="ti">Reconciliation read model (backend) <span>· The one new read model this needs</span></span><span class="sz">L</span><span class="dp">—</span></div>
+<div class="tk"><span class="id">LP-UI-018</span><span class="ti">The reconciliation ledger <span>· The centrepiece — stated against found</span></span><span class="sz">M</span><span class="dp">017</span></div>
+<div class="tk"><span class="id">LP-UI-019</span><span class="ti">Documents: list, upload, freshness <span>· Processing rows above the settled list</span></span><span class="sz">M</span><span class="dp">007,009</span></div>
+<div class="tk"><span class="id">LP-UI-020</span><span class="ti">Verification: outcome tabs, findings as rows <span>· Nesting depth four becomes two</span></span><span class="sz">L</span><span class="dp">005,009</span></div>
+<div class="tk"><span class="id">LP-UI-021</span><span class="ti">Verification: calculator strip <span>· The arithmetic shown, not hidden</span></span><span class="sz">M</span><span class="dp">020</span></div>
+<div class="tk"><span class="id">LP-UI-022</span><span class="ti">Needs as its own route <span>· Out of the middle of the Overview</span></span><span class="sz">M</span><span class="dp">005,009</span></div>
+<div class="tk"><span class="id">LP-UI-023</span><span class="ti">New file: MISMO-first intake <span>· Two ways in, honestly ranked</span></span><span class="sz">M</span><span class="dp">006</span></div>
+<div class="tk"><span class="id">LP-UI-024</span><span class="ti">MISMO import warnings <span>· A toast that vanishes gets a surface</span></span><span class="sz">S</span><span class="dp">023</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic D</span><h3>Admin</h3><span class="est">~3 days</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-025</span><span class="ti">Admin: lenders list <span>· Overrides lead, not contact details</span></span><span class="sz">S</span><span class="dp">007,008</span></div>
+<div class="tk"><span class="id">LP-UI-026</span><span class="ti">Admin: lender overlay editor <span>· Agency base beside the override</span></span><span class="sz">M</span><span class="dp">025</span></div>
+<div class="tk"><span class="id">LP-UI-027</span><span class="ti">Overlay blast radius (backend) <span>· Which files would newly block</span></span><span class="sz">M</span><span class="dp">—</span></div>
+<div class="tk"><span class="id">LP-UI-028</span><span class="ti">Admin: rule validation <span>· Grounded starter is not validated</span></span><span class="sz">M</span><span class="dp">005,007</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic E</span><h3>Document reviewer</h3><span class="est">~2 weeks</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk block"><span class="id">LP-UI-029</span><span class="ti">Bounding-box coordinates in extraction <span>· Answer this before scheduling the epic</span></span><span class="sz">L</span><span class="dp">—</span></div>
+<div class="tk"><span class="id">LP-UI-030</span><span class="ti">Reviewer shell: three resizable panes <span>· Container queries, persisted split</span></span><span class="sz">L</span><span class="dp">029</span></div>
+<div class="tk"><span class="id">LP-UI-031</span><span class="ti">Field ↔ box bidirectional linking <span>· Including the anti-misclick guardrail</span></span><span class="sz">L</span><span class="dp">030</span></div>
+<div class="tk"><span class="id">LP-UI-032</span><span class="ti">Confidence and provenance <span>· Words and a location, never a decimal</span></span><span class="sz">M</span><span class="dp">031</span></div>
+<div class="tk"><span class="id">LP-UI-033</span><span class="ti">Keyboard review rhythm <span>· Flagged fields per minute is the metric</span></span><span class="sz">M</span><span class="dp">032</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic F</span><h3>States, accessibility, polish</h3><span class="est">~4 days</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-034</span><span class="ti">Loading, empty and error states <span>· Three empty states that read differently</span></span><span class="sz">M</span><span class="dp">006</span></div>
+<div class="tk"><span class="id">LP-UI-035</span><span class="ti">Dialogs and toasts <span>· Consequences named; undo where it exists</span></span><span class="sz">S</span><span class="dp">006</span></div>
+<div class="tk"><span class="id">LP-UI-036</span><span class="ti">Accessibility pass <span>· Contrast, focus, targets, CVD, grid nav</span></span><span class="sz">M</span><span class="dp">all</span></div>
+<div class="tk"><span class="id">LP-UI-037</span><span class="ti">Narrow-width pass <span>· Decide the 13-inch laptop, don't assume</span></span><span class="sz">M</span><span class="dp">036</span></div>
+</div>
+<div class="epic">
+  <div class="epic-head"><span class="k">Epic G</span><h3>Later phases — build when the phase lands</h3><span class="est">~1 week</span></div>
+  <div class="tk" style="border-bottom:1px solid var(--line-2);padding-bottom:5px">
+    <span class="dp" style="text-align:left">Ticket</span><span class="dp" style="text-align:left">Title</span>
+    <span class="dp" style="text-align:center">Size</span><span class="dp">Depends on</span></div>
+<div class="tk"><span class="id">LP-UI-038</span><span class="ti">Communication <span>· Phase 4 · the thread is the request</span></span><span class="sz">L</span><span class="dp">022</span></div>
+<div class="tk"><span class="id">LP-UI-039</span><span class="ti">Conditions <span>· Phase 4.5 · a board, not a list</span></span><span class="sz">L</span><span class="dp">020</span></div>
+<div class="tk"><span class="id">LP-UI-040</span><span class="ti">Lender package <span>· Phase 6 · assembly over what exists</span></span><span class="sz">L</span><span class="dp">019</span></div>
+</div>
+<div class="col">
+<h2><span class="n">04 — Nine weeks</span>Suggested sequence</h2>
+</div>
+
+<div class="wk"><span class="w">Week 1</span><div><p>Epic A, in order, with nothing else running alongside it.</p><span class="ids">001 → 002 → 003 → 004 → 005</span></div></div>
+<div class="wk"><span class="w">Week 2</span><div><p>The shell. Start the two backend tickets in parallel — the screens that need them are three weeks out.</p><span class="ids">006 · 007 · 008 · 009 · 010 · 011 &nbsp;+&nbsp; 015 · 017 in the backend</span></div></div>
+<div class="wk"><span class="w">Weeks 3–5</span><div><p>Core screens, in the order a processor meets them, so the vocabulary settles once instead of being retrofitted.</p><span class="ids">012 · 013 · 014 · 016 · 018 · 019 · 020 · 021 · 022 · 023 · 024</span></div></div>
+<div class="wk"><span class="w">Week 6</span><div><p>Admin, and the states that decide whether the whole thing feels solid.</p><span class="ids">025 · 026 · 027 · 028 · 034 · 035</span></div></div>
+<div class="wk"><span class="w">Weeks 7–8</span><div><p>The document reviewer — <strong>only if LP-UI-029 has been answered.</strong> If it hasn't, this slot goes to Epic G instead.</p><span class="ids">029 → 030 · 031 · 032 · 033</span></div></div>
+<div class="wk"><span class="w">Week 9</span><div><p>Accessibility and narrow widths, once there is a finished thing to audit.</p><span class="ids">036 · 037</span></div></div>
+
+<div class="col">
+<h2><span class="n">05 — Starting</span>What to paste into Claude Code</h2>
+<p>Open a session in the repo root and give it <code>PROMPT.md</code>. The short version:</p>
+</div>
+
+<div class="promptbox">
+We are implementing a frontend redesign called <b>Ledger</b>. Everything is in<br>
+<b>docs/design/ledger/</b>.<br><br>
+Read <b>SPEC.md</b> (nine rules, definition of done), then <b>TICKETS.md</b>.<br>
+Open <b>ledger-screens.html</b> in a browser — every ticket names the screen it must match.<br><br>
+Work one ticket at a time, in the "Suggested order" at the bottom of TICKETS.md.<br>
+Files marked <b>Assets</b> are drop-in: copy them, don't retype them.<br>
+Run biome, tsc and the tests. Check light <b>and</b> dark. Write<br>
+<b>docs/tickets/LP-UI-XXX.md</b> per this repo's convention. Stop and show me<br>
+before the next ticket.<br><br>
+Start with <b>LP-UI-001</b>.
+</div>
+
+<div class="col">
+<h2><span class="n">06 — Before LP-UI-001</span>Four answers</h2>
+<p>These are baked into the token file, so they are cheaper to settle now than after five tickets have been built on them. My recommendations are in the table in <code>README.md</code>; the short version is petrol over the default blue, dark mode now, stay on Radix, and yes to Needs as its own route.</p>
+<p>And one more, which is not a preference but a fact I don't have: <strong>does the extraction pipeline store bounding-box coordinates?</strong> <code>SourceLocation</code> carries <code>page</code> and <code>snippet</code> today. If the answer is no, LP-UI-029 starts in the backend and the reviewer moves out of week seven.</p>
+</div>
+
+<footer>
+  40 tickets · 7 epics · 6 drop-in files · 811 codemod replacements verified · 1 blocking question
+</footer>
+</div>
+
+</body>
+</html>
