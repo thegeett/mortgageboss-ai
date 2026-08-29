@@ -1,4 +1,5 @@
 import { Providers } from "@/components/providers";
+import { plexMono, plexSans, plexSerif } from "@/lib/fonts";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -16,7 +17,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${plexSans.variable} ${plexMono.variable} ${plexSerif.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-background font-sans antialiased">
         <Providers>{children}</Providers>
       </body>
