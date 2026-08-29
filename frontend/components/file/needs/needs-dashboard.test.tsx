@@ -59,6 +59,7 @@ function need(overrides: Partial<NeedsItemPublic> = {}): NeedsItemPublic {
     priority: "standard",
     origin: "ai_reasoning",
     disposition: "proposed",
+    explanation: null,
     reasoning: "Self-employment income from Chhotala Realty LLC is qualified from tax returns.",
     reason: null,
     borrower_id: null,
@@ -199,90 +200,57 @@ describe("NeedsDashboard", () => {
     expect(screen.queryByText("Verified")).toBeNull(); // LP-108 status untouched — not a false-green
   });
 
-  // LP-110 — every need shows its SOURCE, honestly attributed by origin. A deterministic floor
-  // source reads as certain; an AI-identified source is marked "verify" and grounds to the fact(s)
-  // the AI cited. The two are visually/semantically distinct — an AI reading is never shown as fact.
-  it("shows a deterministic floor need's source as a certain rule", () => {
+  // LP-634 — every need says WHY the document is needed, in ONE VOICE whatever produced it. The
+  // LP-110 source block that sat here is gone, and with it "AI-identified — verify this is the right
+  // triggering fact; the AI may have misread": it exposed the PIPELINE when what makes a claim
+  // checkable is the CLAIM, and it put a warning about our own reliability on the page a processor
+  // opens first. The three tests replaced here asserted that block.
+  it("shows the composed reason, naming the stated fact", () => {
     setDocuments(false);
     setNeeds({
       data: [
         need({
           origin: "floor",
-          disposition: "confirmed",
-          needs_type: "pay_stub",
-          source: {
-            attribution: "deterministic",
-            facts: [
-              {
-                kind: "income",
-                label: "Employment income is stated on the application",
-                ref: null,
-                document_id: null,
-                document_filename: null,
-              },
-            ],
-          },
+          title: "Payoff statement",
+          explanation:
+            "This refinance pays off the United Wholesale Mortgage loan at closing. The payoff " +
+            "statement gives the exact amount due on the closing date.",
         }),
       ],
     });
     render(<NeedsDashboard fileId="f1" />);
-    expect(screen.getByText("deterministic rule")).toBeDefined(); // certain — a rule
-    expect(screen.getByText("Employment income is stated on the application")).toBeDefined();
-    expect(screen.queryByText(/AI-identified — verify/i)).toBeNull(); // not the AI's reading
+    expect(screen.getByText(/United Wholesale Mortgage loan at closing/)).toBeDefined();
+    expect(screen.queryByText(/AI-identified/)).toBeNull();
+    expect(screen.queryByText(/may have misread/)).toBeNull();
   });
 
-  it("marks an AI-reasoned need's source as AI-identified (verify), grounded to the cited fact", () => {
+  it("reads the same for a floor need and an AI proposal", () => {
     setDocuments(false);
     setNeeds({
       data: [
+        need({ id: "n1", origin: "floor", explanation: "The application states base salary." }),
         need({
+          id: "n2",
           origin: "ai_reasoning",
-          source: {
-            attribution: "ai_identified",
-            facts: [
-              {
-                kind: "employer",
-                label: "Self-employment income from Chhotala Realty LLC",
-                ref: null,
-                document_id: null,
-                document_filename: null,
-              },
-            ],
-          },
+          explanation: "The application states a $438/month lease with Ally Financial.",
         }),
       ],
     });
     render(<NeedsDashboard fileId="f1" />);
-    expect(screen.getByText("AI-identified")).toBeDefined(); // the trust pill — the AI's reading
-    expect(screen.getByText("Self-employment income from Chhotala Realty LLC")).toBeDefined();
-    expect(screen.getByText(/verify this is the right triggering fact/i)).toBeDefined(); // verify note
+    // No trust pill, no attribution lead-in, no hedge — `disposition` carries how much the system is
+    // claiming, and it carries it in one place instead of two.
+    expect(screen.queryByText(/verify this is the right triggering fact/)).toBeNull();
+    expect(screen.getByText(/base salary/)).toBeDefined();
+    expect(screen.getByText(/Ally Financial/)).toBeDefined();
   });
 
-  it("surfaces a suggestion need's finding chain, linking the source document", () => {
+  it("falls back to the stored reasoning when nothing was composed", () => {
     setDocuments(false);
     setNeeds({
-      data: [
-        need({
-          origin: "suggestion",
-          source: {
-            attribution: "finding",
-            facts: [
-              {
-                kind: "finding",
-                label: "Monthly child support obligation of $1,200",
-                ref: "finding-1",
-                document_id: "doc-1",
-                document_filename: "Divorce Decree.pdf",
-              },
-            ],
-          },
-        }),
-      ],
+      data: [need({ explanation: null, reasoning: "the stored sentence" })],
     });
     render(<NeedsDashboard fileId="f1" />);
-    expect(screen.getByText("finding")).toBeDefined(); // the finding attribution pill
-    expect(screen.getByText("Monthly child support obligation of $1,200")).toBeDefined();
-    expect(screen.getByText("Divorce Decree.pdf")).toBeDefined(); // grounded to the source document
+    expect(screen.getByText("the stored sentence")).toBeDefined();
   });
 
   // LP-111 — the AI-flagged possible-duplicate surfaces a Merge / Keep-both prompt (never a silent

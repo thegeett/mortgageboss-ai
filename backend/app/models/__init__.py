@@ -60,6 +60,7 @@ from app.models.needs_item import (
     NeedsItemPriority,
     NeedsItemStatus,
 )
+from app.models.needs_prose import NeedProse
 from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
 from app.models.rule import Rule
@@ -130,6 +131,7 @@ __all__ = [
     "MismoImport",
     "MismoImportStatus",
     "Money",
+    "NeedProse",
     "NeedsItem",
     "NeedsItemDisposition",
     "NeedsItemOrigin",

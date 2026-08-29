@@ -51,6 +51,7 @@ from app.services.needs_engine import (
     seed_floor_needs,
 )
 from app.services.needs_from_findings import seed_needs_from_findings
+from app.services.needs_prose import compose_needs
 from app.services.rule_findings import (
     ReconcileRunResult,
     reconcile_evaluation_findings,
@@ -1069,6 +1070,9 @@ async def run_verification(
                 # versions left behind. bug-004 rewrites a message as a finding retires; this reaches
                 # the ones retired before it existed, which is every one on every file already run.
                 await repair_retired_finding_text(db, loan_file_id)
+                # LP-634 — the Need List's own prose, after the passes that settle WHICH needs
+                # exist. Rewrites `reasoning` and nothing else.
+                await compose_needs(db, loan_file_id=loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
         degradations.append(Degradation("needs_sync", f"needs list not updated: {exc}"))

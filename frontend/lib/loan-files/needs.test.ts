@@ -26,6 +26,7 @@ function need(status: NeedsItemStatus, overrides: Partial<NeedsItemPublic> = {})
     priority: "standard",
     origin: "floor",
     disposition: "confirmed",
+    explanation: null,
     reasoning: null,
     reason: null,
     borrower_id: null,

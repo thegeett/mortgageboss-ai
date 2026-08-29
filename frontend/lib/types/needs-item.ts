@@ -75,6 +75,10 @@ export interface NeedsItemPublic {
   /** LP-631: set when a coverage predicate concluded the FILE ALREADY ANSWERS this need — the
    * document that appears to answer it, plus the reasoning to check it against. A flag, never a
    * close (ADR-388): the processor dismisses the need or keeps it. */
+  /** LP-634: the processor-facing sentence saying WHY this document is needed, composed for THIS
+   * file and naming the stated fact. Null when composition is off or its answer was not admitted —
+   * the card falls back to `reasoning`, the origin's own record. */
+  explanation: string | null;
   possibly_covered_by: MatchedDocument | null;
   coverage_note: string | null;
 }

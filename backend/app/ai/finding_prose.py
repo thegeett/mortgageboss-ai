@@ -300,6 +300,16 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
     return _numbers_in(composition.message) - source
 
 
+def unsupported_numbers_in(source_json: str, text: str) -> set[str]:
+    """The same hallucination check over plain text — LP-634's need reasons use it.
+
+    Shared rather than re-derived: the number grammar `_numbers_in` encodes (two-or-more digits, or a
+    four-digit year, singles excluded) is a decision, and a second copy of it drifts the way the
+    identifier union did in bug-006.
+    """
+    return _numbers_in(text) - _numbers_in(source_json)
+
+
 # Phrases that describe the SOFTWARE rather than the loan file. The prompt forbids them and a model
 # still wrote "The system cannot verify derogatory seasoning requirements" on the first real run — a
 # processor does not care what the system can do, only what the file is missing. Enforced rather than

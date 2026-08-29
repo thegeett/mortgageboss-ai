@@ -178,6 +178,18 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # The "why" — explainability for a suggestion- / AI-derived need (LP-67/69).
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # LP-634 — THE PROCESSOR-FACING SENTENCE, separate from `reasoning` above and deliberately so.
+    #
+    # `reasoning` is the ORIGIN's own record of why the need exists: a floor rule's trigger, the rules
+    # that asked for it, or LP-69's argument. It is written for engineers and it is the composer's
+    # INPUT. This column is the output — one plain sentence naming the stated fact and what the
+    # document settles, in one voice whatever produced the row.
+    #
+    # Two columns rather than one because the first cut used one, and the composed sentence then fed
+    # back in as its own input: the cache key moved every run, the model was re-asked every time, and
+    # each answer was composed from the previous answer instead of from the file. Provenance and prose
+    # are different things and drift into each other the moment they share a column.
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The SOURCE — the specific data that TRIGGERED the need (LP-110), so the reasoning is
     # FALSIFIABLE (the processor can verify the AI didn't misread). A list of structured facts
     # ``[{"kind", "label", "ref"?}]`` grounding to verifiable data, captured per origin: a FLOOR

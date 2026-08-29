@@ -134,7 +134,13 @@ class NeedsItemPublic(BaseModel):
     priority: NeedsItemPriority
     origin: NeedsItemOrigin  # the source-agnostic provenance (floor/suggestion/ai_reasoning/…)
     disposition: NeedsItemDisposition  # the human-confirmation lifecycle (LP-68 → LP-69/70)
-    reasoning: str | None  # the "why" (LP-67/69) — explainability made visible
+    # LP-634 — THE PROCESSOR-FACING SENTENCE. `reasoning` is the origin's own record (a floor
+    # trigger, the rules that asked, LP-69's argument) and is written for engineers; this is the one
+    # plain sentence saying why the document is needed, in one voice whatever produced the row. Null
+    # when composition is off or its answer was not admitted — the card then falls back to `reasoning`,
+    # which is what ships today.
+    explanation: str | None
+    reasoning: str | None  # the origin's own record — the composer's INPUT, kept for provenance
     reason: str | None  # why a need was rejected (a doc failed) or waived
     borrower_id: UUID | None
     satisfied_by_document_id: UUID | None
@@ -190,6 +196,7 @@ class NeedsItemPublic(BaseModel):
             priority=item.priority,
             origin=item.origin,
             disposition=item.disposition,
+            explanation=item.explanation,
             reasoning=item.reasoning,
             reason=item.reason,
             borrower_id=item.borrower_id,

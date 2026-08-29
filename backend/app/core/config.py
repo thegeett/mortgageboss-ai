@@ -189,6 +189,11 @@ class Settings(BaseSettings):
     # write the same columns and render as the same card, so one switch turning off only half of them
     # would be a switch that does not do what it says.
     needs_coverage_flagging_enabled: bool = True
+    # Need-list prose (LP-634): a composition pass writes the one sentence saying WHY each document is
+    # needed, in one voice across the floor, the finding suggestions and LP-69's proposals. Off by
+    # default like `finding_prose_enabled`, because it is a per-need model call and the list is correct
+    # without it — what it changes is whether the list EXPLAINS itself.
+    need_prose_enabled: bool = False
     # Per-document AI-group gating (LP-377-D): skip an AI structuring group on a document its declared
     # `applies_to` doc-types exclude — a paid call the group would only abstain on (and, for income_amounts,
     # over-produce on). ALWAYS fails open (unknown / no-match document → runs every group). Set

@@ -28,6 +28,7 @@ from app.services.needs_ai import apply_ai_needs_for_file_id
 from app.services.needs_coverage import flag_covered_needs
 from app.services.needs_dedup import consolidate_and_flag
 from app.services.needs_engine import apply_document_to_needs, loan_file_needs_lock
+from app.services.needs_prose import compose_needs
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
 from app.tasks.retry import MAX_RETRIES, retry_or_terminal
@@ -79,6 +80,9 @@ async def _run_needs_update(loan_file_id: str, document_id: str) -> None:
         # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
         # to ask whether the file already answers it. It flags; it never closes (ADR-388).
         await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
+        # LP-634 — LAST, and it only ever rewrites `reasoning`. The list is settled by the passes
+        # above; this is the sentence that says WHY each row is on it.
+        await compose_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
 
@@ -90,6 +94,9 @@ async def _run_propose_ai_needs(loan_file_id: str) -> None:
         # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
         # to ask whether the file already answers it. It flags; it never closes (ADR-388).
         await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
+        # LP-634 — LAST, and it only ever rewrites `reasoning`. The list is settled by the passes
+        # above; this is the sentence that says WHY each row is on it.
+        await compose_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
 
