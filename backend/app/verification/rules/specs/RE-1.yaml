@@ -83,6 +83,17 @@ required_inputs:
       when the statement names no lender, the application states no mortgage liabilities, or more than one
       stated liability matches.
 
+# bug-005 — ONE QUESTION, ASKED ONCE. RE-1's subject is the mortgage STATEMENT, which is right when
+# two statements belong to two different loans. LF-AWBB has two statements for the SAME mortgage, so
+# both produced the identical unresolved ask and the composed text said so out loud: "Identify which
+# of the TWO United Wholesale Mortgage statements corresponds to the mortgage liability disclosed on
+# the application" — a sentence about the pair, printed twice, once on each half of the pair.
+#
+# No `reasoning` override: for a non-pass outcome the collapse fires only when every subject's
+# reasoning is IDENTICAL, which is what makes the shared sentence an honest summary of itself. Two
+# statements failing for DIFFERENT reasons still speak for themselves.
+collapse_uniform: {}
+
 subject_enumeration: per_document
 subject_key_fields: [document]
 

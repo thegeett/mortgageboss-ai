@@ -539,7 +539,9 @@ def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
     assert {"id_address", "id_name", "id_title", "id_poa"} <= groups
 
 
-def _evaluation(rule_id: str, subject_id: str, verdict):
+def _evaluation(
+    rule_id: str, subject_id: str, verdict, reasoning: str = "the subject's own reasoning"
+):
     """A minimal RuleEvaluation for the collapse tests (bug-005)."""
     from app.verification.rule_engine.result import RuleEvaluation
 
@@ -552,7 +554,7 @@ def _evaluation(rule_id: str, subject_id: str, verdict):
         threshold_used=None,
         priya_validated=False,
         gated_pending_signoff=True,
-        reasoning="the subject's own reasoning",
+        reasoning=reasoning,
         how_to_fix=None,
     )
 
@@ -600,3 +602,59 @@ def test_a_rule_that_does_not_declare_it_is_untouched() -> None:
 
     group = [_evaluation("CR-1", f"lst{i:016x}", Verdict.SATISFIED) for i in range(4)]
     assert len(_collapse_uniform_passes(group)) == 4
+
+
+def test_out_of_scope_subjects_are_not_dissent() -> None:
+    """THE REASON THE COLLAPSE NEVER FIRED ON THE FILE IT WAS WRITTEN FOR. `NOT_APPLICABLE` results are
+    still in `results` here — they are dropped at PERSIST, not at evaluation — so CR-12's four
+    not-applicable MISMO liabilities sat beside its 24 satisfied tradelines and an "all satisfied" test
+    read them as disagreement."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+    from app.verification.rule_engine.result import Verdict
+
+    group = [_evaluation("CR-12", f"lst{i:016x}", Verdict.SATISFIED) for i in range(24)]
+    group += [_evaluation("CR-12", f"lia{i:016x}", Verdict.NOT_APPLICABLE) for i in range(4)]
+
+    out = _collapse_uniform_passes(group)
+    summaries = [r for r in out if r.subject_id == LOAN_SUBJECT]
+    assert len(summaries) == 1
+    assert "dispute remark" in summaries[0].reasoning
+    assert len([r for r in out if r.verdict is Verdict.NOT_APPLICABLE]) == 4, "carried through"
+
+
+def test_a_uniform_couldnt_check_with_one_shared_sentence_collapses() -> None:
+    """RE-1's two mortgage statements each said "Identify which of the TWO United Wholesale Mortgage
+    statements corresponds to the mortgage liability disclosed on the application" — one sentence about
+    the pair, printed once per half of the pair."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "which statement corresponds to the stated liability could not be resolved"
+    group = [
+        _evaluation("RE-1", "docaaaa", Verdict.COULDNT_CHECK, reasoning=shared),
+        _evaluation("RE-1", "docbbbb", Verdict.COULDNT_CHECK, reasoning=shared),
+    ]
+
+    [only] = _collapse_uniform_passes(group)
+    assert only.subject_id == LOAN_SUBJECT
+    assert only.verdict is Verdict.COULDNT_CHECK
+    assert only.reasoning == shared
+
+
+def test_different_reasons_still_speak_for_themselves() -> None:
+    """The safety property that makes collapsing a NON-pass outcome honest: two subjects failing for
+    DIFFERENT reasons share no sentence, so there is nothing to promote and both stand."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    group = [
+        _evaluation(
+            "RE-1", "docaaaa", Verdict.COULDNT_CHECK, reasoning="the lender name is missing"
+        ),
+        _evaluation(
+            "RE-1", "docbbbb", Verdict.COULDNT_CHECK, reasoning="the payment is unreadable"
+        ),
+    ]
+    assert len(_collapse_uniform_passes(group)) == 2

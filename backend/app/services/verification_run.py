@@ -535,7 +535,8 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
 def _collapse_uniform_passes(
     results: list[RuleEvaluation],
 ) -> list[RuleEvaluation]:
-    """A rule that passes on EVERY subject and declares `collapse_satisfied` shows one row (bug-005).
+    """A rule reaching the SAME conclusion on every subject and declaring `collapse_uniform` shows one
+    row (bug-005).
 
     CR-12 asks one question per credit-report tradeline; on a clean report every answer is the same
     answer, and LF-AWBB's 24 tradelines produced 24 green rows each saying a version of "this account
@@ -559,32 +560,62 @@ def _collapse_uniform_passes(
         except RuleSpecNotFound:
             collapsed.extend(group)
             continue
-        summary = spec.collapse_satisfied
-        if summary is None or len(group) < 2:
+        summary = spec.collapse_uniform
+        # OUT OF SCOPE IS NOT DISSENT. `NOT_APPLICABLE` results are still in `results` here — they are
+        # dropped at PERSIST, not at evaluation — so CR-12's four not-applicable MISMO liabilities sat
+        # alongside its 24 satisfied tradelines and an `all satisfied` test read them as disagreement.
+        # The collapse never fired on the file it was written for.
+        in_scope = [r for r in group if r.verdict is not Verdict.NOT_APPLICABLE]
+        out_of_scope = [r for r in group if r.verdict is Verdict.NOT_APPLICABLE]
+        if summary is None or len(in_scope) < 2:
             collapsed.extend(group)
             continue
-        if any(r.verdict is not Verdict.SATISFIED for r in group):
-            collapsed.extend(group)  # one dissent and every subject speaks for itself again
+        verdicts = {r.verdict for r in in_scope}
+        if len(verdicts) > 1:
+            collapsed.extend(group)  # one real dissent and every subject speaks for itself again
             continue
-        first = group[0]
+        verdict = verdicts.pop()
+        # THE SUMMARY SENTENCE, and where it may come from.
+        #
+        # A uniform PASS has no shared sentence to promote — "The Capital One account is not under
+        # dispute" and "…the Bank of America account…" are both right and neither summarises the set —
+        # so the spec supplies one.
+        #
+        # Any other uniform outcome must have IDENTICAL reasoning across every subject, and then that
+        # sentence IS the summary of itself. RE-1's two statements each said "Identify which of the two
+        # United Wholesale Mortgage statements corresponds to the mortgage liability disclosed on the
+        # application" — one sentence about the pair, printed once per half of the pair. Two statements
+        # failing for DIFFERENT reasons share no sentence, so they still speak for themselves.
+        reasonings = {r.reasoning for r in in_scope}
+        if verdict is Verdict.SATISFIED and summary.reasoning:
+            shared = summary.reasoning
+        elif len(reasonings) == 1:
+            shared = reasonings.pop()
+        else:
+            collapsed.extend(group)
+            continue
+        collapsed.extend(out_of_scope)  # carried through unchanged; persist drops them
+        first = in_scope[0]
         collapsed.append(
             RuleEvaluation(
                 rule_id=rule_id,
                 subject_id=LOAN_SUBJECT,
-                verdict=Verdict.SATISFIED,
+                verdict=verdict,
                 verdict_confidence=min(
-                    (r.verdict_confidence for r in group if r.verdict_confidence is not None),
+                    (r.verdict_confidence for r in in_scope if r.verdict_confidence is not None),
                     default=None,
                 ),
                 load_bearing_tags=(),
                 threshold_used=first.threshold_used,
                 priya_validated=first.priya_validated,
                 gated_pending_signoff=first.gated_pending_signoff,
-                reasoning=summary.reasoning,
-                how_to_fix=None,
+                reasoning=shared,
+                # A pass has nothing to remediate; any other uniform outcome keeps the shared fix,
+                # which is the same sentence every subject was carrying.
+                how_to_fix=None if verdict is Verdict.SATISFIED else first.how_to_fix,
             )
         )
-        logger.info("rule_uniform_pass_collapsed", rule_id=rule_id, subjects=len(group))
+        logger.info("rule_uniform_pass_collapsed", rule_id=rule_id, subjects=len(in_scope))
     return collapsed
 
 

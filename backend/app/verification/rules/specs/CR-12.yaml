@@ -68,15 +68,15 @@ required_inputs:
       whether THIS tradeline is flagged disputed (derived, LP-486): "yes" / "no" from the closed
       vocabulary, "unknown" when the field is absent, empty, or holds an unrecognised value.
 
-subject_enumeration: per_liability
+subject_enumeration: per_liability  # LP-480 — one subject per tradeline row (and per stated liability)
 
 # bug-005 — ONE ROW WHEN EVERY TRADELINE PASSES. A clean credit report gives the same answer on every
 # account, and LF-AWBB's 24 produced 24 green rows each saying a version of "this account is not under
 # dispute". The moment ONE is disputed the per-tradeline findings come back, because naming WHICH
 # account is the entire point of asking per tradeline.
-collapse_satisfied:
+collapse_uniform:
   reasoning: >-
-    no account on the credit report carries a dispute remark   # LP-480 — one subject per tradeline row (and per stated liability)
+    no account on the credit report carries a dispute remark
 subject_key_fields: [liability]
 
 evidence_required: >-

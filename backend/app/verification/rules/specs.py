@@ -1013,8 +1013,8 @@ class ConsistencyEval(BaseModel):
         return self
 
 
-class CollapseSatisfied(BaseModel):
-    """Declare that a rule showing the SAME pass on every subject should show it once (bug-005).
+class CollapseUniform(BaseModel):
+    """Declare that a rule reaching the SAME conclusion on every subject should show it once (bug-005).
 
     CR-12 asks one question per credit-report tradeline. On a clean report every answer is the same
     answer, so LF-AWBB's 24 tradelines produced 24 green rows all saying a version of "this account is
@@ -1031,7 +1031,11 @@ class CollapseSatisfied(BaseModel):
 
     model_config = {"frozen": True, "extra": "forbid"}
 
-    reasoning: str = PydField(min_length=1)
+    #: The summary wording for a uniform PASS, where the per-subject reasonings legitimately differ
+    #: ("The Capital One account is not under dispute" / "…the Bank of America account…") and there is
+    #: no shared sentence to promote. Omit it for the other outcomes: there the collapse requires the
+    #: reasonings to be IDENTICAL, which makes the shared sentence the honest summary of itself.
+    reasoning: str | None = PydField(default=None, min_length=1)
 
 
 class RuleSpec(BaseModel):
@@ -1053,9 +1057,9 @@ class RuleSpec(BaseModel):
     required_inputs: tuple[RequiredInput, ...] = PydField(min_length=1)
     reference_values: ReferenceValues
     subject_enumeration: str = PydField(min_length=1)  # an EXECUTABLE enumerator key (LP-324)
-    # bug-005 — collapse a uniform pass to one row. Absent means "show every subject", which stays the
-    # default: most per-subject rules are worth seeing per subject even when they pass.
-    collapse_satisfied: CollapseSatisfied | None = None
+    # bug-005 — collapse a uniform conclusion to one row. Absent means "show every subject", which
+    # stays the default: most per-subject rules are worth seeing per subject.
+    collapse_uniform: CollapseUniform | None = None
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)
