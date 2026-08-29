@@ -1,20 +1,29 @@
 """LP-634 — the composition PASS over the Need List: enrich stored needs, cache, never break one.
 
 Runs AFTER the needs are settled. It reads them, asks a model for the one sentence saying WHY each
-document is needed, and writes back only `reasoning`. Nothing else is touched: not the title, not the
-type, not the status, not the disposition, not the coverage flag. A total failure of this pass leaves a
-correct Need List reading exactly as it reads today.
+document is needed, and writes that sentence to `explanation`. Nothing else is touched: not
+`reasoning` (which is this pass's own INPUT), not the title, not the type, not the status, not the
+disposition, not the coverage flag. A total failure of this pass leaves a correct Need List reading
+exactly as it reads today.
 
-⚠️ PER NEED, NOT ONE BATCHED CALL — the LP-527 reasoning, unchanged. Batching is cheaper on a cold
-cache and worse everywhere else: one changed need would invalidate a whole batch (defeating the cache,
-which is the point), one malformed response would cost every need its sentence instead of one, and item
-17 of 19 gets less of the model's attention than item 1.
+PER NEED, NOT ONE BATCHED CALL — the LP-527 reasoning, unchanged. Batching is cheaper on a cold cache
+and worse everywhere else: one changed need would invalidate a whole batch (defeating the cache, which
+is the point), one malformed response would cost every need its sentence instead of one, and item 17
+of 19 gets less of the model's attention than item 1.
 
-⚠️ THE FLOOR IS THE REASON THIS EXISTS. Its needs are the deterministic ones — the ones we are surest
+THE FLOOR IS THE REASON THIS EXISTS. Its needs are the deterministic ones — the ones we are surest
 about — and they store NO reasoning at all, so LF-AWBB showed six titles above six blank spaces. They
 are also the easiest to explain, because their triggers are known: `_FLOOR_TRIGGER` gives each one a
 plain sentence, which is both the model's input and the fallback if composition fails. Strictly better
 than the blank either way.
+
+bug-008 — AND THE PASS ITSELF CANNOT RAISE, because both of its callers would lose real work if it
+did. In `verification_run` it runs inside the savepoint that wraps the whole needs sync, so a raise
+discards the floor seed, the re-match, the finding seed, the repair and the coverage flag; in
+`tasks/needs.py` it runs immediately before `db.commit()` under a `task_session` that does not commit
+on an exception, so a raise discards the LP-68 document match and the LP-69 AI needs, retries the whole
+task, and on exhaustion shows the processor a terminal AI-needs failure. The docstring below has always
+promised "never raises" — it is now enforced, in a savepoint of its own, the way `compose_findings` is.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ from app.models.stated_financials import (
     StatedIncomeItem,
     StatedLiability,
 )
+from app.services.needs_engine import OPEN_STATES
 from app.verification.rule_engine.reasons import document_label
 
 logger = get_logger(__name__)
@@ -87,24 +97,51 @@ def _money(value: Decimal | None) -> str | None:
     return f"${value:,.0f}" if value is not None else None
 
 
-def _trigger(need: NeedsItem) -> str:
-    """What produced this need, in whatever register produced it.
+def _floor_trigger(need: NeedsItem) -> str:
+    """The known trigger for a FLOOR need, as a clause. Only ever called for a floor need."""
+    return _FLOOR_TRIGGER.get(need.needs_type or "", _GENERIC_FLOOR_TRIGGER)
+
+
+def _floor_fallback(need: NeedsItem) -> str | None:
+    """The stored floor sentence a failed composition falls back to, or None for any other origin.
+
+    bug-008 — CONSTRAINT 3 OF THE COMPOSER'S OWN CONTRACT, which was documented and not built. "It
+    falls back to what is stored, which for a floor need is a template floor rather than the blank
+    that ships today" was true of nothing: `_FLOOR_TRIGGER` was model INPUT only, so a rejected or
+    failed floor composition left `explanation` NULL and the card fell back to `reasoning`, which is
+    NULL on every floor need (17 of 17 measured across LF-AWBB, LF-BVFU and LF-ZE9N). The blank this
+    ticket exists to remove came back on exactly the needs it exists for.
+    """
+    if need.origin is not NeedsItemOrigin.FLOOR:
+        return None
+    clause = _floor_trigger(need)
+    return f"{clause[0].upper()}{clause[1:]}."
+
+
+def _trigger(need: NeedsItem) -> str | None:
+    """What produced this need, in whatever register produced it, or None if nothing did.
 
     A floor need has no stored reasoning at all, which is the defect; the rest carry text written for
     engineers. Turning either into a processor's sentence is the composer's whole job, so both are
     handed over as-is rather than pre-polished here.
 
-    ⚠️ READS `reasoning`, WRITES `explanation`, and they must stay different columns. The first cut
-    wrote the composed sentence back over `reasoning` — which is this function's INPUT, so the cache
-    key changed on every run, the model was re-asked every time, and each answer was composed from the
+    bug-008 — NONE IS AN ANSWER, and the generic floor line is not. It fell through to "this document
+    is required on every file of this kind" for ANY need with no stored reasoning, floor or not — so a
+    processor-added manual need ("send me the divorce decree") and a `suggestion` need with a null
+    reasoning were both handed a fabricated justification as ground truth, and the prompt instructs the
+    model to write it confidently. A need nothing recorded a reason for gets no composed reason.
+
+    READS `reasoning`, WRITES `explanation`, and they must stay different columns. The first cut wrote
+    the composed sentence back over `reasoning` — which is this function's INPUT, so the cache key
+    changed on every run, the model was re-asked every time, and each answer was composed from the
     previous answer rather than from what actually produced the need. Prose drifting a little further
     from the file on every verification, on the page a processor opens first.
     """
     if need.reasoning and need.reasoning.strip():
         return need.reasoning.strip()
     if need.origin is NeedsItemOrigin.FLOOR:
-        return _FLOOR_TRIGGER.get(need.needs_type or "", _GENERIC_FLOOR_TRIGGER)
-    return _GENERIC_FLOOR_TRIGGER
+        return _floor_trigger(need)
+    return None
 
 
 @dataclass(frozen=True)
@@ -228,16 +265,76 @@ async def _file_facts(db: AsyncSession, loan_file: LoanFile) -> _FileFacts:
     )
 
 
-def summarize(need: NeedsItem, file_facts: _FileFacts) -> NeedFacts:
-    """One need plus the file's stated data — the ONLY input its reason may draw on."""
+# bug-008 — WHICH FACT FAMILIES A NEED'S REASON CAN DRAW ON, by the kind of document it asks for.
+#
+# The cache key is the hash of what the model was GIVEN, which is right — the same input must return
+# the same sentence. The defect was that every need was given the whole file, so any change anywhere
+# (a liability edited, a document of a new kind uploaded) re-composed all nineteen needs at once and
+# could reword all nineteen. `_run_needs_update` runs on every document arrival, so that is the common
+# case, not the rare one, and "a processor re-reading the list sees movement where nothing moved" is
+# precisely what the cache is documented to prevent.
+#
+# Narrowing the KEY alone would be a bug (same key, different input, wrong sentence served), so this
+# narrows the INPUT and the key follows. `loan` and `documents_on_file` stay on every need: the purpose
+# and program frame every request, and knowing what the file already holds is what stops a reason
+# inventing a corpus (LP-597) or asking for something already there.
+#
+# AN UNKNOWN KIND GETS EVERYTHING. A custom or free-form need has no document kind to reason from, and
+# the safe default there is the input this pass shipped with rather than a guess at relevance.
+_INCOME_KINDS = frozenset(
+    {
+        "pay_stub", "w2", "1099", "transcripts_of_1099", "voe", "verbal_voe", "tax_return",
+        "business_tax_return", "tax_transcript", "form_1040_personal_tax_transcripts",
+        "form_1065_partnership_tax_transcripts", "form_1120_corporate_tax_transcripts",
+        "profit_and_loss", "k1_statement", "commission_income_statement", "compensation_statement",
+        "employment_offer_letter", "letter_of_explanation_income", "social_security_award_letter",
+        "pension_statement", "retirement_income_letter", "retirement_pension_award_letter",
+        "disability_award_letter", "disability_income_letter", "child_support_income",
+        "alimony_income", "unemployment_income_letter", "rental_income_schedule", "lease_agreement",
+        "military_leave_and_earning_statement_les", "cpa_letter", "financial_statements",
+    }
+)  # fmt: skip
+_ASSET_KINDS = frozenset(
+    {
+        "bank_statement", "brokerage_statement", "gift_letter", "gift_donor_bank_statement",
+        "verification_of_deposit", "verification_of_assets", "investment_account",
+        "retirement_account", "ira_401k", "money_market_statement", "certificate_of_deposit",
+        "crypto_account_statement", "earnest_money_receipt", "emd_withdrawal_proof",
+        "sale_of_asset_proof", "letter_of_explanation_asset", "bank_deposit_slip",
+    }
+)  # fmt: skip
+_LIABILITY_KINDS = frozenset(
+    {
+        "mortgage_statement", "existing_mortgage_statement", "payoff_statement",
+        "debt_payoff_statement", "student_loan_statement", "installment_loan_statement",
+        "hoa_statement", "verification_of_mortgage", "verification_of_rent",
+        "collection_account_letter", "judgment_documentation", "other_property_note",
+        "subject_property_note", "credit_report", "credit_supplement", "property_tax_bill",
+    }
+)  # fmt: skip
+_KIND_SCOPED = _INCOME_KINDS | _ASSET_KINDS | _LIABILITY_KINDS
+
+
+def summarize(need: NeedsItem, file_facts: _FileFacts) -> NeedFacts | None:
+    """One need plus the file data its reason may draw on, or None if nothing recorded a reason.
+
+    None is how a need with no trigger is SKIPPED rather than explained from a fabricated one — see
+    `_trigger`.
+    """
+    trigger = _trigger(need)
+    if trigger is None:
+        return None
+    kind = need.needs_type or ""
+    unscoped = kind not in _KIND_SCOPED
     return NeedFacts(
         request=need.title,
         document_kind=document_label(need.needs_type) if need.needs_type else None,
-        trigger=_trigger(need),
+        trigger=trigger,
         loan=dict(file_facts.loan),
-        employment=file_facts.employment,
-        liabilities=file_facts.liabilities,
-        assets=file_facts.assets,
+        employment=file_facts.employment if unscoped or kind in _INCOME_KINDS else (),
+        income_types=file_facts.income_types if unscoped or kind in _INCOME_KINDS else (),
+        liabilities=file_facts.liabilities if unscoped or kind in _LIABILITY_KINDS else (),
+        assets=file_facts.assets if unscoped or kind in _ASSET_KINDS else (),
         documents_on_file=file_facts.documents_on_file,
     )
 
@@ -258,26 +355,53 @@ async def _store(db: AsyncSession, key: str, why: str) -> None:
 async def compose_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
     """Write a processor-facing reason onto every open need. Returns how many changed.
 
-    Never raises: a composition pass that fails must not fail the needs update whose LIST is already
-    correct. Gated by ``settings.need_prose_enabled``. Uses ``flush``; the caller owns the transaction.
+    Never raises, and bug-008 made that true rather than merely written down: the body runs in a
+    SAVEPOINT of its own, so a DB error inside it rolls back this pass alone instead of poisoning the
+    session its callers commit. Both of them lose real work otherwise — the module docstring has the
+    two paths. Gated by ``settings.need_prose_enabled``. Uses ``flush``; the caller owns the outer
+    transaction.
     """
     if not settings.need_prose_enabled:
         return 0
+    try:
+        async with db.begin_nested():
+            return await _compose_needs(db, loan_file_id=loan_file_id)
+    except Exception as exc:
+        logger.warning("need_prose_pass_failed", error=type(exc).__name__, detail=str(exc))
+        return 0
+
+
+async def _compose_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
+    """The pass itself. Free to raise; `compose_needs` owns the containment."""
     loan_file = await db.scalar(
         only_active(select(LoanFile).where(LoanFile.id == loan_file_id), LoanFile)
     )
     if loan_file is None:
         return 0
+    # bug-008 — OPEN NEEDS ONLY, which is what the docstring above always said. Unfiltered, this
+    # loaded every non-deleted need including VERIFIED, WAIVED and RECEIVED ones, so every closed need
+    # on a mature file cost a model call on every document arrival and every verification run — to
+    # rewrite a sentence under a row nobody is being asked to act on. `needs_engine` scopes its
+    # matcher with the same tuple and `flag_covered_needs` filters with `is_flaggable`.
     needs = (
         await db.scalars(
-            only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file_id), NeedsItem)
+            only_active(
+                select(NeedsItem).where(
+                    NeedsItem.loan_file_id == loan_file_id,
+                    NeedsItem.status.in_(OPEN_STATES),
+                ),
+                NeedsItem,
+            )
         )
     ).all()
     if not needs:
         return 0
 
     file_facts = await _file_facts(db, loan_file)
-    summaries = {need.id: summarize(need, file_facts) for need in needs}
+    # A need with no recorded trigger is skipped rather than explained from a generic one.
+    summaries = {
+        need.id: facts for need in needs if (facts := summarize(need, file_facts)) is not None
+    }
     keys = {need_id: facts.cache_key() for need_id, facts in summaries.items()}
     cache = await _cached(db, list(dict.fromkeys(keys.values())))
 
@@ -297,7 +421,16 @@ async def compose_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
             async with semaphore:
                 return need_id, await compose(summaries[need_id])
 
-        for need_id, why in await asyncio.gather(*(_one(nid) for nid in misses)):
+        # bug-008 — ONE NEED'S FAILURE COSTS ONE NEED ITS SENTENCE. Without `return_exceptions` the
+        # first raise propagates out of the gather AND cancels every other call in flight, so a single
+        # unexpected error turned a per-need pass into an all-or-nothing one. `compose` already
+        # absorbs `AIClientError`; this is for everything else.
+        composed = await asyncio.gather(*(_one(nid) for nid in misses), return_exceptions=True)
+        for outcome in composed:
+            if isinstance(outcome, BaseException):
+                logger.warning("need_prose_compose_failed", error=type(outcome).__name__)
+                continue
+            need_id, why = outcome
             if why is None:
                 continue
             cache[keys[need_id]] = why
@@ -305,9 +438,11 @@ async def compose_needs(db: AsyncSession, *, loan_file_id: UUID) -> int:
 
     changed = 0
     for need in needs:
-        why = cache.get(keys.get(need.id, ""))
+        # A failed or rejected composition falls back to the stored floor sentence rather than to the
+        # blank — constraint 3 of the composer's contract (see `_floor_fallback`).
+        why = cache.get(keys.get(need.id, "")) or _floor_fallback(need)
         if why is None or need.explanation == why:
-            continue  # rejected, failed, or already saying it
+            continue  # rejected, failed with no floor to fall back to, or already saying it
         need.explanation = why
         changed += 1
     if changed:

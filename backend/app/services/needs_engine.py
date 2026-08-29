@@ -180,7 +180,8 @@ async def record_need_correction(
 # Satisfaction-matching (deterministic, type-level)
 # --------------------------------------------------------------------------- #
 
-# A need awaiting a document is in one of these (the orthogonal REQUESTED counts).
+# A need awaiting a document is in one of these (the orthogonal REQUESTED counts). Public because
+# the prose pass (LP-634) scopes to the same set: what "open" means is one decision, not two.
 #
 # LP-623 — REJECTED IS OPEN. It was not, and that stranded a need beside the document that satisfies
 # it: LF-ABRS carried two W-2s, one COMPLETED and one NEEDS_REVIEW, and whichever was processed first
@@ -190,7 +191,7 @@ async def record_need_correction(
 #
 # `_VALID_TRANSITIONS` has always permitted REJECTED -> RECEIVED ("a rejected need can re-receive").
 # Only the matcher's own query disagreed.
-_OPEN_STATES = (
+OPEN_STATES = (
     NeedsItemStatus.PENDING,
     NeedsItemStatus.REQUESTED,
     NeedsItemStatus.REJECTED,
@@ -433,7 +434,7 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
             NeedsItem.needs_type.in_(
                 [document.document_type, *umbrella_types, *aliased, *alternatives]
             ),
-            NeedsItem.status.in_(_OPEN_STATES),
+            NeedsItem.status.in_(OPEN_STATES),
         )
         .order_by(_MATCH_PRIORITY, NeedsItem.created_at)
         .limit(1)

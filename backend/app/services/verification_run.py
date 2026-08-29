@@ -1071,7 +1071,9 @@ async def run_verification(
                 # the ones retired before it existed, which is every one on every file already run.
                 await repair_retired_finding_text(db, loan_file_id)
                 # LP-634 — the Need List's own prose, after the passes that settle WHICH needs
-                # exist. Rewrites `reasoning` and nothing else.
+                # exist. Writes `explanation` and nothing else: `reasoning` is this pass's own INPUT,
+                # and feeding its output back in was the first cut's defect. It contains its own
+                # failures in a savepoint (bug-008), so it cannot take this one down with it.
                 await compose_needs(db, loan_file_id=loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))

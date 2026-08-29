@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from app.ai.client import AIClientError, complete
@@ -300,14 +301,27 @@ def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[s
     return _numbers_in(composition.message) - source
 
 
-def unsupported_numbers_in(source_json: str, text: str) -> set[str]:
+def unsupported_numbers_in(
+    source_json: str, text: str, *, unlicensed: Iterable[str] = ()
+) -> set[str]:
     """The same hallucination check over plain text — LP-634's need reasons use it.
 
     Shared rather than re-derived: the number grammar `_numbers_in` encodes (two-or-more digits, or a
     four-digit year, singles excluded) is a decision, and a second copy of it drifts the way the
     identifier union did in bug-006.
+
+    bug-008 — AND `unlicensed` IS THE OTHER HALF OF THAT SHARING. The caller above does not hand its
+    whole payload to this grammar; it subtracts the two fields whose digits are NAMES rather than
+    quantities, for reasons LP-597 and LP-613 each cost a shipped defect to learn. The first cut of
+    this function dropped both subtractions, which put the same hole back for needs: a file holding a
+    1099 licensed the literal token "1099" anywhere in a composed reason, because
+    `document_label("1099")` is `"1099"` and it rides in `documents_on_file`. Every caller passes the
+    parts of its own summary whose numbers must not become quotable.
     """
-    return _numbers_in(text) - _numbers_in(source_json)
+    source = _numbers_in(source_json)
+    for part in unlicensed:
+        source -= _numbers_in(part)
+    return _numbers_in(text) - source
 
 
 # Phrases that describe the SOFTWARE rather than the loan file. The prompt forbids them and a model

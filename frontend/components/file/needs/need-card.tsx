@@ -17,7 +17,6 @@ import { FileCheck2, Sparkles } from "lucide-react";
 export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
   const state = STATE_META[need.status];
   const proposed = isProposed(need);
-  const isAi = need.origin === "ai_reasoning" || need.origin === "suggestion";
   const showPriority = need.priority !== "standard";
 
   return (
