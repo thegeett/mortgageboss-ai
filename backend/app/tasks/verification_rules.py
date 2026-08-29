@@ -165,7 +165,15 @@ async def _triage_counts(db: AsyncSession, loan_file_id: UUID) -> tuple[int, int
                     .where(
                         Finding.loan_file_id == loan_file_id,
                         Finding.deleted_at.is_(None),
-                        Finding.evaluation_outcome != EvaluationOutcome.NO_LONGER_APPLIES,
+                        # bug-007 — `is_distinct_from`, NOT `!=`. `evaluation_outcome` is nullable BY
+                        # DESIGN ("only tag-rule findings carry it; existing cross-source/document
+                        # findings leave it null"), and in SQL `null != 'no_longer_applies'` is NULL,
+                        # which WHERE drops. On staging that silently excluded 18 live, open, yellow
+                        # findings from `yellow_count` — a cleaner file than the file is, which is the
+                        # one direction the docstring above says this refuses.
+                        Finding.evaluation_outcome.is_distinct_from(
+                            EvaluationOutcome.NO_LONGER_APPLIES
+                        ),
                         Finding.resolution_status == FindingResolutionStatus.OPEN,
                     )
                     .group_by(Finding.status)

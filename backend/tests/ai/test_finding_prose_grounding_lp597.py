@@ -495,9 +495,14 @@ def test_every_specs_fix_verb_is_recognised() -> None:
     # with `|` or `>` — would introduce exactly the unrecognised-verb gap this test promises to catch,
     # and the test would stay green. The count assertion below is what makes an unreadable scalar
     # style fail loudly instead.
+    # bug-007 — BOTH PATTERNS ARE LINE-ANCHORED, so the two counts measure the same thing. `key_re`
+    # was anchored and `opener_re` was not, so the literal text `how_to_fix:` inside a comment or a
+    # block-scalar body counted as an opener with no key, made `openers_found > keys`, and failed the
+    # assertion below for a reason unrelated to what it guards.
     key_re = re.compile(r"^\s*(?:how_to_fix|couldnt_check_fix):", re.MULTILINE)
     opener_re = re.compile(
-        r"(?:how_to_fix|couldnt_check_fix):\s*(?:[>|][-+]?\s*\n\s+)?[\"\']?([A-Za-z]+)"
+        r"^\s*(?:how_to_fix|couldnt_check_fix):\s*(?:[>|][-+]?\s*\n\s+)?[\"\']?([A-Za-z]+)",
+        re.MULTILINE,
     )
     keys = 0
     openers_found = 0

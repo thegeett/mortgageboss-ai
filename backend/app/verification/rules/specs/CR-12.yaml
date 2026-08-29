@@ -74,6 +74,11 @@ subject_enumeration: per_liability  # LP-480 — one subject per tradeline row (
 # account, and LF-AWBB's 24 produced 24 green rows each saying a version of "this account is not under
 # dispute". The moment ONE is disputed the per-tradeline findings come back, because naming WHICH
 # account is the entire point of asking per tradeline.
+#
+# bug-007 — AND THAT HOLDS WHEN THEY ARE *ALL* DISPUTED, which is why `unresolved` is absent here.
+# This rule's sentence is about ONE tradeline; it merely reads the same on each. Collapsing three
+# disputed accounts into one "Whole file" red would name none of them, which is the same false-green
+# in a worse disguise.
 collapse_uniform:
   reasoning: >-
     no account on the credit report carries a dispute remark

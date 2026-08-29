@@ -28,16 +28,18 @@ Deferred to LP-322: matching findings ACROSS runs (this ticket runs ONE verifica
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.finding import Finding, FindingCategory
+from app.models.finding import Finding, FindingCategory, FindingResolutionStatus
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
 from app.services.finding_prose import compose_findings
@@ -532,8 +534,61 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
     return frozenset(eligible)
 
 
+async def _rules_with_resolved_subjects(db: AsyncSession, loan_file_id: UUID) -> frozenset[str]:
+    """Rules whose PER-SUBJECT findings a processor has already APPLIED or OVERRIDDEN on this file.
+
+    bug-007 — the input to the collapse's stability guard. Reconciliation keys a finding on
+    ``(rule_id, subject_id)`` and deliberately never re-keys one it carries forward, so whether a rule
+    shows one loan-level row or N per-subject rows becomes part of a finding's cross-run IDENTITY. A
+    group that turns uniform between runs therefore retires every per-subject finding and mints a
+    loan-level one — and a retired finding takes its resolution with it, so the processor's answer
+    becomes fresh OPEN work. Cheap to prevent, and the safe direction is showing more rows, not fewer.
+
+    Loan-level rows are excluded: they are what a collapse produces, not what it would destroy.
+    """
+    rows = await db.execute(
+        select(Finding.rule_id)
+        .where(
+            Finding.loan_file_id == loan_file_id,
+            Finding.deleted_at.is_(None),
+            Finding.rule_id.is_not(None),
+            Finding.subject_key.is_not(None),
+            Finding.subject_key != LOAN_SUBJECT,
+            Finding.resolution_status != FindingResolutionStatus.OPEN,
+        )
+        .distinct()
+    )
+    return frozenset(str(rule_id) for (rule_id,) in rows)
+
+
+def _uniform_value(values: Sequence[Any]) -> Any:
+    """The one value every collapsed subject agreed on, or ``None`` where they did not (bug-007).
+
+    A collapsed row may only carry a per-subject field when the subjects AGREE on it. Taking the
+    first would put one subject's evidence, arithmetic or Apply payload on a row standing for all of
+    them, which is a quieter version of the same false-summary this whole helper guards against.
+    """
+    first = values[0]
+    return first if all(value == first for value in values[1:]) else None
+
+
+def _ordered_union(sequences: Iterable[Sequence[Any]]) -> tuple[Any, ...]:
+    """Every subject's items, first-seen order, no duplicates — membership by ``==``, not by hash.
+
+    `LoadBearingTag.value` is `object` and may be unhashable, so this cannot go through a set.
+    """
+    out: list[Any] = []
+    for sequence in sequences:
+        for item in sequence:
+            if item not in out:
+                out.append(item)
+    return tuple(out)
+
+
 def _collapse_uniform_passes(
     results: list[RuleEvaluation],
+    *,
+    humanly_resolved_rule_ids: frozenset[str] = frozenset(),
 ) -> list[RuleEvaluation]:
     """A rule reaching the SAME conclusion on every subject and declaring `collapse_uniform` shows one
     row (bug-005).
@@ -543,11 +598,30 @@ def _collapse_uniform_passes(
     is not under dispute". Individually correct, collectively a wall — and a processor scrolling past
     24 identical passes is being trained to scroll past the rule.
 
-    ONLY WHEN EVERY SUBJECT PASSES, and only above one subject. One dissenting verdict and the
-    per-subject findings stand untouched: naming WHICH account is the whole point of asking per
-    account, and a summary hiding one disputed tradeline behind 23 clean ones is the false-green this
-    codebase refuses everywhere else. The collapsed row carries no load-bearing tags — they belong to
-    subjects it no longer names — and no apply, because there is nothing to remediate on a pass.
+    A UNIFORM PASS, and only above one subject. One dissenting verdict and the per-subject findings
+    stand untouched: naming WHICH account is the whole point of asking per account, and a summary
+    hiding one disputed tradeline behind 23 clean ones is the false-green this codebase refuses
+    everywhere else. A collapsed pass carries no load-bearing tags — they belong to subjects it no
+    longer names — and no apply, evidence or derivation, because there is nothing to remediate.
+
+    A UNIFORM NON-PASS ONLY WHERE THE SPEC DECLARES `unresolved: true` (bug-007). RE-1's two mortgage
+    statements produced the identical unresolved ask — one sentence ABOUT THE PAIR, printed once per
+    half of the pair — and collapsing that is right. Identical reasoning is what makes the shared
+    sentence honest, but it is NOT what makes the collapse safe: a deterministic rule renders its
+    outcome template verbatim and interpolates only declared operands, so a rule with `operands: {}`
+    produces byte-identical reasoning on every subject reaching the same verdict BY CONSTRUCTION. That
+    guard could therefore only ever re-separate subjects that had already disagreed on verdict one
+    line earlier, and three disputed tradelines collapsed to one "Whole file" red naming none of them.
+    Whether the sentence is about the set or about one subject is a fact about the rule, so the spec
+    says it; the default stays per-subject. A collapsed non-pass keeps everything that makes it
+    actionable: the union of its subjects' tags and requested documents, and any apply / evidence /
+    derivation they agreed on.
+
+    ``humanly_resolved_rule_ids`` are the rules with a per-subject finding a processor has already
+    APPLIED or OVERRIDDEN on this file. Reconciliation keys on ``(rule_id, subject_id)`` and never
+    re-keys a carried-forward finding, so a group turning uniform would retire those resolved rows and
+    mint one loan-level row of fresh OPEN work — discarding the human's answer. Once someone has acted
+    per subject, this rule stays per subject on this file.
     """
     by_rule: dict[str, list[RuleEvaluation]] = {}
     for result in results:
@@ -575,6 +649,20 @@ def _collapse_uniform_passes(
             collapsed.extend(group)  # one real dissent and every subject speaks for itself again
             continue
         verdict = verdicts.pop()
+        is_pass = verdict is Verdict.SATISFIED
+        # bug-007 — A NON-PASS COLLAPSES ONLY WHERE THE SPEC SAYS ITS SENTENCE IS ABOUT THE SET.
+        # The identical-reasoning test below cannot carry that weight on its own: a deterministic rule
+        # renders its outcome template verbatim and substitutes only declared operands, so CR-12
+        # (`operands: {}`) says the same words on every disputed tradeline BY CONSTRUCTION. Three
+        # disputed accounts became one "Whole file" red that named none of them.
+        if not is_pass and not summary.unresolved:
+            collapsed.extend(group)
+            continue
+        # And not over work a human has already answered per subject: collapsing now would retire
+        # those resolved findings and mint one loan-level row of fresh OPEN work in their place.
+        if not is_pass and rule_id in humanly_resolved_rule_ids:
+            collapsed.extend(group)
+            continue
         # THE SUMMARY SENTENCE, and where it may come from.
         #
         # A uniform PASS has no shared sentence to promote — "The Capital One account is not under
@@ -587,7 +675,7 @@ def _collapse_uniform_passes(
         # application" — one sentence about the pair, printed once per half of the pair. Two statements
         # failing for DIFFERENT reasons share no sentence, so they still speak for themselves.
         reasonings = {r.reasoning for r in in_scope}
-        if verdict is Verdict.SATISFIED and summary.reasoning:
+        if is_pass and summary.reasoning:
             shared = summary.reasoning
         elif len(reasonings) == 1:
             shared = reasonings.pop()
@@ -605,11 +693,19 @@ def _collapse_uniform_passes(
                     (r.verdict_confidence for r in in_scope if r.verdict_confidence is not None),
                     default=None,
                 ),
-                load_bearing_tags=(),
+                # bug-007 — A NON-PASS ROW KEEPS THE TAGS THAT NAME ITS SUBJECTS. A pass drops them:
+                # they belong to subjects the row no longer names and there is nothing to act on. On
+                # any other outcome they are the opposite of decoration — CR-12 declares
+                # `liab.creditor_name` load-bearing with the comment "it names WHICH debt this finding
+                # is about", and `rule_findings._update_finding` refreshes this column unconditionally,
+                # so an empty tuple leaves the provenance panel empty run after run.
+                load_bearing_tags=()
+                if is_pass
+                else _ordered_union(r.load_bearing_tags for r in in_scope),
                 threshold_used=first.threshold_used,
                 priya_validated=first.priya_validated,
                 gated_pending_signoff=first.gated_pending_signoff,
-                # bug-006 — RATIFICATION IS NOT A DEFAULT. Dropping `load_bearing_tags` and `apply` is
+                # bug-006 — RATIFICATION IS NOT A DEFAULT. Dropping the per-subject fields on a PASS is
                 # deliberate (they belong to subjects this row no longer names); dropping this was not.
                 # ADR-378 calls ratification "the ENTIRE safety substitute for measurement", and
                 # `ratifies_every_finding` forces it True on every ratify-pending rule — so a collapsed
@@ -627,10 +723,37 @@ def _collapse_uniform_passes(
                 reasoning=shared,
                 # A pass has nothing to remediate; any other uniform outcome keeps the shared fix,
                 # which is the same sentence every subject was carrying.
-                how_to_fix=None if verdict is Verdict.SATISFIED else first.how_to_fix,
+                how_to_fix=None if is_pass else first.how_to_fix,
+                # bug-007 — AND THE REST OF WHAT MAKES A NON-PASS ACTIONABLE, which was being dropped
+                # by omission rather than by decision.
+                #
+                # `apply` is the sharpest: `deterministic._evaluate` sets it for exactly FIRED and
+                # NEEDS_REVIEW, and LP-576 records that for a rule that can never fire "the Apply IS
+                # the human's answer to it" — so a collapsed RE-1 needs_review shipped with
+                # `can_apply=False` and no button, which is the whole interaction gone. `evidence`
+                # (LP-626) and `derivation` (LP-535) are the composer's "Basis:" and "Threshold:"
+                # clauses; `requested_documents` (LP-620) is what a couldnt_check is waiting on, and
+                # without it the read path falls back to the rule-wide list.
+                #
+                # AGREED-ON VALUES ONLY for the three scalars: one subject's arithmetic on a row
+                # standing for all of them is a smaller version of the same false summary. The
+                # documents are a union, because waiting on either is waiting on both.
+                apply=None if is_pass else _uniform_value([r.apply for r in in_scope]),
+                evidence=None if is_pass else _uniform_value([r.evidence for r in in_scope]),
+                derivation=None if is_pass else _uniform_value([r.derivation for r in in_scope]),
+                requested_documents=()
+                if is_pass
+                else _ordered_union(r.requested_documents for r in in_scope),
             )
         )
-        logger.info("rule_uniform_pass_collapsed", rule_id=rule_id, subjects=len(in_scope))
+        # bug-007 — named for what it does now. A collapsed red logged as a "pass collapsed" is a
+        # CloudWatch line that reads as the opposite of the event it records.
+        logger.info(
+            "rule_uniform_outcome_collapsed",
+            rule_id=rule_id,
+            verdict=verdict.value,
+            subjects=len(in_scope),
+        )
     return collapsed
 
 
@@ -854,7 +977,10 @@ async def run_verification(
             Degradation("document_provenance", f"findings carry no document links: {exc}")
         )
     results = _attach_document_provenance(results, snapshot)
-    results = _collapse_uniform_passes(results)
+    results = _collapse_uniform_passes(
+        results,
+        humanly_resolved_rule_ids=await _rules_with_resolved_subjects(db, loan_file_id),
+    )
     reconciliation = await _persist(
         db,
         document_id_by_content_id=document_ids,

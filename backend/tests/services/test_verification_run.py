@@ -540,7 +540,17 @@ def test_required_ai_groups_runs_only_what_active_rules_consume() -> None:
 
 
 def _evaluation(
-    rule_id: str, subject_id: str, verdict, reasoning: str = "the subject's own reasoning"
+    rule_id: str,
+    subject_id: str,
+    verdict,
+    reasoning: str = "the subject's own reasoning",
+    *,
+    load_bearing_tags=(),
+    apply=None,
+    evidence=None,
+    derivation=None,
+    requested_documents=(),
+    how_to_fix=None,
 ):
     """A minimal RuleEvaluation for the collapse tests (bug-005)."""
     from app.verification.rule_engine.result import RuleEvaluation
@@ -550,13 +560,23 @@ def _evaluation(
         subject_id=subject_id,
         verdict=verdict,
         verdict_confidence=0.9,
-        load_bearing_tags=(),
+        load_bearing_tags=load_bearing_tags,
         threshold_used=None,
         priya_validated=False,
         gated_pending_signoff=True,
         reasoning=reasoning,
-        how_to_fix=None,
+        how_to_fix=how_to_fix,
+        apply=apply,
+        evidence=evidence,
+        derivation=derivation,
+        requested_documents=requested_documents,
     )
+
+
+def _tag(tag_id: str, value: str):
+    from app.verification.rule_engine.result import LoadBearingTag
+
+    return LoadBearingTag(tag_id=tag_id, value=value, confidence=0.9, reasoning=None)
 
 
 def test_a_uniform_pass_collapses_to_one_row() -> None:
@@ -658,3 +678,187 @@ def test_different_reasons_still_speak_for_themselves() -> None:
         ),
     ]
     assert len(_collapse_uniform_passes(group)) == 2
+
+
+def test_a_uniform_non_pass_does_not_collapse_unless_the_spec_declares_it() -> None:
+    """bug-007 — THE GUARD THAT WAS VACUOUS. Collapsing any uniform outcome whose subjects shared
+    identical reasoning read as a safety property and was none: a deterministic rule renders its
+    outcome template verbatim and substitutes only declared operands, so CR-12 (`operands: {}`) says
+    the same words on every disputed tradeline BY CONSTRUCTION. Three disputed accounts collapsed into
+    one "Whole file" red whose prose was singular and named none of them — the false-green CR-12's own
+    spec comment promises it will never become, arrived at from the other direction."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "the credit report shows THIS TRADELINE as disputed by the consumer"
+    group = [
+        _evaluation("CR-12", "lstcapone", Verdict.FIRED, reasoning=shared),
+        _evaluation("CR-12", "lstbofa00", Verdict.FIRED, reasoning=shared),
+        _evaluation("CR-12", "lstchase0", Verdict.FIRED, reasoning=shared),
+    ]
+
+    kept = _collapse_uniform_passes(group)
+    assert len(kept) == 3, (
+        "CR-12 does not declare `unresolved`; its sentence is about ONE tradeline"
+    )
+    assert {r.subject_id for r in kept} == {"lstcapone", "lstbofa00", "lstchase0"}
+
+
+def test_a_collapsed_non_pass_keeps_what_makes_it_actionable() -> None:
+    """bug-007 — the fields that were dropped by omission rather than by decision. `apply` is the
+    sharpest: LP-576 records that for a rule that can never fire "the Apply IS the human's answer to
+    it", and a collapsed needs_review built with the field defaulted shipped with no button at all."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "which statement corresponds to the stated liability could not be resolved"
+    change = {"action": "identify_statement"}
+    group = [
+        _evaluation(
+            "RE-1",
+            "docaaaa",
+            Verdict.NEEDS_REVIEW,
+            reasoning=shared,
+            load_bearing_tags=(_tag("doc.lender", "United Wholesale Mortgage"),),
+            apply=change,
+            evidence="both statements name the same lender.",
+            derivation="Threshold: n/a",
+            requested_documents=("mortgage_statement",),
+            how_to_fix="Identify which statement corresponds to the stated liability.",
+        ),
+        _evaluation(
+            "RE-1",
+            "docbbbb",
+            Verdict.NEEDS_REVIEW,
+            reasoning=shared,
+            load_bearing_tags=(_tag("doc.lender", "United Wholesale Mortgage"),),
+            apply=change,
+            evidence="both statements name the same lender.",
+            derivation="Threshold: n/a",
+            requested_documents=("mortgage_statement",),
+            how_to_fix="Identify which statement corresponds to the stated liability.",
+        ),
+    ]
+
+    [only] = _collapse_uniform_passes(group)
+    assert only.subject_id == LOAN_SUBJECT
+    assert only.apply == change, "no apply is no button, on the outcome whose answer IS the apply"
+    assert only.evidence == "both statements name the same lender."
+    assert only.derivation == "Threshold: n/a"
+    assert only.requested_documents == ("mortgage_statement",)
+    assert only.load_bearing_tags == (_tag("doc.lender", "United Wholesale Mortgage"),), (
+        "on a non-pass the tags are what name the subjects the row stands for"
+    )
+    assert only.how_to_fix is not None
+
+
+def test_a_collapsed_non_pass_carries_only_what_its_subjects_agreed_on() -> None:
+    """One subject's arithmetic on a row standing for all of them is a quieter version of the same
+    false summary the collapse exists to avoid. Disagreement drops the field rather than picking one;
+    the documents are a union, because waiting on either is waiting on both."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "which statement corresponds to the stated liability could not be resolved"
+    group = [
+        _evaluation(
+            "RE-1",
+            "docaaaa",
+            Verdict.COULDNT_CHECK,
+            reasoning=shared,
+            apply={"action": "a"},
+            derivation="Threshold: $1,000.00",
+            requested_documents=("mortgage_statement",),
+        ),
+        _evaluation(
+            "RE-1",
+            "docbbbb",
+            Verdict.COULDNT_CHECK,
+            reasoning=shared,
+            apply={"action": "b"},
+            derivation="Threshold: $2,000.00",
+            requested_documents=("closing_disclosure",),
+        ),
+    ]
+
+    [only] = _collapse_uniform_passes(group)
+    assert only.apply is None, "two different changes cannot both be THE change on one row"
+    assert only.derivation is None
+    assert only.requested_documents == ("mortgage_statement", "closing_disclosure")
+
+
+def test_a_pass_still_drops_the_per_subject_fields() -> None:
+    """They belong to subjects the row no longer names, and a pass has nothing to remediate — the
+    bug-007 widening is for the outcomes a processor has to act on, not for green."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    passes = [
+        _evaluation(
+            "CR-12",
+            f"lst{i:016x}",
+            Verdict.SATISFIED,
+            load_bearing_tags=(_tag("liab.creditor_name", f"Creditor {i}"),),
+            apply={"action": "nothing"},
+            requested_documents=("credit_report",),
+        )
+        for i in range(24)
+    ]
+
+    [collapsed] = _collapse_uniform_passes(passes)
+    assert collapsed.load_bearing_tags == ()
+    assert collapsed.apply is None
+    assert collapsed.evidence is None
+    assert collapsed.derivation is None
+    assert collapsed.requested_documents == ()
+    assert collapsed.how_to_fix is None
+
+
+def test_a_rule_a_human_has_answered_per_subject_stays_per_subject() -> None:
+    """bug-007 — COLLAPSING IS PART OF A FINDING'S IDENTITY, and that makes it destructive after the
+    fact. Reconciliation keys on `(rule_id, subject_id)` and never re-keys a finding it carries
+    forward, so a group that turns uniform retires every per-subject row and mints one loan-level row
+    in their place — and a retired finding takes its resolution with it, turning a processor's APPLIED
+    or OVERRIDDEN answer back into fresh OPEN work."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "which statement corresponds to the stated liability could not be resolved"
+    group = [
+        _evaluation("RE-1", "docaaaa", Verdict.COULDNT_CHECK, reasoning=shared),
+        _evaluation("RE-1", "docbbbb", Verdict.COULDNT_CHECK, reasoning=shared),
+    ]
+
+    assert len(_collapse_uniform_passes(group)) == 1, "with nothing resolved it collapses"
+    kept = _collapse_uniform_passes(group, humanly_resolved_rule_ids=frozenset({"RE-1"}))
+    assert len(kept) == 2
+    assert {r.subject_id for r in kept} == {"docaaaa", "docbbbb"}
+
+
+def test_a_resolved_subject_on_another_rule_does_not_block_this_one() -> None:
+    """The guard is per rule, and it has to be: one answered CR-1 finding must not freeze RE-1's
+    shape, or the first resolution on a file would un-collapse everything."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    shared = "which statement corresponds to the stated liability could not be resolved"
+    group = [
+        _evaluation("RE-1", "docaaaa", Verdict.COULDNT_CHECK, reasoning=shared),
+        _evaluation("RE-1", "docbbbb", Verdict.COULDNT_CHECK, reasoning=shared),
+    ]
+
+    assert len(_collapse_uniform_passes(group, humanly_resolved_rule_ids=frozenset({"CR-1"}))) == 1
+
+
+def test_a_pass_collapses_even_where_a_human_has_answered() -> None:
+    """The guard protects RESOLVED work, and nothing resolves a green: `_persistable` files a
+    satisfied verdict as an outcome, not as a task. Freezing the pass collapse too would bring the
+    24-row wall back on every file a processor had ever touched."""
+    from app.services.verification_run import _collapse_uniform_passes
+    from app.verification.rule_engine.result import Verdict
+
+    passes = [_evaluation("CR-12", f"lst{i:016x}", Verdict.SATISFIED) for i in range(24)]
+    assert (
+        len(_collapse_uniform_passes(passes, humanly_resolved_rule_ids=frozenset({"CR-12"}))) == 1
+    )

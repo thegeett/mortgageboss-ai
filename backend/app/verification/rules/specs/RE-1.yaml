@@ -89,10 +89,16 @@ required_inputs:
 # of the TWO United Wholesale Mortgage statements corresponds to the mortgage liability disclosed on
 # the application" — a sentence about the pair, printed twice, once on each half of the pair.
 #
-# No `reasoning` override: for a non-pass outcome the collapse fires only when every subject's
-# reasoning is IDENTICAL, which is what makes the shared sentence an honest summary of itself. Two
-# statements failing for DIFFERENT reasons still speak for themselves.
-collapse_uniform: {}
+# bug-007 — `unresolved: true` is the DECLARATION that this rule's sentence is about the SET. It has
+# to be declared: identical reasoning alone is not evidence of that, because a deterministic rule with
+# no operands renders the same sentence on every subject whatever it is about. Here it genuinely is
+# about the pair, so one row is the honest shape.
+#
+# No `reasoning` override: the collapse still fires only when every subject's reasoning is IDENTICAL,
+# and that shared sentence IS the summary. Two statements failing for DIFFERENT reasons still speak
+# for themselves.
+collapse_uniform:
+  unresolved: true
 
 subject_enumeration: per_document
 subject_key_fields: [document]

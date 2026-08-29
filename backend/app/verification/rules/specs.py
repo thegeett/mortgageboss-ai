@@ -1021,7 +1021,7 @@ class CollapseUniform(BaseModel):
     not under dispute". Individually correct, collectively a wall — and a processor scrolling past 24
     identical passes is being trained to scroll past this rule.
 
-    ONLY WHEN EVERY SUBJECT PASSES. The moment one does not, the per-subject findings stand as they
+    PASSES BY DEFAULT. The moment one subject does not pass, the per-subject findings stand as they
     are: the whole value of a per-subject rule is naming WHICH one, and a summary that hid a single
     disputed account behind 23 clean ones would be the false-green this codebase refuses everywhere.
 
@@ -1033,9 +1033,28 @@ class CollapseUniform(BaseModel):
 
     #: The summary wording for a uniform PASS, where the per-subject reasonings legitimately differ
     #: ("The Capital One account is not under dispute" / "…the Bank of America account…") and there is
-    #: no shared sentence to promote. Omit it for the other outcomes: there the collapse requires the
-    #: reasonings to be IDENTICAL, which makes the shared sentence the honest summary of itself.
+    #: no shared sentence to promote.
     reasoning: str | None = PydField(default=None, min_length=1)
+    #: bug-007 — COLLAPSE A UNIFORM **NON-PASS** TOO. Opt-in, and it has to be, because no code can
+    #: derive it.
+    #:
+    #: The first cut collapsed any uniform outcome whose subjects shared IDENTICAL reasoning, on the
+    #: theory that a shared sentence is an honest summary of itself. That test is vacuous: a
+    #: deterministic rule renders its outcome template verbatim and interpolation substitutes only
+    #: declared operands, so a rule with `operands: {}` produces byte-identical reasoning on every
+    #: subject reaching the same verdict BY CONSTRUCTION. Three disputed tradelines collapsed into one
+    #: "Whole file" red whose prose was singular and named none of them — the exact false-green CR-12's
+    #: own spec comment promises it will never become.
+    #:
+    #: What separates the two cases is what the sentence is ABOUT, and only the author knows. RE-1's is
+    #: about the SET ("which of the TWO United Wholesale Mortgage statements corresponds to the stated
+    #: liability") — one question, printed once per half of the pair. CR-12's is about ONE tradeline
+    #: and merely reads the same each time. So: declare it where the sentence summarises the set, leave
+    #: it off everywhere else, and the default stays the safe one.
+    #:
+    #: Identical reasoning is still REQUIRED when this is on — two subjects failing for different
+    #: reasons share no sentence to promote — it is just not sufficient on its own.
+    unresolved: bool = False
 
 
 class RuleSpec(BaseModel):
