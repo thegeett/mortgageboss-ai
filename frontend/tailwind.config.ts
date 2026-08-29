@@ -24,6 +24,13 @@ const pair = (name: string) => ({
 
 export default {
   darkMode: ["class"],
+  // The `.dark` block lives in globals.css inside @layer base, and Tailwind
+  // tree-shakes custom base CSS against the content globs. Nothing in app/,
+  // components/ or lib/ yields the bare token `dark` today, so the whole dark
+  // theme was being dropped from the build. Safelisting it makes the block's
+  // survival independent of what any component happens to spell — including a
+  // theme toggle that sets the class from a variable rather than a literal.
+  safelist: ["dark"],
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     container: { center: true, padding: "2rem", screens: { "2xl": "1400px" } },

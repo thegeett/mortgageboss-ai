@@ -127,6 +127,92 @@ It should not survive as-is.
 
 ---
 
+---
+
+## 2026-08-29 (later) · from the LP-UI-002 review
+
+### A4 — the entire dark theme was being purged from the build. Fixed in the asset.
+
+**The finding was right, and it is the most serious defect in the assets so far.**
+Reproduced independently: compiling `globals.css` against the real content globs
+emits `:root` and **no `.dark` rule at all**. Add one file containing the bare
+token `dark` and the block reappears. Tailwind v3 tree-shakes custom CSS written
+inside `@layer base` against the content globs, and nothing in `app/`,
+`components/` or `lib/` yields that token — the one file containing the letters is
+`rule-findings-tabs.tsx:183`, inside the word "darker" in a comment, which does not
+tokenise to `dark`.
+
+So dark mode shipped as nothing, and LP-UI-001's dark checkbox passed only because
+verifying it meant adding `className="dark"` to `layout.tsx` — which put the token
+into a scanned file and supplied the very condition being tested. That is a sharp
+observation and the right lesson: **a verification that changes the thing it
+measures is not a verification.**
+
+`safelist: ["dark"]` is now in `assets/tailwind.config.ts` and
+`frontend/tailwind.config.ts`, with a comment explaining why it must stay. Verified
+after: `.dark` emits against the unmodified content globs. This matters most for
+LP-UI-011's theme toggle, which would naturally set the class from a variable
+(`classList.add(theme)`) and would otherwise silently kill the theme again.
+
+### The `danger` normalisation stays deferred — agreed
+
+Leaving the twenty call sites spelled `danger` rather than renaming to
+`destructive` is the right call: the alias makes them correct, and mechanical churn
+does not belong in the same commit as a behaviour fix. `TICKETS.md` marks it
+optional and it stays optional.
+
+---
+
+## 2026-08-29 · LP-UI-029 answered — Epic E is unblocked, with a caveat
+
+**There are no bounding boxes, and the model cannot produce one.** Verified
+independently: zero geometry anywhere in `backend/app` — no `bbox`, no rect, no
+coordinates. Documents reach Claude as native base64 `document` blocks, so there is
+no rasterisation and no OCR stage that could have computed page geometry. The
+coordinate is not being dropped somewhere; it is never computed.
+
+**Snippet matching is viable, and the numbers are measured rather than assumed.**
+Against staging: of 1,456 fields carrying a non-null value, **1,443 (99.1%) carry
+both `page` and `snippet`**, and they are populated together — never one without
+the other. The 13 without are fields the model reported as absent, which is exactly
+where an anchor should be missing.
+
+**One correction to the ticket's own reasoning, and it helps.** It described
+`pdf_utils.py` as dev-only. The *text-layer extraction* function is; the module is
+not — `cap_pdf_pages` and `pdf_page_count` are imported by `classification.py`,
+`generic_analyzer.py`, `chunked.py` and `bank_statement.py`. PyMuPDF is therefore
+already on the production path, so `page.search_for()` is a smaller lift than the
+ticket implies: no new dependency and no new stage, just a service.
+
+### What is still unmeasured, and should be before Epic E is scheduled
+
+1. What share of stored documents have a usable text layer (`search_for` finds
+   nothing on a scan). `pdf_utils.has_text` already computes the signal.
+2. Whether the snippet matches the text layer verbatim — ligatures, soft hyphens,
+   column order and whitespace runs all break an exact search.
+
+### Decision, and what it costs the design
+
+The recommendation is right: **do not block Epic E on true coordinates.** Ship
+snippet matching, treat `bbox` as derived and optional, and make it **absent rather
+than approximate** when the search fails.
+
+That has a design consequence I own, not the implementer: **the Review screen in
+`ledger-screens.html` promises a rectangle on every field, and it cannot.** The
+mockup needs a designed *"page known, spot unknown"* field state — page number and
+quoted snippet, no box, and no implication that one is missing by error. That state
+is needed regardless, since 0.9% of valued fields have no page either.
+
+**Owed by the design side, before LP-UI-030 starts:** add that state to the Review
+screen and to the Foundations state vocabulary. Until it exists, LP-UI-030 has no
+mockup for a case that will occur on every scanned document.
+
+Epic E stays scheduled where it is on the assumption that snippet matching is the
+approach. If the alternative — a real OCR/geometry stage — is preferred, that is a
+new backend epic and Epic E moves.
+
+---
+
 ## Standing note
 
 The design assets are **not** infallible. LP-UI-001 found two real defects in them

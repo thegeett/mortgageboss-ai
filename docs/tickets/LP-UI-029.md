@@ -2,7 +2,7 @@
 
 - **Ticket:** LP-UI-029 — does the extraction pipeline store bounding boxes?
 - **Epic:** Ledger redesign → Epic E (Document reviewer) · **BLOCKS** LP-UI-030…033
-- **Status:** Investigated — answer below. **Decision open**; no ADR written yet.
+- **Status:** Answered; decision taken — snippet matching, Epic E unblocked.
 - **Date:** 2026-08-29
 - **Raised early** because Epic E (~2 weeks) cannot be scheduled honestly until
   this is answered.
@@ -27,12 +27,19 @@ class SourceLocation(BaseModel):
 have produced one.** Documents reach the model as native base64 `document`
 blocks — `build_document_block` (`backend/app/ai/client.py:135`) hands Claude the
 whole PDF and the model reads it directly. There is no rasterisation step, no
-Textract, no OCR engine, nothing that computes page geometry. `pdf_utils.py` is
-explicit that it is *"a DEV-ONLY tool… not a pipeline step. The production
-pipeline reads documents with AI directly (full-document native reading,
-LP-38/39)"*. So the coordinate does not exist and is not being dropped somewhere —
-it is never computed. Asking the model for one would be asking it to invent
-numbers it has no way to measure.
+Textract, no OCR engine, nothing that computes page geometry. So the coordinate
+does not exist and is not being dropped somewhere — it is never computed. Asking
+the model for one would be asking it to invent numbers it has no way to measure.
+
+**Correction to an earlier version of this ticket.** It described `pdf_utils.py`
+as dev-only, quoting the module docstring's "a DEV-ONLY tool… not a pipeline
+step". That applies to `extract_text_from_pdf`, the text-layer comparison harness
+behind `api/dev.py` — **not to the module**. `cap_pdf_pages` and `pdf_page_count`
+are imported by `ai/classification.py`, `ai/generic_analyzer.py`,
+`ai/extraction/chunked.py` and `ai/extraction/bank_statement.py`. PyMuPDF is
+already on the production path, which makes `page.search_for()` a smaller lift
+than this ticket first implied: no new dependency, no new pipeline stage, just a
+service.
 
 Storage is `Extraction.extracted_data`, a JSON blob of `TypedField`s
 (`backend/app/models/extraction.py:124`), so adding a `bbox` key needs no DDL —
@@ -66,10 +73,12 @@ The anchor text is there on essentially every extracted value, and it is absent
 in exactly the right place — a field the model reported as absent carries no
 snippet. `page` and `snippet` are populated together, never one without the other.
 
-**PyMuPDF is already a dependency** (`pymupdf>=1.27.2.3`, used by `pdf_utils.py`),
-and `page.search_for(text)` returns rectangles directly, so the interim needs no
-new package — only a service that opens the stored PDF, searches page `n` for the
-snippet, and normalises the rect against the page box.
+**PyMuPDF is already a dependency and already on the production path**
+(`pymupdf>=1.27.2.3`; `cap_pdf_pages` / `pdf_page_count` are called from
+classification, generic analysis, chunked extraction and bank-statement
+extraction). `page.search_for(text)` returns rectangles directly, so the interim
+needs no new package and no new stage — only a service that opens the stored PDF,
+searches page `n` for the snippet, and normalises the rect against the page box.
 
 ## What is still unmeasured
 
@@ -107,14 +116,28 @@ The alternative — a real OCR/geometry stage — buys exact boxes on scans too,
 costs a new pipeline stage, a second read of every document, and a per-page bill,
 for a feature that is a convenience over a snippet the processor can already read.
 
-**This is a scheduling and architecture decision, so it is left open rather than
-recorded as an ADR here.** Once it is made, the ADR goes in `decisions.md` and
-this ticket becomes the implementation record.
+**Decided (2026-08-29, recorded in `AMENDMENTS.md`).** Epic E is not blocked on
+true coordinates; snippet matching is the approach and Epic E stays where it is on
+the schedule. Two things follow.
+
+The two unmeasured numbers above should be measured before Epic E is *scheduled*,
+not before the approach is decided.
+
+And the design side owes a screen state before LP-UI-030 starts: the Review screen
+in `ledger-screens.html` promises a rectangle on every field and cannot keep that
+promise, so it needs a designed **"page known, spot unknown"** field state — page
+number and quoted snippet, no box, and no implication that the box is missing by
+error. Until that exists, LP-UI-030 has no mockup for a case that occurs on every
+scanned document.
+
+If the alternative — a real OCR/geometry stage — is ever preferred instead, that
+is a new backend epic and Epic E moves.
 
 ## Files inspected
 
 - `backend/app/ai/extraction/shape.py` — `SourceLocation`, `TypedField`
 - `backend/app/ai/client.py` — `build_document_block`, `build_document_message`
-- `backend/app/services/pdf_utils.py` — PyMuPDF text layer, `has_text`, dev-only
+- `backend/app/services/pdf_utils.py` — PyMuPDF; `cap_pdf_pages` / `pdf_page_count`
+  are production, `extract_text_from_pdf` is the dev-only harness
 - `backend/app/models/extraction.py` — `extracted_data` JSON storage
 - staging `readonly.extractions`, via `./scripts/deploy staging query`
