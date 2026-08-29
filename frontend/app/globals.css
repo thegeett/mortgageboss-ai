@@ -2,36 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================================
+   LEDGER — design tokens for mortgageboss-ai            LP-UI-001
+   -----------------------------------------------------------------------------
+   Values are space-separated HSL triples on purpose: tailwind.config.ts wraps
+   them in hsl(), which is what makes opacity modifiers (bg-warning/10,
+   border-primary/30) work. Do NOT change these to hex — ~200 existing usages
+   depend on the modifier form.
+
+   Every text tone clears 4.5:1 against its own ground in BOTH themes, and
+   --input clears 3:1 as a control border. Verified, not assumed.
+   ============================================================================= */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 14% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 217 91% 60%;
-    --radius: 0.5rem;
+    --background: 180.0 14.3% 98.6%;
+    --foreground: 188.6 17.9% 7.6%;
+    /* NEW — the middle text tone. gray-600/700 map here. 8:1 light, 10:1 dark. */
+    --foreground-2: 168.0 6.6% 29.8%;
+    --card: 0.0 0.0% 100.0%;
+    --card-foreground: 188.6 17.9% 7.6%;
+    --popover: 0.0 0.0% 100.0%;
+    --popover-foreground: 188.6 17.9% 7.6%;
+    /* The one accent. Petrol: far in hue from red/amber/green, so it never argues with a status. */
+    --primary: 187.9 67.9% 22.0%;
+    --primary-foreground: 0.0 0.0% 100.0%;
+    --secondary: 180.0 9.1% 95.7%;
+    --secondary-foreground: 188.6 17.9% 7.6%;
+    --muted: 180.0 9.1% 95.7%;
+    --muted-foreground: 168.0 4.4% 44.3%;
+    /* shadcn's `accent` is the HOVER surface, not the brand accent. Left alone deliberately. */
+    --accent: 180.0 8.6% 93.1%;
+    --accent-foreground: 188.6 17.9% 7.6%;
+    --destructive: 7.1 61.8% 43.1%;
+    --destructive-foreground: 0.0 0.0% 100.0%;
+    /* --- status. Always paired with a glyph and a word; never colour alone. --- */
+    --success: 159.8 60.6% 26.9%;
+    --success-foreground: 0.0 0.0% 100.0%;
+    --warning: 37.8 89.4% 29.6%;
+    --warning-foreground: 0.0 0.0% 100.0%;
+    /* `info` is aliased to the petrol accent: in Ledger, "in flight" IS the accent state.
+       Keeps ~90 existing bg-info/10 usages working without a competing sixth hue. */
+    --info: 187.9 67.9% 22.0%;
+    --info-foreground: 0.0 0.0% 100.0%;
+    /* NEW — provenance, NOT a status. Violet never means "bad". */
+    --ai: 248.1 36.0% 48.4%;
+    --ai-foreground: 0.0 0.0% 100.0%;
+    /* Two borders, deliberately: `border` is the decorative hairline (table rules,
+       dividers); `input` is the CONTROL border and clears 3:1 for WCAG 1.4.11. */
+    --border: 165.0 7.7% 89.8%;
+    --border-strong: 170.0 6.4% 81.6%;
+    --input: 168.0 4.3% 54.5%;
+    --ring: 187.9 67.9% 22.0%;
+    /* NEW — loading placeholders. --muted is too close to the card surface in dark. */
+    --skeleton: 168.0 9.4% 89.6%;
 
-    /* Custom semantic colors */
-    --success: 142 71% 45%;
-    --success-foreground: 0 0% 100%;
-    --warning: 32 95% 44%;
-    --warning-foreground: 0 0% 100%;
-    --info: 199 89% 48%;
-    --info-foreground: 0 0% 100%;
+    /* --- geometry: tool, not marketing site --- */
+    --radius: 0.3125rem; /* 5px controls  (was 0.5rem) */
+    --radius-container: 0.5rem; /* 8px cards, panels, tables */
+
+    /* --- density: driven by [data-density] on <html>, see LP-UI-010 --- */
+    --row-h: 1.75rem; /* 28px — compact, the default */
+    --row-px: 0.75rem; /* 12px horizontal cell padding */
+
+    /* --- layout --- */
+    --rail-w: 3.25rem; /* 52px icon rail */
+    --nav-w: 13.5rem; /* 216px context column */
+    --ctx-w: 18rem; /* 288px file context rail */
+    --topbar-h: 2.75rem; /* 44px */
+
+    /* --- confidence thresholds, shared with the backend --- */
+    --confidence-standard: 0.85;
+    --confidence-critical: 0.97;
+  }
+
+  .dark {
+    --background: 192.0 17.2% 5.7%;
+    --foreground: 168.0 12.8% 92.4%;
+    /* NEW — the middle text tone. gray-600/700 map here. 8:1 light, 10:1 dark. */
+    --foreground-2: 168.0 7.1% 72.5%;
+    --card: 180.0 14.3% 8.2%;
+    --card-foreground: 168.0 12.8% 92.4%;
+    --popover: 180.0 14.3% 9.6%;
+    --popover-foreground: 168.0 12.8% 92.4%;
+    /* The one accent. Petrol: far in hue from red/amber/green, so it never argues with a status. */
+    --primary: 186.9 47.3% 53.1%;
+    --primary-foreground: 187.5 75.0% 6.3%;
+    --secondary: 180.0 14.3% 11.0%;
+    --secondary-foreground: 168.0 12.8% 92.4%;
+    --muted: 180.0 14.3% 11.0%;
+    --muted-foreground: 162.0 4.5% 56.5%;
+    /* shadcn's `accent` is the HOVER surface, not the brand accent. Left alone deliberately. */
+    --accent: 180.0 11.4% 13.7%;
+    --accent-foreground: 168.0 12.8% 92.4%;
+    --destructive: 7.1 75.8% 69.2%;
+    --destructive-foreground: 9.2 33.3% 7.6%;
+    /* --- status. Always paired with a glyph and a word; never colour alone. --- */
+    --success: 155.5 46.6% 53.7%;
+    --success-foreground: 161.5 68.4% 7.5%;
+    --warning: 37.9 67.1% 54.7%;
+    --warning-foreground: 40.0 62.8% 8.4%;
+    /* `info` is aliased to the petrol accent: in Ledger, "in flight" IS the accent state.
+       Keeps ~90 existing bg-info/10 usages working without a competing sixth hue. */
+    --info: 186.9 47.3% 53.1%;
+    --info-foreground: 187.5 75.0% 6.3%;
+    /* NEW — provenance, NOT a status. Violet never means "bad". */
+    --ai: 250.1 70.9% 77.1%;
+    --ai-foreground: 249.2 43.3% 11.8%;
+    /* Two borders, deliberately: `border` is the decorative hairline (table rules,
+       dividers); `input` is the CONTROL border and clears 3:1 for WCAG 1.4.11. */
+    --border: 180.0 11.7% 15.1%;
+    --border-strong: 180.0 9.8% 20.0%;
+    --input: 174.5 5.4% 39.8%;
+    --ring: 186.9 47.3% 53.1%;
+    /* NEW — loading placeholders. --muted is too close to the card surface in dark. */
+    --skeleton: 173.3 9.9% 17.8%;
+  }
+
+  [data-density="comfortable"] {
+    --row-h: 2.25rem;
+    --row-px: 0.75rem;
+  }
+  [data-density="relaxed"] {
+    --row-h: 2.75rem;
+    --row-px: 1rem;
   }
 }
 
@@ -42,5 +136,29 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  /* Money, ratios, dates, loan ids — anything that lines up in a column. */
+  .tabular,
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+  /* :focus-visible, never :focus — a dense table where every click paints a
+     ring is exhausting. 2px at 2px offset satisfies WCAG 2.4.13. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  /* WCAG 2.4.11 — a focused row must not hide behind the sticky header. */
+  [data-row] {
+    scroll-margin-block: var(--topbar-h);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

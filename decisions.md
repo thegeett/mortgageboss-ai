@@ -15572,3 +15572,48 @@ graded need at RECEIVED rather than claiming a coverage it cannot verify.
 **Related:** LP-631, LP-632, LP-633, ADR-069 (a need survives its document), LP-108 (honest satisfaction;
 never over-claim), LP-111 (flag the duplicate, let the processor merge), LP-625 (`_refreshable` — an untouched
 proposal is the model's, a touched one is the processor's).
+
+## ADR-389
+
+**Colour, weight and radius have exactly one source: the token layer in `globals.css`.**
+
+*Context.* The LP-5 palette was a stock shadcn install — Tailwind blue at `217 91% 60%`, one
+border token, no `.dark` block — and the app never actually used it. LP-UI-001 measured 808
+`gray-*` classes across 67 of 95 components, which is why `darkMode: ["class"]` has sat in the
+config since LP-5 without ever being switchable: there was nothing for the class to switch. The
+same bypass hid two real failures. `text-gray-400`, the most-used text colour in the app, is
+2.54:1 on white and fails AA outright. And `text-danger` / `bg-danger/5` / `border-danger/40`
+appear at twenty call sites against a `danger` colour that the config never defined, so
+`FailedRunBanner` — the banner that reports a dead verification run — has been rendering grey
+(LP-UI-002).
+
+*Decision.* Every colour, font weight and radius in the frontend resolves through a CSS variable
+declared in `app/globals.css` and exposed as a Tailwind token in `tailwind.config.ts`. A component
+may not name a colour any other way: no `gray-*`, no other Tailwind palette scale, no hex, no
+`hsl()` inside an arbitrary value. Two consequences are load-bearing rather than cosmetic. Values
+stay as **space-separated HSL triples**, because the config wraps them in `hsl()` and that is the
+only form under which `bg-warning/10` and the ~200 other opacity modifiers keep working — a
+conversion to hex would silently break all of them. And **`border` and `input` are two different
+tokens on purpose**: `border` is the decorative hairline that carries no meaning, `input` is the
+control border and is held to WCAG 1.4.11's 3:1, so a control is never allowed to inherit a
+hairline that a user cannot see.
+
+*Consequences.* Dark mode becomes a token swap with no component work, which is what makes it
+shippable at all; the cost is that it only works once LP-UI-004 has removed the hardcoded greys,
+so LP-UI-001 through 003 leave the app visibly worse than they found it. Contrast becomes a
+property of the palette rather than of each screen — it is checked once, numerically, in both
+themes, and a screen cannot regress it without leaving the token set. That check has to be run
+and not assumed: LP-UI-001 found `muted-foreground` on `muted` at 4.29:1 in light, under the floor
+the spec claims, and the LP-UI-004 codemod will route 24 existing elements onto exactly that pair.
+The rule also has a blind spot worth naming — a colour written as an arbitrary value
+(`bg-[radial-gradient(...hsl(217_91%_60%...))]`, still present on the login and landing pages)
+satisfies a `gray-*` grep while violating this ADR, so the lint rule that enforces it must match
+arbitrary values too, not just the palette scales.
+
+*Applies to.* Everything under `frontend/app`, `frontend/components` and `frontend/lib`. It does
+not apply to `docs/design/ledger/`, where the mockups are deliberately standalone HTML and carry
+their own copy of the palette.
+
+**Related:** LP-UI-001, LP-UI-002 (the undefined `danger`), LP-UI-004 (the codemod that makes the
+rule true), LP-UI-005 (one status vocabulary on top of these tokens), LP-5 (the palette this
+replaces), `docs/design/ledger/SPEC.md` rules 1, 2, 3 and 8.
