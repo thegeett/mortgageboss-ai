@@ -484,6 +484,21 @@ module "compute" {
     # goes anywhere else.
     FINDING_PROSE_ENABLED = "true"
 
+    # LP-634 — the same pass over the NEED LIST, on the same terms and for a sharper reason: the
+    # Need List is the first page a processor opens, and it explained almost nothing. Across
+    # LF-AWBB, LF-BVFU and LF-ZE9N, 17 of 17 FLOOR needs — the deterministic ones, the ones we are
+    # surest about — stored no reasoning at all, so the page showed titles above blank spaces; the
+    # finding-derived ones read "Required by verification rule(s) CL-1, CR-13, DT-7, ID-5, IH-2,
+    # IH-3, PR-6".
+    #
+    # It writes `explanation` and NOTHING else — not the title, not the type, not the status, not
+    # the coverage flag — and the card falls back to the stored `reasoning` when a composition is
+    # rejected. Turning it off returns today's wording with no other effect.
+    #
+    # Enabled on staging for the same reason as the line above: it rewrites every need on a file at
+    # once, so it is read against the stored text HERE before it goes anywhere else.
+    NEED_PROSE_ENABLED = "true"
+
     # ⚠️ REDIS_URL IS NOT HERE. redis_auth_enabled is true in this environment, so
     # the URL carries an AUTH token and is a CREDENTIAL — it is injected from the
     # redis-url secret in secret_arns below.
