@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ValidationInventory } from "@/lib/types/validation-aid";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const recordMutate = vi.fn();
@@ -72,8 +72,12 @@ describe("ValidationAidPage", () => {
     expect(screen.getByText("conv.dti.back_end_max_manual")).toBeDefined();
     expect(screen.getByText(/Fannie B3-6-02/)).toBeDefined();
     expect(screen.getByText("calc.pmi_rate")).toBeDefined();
-    // HONEST: nothing validated by default.
-    expect(screen.getAllByText("grounded starter").length).toBeGreaterThanOrEqual(2);
+    // HONEST: nothing validated by default. The label is VALIDATION_STATUS's
+    // now (LP-UI-028) rather than the raw enum with its underscore replaced —
+    // the status joined the one vocabulary, so the words are the vocabulary's.
+    // Scoped to the list, because the counts strip carries the same label once.
+    const rows = screen.getByRole("list");
+    expect(within(rows).getAllByText("Grounded starter").length).toBeGreaterThanOrEqual(2);
   });
 
   it("records a 'validated' verdict (captures Priya's judgment)", () => {
@@ -110,5 +114,85 @@ describe("ValidationAidPage", () => {
       expect.objectContaining({ kind: "add_new", title: "Gift of equity letter" }),
       expect.anything(),
     );
+  });
+
+  it("keeps the reviewer's own words on a FLAGGED rule (LP-UI-028)", () => {
+    // The note rendered only when there was a corrected_value, so a rule flagged
+    // for removal showed the flag and lost the reason. The reason a rule is
+    // wrong is worth more than the flag.
+    useInventoryMock.mockReturnValue({
+      data: {
+        ...INVENTORY,
+        items: [
+          {
+            ...INVENTORY.items[0],
+            validation_status: "flagged_remove",
+            verdict: {
+              kind: "flagged_remove",
+              corrected_value: null,
+              note: "Fannie retired this in the 2026 selling guide.",
+              at: "2026-08-30T00:00:00Z",
+              actor: "Priya",
+            },
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<ValidationAidPage />);
+    expect(screen.getByText(/Fannie retired this in the 2026 selling guide/)).toBeDefined();
+  });
+
+  it("keeps the words on a correction too, beside the new value", () => {
+    useInventoryMock.mockReturnValue({
+      data: {
+        ...INVENTORY,
+        items: [
+          {
+            ...INVENTORY.items[0],
+            validation_status: "corrected",
+            verdict: {
+              kind: "corrected",
+              corrected_value: "45",
+              note: "Investor caps at 45, not 50.",
+              at: "2026-08-30T00:00:00Z",
+              actor: "Priya",
+            },
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<ValidationAidPage />);
+    expect(screen.getByText(/Corrected to 45/)).toBeDefined();
+    expect(screen.getByText(/Investor caps at 45, not 50/)).toBeDefined();
+  });
+
+  it("distinguishes grounded-starter from validated by more than colour", () => {
+    // SPEC rule: colour AND glyph AND word. Grey-versus-green is one channel,
+    // and this screen exists so a researched-but-unconfirmed rule never reads as
+    // "fine, nothing to do here".
+    useInventoryMock.mockReturnValue({
+      data: {
+        ...INVENTORY,
+        items: [
+          { ...INVENTORY.items[0], item_id: "a", validation_status: "grounded_starter" },
+          { ...INVENTORY.items[0], item_id: "b", validation_status: "validated" },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<ValidationAidPage />);
+    const rows = screen.getByRole("list");
+    const starter = within(rows).getByText("Grounded starter");
+    const validated = within(rows).getByText("Validated");
+    // Different words AND a different tone — the tone drives both the colour and
+    // the glyph, so this pins two of the three channels. A grounded starter
+    // rendered in the verified tone would read as "confirmed", which is the one
+    // thing this screen exists to prevent.
+    expect(starter.className).not.toBe(validated.className);
   });
 });

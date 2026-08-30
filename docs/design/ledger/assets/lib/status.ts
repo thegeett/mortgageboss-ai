@@ -32,6 +32,7 @@ import type { LoanFileStatus } from "@/lib/types/loan-file";
 import type { LtvLimitStatus } from "@/lib/types/ltv";
 import type { NeedsItemPriority, NeedsItemStatus } from "@/lib/types/needs-item";
 import type { Agreement } from "@/lib/types/reconciliation";
+import type { ValidationStatus } from "@/lib/types/validation-aid";
 import type { EvaluationOutcome, FindingSeverity } from "@/lib/types/verification";
 
 export type Tone =
@@ -146,6 +147,23 @@ export const FINDING_SEVERITY: Record<FindingSeverity, StatusMeta> = {
   red: { tone: "blocking", label: "Blocking" },
   yellow: { tone: "attention", label: "Warning" },
   green: { tone: "verified", label: "Passed" },
+};
+
+// --- rule validation (lib/types/validation-aid.ts ValidationStatus) --------- //
+// The EIGHTH domain, found the same way A21 found the seventh: an independent
+// `STATUS_BADGE` map in the validation screen with its own colour language.
+//
+// `grounded_starter` is `ai`, not `neutral`, and that is the whole point of the
+// screen. A rule researched against real sources but not yet confirmed by a human
+// is exactly what the `ai` tone means — provenance, never "bad" — and rendering it
+// as neutral let it read as "fine, nothing to do here", which is the one thing
+// this screen exists to prevent. It is also what makes it distinguishable from
+// `validated` at a glance in three channels rather than by grey-versus-green.
+export const VALIDATION_STATUS: Record<ValidationStatus, StatusMeta> = {
+  grounded_starter: { tone: "ai", label: "Grounded starter" },
+  validated: { tone: "verified", label: "Validated" },
+  corrected: { tone: "attention", label: "Corrected" },
+  flagged_remove: { tone: "blocking", label: "Flagged to remove" },
 };
 
 // --- calculators ------------------------------------------------------------ //
