@@ -106,3 +106,42 @@ async def test_unknown_rule_id_is_rejected(
         },
     )
     assert res.status_code == 422
+
+
+async def test_blast_radius_is_read_only_and_tenant_scoped(
+    client: AsyncClient, db: AsyncSession, company_a: Company, company_b: Company
+) -> None:
+    """The endpoint at the layer the ticket names: read-only, scoped, no runs (LP-UI-027).
+
+    Tested at the API rather than only at the service, because the last review's
+    finding was exactly this shape — the helper guarded, the wiring not.
+    """
+    lender = await factories.make_lender(db, company=company_a)
+    await db.commit()
+    admin = await _admin_client(client, db, company_a)
+    await db.commit()
+
+    proposal = {
+        "overrides": [{"rule_id": "conv.dti.back_end_max", "value": "45"}],
+        "reason": "ignored by this endpoint — nothing is recorded",
+    }
+    res = await admin.post(f"/api/v1/admin/lenders/{lender.id}/overlay/blast-radius", json=proposal)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["evaluated_files"] == 0
+    # It says the saved overlay is not read by the engine today, so a screen
+    # showing this cannot imply the change takes effect on save.
+    assert body["applies_today"] is False
+
+    # READ-ONLY: the overlay is untouched by the estimate.
+    after = await admin.get(f"/api/v1/admin/lenders/{lender.id}/overlay")
+    assert after.json()["overrides"] == []
+    assert after.json()["audit"] == []
+
+    # A lender belonging to another company is a 404, not an estimate.
+    theirs = await factories.make_lender(db, company=company_b)
+    await db.commit()
+    denied = await admin.post(
+        f"/api/v1/admin/lenders/{theirs.id}/overlay/blast-radius", json=proposal
+    )
+    assert denied.status_code == 404

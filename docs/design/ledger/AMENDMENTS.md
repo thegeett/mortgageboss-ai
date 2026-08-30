@@ -763,6 +763,57 @@ what happens to open findings from retired rules? Backfill-resolve them, migrate
 them to their successor, or give the deterministic cross-source family a surface.
 Until that is answered, "blocked by something invisible" is live behaviour.
 
+## 2026-08-30 · A23 — from LP-UI-025/026, and it is the largest gap the epic has found
+
+### A23 — the lender overlay editor writes a column the rule engine never reads
+
+**Verified independently, not taken on report.** Three checks, all confirming:
+
+- `LenderOverlay(...)` is constructed in exactly three places, all Python
+  constants: `verification/overlays/starter.py` (UWM, Sun-West) and
+  `verification/overlays/samples.py`. Never from the database.
+- `verification/registry.py:127` builds
+  `RuleRegistry(overlays={**SAMPLE_OVERLAYS, **STARTER_OVERLAYS})` — two
+  hardcoded dicts keyed by slug, and nothing else.
+- The `lenders.lender_overlays` column is read in exactly three modules, all of
+  them the admin surface: `services/`, `api/` and `schemas/overlay_admin.py`.
+  Nothing under `app/verification/` touches it.
+
+So: **an admin can override a lender's rule threshold, and nothing happens.** The
+value is stored, audited, counted, and displayed as that lender's headline
+configuration on the lenders list — and every loan file at that lender is still
+evaluated against the investor default. ADR-193 deferred the reading half and
+LP-87 built only the writing half; the deferral's own words ("currently unused")
+are still literally true of the engine.
+
+LP-UI-025 did not cause this, but it is what made it visible: promoting the
+override count to a lender's headline turns a dormant column into a claim.
+LP-UI-026 then found the editor's own introduction saying *"Editing a threshold
+changes what enforcement uses for this lender"* — a screen telling an admin their
+change is live when it is not, which is the worst thing that editor could do. The
+copy now says "Recorded, not yet applied", with a comment to delete it when the
+column is wired.
+
+**This is a product decision, not a UI ticket:** finish LP-87's other half (wire
+the column into the registry, with the precedence and caching questions that
+implies), or state that overlays are configuration-only for now. The honest copy
+is a stopgap, not an answer — an admin screen whose whole purpose is an action
+that does nothing is not a screen worth keeping in that state for long.
+
+### A20, corrected by A23
+
+A20 warned that the reconciliation ledger does not resolve LP-80 lender overlays,
+so under an overlay lender the ledger and the engine could disagree. **That
+divergence does not exist today, because the engine does not resolve stored
+overlays either** — both read the same defaults. A20's mitigation (where a
+finding exists, the finding is the authority) remains right and costs nothing.
+
+But the risk inverts the moment A23 is fixed: wiring the column into the registry
+makes the engine overlay-aware while the ledger stays default-aware, which
+*creates* the disagreement A20 anticipated. **Whoever wires the column must change
+`reconciliation.py` in the same change.** Recorded here because the two live in
+different parts of the codebase and nothing connects them.
+
 ---
 
 ## Standing note

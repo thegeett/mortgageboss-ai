@@ -27,6 +27,7 @@ from app.services.overlay_admin import (
     get_lender,
     update_lender_overlay,
 )
+from app.services.overlay_blast_radius import BlastRadius, estimate_blast_radius
 
 router = APIRouter(
     prefix="/admin/lenders",
@@ -60,6 +61,32 @@ async def get_overlay(
     if lender is None:
         raise _NOT_FOUND
     return await attach_actor_names(db, build_overlay_view(lender))
+
+
+@router.post("/{lender_id}/overlay/blast-radius", response_model=BlastRadius)
+async def overlay_blast_radius(
+    lender_id: UUID,
+    payload: OverlayUpdateRequest,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> BlastRadius:
+    """What a PROPOSED overlay would do to this lender's open files (LP-UI-027).
+
+    READ-ONLY. It writes nothing and enqueues no verification run — it resolves
+    each file's rules, swaps in the proposed thresholds, and evaluates the pure
+    engine twice. `POST` because the proposal is a body, not because it changes
+    anything.
+
+    The request reuses `OverlayUpdateRequest` so a caller estimates exactly what
+    it would save. `reason` is ignored here: nothing is recorded, so there is
+    nothing to give a reason for.
+    """
+    result = await estimate_blast_radius(
+        db, company_id=company_id, lender_id=lender_id, overrides=payload.overrides
+    )
+    if result is None:
+        raise _NOT_FOUND
+    return result
 
 
 @router.put("/{lender_id}/overlay", response_model=LenderOverlayView)
