@@ -70,6 +70,12 @@
     --nav-w: 13.5rem; /* 216px context column */
     --ctx-w: 18rem; /* 288px file context rail */
     --topbar-h: 2.75rem; /* 44px */
+    /* The work surface's own padding. Single-sourced because a full-bleed route
+       has to cancel it exactly: AppShell pads `main` by this, and the file
+       layout negates it with `-m-[var(--shell-pad)]` plus a matching height
+       calc. Two files spelling `4` independently is a coupling nothing checks —
+       tailwind.config.test.ts checks this one. */
+    --shell-pad: 1rem; /* 16px */
 
     /* --- confidence thresholds, shared with the backend --- */
     --confidence-standard: 0.85;

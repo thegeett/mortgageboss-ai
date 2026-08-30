@@ -31,9 +31,18 @@ export default function FileLayout({ children }: { children: React.ReactNode }) 
   return (
     // The rail is a sibling of the work surface, not inside it, so it scrolls
     // independently and keeps the four numbers on screen while the tab scrolls.
-    // `-m-4` cancels the shell's page padding: the rail meets the window edge
-    // and the border is the seam, which is the point of a full-bleed shell.
-    <div className="-m-4 flex h-full min-h-0">
+    // The negative margin cancels the shell's page padding: the rail meets the
+    // window edge and the border is the seam, which is the point of a full-bleed
+    // shell.
+    //
+    // The height calc is the half that is easy to miss. A negative margin is
+    // absorbed by an AUTO width — which is why the horizontal edges came out
+    // right — but `height: 100%` is not auto: it resolves against the parent's
+    // CONTENT box, so it was already 2×pad short before the margins moved it up
+    // by one pad, leaving the rail's border ending a full 32px above the bottom
+    // of the window. Adding the padding back to the height is what makes the
+    // vertical seam behave like the horizontal one.
+    <div className="-m-[var(--shell-pad)] flex h-[calc(100%_+_var(--shell-pad)_*_2)] min-h-0">
       <div className="min-w-0 flex-1 overflow-y-auto p-4">
         <div className="space-y-6">
           <div className="space-y-4">

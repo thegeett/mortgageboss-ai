@@ -122,6 +122,23 @@ export function loanFileIdFromPath(pathname: string): string | null {
   return id && id !== "new" ? id : null;
 }
 
+/**
+ * The tab segment for a path inside a file — "documents", "verification", … —
+ * or null on the file's index (and on any path that is not inside a file).
+ *
+ * `pathname.endsWith("/documents")` answered the same question by matching the
+ * END of the whole path, which is true for any route that happens to finish with
+ * the same word however deeply nested, and false for a trailing slash. This
+ * anchors to the file's own base instead, so it says which SECTION you are in
+ * rather than what the URL happens to end with.
+ */
+export function fileTabSegment(pathname: string): string | null {
+  const fileId = loanFileIdFromPath(pathname);
+  if (!fileId) return null;
+  const rest = pathname.slice(`/loan-files/${fileId}`.length).replace(/^\/+|\/+$/g, "");
+  return rest === "" ? null : (rest.split("/")[0] ?? null);
+}
+
 /** What the context column shows for `pathname`. `null` = show nothing. */
 export function contextSection(pathname: string): ContextSection | null {
   const fileId = loanFileIdFromPath(pathname);

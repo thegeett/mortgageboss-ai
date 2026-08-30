@@ -32,12 +32,31 @@ function normalise(source: string): string {
   return source.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Where two normalised sources first differ, with a little context either side.
+ * Asserting the whole file prints both in full on failure, which buries the one
+ * line that moved under two thousand characters of identical text.
+ */
+function firstDifference(asset: string, shipped: string): string {
+  let i = 0;
+  while (i < asset.length && i < shipped.length && asset[i] === shipped[i]) i++;
+  const from = Math.max(0, i - 60);
+  return [
+    `first differs at character ${i}:`,
+    `  asset:   …${asset.slice(from, i + 120)}`,
+    `  shipped: …${shipped.slice(from, i + 120)}`,
+  ].join("\n");
+}
+
 describe("the ledger assets match the files they seed", () => {
   it.each(PAIRS)("%s", (assetPath, shippedPath) => {
-    const asset = readFileSync(new URL(assetPath, import.meta.url), "utf8");
-    const shipped = readFileSync(new URL(shippedPath, import.meta.url), "utf8");
-    expect(normalise(asset), `${assetPath} has drifted from ${shippedPath}`).toBe(
-      normalise(shipped),
-    );
+    const asset = normalise(readFileSync(new URL(assetPath, import.meta.url), "utf8"));
+    const shipped = normalise(readFileSync(new URL(shippedPath, import.meta.url), "utf8"));
+    // Compared as a boolean with the location in the message, rather than as two
+    // strings: a failing `toBe` on a whole file is unreadable.
+    expect(
+      asset === shipped,
+      `${assetPath} has drifted from ${shippedPath}\n${firstDifference(asset, shipped)}`,
+    ).toBe(true);
   });
 });

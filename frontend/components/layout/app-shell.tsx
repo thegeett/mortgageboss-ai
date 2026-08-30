@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Full-bleed: no max-width. The padding is the work surface's own
               breathing room, not a column cap — a table inside a screen ticket
               can still opt out of it. */}
-          <main className="flex-1 overflow-y-auto px-4 py-4">
+          <main className="flex-1 overflow-y-auto p-[var(--shell-pad)]">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>
         </div>

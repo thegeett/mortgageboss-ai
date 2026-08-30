@@ -11,6 +11,7 @@
  * only shows the work.
  */
 
+import { figureToneClass } from "@/components/status-token";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,24 +24,11 @@ import {
   useSetCalculatorOverride,
 } from "@/lib/api/calculators";
 import { formatMoneyPrecise, humanize } from "@/lib/format";
-import { CALCULATOR_STATUS, type Tone, resolveStatus } from "@/lib/status";
+import { CALCULATOR_STATUS, resolveStatus } from "@/lib/status";
 import type { CalcLine, CalculatorName, CalculatorView } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
-
-// StatusToken's own TEXT map with ONE deliberate difference: `neutral` is
-// `text-foreground`, not `text-muted-foreground`. A headline figure with no
-// status to report is ordinary text; muting it would read as "this number is
-// less important", which is the opposite of true on this card.
-const TONE_TEXT: Record<Tone, string> = {
-  blocking: "text-destructive",
-  attention: "text-warning",
-  verified: "text-success",
-  progress: "text-info",
-  neutral: "text-foreground",
-  ai: "text-ai",
-};
 
 export function CalculatorCard({
   fileId,
@@ -114,7 +102,7 @@ function CalculatorBody({
   // would paint an amber warning across a DTI/LTV figure that is perfectly fine.
   // `neutral` also covers the no-status case, so no ternary is needed.
   const status = resolveStatus(CALCULATOR_STATUS, data.status, "neutral");
-  const tone = TONE_TEXT[status.tone];
+  const tone = figureToneClass(status.tone);
 
   return (
     <div className="space-y-5">

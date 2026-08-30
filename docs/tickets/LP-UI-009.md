@@ -108,3 +108,143 @@ it as a performance problem.
 
 - new: `components/layout/file-context-rail.tsx`
 - changed: `app/(protected)/loan-files/[id]/layout.tsx`
+
+## Review pass — an em dash that meant two things, and a seam that stopped short
+
+Reviewed on request from the session running the epic. Five defects fixed, three
+of the hand-off's five suspicions cleared, and the two open questions answered.
+
+### The full-bleed layout stopped 32px above the bottom of the window
+
+`-m-4` cancels the shell's padding, and horizontally that works — a block with
+`width: auto` absorbs its own negative margins, so the used width grows back by
+exactly the two 16px it gave up and the rail meets both side edges.
+
+`h-full` is not auto. `height: 100%` resolves against the parent's CONTENT box,
+which is already 2×pad shorter than its border box, and a negative margin does
+not grow it. So the element was `H − 32` tall with its top pulled up to the
+window edge, leaving its bottom — and the rail's left border, the seam this
+ticket is about — a full 32px above the bottom of the viewport. The horizontal
+axis looked right, which is exactly why the vertical one would not have been
+questioned.
+
+Fixed by adding the padding back to the height, and by single-sourcing the
+number the two files were both spelling as `4`:
+
+- `--shell-pad: 1rem` in globals.css (asset re-synced),
+- `p-[var(--shell-pad)]` on AppShell's `main`,
+- `-m-[var(--shell-pad)] h-[calc(100%_+_var(--shell-pad)_*_2)]` on the layout.
+
+That answers the hand-off's own worry about the coupling — "nothing asserting
+it" — with three assertions in `tailwind.config.test.ts`: the variable exists,
+`main` uses it rather than a literal, and the layout cancels it in BOTH axes. All
+three Tailwind classes were checked against a compiled stylesheet, since two are
+arbitrary values and one contains a `calc`.
+
+### An em dash meant "absent" and was being used for "not loaded"
+
+Every value in the rail fell back to `—`, including while its query was still in
+flight. `—` means "this file has no such value", so a processor opening a file
+saw four dashes that read as missing data on a file that has all four. The tabs
+beside the rail show skeletons for the same period, so the rail was actively
+contradicting them.
+
+Each metric now takes `pending` and renders a skeleton, driven by the `isPending`
+these hooks already return.
+
+### The rail invented a fourth tone vocabulary
+
+`Metric` took `tone?: "blocking" | "attention" | "neutral"` and mapped it to
+classes inline — a private three-value subset of `Tone` with its own copy of the
+mapping, which is precisely the shape LP-UI-005 consolidated six of. It is also
+the third copy of the FIGURE variant specifically (`neutral` as
+`text-foreground` rather than `text-muted-foreground`, right for a number and
+wrong for a status).
+
+`figureToneClass(tone)` is now exported from `status-token.tsx` and used by both
+CalculatorCard and the rail, and `Metric` takes the real `Tone`.
+
+### Tab detection matched the end of the URL, not the section
+
+`pathname.endsWith("/documents")` is true for any route that finishes with that
+word however deeply nested, and false for a trailing slash. `fileTabSegment()`
+anchors to the file's own base and returns the first segment after it, so
+`/loan-files/abc/documents/xyz` is still the documents section and
+`/loan-files/abc/conditions/documents` is correctly the conditions one.
+
+### A gated DTI read as a file with no DTI
+
+LP-375 has the engine null a gated ratio rather than fabricate a 0, and the
+calculator tile says "Gated". The rail rendered the null as `—`, which says
+"this file has no DTI" instead of "a required input is unknown". It now says the
+same word the tile does.
+
+### Cleared, no change
+
+- **`dtiTone` on decimal strings.** Correct as written. A null value or limit
+  returns neutral, a non-numeric string fails `Number.isFinite` and returns
+  neutral, and equality is `>` so a DTI exactly at its ceiling is not over —
+  which is the right convention.
+- **`reserves.headline`.** Cannot leak a machine token: `calculators.py:453`
+  emits `"—"` or `f"{months} months"`, both display strings. This is unlike the
+  `binding:*` case, where the leaking field was `status`, a machine enum, not a
+  rendered headline.
+- **The `attention` fallback on the status.** Deliberately kept, and the
+  distinction from the calculators is principled. There the tone coloured a
+  computed FIGURE, so an unrecognised status painted amber over a number with
+  nothing wrong with it. Here it colours the STATUS ITSELF — a loan-file status
+  this build does not recognise is a thing a processor should look at, which is
+  what amber says. Noted in the code so the next reader does not "fix" it.
+
+### The acceptance criterion: reword it
+
+"Reads from the queries already cached by the file layout — no extra fetches" is
+not achievable, and the hand-off is right that it contradicts the feature. The
+layout caches one query; DTI, LTV and reserves belong to the Verification tab,
+and not having to go there is the entire point of the rail. A criterion that
+forbids the requests forbids the feature.
+
+The criterion that was meant, and that this ticket meets, is **no DUPLICATE
+requests**: every hook the rail calls is keyed identically to the tab that owns
+it, so React Query serves both from one request and the rail costs nothing at
+all on Verification. Reworded in the acceptance list, with the measured numbers
+kept beside it.
+
+One real cost to record rather than hide, which the +3/+4/+1 numbers do not show
+on their own: the rail is `hidden xl:block`, which hides it from view, from the
+tab order and from the a11y tree — but the component still MOUNTS below 1280px,
+so its four always-on queries still fire for a user who cannot see it. Every fix
+for that is worse than the cost: gating the hooks needs the viewport, the
+viewport is only known after hydration, and a `useSyncExternalStore` with a
+server snapshot still enables them on the first client render. Deferring them
+properly would trade four requests on narrow screens for a guaranteed skeleton
+flash on every wide one, which is the common case. Recommendation: accept it,
+and revisit only if the rail's query set grows.
+
+### The dev double-fetch is StrictMode, and is dev-only
+
+`next.config.ts` does not set `reactStrictMode`, and Next 15's App Router
+defaults it to true, so effects double-invoke in development, queries remount,
+and each fetches twice — including queries this ticket never touches, which is
+what the hand-off observed. It does not happen in a production build, where
+StrictMode's double-invocation is compiled out. Nothing to fix; worth recording
+so the numbers are not read as a regression.
+
+### Verification
+
+`tsc --noEmit` clean, `biome check` clean over 214 files, 555 tests pass (from
+541), `pnpm build` compiles. Every fix mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| drop the height calc | 1 test fails |
+| put a literal `p-4` back on `main` | 1 test fails |
+| revert to `endsWith` tab detection | 1 test fails |
+| drop the pending skeletons | 1 test fails |
+| drop the gated check | 1 test fails |
+
+The asset drift guard added in the LP-UI-007 review earned itself during this
+pass: exporting `figureToneClass` from `status-token.tsx` failed
+`ledger-assets.test.ts` immediately, before the change could be committed with a
+stale asset. Its failure output printed both files in full, so it now reports the
+first differing character with context instead.

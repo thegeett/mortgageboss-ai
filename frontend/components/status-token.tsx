@@ -53,6 +53,23 @@ const RAIL: Record<Tone, string> = {
   ai: "border-l-ai",
 };
 
+/**
+ * The same mapping for a FIGURE rather than a status: `neutral` is
+ * `text-foreground`, not `text-muted-foreground`, because a number with no
+ * status to report is ordinary text and muting it would read as "this matters
+ * less". Exported because CalculatorCard and the file context rail both need
+ * exactly this variant, and a third private copy is how the six status maps
+ * LP-UI-005 consolidated came about in the first place.
+ */
+const FIGURE_TEXT: Record<Tone, string> = {
+  ...TEXT,
+  neutral: "text-foreground",
+};
+
+export function figureToneClass(tone: Tone): string {
+  return FIGURE_TEXT[tone];
+}
+
 /** Tinted pill. Use sparingly — a count badge or a filter chip, not a row state. */
 const CHIP: Record<Tone, string> = {
   blocking: "bg-destructive/10 text-destructive",

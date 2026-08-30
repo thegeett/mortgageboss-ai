@@ -1,4 +1,10 @@
-import { activeItemHref, contextSection, isActivePath, visibleNavItems } from "@/lib/navigation";
+import {
+  activeItemHref,
+  contextSection,
+  fileTabSegment,
+  isActivePath,
+  visibleNavItems,
+} from "@/lib/navigation";
 import { describe, expect, it } from "vitest";
 
 describe("visibleNavItems", () => {
@@ -97,5 +103,37 @@ describe("contextSection", () => {
 
   it("shows nothing on a route with no section", () => {
     expect(contextSection("/dev/extraction-bench")).toBeNull();
+  });
+});
+
+describe("fileTabSegment", () => {
+  // `pathname.endsWith("/documents")` answered this by matching the END of the
+  // whole path — true for any route finishing with the same word however deeply
+  // nested, and false for a trailing slash. This anchors to the file's base.
+  it("names the section you are in", () => {
+    expect(fileTabSegment("/loan-files/abc/documents")).toBe("documents");
+    expect(fileTabSegment("/loan-files/abc/verification")).toBe("verification");
+  });
+
+  it("returns null on the file's own index", () => {
+    expect(fileTabSegment("/loan-files/abc")).toBeNull();
+  });
+
+  it("tolerates a trailing slash", () => {
+    expect(fileTabSegment("/loan-files/abc/documents/")).toBe("documents");
+    expect(fileTabSegment("/loan-files/abc/")).toBeNull();
+  });
+
+  it("names the SECTION, not the last segment", () => {
+    // A deeper route under a section still belongs to that section, and one that
+    // merely ends with the same word does not belong to it at all.
+    expect(fileTabSegment("/loan-files/abc/documents/xyz")).toBe("documents");
+    expect(fileTabSegment("/loan-files/abc/conditions/documents")).toBe("conditions");
+  });
+
+  it("returns null outside a file", () => {
+    expect(fileTabSegment("/loan-files")).toBeNull();
+    expect(fileTabSegment("/loan-files/new")).toBeNull();
+    expect(fileTabSegment("/admin/lenders")).toBeNull();
   });
 });

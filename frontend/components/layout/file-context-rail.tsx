@@ -1,6 +1,7 @@
 "use client";
 
-import { StatusToken } from "@/components/status-token";
+import { StatusToken, figureToneClass } from "@/components/status-token";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useCalculator } from "@/lib/api/calculators";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import { useDti } from "@/lib/api/dti";
@@ -9,7 +10,8 @@ import { useLtv } from "@/lib/api/ltv";
 import { useVerification } from "@/lib/api/verification";
 import { formatMoney, humanize } from "@/lib/format";
 import { isTerminalStatus } from "@/lib/loan-files/documents";
-import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
+import { fileTabSegment } from "@/lib/navigation";
+import { LOAN_FILE_STATUS, type Tone, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { usePathname } from "next/navigation";
@@ -31,34 +33,39 @@ import { usePathname } from "next/navigation";
  * rather than squeezing the work surface it exists to support.
  */
 
-/** A number the rail exists to keep on screen. */
+/**
+ * A number the rail exists to keep on screen.
+ *
+ * `pending` is not decoration. Every value here falls back to an em dash, and an
+ * em dash MEANS "this file has no such value" — using it for "not fetched yet"
+ * tells a processor the file is missing a figure it actually has. The tabs show
+ * skeletons while they load; the rail has to as well or it contradicts them.
+ */
 function Metric({
   label,
   value,
   hint,
-  tone,
+  tone = "neutral",
+  pending = false,
 }: {
   label: string;
   value: string;
   hint?: string | null;
-  tone?: "blocking" | "attention" | "neutral";
+  /** The shared vocabulary, not a private three-value copy of it. */
+  tone?: Tone;
+  pending?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-2 py-1">
       <span className="truncate text-xs text-muted-foreground">{label}</span>
-      <span className="flex items-baseline gap-1.5">
-        <span
-          className={cn(
-            "tabular text-sm font-medium",
-            tone === "blocking" && "text-destructive",
-            tone === "attention" && "text-warning",
-            (tone === "neutral" || tone === undefined) && "text-foreground",
-          )}
-        >
-          {value}
+      {pending ? (
+        <Skeleton className="h-3 w-14" />
+      ) : (
+        <span className="flex items-baseline gap-1.5">
+          <span className={cn("tabular text-sm font-medium", figureToneClass(tone))}>{value}</span>
+          {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
         </span>
-        {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
-      </span>
+      )}
     </div>
   );
 }
@@ -76,17 +83,15 @@ const DASH = "—";
 
 export function FileContextRail({ fileId }: { fileId: string }) {
   const pathname = usePathname();
-  const { data: file } = useLoanFile(fileId);
-  const { data: dti } = useDti(fileId);
-  const { data: ltv } = useLtv(fileId);
-  const { data: reserves } = useCalculator(fileId, "reserves");
-  const { data: activity } = useLoanFileActivity(fileId);
+  const { data: file, isPending: filePending } = useLoanFile(fileId);
+  const { data: dti, isPending: dtiPending } = useDti(fileId);
+  const { data: ltv, isPending: ltvPending } = useLtv(fileId);
+  const { data: reserves, isPending: reservesPending } = useCalculator(fileId, "reserves");
+  const { data: activity, isPending: activityPending } = useLoanFileActivity(fileId);
 
-  // Tab-specific sections. These hooks are only mounted on the tab that already
-  // owns the query, so the rail never introduces a request the page was not
-  // already making.
-  const onDocuments = pathname.endsWith("/documents");
-  const onVerification = pathname.endsWith("/verification");
+  // Tab-specific sections, anchored to the file's own base rather than matched
+  // against the end of the whole path.
+  const tab = fileTabSegment(pathname);
 
   return (
     <aside
@@ -95,33 +100,69 @@ export function FileContextRail({ fileId }: { fileId: string }) {
     >
       <Section title="Status">
         <div className="py-1">
-          <StatusToken meta={resolveStatus(LOAN_FILE_STATUS, file?.status)} variant="inline" />
+          {filePending ? (
+            <Skeleton className="h-4 w-28" />
+          ) : (
+            // The DEFAULT `attention` fallback is deliberate here, unlike the
+            // calculators. There the tone coloured a computed figure, so an
+            // unrecognised status painted amber over a number with nothing wrong
+            // with it. Here the tone colours the STATUS ITSELF: a loan-file
+            // status this build does not know is a thing a processor should
+            // look at, which is what amber says.
+            <StatusToken meta={resolveStatus(LOAN_FILE_STATUS, file?.status)} variant="inline" />
+          )}
         </div>
       </Section>
 
       <Section title="Loan">
-        <Metric label="Amount" value={file?.loan_amount ? formatMoney(file.loan_amount) : DASH} />
-        <Metric label="Program" value={file?.loan_program ? humanize(file.loan_program) : DASH} />
-        <Metric label="Purpose" value={file?.loan_purpose ? humanize(file.loan_purpose) : DASH} />
+        <Metric
+          label="Amount"
+          value={file?.loan_amount ? formatMoney(file.loan_amount) : DASH}
+          pending={filePending}
+        />
+        <Metric
+          label="Program"
+          value={file?.loan_program ? humanize(file.loan_program) : DASH}
+          pending={filePending}
+        />
+        <Metric
+          label="Purpose"
+          value={file?.loan_purpose ? humanize(file.loan_purpose) : DASH}
+          pending={filePending}
+        />
       </Section>
 
       <Section title="Ratios">
         <Metric
           label="Back-end DTI"
-          value={dti?.back_end_dti ? `${dti.back_end_dti}%` : DASH}
+          // LP-375: a gated DTI has no ratio, and the engine nulls it rather
+          // than fabricating a 0. The tile says "Gated"; an em dash here would
+          // read as "this file has no DTI" instead of "a required input is
+          // unknown", so the rail says the same word the tile does.
+          value={dtiValue(dti?.gated, dti?.back_end_dti)}
           hint={dti?.limit.back_end_max ? `/ ${dti.limit.back_end_max}%` : null}
           tone={dtiTone(dti?.back_end_dti, dti?.limit.back_end_max)}
+          pending={dtiPending}
         />
-        <Metric label="Front-end DTI" value={dti?.front_end_dti ? `${dti.front_end_dti}%` : DASH} />
-        <Metric label="LTV" value={ltv?.ltv ? `${ltv.ltv}%` : DASH} />
-        <Metric label="Reserves" value={reserves?.headline ?? DASH} />
+        <Metric
+          label="Front-end DTI"
+          value={dtiValue(dti?.gated, dti?.front_end_dti)}
+          pending={dtiPending}
+        />
+        <Metric label="LTV" value={ltv?.ltv ? `${ltv.ltv}%` : DASH} pending={ltvPending} />
+        <Metric label="Reserves" value={reserves?.headline ?? DASH} pending={reservesPending} />
       </Section>
 
-      {onDocuments ? <DocumentsSection fileId={fileId} /> : null}
-      {onVerification ? <VerificationSection fileId={fileId} /> : null}
+      {tab === "documents" ? <DocumentsSection fileId={fileId} /> : null}
+      {tab === "verification" ? <VerificationSection fileId={fileId} /> : null}
 
       <Section title="Recent activity">
-        {activity && activity.length > 0 ? (
+        {activityPending ? (
+          <div className="space-y-1.5 py-1">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+        ) : activity && activity.length > 0 ? (
           <ul className="space-y-1.5 py-1">
             {activity.slice(0, 5).map((entry) => (
               <li key={entry.id} className="text-xs leading-snug text-foreground-2">
@@ -179,6 +220,12 @@ function VerificationSection({ fileId }: { fileId: string }) {
       <Metric label="Last run" value={run?.completed_at ? when(run.completed_at) : DASH} />
     </Section>
   );
+}
+
+/** A ratio, or the word for why there isn't one. */
+function dtiValue(gated: boolean | undefined, ratio: string | null | undefined): string {
+  if (gated) return "Gated";
+  return ratio ? `${ratio}%` : DASH;
 }
 
 /** DTI against its own limit — the one ratio with a published ceiling. */

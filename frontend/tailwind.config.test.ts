@@ -172,3 +172,32 @@ describe("the tokens the redesign adds", () => {
     expect(DARK["--border"]).not.toBe(DARK["--input"]);
   });
 });
+
+describe("the shell padding is single-sourced", () => {
+  // AppShell pads `main`, and the file layout has to cancel that EXACTLY to run
+  // full-bleed — a negative margin of the same size, plus a height calc adding
+  // it back, because `height: 100%` resolves against the parent's content box
+  // and a negative margin does not grow it. Three numbers that must agree,
+  // previously spelled `4` in two files with nothing checking they matched.
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+  it("globals.css defines --shell-pad", () => {
+    expect(ROOT["--shell-pad"]).toBeDefined();
+  });
+
+  it("AppShell pads the work surface with it, not a literal", () => {
+    const source = read("./components/layout/app-shell.tsx");
+    expect(source).toContain("p-[var(--shell-pad)]");
+    expect(source, "a literal padding here is the coupling this test exists for").not.toMatch(
+      /<main[^>]*\bp[xy]?-\d/,
+    );
+  });
+
+  it("the file layout cancels it in BOTH axes", () => {
+    const source = read("./app/(protected)/loan-files/[id]/layout.tsx");
+    expect(source).toContain("-m-[var(--shell-pad)]");
+    // The height half is the one that is easy to drop; without it the rail's
+    // border stops 2×pad above the bottom of the window.
+    expect(source).toContain("h-[calc(100%_+_var(--shell-pad)_*_2)]");
+  });
+});
