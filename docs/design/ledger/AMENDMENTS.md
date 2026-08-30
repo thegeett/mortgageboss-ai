@@ -3,63 +3,14 @@
 Changes to the spec, tickets or assets made *after* implementation started.
 Read this alongside `TICKETS.md` — where the two disagree, this file wins.
 
+> **Ordering:** amendments are NOT in file order — successive appends by two
+> sessions have left the newest ones at the top and the standing note mid-file.
+> Read by amendment NUMBER (A1…A29), not by position. Worth tidying once the
+> epic is done; not worth a merge conflict mid-ticket.
+
 Amendments run **A1 upward in order below**, newest last. New ones append at
 the END of the file. The standing note is pinned here at the top so it cannot be
 stranded mid-file again — it has happened twice.
-
-## 2026-08-30 · A28 — from LP-UI-033: the Verified tier now has a producer, and a correction fixes nothing
-
-### A28a — A26a is closed
-
-LP-UI-032 reported "Verified (human-confirmed)" as a tier no field could reach,
-because no action anywhere in the product confirmed an extracted value. LP-UI-033
-builds that action: `Enter` accepts, `E` corrects, `R` rejects, and a verdict is
-recorded per (extraction, field) in `field_reviews`. The tier is live, and a
-processor's accepted field renders as Verified and drops out of the keyboard loop.
-
-The design questions A26a raised are answered, and the answers are in ADR-393: a
-verdict sits beside the extraction rather than inside it, so the model's own value
-stays answerable; and it is keyed on the extraction version, so a re-extraction
-retires it rather than attaching a person's name to a figure they never saw.
-
-### A28b — a correction is a note, not a fix
-
-**Nothing consumes a corrected value.** The rule engine reads `extracted_data`,
-which a correction deliberately does not touch. So a processor can read the pay
-stub, see that the extracted gross pay is wrong, type the right figure — and the
-DTI will still be computed from the model's number. The screen will show the
-correction; the verification will not.
-
-This is the honest state and it is not a small gap. It is the difference between a
-correction being a record of disagreement and a correction being a repair, and a
-processor has every reason to assume the second.
-
-Closing it is a verification-layer decision, not a UI one, and it has its own
-questions: does a correction re-trigger a verification run; does it invalidate
-findings that cited the old value; does a corrected value need its own provenance
-in the snapshot so a rule can say where its input came from; and what happens to a
-correction when the field it corrects is one the LP-508 list already distrusts.
-
-**Until it is closed, the reviewer must not imply otherwise** — which is why the
-correction renders beside the model's value rather than replacing it outright.
-
-### A28c — the same fact was computed in two places again
-
-`Enter` recorded the verdict, the API stored it, the field left the keyboard
-queue, and the mark beside the row went on saying "Check this". `buildQueue` knew
-about verdicts; `tierInputFor`, written in LP-UI-032 before verdicts existed, did
-not. Both callers now derive the tier through one function.
-
-Third time in this epic (A20/ADR-391, ADR-392, this): a value derived in two
-places disagrees the moment one of them learns something. Worth reading as a
-standing hazard rather than three incidents — when a second caller needs a derived
-fact, the fix is to reach for the first caller's function, not to rebuild the
-mapping beside it.
-
-
----
-
----
 
 ## Standing note
 
@@ -1188,3 +1139,104 @@ holds personal identifiers: SSNs, personal TINs, immigration numbers.
 Which side a field belongs on is a judgement about what a processor needs to read
 versus what should never be on a screen, and it has not been reviewed by the
 domain expert. It is the kind of question she should be asked directly.
+
+
+---
+
+## 2026-08-30 · A29 — mine, from checking LP-UI-032: a second definition of "identifier"
+
+### A29 — the masking list was authored, not derived, and an older one already existed
+
+LP-UI-032 and its review closed a live PII leak, and the fixes are right. Checking
+them turned up something the ticket did not look at.
+
+`field_criticality.py` imports stdlib and `yaml` and nothing else. It does not
+consult `_PII_FIELDS` in `verification/snapshot/documents_section.py` — an
+existing map of **82 field names** already classified by `PiiKind`, with a
+pre-masked flag, used by the snapshot and scrubbing layer all along.
+`social_security_number` was already in it as `(PiiKind.SSN, False)`.
+
+**The codebase already knew that field was an SSN. The masking that leaked it was
+not asking the list that knew.**
+
+So "is this field an identifier" is now answered by two independently maintained
+lists, and they disagree. Compared directly:
+
+- **22 fields** the snapshot layer classifies as PII and does *not* treat as
+  pre-masked are absent from the reviewer's identity groups — among them
+  `account_number`, `aba_routing_number`, `wire_ach_trace_number`,
+  `wire_or_remittance_instructions`, `document_discriminator`, `document_number`,
+  `passport_number`. All are `PiiKind.ACCOUNT`. **No SSN-kind field is in the
+  gap**, so the acute exposure A26b/A27 fixed really is closed.
+- **11 fields** in the reviewer's identity groups are absent from `_PII_FIELDS`,
+  mostly dates of birth and professional licence numbers.
+
+**This is not "22 fields are leaking."** Several of the 22 are arguably meant to
+be readable — a processor verifying a bank statement may need the account number,
+which is exactly the `identity` / `identity_readable` split A27d drew and flagged
+as not domain-reviewed. The defect is that the question is **answered twice, by
+two lists maintained separately**, on the one topic where divergence means a
+disclosure rather than a wrong number.
+
+This is A22's pattern at its highest stakes — the seventh instance, and the first
+where the cost is PII on a screen rather than a number that disagrees with another
+number. The epic's own SPEC rule applies exactly: *an aggregate must reuse the
+predicate its detail screen uses, not restate it.*
+
+**Recommendation, for the user rather than for a ticket.** Derive the reviewer's
+identity groups **from `_PII_FIELDS`**, so the yaml records only the readable /
+hidden decision per field — the genuinely new judgement — instead of re-listing
+which fields are identifiers at all. And put the readable / hidden split to the
+domain expert alongside the critical-field list A26 already flagged as
+un-reviewed.
+
+---
+
+## 2026-08-30 · A28 — from LP-UI-033: the Verified tier now has a producer, and a correction fixes nothing
+
+### A28a — A26a is closed
+
+LP-UI-032 reported "Verified (human-confirmed)" as a tier no field could reach,
+because no action anywhere in the product confirmed an extracted value. LP-UI-033
+builds that action: `Enter` accepts, `E` corrects, `R` rejects, and a verdict is
+recorded per (extraction, field) in `field_reviews`. The tier is live, and a
+processor's accepted field renders as Verified and drops out of the keyboard loop.
+
+The design questions A26a raised are answered, and the answers are in ADR-393: a
+verdict sits beside the extraction rather than inside it, so the model's own value
+stays answerable; and it is keyed on the extraction version, so a re-extraction
+retires it rather than attaching a person's name to a figure they never saw.
+
+### A28b — a correction is a note, not a fix
+
+**Nothing consumes a corrected value.** The rule engine reads `extracted_data`,
+which a correction deliberately does not touch. So a processor can read the pay
+stub, see that the extracted gross pay is wrong, type the right figure — and the
+DTI will still be computed from the model's number. The screen will show the
+correction; the verification will not.
+
+This is the honest state and it is not a small gap. It is the difference between a
+correction being a record of disagreement and a correction being a repair, and a
+processor has every reason to assume the second.
+
+Closing it is a verification-layer decision, not a UI one, and it has its own
+questions: does a correction re-trigger a verification run; does it invalidate
+findings that cited the old value; does a corrected value need its own provenance
+in the snapshot so a rule can say where its input came from; and what happens to a
+correction when the field it corrects is one the LP-508 list already distrusts.
+
+**Until it is closed, the reviewer must not imply otherwise** — which is why the
+correction renders beside the model's value rather than replacing it outright.
+
+### A28c — the same fact was computed in two places again
+
+`Enter` recorded the verdict, the API stored it, the field left the keyboard
+queue, and the mark beside the row went on saying "Check this". `buildQueue` knew
+about verdicts; `tierInputFor`, written in LP-UI-032 before verdicts existed, did
+not. Both callers now derive the tier through one function.
+
+Third time in this epic (A20/ADR-391, ADR-392, this): a value derived in two
+places disagrees the moment one of them learns something. Worth reading as a
+standing hazard rather than three incidents — when a second caller needs a derived
+fact, the fix is to reach for the first caller's function, not to rebuild the
+mapping beside it.
