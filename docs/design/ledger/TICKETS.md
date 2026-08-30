@@ -301,15 +301,17 @@ Saved views replace the four hard-coded pills. Flat filters by default with a
 "convert to advanced condition" escape hatch — 90% of filters are flat ANDs; do not
 make everyone pay for a query builder.
 
-Support **"current user"** as a filter value so one shared view ("My files in
-processing") serves the whole team instead of N duplicated personal views.
+~~Support "current user" as a filter value.~~ **Cut — see AMENDMENTS A19.** A loan
+file has no owner in the schema (no `assigned_to_user_id`, no association table;
+`loan_officer_name` is an external contact). File assignment is its own feature and
+its own ticket; the "My files" and "Unassigned" pills in the mockup go with it.
 
 Serialise view state to the URL as well as persisting it, so a processor can paste
 a filtered view into Slack for a colleague.
 
 - [ ] Views listed in the context column with live counts
 - [ ] URL round-trips the full filter state
-- [ ] "Current user" resolves per viewer
+- [ ] Filters are limited to what `SavedViewFilters` accepts (statuses, search) — no field the schema cannot resolve
 
 ### LP-UI-015 — Saved views (backend)
 **Size** M · **Depends on** — · **Blocks** 014

@@ -131,6 +131,25 @@ count. Those four numbers are the reason a processor switches tabs today.
   as the current page. Pick the longest match across the whole list (LP-UI-008
   review).
 
+- **Never build a Tailwind class by interpolation.** Tailwind scans source for
+  COMPLETE class names, so `` `[&>*:first-child]:${MAP[tone]}` `` is never emitted
+  and the element silently falls back — nothing errors, nothing fails, the colour
+  is just absent. Map tones to whole literal strings. This is LP-UI-002's
+  undefined `danger` wearing a new costume, and it will recur; assert the class on
+  the RENDERED element, including that it contains no `$` or `{`.
+- **A row that draws one hairline colours only that hairline.** `[&>*]:border-border`
+  on a table row sets all four sides and beats a cell's `border-l-<tone>`. Use
+  `[&>*]:border-b-border` so a cell can still colour an edge (LP-UI-013).
+- **An aggregate must reuse the predicate its detail screen uses, not restate it.**
+  The dashboard counted "findings that block submission" with its own filter and
+  disagreed with the file screen in both directions — counting low-confidence
+  hunches the aggression dial exists to exclude, and missing AI findings that carry
+  a severity but no rule-engine outcome. Two numbers for one fact is worse than
+  either being wrong alone, because the processor cannot tell which to believe.
+  Import the canonical function (`finding_blocking.py`, `NEEDS_GROUP`); do not
+  re-derive it (LP-UI-013 review). This is the product's own thesis applied to
+  itself: reconciliation is the job, so our own surfaces must reconcile.
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket

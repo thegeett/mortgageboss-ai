@@ -600,6 +600,36 @@ rediscover it as a defect.
 on `dti.py` and has no counterpart in `ltv.py`, so there is no gated LTV to
 mirror.
 
+## 2026-08-30 · A19 — from LP-UI-015, and this one is the ticket's fault too
+
+### A19 — "current user" is not a filter this product can express
+
+LP-UI-014 asks saved views to *"Support **current user** as a filter value so one
+shared view serves the whole team"*, with an acceptance criterion *"Current user
+resolves per viewer"*, and the Pipeline mockup shows the pills **My files 18** and
+**Unassigned 2**.
+
+Checked against the models rather than assumed: **a loan file has no owner.**
+`LoanFile` carries no `assigned_to_user_id`, there is no user/file association
+table, `loan_officer_name` / `loan_officer_email` are free text describing an
+EXTERNAL contact, and `uploaded_by_user_id` lives on the document, not the file.
+"My files" has nothing to resolve against, and "Unassigned" is every file.
+
+LP-UI-015 was right to build `SavedViewFilters` with `extra="forbid"` rather than
+accept the field and quietly drop it — a view that silently ignores half of what
+it claims to filter on is the failure this product exists to prevent. A client
+sending `{"assigned_to": "current_user"}` gets a 422.
+
+**The criterion is removed from LP-UI-014, not deferred inside it.** File
+assignment is a feature, not a filter: a column, a migration, an assignment UI, a
+backfill for existing files, and a decision about one owner or several (a
+processor plus a reviewer is the obvious second case). It needs its own ticket and
+its own product decision. The two mockup pills go with it.
+
+The general form, and it is the same shape as A17: a ticket may not assert a
+capability of the existing data model without checking the model when the ticket
+is written. Both times the design assumed a field the schema does not have.
+
 ---
 
 ## Standing note
