@@ -3,7 +3,13 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const pathname = vi.hoisted(() => ({ current: "/dashboard" }));
-vi.mock("next/navigation", () => ({ usePathname: () => pathname.current }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathname.current,
+  // LP-UI-014: the column reads `?view` on the pipeline to mark the active
+  // saved view. Every path these tests use is a file or admin route, so the
+  // saved-views branch never renders here — the mock only has to exist.
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 import { ContextColumn } from "./context-column";
 
@@ -85,10 +91,27 @@ describe("the rail's current-destination marker", () => {
 });
 
 describe("the rail's sidebar toggle", () => {
-  // A disclosure button that discloses nothing is a control that lies, and after
-  // LP-UI-011 the dashboard — the app's primary screen — has no context section
-  // at all. Both the button and ⌘B are gated on there being a column.
+  // A disclosure button that discloses nothing is a control that lies. Both the
+  // button and ⌘B are gated on there being a column.
+  //
+  // LP-UI-014 note: this used to point at /dashboard, which had no section after
+  // LP-UI-011 removed the one-item pipeline column. The dashboard has a real
+  // column again — saved views — so the assertion moved to a route that still
+  // genuinely has none. The property being tested is unchanged; only the example
+  // of a column-less route is.
   it("is not rendered where there is no context column", async () => {
+    const { IconRail } = await import("@/components/layout/icon-rail");
+    const { TooltipProvider } = await import("@/components/ui/tooltip");
+    pathname.current = "/dev/extraction-bench";
+    render(
+      <TooltipProvider>
+        <IconRail collapsed={false} onToggleContext={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /toggle the context column/i })).toBeNull();
+  });
+
+  it("IS rendered on the dashboard, which has saved views (LP-UI-014)", async () => {
     const { IconRail } = await import("@/components/layout/icon-rail");
     const { TooltipProvider } = await import("@/components/ui/tooltip");
     pathname.current = "/dashboard";
@@ -97,7 +120,7 @@ describe("the rail's sidebar toggle", () => {
         <IconRail collapsed={false} onToggleContext={() => {}} />
       </TooltipProvider>,
     );
-    expect(screen.queryByRole("button", { name: /toggle the context column/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /toggle the context column/i })).not.toBeNull();
   });
 
   it("is rendered inside a file, where there is one", async () => {

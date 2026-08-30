@@ -28,6 +28,8 @@ export interface SavedViewFilters {
 }
 
 export interface SavedView {
+  /** Live count of matching files. `null` when counts were not requested. */
+  count: number | null;
   id: string;
   name: string;
   filters: SavedViewFilters;
@@ -57,13 +59,25 @@ export interface SavedViewUpdate {
 
 export const savedViewsQueryKey = ["saved-views"] as const;
 
-export async function fetchSavedViews(): Promise<SavedView[]> {
-  const res = await apiClient.get<SavedView[]>(`${API_V1}/saved-views`);
+export async function fetchSavedViews(withCounts: boolean): Promise<SavedView[]> {
+  const res = await apiClient.get<SavedView[]>(`${API_V1}/saved-views`, {
+    params: withCounts ? { with_counts: true } : undefined,
+  });
   return res.data;
 }
 
-export function useSavedViews() {
-  return useQuery({ queryKey: savedViewsQueryKey, queryFn: fetchSavedViews });
+/**
+ * The caller's views plus their company's shared ones.
+ *
+ * `withCounts` asks the SERVER to count each view. Counting in the browser would
+ * mean one `pageSize: 1` request per view — the StatsCards pattern LP-UI-013
+ * deleted, reintroduced through a different door.
+ */
+export function useSavedViews({ withCounts = false } = {}) {
+  return useQuery({
+    queryKey: [...savedViewsQueryKey, { withCounts }] as const,
+    queryFn: () => fetchSavedViews(withCounts),
+  });
 }
 
 export function useCreateSavedView() {

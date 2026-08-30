@@ -118,5 +118,10 @@ class SavedViewPublic(BaseModel):
     #: offer edit and delete, and computing it here keeps that judgement in one
     #: place rather than in every consumer.
     is_mine: bool
+    #: How many files this view currently matches. Server-computed so the
+    #: context column does not fire one `pageSize: 1` request per view — the
+    #: StatsCards pattern LP-UI-013 deleted. `None` when counts were not asked
+    #: for, which is different from a view that matches nothing.
+    count: int | None = None
     created_at: datetime
     updated_at: datetime

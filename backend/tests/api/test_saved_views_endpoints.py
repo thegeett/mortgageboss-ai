@@ -21,6 +21,8 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
+from app.models.loan_file import LoanFileStatus
+from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -291,3 +293,54 @@ async def test_deleting_a_view_frees_its_name(client: AsyncClient, db: AsyncSess
 
     again = await client.post(URL, json=body, headers=_auth(token))
     assert again.status_code == 201, "the deleted name stayed reserved"
+
+
+# --------------------------------------------------------------------------- #
+# live counts
+# --------------------------------------------------------------------------- #
+
+
+async def test_counts_are_off_by_default_and_none_is_not_zero(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A caller that only wants names should not pay for the counts."""
+    _, _, token = await _user(db, slug="acme", email="a@acme.com")
+    await _create(client, token)
+
+    listed = await client.get(URL, headers=_auth(token))
+    # None, not 0 — "not asked for" and "matches nothing" are different answers.
+    assert listed.json()[0]["count"] is None
+
+
+async def test_counts_use_the_view_s_own_filters(client: AsyncClient, db: AsyncSession) -> None:
+    """Each view counts what IT matches, not what the page happens to show."""
+    company, _, token = await _user(db, slug="acme", email="a@acme.com")
+    for _ in range(3):
+        await create_loan_file(db, company_id=company.id)
+    submitted = await create_loan_file(db, company_id=company.id)
+    submitted.status = LoanFileStatus.SUBMITTED
+    await db.flush()
+
+    everything = await _create(client, token, name="Everything")
+    only_submitted = await _create(
+        client, token, name="Submitted", filters={"statuses": ["submitted"]}
+    )
+
+    listed = await client.get(f"{URL}?with_counts=true", headers=_auth(token))
+    counts = {view["id"]: view["count"] for view in listed.json()}
+    assert counts[everything["id"]] == 4
+    assert counts[only_submitted["id"]] == 1
+
+
+async def test_counts_are_company_scoped(client: AsyncClient, db: AsyncSession) -> None:
+    """A count must never see another tenant's files."""
+    company, _, token = await _user(db, slug="acme", email="a@acme.com")
+    await create_loan_file(db, company_id=company.id)
+
+    rival, _, _ = await _user(db, slug="rival", email="b@rival.com")
+    for _ in range(5):
+        await create_loan_file(db, company_id=rival.id)
+
+    view = await _create(client, token, name="Everything")
+    listed = await client.get(f"{URL}?with_counts=true", headers=_auth(token))
+    assert {v["id"]: v["count"] for v in listed.json()}[view["id"]] == 1

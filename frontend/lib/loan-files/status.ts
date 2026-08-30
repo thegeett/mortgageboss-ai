@@ -1,9 +1,10 @@
 /**
- * Dashboard filter-pill groupings for loan-file status (LP-31).
+ * Loan-file status label lookup.
  *
- * Status PRESENTATION moved to `lib/status.ts` in LP-UI-005 — one tone
- * vocabulary for every domain, rendered through `<StatusToken>`. What stays here
- * is the grouping logic, which is a dashboard concern rather than a visual one.
+ * Status PRESENTATION moved to `lib/status.ts` in LP-UI-005. The dashboard's
+ * four filter-pill groupings lived here until LP-UI-014 replaced them with saved
+ * views; their status sets are recorded in docs/tickets/LP-UI-014.md as the
+ * defaults worth seeding.
  *
  * Pill groupings (ADR): All = no filter; Active = the in-progress statuses
  * (everything not action-needed and not completed — incl. CLEAR_TO_CLOSE, so no
@@ -13,30 +14,6 @@
  */
 import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
-
-export type FilterKey = "all" | "active" | "action_needed" | "completed";
-
-export interface FilterPill {
-  key: FilterKey;
-  label: string;
-  /** The statuses this pill filters to; empty = no status filter (All). */
-  statuses: LoanFileStatus[];
-}
-
-export const FILTER_PILLS: FilterPill[] = [
-  { key: "all", label: "All", statuses: [] },
-  {
-    key: "active",
-    label: "Active",
-    statuses: ["draft", "in_processing", "ready_to_submit", "submitted", "clear_to_close"],
-  },
-  { key: "action_needed", label: "Action needed", statuses: ["in_conditions"] },
-  { key: "completed", label: "Completed", statuses: ["closed", "withdrawn"] },
-];
-
-export function statusesForFilter(key: FilterKey): LoanFileStatus[] {
-  return FILTER_PILLS.find((pill) => pill.key === key)?.statuses ?? [];
-}
 
 export function statusLabel(status: LoanFileStatus): string {
   return resolveStatus(LOAN_FILE_STATUS, status).label;

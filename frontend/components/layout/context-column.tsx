@@ -1,9 +1,11 @@
 "use client";
 
+import { SavedViews } from "@/components/dashboard/saved-views";
+import { isFiltered, readPipelineUrl } from "@/lib/loan-files/view-url";
 import { activeItemHref, contextSection } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 /** Referenced by the rail's toggle via `aria-controls`. */
 export const CONTEXT_COLUMN_ID = "context-column";
@@ -21,13 +23,32 @@ export const CONTEXT_COLUMN_ID = "context-column";
  */
 export function ContextColumn() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const section = contextSection(pathname);
+  // The pipeline's column is saved views (LP-UI-014), not a link list — it is
+  // the one section whose contents are data rather than routes.
+  const onPipeline = pathname === "/dashboard";
   // Computed once for the list rather than per item: "current" is a property of
   // the whole set (the most specific match), not of any item on its own.
   const currentHref = activeItemHref(
     pathname,
     section ? section.items.map((item) => item.href) : [],
   );
+
+  if (onPipeline) {
+    return (
+      <div
+        id={CONTEXT_COLUMN_ID}
+        className="hidden w-nav shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-150 md:block"
+        data-context-column
+      >
+        <SavedViews
+          activeViewId={searchParams.get("view")}
+          filtered={isFiltered(readPipelineUrl(new URLSearchParams(searchParams.toString())))}
+        />
+      </div>
+    );
+  }
 
   if (!section) return null;
 

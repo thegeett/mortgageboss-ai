@@ -1,19 +1,18 @@
 "use client";
 
 import { FileTable } from "@/components/dashboard/file-table";
-import { FilterPills } from "@/components/dashboard/filter-pills";
 import { SearchInput } from "@/components/dashboard/search-input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
 import { byAttention } from "@/lib/loan-files/attention";
-import { type FilterKey, statusesForFilter } from "@/lib/loan-files/status";
+import { isFiltered, readPipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 const PAGE_SIZE = 20;
 
@@ -27,23 +26,34 @@ export default function DashboardPage() {
   const router = useRouter();
   const firstName = useAuthStore((state) => state.user?.first_name);
 
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [searchInput, setSearchInput] = useState("");
+  // Filter state lives in the URL (LP-UI-014), not in component state, so a
+  // processor can paste what they are looking at to a colleague. The search box
+  // keeps local state only for what has been typed but not yet committed —
+  // pushing a route on every keystroke would fill the history with fragments.
+  const searchParams = useSearchParams();
+  const urlState = useMemo(
+    () => readPipelineUrl(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+
+  const [searchInput, setSearchInput] = useState(urlState.search);
   const [page, setPage] = useState(1);
-  const search = useDebouncedValue(searchInput.trim(), 300);
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
 
-  const statuses = useMemo(() => statusesForFilter(filter), [filter]);
+  // The URL is the source of truth; the typed value catches up to it.
+  useEffect(() => {
+    setSearchInput(urlState.search);
+    setPage(1);
+  }, [urlState.search]);
 
-  // Changing a filter or the search resets to the first page (done in the
-  // handlers rather than an effect, so there's no extra render/refetch).
-  const handleFilter = (next: FilterKey) => {
-    setFilter(next);
-    setPage(1);
-  };
-  const handleSearch = (next: string) => {
-    setSearchInput(next);
-    setPage(1);
-  };
+  // ...and it catches up the other way once typing settles.
+  useEffect(() => {
+    if (debouncedSearch === urlState.search) return;
+    router.replace(`/dashboard${writePipelineUrl({ ...urlState, search: debouncedSearch })}`);
+  }, [debouncedSearch, urlState, router]);
+
+  const statuses = urlState.statuses;
+  const search = urlState.search;
 
   const { data, isPending, isError } = useLoanFiles({
     page,
@@ -55,7 +65,7 @@ export default function DashboardPage() {
   // touched. Memoised so the table is not handed a new array every render.
   const sorted = useMemo(() => byAttention(data?.items ?? []), [data?.items]);
 
-  const isFiltered = filter !== "all" || search !== "";
+  const filtered = isFiltered(urlState);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -81,15 +91,21 @@ export default function DashboardPage() {
 
       <Card className="border-border/80">
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-          <FilterPills value={filter} onChange={handleFilter} />
-          <SearchInput value={searchInput} onChange={handleSearch} />
+          {/* The four hard-coded pills are gone (LP-UI-014) — saved views in
+              the context column replace them. What is left here is the search,
+              and the name of the view you are looking at. */}
+          <p className="text-sm text-muted-foreground">
+            {total} {total === 1 ? "file" : "files"}
+            {filtered ? " matching" : ""}
+          </p>
+          <SearchInput value={searchInput} onChange={setSearchInput} />
         </div>
 
         <FileTable
           files={sorted}
           isPending={isPending}
           isError={isError}
-          isFiltered={isFiltered}
+          isFiltered={filtered}
           onSelect={goToFile}
           onNewFile={newFile}
         />

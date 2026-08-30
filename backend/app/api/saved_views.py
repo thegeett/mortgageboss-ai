@@ -12,9 +12,10 @@ and writable only by its owner. A processor can use a colleague's "Blocked to
 submit" without being able to change it underneath them.
 """
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import or_, select
 
 from app.api.dependencies import CurrentUser
@@ -28,15 +29,17 @@ from app.schemas.saved_view import (
     SavedViewPublic,
     SavedViewUpdate,
 )
+from app.services.loan_files import count_loan_files
 
 router = APIRouter(prefix="/saved-views", tags=["saved-views"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved view not found.")
 
 
-def _to_public(view: SavedView, viewer: User) -> SavedViewPublic:
+def _to_public(view: SavedView, viewer: User, count: int | None = None) -> SavedViewPublic:
     """Serialise, resolving `is_mine` against the caller."""
     return SavedViewPublic(
+        count=count,
         id=view.id,
         name=view.name,
         filters=SavedViewFilters.model_validate(view.filters),
@@ -68,8 +71,18 @@ async def _get_scoped(db: DbSession, view_id: UUID, user: User) -> SavedView:
 
 
 @router.get("", response_model=list[SavedViewPublic])
-async def list_saved_views(db: DbSession, current_user: CurrentUser) -> list[SavedViewPublic]:
-    """The caller's own views plus their company's shared ones, oldest first."""
+async def list_saved_views(
+    db: DbSession,
+    current_user: CurrentUser,
+    with_counts: Annotated[bool, Query()] = False,
+) -> list[SavedViewPublic]:
+    """The caller's own views plus their company's shared ones, oldest first.
+
+    ``with_counts`` runs each view's filters as a COUNT. One query per view on
+    ONE round trip — the alternative is the client firing a `pageSize: 1`
+    request per view, which is the StatsCards pattern LP-UI-013 deleted. Opt-in
+    because a caller that only needs the names should not pay for the counts.
+    """
     stmt = (
         select(SavedView)
         .where(
@@ -83,7 +96,20 @@ async def list_saved_views(db: DbSession, current_user: CurrentUser) -> list[Sav
         .order_by(SavedView.created_at)
     )
     views = (await db.execute(stmt)).scalars().all()
-    return [_to_public(view, current_user) for view in views]
+    if not with_counts:
+        return [_to_public(view, current_user) for view in views]
+
+    out: list[SavedViewPublic] = []
+    for view in views:
+        filters = SavedViewFilters.model_validate(view.filters)
+        count = await count_loan_files(
+            db,
+            company_id=current_user.company_id,
+            statuses=list(filters.statuses) or None,
+            search=filters.search,
+        )
+        out.append(_to_public(view, current_user, count))
+    return out
 
 
 @router.post("", response_model=SavedViewPublic, status_code=status.HTTP_201_CREATED)

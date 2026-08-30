@@ -158,8 +158,10 @@ export function contextSection(pathname: string): ContextSection | null {
   const fileId = loanFileIdFromPath(pathname);
   if (fileId) return fileSections(fileId);
   if (pathname.startsWith("/admin")) return ADMIN_SECTION;
-  // The dashboard has no context column yet. Its contents are the saved views
-  // from LP-UI-012; until those exist the column would hold a single link to the
-  // screen you are already on, and an empty column is worse than none.
+  // The pipeline's column is SavedViews (LP-UI-014) rather than a link list, so
+  // it has no items here — but it does render, and the rail's ⌘B toggle is
+  // gated on this returning non-null. An empty `items` says "there is a column,
+  // and its contents are not routes".
+  if (pathname === "/dashboard") return { title: "Pipeline", items: [] };
   return null;
 }
