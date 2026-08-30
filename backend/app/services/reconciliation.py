@@ -38,11 +38,24 @@ from app.models.loan_file import LoanFile
 from app.models.property import Property
 from app.models.stated_financials import StatedAsset
 from app.services.borrower_name_matching import normalize_name
+from app.verification.cross_source.rules import XSRC_INCOME_STATED_VS_DOCUMENTED
 
-# The engine's income variance, imported rather than restated. Two mechanisms
-# answering one question with different tolerances is a documented past mistake
-# in this codebase (see the note at cross_source/rules.py:588).
-INCOME_VARIANCE_PERCENT = Decimal("10")
+# The engine's income variance, READ OFF THE RULE rather than restated. An
+# earlier version of this line declared `Decimal("10")` under a comment claiming
+# it was imported, which is the drift it was written to prevent wearing the
+# label of the fix: two mechanisms answering one question, guaranteed to agree
+# only until someone edits one of them.
+#
+# Taken from the rule rather than from `_VARIANCE_10` directly, so it follows
+# whatever threshold that rule actually carries.
+#
+# KNOWN GAP: LP-80 makes this threshold overlay-overrideable per lender by
+# rule_id, and this read model does not resolve overlays — so for a file under a
+# lender that has widened or narrowed the variance, the ledger uses the default
+# where the engine uses the overlay. Narrower than restating the literal, and
+# recorded rather than hidden.
+_INCOME_THRESHOLD = XSRC_INCOME_STATED_VS_DOCUMENTED.threshold
+INCOME_VARIANCE_PERCENT = _INCOME_THRESHOLD.value if _INCOME_THRESHOLD else Decimal("10")
 
 
 class Agreement(StrEnum):
@@ -128,6 +141,37 @@ def _found_fields(documents: list[Document]) -> dict[str, list[_FoundField]]:
     return out
 
 
+def _w2_covers_a_partial_year(
+    borrowers: list[Borrower], found: dict[str, list[_FoundField]]
+) -> int | None:
+    """The W-2 tax year during which employment began, if the data says one did.
+
+    Conservative and coarse on purpose: it compares every extracted `tax_year`
+    against every stated employment `start_date`, without pairing a W-2 to the
+    employer it belongs to — which nothing in the extraction records. A false
+    positive costs an honest "cannot compare"; a false negative costs a wrong
+    number presented as a discrepancy, and those are not symmetric.
+
+    Returns None when nothing says the year is partial, including when the
+    application states no start date — the absence of evidence is not evidence,
+    and flagging every W-2 as uncheckable would empty the row.
+    """
+    years = set()
+    for field in found.get("tax_year", []):
+        try:
+            years.add(int(Decimal(field.value)))
+        except (InvalidOperation, ValueError):
+            continue
+    if not years:
+        return None
+    for borrower in borrowers:
+        for employer in getattr(borrower, "stated_employers", []):
+            start = getattr(employer, "start_date", None)
+            if start is not None and int(start.year) in years:
+                return int(start.year)
+    return None
+
+
 def _first(found: dict[str, list[_FoundField]], *keys: str) -> _FoundField | None:
     """The first populated field among `keys`, in the order given.
 
@@ -185,7 +229,13 @@ def income_agreement(stated: Decimal | None, found: Decimal | None) -> Agreement
         return Agreement.MISSING
     if found == 0:
         return Agreement.MATCH if stated == 0 else Agreement.DIFFERS
-    variance = abs(stated - found) / found * Decimal(100)
+    # QUANTIZED to 0.1 before comparing, exactly as `_check_income_variance`
+    # does. Importing the threshold is not enough on its own: with a raw
+    # comparison here a variance of 10.04% is `satisfied` to the engine (which
+    # rounds it to 10.0) and `differs` to this row — the same two numbers, one
+    # screen, two answers, which is the whole thing this module promises not to
+    # do. The rounding is part of the rule, not a display concern.
+    variance = (abs(stated - found) / found * Decimal(100)).quantize(Decimal("0.1"))
     return Agreement.MATCH if variance <= INCOME_VARIANCE_PERCENT else Agreement.DIFFERS
 
 
@@ -309,6 +359,32 @@ def _income_row(
     stated_total = stated if counted else None
 
     annual = _first(found, "wages_tips_other_comp", "box_1_wages")
+    partial_year = _w2_covers_a_partial_year(borrowers, found)
+    if annual is not None and partial_year is not None:
+        # A W-2 is annual BY DEFINITION only when the borrower worked the whole
+        # year. For a mid-year hire box 1 covers part of one, and `/12`
+        # understates monthly income — the same unit error this row exists to
+        # avoid, one level down: it would report `differs` against a correctly
+        # stated income and send a processor after a discrepancy that is an
+        # artefact of the division.
+        #
+        # How much of a year it covers, and how to annualise it, is underwriting
+        # judgement (YTD-plus-W-2 averaging, and which months count) and is NOT
+        # decided here. This declines to compute and says why.
+        return ReconciliationRow(
+            field_key="base_monthly_income",
+            label="Base monthly income",
+            stated_value=_money_text(stated_total),
+            found_value=None,
+            agreement=Agreement.MISSING,
+            source=annual.source,
+            source_note=(
+                f"The W-2 covers {partial_year}, and the application states employment "
+                f"beginning during that year — so its wages are a partial year and "
+                "dividing by 12 would understate monthly income. Annualising a "
+                "partial year is an underwriting judgement, not a conversion."
+            ),
+        )
     if annual is not None:
         found_monthly = _decimal(annual.value)
         if found_monthly is not None:
@@ -378,14 +454,72 @@ def _employer_row(
     )
 
 
+#: MISMO `AssetType` values that a BANK STATEMENT can evidence. A retirement
+#: fund or a gift of cash is a real asset and is not a checking balance; a
+#: statement for one says nothing about either.
+_DEPOSITORY_ASSET_TYPES = {"checkingaccount", "savingsaccount", "moneymarketfund"}
+
+
+def _is_depository(asset: StatedAsset) -> bool:
+    return (asset.asset_type or "").strip().lower().replace(" ", "") in _DEPOSITORY_ASSET_TYPES
+
+
 def _assets_row(
     assets: list[StatedAsset], found: dict[str, list[_FoundField]]
 ) -> ReconciliationRow:
-    stated_total = sum((Decimal(a.value) for a in assets if a.value is not None), Decimal(0))
-    stated_value = stated_total if any(a.value is not None for a in assets) else None
+    """A stated DEPOSITORY balance against one bank statement's ending balance.
+
+    The subtlety is the same one the income row is about, and it was got wrong
+    here first: the previous version summed EVERY `StatedAsset` — checking,
+    savings, retirement, gift funds — and compared the total to a single
+    statement's ending balance. For any borrower with more than one account that
+    differs by construction, and the row reported it as a discrepancy on a
+    compliance screen. The stated side was not the quantity the label named.
+
+    So: only depository assets, which are the ones a bank statement can evidence
+    at all; and where the shapes cannot line up — several stated accounts, one
+    statement — the row says it cannot be compared and why, rather than
+    subtracting two numbers that are not about the same thing. ADR-328's rule,
+    applied to assets: a confident wrong answer is worse than an honest gap.
+    """
+    depository = [a for a in assets if _is_depository(a) and a.value is not None]
+    non_depository = [a for a in assets if not _is_depository(a) and a.value is not None]
 
     hit = _first(found, "ending_balance", "current_balance")
     found_amount = _decimal(hit.value) if hit else None
+
+    # More than one account on the application, one statement in the file. Which
+    # account the statement is for is not something this join knows, so any
+    # comparison it made would be a guess presented as a finding.
+    if len(depository) > 1:
+        stated_total = sum(
+            (Decimal(a.value) for a in depository if a.value is not None), Decimal(0)
+        )
+        return ReconciliationRow(
+            field_key="checking_balance",
+            label="Checking balance",
+            stated_value=_money_text(stated_total),
+            found_value=_money_text(found_amount),
+            agreement=Agreement.MISSING,
+            source=hit.source if hit else None,
+            source_note=(
+                f"The application states {len(depository)} depository accounts totalling "
+                f"{_money_text(stated_total)}. One bank statement is on file, and which "
+                "account it belongs to is not recorded — so these two figures are not "
+                "comparable. A statement per account would settle it."
+            ),
+        )
+
+    stated_value = Decimal(depository[0].value) if depository and depository[0].value else None
+    note = None
+    if stated_value is None and non_depository:
+        # Assets exist, but none a bank statement speaks to. Saying "no stated
+        # value" would read as an omission on the application, which it is not.
+        note = (
+            f"The application states {len(non_depository)} asset(s), none of them a "
+            "depository account — a bank statement does not evidence those."
+        )
+
     return _row(
         "checking_balance",
         "Checking balance",
@@ -393,7 +527,7 @@ def _assets_row(
         _money_text(found_amount),
         money_agreement(stated_value, found_amount),
         hit,
-        no_source_note="No bank statement has been extracted for this file.",
+        no_source_note=note or "No bank statement has been extracted for this file.",
     )
 
 
@@ -472,7 +606,10 @@ async def _current_documents(db: AsyncSession, loan_file_id: UUID) -> list[Docum
         .where(Document.loan_file_id == loan_file_id, Document.is_current.is_(True))
         .options(selectinload(Document.extractions)),
         Document,
-    ).order_by(Document.created_at, Document.id)
+        # NEWEST FIRST. `_first()` takes the head of each key's list, so with two
+        # pay stubs or two W-2s ascending order handed a processor the OLDEST
+        # one — not arbitrary, systematically the stalest evidence on the file.
+    ).order_by(Document.created_at.desc(), Document.id.desc())
     return list((await db.execute(stmt)).scalars().all())
 
 

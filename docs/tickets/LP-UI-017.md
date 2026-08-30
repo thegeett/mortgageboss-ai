@@ -119,3 +119,110 @@ with the two known `.env` failures.
 
 - `app/services/reconciliation.py` (new), `app/api/loan_files.py`,
   `tests/services/test_reconciliation.py` (new), `decisions.md` (ADR-391)
+
+## Review pass — two numbers that were not about the same thing
+
+Reviewed on request from the session running the epic. Five defects, four of
+which the hand-off had already suspected. The pattern it named — "grep for the
+concept first" — held: every one of these is two mechanisms answering one
+question, or two quantities being subtracted that are not the same quantity.
+
+### The assets row compared total assets to one checking balance
+
+The most serious, and the hand-off was right to be unsure it had caught it. The
+row is labelled **Checking balance** and summed **every** `StatedAsset` —
+checking, savings, retirement, gift funds — against a single bank statement's
+`ending_balance`.
+
+A borrower with $5,000 checking and an $80,000 401(k) produced an $80,000
+"discrepancy" that does not exist, on a compliance screen, next to the document
+it supposedly contradicts. The stated side was not the quantity the label named.
+This is ADR-328's rule applied to assets, and it was the same defect the income
+row had already been fixed for.
+
+Now: only depository assets (checking / savings / money market — the ones a bank
+statement can evidence at all); and where the shapes cannot line up — several
+stated accounts, one statement, no record of which account it belongs to — the
+row reports `missing` with the reason instead of subtracting. A file whose only
+assets are a gift of cash says so, rather than reading as an omission on the
+application.
+
+### The variance threshold was restated under a comment saying it was imported
+
+Raised in the hand-off, correctly, and worth stating plainly: `INCOME_VARIANCE_
+PERCENT = Decimal("10")` beneath *"imported rather than restated"* is the drift
+it was written to prevent, wearing the label of the fix.
+
+It is importable. `_VARIANCE_10` is a plain module constant and the rule carries
+it as `threshold`, so the value is now read off
+`XSRC_INCOME_STATED_VS_DOCUMENTED.threshold` — the rule the engine actually
+applies, not a sibling constant.
+
+### Importing the threshold was not enough — the comparison still differed
+
+Found by a test that was itself wrong first. The engine **quantizes** the
+variance to 0.1 before comparing (`rules.py:190`) and this row did not. A
+variance of 10.04% is `satisfied` to the engine, which rounds it to 10.0, and was
+`differs` here: the same two numbers, one screen, two answers — exactly what the
+module docstring promises cannot happen.
+
+The rounding is part of the rule, not a display concern, and is now applied here
+too.
+
+**One test changed to match the code, flagged deliberately.** The existing
+`test_beyond_ten_percent_differs` asserted `income_agreement(11001, 10000) is
+DIFFERS`. That pinned the disagreement rather than a property — the engine emits
+no finding for those two numbers. Updated, with the old case kept under a name
+that says what it is now testing. The load-bearing property is "the ledger and
+the finding agree about the same two numbers", and the old expectation was the
+one violating it.
+
+### A partial-year W-2 was divided by 12
+
+Raised in the hand-off as "arguably the same class of error, one level down". It
+is the same class, and it is checkable: `StatedEmployer.start_date` and the W-2's
+extracted `tax_year` are both available. Where employment began during the year a
+W-2 covers, box 1 is a partial year and `/12` understates monthly income — which
+reports `differs` against a correctly stated figure and sends a processor after
+an artefact of the division.
+
+The row now declines to compute and says why. It does **not** attempt to
+annualise: how much of a year a W-2 covers and how to average it with a YTD pay
+stub is underwriting judgement, and this module is a join, not a calculator. That
+part is a domain question for the resident expert, not an inference to make here.
+
+The detection is coarse — every extracted `tax_year` against every stated
+`start_date`, without pairing a W-2 to its employer, which nothing records. That
+asymmetry is deliberate: a false positive costs an honest "cannot compare", a
+false negative costs a wrong number presented as a discrepancy. A missing start
+date returns None rather than flagging, because absence of evidence is not
+evidence and flagging every W-2 would empty the row.
+
+### `_first()` returned the oldest document, not the newest
+
+Raised as "arbitrary rather than the most recent". It was worse than arbitrary:
+`_current_documents` ordered by `created_at` ASC, so with two pay stubs or two
+W-2s `_first()` systematically handed a processor the **stalest** evidence on the
+file. Now ordered newest-first.
+
+### The route had no test of its own tenant boundary
+
+Inheriting scoping from `get_loan_file` is the right design, and nothing asserted
+it here — so a route that later grew its own query would break the boundary
+silently. This is the densest disclosure surface in the product: stated income,
+balances, employer names and the documents behind them, in one response. Two
+tests, a cross-company 404 and a positive control, because a 404 assertion passes
+just as well against a route that is broken for everyone.
+
+### Verification
+
+`ruff`, `ruff format` and `mypy` clean over 448 files; **5,994 pass** (from
+5,980) with the two known `.env` failures. Every fix mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| sum all assets against one statement again | 2 tests fail |
+| restate the variance threshold as a literal | 2 tests fail |
+| drop the quantize | 2 tests fail |
+| divide a partial-year W-2 anyway | 1 test fails |
+| drop the tenant gate on the route | 1 test fails |
