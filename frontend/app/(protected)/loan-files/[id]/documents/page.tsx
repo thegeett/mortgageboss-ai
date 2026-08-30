@@ -6,6 +6,7 @@ import { DocumentList } from "@/components/file/documents/document-list";
 import { ProcessingStrip } from "@/components/file/documents/processing-strip";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { DocumentResponse } from "@/lib/types/document";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
@@ -50,6 +51,18 @@ function DocumentsWorkspace() {
 
   return (
     <div className="space-y-6">
+      {/* The way into the reviewer (LP-UI-030). Without an entry point the route
+          is reachable only by typing a URL, which is the LP-UI-016 rule facing
+          the other way: a screen nobody can get to is not shipped. */}
+      <div className="flex justify-end">
+        <Link
+          href={`/loan-files/${id}/review`}
+          className="text-sm text-muted-foreground hover:text-primary hover:underline"
+        >
+          Open the document reviewer
+        </Link>
+      </div>
+
       <DocumentDropzone fileId={id} />
       {/* Above the list on purpose (LP-UI-019): watching uploads land must not
           move the documents already settled underneath them. */}

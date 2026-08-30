@@ -33,11 +33,18 @@ export const DENSITY_COOKIE = "ledger-density";
 export interface UserPreferences {
   default_aggression_level: AggressionLevel;
   density: RowDensity;
+  /**
+   * Where this user put the reviewer's two dividers (LP-UI-030), as
+   * `[list %, canvas %]`. `null` means never adjusted — the reviewer shows its
+   * own default rather than a value nobody chose.
+   */
+  reviewer_pane_split: [number, number] | null;
 }
 
 export interface UserPreferencesUpdate {
   default_aggression_level?: AggressionLevel;
   density?: RowDensity;
+  reviewer_pane_split?: [number, number];
 }
 
 export const preferencesQueryKey = ["preferences", "me"] as const;

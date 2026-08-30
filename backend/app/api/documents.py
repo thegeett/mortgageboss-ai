@@ -52,6 +52,7 @@ from app.services.documents import (
     soft_delete_document,
     validate_upload,
 )
+from app.services.page_render import DEFAULT_ZOOM, render_page
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
@@ -375,6 +376,55 @@ async def resolve_staleness_endpoint(
     )
     await db.commit()
     return await build_document_response(db, document=document)
+
+
+@flat_router.get("/{document_id}/page/{page_number}")
+async def page_image(
+    document_id: UUID,
+    page_number: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    zoom: float = DEFAULT_ZOOM,
+) -> Response:
+    """One page of the document, rendered to PNG (LP-UI-030).
+
+    Behind the same tenant gate as `/download` — a rendered page is the document's
+    content, so it is exactly as sensitive as the bytes and gets the same 404 for
+    another company's file.
+
+    `404` for a page the document does not have, and for a non-PDF: the reviewer
+    has a designed no-page state, and it is reachable often enough to matter — 12
+    of 105 stored PDFs are scans with no text layer, and a model-cited page is out
+    of range on ~4% of extracted fields.
+
+    The page geometry travels in headers rather than a second request, because a
+    caller placing a highlight needs the image AND the point-space it was rendered
+    from, and fetching those separately is how the two drift.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    if document.mime_type != "application/pdf":
+        raise _NOT_FOUND
+    storage = get_storage_backend()
+    content = await storage.read(document.storage_path)
+    rendered = await render_page(content, page_number=page_number, zoom=zoom)
+    if rendered is None:
+        raise _NOT_FOUND
+    return Response(
+        content=rendered.png,
+        media_type="image/png",
+        headers={
+            "X-Page-Width-Points": str(rendered.width_points),
+            "X-Page-Height-Points": str(rendered.height_points),
+            "X-Page-Zoom": str(rendered.zoom),
+            # A rendered page is borrower content: it must not sit in a shared
+            # cache, and the browser may keep it only for this session.
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 @flat_router.get("/{document_id}/download")

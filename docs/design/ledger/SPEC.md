@@ -174,6 +174,23 @@ count. Those four numbers are the reason a processor switches tabs today.
   visible. When two changes each remove something, check the rows where only one
   of them applies (LP-UI-024 review).
 
+- **A comment claiming a constant is imported is not an import.** Twice now:
+  `INCOME_VARIANCE_PERCENT` (LP-UI-021) and `_BLOCKING_SEVERITIES` (LP-UI-027) were
+  each restated inline under a docstring asserting they came from the owning
+  module. The comment is what makes it invisible — it answers the question a
+  reviewer would have asked. Import it, and note the limit honestly: a restatement
+  of an IDENTICAL value is behaviourally indistinguishable and no test can catch
+  it. What the import buys is that the next edit moves both.
+- **A green mutation run means nothing until you confirm the mutation landed and
+  which tests ran.** Three distinct routes to a false pass have occurred: editing
+  the wrong path, a `-k` filter that silently excluded the only guarding file, and
+  editing a copy of a constant that lives elsewhere. All three print a reassuring
+  result. Read the edit and the test selection before reading the outcome.
+- **A test that pins an import does not pin the use.** Asserting two constants are
+  the same object proves the import exists and says nothing about whether the code
+  under test uses it — a restatement at the use site passes. Assert the behaviour
+  across the whole domain instead (LP-UI-027 review).
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket

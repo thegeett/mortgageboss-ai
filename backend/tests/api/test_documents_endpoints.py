@@ -10,8 +10,10 @@ preserving the stored bytes.
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
+import pymupdf
 import pytest
 import pytest_asyncio
 from app.api import documents as documents_api
@@ -466,3 +468,81 @@ async def test_unauthenticated_is_401(client: AsyncClient, db_session: AsyncSess
     assert (
         await client.post(_docs_url(loan_file.display_id), files=[_pdf_part()])
     ).status_code == 401
+
+
+def _real_pdf(pages: int = 1) -> bytes:
+    """An actually-renderable PDF.
+
+    `PDF_BYTES` above is a header and a comment — enough for upload and download,
+    which move bytes, and not enough for anything that OPENS the file. The page
+    endpoint renders, so it needs a real one; asserting a render against a stub
+    would be asserting a 404 and calling it success.
+    """
+    doc = pymupdf.open()
+    for i in range(pages):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), f"page {i + 1}")
+    return bytes(doc.tobytes())
+
+
+async def _upload_real_pdf(client: AsyncClient, ident: str, token: str) -> dict[str, Any]:
+    resp = await client.post(
+        _docs_url(ident),
+        headers=_auth(token),
+        files=[("files", ("paystub.pdf", _real_pdf(), "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    return dict(resp.json()[0])
+
+
+# --------------------------------------------------------------------------- #
+# Page image (LP-UI-030) — the reviewer's canvas
+# --------------------------------------------------------------------------- #
+
+
+async def test_page_image_renders_and_carries_its_geometry(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Tested at the API, not only the renderer — the layer a caller meets."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content.startswith(b"\x89PNG\r\n\x1a\n")
+    # The point-space a highlight rectangle is expressed in travels WITH the
+    # image; fetching it separately is how the two drift.
+    assert float(resp.headers["X-Page-Width-Points"]) > 0
+    assert float(resp.headers["X-Page-Height-Points"]) > 0
+    assert float(resp.headers["X-Page-Zoom"]) >= 1.0
+    # A rendered page is borrower content: never a shared cache.
+    assert "private" in resp.headers["cache-control"]
+
+
+async def test_a_page_the_document_does_not_have_is_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Measured on real data: a model-cited page is out of range on ~4% of
+    # extracted fields, so this is a designed state rather than an edge case.
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/99", headers=_auth(token))
+    assert resp.status_code == 404
+
+
+async def test_another_companys_page_is_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # A rendered page IS the document's content, so it gets the same gate as the
+    # bytes. This is the assertion that stops the reviewer becoming a way around
+    # the download endpoint's tenant scoping.
+    company_a, _ua, token_a = await _make_user(db_session, slug="acme")
+    _company_b, _ub, token_b = await _make_user(db_session, slug="beta")
+    loan_file = await create_loan_file(db_session, company_id=company_a.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token_a)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token_b))
+    assert resp.status_code == 404

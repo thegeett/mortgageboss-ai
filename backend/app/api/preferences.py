@@ -26,7 +26,7 @@ async def get_preferences(current_user: CurrentUser) -> UserPreferences:
 async def update_preferences(
     payload: UserPreferencesUpdate, db: DbSession, current_user: CurrentUser
 ) -> UserPreferences:
-    """Update the caller's preferences — thoroughness, row density, or both.
+    """Update the caller's preferences — thoroughness, row density, or the reviewer split.
 
     The default applies to every file the user opens unless that file has a per-file
     override. Changing it never re-runs any AI — it only changes the cutoff the
@@ -37,6 +37,8 @@ async def update_preferences(
         current_user.default_aggression_level = payload.default_aggression_level
     if payload.density is not None:
         current_user.density = payload.density
+    if payload.reviewer_pane_split is not None:
+        current_user.reviewer_pane_split = payload.reviewer_pane_split
     await db.commit()
     await db.refresh(current_user)
     return UserPreferences.model_validate(current_user)

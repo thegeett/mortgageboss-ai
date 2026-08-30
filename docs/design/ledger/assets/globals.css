@@ -173,6 +173,31 @@
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
+
+  /* The reviewer's fields pane (LP-UI-030) sizes its rows to the PANE, not the
+     window. A processor can drag it from 320px to 720px without the window
+     changing at all, so a media query would answer the wrong question — it would
+     lay out for a viewport the pane no longer fills.
+
+     Native CSS rather than a Tailwind plugin: `container-type` and `@container`
+     need no dependency, and adding one for two rules is how a build grows. */
+  .field-pane {
+    container-type: inline-size;
+    container-name: fieldpane;
+  }
+  /* Narrow: label above value, one column. */
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+  }
+  @container fieldpane (min-width: 26rem) {
+    .field-row {
+      grid-template-columns: 11rem 1fr;
+      gap: 0.75rem;
+      align-items: baseline;
+    }
+  }
   /* WCAG 2.4.11 — a focused row must not hide behind the sticky header. */
   [data-row] {
     scroll-margin-block: var(--topbar-h);

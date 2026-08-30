@@ -131,7 +131,14 @@ async def test_both_fields_together_still_work(client: AsyncClient, db: AsyncSes
     )
 
     assert put.status_code == 200
-    assert put.json() == {"default_aggression_level": "thorough", "density": "relaxed"}
+    # LP-UI-030 added the reviewer split. Kept as an EXACT comparison rather than
+    # a subset check: this endpoint returns a user's stored preferences, and a
+    # field appearing in it unnoticed is the thing exact equality is for.
+    assert put.json() == {
+        "default_aggression_level": "thorough",
+        "density": "relaxed",
+        "reviewer_pane_split": None,
+    }
 
 
 async def test_an_empty_body_changes_nothing(client: AsyncClient, db: AsyncSession) -> None:
@@ -171,3 +178,54 @@ async def test_an_explicit_null_does_not_clear_a_field(
 
     assert put.status_code == 200
     assert put.json()["density"] == "relaxed"
+
+
+# --------------------------------------------------------------------------- #
+# The reviewer pane split (LP-UI-030)
+# --------------------------------------------------------------------------- #
+
+
+async def test_reviewer_split_round_trips(client: AsyncClient, db: AsyncSession) -> None:
+    _user, token = await _user_and_token(db)
+    put = await client.put(
+        PREFS,
+        headers=_auth(token),
+        json={"reviewer_pane_split": [22, 53]},
+    )
+    assert put.status_code == 200
+    assert put.json()["reviewer_pane_split"] == [22, 53]
+
+    got = await client.get(PREFS, headers=_auth(token))
+    assert got.json()["reviewer_pane_split"] == [22, 53]
+
+
+async def test_never_adjusted_is_null_not_a_default(client: AsyncClient, db: AsyncSession) -> None:
+    # NULL and "adjusted back to the default" are different facts. The UI shows
+    # its own default for NULL rather than writing one nobody chose.
+    _user, token = await _user_and_token(db)
+    got = await client.get(PREFS, headers=_auth(token))
+    assert got.json()["reviewer_pane_split"] is None
+
+
+async def test_a_split_that_hides_a_pane_is_rejected(client: AsyncClient, db: AsyncSession) -> None:
+    """The value is JSON and it SURVIVES to the next session.
+
+    A client persisting `[90, 5]` gives itself a layout with a pane it cannot
+    reach, and a bad write is not a refresh away from being fixed — which is why
+    this is validated at the boundary rather than clamped in the browser.
+    """
+    _user, token = await _user_and_token(db)
+    for bad in ([90, 5], [5, 20], [50, 50], [40], [10, 20, 30]):
+        put = await client.put(PREFS, headers=_auth(token), json={"reviewer_pane_split": bad})
+        assert put.status_code == 422, f"{bad} should be rejected"
+
+
+async def test_setting_the_split_leaves_other_preferences_alone(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    _user, token = await _user_and_token(db)
+    await client.put(PREFS, headers=_auth(token), json={"density": "relaxed"})
+    await client.put(PREFS, headers=_auth(token), json={"reviewer_pane_split": [25, 50]})
+    got = await client.get(PREFS, headers=_auth(token))
+    assert got.json()["density"] == "relaxed"
+    assert got.json()["reviewer_pane_split"] == [25, 50]

@@ -684,6 +684,21 @@ and it was wrong.
 count is an acceptance criterion and has to be derived from the code, not from
 the survey that motivated the ticket. Two maps living in one file read as one.
 
+**UPDATE (LP-UI-028): eight, not seven.** `STATUS_BADGE` on the rule-validation
+admin screen was a further independent map with its own colour language, found the
+same way. It is now `VALIDATION_STATUS` in `lib/status.ts`, typed
+`Record<ValidationStatus, StatusMeta>` against a real union. `grounded_starter`
+takes the **ai** tone rather than `neutral`, and that is the whole point of that
+screen: the status records *where the value came from* — researched against the
+Selling Guide, pending a domain expert — not whether it is correct, which is the
+`ai` tone's own definition. Rendered `neutral` it read as "nothing to do here" on a
+screen that exists to surface what nobody has confirmed, where 121 of 121 items sit
+in that state.
+
+The count was wrong twice, which retires the count as a criterion: **do not assert
+how many vocabularies exist.** The durable criterion is that every status a screen
+renders comes from `lib/status.ts`, checkable by grep at any time.
+
 ### Operational note — an unstaged amendment is an invisible amendment
 
 A20 was written the night before LP-UI-018 precisely so the ticket would honour
@@ -794,11 +809,37 @@ change is live when it is not, which is the worst thing that editor could do. Th
 copy now says "Recorded, not yet applied", with a comment to delete it when the
 column is wired.
 
+**UPDATE (LP-UI-027): the gap is three layers, not one.** The estimator built for
+blast radius had to establish what it could actually measure, and found:
+
+1. **The column is unread** — `registry.py:127` uses only the two constant dicts.
+2. **The overlay-aware engine is uncalled.** `services/verification_engine` holds
+   the only `evaluate()` that resolves overlays at all, and it has no production
+   caller. Verified: its only importer anywhere in `app/` is the new estimator
+   itself, and the codebase already says so in its own words at
+   `finding_source_matching.py:193` — *"verification_engine has no caller"*.
+3. **No finding exists for any rule an overlay can target.** Zero findings for
+   any `conv.*`, `fha.*` or sample rule id.
+
+Taken together, the lender-overlay capability is **inert end to end**, not merely
+missing its storage wiring. That matters for how it gets fixed: wiring the column
+into the registry is necessary and not sufficient, because nothing calls the
+engine that would consume it.
+
+It also validates a deviation LP-UI-027 made deliberately. The ticket asked for
+blast radius "estimated against each file's last completed run"; built that way it
+would have answered **"no files affected" for every proposal** — the most dangerous
+possible answer, indistinguishable from a correct one, reading as reassurance, on a
+screen where an admin acts on it. It evaluates the pure engine twice with the
+proposed thresholds swapped in and diffs instead, which works today and keeps
+working once the column is wired.
+
 **This is a product decision, not a UI ticket:** finish LP-87's other half (wire
-the column into the registry, with the precedence and caching questions that
-implies), or state that overlays are configuration-only for now. The honest copy
-is a stopgap, not an answer — an admin screen whose whole purpose is an action
-that does nothing is not a screen worth keeping in that state for long.
+the column into the registry, and call the overlay-aware engine, with the
+precedence and caching questions that implies), or state that overlays are
+configuration-only for now. The honest copy is a stopgap, not an answer — an admin
+screen whose whole purpose is an action that does nothing is not a screen worth
+keeping in that state for long.
 
 ### A20, corrected by A23
 

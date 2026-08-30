@@ -1,0 +1,105 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { usePageImage, useRevokeOnUnmount } from "@/lib/api/page-image";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
+/**
+ * One page of the document, rendered (LP-UI-030).
+ *
+ * The image comes from the server, rendered by the same PyMuPDF that will derive
+ * a field's highlight rectangle in LP-UI-031 — one renderer, one coordinate
+ * space. Two engines would be two spaces, and a box a few points off is worse
+ * than no box, because it points confidently at the wrong words.
+ *
+ * THE NO-PAGE STATE IS NOT AN EDGE CASE. Measured over stored documents: 12 of
+ * 105 PDFs are scans, and a model-cited page is out of range on ~4% of extracted
+ * fields. So "there is no page image for this" is a designed state that a real
+ * processor will meet, and it says which of those two it is rather than showing
+ * a broken frame.
+ */
+export function PageCanvas({
+  documentId,
+  page,
+  pageCount,
+  onPageChange,
+}: {
+  documentId: string | null;
+  page: number;
+  /** `null` when unknown — the control then only guards the lower bound. */
+  pageCount: number | null;
+  onPageChange: (page: number) => void;
+}) {
+  const { data, isPending, isError } = usePageImage(documentId, page);
+  useRevokeOnUnmount(data?.url);
+
+  if (!documentId) {
+    return <Empty>Choose a document on the left to read it here.</Empty>;
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-center gap-2 border-b border-border bg-background px-3 py-1.5">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Previous page"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="tabular text-xs text-muted-foreground">
+          Page {page}
+          {pageCount ? ` of ${pageCount}` : ""}
+        </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Next page"
+          disabled={pageCount !== null && page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        {isPending ? (
+          <div aria-busy>
+            <output className="sr-only">Loading page {page}</output>
+            <Skeleton className="mx-auto h-[60vh] w-full max-w-[46rem]" />
+          </div>
+        ) : isError || !data ? (
+          <Empty>
+            No page image for this document. It may be a scan with no text layer, a file that is not
+            a PDF, or a page the document does not have — the extracted fields are still on the
+            right, with the text each value was read from.
+          </Empty>
+        ) : (
+          // `alt` is deliberately not the page's content: it is an image of a
+          // borrower's document, and describing it would mean transcribing PII
+          // into the accessibility tree. The fields panel is the readable form.
+          <img
+            src={data.url}
+            alt={`Page ${page} of the document`}
+            width={data.widthPoints * data.zoom}
+            height={data.heightPoints * data.zoom}
+            className="mx-auto h-auto w-full max-w-[46rem] rounded border border-border bg-background shadow-sm"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <p className="max-w-prose text-center text-sm text-muted-foreground">{children}</p>
+    </div>
+  );
+}
