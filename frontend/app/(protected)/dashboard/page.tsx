@@ -114,9 +114,13 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {/* h2, not h1: the topbar breadcrumb already carries the page's h1
+              ("Dashboard"), and it is the only h1 on every other route. Two h1s
+              on one page gives a screen reader two answers to "where am I". This
+              is a greeting under that heading, not a second title. */}
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             {firstName ? `Welcome back, ${firstName}.` : "Dashboard"}
-          </h1>
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">Your loan file worklist.</p>
         </div>
         <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">

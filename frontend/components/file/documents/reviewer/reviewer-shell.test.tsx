@@ -6,6 +6,27 @@ import { DEFAULT_SPLIT, type PaneSplit, ReviewerShell, clampSplit } from "./revi
 
 afterEach(cleanup);
 
+describe("the divider is reachable by pointer and keyboard (LP-UI-036)", () => {
+  it("extends its hit area past the hairline", () => {
+    // The line is 4px because a thick divider is visual noise. A 4px POINTER
+    // TARGET is a test of mouse accuracy (WCAG 2.5.8 wants 24), so the grabbable
+    // region is widened with a pseudo-element that draws nothing. Measured live
+    // at 24px; asserted here so the class cannot quietly go.
+    renderShell(null);
+    const divider = screen.getAllByRole("separator")[0];
+    expect(divider?.className).toContain("before:-left-2.5");
+    expect(divider?.className).toContain("before:-right-2.5");
+    expect(divider?.className).toContain("relative");
+  });
+
+  it("still announces its position", () => {
+    renderShell(null);
+    const divider = screen.getAllByRole("separator")[0];
+    expect(divider?.getAttribute("aria-valuenow")).toBeTruthy();
+    expect(divider?.getAttribute("aria-label")).toBeTruthy();
+  });
+});
+
 function renderShell(split: PaneSplit | null, onSplitChange = vi.fn()) {
   render(
     <ReviewerShell

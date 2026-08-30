@@ -213,7 +213,11 @@ function Source({ row, fileId }: { row: ReconciliationRow; fileId: string }) {
         {page !== null ? ` · p.${page}` : ""}
       </Link>
       {snippet ? (
-        <span className="mt-0.5 block truncate text-xs text-muted-foreground/80" title={snippet}>
+        // `text-muted-foreground`, not `/80`. The faded variant measured 3.45:1
+        // against the card in light mode — the opacity is what broke it, and the
+        // token itself passes. There is no third level of quiet below muted that
+        // is still readable; wanting one is a sign the row has too many levels.
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={snippet}>
           &ldquo;{snippet}&rdquo;
         </span>
       ) : null}

@@ -198,7 +198,18 @@
       align-items: baseline;
     }
   }
-  /* WCAG 2.4.11 — a focused row must not hide behind the sticky header. */
+  /* WCAG 2.4.11 — nothing focused may hide behind the sticky header.
+     Applied to every focusable element rather than to `[data-row]` alone: a row
+     was the case we thought of, and a button, a link or an input scrolled into
+     view lands under the header just as completely. `scroll-margin` costs
+     nothing where there is no scrolling ancestor. */
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex="-1"]),
   [data-row] {
     scroll-margin-block: var(--topbar-h);
   }

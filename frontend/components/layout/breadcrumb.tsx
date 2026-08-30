@@ -47,7 +47,11 @@ function Trail({ children }: { children: React.ReactNode }) {
       <span aria-hidden className="text-muted-foreground">
         /
       </span>
-      <span className="truncate font-semibold text-foreground">{children}</span>
+      {/* The current location is the page's H1 (LP-UI-036). Every other route
+          already gets its h1 from this component; `/loan-files/new` took this
+          branch and had NONE, so nothing announced what the page was. One h1 per
+          route, always in the same place, from the same component. */}
+      <h1 className="truncate text-sm font-semibold text-foreground">{children}</h1>
     </nav>
   );
 }

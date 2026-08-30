@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { humanize } from "@/lib/format";
 import {
   activeItemHref,
   contextSection,
@@ -28,6 +29,18 @@ import { usePathname } from "next/navigation";
  * sidebar is hidden), the current section title, and the account menu. Reads the
  * user from the LP-25 store; renders nothing user-specific if absent.
  */
+/**
+ * A readable name for a route the nav does not list — the last path segment that
+ * is not an id, humanised. `/admin/lenders` → "Lenders".
+ */
+function sectionFromPath(pathname: string): string {
+  const segments = pathname.split("/").filter(Boolean);
+  // Walk back past ids and uuids to the last word-shaped segment.
+  const named = [...segments].reverse().find((s) => /^[a-z][a-z-]*$/i.test(s) && s.length > 1);
+  if (!named) return "Pipeline";
+  return humanize(named);
+}
+
 export function Header() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
@@ -89,7 +102,12 @@ export function Header() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Breadcrumb fallback={current?.label ?? "mortgageboss·ai"} />
+        {/* The fallback names WHERE YOU ARE, never the product (LP-UI-036). It
+            is the page's h1, and on the admin routes — which are not nav items —
+            it said "mortgageboss·ai", so a screen reader answered "where am I"
+            with the product name. A humanised path segment is right for any
+            route the nav does not list. */}
+        <Breadcrumb fallback={current?.label ?? sectionFromPath(pathname)} />
       </div>
 
       {user && <UserMenu user={user} />}

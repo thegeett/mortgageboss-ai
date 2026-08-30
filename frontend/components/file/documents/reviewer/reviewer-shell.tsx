@@ -183,8 +183,13 @@ function Divider({
         }
       }}
       className={cn(
-        "w-1 shrink-0 cursor-col-resize bg-border transition-colors",
+        "relative w-1 shrink-0 cursor-col-resize bg-border transition-colors",
         "hover:bg-primary/40 focus-visible:bg-primary",
+        // THE HIT AREA IS WIDER THAN THE LINE (WCAG 2.5.8). A 4px strip is a
+        // 4px pointer target; the pseudo-element extends the grabbable region to
+        // 24px without drawing anything, so the divider stays a hairline and
+        // stops being a test of mouse accuracy.
+        "before:absolute before:inset-y-0 before:-left-2.5 before:-right-2.5 before:content-['']",
       )}
     />
   );
