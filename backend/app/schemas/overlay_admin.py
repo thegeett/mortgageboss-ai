@@ -9,9 +9,11 @@ value-recording posture).
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OverlayOverrideView(BaseModel):
@@ -33,6 +35,33 @@ class OverlayAuditEntry(BaseModel):
     actor_user_id: str | None
     reason: str
     changes: list[dict[str, object]]  # [{field: rule_id, from, to}]
+
+
+class OverlayLenderSummary(BaseModel):
+    """A lender in the admin list, led by its OVERLAY rather than its details.
+
+    An overlay is the highest-leverage thing an admin touches — one change moves
+    every file at that lender — so the list answers "what is different here, and
+    when did it last change" before it answers "who do I call".
+
+    Both numbers come off the `lenders.lender_overlays` blob the list query
+    already loads. Fetching each lender's overlay separately to count them would
+    be one request per row: the StatsCards pattern LP-UI-013 deleted.
+
+    `override_count` of zero is a REAL ANSWER, not a gap — it means the agency
+    guideline applies unchanged at this lender. The UI says so in words rather
+    than rendering an empty space.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    supported_programs: list[str]
+    override_count: int
+    #: When the overlay was last edited, from its audit trail. `None` when it has
+    #: never been edited — which is not the same as "edited a long time ago".
+    last_changed_at: datetime | None = None
 
 
 class LenderOverlayView(BaseModel):

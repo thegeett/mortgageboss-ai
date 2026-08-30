@@ -158,6 +158,22 @@ count. Those four numbers are the reason a processor switches tabs today.
   same night. Any ticket that deletes a navigation affordance restores an
   equivalent one before it lands (LP-UI-016 review).
 
+- **A compatibility guarantee runs in both directions or it is half a guarantee.**
+  Adding a field to a JSON column needs the new code to read old rows (obvious,
+  and it was done) *and* the old code to survive new rows — which is what a
+  ROLLBACK produces. LP-UI-024 handled only the first; an unrecognised `subject`
+  reached `model_validate` and 500'd the response, so the missing half failed
+  harder than the half that was covered: a missing link degrades a panel, a
+  ValidationError kills the screen. Every schema change to a stored JSON payload
+  gets both directions and a test for each (LP-UI-024 review).
+- **Two correct decisions can compose into a regression.** Deleting a duplicate
+  rendering was right; dropping its now-redundant instructions was right *for
+  warnings that have a link*. Composed, every warning on a pre-existing file
+  became a sentence with no destination and no guidance — strictly worse than
+  what was removed, on exactly the data the compatibility fallback exists to keep
+  visible. When two changes each remove something, check the rows where only one
+  of them applies (LP-UI-024 review).
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket
