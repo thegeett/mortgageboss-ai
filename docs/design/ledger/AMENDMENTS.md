@@ -608,3 +608,37 @@ The design assets are **not** infallible. LP-UI-001 found two real defects in th
 by verifying rather than trusting, which is exactly right. Keep doing that: if a
 ticket's premise does not survive contact with the code, say so on the ticket
 rather than working around it, and the asset gets corrected here.
+
+### A18 — the serif carries two registers, and only the italic one is reserved
+
+LP-UI-012 renders the login page's thesis line in **upright** Plex Serif, and
+LP-UI-003's brief says *"Plex Serif italic appears in exactly one place, text
+quoted verbatim from a document"*. Raised as a contradiction that would force
+either a reworded rule or a drop to sans.
+
+Neither, because the rule is about a face the login page does not use. Checked
+in the tree: the only `font-serif` today is `app/(auth)/login/page.tsx:44`, with
+no `italic`, and LP-UI-029's verbatim snippet — the reserved use — is specified
+as serif *italic* and has not shipped. Two faces, and the sentence governs one of
+them. It is not false; it is silent about the other.
+
+So the rule stands and gains a second clause:
+
+- **Plex Serif italic** — text quoted verbatim from a document. Reserved,
+  exceptionless, and the reason it reads as "the document speaking" without a
+  label. Nothing decorative may borrow it.
+- **Plex Serif upright** — the product speaking about itself, in the pre-
+  authentication chrome. One line on the login page, and no use inside the
+  working surfaces, where a serif that is not a quotation would teach against
+  the rule above.
+
+Recorded rather than resolved by deleting the line because the distinction is
+load-bearing: the value of "serif means the document" comes from being
+exceptionless, and an upright face used somewhere a processor never meets a
+document costs that nothing. What would cost it is upright serif appearing on a
+file screen, which this clause forbids.
+
+Worth noting the dependency: upright serif only renders at all because the
+LP-UI-003 review corrected `plexSerif` from `style: ["italic"]` to
+`["normal", "italic"]`. Before that this line would have silently fallen back to
+Georgia.

@@ -86,6 +86,8 @@ The current stack is `-apple-system, BlinkMacSystemFont, "Segoe UI"` — no deci
 Plex Sans is built for product UI at 13px; Plex Mono carries money, ratios, loan
 ids and citations; Plex Serif italic appears in exactly **one** place, text quoted
 verbatim from a document, so "this is the document speaking" reads without a label.
+The UPRIGHT serif is a separate register — the product speaking about itself, in
+pre-authentication chrome only, never on a working surface (A18).
 
 Self-hosted through `next/font` — no runtime network request, no layout shift.
 
