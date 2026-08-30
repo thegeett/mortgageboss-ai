@@ -84,3 +84,85 @@ including this one. That left a third state visible in the data that I had not
 designed for — **zero overrides with a last-changed timestamp**, i.e. edited then
 cleared — and the row reads it correctly ("Agency guideline, unchanged" beside a
 real date).
+
+## Review pass — the column the editor writes, the engine does not read
+
+Reviewed on request from the session running the epic. No code defect in this
+ticket; one finding above it, and three judgement calls confirmed.
+
+### The second definition is not in the admin path — it is between the admin and the engine
+
+The check asked for passes. Every read of `lenders.lender_overlays` in the admin
+path goes through `_stored_overrides` / `_stored_audit`, all inside
+`services/overlay_admin.py`, so the list's count and the editor's list cannot
+disagree about what an override is. That was the right instinct and the right
+place to look.
+
+The disagreement is one layer out, and it is larger. **The verification engine
+does not read that column at all.**
+
+- `registry.py:127` builds `RuleRegistry(overlays={**SAMPLE_OVERLAYS,
+  **STARTER_OVERLAYS})` — two hardcoded dicts of Python constants, keyed by
+  lender slug.
+- `LenderOverlay` is only ever constructed in `overlays/samples.py` and
+  `overlays/starter.py`. Nothing builds one from the database.
+- `effective_rules` resolves `self.overlays.get(lender_slug)`, so a file's
+  overlay comes from those constants and nowhere else.
+- ADR-193's own words are still literally true of the engine: the
+  `lenders.lender_overlays` column is *"currently unused"*.
+
+LP-87 closed half of that deferral. It built the editor that writes the column
+and, per its docstring, "makes each override's effect legible (the investor base
+threshold → the lender's effective threshold by composing against the base
+rule)". That effective threshold is computed against the base rule and is not
+what any file is evaluated against.
+
+**This ticket did not introduce it, and it is what makes it visible.** Leading
+the lenders list with the overlay count promotes a stored blob to a lender's
+headline configuration. An admin who sets an override now sees it stored,
+audited, and counted on the list — and no verification outcome changes.
+
+Not fixed here, deliberately: wiring the column into the registry is a
+substantial backend change and a sequencing decision about LP-87's remaining
+half, not a repair a review should make on its way past. Raised to the user with
+this review.
+
+### The seed-data reasoning was right on a false premise
+
+Worth separating, because the conclusion and the reason came apart. The stated
+reason for reverting was that *"an overlay alters rule thresholds for EVERY file
+at that lender, so a fabricated one would quietly move verification outcomes on
+seed files"*. It would not — for the reason above, it would move nothing.
+
+Reverting was still correct, and for a better reason: the wiring is a matter of
+when, not whether, and a fabricated override left in seed data becomes wrong the
+day it lands, silently, in a way nobody will connect to a screenshot taken
+months earlier.
+
+This is the same shape as the false grep evidence in LP-UI-022 — a sound
+conclusion resting on a premise that does not hold. It is worth catching because
+the next one may not survive its premise being wrong.
+
+### Confirmed, not changed
+
+- **`max()` over audit timestamps rather than `[-1]`.** Keep. Not cargo: the
+  blob predates the writer, was hand-edited config before LP-87, and a JSON array
+  carries no ordering guarantee anyone can enforce retrospectively. The cost is
+  one function call; the failure it prevents is a "last changed" date that is
+  quietly the wrong one.
+- **An unparseable `at` costing the line rather than raising.** Keep, and it is
+  the same discipline as LP-UI-024's `coerce`: on a JSON column the reader meets
+  what a past writer left, and a missing line is a degraded row where an
+  exception is a dead screen.
+- **Reverting the seed overlay and keeping the audit.** Right on both halves.
+  Scrubbing an audit trail to tidy up is worse than an entry that needs
+  explaining, and the entry is true — the edit did happen. The state it produced
+  is worth the note it was given: zero overrides with a real last-changed date is
+  what every lender looks like after an overlay is removed, and it now has
+  evidence that the row renders it correctly.
+
+### Verification
+
+No changes made. Confirmed the tree as handed over: backend `ruff` and `mypy`
+clean over 449 files, **6,028 pass** with the two known `.env` failures; frontend
+`tsc` clean, **706 tests**.
