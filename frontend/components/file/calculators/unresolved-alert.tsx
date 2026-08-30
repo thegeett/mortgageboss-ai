@@ -35,6 +35,14 @@ export function UnresolvedAlert({ breakdown }: { breakdown: FindingBreakdown }) 
   // about gets its own clause rather than inflating one of the three named ones.
   if (breakdown.other > 0) parts.push(`${breakdown.other} other`);
 
+  // Every caller derives `unresolved` and `breakdown` from the same in-scope
+  // list, so an all-zero breakdown cannot reach here today. It DID reach here
+  // once, from a fixture that type-checked and could not occur, and rendered
+  // " unresolved — this calculation may be incomplete": a warning with no
+  // subject. Guarding makes that unreachable by construction rather than by the
+  // caller's arithmetic staying in step with this component's.
+  if (parts.length === 0) return null;
+
   return (
     <div
       role="alert"

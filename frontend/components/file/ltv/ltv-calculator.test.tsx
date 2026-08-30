@@ -185,13 +185,19 @@ describe("LtvCalculator", () => {
         findings: {
           unresolved: true,
           open_in_scope_count: 1,
-          breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+          // COHERENT: the count and the breakdown come from one in-scope list
+          // server-side, so `1` with an all-zero breakdown cannot occur. As a
+          // fixture it type-checked, rendered a warning with no subject, and the
+          // assertion below passed on it — a lie the type system cannot catch.
+          breakdown: { governed: 1, cross_source: 0, legacy: 0, other: 0 },
         },
       },
     });
     render(<LtvCalculator fileId="LF-1" />);
     expect(screen.getByText("Cash out refinance")).toBeDefined();
-    expect(screen.getByRole("alert")).toBeDefined();
+    // Asserted on the CONTENT, not merely that an alert element exists — the
+    // subject-less render satisfied `getByRole("alert")` perfectly well.
+    expect(screen.getByRole("alert").textContent).toContain("1 rule finding unresolved");
   });
 
   it("flags over-limit in red", () => {

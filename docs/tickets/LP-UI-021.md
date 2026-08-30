@@ -96,3 +96,104 @@ render nothing. Corrected to be coherent rather than merely type-checking.
   — they are neither governed outcomes nor the AI sweep — and it wants a decision
   about where that family belongs rather than a tab invented here.
 - `CollapsedFindings` auto-expanding an `open` group (carried from LP-UI-020).
+
+## Review pass — a warning with no subject, and a fixture that lied twice
+
+Reviewed on request from the session running the epic. Two defects, four
+judgement calls confirmed, and one thing raised to the user rather than filed.
+
+### The alert could render a warning with no subject
+
+Every caller derives `unresolved`, `open_in_scope_count` and `breakdown` from
+the same in-scope list, so an all-zero breakdown cannot reach `UnresolvedAlert`
+from any real response. It reached it anyway — from a fixture — and rendered
+`" unresolved — this calculation may be incomplete"`: a warning whose subject is
+an empty string.
+
+The component returns null when it has nothing to name. That converts
+"unreachable because three callers' arithmetic stays in step with this
+component's" into "unreachable by construction", which is the difference between
+a property and a coincidence.
+
+### The incoherent fixture survived in the twin
+
+The hand-off found this and fixed it, and fixed one of two. `open_in_scope_count:
+1` beside an all-zero breakdown was corrected in the DTI test and left in the
+LTV one — the same pairing, the same file shape, three files apart. This is the
+`table-fixed` lesson from LP-UI-019 in the other direction: a defect found in one
+place and left in its twin.
+
+It only surfaced because the guard above made the malformed render impossible.
+Until then the LTV test asserted `getByRole("alert")` **exists**, which the
+subject-less warning satisfied perfectly — so a test named "shows the unresolved
+alert" was passing on an alert that said nothing. It now asserts the content.
+
+That is the hand-off's own "an assertion about the visible half says nothing
+about the half that acts", turned once more: asserting that an element EXISTS
+says nothing about whether it says anything.
+
+A scan across every `open_in_scope_count` / `breakdown` pair in the suite found
+no others.
+
+### The remainder lesson: no residual left in the breakdown
+
+Checked, since the hand-off asked and noted it had found none last time either.
+There is none, and the reason is structural rather than lucky: the classifier is
+three POSITIVE tests (`evaluation_outcome is not None`, `origin is
+DETERMINISTIC_RULE`, `origin is AI_CROSS_SOURCE`) with `other` as a genuine
+`else`. None of the three is a fallback, so `other` can actually fire — an
+explicit `other` under an else-branch classifier would have been the same defect
+wearing the fix's label. `UnresolvedAlert` renders it, so it is visible as well
+as counted.
+
+Two remainders elsewhere in the tree are fine and were left: `findings-list.tsx`
+computes `hiddenOpen` and `filteredOut` by subtraction, but each subtracts a
+strict subset from its superset, so the label cannot be wrong about what is
+missing. The rail's `unrecognised` is the same shape, deliberately.
+
+### Confirmed, not changed
+
+- **Extracting `UnresolvedAlert` from three byte-identical copies.** Right, and
+  the evidence is the bug that prompted it: fixing one copy left the DTI panel
+  reading "91" on the same screen. Three surfaces that must agree are not three
+  surfaces with a reason to diverge — and if one ever earns a different alert, a
+  prop is the cheaper change than three copies that drifted silently for months.
+- **Threading override attribution through three backend services.** The models
+  already recorded `actor_user_id` and `note`; all three services dropped them on
+  the way out. That is one defect in three places, not three tickets, and one
+  shared helper is the right size. A frontend ticket that needs "who set it" and
+  finds the backend discarding it should thread it, not stub it.
+- **Leaving the 3 cross-source findings listed nowhere.** Correct. Where that
+  family belongs is a product decision, and inventing a tab for it inside a UI
+  ticket would be the worse error.
+- **The fixture-coherence conclusion.** Right, and worth stating as the rule it
+  is: a fixture that type-checks can still describe a state the system cannot
+  produce, and a test built on one passes while testing nothing. `tsc` proves the
+  shape, not the coherence.
+
+### Raised to the user, not filed
+
+The hand-off asks that A22's product question go to the user rather than stay in
+AMENDMENTS, and that is right. Two of the three unaccounted findings come from
+`xsrc.income.employer_name_consistency` — the rule LP-606 retired, and the same
+rule the LP-UI-018 review caught the ledger deferring to. It has now surfaced
+twice in four tickets from opposite directions: once as a verdict being rendered,
+once as a count with nowhere to render.
+
+Those findings are open, counted, and unresolvable — the alert tells a processor
+they can be "applied or overridden" and no screen offers either. That is not a UI
+defect to fix here; it is the retirement being half-done, and every remaining
+ticket in Epics C–G is another chance to bind to the wrong generation.
+
+Surfaced to the user with this review.
+
+### Verification
+
+Frontend `tsc` and `biome` clean over 235 files, **678 tests** (from 674), build
+compiles into `.next-review` with the dev server left running. Backend `ruff` and
+`mypy` clean over 449 files, **6,013 pass** with the two known `.env` failures.
+
+| mutation | result |
+| --- | --- |
+| drop the empty-parts guard | 1 test fails |
+| fold `other` into `governed` | 1 test fails |
