@@ -36,7 +36,13 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.mismo.schema import ParsedBorrower, ParsedLoan, ParsedMismo
+from app.mismo.schema import (
+    ParsedBorrower,
+    ParsedLoan,
+    ParsedMismo,
+    ParseWarning,
+    WarningSubject,
+)
 from app.models.activity_log import ActivityType
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.lender import LoanProgram
@@ -180,8 +186,16 @@ async def create_loan_file_from_mismo(
         refinance_undetermined = refinance_type is None
         if refinance_undetermined:
             parsed.parse_warnings.append(
-                "Refinance type (cash-out vs. rate/term) could not be determined from the MISMO — "
-                "the LTV limit depends on it; confirm it on the Overview."
+                ParseWarning(
+                    # The "confirm it on the Overview" this used to end with was
+                    # prose standing in for a link. The subject carries it now, so
+                    # the warning can BE the link rather than describe one.
+                    message=(
+                        "Refinance type (cash-out vs. rate/term) could not be determined "
+                        "from the MISMO — the LTV limit depends on it."
+                    ),
+                    subject=WarningSubject.LOAN,
+                )
             )
     await db.flush()
 
@@ -328,7 +342,10 @@ async def create_loan_file_from_mismo(
             status=(
                 MismoImportStatus.PARTIAL if parsed.parse_warnings else MismoImportStatus.COMPLETED
             ),
-            parse_warnings=parsed.parse_warnings or None,
+            # Dumped like `catch_all` beside it: the column is JSON and holds
+            # dicts. Rows written before LP-UI-024 hold bare strings, which
+            # `ParseWarning.coerce` still reads on the way out.
+            parse_warnings=[w.model_dump(mode="json") for w in parsed.parse_warnings] or None,
             catch_all=[section.model_dump() for section in parsed.catch_all] or None,
             raw_file_path=raw_path,
         )

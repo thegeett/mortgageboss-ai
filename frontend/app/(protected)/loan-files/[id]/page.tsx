@@ -2,6 +2,7 @@
 
 import { NeedsSummary } from "@/components/file/needs/needs-summary";
 import { ActivityFeed } from "@/components/file/overview/activity-feed";
+import { MismoWarnings } from "@/components/file/overview/mismo-warnings";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
 import { ReconciliationLedger } from "@/components/file/overview/reconciliation-ledger";
 import { StatedFinancialsSection } from "@/components/file/overview/stated-financials-section";
@@ -28,6 +29,10 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      {/* What the import could not read, above the comparison it affects — a
+          ledger row missing a stated value is often one of these (LP-UI-024). */}
+      <MismoWarnings fileId={id} />
+
       <ReconciliationLedger fileId={id} />
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -55,10 +55,25 @@ export interface StatedBorrower {
   employers: StatedEmployer[];
 }
 
+/**
+ * Which part of the file a parse warning is about (LP-UI-024).
+ *
+ * The parser knows what it was looking for when it gave up. Before this, every
+ * warning was a bare sentence and a panel wanting to link one to the field it
+ * concerns had to recognise its own prose.
+ */
+export type WarningSubject = "borrowers" | "income" | "loan" | "property" | "other";
+
+export interface ParseWarning {
+  message: string;
+  /** `other` is a real value, not a gap — a warning belonging to no section still shows. */
+  subject: WarningSubject;
+}
+
 export interface MismoImportSummary {
   source_format: string;
   status: string;
-  warnings: string[];
+  warnings: ParseWarning[];
   imported_at: string;
 }
 
@@ -90,5 +105,5 @@ export interface StatedFinancials {
 /** The LP-54 import response: the created file + parse warnings. */
 export interface MismoImportResult {
   loan_file: LoanFileDetail;
-  warnings: string[];
+  warnings: ParseWarning[];
 }

@@ -87,7 +87,8 @@ async def test_partial_parse_returns_warnings(auth_client: AsyncClient, raw_byte
     resp = await auth_client.post(IMPORT_URL, files=_upload(partial))
     assert resp.status_code == 201  # still created (import-directly)
     body = resp.json()
-    assert any("estimated value" in w for w in body["warnings"])
+    assert any("estimated value" in w["message"] for w in body["warnings"])
+    assert any(w["subject"] == "property" for w in body["warnings"])
     assert body["loan_file"]["id"]  # the file was created despite the missing field
 
 

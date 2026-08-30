@@ -11,6 +11,7 @@ from uuid import UUID
 
 from app.mismo.import_service import create_loan_file_from_mismo
 from app.mismo.parser import parse_mismo
+from app.mismo.schema import WarningSubject
 from app.models import Company, NeedsItem
 from app.models.loan_file import LoanPurpose, RefinanceType
 from app.services.ltv import LtvPurpose, build_ltv_calculation, ltv_purpose_for
@@ -114,7 +115,8 @@ async def test_undetermined_refi_is_surfaced_not_silently_looser(db_session: Asy
     assert loan_file.loan_purpose is LoanPurpose.REFINANCE
     assert loan_file.refinance_type is None  # undetermined — not guessed
     # Surfaced two ways: a parse warning + a "confirm refinance type" needs item.
-    assert any("could not be determined" in w for w in parsed.parse_warnings)
+    assert any("could not be determined" in w.message for w in parsed.parse_warnings)
+    assert any(w.subject is WarningSubject.LOAN for w in parsed.parse_warnings)
     needs = await _needs(db_session, loan_file.id)
     assert any("Confirm refinance type" in n.title for n in needs)
 
@@ -128,7 +130,7 @@ async def test_purchase_is_unaffected(db_session: AsyncSession) -> None:
     loan_file, parsed = await _import(db_session, company, synthetic.base_bytes())
     assert loan_file.loan_purpose is LoanPurpose.PURCHASE
     assert loan_file.refinance_type is None
-    assert not any("refinance type" in w.lower() for w in parsed.parse_warnings)
+    assert not any("refinance type" in w.message.lower() for w in parsed.parse_warnings)
     needs = await _needs(db_session, loan_file.id)
     assert not any("Confirm refinance type" in n.title for n in needs)
 

@@ -131,7 +131,7 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
   if (!isPending && !isError && !hasData) return null;
 
   return (
-    <Card className="border-border/80">
+    <Card id="stated-financials" className="scroll-mt-24 border-border/80">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
@@ -169,24 +169,12 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
         ) : (
           data && (
             <>
-              {/* Honest, non-blocking parse warnings. */}
-              {data.mismo_import && data.mismo_import.warnings.length > 0 && (
-                <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning">
-                  <p className="flex items-center gap-1.5 font-medium">
-                    <Info className="h-4 w-4 shrink-0" />
-                    Imported — a few fields need your attention
-                  </p>
-                  <ul className="mt-1.5 list-disc space-y-0.5 pl-7 text-xs">
-                    {data.mismo_import.warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                  <p className="mt-1.5 pl-7 text-xs text-warning/80">
-                    The file was created —{" "}
-                    {editing ? "fill these in below." : 'use "Edit" to fill these in.'}
-                  </p>
-                </div>
-              )}
+              {/* The parse warnings moved OUT of this card (LP-UI-024). They were
+                  reachable here — inside the section a reader opens only if they
+                  already suspect something — and they could not link anywhere,
+                  because a warning was a bare sentence. `MismoWarnings` renders
+                  them at the top of the Overview with a link per subject. Two
+                  renderings of one list is how they drift; there is one. */}
 
               {editing && <StatedFinancialsEditor fileId={fileId} data={data} />}
 

@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.mismo.schema import ParseWarning
+
 
 class StatedIncomeItemPublic(BaseModel):
     id: UUID  # needed for editing (LP-56)
@@ -101,7 +103,11 @@ class MismoImportSummary(BaseModel):
 
     source_format: str
     status: str
-    warnings: list[str]
+    #: LP-UI-024 — each carries the subject the parser was looking at, so the
+    #: warnings panel links one to the section it concerns. Read through
+    #: `ParseWarning.coerce`: rows written before the subject existed hold bare
+    #: strings, and they are still true.
+    warnings: list[ParseWarning]
     imported_at: datetime
 
 

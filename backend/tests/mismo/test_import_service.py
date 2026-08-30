@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.mismo import import_service
 from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
 from app.mismo.parser import parse_mismo
-from app.mismo.schema import ParsedMismo
+from app.mismo.schema import ParsedMismo, ParseWarning, WarningSubject
 from app.models import (
     Borrower,
     Company,
@@ -205,7 +205,12 @@ async def test_partial_parse_creates_with_warnings(
     # Simulate a partial parse: drop the property value + record a warning.
     assert parsed.property is not None
     parsed.property.estimated_value = None
-    parsed.parse_warnings.append("Subject property is missing an estimated value.")
+    parsed.parse_warnings.append(
+        ParseWarning(
+            message="Subject property is missing an estimated value.",
+            subject=WarningSubject.PROPERTY,
+        )
+    )
 
     company = await _company(db_session)
     lf = await create_loan_file_from_mismo(
@@ -217,7 +222,10 @@ async def test_partial_parse_creates_with_warnings(
         await db_session.scalars(select(MismoImport).where(MismoImport.loan_file_id == lf.id))
     ).one()
     assert record.status is MismoImportStatus.PARTIAL
-    assert any("estimated value" in w for w in record.parse_warnings)
+    # Stored as ParseWarning dicts since LP-UI-024 — the subject travels with the
+    # message so the panel links to the section rather than parsing the sentence.
+    assert any("estimated value" in w["message"] for w in record.parse_warnings)
+    assert any(w["subject"] == "property" for w in record.parse_warnings)
 
 
 async def test_floor_rejects_empty_parse(db_session: AsyncSession, raw_bytes: bytes) -> None:

@@ -24,15 +24,20 @@ function OverviewCard({
   loading = false,
   action,
   children,
+  anchorId,
 }: {
   title: string;
   icon: LucideIcon;
   loading?: boolean;
   action?: React.ReactNode;
   children: React.ReactNode;
+  /** Link target for the MISMO warnings panel (LP-UI-024). */
+  anchorId?: string;
 }) {
   return (
-    <Card className="border-border/80">
+    // `scroll-mt` so a linked card clears the sticky topbar — the same reason
+    // `[data-row]` carries `scroll-margin-block` in globals.css.
+    <Card id={anchorId} className="scroll-mt-24 border-border/80">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Icon className="h-4 w-4 text-muted-foreground" />
@@ -112,7 +117,7 @@ export function BorrowerCard({
   onRetry,
 }: CardState & { borrowers: BorrowerDetail[] | undefined }) {
   return (
-    <OverviewCard title="Borrowers" icon={Users} loading={isPending}>
+    <OverviewCard title="Borrowers" icon={Users} loading={isPending} anchorId="card-borrowers">
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
@@ -158,6 +163,7 @@ export function PropertyCard({
 
   return (
     <OverviewCard
+      anchorId="card-property"
       title="Subject property"
       icon={Building2}
       loading={isPending}
@@ -238,6 +244,7 @@ export function LoanCard({
 
   return (
     <OverviewCard
+      anchorId="card-loan"
       title="Loan"
       icon={Landmark}
       loading={isPending}

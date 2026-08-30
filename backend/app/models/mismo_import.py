@@ -67,7 +67,10 @@ class MismoImport(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     # LP-51 outputs: the needed-now warnings and the everything-else catch-all.
-    parse_warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    #: `ParseWarning` dicts (`{message, subject}`) since LP-UI-024. Rows written
+    #: before it hold bare strings; `ParseWarning.coerce` reads either, so no
+    #: backfill is needed and an old import still shows its warnings.
+    parse_warnings: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     catch_all: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     # Reference to the original MISMO file preserved in the storage layer (audit).
