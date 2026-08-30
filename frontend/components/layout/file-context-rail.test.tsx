@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const pathname = vi.hoisted(() => ({ current: "/loan-files/abc" }));
@@ -13,6 +13,7 @@ const data = vi.hoisted(() => ({
   reserves: undefined as unknown,
   activity: undefined as unknown,
   documents: [] as unknown[],
+  verification: undefined as unknown,
   pending: false,
 }));
 const q = (value: unknown) => ({ data: value, isPending: data.pending });
@@ -25,7 +26,11 @@ vi.mock("@/lib/api/dti", () => ({ useDti: () => q(data.dti) }));
 vi.mock("@/lib/api/ltv", () => ({ useLtv: () => q(data.ltv) }));
 vi.mock("@/lib/api/calculators", () => ({ useCalculator: () => q(data.reserves) }));
 vi.mock("@/lib/api/documents", () => ({ useLoanFileDocuments: () => q(data.documents) }));
-vi.mock("@/lib/api/verification", () => ({ useVerification: () => q(undefined) }));
+const resolveMutate = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/verification", () => ({
+  useVerification: () => q(data.verification),
+  useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
+}));
 
 import { FileContextRail } from "./file-context-rail";
 
@@ -37,7 +42,9 @@ afterEach(() => {
   data.reserves = undefined;
   data.activity = undefined;
   data.documents = [];
+  data.verification = undefined;
   data.pending = false;
+  resolveMutate.mockReset();
   pathname.current = "/loan-files/abc";
 });
 
@@ -217,5 +224,151 @@ describe("FileContextRail — documents coverage, freshness, duplicates (LP-UI-0
   it("says so plainly when no two documents share a type", () => {
     renderDocsTab([doc({ document_type: "w2" }), doc({ id: "b", document_type: "pay_stub" })]);
     expect(screen.getByText(/No two current documents share a type/)).toBeTruthy();
+  });
+});
+
+describe("FileContextRail — verification counts are the GOVERNED ones (LP-UI-020)", () => {
+  function renderVerificationTab(verification: unknown) {
+    pathname.current = "/loan-files/abc/verification";
+    data.verification = verification;
+    renderRail();
+  }
+
+  // `missing_documents` is REQUIRED on RuleFinding, and the rail's
+  // "waiting on" block reads it. A fixture omitting it compiles only because
+  // this mock is untyped, and would throw where the real shape cannot.
+  const finding = (outcome: string, missing: string[] = []) => ({
+    id: `f-${outcome}-${missing.join("-")}`,
+    evaluation_outcome: outcome,
+    missing_documents: missing,
+  });
+
+  it("counts open violations, not the legacy sweep's red count", () => {
+    // THE BUG THIS REPLACES. The block read `red_count` off the run — the LEGACY
+    // sweep's severity — and printed it under the governed engine's word. On
+    // LF-96SV that rendered "Must fix 0" beside ten open violations.
+    renderVerificationTab({
+      latest_run: { red_count: 0, yellow_count: 14, green_count: 0, completed_at: null },
+      rule_findings: [finding("open"), finding("open"), finding("satisfied")],
+      findings: [],
+    });
+    const mustFix = screen.getByText("Must fix").closest("div") as HTMLElement;
+    expect(within(mustFix).getByText("2")).toBeTruthy();
+  });
+
+  it("splits couldn't-check out of needs-review, the way the tab strip does", () => {
+    renderVerificationTab({
+      latest_run: null,
+      rule_findings: [
+        finding("couldnt_check"),
+        finding("couldnt_check"),
+        finding("needs_review"),
+        finding("open"),
+      ],
+      findings: [],
+    });
+    const couldnt = screen.getByText("Couldn't check").closest("div") as HTMLElement;
+    expect(within(couldnt).getByText("2")).toBeTruthy();
+    const review = screen.getByText("Needs review").closest("div") as HTMLElement;
+    expect(within(review).getByText("1")).toBeTruthy();
+  });
+
+  it("keeps the legacy sweep on its own line and never adds it in", () => {
+    // LP-375 is structural: these two are never merged or summed. Four governed
+    // findings and three legacy ones must not read as seven of anything.
+    renderVerificationTab({
+      latest_run: null,
+      rule_findings: [finding("open"), finding("satisfied")],
+      findings: [{ id: "a" }, { id: "b" }, { id: "c" }],
+    });
+    const legacy = screen.getByText("Old findings").closest("div") as HTMLElement;
+    expect(within(legacy).getByText("3")).toBeTruthy();
+    const mustFix = screen.getByText("Must fix").closest("div") as HTMLElement;
+    expect(within(mustFix).getByText("1")).toBeTruthy();
+  });
+
+  it("counts satisfied findings rather than the run's green count", () => {
+    renderVerificationTab({
+      latest_run: { red_count: 0, yellow_count: 0, green_count: 0, completed_at: null },
+      rule_findings: [finding("satisfied"), finding("satisfied")],
+      findings: [],
+    });
+    const satisfied = screen.getByText("Satisfied").closest("div") as HTMLElement;
+    expect(within(satisfied).getByText("2")).toBeTruthy();
+  });
+
+  it("shows em dashes on EVERY count before the verification data arrives", () => {
+    // Zero is a real answer and "not loaded yet" is not. Printing 0 for both
+    // says a file is clear when nothing has been read.
+    //
+    // All four, not one: a mutation that dropped the guard from "Couldn't check"
+    // alone passed a version of this test that only inspected "Must fix". Each
+    // metric carries the guard separately, so each one has to be asserted.
+    renderVerificationTab(undefined);
+    for (const label of [
+      "Must fix",
+      "Couldn't check",
+      "Needs review",
+      "Satisfied",
+      "Old findings",
+    ]) {
+      const row = screen.getByText(label).closest("div") as HTMLElement;
+      expect(within(row).getByText("—"), `${label} should read as unknown, not zero`).toBeTruthy();
+    }
+  });
+
+  it("groups the awaited documents and offers one request for all of them", () => {
+    // Six rules blocked on a credit report is ONE thing to ask for. Grouping by
+    // finding would email the borrower six times for the same document.
+    renderVerificationTab({
+      latest_run: null,
+      rule_findings: [
+        finding("couldnt_check", ["credit report"]),
+        finding("couldnt_check", ["credit report"]),
+        finding("couldnt_check", ["appraisal"]),
+        finding("open"),
+      ],
+      findings: [],
+    });
+    expect(screen.getByText("Waiting on")).toBeTruthy();
+    expect(screen.getByText("credit report")).toBeTruthy();
+    expect(screen.getByText("appraisal")).toBeTruthy();
+    // Deduplicated: two findings blocked on the credit report is ONE document.
+    expect(screen.getByRole("button", { name: "Request all 2" })).toBeTruthy();
+  });
+
+  it("says nothing when no rule is waiting on a document", () => {
+    renderVerificationTab({
+      latest_run: null,
+      rule_findings: [finding("couldnt_check"), finding("open")],
+      findings: [],
+    });
+    expect(screen.queryByText("Waiting on")).toBeNull();
+    // Positive control: the section rendered, so the absence above is real.
+    expect(screen.getByText("Must fix")).toBeTruthy();
+  });
+
+  it("caps the list but still requests every document", () => {
+    // Fifteen names is six lines of prose in a 288px rail. The cap is display
+    // only — the count and the request cover all of them.
+    const docs = ["a", "b", "c", "d", "e", "f", "g"];
+    renderVerificationTab({
+      latest_run: null,
+      rule_findings: docs.map((d) => finding("couldnt_check", [d])),
+      findings: [],
+    });
+    expect(screen.getByText("and 2 more")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request all 7" })).toBeTruthy();
+    expect(screen.queryByText("g")).toBeNull();
+
+    // THE LOAD-BEARING HALF. The cap is display only; the request must still
+    // carry every waiting finding. Asserting the button's LABEL says nothing
+    // about its payload — a version that requested only the five shown passed
+    // every other assertion here.
+    fireEvent.click(screen.getByRole("button", { name: "Request all 7" }));
+    expect(resolveMutate).toHaveBeenCalledTimes(1);
+    const action = resolveMutate.mock.calls[0]?.[0];
+    expect(action.kind).toBe("request-docs-bulk");
+    expect(action.findingIds).toHaveLength(7);
   });
 });

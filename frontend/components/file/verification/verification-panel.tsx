@@ -16,9 +16,9 @@ import { NeedsCompleteness } from "@/components/file/verification/needs-complete
 import { RuleFindingsTabs } from "@/components/file/verification/rule-findings-tabs";
 import { VerificationStats } from "@/components/file/verification/verification-stats";
 import { VersionSelector } from "@/components/file/verification/version-selector";
+import { railClass } from "@/components/status-token";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
@@ -44,7 +44,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
 import { phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Lock, Play, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGGRESSION_META, AggressionDial } from "./aggression-dial";
 
@@ -209,26 +209,29 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   }, [activeLevel, updatePreferences, queryClient, fileId]);
 
   return (
-    <Card className="border-border/80">
-      <CardHeader className="flex-row items-start justify-between space-y-0 pb-4">
-        <div className="space-y-1">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <ScanSearch className="h-4 w-4" />
-            </span>
-            Verification
+    // LP-UI-020: a section, not a Card. This was Card > CardContent > tab panel >
+    // finding card — four rounded borders and four shadows to reach one
+    // sentence. The heading, the program, the version selector and both run
+    // controls all survive; only the box around them is gone.
+    <section aria-labelledby="verification-heading" className="space-y-4">
+      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 id="verification-heading" className="text-label uppercase text-muted-foreground">
+              Verification
+            </h2>
             {data?.program && (
               <Badge variant="secondary" className="font-medium">
                 {humanize(data.program)}
               </Badge>
             )}
-          </CardTitle>
-          <p className="pl-9 text-xs text-muted-foreground">
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
             The full rule set + the AI cross-source pass, against the documents — program- and
             lender-specific.
           </p>
           {data && (
-            <div className="pl-9 pt-1">
+            <div className="pt-1.5">
               <VersionSelector fileId={fileId} currentRunId={data.latest_run?.id ?? null} />
             </div>
           )}
@@ -272,8 +275,8 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             </button>
           )}
         </div>
-      </CardHeader>
-      <CardContent aria-busy={isPending}>
+      </header>
+      <div aria-busy={isPending}>
         {isPending ? (
           <>
             <output className="sr-only">Loading verification</output>
@@ -300,8 +303,8 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             onRetry={triggerRun}
           />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -551,9 +554,17 @@ function FailedRunBanner({
       : (run.detail ?? "The verification pass failed on the worker. No findings were produced.");
 
   return (
+    // LP-UI-020 — a RAIL, not a tinted box. State lives on the left rule and the
+    // glyph; a fill costs text contrast and stacks badly against hover and
+    // focus. `danger` resolves because LP-UI-002 defined it as an alias of
+    // `destructive` — before that, twenty class names across four files named a
+    // colour that did not exist, and this banner drew no border at all.
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-sm text-foreground-2"
+      className={cn(
+        railClass("blocking"),
+        "flex items-start gap-2 py-1.5 pl-3 text-sm text-foreground-2",
+      )}
     >
       <X className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
       <div className="flex-1 space-y-1.5">
@@ -582,7 +593,10 @@ function StaleBanner() {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
+      className={cn(
+        railClass("attention"),
+        "flex items-start gap-2 py-1.5 pl-3 text-sm text-foreground-2",
+      )}
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>

@@ -1,18 +1,25 @@
 "use client";
 
 import { StatusToken, figureToneClass } from "@/components/status-token";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCalculator } from "@/lib/api/calculators";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import { useDti } from "@/lib/api/dti";
 import { useLoanFile, useLoanFileActivity } from "@/lib/api/loan-files";
 import { useLtv } from "@/lib/api/ltv";
-import { useVerification } from "@/lib/api/verification";
+import { useResolveFinding, useVerification } from "@/lib/api/verification";
 import { formatMoney, humanize } from "@/lib/format";
 import { documentCoverage, inFlightDocuments } from "@/lib/loan-files/documents";
 import { fileTabSegment } from "@/lib/navigation";
-import { LOAN_FILE_STATUS, type Tone, resolveStatus } from "@/lib/status";
+import { EVALUATION_OUTCOME, LOAN_FILE_STATUS, type Tone, resolveStatus } from "@/lib/status";
+import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
+import {
+  awaitedDocuments,
+  bucketRuleFindings,
+  splitByMissingDocument,
+} from "@/lib/verification/rule-findings";
 import { formatDistanceToNow } from "date-fns";
 import { usePathname } from "next/navigation";
 
@@ -257,26 +264,123 @@ function DocumentsSection({ fileId }: { fileId: string }) {
   );
 }
 
-/** Run stats — only on the Verification tab, which already fetches these. */
+/**
+ * Run stats — only on the Verification tab, which already fetches these.
+ *
+ * THESE ARE THE GOVERNED OUTCOMES, and until LP-UI-020 they were not. The block
+ * read `red_count` / `yellow_count` / `green_count` off the run, which
+ * `lib/types/verification.ts` says are the LEGACY sweep's severity counts, and
+ * printed them under the governed engine's words. On LF-96SV that rendered
+ * "Must fix 0" beside a file the engine gives ten `open` violations, and
+ * "Satisfied 0" against fourteen satisfied. A processor reading the rail was
+ * told there was nothing to fix.
+ *
+ * Derived through `bucketRuleFindings` — the same function the tab strip buckets
+ * with — so the rail and the tabs cannot drift. Reusing the predicate rather
+ * than counting outcomes again here is the LP-UI-013 lesson: an aggregate must
+ * reuse what its detail screen uses.
+ *
+ * The legacy sweep keeps its own line and its own word. It is never added to the
+ * governed numbers (LP-375), and the two have genuinely different meanings.
+ */
 function VerificationSection({ fileId }: { fileId: string }) {
   const { data: verification } = useVerification(fileId);
   const run = verification?.latest_run ?? null;
+  const ruleFindings = verification?.rule_findings ?? [];
+  const buckets = bucketRuleFindings(ruleFindings);
+
+  // `couldnt_check` is its own bucket as of LP-UI-020 — "we could not check
+  // this" is a different job from "this is wrong", chased with a document
+  // request rather than a correction. The rail reads the same buckets the tab
+  // strip renders, so a routing change moves both together or neither.
+  const couldntCheck = buckets.couldnt_check.length;
+  const mustFix = buckets.attention.filter((f) => f.evaluation_outcome === "open").length;
+  const needsReview = buckets.attention.length - mustFix;
+  const legacy = verification?.findings.length ?? 0;
 
   return (
     <Section title="Verification">
       <Metric
-        label="Must fix"
-        value={run ? String(run.red_count) : DASH}
-        tone={run && run.red_count > 0 ? "blocking" : "neutral"}
+        label={EVALUATION_OUTCOME.open.label}
+        value={verification ? String(mustFix) : DASH}
+        tone={mustFix > 0 ? "blocking" : "neutral"}
       />
       <Metric
-        label="Needs attention"
-        value={run ? String(run.yellow_count) : DASH}
-        tone={run && run.yellow_count > 0 ? "attention" : "neutral"}
+        label={EVALUATION_OUTCOME.couldnt_check.label}
+        value={verification ? String(couldntCheck) : DASH}
+        tone={couldntCheck > 0 ? "attention" : "neutral"}
       />
-      <Metric label="Satisfied" value={run ? String(run.green_count) : DASH} />
+      <Metric
+        label={EVALUATION_OUTCOME.needs_review.label}
+        value={verification ? String(needsReview) : DASH}
+        tone={needsReview > 0 ? "attention" : "neutral"}
+      />
+      <Metric
+        label={EVALUATION_OUTCOME.satisfied.label}
+        value={verification ? String(buckets.satisfied.length) : DASH}
+      />
+      {/* Its own line, its own word, never added to the four above. */}
+      <Metric label="Old findings" value={verification ? String(legacy) : DASH} />
       <Metric label="Last run" value={run?.completed_at ? when(run.completed_at) : DASH} />
+      <AwaitingDocuments fileId={fileId} findings={buckets.couldnt_check} />
     </Section>
+  );
+}
+
+/**
+ * The documents the governed rules are waiting on, and one request for all of
+ * them (LP-UI-020).
+ *
+ * Grouped BY DOCUMENT, not by finding: six rules blocked on a credit report is
+ * one thing to ask the borrower for, and asking six times is how a borrower gets
+ * six emails. `awaitedDocuments` deduplicates, so the count here is documents,
+ * not findings.
+ *
+ * NOT the only way to fire this. The same action sits beside the list it
+ * summarises inside the Couldn't check tab (LP-562), and it stays there: this
+ * rail is `hidden xl:block`, so making it the sole home would put a primary
+ * action out of reach below 1280px — the regression class LP-UI-016 was
+ * overruled on. Both entry points dispatch the identical `request-docs-bulk`,
+ * so there is one mechanism with two doors, not two mechanisms.
+ */
+function AwaitingDocuments({ fileId, findings }: { fileId: string; findings: RuleFinding[] }) {
+  const resolve = useResolveFinding(fileId);
+  const { missing } = splitByMissingDocument(findings);
+  const documents = awaitedDocuments(missing);
+  if (documents.length === 0) return null;
+
+  // Fifteen document names run to six lines of prose in a 288px rail, which is
+  // the opposite of "answerable in one action". Stacked and capped: the names a
+  // processor can act on, then how many more the one request still covers.
+  const SHOWN = 5;
+  const rest = documents.length - SHOWN;
+
+  return (
+    <div className="pt-2">
+      <p className="text-xs font-medium text-muted-foreground">Waiting on</p>
+      <ul className="mt-1 space-y-0.5">
+        {documents.slice(0, SHOWN).map((name) => (
+          <li key={name} className="truncate text-xs text-foreground-2" title={name}>
+            {name}
+          </li>
+        ))}
+        {rest > 0 ? <li className="text-xs text-muted-foreground">and {rest} more</li> : null}
+      </ul>
+      <Button
+        size="sm"
+        variant="outline"
+        className="mt-2 h-7 w-full text-xs"
+        disabled={resolve.isPending}
+        onClick={() =>
+          resolve.mutate({
+            kind: "request-docs-bulk",
+            findingIds: missing.map((finding) => finding.id),
+          })
+        }
+      >
+        Request all {documents.length}
+      </Button>
+    </div>
   );
 }
 

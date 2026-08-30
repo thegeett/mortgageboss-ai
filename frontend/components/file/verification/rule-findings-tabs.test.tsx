@@ -75,17 +75,49 @@ function tab(name: RegExp) {
   return screen.getByRole("tab", { name });
 }
 
+/**
+ * Render, then open the Couldn't check tab (LP-UI-020).
+ *
+ * These tests seed `couldnt_check` findings and used to assert against the
+ * default tab, because that outcome shared "Needs attention". It has its own tab
+ * now. The property each test pins is unchanged — the split between documents to
+ * request and to read, the grouping, the provenance card — so the fixture opens
+ * the tab those findings moved to rather than each test being rewritten.
+ */
+function renderCouldntCheck(
+  ruleFindings: RuleFinding[],
+  legacyCount = 0,
+  ruleFindingsStale = false,
+  onAct?: (action: RuleFindingAction) => void,
+) {
+  const result = renderTabs(ruleFindings, legacyCount, ruleFindingsStale, onAct);
+  fireEvent.click(tab(/couldn.t check/i));
+  return result;
+}
+
 describe("the §8 tabs — the honesty contract", () => {
-  it("puts couldnt_check in Tab 1 (Needs attention), never Tab 2 or Tab 4", () => {
-    // LP-583 — a satisfied finding is seeded so the Satisfied tab EXISTS to be checked. Empty tabs
-    // are hidden now, and the point of this test is that couldnt_check does not LEAK into another
-    // bucket — which needs the other bucket present to be a real assertion.
+  it("gives couldnt_check its OWN tab, and no other tab absorbs it (LP-UI-020)", () => {
+    // The assertion this replaces was "couldnt_check belongs in Tab 1". It moved
+    // deliberately: "we could not check this" is chased with a document request
+    // and "this is wrong" with a correction, and on LF-96SV there are 62 of the
+    // former against 10 of the latter. The PROPERTY is unchanged and is what
+    // still matters — the outcome lands in exactly one bucket and never leaks.
+    //
+    // A satisfied finding is seeded so the Satisfied tab EXISTS to be checked;
+    // an empty tab is hidden, and a queryByText against a tab that never
+    // rendered passes for the wrong reason.
     renderTabs([
       ruleFinding({ evaluation_outcome: "couldnt_check", message: "a gap here" }),
       ruleFinding({ id: "sat", evaluation_outcome: "satisfied", message: "all good" }),
+      ruleFinding({ id: "op", evaluation_outcome: "open", message: "a real violation" }),
     ]);
 
-    // Default tab is Needs attention → the couldnt_check finding shows.
+    // Default tab is Needs attention → the VIOLATION shows, the gap does not.
+    expect(screen.getByText("a real violation")).toBeDefined();
+    expect(screen.queryByText("a gap here")).toBeNull();
+
+    // Its own tab holds it.
+    fireEvent.click(tab(/couldn.t check/i));
     expect(screen.getByText("a gap here")).toBeDefined();
 
     // Tab 2 (Satisfied) does NOT contain it.
@@ -187,20 +219,24 @@ describe("the §8 tabs — the honesty contract", () => {
     expect(screen.queryByText("left the file")).toBeNull();
   });
 
-  it("distinguishes the three Tab-1 outcomes, with the must-fix (open) group first", () => {
+  it("distinguishes Tab 1's two outcomes, with the must-fix (open) group first", () => {
+    // THREE became two: LP-UI-020 moved `couldnt_check` to its own tab, so this
+    // tab holds `open` and `needs_review`. The property is the one that mattered
+    // — the real violations are named separately and come FIRST, never buried
+    // under the softer outcome sharing the tab.
     renderTabs([
       ruleFinding({ id: "cc", evaluation_outcome: "couldnt_check", message: "cc msg" }),
       ruleFinding({ id: "nr", evaluation_outcome: "needs_review", message: "nr msg" }),
       ruleFinding({ id: "op", evaluation_outcome: "open", message: "op msg", status: "red" }),
     ]);
-    // The three outcome group headers are all present and named differently.
     expect(screen.getByRole("heading", { name: "Must fix" })).toBeDefined();
-    expect(screen.getByRole("heading", { name: "Couldn't check" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Needs review" })).toBeDefined();
-    // `open` (Must fix) renders BEFORE `couldnt_check` — the real signal isn't buried, and
-    // LP-583 gives it visual weight too, since ordering alone does not survive a fast scan.
+    // And the moved outcome is NOT here — the split is real, not cosmetic.
+    expect(screen.queryByRole("heading", { name: "Couldn't check" })).toBeNull();
+    expect(screen.queryByText("cc msg")).toBeNull();
+
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
-    expect(headings.indexOf("Must fix")).toBeLessThan(headings.indexOf("Couldn't check"));
+    expect(headings.indexOf("Must fix")).toBeLessThan(headings.indexOf("Needs review"));
   });
 
   it("Tab 2 (Satisfied) is reachable — a pass is visible, not assumed", () => {
@@ -213,7 +249,7 @@ describe("the §8 tabs — the honesty contract", () => {
     // 4 unclassified documents each yield ID-7's identical couldnt_check → ONE row, not four.
     const reason =
       "a document in the file could not be classified — it may be the title commitment";
-    renderTabs(
+    renderCouldntCheck(
       ["s1", "s2", "s3", "s4"].map((sid) =>
         ruleFinding({
           id: sid,
@@ -235,7 +271,7 @@ describe("the §8 tabs — the honesty contract", () => {
 
 describe("the quarantine — the two systems never merge", () => {
   it("a legacy finding never appears in tabs 1-4; a rule finding never in Tab 5", () => {
-    renderTabs([ruleFinding({ message: "GOVERNED-RULE-FINDING" })], 5);
+    renderCouldntCheck([ruleFinding({ message: "GOVERNED-RULE-FINDING" })], 5);
 
     // Tabs 1-4: the governed finding shows, the legacy content does NOT.
     expect(screen.getByText("GOVERNED-RULE-FINDING")).toBeDefined();
@@ -248,7 +284,9 @@ describe("the quarantine — the two systems never merge", () => {
   });
 
   it("never sums the two systems' counts — each tab shows only its own list's count", () => {
-    // 2 governed (Needs attention) + a legacy count of 7 → the tabs read 2 and 7, NEVER 9.
+    // 1 governed in Needs attention + 1 in Couldn't check + a legacy count of 7
+    // → the tabs read 1, 1 and 7. NEVER 9, and never 2 in one governed tab now
+    // that the two outcomes have separate homes.
     renderTabs(
       [
         ruleFinding({ id: "a", evaluation_outcome: "open", status: "red" }),
@@ -256,7 +294,8 @@ describe("the quarantine — the two systems never merge", () => {
       ],
       7,
     );
-    expect(within(tab(/needs attention/i)).getByText("2")).toBeDefined();
+    expect(within(tab(/needs attention/i)).getByText("1")).toBeDefined();
+    expect(within(tab(/couldn.t check/i)).getByText("1")).toBeDefined();
     // LP-583 — an archival tab shows its count only while open (113 "no longer applies" was the
     // largest number on a real file and the least useful). The INVARIANT under test is unchanged:
     // each tab reports its OWN list, never the sum.
@@ -276,7 +315,7 @@ describe("the quarantine — the two systems never merge", () => {
 
 describe("the provenance card — the reasoning IS the product", () => {
   it("shows the AI's reasoning and the guideline when a row is expanded", () => {
-    renderTabs([
+    renderCouldntCheck([
       ruleFinding({
         message: "the address-type is unknown",
         guideline: "Fannie B3-4.1 — residence must be consistent.",
@@ -314,7 +353,7 @@ describe("the provenance card — the reasoning IS the product", () => {
   });
 
   it("has NO §10 action affordances on tabs 1-4 (Accept risk / Request docs / Override / Note — LP-377)", () => {
-    renderTabs([ruleFinding({ message: "expand me" })]);
+    renderCouldntCheck([ruleFinding({ message: "expand me" })]);
     fireEvent.click(screen.getByRole("button", { name: /expand me/i }));
     for (const label of [/accept risk/i, /request docs/i, /override/i, /add note/i, /apply/i]) {
       expect(screen.queryByRole("button", { name: label })).toBeNull();
@@ -340,7 +379,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
   });
 
   it("names the document in the provenance card, never the content-id hash", () => {
-    renderTabs([
+    renderCouldntCheck([
       ruleFinding({
         rule_id: "ID-7",
         evaluation_outcome: "couldnt_check",
@@ -356,7 +395,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
   });
 
   it("a collapsed group expands to WHICH documents (each member's label)", () => {
-    renderTabs([
+    renderCouldntCheck([
       ruleFinding({
         id: "rf-a",
         rule_id: "ID-7",
@@ -424,7 +463,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
   it("LP-518 — an identical-message group still shows that shared message, not a subject list", () => {
     // The LP-376-C behaviour must survive: when every member genuinely says the same thing, that
     // sentence is more useful than a list of filenames.
-    renderTabs(
+    renderCouldntCheck(
       ["March_Statement.pdf", "April_Statement.pdf"].map((label, i) =>
         ruleFinding({
           id: `rf-${i}`,
@@ -511,7 +550,7 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
     // The regression LP-376-C exists to prevent: four identical lines under a summary whose entire
     // purpose is to replace them. When members agree, the bullets carry subjects only.
     const reason = "a document in the file could not be classified";
-    renderTabs(
+    renderCouldntCheck(
       ["March.pdf", "April.pdf", "May.pdf"].map((label, i) =>
         ruleFinding({
           id: `rf-${i}`,
@@ -532,17 +571,21 @@ describe("the subject label (LP-377-B) — the read path's label, never a raw co
 
 describe("LP-377-C — the stale-findings notice", () => {
   it("warns when the latest run did not complete but governed findings are shown", () => {
-    renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ true);
+    renderCouldntCheck([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ true);
     expect(screen.getByText(/from an earlier run/i)).toBeDefined();
   });
 
   it("shows no notice when the findings are current (not stale)", () => {
-    renderTabs([ruleFinding({ evaluation_outcome: "couldnt_check" })], 0, /* stale */ false);
+    renderCouldntCheck(
+      [ruleFinding({ evaluation_outcome: "couldnt_check" })],
+      0,
+      /* stale */ false,
+    );
     expect(screen.queryByText(/from an earlier run/i)).toBeNull();
   });
 
   it("shows no notice when stale but there are no governed findings to mislead about", () => {
-    renderTabs([], 0, /* stale */ true);
+    renderCouldntCheck([], 0, /* stale */ true);
     expect(screen.queryByText(/from an earlier run/i)).toBeNull();
   });
 });
@@ -574,7 +617,7 @@ describe("LP-541 — request vs read inside Couldn't check", () => {
   });
 
   it("names the documents to request rather than only counting them", () => {
-    renderTabs([missing, present]);
+    renderCouldntCheck([missing, present]);
 
     // One request a processor can send in one go, not N separate errands.
     expect(screen.getByText(/waiting on credit report/i)).toBeDefined();
@@ -584,7 +627,7 @@ describe("LP-541 — request vs read inside Couldn't check", () => {
 
   it("does NOT split when every finding is on one side", () => {
     // A single header over the whole bucket adds nesting and says nothing.
-    renderTabs([present]);
+    renderCouldntCheck([present]);
 
     expect(screen.queryByText(/request these/i)).toBeNull();
   });
@@ -593,7 +636,7 @@ describe("LP-541 — request vs read inside Couldn't check", () => {
     // `missing_documents` is empty both for "nothing missing" and for a retired rule we cannot
     // classify. Landing in `present` asks a processor to LOOK; the other side would assert an absence
     // we have not established.
-    renderTabs([missing, { ...present, rule_name: null }]);
+    renderCouldntCheck([missing, { ...present, rule_name: null }]);
 
     expect(screen.getByText(/read or clarify these \(1\)/i)).toBeDefined();
   });
@@ -618,7 +661,7 @@ describe("LP-542 — the missing-document marker outside Couldn't check", () => 
 
   it("does NOT repeat the marker inside Couldn't check", () => {
     // That bucket is already split into request-these and read-these; a per-row chip would say it twice.
-    renderTabs([
+    renderCouldntCheck([
       ruleFinding({
         id: "cr13",
         evaluation_outcome: "couldnt_check",
@@ -654,7 +697,7 @@ describe("LP-562 — one click requests every outstanding document", () => {
       missing_documents: [],
     });
 
-    renderTabs([missingA, missingB, present], 0, false, onAct);
+    renderCouldntCheck([missingA, missingB, present], 0, false, onAct);
     screen.getByRole("button", { name: /request all 1/i }).click();
 
     expect(onAct).toHaveBeenCalledWith({
@@ -668,7 +711,7 @@ describe("LP-564 — the bulk button survives its own best case", () => {
   it("still renders when EVERY finding is waiting on a document", () => {
     // The early return required both sides to be non-empty, so a file where every couldnt_check
     // finding needs a document — the maximum-saving case its own docstring cites — lost the button.
-    renderTabs(
+    renderCouldntCheck(
       [
         ruleFinding({
           id: "a",

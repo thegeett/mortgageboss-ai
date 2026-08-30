@@ -15,7 +15,12 @@ import { humanize } from "@/lib/format";
 import { EVALUATION_OUTCOME, type Tone, resolveStatus } from "@/lib/status";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
-export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
+export type GovernedTabId =
+  | "attention"
+  | "couldnt_check"
+  | "satisfied"
+  | "no_longer_applies"
+  | "not_applicable";
 // LP-586 — `cross_source` is neither governed nor legacy: a separate AI pass over the SNAPSHOT,
 // with its own stability contract and no apply. It gets its own id rather than being folded
 // into either family, because it answers a different question from both.
@@ -24,7 +29,11 @@ export type TabId = GovernedTabId | "legacy" | "cross_source";
 /** The §8 outcomes → their governed tab. */
 const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
   open: "attention",
-  couldnt_check: "attention",
+  // LP-UI-020 — ITS OWN TAB. "We could not check this" is a different job from
+  // "this is wrong": one is chased with a document request, the other with a
+  // correction. On LF-96SV there are 62 of them against 10 real violations, so
+  // sharing a tab was the exact drowning LP-333 warned about, one layer up.
+  couldnt_check: "couldnt_check",
   needs_review: "attention",
   pending_automation: "attention", // LP-391 — a manual-review flag lives where the work is (Tab 1)
   satisfied: "satisfied",
@@ -46,7 +55,6 @@ export function tabForOutcome(outcome: EvaluationOutcome): GovernedTabId {
  * of `couldnt_check` (LP-333's warning, one layer up). */
 export const ATTENTION_ORDER: readonly EvaluationOutcome[] = [
   "open",
-  "couldnt_check",
   "needs_review",
   "pending_automation",
 ] as const;
@@ -106,6 +114,7 @@ export function outcomeMeta(outcome: EvaluationOutcome): OutcomeMeta {
 
 export interface GovernedBuckets {
   attention: RuleFinding[];
+  couldnt_check: RuleFinding[];
   satisfied: RuleFinding[];
   no_longer_applies: RuleFinding[];
   not_applicable: RuleFinding[];
@@ -115,6 +124,7 @@ export interface GovernedBuckets {
 export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
   const buckets: GovernedBuckets = {
     attention: [],
+    couldnt_check: [],
     satisfied: [],
     no_longer_applies: [],
     not_applicable: [],

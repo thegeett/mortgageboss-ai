@@ -474,14 +474,20 @@ describe("VerificationPanel", () => {
       // to nothing and a dead six-minute run announced itself in grey. This pins
       // the markup; `tailwind.config.test.ts` pins the token those classes need,
       // which is the half a DOM test cannot see.
+      //
+      // LP-UI-020 moved the state from a tinted box to a LEFT RAIL — state goes
+      // on the rail and the glyph, never on a fill. The property is unchanged and
+      // is the one that mattered: a failed run must not read as neutral text. Only
+      // the channel carrying the colour moved, so the assertion moved with it.
       mock({
         data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: "boom" } },
       });
       render(<VerificationPanel fileId="LF-1" />);
       const banner = screen.getByRole("alert");
-      expect(banner.className).toContain("border-danger/40");
-      expect(banner.className).toContain("bg-danger/5");
+      expect(banner.className).toContain("border-l-destructive");
       expect(banner.querySelector(".text-danger")).not.toBeNull();
+      // And NOT neutral: the rail must carry a colour, not the default border.
+      expect(banner.className).not.toContain("border-l-border");
     });
 
     it("falls back to a generic reason when the run carries no detail", () => {

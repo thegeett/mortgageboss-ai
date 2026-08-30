@@ -505,18 +505,28 @@ export function RuleFindingsTabs({
   const [active, setActive] = useState<TabId>("attention");
   const buckets = bucketRuleFindings(ruleFindings);
   const openCount = buckets.attention.filter((f) => f.evaluation_outcome === "open").length;
-  const couldntCheckCount = buckets.attention.filter(
-    (f) => f.evaluation_outcome === "couldnt_check",
-  ).length;
 
   const allTabs: TabDef[] = [
     {
       id: "attention",
       label: "Needs attention",
       count: buckets.attention.length,
-      // A violation reds the badge; a blocking gap (couldnt_check, no open) warns it — never neutral, so
-      // a file that only "couldn't check" doesn't read as fine at the tab-strip glance (honesty contract).
-      tone: openCount > 0 ? "danger" : couldntCheckCount > 0 ? "warning" : undefined,
+      // A violation reds the badge. The couldnt_check half of that rule moved
+      // with the findings: this tab no longer holds them, so borrowing their
+      // count for its own tone would colour it for work that is not in it.
+      tone: openCount > 0 ? "danger" : buckets.attention.length > 0 ? "warning" : undefined,
+    },
+    // LP-UI-020 — "we could not check this" is a different job from "this is
+    // wrong": one is chased with a document request, the other with a
+    // correction. On LF-96SV it is 62 against 10, so sharing a tab was the
+    // drowning LP-333 warned about one layer up. `alwaysShow` is deliberate —
+    // "nothing was skipped" is an answer a processor needs, not an absence.
+    {
+      id: "couldnt_check",
+      label: outcomeMeta("couldnt_check").label,
+      count: buckets.couldnt_check.length,
+      tone: buckets.couldnt_check.length > 0 ? "warning" : undefined,
+      alwaysShow: true,
     },
     { id: "satisfied", label: "Satisfied", count: buckets.satisfied.length },
     // Archival: real, worth keeping, and not what anyone opens the page to do.
@@ -602,6 +612,24 @@ export function RuleFindingsTabs({
         {shown === "attention" && (
           <AttentionTab findings={buckets.attention} onAct={onAct} fileId={fileId} />
         )}
+
+        {/* LP-UI-020 — its own tab. `MissingVsPresent` is unchanged: it still
+            splits the documents to GO AND GET from the ones to GO AND READ, and
+            still carries the one batched request (LP-541/562/564). Only the
+            bucket it renders moved out from under "Needs attention". */}
+        {shown === "couldnt_check" &&
+          (buckets.couldnt_check.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">{outcomeMeta("couldnt_check").blurb}</p>
+              <MissingVsPresent findings={buckets.couldnt_check} onAct={onAct} fileId={fileId} />
+            </div>
+          ) : (
+            <EmptyState
+              icon={<CheckCircle2 className="h-8 w-8" />}
+              title="Every rule had what it needed"
+              body="Nothing was skipped for want of a document — a rule that could not run would appear here."
+            />
+          ))}
 
         {shown === "satisfied" &&
           (buckets.satisfied.length > 0 ? (
