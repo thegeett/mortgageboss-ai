@@ -2,7 +2,7 @@
 import type { DocumentResponse } from "@/lib/types/document";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocumentList } from "./document-list";
+import { DOCUMENT_COLUMNS, DocumentList, DocumentRow } from "./document-list";
 
 afterEach(cleanup);
 
@@ -327,5 +327,30 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
     );
     expect(screen.getByText("EMD wire receipt.pdf")).toBeDefined();
     expect(screen.getByText("Home Value estimate.pdf")).toBeDefined();
+  });
+});
+
+describe("the real row against the declared columns", () => {
+  /**
+   * The half `DOCUMENT_COLUMNS` does not cover.
+   *
+   * The header and the skeleton both map that list; the real row hand-writes its
+   * five cells. So the shared list keeps the header and the skeleton in step and
+   * says nothing about the rows — while `list-skeleton.test.tsx` describes what it
+   * prevents as "a new column reaching the rows and not the skeleton". Add a sixth
+   * column today and the header and skeleton grow, the row does not, and the table
+   * jumps sideways exactly as that comment describes.
+   */
+  it("renders one cell per declared column, as the skeleton does", () => {
+    const { container } = render(
+      <table>
+        <tbody>
+          <DocumentRow document={doc()} onSelect={() => {}} />
+        </tbody>
+      </table>,
+    );
+    expect(container.querySelector("tr")?.querySelectorAll("td")).toHaveLength(
+      DOCUMENT_COLUMNS.length,
+    );
   });
 });

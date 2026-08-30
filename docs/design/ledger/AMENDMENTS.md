@@ -1356,3 +1356,50 @@ or an identity document cannot be argued onto the readable side.
 `tax_bill_or_account_number` is deliberately masked on that principle: it reads as
 an account number, and a value that has to be argued about belongs on the masked
 side.
+
+## 2026-08-30 · A31 — from the LP-UI-034 review: three guards that were not guarding
+
+### A31a — a scan that does not look somewhere looks exactly like a clean scan
+
+The no-apology guard listed three directories and there are four. `hooks/` was
+never scanned, and planting the banned phrase there left the whole suite green.
+The roots are derived from the tree now.
+
+This is the same failure as A27a one layer over. There a regex missed a spelling;
+here a list missed a directory. Both are guards whose coverage is authored, and an
+authored coverage list fails silently — nothing distinguishes "scanned and clean"
+from "never looked".
+
+### A31b — the comment-skipping logic dropped real code
+
+`/* note */ const m = "Something went wrong";` was read as a comment. The
+function skipped any line that OPENED a block comment, rather than stripping the
+commented span and keeping the rest. Worth recording because the fix has to hold
+both directions at once: a comment quoting the banned phrase to explain the ban
+must still be skipped, and that is what made the naive version tempting.
+
+### A31c — a shared list that binds two of the three things it looks like it binds
+
+`DOCUMENT_COLUMNS` is mapped by the header and by the skeleton; the real row
+hand-writes its cells. The comment on the list says it prevents "a new column
+reaching the rows and not the skeleton" — the one pairing it does NOT constrain.
+The test had the same blind spot: it compared the skeleton to the list and never
+rendered a row.
+
+**The general shape:** extracting a shared constant binds only the call sites that
+actually read it. The ones that don't are invisible in the diff, because nothing
+about them changed — which is exactly why they are the ones to check.
+
+### A31d — the layout-shift number and the thing it did not measure
+
+The documents skeleton rendered a bare table while every loaded render puts a
+category heading and a count pill above it. That is a shift above the rows, which
+no per-row height fix can reach — and the measurement reported 2px, which a
+missing heading line cannot produce.
+
+The ticket was right to distrust its own method. The lesson is narrower than "the
+method was wrong": a measurement answers for the element it polled and for the
+moment it ran, and neither is a regression test. The structural facts — the
+skeleton has a heading, the heading precedes the table, the row and the skeleton
+agree on cell count — are pinned by tests that survive the next change to either
+side.

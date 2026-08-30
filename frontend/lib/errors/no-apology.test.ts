@@ -25,7 +25,25 @@ import { describe, expect, it } from "vitest";
 const BANNED = [/something went wrong/i, /an error occurred/i, /an unexpected error/i];
 
 const ROOT = new URL("../../", import.meta.url).pathname;
-const SEARCH = ["app", "components", "lib"];
+
+/** Not source: dependencies, build output, static assets. */
+const NOT_SOURCE = new Set(["node_modules", "public", "coverage"]);
+
+/**
+ * Every top-level directory that holds source, DERIVED rather than listed.
+ *
+ * The listed version was `["app", "components", "lib"]` and silently missed
+ * `hooks/` — six files including `use-require-auth`, which is exactly the kind of
+ * place a toast message gets written. A ban guard that does not scan somewhere is
+ * indistinguishable from one that scans it and finds nothing, and the whole point
+ * of this test is the file nobody has written yet. Verified by planting the phrase
+ * in `hooks/`: the listed version stayed green.
+ */
+function searchRoots(): string[] {
+  return readdirSync(ROOT, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !NOT_SOURCE.has(e.name))
+    .map((e) => e.name);
+}
 
 function sourceFiles(): string[] {
   const walk = (dir: string): string[] =>
@@ -34,7 +52,7 @@ function sourceFiles(): string[] {
       if (entry.isDirectory()) return entry.name === "node_modules" ? [] : walk(path);
       return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
     });
-  return SEARCH.flatMap((dir) => walk(join(ROOT, dir)));
+  return searchRoots().flatMap((dir) => walk(join(ROOT, dir)));
 }
 
 /**
@@ -50,19 +68,34 @@ function codeLines(source: string): Array<[number, string]> {
   const out: Array<[number, string]> = [];
   let inBlock = false;
   source.split("\n").forEach((line, index) => {
-    const trimmed = line.trim();
-    if (inBlock) {
-      if (trimmed.includes("*/")) inBlock = false;
-      return;
+    // STRIP the commented spans rather than dropping the whole line. Dropping it
+    // skipped any code that shared a line with a comment, and
+    // `/* note */ const m = "Something went wrong";` is a line a formatter can
+    // produce — the guard read it as a comment and reported nothing.
+    let rest = line;
+    let code = "";
+    for (;;) {
+      if (inBlock) {
+        const close = rest.indexOf("*/");
+        if (close === -1) break;
+        rest = rest.slice(close + 2);
+        inBlock = false;
+        continue;
+      }
+      const open = rest.indexOf("/*");
+      if (open === -1) {
+        code += rest;
+        break;
+      }
+      code += rest.slice(0, open);
+      rest = rest.slice(open + 2);
+      inBlock = true;
     }
-    if (trimmed.startsWith("//")) return;
-    // `{/*` and `/*` both open a block; a one-line `/* … */` closes immediately.
-    const opens = trimmed.startsWith("/*") || trimmed.startsWith("{/*");
-    if (opens) {
-      if (!trimmed.includes("*/")) inBlock = true;
-      return;
-    }
-    out.push([index + 1, line]);
+    // A `//` comment is skipped only when it is the WHOLE line. A trailing one is
+    // still scanned, which can over-report — the safe direction for a ban, and
+    // cheaper than deciding whether a `//` sits inside a string literal.
+    if (code.trim().startsWith("//")) return;
+    if (code.trim().length > 0) out.push([index + 1, code]);
   });
   return out;
 }
@@ -82,6 +115,32 @@ describe("no apology stands in for information", () => {
       "\n",
     );
     expect(codeLines(sample).map(([, line]) => line)).toEqual(["const a = 1;", "const b = 2;"]);
+  });
+
+  it("scans every directory that holds source, not a remembered three", () => {
+    // `hooks/` was missed by the listed version. Asserted by NAME because the
+    // failure is silent: a phrase planted there stayed green through the whole
+    // suite, and no other assertion here can tell "scanned and clean" from
+    // "never looked".
+    expect(searchRoots()).toContain("hooks");
+    expect(sourceFiles().some((f) => f.includes("/hooks/"))).toBe(true);
+  });
+
+  it("keeps the code that shares a line with a comment", () => {
+    // The false negative in the old `codeLines`: a line OPENING a block comment
+    // was dropped whole, so anything after the `*/` went unscanned.
+    const sample = '/* note */ const m = "Something went wrong";';
+    expect(codeLines(sample)).toHaveLength(1);
+    expect(BANNED.some((p) => p.test(codeLines(sample)[0]?.[1] ?? ""))).toBe(true);
+  });
+
+  it("still skips a phrase quoted inside a block comment", () => {
+    // The other direction, and the reason `codeLines` exists: a comment must be
+    // able to explain the ban by quoting it.
+    const sample = ["/**", " * We never say 'Something went wrong'.", " */", "const a = 1;"].join(
+      "\n",
+    );
+    expect(codeLines(sample).map(([, line]) => line.trim())).toEqual(["const a = 1;"]);
   });
 
   it("no user-facing string says 'something went wrong'", () => {

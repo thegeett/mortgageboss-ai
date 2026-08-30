@@ -62,3 +62,34 @@ describe("ListSkeleton", () => {
     }
   });
 });
+
+describe("the group heading", () => {
+  /**
+   * The loaded list ALWAYS renders a category label and a count pill above each
+   * table. The skeleton rendered a bare table, so the rows arrived lower than
+   * they started on every documents tab — a shift no per-row height fix could
+   * remove, because it is above the rows.
+   *
+   * Asserted on the elements rather than on a measured height: jsdom computes no
+   * layout, so what this can pin is that the same structure is present, and the
+   * classes carry the size the way the cells already do.
+   */
+  it("stands in for the heading the loaded list always has", () => {
+    const { container } = render(<ListSkeleton />);
+    const heading = container.querySelector("h3");
+    expect(heading).not.toBeNull();
+    // The type class is what gives the line its height; a hardcoded pixel height
+    // here would be the same copied-number bug the row heights already had.
+    expect(heading?.className).toContain("text-label");
+  });
+
+  it("puts the heading ABOVE the table, where the real one sits", () => {
+    const { container } = render(<ListSkeleton />);
+    const heading = container.querySelector("h3");
+    const table = container.querySelector("table");
+    expect(heading).not.toBeNull();
+    expect(table).not.toBeNull();
+    // compareDocumentPosition: FOLLOWING means the table comes after the heading.
+    expect(heading?.compareDocumentPosition(table as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});

@@ -121,3 +121,74 @@ shared `ErrorState` now supports the two-action shape the mockup shows, and
 
 The other 20 or so ad-hoc empty states outside the lists named here still render
 their own markup. They read correctly; they simply do not use the primitive yet.
+
+---
+
+## Review (LP-UI-034 review commit)
+
+Reviewed on request from the session running the epic. Four findings, three of
+them in the guards rather than in the feature.
+
+### 1. The ban guard did not scan `hooks/`
+
+`SEARCH` listed `["app", "components", "lib"]`. `hooks/` holds six files including
+`use-require-auth` — exactly the kind of place a toast message gets written.
+Verified by planting "Something went wrong" there: the whole suite stayed green.
+
+A scan that does not look somewhere is indistinguishable from one that looks and
+finds nothing, and this guard exists for the file nobody has written yet. The
+roots are derived from the tree now, so a new top-level source directory cannot be
+missed by being forgotten.
+
+### 2. `codeLines` dropped code that shared a line with a comment
+
+A line opening a block comment was skipped whole, so
+`/* note */ const m = "Something went wrong";` — a line a formatter can produce —
+was read as a comment and reported nothing. It strips the commented spans now and
+keeps the rest, which also preserves the property the function exists for: a
+comment quoting the banned phrase to explain the ban is still skipped.
+
+### 3. The skeleton had no group heading, and that is where the shift is
+
+The per-row work is right — the skeleton is built from the same primitives, so it
+cannot drift from the row height again. But the loaded list **always** renders a
+category label and a count pill above each table, and the skeleton rendered a bare
+table. The rows arrive lower than they started on every documents tab, and no
+per-row fix can reach it, because it is above the rows.
+
+This is worth weighing against the measurement. 2px is not consistent with a
+missing heading line; a group label plus its margin is an order of magnitude more
+than that. The likely explanation is what the ticket already worried about — the
+polled element. Measuring the container's top rather than the first row's would
+report a small number while the rows moved. The skeleton now renders the heading,
+with the `h3` and pill keeping their own classes so the line box comes from the
+type scale rather than a height typed in by hand.
+
+### 4. `DOCUMENT_COLUMNS` keeps the header and the skeleton in step, not the rows
+
+Both the header and the skeleton map the shared list. The real row hand-writes its
+five cells. So adding a sixth column grows the header and the skeleton and leaves
+the row behind — which is precisely the sideways jump the comment on that list
+describes as the thing it prevents. `list-skeleton.test.tsx` pinned skeleton
+against columns and never rendered a real row. `DocumentRow` is exported and the
+comparison is made against the existing `doc()` factory; verified by adding a
+sixth column, which now fails.
+
+### Confirmed, not changed
+
+- **The row COUNT (3 vs 9).** The judgement holds, and it is checkable rather than
+  a matter of taste: no document count exists on any response the page already
+  has — not on the loan-file detail, not anywhere in the document types. On a cold
+  load the client genuinely cannot know how many rows are coming.
+- **The `isGeneric` refactor.** No stale string comparison survives anywhere; the
+  remaining occurrences of the banned phrases are all inside comments explaining
+  the ban, which the fixed `codeLines` correctly skips.
+- **The remaining ad-hoc empty states.** Measured: 23 files carry a `length === 0`
+  branch without the primitive, matching the ticket's estimate. Several are
+  conditional guards rather than empty states. None of them say a banned phrase,
+  and the fixed guard now covers all of them.
+
+### Verification
+
+biome 0, tsc 0, **898 vitest**, build clean. No backend change, so no pytest run.
+Six mutations, all caught.

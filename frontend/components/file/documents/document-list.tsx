@@ -46,7 +46,8 @@ import { PackageCheck } from "lucide-react";
  * a reader looks to find out whether a document is usable.
  */
 
-function DocumentRow({
+/** Exported for `list-skeleton.test.tsx`, which compares its cell count to the skeleton's. */
+export function DocumentRow({
   document,
   onSelect,
 }: {
@@ -170,6 +171,20 @@ export function ListSkeleton() {
   return (
     <div aria-busy>
       <output className="sr-only">Loading documents</output>
+      {/* THE GROUP HEADING, which the loaded list ALWAYS renders and this did
+          not. Every real render puts a category label and a count pill above the
+          table; a skeleton without one hands the table back lower than it started,
+          on every documents tab. Same discipline as the cells: the `h3` and the
+          pill keep their own classes so the line box comes from the type scale
+          rather than from a height somebody typed here. */}
+      <div className="mb-1 flex items-center gap-2">
+        <h3 className="text-label uppercase text-muted-foreground">
+          <Skeleton className="inline-block h-[0.75em] w-24 align-middle" />
+        </h3>
+        <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+          <Skeleton className="inline-block h-[0.75em] w-2 align-middle" />
+        </span>
+      </div>
       <Table className="table-fixed">
         <DocumentTableHeader />
         <TableBody>
