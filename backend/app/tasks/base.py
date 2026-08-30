@@ -39,8 +39,38 @@ logger = structlog.get_logger(__name__)
 
 
 def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Run a coroutine to completion from a sync Celery task (fresh loop per call)."""
-    return asyncio.run(coro)
+    """Run a coroutine to completion from a sync Celery task (fresh loop per call).
+
+    **This is the task boundary, so it is where per-loop resources are released** (LP-636
+    defect 1). The AI client is cached for reuse, but its HTTP connection pool belongs to the
+    loop that opened those connections. This function closes that loop when the task ends, so a
+    cached client would hand the NEXT task a dead socket — ``RuntimeError: Event loop is
+    closed``, which the SDK surfaces as ``APIConnectionError`` in 1-5ms, before any network I/O.
+    On staging that produced 91 such failures in one burst and cost 5 of 44 documents.
+
+    The client is closed and forgotten INSIDE the loop, in a ``finally``, because ``close()`` is
+    a coroutine and has to release its transports while their loop is still alive. Doing it after
+    ``asyncio.run`` returns would be too late.
+
+    Pooling itself is left ON. It is correct and valuable WITHIN a task — one verification run
+    makes hundreds of calls on this single loop, and a fresh handshake for each would be paid
+    hundreds of times. The bug is reuse ACROSS tasks, and that is what this boundary ends.
+
+    The same shape ``task_session`` uses below: build per task, release at the end.
+    """
+
+    async def _with_task_scoped_client() -> T:
+        try:
+            return await coro
+        finally:
+            # Import here, not at module scope: `app.ai.client` pulls in settings and the
+            # provider SDKs, and `base` is imported by every task module including ones with no
+            # AI in them (health.py pings the database and nothing else).
+            from app.ai.client import close_anthropic_client
+
+            await close_anthropic_client()
+
+    return asyncio.run(_with_task_scoped_client())
 
 
 @asynccontextmanager

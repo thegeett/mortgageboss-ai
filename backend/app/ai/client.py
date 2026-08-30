@@ -36,7 +36,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-import httpx
 import structlog
 from anthropic import (
     APIConnectionError,
@@ -202,41 +201,6 @@ def build_document_message(
     return {"role": "user", "content": blocks}
 
 
-#: The SDK's own defaults, restated because injecting an ``http_client`` REPLACES them with
-#: httpx's — and httpx's are wrong here in a way that fails silently.
-#:
-#: ``read`` is the dangerous one: httpx defaults to 5s FLAT, these calls stream for minutes, so a
-#: bare ``httpx.AsyncClient()`` would break almost every extraction while looking like a tidy
-#: refactor. ``max_connections`` matters under the worker's four children.
-#: (`anthropic._constants`: DEFAULT_TIMEOUT, DEFAULT_CONNECTION_LIMITS — copied, not imported: a
-#: private constant that changed shape under us would be worse than a stated value that does not.)
-_SDK_TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=600.0, pool=600.0)
-
-#: **max_keepalive_connections=0 is the fix for LP-636 defect 1**, not a tuning knob.
-#:
-#: ``get_anthropic_client`` is ``lru_cache``d — one client for the process — while ``run_async``
-#: (``app/tasks/base.py``) is ``asyncio.run``: a FRESH event loop per Celery task, closed when the
-#: task ends. A pooled keep-alive connection outlives the loop it was opened on, and the next task
-#: that takes it from the pool fails instantly with ``RuntimeError: Event loop is closed``, which
-#: the SDK surfaces as ``APIConnectionError``. On staging that cost 5 of 44 documents in one upload
-#: and produced 91 failures at 1-5ms — too fast to have reached AWS.
-#:
-#: Reproduced and fixed under test (``tests/ai/test_client_event_loops_lp636.py``): 4 of 8 calls
-#: fail across successive ``asyncio.run`` loops with pooling on, 8 of 8 pass with it off.
-#:
-#: This is the same decision the database layer already made for the same reason — ``task_session``
-#: builds its engine with ``NullPool`` "so no connection is shared across loops". Doing it
-#: unconditionally, rather than only under Celery, means any script, bench or test that runs its
-#: own loop is covered too. The cost is a TCP+TLS handshake per call, which against a
-#: multi-second model call is noise.
-_NO_KEEPALIVE_LIMITS = httpx.Limits(max_connections=1000, max_keepalive_connections=0)
-
-
-def _build_http_client() -> httpx.AsyncClient:
-    """An httpx client that never pools a connection across event loops (LP-636)."""
-    return httpx.AsyncClient(timeout=_SDK_TIMEOUT, limits=_NO_KEEPALIVE_LIMITS)
-
-
 @lru_cache(maxsize=1)
 def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     """The shared singleton async client for the ACTIVE provider (lazy, cached — LP-35 style).
@@ -275,10 +239,15 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
       INSIDE that window — a burst, which is exactly when it matters. On staging it cost
       5 of 44 documents in one upload.
 
-      Caching is safe **because the pool is disabled** (``_NO_KEEPALIVE_LIMITS`` above), not
-      because a shared pool tolerates a closed loop. Keep the two facts attached: if the
-      keep-alive limit is ever raised, this bug returns. ``tests/ai/test_client_event_loops_lp636.py``
-      fails if it is.
+      **The cache is scoped to the TASK, not the process.** :func:`run_async`
+      (``app/tasks/base.py``) closes and clears this client inside the loop it belongs to,
+      before that loop ends, so a client never outlives its loop — while pooling stays ON
+      WITHIN a task, which is where it earns its keep: one verification run makes hundreds
+      of calls on a single loop, and a handshake per call would be paid hundreds of times.
+
+      This is the shape ``task_session`` already uses for the database — a fresh engine per
+      task, disposed at the end — rather than one cached forever with pooling disabled.
+      ``tests/ai/test_client_event_loops_lp636.py`` fails if the boundary is removed.
     * *Credential refresh.* ``AsyncAnthropicBedrock`` signs **per request** (its
       ``_prepare_request`` calls the SigV4 signer), and the cached ``boto3.Session`` it
       signs with resolves credentials through the provider chain, so a rotating ECS task
@@ -306,15 +275,32 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
             aws_region=settings.bedrock_region,
             aws_profile=settings.aws_profile,  # None → the default chain, unchanged
             max_retries=0,
-            http_client=_build_http_client(),  # LP-636 — no cross-loop connection reuse
         )
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
-    return AsyncAnthropic(
-        api_key=settings.anthropic_api_key,
-        max_retries=0,
-        http_client=_build_http_client(),  # LP-636 — same reason; both providers are httpx-based
-    )
+    return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
+
+
+async def close_anthropic_client() -> None:
+    """Close the cached client and forget it. **Await this INSIDE the loop that built it.**
+
+    LP-636 defect 1. The client is cached for reuse, but its connection pool belongs to the event
+    loop that opened those connections. ``run_async`` gives every Celery task a fresh loop and
+    closes it at the end, so a client that survives the task hands the next one a dead socket:
+    ``RuntimeError: Event loop is closed``, surfaced as ``APIConnectionError`` in 1-5ms.
+
+    Called from ``run_async``'s ``finally``, still inside the loop — ``close()`` is a coroutine and
+    has to shut its transports down while their loop is alive. Closing after ``asyncio.run``
+    returns would be too late, and would leak the sockets it meant to release.
+
+    A no-op when nothing was cached, so the many tasks that never make an AI call pay nothing —
+    and it must not CONSTRUCT a client merely to close one.
+    """
+    if get_anthropic_client.cache_info().currsize == 0:
+        return
+    client = get_anthropic_client()
+    get_anthropic_client.cache_clear()
+    await client.close()
 
 
 #: Bedrock error codes that mean "try again shortly", matched on the SDK exception's
