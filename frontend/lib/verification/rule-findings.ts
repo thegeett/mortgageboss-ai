@@ -12,6 +12,7 @@
  * ratification-pending judgment is not a violation) — same tab, the detail says which.
  */
 import { humanize } from "@/lib/format";
+import { EVALUATION_OUTCOME, type Tone, resolveStatus } from "@/lib/status";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
 export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
@@ -50,74 +51,58 @@ export const ATTENTION_ORDER: readonly EvaluationOutcome[] = [
   "pending_automation",
 ] as const;
 
-export type OutcomeTone = "danger" | "warning" | "info" | "success" | "muted";
-
 export interface OutcomeMeta {
   /** The short label a processor triages on. */
   label: string;
   /** One line: what THIS outcome means (so `couldnt_check` reads as a gap, not a violation). */
   blurb: string;
-  tone: OutcomeTone;
+  tone: Tone;
 }
+
+/**
+ * The prose. LP-UI-005 moved the LABEL and the TONE to `lib/status.ts`
+ * (EVALUATION_OUTCOME) so every domain shares one colour vocabulary; what stays
+ * here is the domain writing, which is not presentation and was argued out in
+ * LP-583 and LP-581.
+ *
+ * Two outcomes changed TONE and neither changed wording: `needs_review` and
+ * `pending_automation` were `info` and are now `attention`. Both mean a human
+ * must look — which is what `attention` means, and which is the tab they were
+ * already bucketed into by ATTENTION_ORDER.
+ */
+const OUTCOME_BLURB: Record<EvaluationOutcome, string> = {
+  // LP-583 — "Violation" is not vocabulary at any stage of the loan: processors and underwriters
+  // say "condition", post-close QC says "defect" (Fannie's and FHA's taxonomies are both Defect
+  // Taxonomies). It was also the only severity NOUN in a set of action phrases — "Needs review",
+  // "Couldn't check". "Must fix" matches the register and says what to do.
+  open: "A rule fired — a real finding that needs action.",
+  couldnt_check:
+    "The rule applies and the thing might exist, but a required input is missing — a gap, not a pass.",
+  // LP-581 — plain English: "ratification" is the engine's word (ADR-336), not a processor's.
+  needs_review: "A judgment awaiting your sign-off — not a violation.",
+  pending_automation:
+    "This file has something in scope, but the automated check isn't active yet — a human must review it. The system has NOT judged it (not a pass/fail).",
+  satisfied: "The rule ran and passed — with evidence.",
+  no_longer_applies: "The subject left the file since a prior run.",
+  not_applicable: "The rule is irrelevant to this subject's nature — not a pass, and not a gap.",
+};
 
 /** Shown for an outcome outside this union (a backend enum that grew) — surfaced, never crashed on. */
 const FALLBACK_META: OutcomeMeta = {
   label: "Unknown outcome",
   blurb:
     "An outcome this view doesn't recognise yet — surfaced here so it is never silently dropped.",
-  tone: "warning",
+  tone: "attention",
 };
 
-/** OUTCOME_META lookup that never returns undefined: an outcome outside the union → a safe fallback, so
- *  one unexpected value degrades a single row instead of crashing the whole tabs render. */
+/** Never returns undefined: an outcome outside the union → a safe fallback, so one unexpected value
+ *  degrades a single row instead of crashing the whole tabs render. */
 export function outcomeMeta(outcome: EvaluationOutcome): OutcomeMeta {
-  return OUTCOME_META[outcome] ?? FALLBACK_META;
+  const blurb = OUTCOME_BLURB[outcome];
+  if (!blurb) return FALLBACK_META;
+  const { label, tone } = resolveStatus(EVALUATION_OUTCOME, outcome);
+  return { label, blurb, tone };
 }
-
-export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
-  open: {
-    // LP-583 — "Violation" is not vocabulary at any stage of the loan: processors and underwriters
-    // say "condition", post-close QC says "defect" (Fannie's and FHA's taxonomies are both Defect
-    // Taxonomies). It was also the only severity NOUN in a set of action phrases — "Needs review",
-    // "Couldn't check". "Must fix" matches the register and says what to do.
-    label: "Must fix",
-    blurb: "A rule fired — a real finding that needs action.",
-    tone: "danger",
-  },
-  couldnt_check: {
-    label: "Couldn't check",
-    blurb:
-      "The rule applies and the thing might exist, but a required input is missing — a gap, not a pass.",
-    tone: "warning",
-  },
-  needs_review: {
-    label: "Needs review",
-    // LP-581 — plain English: "ratification" is the engine's word (ADR-336), not a processor's.
-    blurb: "A judgment awaiting your sign-off — not a violation.",
-    tone: "info",
-  },
-  pending_automation: {
-    label: "Manual review",
-    blurb:
-      "This file has something in scope, but the automated check isn't active yet — a human must review it. The system has NOT judged it (not a pass/fail).",
-    tone: "info",
-  },
-  satisfied: {
-    label: "Satisfied",
-    blurb: "The rule ran and passed — with evidence.",
-    tone: "success",
-  },
-  no_longer_applies: {
-    label: "No longer applies",
-    blurb: "The subject left the file since a prior run.",
-    tone: "muted",
-  },
-  not_applicable: {
-    label: "Not applicable",
-    blurb: "The rule is irrelevant to this subject's nature — not a pass, and not a gap.",
-    tone: "muted",
-  },
-};
 
 export interface GovernedBuckets {
   attention: RuleFinding[];

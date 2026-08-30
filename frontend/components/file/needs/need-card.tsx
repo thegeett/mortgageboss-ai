@@ -3,7 +3,9 @@ import {
   NeedCoverageFlag,
   NeedDuplicateFlag,
 } from "@/components/file/needs/need-actions";
-import { PRIORITY_META, STATE_META, isProposed, sourceLabel } from "@/lib/loan-files/needs";
+import { StatusToken, railClass } from "@/components/status-token";
+import { isProposed, sourceLabel } from "@/lib/loan-files/needs";
+import { NEEDS_PRIORITY, NEEDS_STATUS, resolveStatus } from "@/lib/status";
 import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { cn } from "@/lib/utils";
 import { FileCheck2, Sparkles } from "lucide-react";
@@ -15,7 +17,7 @@ import { FileCheck2, Sparkles } from "lucide-react";
  * A proposed need gets a quiet left accent: it's awaiting the processor's review.
  */
 export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
-  const state = STATE_META[need.status];
+  const state = resolveStatus(NEEDS_STATUS, need.status);
   const proposed = isProposed(need);
   const isAi = need.origin === "ai_reasoning" || need.origin === "suggestion";
   const showPriority = need.priority !== "standard";
@@ -24,17 +26,14 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
     <li
       className={cn(
         "rounded-lg border border-border/80 bg-card px-3.5 py-3 transition-colors",
-        proposed && "border-l-[3px] border-l-primary",
+        // State reads on the left rail, not a fill (SPEC rule 5). `proposed` is
+        // provenance rather than state, so it keeps the accent and wins the rail.
+        proposed ? "border-l-[3px] border-l-primary" : railClass(state.tone),
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            {/* Dot nudged down to sit on the first line now that the title can wrap. */}
-            <span
-              className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", state.dotClass)}
-              aria-hidden
-            />
             {/* AI-generated titles are long descriptive sentences — wrap in full (no truncate),
                 so the processor reads the whole need. The Confirm button + menu stay top-aligned. */}
             <p className="min-w-0 text-sm font-semibold text-foreground">{need.title}</p>
@@ -45,28 +44,14 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
           )}
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-4">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                state.pillClass,
-              )}
-            >
-              {state.label}
-            </span>
+            <StatusToken meta={state} variant="chip" />
             {proposed && (
               <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                 Proposed — review
               </span>
             )}
             {showPriority && (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                  PRIORITY_META[need.priority].className,
-                )}
-              >
-                {PRIORITY_META[need.priority].label}
-              </span>
+              <StatusToken meta={resolveStatus(NEEDS_PRIORITY, need.priority)} variant="chip" />
             )}
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {sourceLabel(need.origin)}

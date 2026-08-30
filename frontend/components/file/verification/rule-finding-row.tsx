@@ -12,45 +12,53 @@
  * LP-377, and a button that does nothing is a lie).
  */
 
+import { StatusToken, railClass } from "@/components/status-token";
 import { humanize } from "@/lib/format";
+import type { Tone } from "@/lib/status";
 import type { RuleFinding, RuleFindingTag } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
-import { type OutcomeTone, outcomeMeta, ruleCategoryLabel } from "@/lib/verification/rule-findings";
+import { outcomeMeta, ruleCategoryLabel } from "@/lib/verification/rule-findings";
 import { ChevronDown, FileText, Gavel } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { type RuleFindingAction, RuleFindingActions } from "./rule-finding-actions";
 
-const TONE: Record<OutcomeTone, { text: string; chipBg: string; border: string; dot: string }> = {
-  danger: {
+const TONE: Record<Tone, { text: string; chipBg: string; border: string; dot: string }> = {
+  blocking: {
     text: "text-destructive",
     chipBg: "bg-destructive/10 text-destructive",
     border: "border-destructive/30",
     dot: "bg-destructive",
   },
-  warning: {
+  attention: {
     text: "text-warning",
     chipBg: "bg-warning/10 text-warning",
     border: "border-warning/30",
     dot: "bg-warning",
   },
-  info: {
-    text: "text-info",
-    chipBg: "bg-info/10 text-info",
-    border: "border-info/30",
-    dot: "bg-info",
-  },
-  success: {
+  verified: {
     text: "text-success",
     chipBg: "bg-success/10 text-success",
     border: "border-success/30",
     dot: "bg-success",
   },
-  muted: {
+  progress: {
+    text: "text-info",
+    chipBg: "bg-info/10 text-info",
+    border: "border-info/30",
+    dot: "bg-info",
+  },
+  neutral: {
     text: "text-muted-foreground",
     chipBg: "bg-muted text-muted-foreground",
     border: "border-border",
     dot: "bg-muted-foreground",
+  },
+  ai: {
+    text: "text-ai",
+    chipBg: "bg-ai/10 text-ai",
+    border: "border-ai/30",
+    dot: "bg-ai",
   },
 };
 
@@ -196,7 +204,13 @@ export function RuleFindingRow({
   const panelId = useId();
 
   return (
-    <div className={cn("rounded-lg border", expanded ? tone.border : "border-border/70")}>
+    <div
+      className={cn(
+        "rounded-lg border",
+        expanded ? tone.border : "border-border/70",
+        railClass(meta.tone),
+      )}
+    >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -204,7 +218,6 @@ export function RuleFindingRow({
         aria-controls={panelId}
         className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-muted/70"
       >
-        <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", tone.dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <RuleLabel finding={finding} />
@@ -221,11 +234,11 @@ export function RuleFindingRow({
           </div>
           <p className="mt-0.5 line-clamp-2 text-sm text-foreground-2">{finding.message}</p>
         </div>
-        <span
-          className={cn("shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold", tone.chipBg)}
-        >
-          {meta.label}
-        </span>
+        <StatusToken
+          meta={{ tone: meta.tone, label: meta.label }}
+          variant="chip"
+          className="shrink-0"
+        />
         <ChevronDown
           className={cn(
             "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform",

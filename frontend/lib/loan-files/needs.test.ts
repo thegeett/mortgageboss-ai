@@ -1,5 +1,4 @@
 import {
-  PRIORITY_META,
   categoryLabel,
   groupNeeds,
   isProposed,
@@ -7,6 +6,7 @@ import {
   proposedNeedsCount,
   sourceLabel,
 } from "@/lib/loan-files/needs";
+import { NEEDS_PRIORITY, resolveStatus } from "@/lib/status";
 import type {
   NeedsItemDisposition,
   NeedsItemOrigin,
@@ -124,11 +124,11 @@ describe("categoryLabel", () => {
   });
 });
 
-describe("PRIORITY_META", () => {
+describe("NEEDS_PRIORITY", () => {
   it("has a label + classes for each priority", () => {
     for (const priority of ["blocking", "standard", "low"] as const) {
-      expect(PRIORITY_META[priority].label).toBeTruthy();
-      expect(PRIORITY_META[priority].className).toContain("border");
+      expect(resolveStatus(NEEDS_PRIORITY, priority).label).toBeTruthy();
+      expect(resolveStatus(NEEDS_PRIORITY, priority).tone).toBeTruthy();
     }
   });
 });

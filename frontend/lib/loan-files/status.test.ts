@@ -1,4 +1,5 @@
-import { FILTER_PILLS, STATUS_META, statusLabel, statusesForFilter } from "@/lib/loan-files/status";
+import { FILTER_PILLS, statusLabel, statusesForFilter } from "@/lib/loan-files/status";
+import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
 import { describe, expect, it } from "vitest";
 
@@ -13,11 +14,12 @@ const ALL_STATUSES: LoanFileStatus[] = [
   "withdrawn",
 ];
 
-describe("STATUS_META", () => {
-  it("maps every status to a label and badge classes", () => {
+describe("LOAN_FILE_STATUS", () => {
+  it("maps every status to a label and a tone", () => {
     for (const status of ALL_STATUSES) {
-      expect(STATUS_META[status].label).toBeTruthy();
-      expect(STATUS_META[status].className).toContain("border");
+      const meta = resolveStatus(LOAN_FILE_STATUS, status);
+      expect(meta.label).toBeTruthy();
+      expect(meta.tone).toBeTruthy();
     }
   });
 

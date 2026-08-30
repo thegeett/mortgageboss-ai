@@ -1,3 +1,4 @@
+import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 /**
  * Document presentation + logic helpers (LP-43).
  *
@@ -15,57 +16,12 @@ import type {
   Transaction,
 } from "@/lib/types/document";
 
-// --- Status treatment ------------------------------------------------------- //
-
-export interface DocumentStatusMeta {
-  label: string;
-  /** Badge classes from the design tokens. */
-  className: string;
-  /** True while the pipeline is still working (drives the spinner + polling). */
-  inProgress: boolean;
-}
-
-export const DOCUMENT_STATUS_META: Record<DocumentStatus, DocumentStatusMeta> = {
-  pending: {
-    label: "Processing",
-    className: "bg-info/10 text-info border-info/20",
-    inProgress: true,
-  },
-  classifying: {
-    label: "Processing",
-    className: "bg-info/10 text-info border-info/20",
-    inProgress: true,
-  },
-  classified: {
-    label: "Classified",
-    className: "bg-info/10 text-info border-info/20",
-    inProgress: true,
-  },
-  extracting: {
-    label: "Processing",
-    className: "bg-info/10 text-info border-info/20",
-    inProgress: true,
-  },
-  completed: {
-    label: "Completed",
-    className: "bg-success/10 text-success border-success/20",
-    inProgress: false,
-  },
-  needs_review: {
-    label: "Needs review",
-    className: "bg-warning/10 text-warning border-warning/20",
-    inProgress: false,
-  },
-  failed: {
-    label: "Failed",
-    className: "bg-destructive/10 text-destructive border-destructive/20",
-    inProgress: false,
-  },
-};
-
 /** A document is settled once the pipeline can no longer change its status. */
 export function isTerminalStatus(status: DocumentStatus): boolean {
-  return !DOCUMENT_STATUS_META[status].inProgress;
+  // `spin` marks the in-flight pipeline states and nothing else (LP-UI-005's
+  // StatusMeta documents it that way), so it is the same set the old
+  // `inProgress` flag carried — one source now instead of two that could drift.
+  return !resolveStatus(DOCUMENT_STATUS, status).spin;
 }
 
 /** True if ANY document is still being processed (→ keep polling). */

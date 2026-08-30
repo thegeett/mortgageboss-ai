@@ -13,28 +13,17 @@
 import { CalculatorCard } from "@/components/file/calculators/calculator-card";
 import { DtiCalculator } from "@/components/file/dti/dti-calculator";
 import { LtvCalculator } from "@/components/file/ltv/ltv-calculator";
+import { StatusToken } from "@/components/status-token";
 import { useCalculator } from "@/lib/api/calculators";
 import { useDti } from "@/lib/api/dti";
 import { useLtv } from "@/lib/api/ltv";
+import { CALCULATOR_STATUS, resolveStatus } from "@/lib/status";
 import type { CalculatorName } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
 import { Calculator, ChevronDown } from "lucide-react";
 import { useState } from "react";
 
 type CalcKey = "dti" | "ltv" | CalculatorName;
-
-const STATUS_DOT: Record<string, string> = {
-  over: "bg-destructive",
-  insufficient: "bg-destructive",
-  pass: "bg-success",
-  sufficient: "bg-success",
-  required: "bg-warning",
-  declining: "bg-warning",
-};
-
-function dot(status: string | null | undefined): string {
-  return (status && STATUS_DOT[status]) || "bg-muted-foreground";
-}
 
 function Tile({
   title,
@@ -61,7 +50,7 @@ function Tile({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dot(status))} aria-hidden />
+          <StatusToken meta={resolveStatus(CALCULATOR_STATUS, status)} variant="dot" />
           <span className="truncate text-xs font-medium text-foreground-2">{title}</span>
         </div>
         <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">

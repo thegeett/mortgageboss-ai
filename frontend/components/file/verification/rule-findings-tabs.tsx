@@ -12,11 +12,10 @@
 
 import { Button } from "@/components/ui/button";
 import { humanize } from "@/lib/format";
+import type { Tone } from "@/lib/status";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import {
-  OUTCOME_META,
-  type OutcomeTone,
   type TabId,
   attentionGroups,
   awaitedDocuments,
@@ -321,12 +320,13 @@ function GroupedFindingList({
 
 // The collapsed-summary dot color per outcome tone — so a collapsed SATISFIED group reads green (a pass),
 // an `open` group red, etc., not a blanket warning (every member of a group shares one outcome).
-const TONE_DOT: Record<OutcomeTone, string> = {
-  danger: "bg-destructive",
-  warning: "bg-warning",
-  info: "bg-info",
-  success: "bg-success",
-  muted: "bg-muted-foreground",
+const TONE_DOT: Record<Tone, string> = {
+  blocking: "bg-destructive",
+  attention: "bg-warning",
+  verified: "bg-success",
+  progress: "bg-info",
+  neutral: "bg-muted-foreground",
+  ai: "bg-ai",
 };
 
 /**
@@ -607,8 +607,8 @@ export function RuleFindingsTabs({
           (buckets.satisfied.length > 0 ? (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                {OUTCOME_META.satisfied.blurb} These ran and passed — visible so you know a rule was
-                actually checked, not silently skipped.
+                {outcomeMeta("satisfied").blurb} These ran and passed — visible so you know a rule
+                was actually checked, not silently skipped.
               </p>
               <FindingList findings={buckets.satisfied} onAct={onAct} fileId={fileId} />
             </div>

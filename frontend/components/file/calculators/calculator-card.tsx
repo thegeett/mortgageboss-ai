@@ -23,20 +23,20 @@ import {
   useSetCalculatorOverride,
 } from "@/lib/api/calculators";
 import { formatMoneyPrecise, humanize } from "@/lib/format";
+import { CALCULATOR_STATUS, type Tone, resolveStatus } from "@/lib/status";
 import type { CalcLine, CalculatorName, CalculatorView } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
+
+const TONE_TEXT: Record<Tone, string> = {
+  blocking: "text-destructive",
+  attention: "text-warning",
+  verified: "text-success",
+  progress: "text-info",
+  neutral: "text-foreground",
+  ai: "text-ai",
+};
 import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
-
-const STATUS_TONE: Record<string, string> = {
-  required: "text-warning",
-  not_required: "text-muted-foreground",
-  sufficient: "text-success",
-  insufficient: "text-danger",
-  declining: "text-warning",
-  over: "text-danger",
-  pass: "text-success",
-};
 
 export function CalculatorCard({
   fileId,
@@ -105,7 +105,9 @@ function CalculatorBody({
     );
   };
 
-  const tone = (data.status && STATUS_TONE[data.status]) || "text-foreground";
+  const status = resolveStatus(CALCULATOR_STATUS, data.status);
+  // `neutral` is the no-status case; a headline figure reads as ordinary text, not muted.
+  const tone = data.status ? TONE_TEXT[status.tone] : "text-foreground";
 
   return (
     <div className="space-y-5">

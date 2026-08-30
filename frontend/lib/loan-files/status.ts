@@ -1,10 +1,9 @@
 /**
- * Single source of truth for loan-file status presentation and the dashboard
- * filter-pill groupings (LP-31).
+ * Dashboard filter-pill groupings for loan-file status (LP-31).
  *
- * Status → badge colours use the LP-5 semantic tokens (info/warning/success +
- * neutral grays), kept calm: attention statuses (in-conditions) read amber,
- * good outcomes (clear-to-close) read green, terminal/idle read neutral.
+ * Status PRESENTATION moved to `lib/status.ts` in LP-UI-005 — one tone
+ * vocabulary for every domain, rendered through `<StatusToken>`. What stays here
+ * is the grouping logic, which is a dashboard concern rather than a visual one.
  *
  * Pill groupings (ADR): All = no filter; Active = the in-progress statuses
  * (everything not action-needed and not completed — incl. CLEAR_TO_CLOSE, so no
@@ -12,36 +11,8 @@
  * includes outstanding blocking needs); Completed = CLOSED + WITHDRAWN. The four
  * non-"All" groups are disjoint and together cover all eight statuses.
  */
+import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
-
-export interface StatusMeta {
-  label: string;
-  /** Badge classes (background/text/border) built from the design tokens. */
-  className: string;
-}
-
-export const STATUS_META: Record<LoanFileStatus, StatusMeta> = {
-  draft: { label: "Draft", className: "bg-muted text-foreground-2 border-border" },
-  in_processing: { label: "In processing", className: "bg-info/10 text-info border-info/20" },
-  ready_to_submit: {
-    label: "Ready to submit",
-    className: "bg-primary/10 text-primary border-primary/20",
-  },
-  submitted: { label: "Submitted", className: "bg-primary/10 text-primary border-primary/20" },
-  in_conditions: {
-    label: "In conditions",
-    className: "bg-warning/10 text-warning border-warning/20",
-  },
-  clear_to_close: {
-    label: "Clear to close",
-    className: "bg-success/10 text-success border-success/20",
-  },
-  closed: { label: "Closed", className: "bg-muted text-muted-foreground border-border" },
-  withdrawn: {
-    label: "Withdrawn",
-    className: "bg-transparent text-muted-foreground border-border-strong",
-  },
-};
 
 export type FilterKey = "all" | "active" | "action_needed" | "completed";
 
@@ -68,5 +39,5 @@ export function statusesForFilter(key: FilterKey): LoanFileStatus[] {
 }
 
 export function statusLabel(status: LoanFileStatus): string {
-  return STATUS_META[status].label;
+  return resolveStatus(LOAN_FILE_STATUS, status).label;
 }
