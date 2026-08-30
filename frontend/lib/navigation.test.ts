@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   NAV_ITEMS,
+  NEW_FILE_PATH,
   activeItemHref,
   contextSection,
   fileSections,
@@ -184,6 +185,18 @@ describe("fileSections (LP-UI-022)", () => {
     const items = fileSections("LF-1").items;
     const needs = items.find((item) => item.label === "Needs");
     expect(needs?.href).toBe("/loan-files/LF-1/needs");
+  });
+
+  it("points NEW_FILE_PATH at a route that exists", () => {
+    // The new-file page's ONLY way back is the topbar breadcrumb, and the
+    // breadcrumb finds that page by comparing the pathname to this constant. If
+    // the route is ever renamed, the comparison stops matching, the breadcrumb
+    // falls back to a plain heading with no link, and the page becomes a screen
+    // a processor can reach and not leave — with nothing failing, because the
+    // page's own comment is what records the dependency.
+    const segment = NEW_FILE_PATH.replace("/loan-files/", "");
+    const base = join(import.meta.dirname, "..", "app", "(protected)", "loan-files");
+    expect(existsSync(join(base, segment, "page.tsx")), `${NEW_FILE_PATH} has no page`).toBe(true);
   });
 
   it("points every file section at a route that exists", () => {

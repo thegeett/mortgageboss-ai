@@ -38,7 +38,13 @@ describe("New loan file page — MISMO primary, manual secondary", () => {
     const upload = screen.getByTestId("mismo-upload");
     const form = screen.getByTestId("intake-form");
     // Node.compareDocumentPosition: FOLLOWING means `form` comes after `upload`.
-    expect(upload.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const position = upload.compareDocumentPosition(form);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // CONTAINED_BY is OR'd with FOLLOWING when one node is inside the other, so
+    // FOLLOWING alone also passes for a form nested INSIDE the dropzone — which
+    // is not "second", it is "part of the first". Two siblings in order is the
+    // claim; this is what makes the assertion able to reject the alternative.
+    expect(position & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeFalsy();
   });
 
   it("says a sparse file is allowed before asking for one", () => {
