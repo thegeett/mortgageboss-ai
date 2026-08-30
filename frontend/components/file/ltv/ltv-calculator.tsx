@@ -244,7 +244,7 @@ function AppraisedSourceTooltip() {
         <p className="font-mono text-[11px] text-background">
           appraised = valuation_amount or estimated_value
         </p>
-        <p className="mt-1 leading-relaxed text-muted-foreground">
+        <p className="mt-1 leading-relaxed text-background/75">
           The appraised value basis uses the property valuation amount; if absent, it falls back to
           the estimated value. No appraisal document is on file yet.
         </p>
@@ -407,7 +407,7 @@ function LineRow({
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button

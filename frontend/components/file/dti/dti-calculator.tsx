@@ -408,7 +408,7 @@ function LineRow({
             )}
           >
             {item.unknown && !item.excluded ? "Unknown" : formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button
@@ -499,7 +499,7 @@ function UseEstimateButton({
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">
           <p>{suggestion.sentence}</p>
-          <p className="mt-1.5 text-muted-foreground">
+          <p className="mt-1.5 text-background/75">
             Using it records an override in your name — the file will still show this figure is an
             estimate, and the tax bill is still outstanding.
           </p>

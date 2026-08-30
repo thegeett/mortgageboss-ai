@@ -37,7 +37,10 @@ export const STATUS_META: Record<LoanFileStatus, StatusMeta> = {
     className: "bg-success/10 text-success border-success/20",
   },
   closed: { label: "Closed", className: "bg-muted text-muted-foreground border-border" },
-  withdrawn: { label: "Withdrawn", className: "bg-muted text-muted-foreground border-border" },
+  withdrawn: {
+    label: "Withdrawn",
+    className: "bg-transparent text-muted-foreground border-border-strong",
+  },
 };
 
 export type FilterKey = "all" | "active" | "action_needed" | "completed";

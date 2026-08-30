@@ -70,7 +70,7 @@ export const STATE_META: Record<NeedsItemStatus, StateMeta> = {
   waived: {
     label: "Waived",
     group: "set_aside",
-    dotClass: "bg-border",
+    dotClass: "bg-muted-foreground",
     pillClass: "bg-muted text-muted-foreground border-border",
   },
 };

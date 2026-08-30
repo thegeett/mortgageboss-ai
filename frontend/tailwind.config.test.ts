@@ -1,18 +1,62 @@
 /**
  * The design tokens the codebase already writes must actually resolve.
  *
- * These assertions are deliberately about the RESOLVED Tailwind theme rather than
- * about markup, because that is where both LP-UI bugs actually lived. A component
- * test can only see the class string, and in both cases the class string was
- * correct — `border-danger/40` was on `FailedRunBanner` the whole time, and the
- * config comment claimed 700 did not exist. What was wrong was what the config
- * did with them, which is invisible to JSDOM and visible here.
+ * These assertions are deliberately about the RESOLVED Tailwind theme and about
+ * globals.css, rather than about markup, because that is where both LP-UI bugs
+ * actually lived. A component test can only see the class string, and in both
+ * cases the class string was correct — `border-danger/40` was on
+ * `FailedRunBanner` the whole time, and the config comment claimed 700 did not
+ * exist. What was wrong was what the config and the stylesheet did with them,
+ * which is invisible to JSDOM and visible here.
  */
+import { readFileSync } from "node:fs";
 import resolveConfig from "tailwindcss/resolveConfig";
 import { describe, expect, it } from "vitest";
 import config from "./tailwind.config";
 
 const theme = resolveConfig(config).theme;
+
+/**
+ * The resolved theme is only half the contract. `colour("input")` is the literal
+ * string "hsl(var(--input))" no matter what --input is set to — or whether it is
+ * set at all — so an assertion phrased against the resolved theme alone cannot
+ * see either failure mode that has actually bitten this codebase: a variable
+ * that does not exist (LP-UI-002, `danger`), and two variables silently given
+ * the same value. Both live in globals.css, so both are checked against it.
+ */
+const css = readFileSync(new URL("./app/globals.css", import.meta.url), "utf8");
+
+/** The `--name: value` declarations directly inside one selector's block. */
+function customProperties(selector: string): Record<string, string> {
+  const start = css.indexOf(`${selector} {`);
+  if (start === -1) throw new Error(`globals.css has no \`${selector}\` block`);
+  let depth = 0;
+  let end = start;
+  for (let i = css.indexOf("{", start); i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) {
+      end = i;
+      break;
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const [, name, value] of css.slice(start, end).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+    out[name as string] = (value as string).trim();
+  }
+  return out;
+}
+
+const ROOT = customProperties(":root");
+const DARK = customProperties(".dark");
+
+/** Every `--x` the resolved theme's colours point at. */
+function referencedColourVars(): string[] {
+  const found = new Set<string>();
+  for (const [, name] of JSON.stringify(theme?.colors ?? {}).matchAll(/var\((--[\w-]+)\)/g)) {
+    found.add(name as string);
+  }
+  return [...found].sort();
+}
 
 /** `text-red-500` style tokens resolve to a string; `pair()` tokens to an object. */
 function colour(name: string): string {
@@ -70,16 +114,32 @@ describe("the tokens the redesign adds", () => {
   // These are new in LP-UI-001 and the screen tickets are about to lean on them.
   // A missing one fails the same silent way `danger` did.
   it.each(["foreground-2", "border-strong", "skeleton", "ai", "success", "warning", "info"])(
-    "`%s` resolves",
+    "`%s` resolves in the theme",
     (name) => {
       expect(() => colour(name)).not.toThrow();
     },
   );
 
+  // ...and the half the theme cannot see: the variable behind the token. Deleting
+  // `--ai` from globals.css leaves the assertion above green while every
+  // `bg-ai/10` in the tree compiles to nothing — exactly the LP-UI-002 failure.
+  it.each(referencedColourVars())("`%s` is defined in :root", (name) => {
+    expect(ROOT[name]).toBeDefined();
+  });
+
+  it.each(referencedColourVars())("`%s` is defined in .dark", (name) => {
+    // Colour tokens must be re-stated for the dark theme; one left out inherits
+    // the light value and is wrong rather than missing, which is harder to spot.
+    expect(DARK[name]).toBeDefined();
+  });
+
   it("keeps `border` and `input` as two different colours", () => {
     // `border` is the decorative hairline; `input` is the control border held to
     // WCAG 1.4.11's 3:1. Collapsing them back into one value would silently drop
-    // every control border below the contrast floor.
-    expect(colour("border")).not.toBe(colour("input"));
+    // every control border below the contrast floor. Compared by VALUE: the
+    // resolved theme gives back two different `hsl(var(--x))` strings whatever
+    // the variables say, so comparing those can never fail.
+    expect(ROOT["--border"]).not.toBe(ROOT["--input"]);
+    expect(DARK["--border"]).not.toBe(DARK["--input"]);
   });
 });

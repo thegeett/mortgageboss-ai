@@ -50,7 +50,7 @@ const TONE: Record<OutcomeTone, { text: string; chipBg: string; border: string; 
     text: "text-muted-foreground",
     chipBg: "bg-muted text-muted-foreground",
     border: "border-border",
-    dot: "bg-border",
+    dot: "bg-muted-foreground",
   },
 };
 

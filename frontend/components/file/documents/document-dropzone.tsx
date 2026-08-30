@@ -85,7 +85,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
         isDragActive
           ? "border-primary bg-primary/5"
-          : "border-input bg-muted/60 hover:border-input",
+          : "border-input bg-muted/60 hover:border-foreground-2",
         upload.isPending && "pointer-events-none opacity-70",
       )}
     >

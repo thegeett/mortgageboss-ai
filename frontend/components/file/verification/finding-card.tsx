@@ -261,7 +261,7 @@ export function FindingCard({
             <span
               className={cn(
                 "rounded px-1 py-px font-medium",
-                deterministic ? "bg-primary/10 text-primary" : "bg-info/10 text-info",
+                deterministic ? "bg-primary/10 text-primary" : "bg-ai/10 text-ai",
               )}
             >
               {deterministic ? "deterministic" : "AI · novel"}

@@ -131,3 +131,137 @@ figures aligned.
 
 - 70 files, codemod (commit 1) + 4 manual fixes + 1 test assertion
 - 28 files, white/black surfaces (commit 2) + `skeleton.tsx`
+
+## Review pass — the many-to-one mappings the codemod could not see
+
+A `/code-review` over `HEAD~10...HEAD` found thirteen defects, twelve of them one
+failure mode: **the `gray-*` → token mapping is many-to-one**. Wherever two
+distinct grays carried meaning — a base tone and its hover, state A and state B,
+text-on-inverted and text-on-surface — the codemod collapsed them onto a single
+token and the distinction silently disappeared. Nothing failed; the classes still
+resolved, they just resolved to the same thing.
+
+### Contrast: text on an inverted surface
+
+`TooltipContent` is `bg-foreground` (near-black in light), so its body copy needs
+the tooltip's own text colour, not the page's. Two `text-gray-300` sites took the
+generic `text-muted-foreground` mapping and landed at **3.44:1 light / 2.63:1
+dark** — below AA, from ~12:1 before. Both are now `text-background/75`
+(**10.27:1 / 7.97:1**).
+
+- `file/ltv/ltv-calculator.tsx:247` — the appraised-value help tooltip
+- `file/dti/dti-calculator.tsx:502` — the tax-suggestion override caveat
+
+Worth recording *why* the contrast sweep above missed them: it walked every leaf
+element with visible text on four screens, and tooltip content is portalled in
+only on hover, so it was never in the DOM to be measured. A sweep of static
+screens cannot see a hover-mounted portal.
+
+### A scrim is not a surface — second instance
+
+`SheetOverlay` was `bg-gray-900/40` → `bg-foreground/40`. `--foreground` is 92.4%
+lightness in dark, so the modal scrim became a 40% *white* wash that brightened
+the page it was meant to dim. `dialog.tsx` was already corrected to `bg-black/80`
+for exactly this reason; the sheet is the same kind of element and did not get the
+same treatment. Now `bg-black/40`.
+
+### Hover states that collapsed onto their own base
+
+Four sites where `X` and `hover:X-darker` both mapped to one token, leaving
+`text-muted-foreground group-hover:text-muted-foreground` — a hover that does
+nothing. In three of them the pencil is the *only* affordance signalling that a
+line amount is click-to-edit.
+
+- `file/ltv/ltv-calculator.tsx:410`, `file/dti/dti-calculator.tsx:411`,
+  `file/calculators/calculator-card.tsx:293` — `group-hover:text-foreground`
+- `file/documents/document-dropzone.tsx:88` — `hover:border-foreground-2`
+
+`border-strong` would have been the wrong fix for the dropzone: it is *lighter*
+than `input` (81.6% vs 54.5%), so hover would have weakened the border rather than
+strengthened it. `foreground-2` is darker than `input` in light and lighter in
+dark, so it reads as a strengthening in both.
+
+### `bg-border` used as a status indicator
+
+`--border` is the hairline at 89.8% lightness: **1.25:1** on a card, effectively
+invisible. Findings section A6 scopes it to rules, dividers and troughs; a status
+dot is none of those. Five `bg-gray-300` dots took it.
+
+- `file/verification/rule-finding-row.tsx:53` — the `muted` severity dot
+- `file/verification/rule-findings-tabs.tsx:329` — the collapsed-group tone dot
+- `file/calculators/calculators-section.tsx:36` — the *default* calculator dot,
+  i.e. every unrecognised status
+- `lib/loan-files/needs.ts:73` — the "Waived" dot
+
+All four → `bg-muted-foreground` (**5.32:1 light / 5.83:1 dark**).
+
+The fifth, `rule-findings-tabs.tsx:431`, is a 4px decorative list bullet rather
+than an indicator, so it took `bg-border-strong` — 1.52:1, the weight
+`gray-300` actually had.
+
+### Two states that became byte-identical
+
+`closed` and `withdrawn` in `lib/loan-files/status.ts` were `gray-100/gray-500`
+and `gray-50/gray-400`; both collapsed to `bg-muted text-muted-foreground
+border-border`, so two different terminal states rendered as the same badge and
+the only differentiator left was reading the label. `withdrawn` is now
+`bg-transparent … border-border-strong` — **outline vs filled**, chosen over a
+lightness step because a lightness step does not survive the theme flip.
+
+### A ternary with one branch
+
+`file/verification/finding-card.tsx:264` read
+`deterministic ? "bg-primary/10 text-primary" : "bg-info/10 text-info"`. `--info`
+is aliased to `--primary` in both themes, so both branches rendered the same
+colour — and matched the neighbouring "docs requested" chip, which means something
+unrelated. The AI branch now uses `bg-ai/10 text-ai` (**5.80:1 / 6.31:1**), the
+token LP-UI-001 introduced for provenance and which until now had zero consumers.
+
+### Not a codemod defect: the serif face
+
+`lib/fonts.ts` loaded `IBM_Plex_Serif` with `style: ["italic"]` only, so the
+generated `@font-face` matched italic text alone and upright `font-serif` had no
+face to bind to — it fell back to Georgia, silently, and invisibly on any machine
+with a passable serif. Nothing uses `font-serif` yet, but LP-UI-029's
+verbatim-snippet state is about to. Now `style: ["normal", "italic"]`; the build
+emits both faces.
+
+### The test assertion that could not fail
+
+`tailwind.config.test.ts:83` asserted `colour("border") !== colour("input")`.
+Those return the literal strings `"hsl(var(--border))"` and `"hsl(var(--input))"`,
+which differ *by construction* whatever the variables hold — setting `--input`
+equal to `--border`, the exact regression the comment describes, left the test
+green. The `it.each` "`%s` resolves" block had the same shape: it proved a key
+exists in the resolved theme, not that the variable behind it is defined, so
+deleting `--ai` from `globals.css` would have reproduced LP-UI-002's
+"compiles to nothing" failure with the suite passing.
+
+The suite now parses `app/globals.css` and asserts against the declarations
+themselves: every `var(--x)` the resolved theme's colours reference is defined in
+**both** `:root` and `.dark`, and `--border` ≠ `--input` **by value**, per theme.
+Both were mutation-checked — collapsing `--input` onto `--border` and deleting
+`--ai` each fail exactly one test, where previously neither failed any.
+
+### Verification
+
+- `tsc --noEmit` clean; `biome check` clean over 203 files; **460 tests pass**
+  (48 files); `pnpm build` succeeds.
+- Contrast ratios above computed per token pair in both themes, including the
+  alpha compositing for `text-background/75` and `bg-ai/10`.
+- Built the CSS with the Tailwind CLI and confirmed every new class emits a real
+  rule — `text-background/75` → `color: hsl(var(--background) / 0.75)`.
+- Build output inspected for `@font-face`: both `IBM Plex Serif` styles present.
+
+### For the next codemod
+
+The mechanical check that would have caught eight of these is a grep for a
+variant and its base resolving to the same utility:
+
+```
+rg '(\w[\w-]*):([\w-]+)\b(?=[^"]*\b\2\b)' --pcre2 app components lib
+```
+
+The remaining four need a human: a colour-on-inverted-surface pass, and a check
+that every `Record<K, string>` of class strings still has distinct values for
+distinct keys.

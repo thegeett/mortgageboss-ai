@@ -290,7 +290,7 @@ function LineRow({
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button

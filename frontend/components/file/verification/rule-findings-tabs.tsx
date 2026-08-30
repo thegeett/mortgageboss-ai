@@ -326,7 +326,7 @@ const TONE_DOT: Record<OutcomeTone, string> = {
   warning: "bg-warning",
   info: "bg-info",
   success: "bg-success",
-  muted: "bg-border",
+  muted: "bg-muted-foreground",
 };
 
 /**
@@ -428,7 +428,7 @@ function CollapsedFindings({
         <ul className="max-h-56 space-y-1 overflow-y-auto border-t border-border px-3 py-2">
           {findings.map((finding) => (
             <li key={finding.id} className="flex gap-2 text-xs leading-relaxed">
-              <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-border" aria-hidden />
+              <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-border-strong" aria-hidden />
               <span className="min-w-0">
                 {finding.subject_label.length > 0 && (
                   <span className="font-medium text-foreground-2">{finding.subject_label}</span>

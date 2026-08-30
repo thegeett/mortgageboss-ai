@@ -33,7 +33,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function dot(status: string | null | undefined): string {
-  return (status && STATUS_DOT[status]) || "bg-border";
+  return (status && STATUS_DOT[status]) || "bg-muted-foreground";
 }
 
 function Tile({
