@@ -203,13 +203,90 @@ mockup needs a designed *"page known, spot unknown"* field state — page number
 quoted snippet, no box, and no implication that one is missing by error. That state
 is needed regardless, since 0.9% of valued fields have no page either.
 
-**Owed by the design side, before LP-UI-030 starts:** add that state to the Review
-screen and to the Foundations state vocabulary. Until it exists, LP-UI-030 has no
-mockup for a case that will occur on every scanned document.
+**Owed by the design side, before LP-UI-030 starts:** ~~add that state to the
+Review screen and to the Foundations state vocabulary.~~ **Done, 2026-08-29 19:2x.**
+
+The Review screen now carries a twelfth field, *Employer match*, in the
+**page known, spot not located** state. Hovering it lights no box; instead the page
+takes a dashed outline and a caption reading *"page 2 · no text layer to search"*.
+The field itself shows the value normally, a dashed-pin provenance line
+(`p.2 · page known, spot not located`) and the verbatim snippet quoted in serif
+italic — the document speaking, which is the one place that face is used.
+
+Deliberately **not** styled as a problem: no amber, no warning glyph, no left rail.
+On a scanned document this is every field, and a screen that flags the normal case
+as a fault teaches processors to ignore the flag. The header strip counts it
+honestly — "12 fields · 4 need a look · 1 not located".
+
+Foundations gains a **Provenance** row, kept separate from the status vocabulary,
+because a field can be perfectly verified and still have no box:
+
+| | meaning |
+|---|---|
+| solid pin | Located — page and spot |
+| dashed pin | Page known, spot not located |
+| violet spark | Inferred, not read |
+| dashed circle | Not on this document |
+
+LP-UI-030 now has a mockup for the case that will occur on every scan.
 
 Epic E stays scheduled where it is on the assumption that snippet matching is the
 approach. If the alternative — a real OCR/geometry stage — is preferred, that is a
 new backend epic and Epic E moves.
+
+---
+
+---
+
+## 2026-08-29 (later still) · A5 — the codemod's expected numbers were stale
+
+**Re-measured against HEAD before LP-UI-004 runs, so the ticket is not checked
+against a phantom.** The current dry run reports **803 replacements across 70
+files, 3 unmapped** — not the 811 the ticket and the script header claimed.
+
+Both figures are now corrected in `TICKETS.md` and in the script's own comments.
+
+**Why it moved is not established, and I am not going to invent a cause.** What
+*is* established: `gray-N` occurrences in `frontend/` `.ts`/`.tsx` are **808 at
+both the docs commit and HEAD** — identical — and no `.tsx` file lost a grey class
+between them. 803 mapped + 3 unmapped = 806, so two occurrences sit in a context
+the pattern does not match at all, which is expected and harmless. The earlier 811
+exceeded the total occurrence count, so it was wrong when it was written; the
+measurement taken now, against the tree the codemod will actually run on, is the
+one to trust.
+
+**For LP-UI-004:** expect 803 / 70 / 3. A drift from *that* is worth reading. And
+the acceptance criteria stand as written — the greps are the real proof, not the
+script's own report, which is exactly why they are there.
+
+---
+
+---
+
+## 2026-08-29 (idle tick) · A6 — pre-checked every pairing LP-UI-004 will create
+
+Nothing was moving, so the codemod's remaining contrast risk was measured ahead of
+the ticket rather than after it. Every `className` in the codebase was scanned for
+a background and a text colour that the mapping will convert together.
+
+**Three pairings will exist, and all three clear 4.5:1 in both themes:**
+
+| pairing | elements | light | dark |
+|---|---|---|---|
+| `bg-muted` + `text-muted-foreground` | 14 (10 files) | 4.87 | 5.38 |
+| `bg-muted` + `text-foreground-2` | 9 (8 files) | 7.50 | 8.71 |
+| `bg-muted` + `text-foreground` | 2 (1 file) | 16.70 | 14.15 |
+
+So A2's correction did its job: the 14 elements that would have landed on 4.28:1
+now sit at 4.87:1. LP-UI-004 should not produce a single new contrast failure.
+
+**One latent trap, closed in the SPEC rather than in the palette.**
+`bg-border` + `text-muted-foreground` is **4.27:1** in light. It does not occur —
+nothing pairs them — so there is nothing to fix, but the mapping sends
+`bg-gray-200/300` to `bg-border`, and the next person to put muted text on one of
+those surfaces would land under the floor with no warning. `SPEC.md` now states
+that `bg-border` is for rules, dividers, dots and troughs, never a text surface,
+and points at `bg-muted` as the filled alternative.
 
 ---
 

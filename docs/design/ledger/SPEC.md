@@ -68,6 +68,10 @@ count. Those four numbers are the reason a processor switches tabs today.
   `text-muted-foreground`, `border-border`, `border-input`, `bg-muted`.
   **No `gray-*` may re-enter the codebase.** Add a lint rule if it does.
 - `border` = decorative hairline. `input` = control border, clears 3:1.
+- **`bg-border` is not a text surface.** It is for rules, dividers, dots and
+  progress troughs. `text-muted-foreground` on it is 4.27:1 in light — below the
+  floor. No element pairs them today and none should; if a filled surface is
+  wanted, use `bg-muted` (4.87:1 with the same text).
 - Status labels stay domain-specific (`lib/status.ts`); only the colour
   vocabulary is shared. "Must fix" and "Blocked" are the same tone, different
   words, and the words are what processors quote.

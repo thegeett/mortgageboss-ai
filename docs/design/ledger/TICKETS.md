@@ -103,7 +103,7 @@ common text colour in the app** — is 2.54:1 on white. It fails AA for text and
 fails even the 3:1 bar for icons. `text-gray-300` (19 uses) is 1.47:1. Everything
 in the 300–500 band lands on `muted-foreground` at 4.56:1.
 
-Dry-run verified against the repo on 2026-08-29: **811 replacements, 70 files, 3
+Dry-run verified against the repo on 2026-08-29: **803 replacements, 70 files, 3
 left over.** Those three are inverted surfaces (a dark tooltip on a light page) and
 are named in the script's footer with their fix.
 

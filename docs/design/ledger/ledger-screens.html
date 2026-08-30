@@ -480,6 +480,16 @@ button { font: inherit; color: inherit; }
 .phase-note { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-family: "IBM Plex Mono", monospace; color: var(--ai); background: var(--ai-soft); padding: 2px 8px; border-radius: 10px; }
 .sgrp { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); padding: 0 7px 0 10px; align-self: center; }
 
+/* provenance: how we know where a value came from (LP-UI-029 — no coordinates
+   exist, so a box is derived and optional, and absent rather than approximate) */
+.prov { display: flex; align-items: center; gap: 5px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+.prov .pin { width: 9px; height: 9px; flex: none; }
+.quote { display: block; margin-top: 5px; border-left: 2px solid var(--line-2); padding: 2px 0 2px 8px; font-family: "IBM Plex Serif", Georgia, serif; font-style: italic; font-size: 11.5px; color: var(--ink-2); }
+.field.pageonly { border-left-color: var(--line-2); }
+.field.pageonly.live { background: var(--surface-2); border-left-color: var(--ink-3); }
+.page.unlocated { outline: 2px dashed var(--line-ctl); outline-offset: 3px; }
+.page-flag { position: absolute; left: 0; right: 0; bottom: -26px; text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+
 .hidden { display: none !important; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -964,7 +974,7 @@ button { font: inherit; color: inherit; }
           </div>
           <div style="display:flex;align-items:center;gap:8px;padding:7px 14px;border-bottom:1px solid var(--line);background:var(--surface);font-size:11.5px;color:var(--ink-3)">
             <span class="chip ai">AI extracted</span>
-            <span>11 fields · <b style="color:var(--attention);font-weight:500">4 need a look</b></span>
+            <span>12 fields · <b style="color:var(--attention);font-weight:500">4 need a look</b> · <b style="font-weight:500">1 not located</b></span>
             <span style="flex:1"></span>
             <span>Hold <span class="kbd">⌥</span> to reveal every candidate the model found</span>
           </div>
@@ -1056,6 +1066,15 @@ button { font: inherit; color: inherit; }
             <div class="fv">$343.30</div>
             <div class="fs">p.1 · deductions</div>
           </div>
+          <div class="field pageonly" data-pageonly>
+            <div class="fk">Employer match</div>
+            <div class="fv">$205.98</div>
+            <div class="prov">
+              <svg class="pin" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 10.5S9.6 7.4 9.6 5A3.6 3.6 0 0 0 2.4 5c0 2.4 3.6 5.5 3.6 5.5Z" stroke-dasharray="2 1.6"/></svg>
+              p.2 · page known, spot not located
+            </div>
+            <span class="quote">"401(K) EMPLOYER MATCH 205.98"</span>
+          </div>
           <div class="field" style="border-left-color:var(--line-2)">
             <div class="fk">Overtime — 12-month average</div>
             <div class="fv" style="color:var(--ink-3)">Not on this document</div>
@@ -1113,6 +1132,15 @@ button { font: inherit; color: inherit; }
           <span class="st ai"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2.5 9.5 6.5 13.5 8 9.5 9.5 8 13.5 6.5 9.5 2.5 8 6.5 6.5z"/></svg>AI proposed</span>
         </div>
         <div class="note">Color, glyph shape and word all carry the state. Drop the color and the row still reads — which is what happens for the 1 in 12 men with a color vision deficiency, and on a printed file.</div>
+
+        <h3>Provenance — how we know, which is not a status</h3>
+        <div class="demorow">
+          <span class="st mut" style="color:var(--ink-2)"><svg class="g" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 10.5S9.6 7.4 9.6 5A3.6 3.6 0 0 0 2.4 5c0 2.4 3.6 5.5 3.6 5.5Z"/><circle cx="6" cy="5" r="1.3"/></svg>Located — page and spot</span>
+          <span class="st mut"><svg class="g" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 10.5S9.6 7.4 9.6 5A3.6 3.6 0 0 0 2.4 5c0 2.4 3.6 5.5 3.6 5.5Z" stroke-dasharray="2 1.6"/></svg>Page known, spot not located</span>
+          <span class="st ai"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2.5 9.5 6.5 13.5 8 9.5 9.5 8 13.5 6.5 9.5 2.5 8 6.5 6.5z"/></svg>Inferred, not read</span>
+          <span class="st mut"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"><circle cx="8" cy="8" r="5.6"/></svg>Not on this document</span>
+        </div>
+        <div class="note">The extraction pipeline stores a page and a verbatim snippet, never a rectangle — the box is derived by searching the page's text layer, so it is <b>absent rather than approximate</b> when the search fails, which on a scanned document is every field. A missing box is therefore a normal condition and is never drawn as a fault: the value, the page and the quoted line are all still there. Provenance is a separate channel from status — a field can be perfectly verified and still have no box.</div>
 
         <h3>Controls</h3>
         <div class="demorow">
@@ -2117,7 +2145,7 @@ button { font: inherit; color: inherit; }
     new: "Two ways into a file, honestly ranked. The MISMO drop is the primary action because it fills in everything the hand-entry form asks for; the form sits below it for the files that arrive without one. Only two fields are required, which matches the model — a loan file is allowed to start sparse.",
     overview: "The file, with the loan's vital signs pinned to a context rail that never scrolls away. The centrepiece is the reconciliation ledger — stated against found, side by side, each row rail-coded and each value linked to the page it came from. That comparison is the product; today it is scattered across three tabs.",
     docs: "Upload, classification and freshness in one place. The processing rows sit above the list rather than inside it, so watching three uploads land doesn't disturb the nine documents already there. Freshness and duplicates move to the context rail, where they are answerable in one action instead of noticed one row at a time.",
-    review: "The pattern that does not exist in the app today and pays for itself fastest: the document beside its extracted fields, each field linked to the box it was read from. Confidence is stated in words and location, never as a decimal.",
+    review: "The pattern that does not exist in the app today and pays for itself fastest: the document beside its extracted fields, each field linked to the box it was read from. Confidence is stated in words and location, never as a decimal. Hover the last field — no coordinates exist in the pipeline, so a box is derived by searching the page text and is absent rather than approximate when that fails.",
     verify: "The screen the app is really about. Calculators become a strip you expand one at a time, with the arithmetic shown rather than hidden. Findings are rail-coded rows, not nested cards: outcome, reason, guideline citation, the exact source, then the actions.",
     needs: "The self-maintaining checklist, promoted out of the middle of the Overview into its own route. Every need says where it came from and how much to trust it — a baseline requirement reads differently from the AI's reading, and an AI proposal is never acted on until a processor confirms it.",
     comm: "Designed ahead of Phase 4. The thread is the request mechanism: a message carries the needs it is asking for, and a reply's attachment is classified, matched and closed against them automatically — with the automatic step shown in the thread as its own turn, never silently.",
@@ -2315,11 +2343,32 @@ button { font: inherit; color: inherit; }
   }
 
   function select(key) {
+    page.classList.remove("unlocated");
+    var flag = page.querySelector(".page-flag");
+    if (flag) flag.remove();
     Object.keys(boxes).forEach(function (k) { boxes[k].classList.toggle("live", k === key); });
     fields.forEach(function (f, i) { f.classList.toggle("live", LINK[i] === key); });
   }
 
   fields.forEach(function (fld, i) {
+    if (fld.hasAttribute("data-pageonly")) {
+      // No coordinates exist for this value, so there is no box to light. The
+      // page is flagged instead — honest about what is known, and not styled as
+      // an error, because on a scanned document this is the normal case.
+      fld.style.cursor = "default";
+      fld.addEventListener("mouseenter", function () {
+        Object.keys(boxes).forEach(function (k) { boxes[k].classList.remove("live"); });
+        fields.forEach(function (o) { o.classList.toggle("live", o === fld); });
+        page.classList.add("unlocated");
+        if (!page.querySelector(".page-flag")) {
+          var flag = document.createElement("div");
+          flag.className = "page-flag";
+          flag.textContent = "page 2 · no text layer to search";
+          page.appendChild(flag);
+        }
+      });
+      return;
+    }
     if (!LINK[i]) return;
     fld.style.cursor = "pointer";
     fld.addEventListener("mouseenter", function () { select(LINK[i]); });

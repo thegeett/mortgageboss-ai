@@ -124,7 +124,7 @@ if (unmapped.size) {
   console.log("\n  nothing left unmapped.");
 }
 
-// Verified against the repo on 2026-08-29: 811 replacements across 70 files,
+// Re-measured against HEAD on 2026-08-29 19:5x: 803 replacements across 70 files,
 // with exactly three left over. Both sites are INVERTED surfaces (a dark
 // tooltip sitting on a light page), which no colour-shade mapping can decide
 // correctly. Fix them by hand as part of LP-UI-004:

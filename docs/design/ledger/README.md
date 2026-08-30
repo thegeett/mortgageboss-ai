@@ -70,5 +70,6 @@ Confirm these before LP-UI-001, since they are baked into the tokens:
 
 - Every text tone clears 4.5:1 against its own ground in **both** themes
 - `--input` (control border) clears 3:1 — WCAG 1.4.11
-- The codemod was dry-run against this repo on 2026-08-29: **811 replacements,
-  70 files, 3 left for a human** (named in the script's footer)
+- The codemod was dry-run against this repo on 2026-08-29: **803 replacements,
+  70 files, 3 left for a human** (named in the script's footer). Re-measured against
+  HEAD before LP-UI-004; see `AMENDMENTS.md` A5 for why the earlier figure was wrong.
