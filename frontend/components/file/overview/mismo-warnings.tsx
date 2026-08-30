@@ -51,6 +51,20 @@ export function MismoWarnings({ fileId }: { fileId: string }) {
           <Warning key={`${warning.subject}:${warning.message}`} warning={warning} />
         ))}
       </ul>
+
+      {/* The block this panel replaced ended "the file was created — use Edit to
+          fill these in", which was dropped as redundant beside a link that goes
+          to the field. It is redundant for a warning that HAS one. Every warning
+          stored before LP-UI-024 coerces to `other` and gets no link, so on any
+          file imported before this change the panel was a list of sentences with
+          nothing to do — strictly less useful than the block it replaced. Shown
+          only when something on screen actually lacks a destination. */}
+      {warnings.some((warning) => ANCHOR[warning.subject] === null) ? (
+        <p className="pt-2 text-xs text-muted-foreground">
+          Warnings without a link name a section this import could not place. Use Edit on the
+          section they describe.
+        </p>
+      ) : null}
     </section>
   );
 }

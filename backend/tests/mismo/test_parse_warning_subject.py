@@ -31,6 +31,26 @@ class TestCoercingAStoredWarning:
         # is worse than one that cannot link a row to its section.
         assert ParseWarning.coerce({"message": "odd"}).subject is WarningSubject.OTHER
 
+    def test_a_subject_this_build_does_not_know_still_reads(self) -> None:
+        """The MIRROR of the legacy case, and the one a rollback produces.
+
+        `coerce` was written for old rows read by new code. The other direction
+        is a newer version writing a subject an older one then reads, and a
+        bare `model_validate` raises there — a 500 on the response rather than a
+        missing link. Handling one direction is half a guarantee.
+        """
+        warning = ParseWarning.coerce(
+            {"message": "A future field is missing.", "subject": "collateral"}
+        )
+        assert warning.message == "A future field is missing."
+        assert warning.subject is WarningSubject.OTHER
+
+    def test_a_shape_it_cannot_read_at_all_does_not_crash(self) -> None:
+        # A JSON column can hold anything a past writer put there.
+        assert ParseWarning.coerce(None).subject is WarningSubject.OTHER
+        assert ParseWarning.coerce(42).subject is WarningSubject.OTHER
+        assert ParseWarning.coerce({"subject": "loan"}).subject is WarningSubject.OTHER
+
     def test_other_is_a_real_member_not_a_hole(self) -> None:
         # A warning belonging to no section still has to appear somewhere. The
         # UI groups on this value, so it must be a value.

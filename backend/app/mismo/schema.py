@@ -22,7 +22,7 @@ from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 class ParsedIncomeItem(BaseModel):
@@ -275,7 +275,17 @@ class ParseWarning(BaseModel):
         if isinstance(raw, str):
             return cls(message=raw)
         if isinstance(raw, dict):
-            return cls.model_validate(raw)
+            try:
+                return cls.model_validate(raw)
+            except ValidationError:
+                # A SUBJECT this build does not know — the mirror of the case
+                # above, and the one a rollback produces: a newer version writes
+                # a subject that is later read by an older one. Handling only the
+                # backward direction is half a guarantee, and the failure is a
+                # 500 on the response rather than a missing link. The message is
+                # still true and still worth showing.
+                message = raw.get("message")
+                return cls(message=message if isinstance(message, str) else str(raw))
         return cls(message=str(raw))
 
 

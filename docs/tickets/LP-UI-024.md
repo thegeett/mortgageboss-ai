@@ -88,3 +88,86 @@ whose warning did not fire — the regex removed one of twelve
 `LF-68D5` (the verified one). Both are legitimate imports rather than hand-written
 rows, and the seed script rebuilds the database, but they are strays and worth
 naming rather than leaving for someone to find.
+
+## Review pass — the guarantee that only ran in one direction
+
+Reviewed on request from the session running the epic. Two defects, and the
+scope call confirmed.
+
+### `coerce` handled old rows read by new code, and not the mirror
+
+The legacy path is right and the reasoning behind it is right: `parse_warnings`
+is JSON, rows written before this change hold bare strings, and they are still
+true and still worth showing. `coerce` reads them as `other` rather than dropping
+them or crashing.
+
+It handles one direction. A stored `subject` this build does not recognise —
+which is what a rollback produces, a newer version writing a member an older one
+then reads — reached `model_validate` and raised `ValidationError`, 500ing the
+stated-financials response. Confirmed by calling it before changing anything.
+
+Handling only the backward direction is half a guarantee, and the half that was
+missing fails harder: a missing link is a degraded panel, a `ValidationError` is
+a dead screen. It now falls back to `other` and keeps the message, which is the
+same answer the legacy path gives for the same reason.
+
+### Every warning on an existing file lost its instructions
+
+Deleting the old block was right — two renderings of one thing is the
+`UnresolvedAlert` argument, and the hand-off applied it correctly. Dropping *"the
+file was created — use Edit to fill these in"* as redundant beside a link is also
+right, **for a warning that has a link**.
+
+`other` has none, by design. And every warning stored before this change coerces
+to `other`. So on any file imported before today the panel is a list of sentences
+with no destination and no guidance — strictly less useful than the block it
+replaced, which at least said what to do. The two correct decisions composed into
+a regression on exactly the data the `coerce` fallback exists to keep visible.
+
+A single line now appears when — and only when — something on screen actually
+lacks a destination. Not restored wholesale: for a linked warning the link is
+still the better answer, and the old copy would be the noise it was removed for.
+
+### Confirmed, not changed
+
+- **The scope.** Parser, schema, model and two response schemas is a lot of
+  backend for an "S" frontend ticket, and it is the right call. "Link a warning
+  to the field it concerns" is impossible from a bare sentence without the UI
+  parsing its own prose, and the parser already knows which section it was
+  reading when it gave up. That is LP-UI-021's override-attribution shape again:
+  data that exists at creation and is dropped on the way out. The alternative —
+  inferring the subject from the message text in the frontend — is the version
+  that looks smaller and is worse.
+- **No missed writer.** Checked independently rather than trusting the grep.
+  There is one writer (`import_service.py:348`, `model_dump(mode="json")` beside
+  `catch_all`), one reader of the stored column (`stated_financials.py:147`, via
+  `coerce`), and one response path carrying fresh in-memory warnings
+  (`api/loan_files.py:201`), whose schema declares `list[ParseWarning]`. The
+  inventory is complete and consistent.
+- **`other` as a real member rather than a fallback.** Correct, and it is the
+  distinction that made the `FindingBreakdown` classifier sound: an `other`
+  assigned explicitly can be reasoned about, an `other` that is an else-branch is
+  a hiding place.
+- **Naming the stray files.** LF-ZKPK and LF-68D5 are real imports left in the
+  dev database by the end-to-end verification. Naming them is the right
+  disposition — a reviewer who finds two unexplained files later cannot tell them
+  from a bug. Left in place: they are dev data, the verification that produced
+  them is the reason to trust this ticket, and deleting the evidence to tidy up
+  is a worse trade. Worth removing when the dev database is next reset.
+
+The end-to-end verification is worth recording as the standard: stripping two
+elements from the fixture, importing it, and reading the result on screen caught
+that the first attempt's regex removed the wrong one of twelve
+`PropertyEstimatedValueAmount` elements. A fixture-level test would have passed
+on the same mistake.
+
+### Verification
+
+Backend `ruff` and `mypy` clean over 449 files, **6,020 pass** with the two known
+`.env` failures. Frontend `tsc` and `biome` clean over 240 files, **699 tests**
+(from 696), build compiles into `.next-review`.
+
+| mutation | result |
+| --- | --- |
+| drop the `ValidationError` guard | 2 tests fail |
+| drop the no-link guidance | 3 tests fail |

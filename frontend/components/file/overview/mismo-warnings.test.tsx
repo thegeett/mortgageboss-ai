@@ -91,3 +91,32 @@ describe("MismoWarnings (LP-UI-024)", () => {
     expect(screen.getByText("2 fields to review")).toBeTruthy();
   });
 });
+
+describe("a warning with nowhere to send you", () => {
+  // Every warning stored before LP-UI-024 coerces to `other` and gets no link,
+  // so on any file imported before this change the panel was a list of sentences
+  // with nothing to do — strictly less useful than the block it replaced, which
+  // at least said "use Edit to fill these in".
+  it("says what to do when a warning has no link", () => {
+    withWarnings([{ message: "Something the parser could not place.", subject: "other" }]);
+    render(<MismoWarnings fileId="LF-1" />);
+    expect(screen.getByText(/Use Edit on the section they describe/i)).toBeTruthy();
+  });
+
+  it("does not say it when every warning has a link", () => {
+    withWarnings([{ message: "Loan is missing a base loan amount.", subject: "loan" }]);
+    render(<MismoWarnings fileId="LF-1" />);
+    // Asserted alongside a positive, so an empty render cannot pass this.
+    expect(screen.getByRole("link", { name: /go to the loan/i })).toBeTruthy();
+    expect(screen.queryByText(/Use Edit on the section/i)).toBeNull();
+  });
+
+  it("says it once when only some warnings lack a link", () => {
+    withWarnings([
+      { message: "Loan is missing a base loan amount.", subject: "loan" },
+      { message: "Something the parser could not place.", subject: "other" },
+    ]);
+    render(<MismoWarnings fileId="LF-1" />);
+    expect(screen.getAllByText(/Use Edit on the section they describe/i)).toHaveLength(1);
+  });
+});
