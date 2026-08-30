@@ -154,3 +154,87 @@ The critical list is **not domain-expert reviewed** — the ticket asks for that
 it has not happened. The classification is mine, from the field names and the
 schema specs, and `reviewed_not_critical` carries a reason for every exclusion
 precisely so that review is a reading task rather than an archaeology one.
+
+---
+
+## Review (LP-UI-032 review commit)
+
+Reviewed on request from the session running the epic. Two defects, both of them
+the general shape A26b named — *any other place that masks by enumerating keys
+has the same defect* — coming true in the two places the ticket's fix could not
+reach. Recorded in full as AMENDMENTS A27.
+
+### 1. The drift guard's regex missed the spelled-out identifiers
+
+`CRITICAL_SHAPE` tested for `ssn` and `itin`. The schema specs also spell the
+same thing out: `social_security_number`, `taxpayer_tin`, `spouse_tin`, `ein`,
+`employer_ein`, `i94_number`, `uscis_or_a_number`, `date_of_birth`. None of those
+contain `ssn` or `itin`, so 38 identity keys were never forced into a decision,
+sat in neither list, and answered `is_sensitive() == False`.
+
+`social_security_number` is a shipped spec key: it would have printed a Social
+Security number in the clear, which is the defect this ticket exists to fix.
+Three of the 38 carry data in the corpus today — `date_of_birth` (8 fields),
+`borrower_date_of_birth`, `employer_ein` (14).
+
+The hole also covered money named with a noun rather than a suffix —
+`cash_to_close`, `total_closing_costs`, `monthly_principal_and_interest`,
+`total_assets`, `total_liabilities`. **92 keys** are now classified across the
+existing categories plus `totals`, `settlement` and `identity_readable`.
+
+Found by running the regex over the whole 1,603-key universe and reading what it
+did **not** match. A shape guard fails on the vocabulary its author had in mind,
+and it fails silently — an unmatched key looks exactly like a key that was
+considered and found ordinary.
+
+### 2. Classified is not the same as classified where masking looks
+
+`is_sensitive()` reads `critical.identity` alone. An SSN filed under any other
+category is critical, flagged, and still rendered in the clear — and the drift
+guard cannot catch it, because the field *is* classified.
+`test_a_personal_identifier_lands_in_the_group_that_gets_MASKED` closes the gap.
+Verified by moving `borrower_ssn` to another category: two tests fail.
+
+### 3. The catch-all rendered every value unmasked
+
+`extractionFields` masks by field key; the catch-all is keyed by a free-text
+label the model wrote, so it masked nothing. That is the worst place for the gap:
+the catch-all is by definition the fields nobody classified. Measured on the
+corpus, a nine-digit tax id under `b Employer's social security number` plus
+eleven other identifier-labelled values were rendering in the clear.
+
+Both the label and the value have to be read. `Social Security - YTD` is a
+withholding amount of `$4,200.00` on a real pay stub in this corpus — masking on
+the label alone would hide a processor's YTD figure, a worse bug than the one
+being fixed. Masking on the value alone misses an eight-digit brokerage account
+number. So money and rates are excluded first, then a bare 9+ digit run or an SSN
+shape is an identifier whatever the label says, and below that the label decides.
+
+### Confirmed, not changed
+
+- **The tier ordering.** `tierFor` reads `humanConfirmed` → `distrustedReason` →
+  `critical` → confidence, so a missing rating cannot buy a critical field a
+  pass, and `confidence` is a plain `typeof === "number"` test — a stored `0`
+  stays `0` rather than becoming `unrated` through a falsy check.
+- **A confident field renders nothing** (`ScrutinyMark` returns `null`).
+- **`CONFIDENCE_CRITICAL` gating nothing** is correctly recorded as a finding
+  rather than resolved by deleting one side of the contradiction.
+- **`review/page.tsx` calls `extractionFields` without `sensitiveKeys`** — checked
+  and clean: it builds a key→label map and discards every value.
+- **`full_text` and the raw extraction blob** are not rendered anywhere in the UI.
+
+### On the piped-`tail` hazard
+
+Re-ran the whole of CI by exit code rather than by reading output. One real
+finding: `biome check` exits 1 on a formatting difference that prints no lint
+rule, so a `| tail` that shows only the summary reads as success. Nothing else in
+the recent commits had slipped through — tsc, mypy, ruff and both suites were
+already clean at `c5a5601`.
+
+### Verification
+
+Frontend: biome 0, tsc 0, **794 vitest**. Backend: ruff 0, ruff format 0, mypy
+strict 0, **6,130 pytest**. Four mutations run; the two that survived (a renderer
+that stops calling the mask, a dropped money exclusion) were my own test gaps and
+are now covered — the first by a component test, the second by the large-amount
+case the exclusion exists for.

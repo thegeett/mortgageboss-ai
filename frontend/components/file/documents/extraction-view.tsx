@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  catchAllDisplay,
   catchAllSections,
   extractionFields,
   extractionTransactions,
@@ -168,7 +169,11 @@ export function ExtractionView({ data }: { data: Record<string, unknown> }) {
                   <FieldRow
                     key={`${field.label}-${i}`}
                     label={field.label}
-                    value={field.value ?? "—"}
+                    // Masked here as well as in the typed core. This path is keyed by
+                    // the model's free-text label, so the backend's key-based identity
+                    // list cannot reach it — and the catch-all is where an
+                    // unclassified identifier lands.
+                    value={field.value == null ? "—" : catchAllDisplay(field.label, field.value)}
                     source={field.source}
                   />
                 ))}

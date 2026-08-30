@@ -1051,3 +1051,84 @@ The design assets are **not** infallible. LP-UI-001 found two real defects in th
 by verifying rather than trusting, which is exactly right. Keep doing that: if a
 ticket's premise does not survive contact with the code, say so on the ticket
 rather than working around it, and the asset gets corrected here.
+
+## 2026-08-30 · A27 — from the LP-UI-032 review: a guard with a hole shaped like a spelling
+
+A26b closed the SSN exposure and named the general shape: *any other place that
+masks by enumerating keys has the same defect.* Both findings here are that
+sentence coming true, in the two places the fix could not reach.
+
+### A27a — `ssn` does not match `social_security_number`
+
+The drift guard is the right instrument and it had a hole. `CRITICAL_SHAPE`
+tested for `ssn` and `itin`; the schema specs also spell the same thing out as
+`social_security_number`, `social_security_number_2`, `taxpayer_tin`,
+`spouse_tin`, `payer_tin`, `ein`, `employer_ein`, `i94_number`,
+`uscis_or_a_number`, `date_of_birth`. None of those substrings contain `ssn` or
+`itin`, so **38 identity keys were never forced into a decision**, were in
+neither list, and answered `is_sensitive() == False`.
+
+`social_security_number` is a shipped spec key. It would have rendered a Social
+Security number in the clear — the identical defect A26b fixed, one spelling
+over, and the guard built to prevent exactly that could not see it. Three of the
+38 carry data in the corpus today (`date_of_birth` ×8, `borrower_date_of_birth`,
+`employer_ein` ×14).
+
+The same hole covered money that names itself with a noun instead of a suffix:
+`cash_to_close`, `total_closing_costs`, `monthly_principal_and_interest`,
+`total_assets`, `total_liabilities` — the figures a borrower is actually quoted.
+None of them end in `_amount`. 92 keys are now classified; the regex covers the
+spelled-out identifiers and the noun-shaped money.
+
+**The lesson is about how a shape guard fails.** It fails on the vocabulary its
+author had in mind, and it fails silently, because an unmatched key is
+indistinguishable from a key that was considered and found ordinary. A regex over
+names is still the right tool — it caught 220 keys — but it needs to be tested
+against the whole key universe by reading what it does NOT match, which is the
+only way this was found.
+
+### A27b — being classified is not the same as being classified where masking looks
+
+`is_sensitive()` reads `critical.identity` and nothing else. A field filed under
+any other category is critical, flagged in the UI, and **still rendered in the
+clear** — and the drift guard cannot catch it, because the field *is* classified.
+`test_a_personal_identifier_lands_in_the_group_that_gets_MASKED` closes that: a
+name matching an anchored SSN/TIN shape that is declared critical must be in
+`identity`. Verified by moving `borrower_ssn` to another category, which fails.
+
+### A27c — the catch-all rendered every value unmasked, and the label alone cannot fix it
+
+`extractionFields` masks by field KEY. The catch-all (`additional_sections`) is
+keyed by a free-text LABEL the model wrote, so there is no key to look up, and it
+masked nothing at all. That is the worst possible place for the gap: **the
+catch-all is by definition the fields nobody classified**, which is exactly where
+an unclassified identifier ends up. Measured on the corpus: a nine-digit tax id
+under "b Employer's social security number", plus eleven other
+identifier-labelled values, rendering in the clear.
+
+The fix has to read the label AND the value, and the reason is a real pair of
+rows on a real pay stub:
+
+| label | value | what it is |
+|---|---|---|
+| `b Employer's social security number` | 9 digits | a tax identifier |
+| `Social Security - YTD` | `$4,200.00` | a withholding amount |
+
+Masking on the label alone hides the processor's YTD figure — a worse bug than
+the one being fixed. Masking on the value alone misses an eight-digit brokerage
+account number, which no rule can distinguish from any other number without its
+label. So: money and rates are excluded first, then a bare 9+ digit run or an SSN
+shape is an identifier whatever the label claims, and below that the label decides.
+
+### A27d — masked and readable are not the same list, and this split is not domain-reviewed
+
+Not every identity field should be hidden. Verifying a date of birth against the
+1003, or an employer's EIN against the W-2, **is the processor's job**, and a
+masked value cannot be verified. So `critical.identity_readable` holds the fields
+that are critical (a wrong one corrupts an identity match) but rendered: dates of
+birth, EINs, professional licence numbers, account tails. `identity` — hidden —
+holds personal identifiers: SSNs, personal TINs, immigration numbers.
+
+Which side a field belongs on is a judgement about what a processor needs to read
+versus what should never be on a screen, and it has not been reviewed by the
+domain expert. It is the kind of question she should be asked directly.

@@ -41,8 +41,50 @@ critical:
     - taxpayer_ssn_masked
     - ssn_or_itin_last4
     - ssn_or_itin_last4_2
+    - social_security_number
+    - social_security_number_2
+    - social_security_number_masked
+    - taxpayer_tin
+    - taxpayer_tin_masked
+    - spouse_tin
+    - spouse_tin_masked
+    - borrower_tin_masked
+    - payer_tin
+    - recipient_tin
+    - recipient_tin_masked
+    - lender_tin
+    - partner_or_shareholder_tin
+    - shareholder_or_partner_tin_masked
+    - i94_number
+    - uscis_or_a_number
+    - beneficiary_a_number
 
   # --- Credit scores. Three bureau scores drive pricing and eligibility outright. ---
+  # --- Identity a processor must be able to READ. Critical (a wrong one corrupts an identity
+  # match) but NOT masked: verifying a date of birth against the 1003, or an employer's EIN
+  # against the W-2, is the processor's job, and a masked value cannot be verified. Only the
+  # `identity` group above is hidden — `identity_fields()` reads that group alone.
+  # The mask/read split is a judgement and has NOT been domain-reviewed. See LP-UI-033.
+  identity_readable:
+    - date_of_birth
+    - date_of_birth_2
+    - borrower_date_of_birth
+    - borrower_dob
+    - borrower_dob_2
+    - beneficiary_date_of_birth
+    - ein
+    - ein_masked
+    - employer_ein
+    - entity_ein
+    - entity_ein_masked
+    - ein_or_state_entity_number_masked
+    - license_number
+    - company_license_number
+    - cpa_license_number
+    - surveyor_license_number
+    - pest_control_business_license_number
+    - recipient_or_escrow_account_last4
+
   credit:
     - aus_credit_score
     - score_equifax
@@ -100,6 +142,14 @@ critical:
     - wages_tips_other_comp
     - ytd_gross
     - ytd_income
+    - federal_income_tax_withheld
+    - state_tax_withheld
+    - state_income_tax
+    - local_income_tax
+    - total_deductions
+    - total_deductions_current
+    - total_allotments
+    - stated_monthly_income_total
     # Hours are the income calculation's multiplicand — a wrong one is a wrong
     # income by exactly the same arithmetic as a wrong rate.
     - average_hours_per_week
@@ -270,6 +320,51 @@ critical:
 
 # Ruled out, each with the reason. An entry here says "looked critical, is not" — which is
 # information, and is why this half exists rather than an unexplained absence.
+  # --- Aggregates. A total is what the next reader trusts INSTEAD of re-adding the column,
+  # so a wrong one propagates further than any single line it was built from. ---
+  totals:
+    - total_assets
+    - total_liabilities
+    - total_available_assets
+    - total_verified_assets
+    - liquid_assets_total
+    - total_revenue
+    - total_operating_expenses
+    - total_cost_of_goods_sold
+    - total_withdrawals
+    - total_payments
+    - total_payments_received
+    - total_of_payments
+    - checks_total
+    - fees_total
+    - nsf_fee_total
+    - total_tax
+    - total_tax_due
+
+  # --- Settlement and note figures. What the borrower actually pays or brings. ---
+  settlement:
+    - cash_to_close
+    - total_closing_costs
+    - estimated_escrow
+    - escrow_balance_orcredit
+    - lender_credits
+    - seller_credits
+    - due_diligence_fee
+    - tax_or_processing_fee
+    - per_diem_interest
+    - interest_paid
+    - penalties_and_interest
+    - refund_of_overpaid_interest
+    - in_5_years_principal_paid
+    - monthly_principal_and_interest
+    - outstanding_mortgage_principal
+    - current_arrears
+    - amount_due
+    - annual_property_tax
+    - annual_property_taxes
+    - estimated_construction_cost
+    - withdrawal_penalty_or_tax
+
 reviewed_not_critical:
   account_status_after_payment: a status word, not the payment figure itself
   aus_loan_amount: >-
@@ -299,3 +394,22 @@ reviewed_not_critical:
   gross_living_area: >-
     square footage. Material to an appraisal review and not money, a rate or an
     identity — it belongs to whoever reviews comparables, not to this tier
+  assignment_or_collateral_interest: >-
+    a legal interest in collateral — prose describing a claim, not a money figure
+  closing_cost_estimate_expiration: >-
+    the date an estimate lapses; the costs themselves are `total_closing_costs`
+  days_past_due: >-
+    a delinquency duration in days. Material to a credit review, but it is a count — the money at risk is the balance beside it
+  escrow_holder_or_recipient: >-
+    the name of the party holding escrow; a wrong one is visible to the next reader
+  escrow_or_transaction_number: >-
+    a reference number for matching a wire, not an identity that a person is matched on
+  poa_principal: >-
+    the person GRANTING a power of attorney — a name. Matched here only because it contains the word principal
+  principal_business_activity: a description of what a business does. Same word, no money in it
+  required_reserve_months: >-
+    a requirement expressed in months. The reserve dollars are the critical figure and are counted under assets
+  second_tin_notice: >-
+    an IRS checkbox saying a TIN mismatch notice was sent twice — a flag, not a TIN
+  total_tradeline_count: a count of credit accounts, not a money figure
+  total_units: a count of units in a property, not a money figure or an identity

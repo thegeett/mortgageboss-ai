@@ -431,6 +431,55 @@ export function formatSource(source: SourceLocation | null): string | null {
 /** Sensitive typed-core keys masked in display (W-2 SSN LP-39b; bank acct LP-39c). */
 export const MASKED_FIELD_KEYS = new Set(["employee_ssn", "account_number_masked"]);
 
+/**
+ * A catch-all field naming an identifier (LP-UI-032 review).
+ *
+ * THE TYPED-CORE MASK CANNOT REACH THIS PATH. `extractionFields` masks by field KEY,
+ * against the backend's identity list plus `MASKED_FIELD_KEYS`. The catch-all is keyed
+ * by a free-text LABEL the model wrote, so there is no key to look up — and the
+ * catch-all is by definition the fields nobody classified, which is exactly where an
+ * unclassified identifier ends up. Measured on the current corpus: a nine-digit tax id
+ * under "b Employer's social security number" renders in the clear today, alongside
+ * eleven other identifier-labelled catch-all values.
+ *
+ * BOTH the label and the value have to be consulted, and neither alone works:
+ *
+ * - Label alone masks money. "Social Security - YTD" and "OASDI (Social Security) -
+ *   Current" are withholding AMOUNTS on a real pay stub in this corpus. Masking a
+ *   processor's YTD figure because its label says "social security" is a worse bug
+ *   than the one being fixed.
+ * - Value alone misses short identifiers. An eight-digit brokerage account number is
+ *   not distinguishable from any other number without its label.
+ *
+ * So: money and rates are excluded first, then a bare 9+ digit run or an SSN shape is
+ * an identifier whatever the label claims, and below that the label has to say so.
+ */
+const IDENTIFIER_LABEL =
+  /\b(ssns?|social security (number|no)|tax(payer)? id|tins?|eins?|account (number|no)|routing|passport|licen[sc]e number)\b/i;
+
+export function catchAllIsSensitive(label: string, value: string): boolean {
+  // A status word ("Match", "No alert") carries no identifier to hide, and masking it
+  // to bullets destroys the only thing the row said.
+  if (!/\d/.test(value)) return false;
+  // Money and rates. A decimal fraction or a currency/percent mark says this is an
+  // amount — no identifier is written with cents.
+  if (/[$%]|\d\.\d/.test(value)) return false;
+  if (/\d{3}[- ]\d{2}[- ]\d{4}|\b\d{9,}\b/.test(value)) return true;
+  return IDENTIFIER_LABEL.test(label);
+}
+
+/** The display form for a catch-all field — masked when it names an identifier. */
+export function catchAllDisplay(label: string, value: string): string {
+  if (!catchAllIsSensitive(label, value)) return value;
+  // Which mask, and the VALUE decides first. A 9-digit or dashed SSN shape gets the
+  // SSN form whatever the label says: keying only off the label gave "••••6789" for a
+  // literal `123-45-6789` sitting under a label that did not name it.
+  const ssnShaped = /^\D*\d{3}[- ]\d{2}[- ]\d{4}\D*$/.test(value) || /^\D*\d{9}\D*$/.test(value);
+  return ssnShaped || /\bssns?\b|social security (number|no)|tax(payer)? id|\btins?\b/i.test(label)
+    ? maskSsn(value)
+    : maskLast4(value);
+}
+
 // --- Document type override (LP-44) ----------------------------------------- //
 
 /** Types that re-extract on override (the rest relabel classified-only). */

@@ -32,8 +32,28 @@ CRITICAL_SHAPE = re.compile(
     r"(_amount$|^amount$|_rate$|^rate$|ssn|itin|_income$|^income|wages|gross|net_|_net$|^net$"
     r"|_balance$|loan_amount|purchase_price|appraised_value|payment$|_price$|credit_score"
     r"|score_|_value$|premium$|_pay$|hours|ytd|salary|compensation|earnings|deposit"
-    r"|credit_limit|dti|ltv|percent|_pct$|apr)"
+    r"|credit_limit|dti|ltv|percent|_pct$|apr"
+    # THE SPELLED-OUT IDENTIFIERS. `ssn` above does not match `social_security_number`, and
+    # `itin` does not match `taxpayer_tin` — so 38 identity keys, `social_security_number`
+    # among them, were never forced into a decision and answered `sensitive=False`. That is
+    # the same defect this ticket fixed for `borrower_ssn`, one spelling over.
+    r"|social_security_number|(^|_)tin(_|$)|_tin_|(^|_)ein(_|$)|date_of_birth|(^|_)dob(_|$)"
+    r"|i94_number|uscis|(^|_)a_number|license_number"
+    # Money that names itself with a noun rather than a suffix. `cash_to_close`,
+    # `total_closing_costs` and `monthly_principal_and_interest` are the figures a
+    # borrower is quoted; none of them end in `_amount`.
+    r"|^total_|_total$|principal|escrow|interest_paid|_interest$|_fee$|_fees$|withheld"
+    r"|_credits$|cash_to_close|closing_cost|_tax$|_taxes$|arrears|_due$|_paid$|_cost$"
+    r"|_costs$|reserve)"
 )
+
+#: Names that are an identifier for a PERSON. These must be masked, not merely flagged, so
+#: they have to land in the `identity` group — `identity_fields()` reads that group alone.
+#:
+#: Anchored on word boundaries, unlike `CRITICAL_SHAPE`. That regex may over-match freely
+#: because a false positive there costs one reviewed line; here a false positive would
+#: demand that a status word be masked. (`itin` unanchored matches `wai-tin-g_period`.)
+MUST_BE_MASKED = re.compile(r"((^|_)(ssn|itin|tin)(_|$)|social_security_number)")
 
 
 def _spec_typed_core_keys() -> set[str]:
@@ -221,3 +241,24 @@ class TestSensitiveFields:
 
     def test_it_is_not_empty(self) -> None:
         assert len(identity_fields()) >= 8
+
+
+def test_a_personal_identifier_lands_in_the_group_that_gets_MASKED() -> None:
+    """Being classified is not enough — it has to be classified into `identity`.
+
+    `is_sensitive()` reads `critical.identity` and nothing else, so an SSN filed under
+    any other category is critical, flagged, and STILL RENDERED IN THE CLEAR. The drift
+    guard above cannot catch that: the field is classified, just not where masking looks.
+    """
+    # Scoped to the fields DECLARED critical. A name ruled out in `reviewed_not_critical`
+    # carries a written reason for being ruled out — `second_tin_notice` is an IRS checkbox,
+    # `ssn_first_reported_date` is a date — and that is a decision on the record, which is
+    # the whole posture of the file. What must not happen silently is a field being called
+    # critical and filed where masking does not look.
+    misfiled = sorted(
+        f for f in critical_fields() if MUST_BE_MASKED.search(f) and not is_sensitive(f)
+    )
+    assert not misfiled, (
+        "These name a personal identifier but are not in `critical.identity`, so they render "
+        f"in the clear: {misfiled}"
+    )
