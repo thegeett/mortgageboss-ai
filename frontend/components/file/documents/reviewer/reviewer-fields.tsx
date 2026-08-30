@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentDetail } from "@/lib/api/documents";
 import { extractionFields } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
+import { cn } from "@/lib/utils";
 
 /**
  * The extracted fields, beside the page they came from (LP-UI-030).
@@ -18,7 +19,28 @@ import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
  * value of this panel when there is no page image to point at, which measurement
  * says is the case for roughly a quarter of fields.
  */
-export function ReviewerFields({ documentId }: { documentId: string | null }) {
+export function ReviewerFields({
+  documentId,
+  selected,
+  hovered,
+  onSelect,
+  onHover,
+  hasBox,
+  citationWrong,
+  relocated,
+}: {
+  documentId: string | null;
+  selected?: string | null;
+  hovered?: string | null;
+  onSelect?: (fieldKey: string) => void;
+  onHover?: (fieldKey: string | null) => void;
+  /** Whether this field's value could be located on the page at all. */
+  hasBox?: (fieldKey: string) => boolean;
+  /** The extraction cited a page the document does not have. */
+  citationWrong?: (fieldKey: string) => boolean;
+  /** The text was found on a page other than the one cited. */
+  relocated?: (fieldKey: string) => boolean;
+}) {
   const { data, isPending, isError } = useDocumentDetail(documentId);
 
   if (!documentId) {
@@ -56,8 +78,28 @@ export function ReviewerFields({ documentId }: { documentId: string | null }) {
       ) : (
         <ul className="space-y-2">
           {fields.map((field) => (
-            <li key={field.key} className="field-row border-b border-border pb-2 last:border-b-0">
-              <span className="text-xs text-muted-foreground">{field.label}</span>
+            <li
+              key={field.key}
+              className={cn(
+                "field-row rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
+                field.key === selected && "bg-primary/10",
+                field.key === hovered && field.key !== selected && "bg-muted",
+              )}
+            >
+              {/* FOCUS A FIELD -> THE VIEWER GOES TO ITS BOX. The ticket calls
+                  this the direction that actually saves time, so the whole row
+                  is the control rather than a small affordance inside it. */}
+              <button
+                type="button"
+                className="text-left text-xs text-muted-foreground"
+                onClick={() => onSelect?.(field.key)}
+                onFocus={() => onHover?.(field.key)}
+                onBlur={() => onHover?.(null)}
+                onMouseEnter={() => onHover?.(field.key)}
+                onMouseLeave={() => onHover?.(null)}
+              >
+                {field.label}
+              </button>
               <span className="min-w-0">
                 <span className="block break-words text-sm font-medium text-foreground">
                   {field.value ?? "—"}
@@ -71,6 +113,13 @@ export function ReviewerFields({ documentId }: { documentId: string | null }) {
                     {field.source.page ? ` · p.${field.source.page}` : ""}
                   </span>
                 ) : null}
+
+                <CitationNote
+                  cited={Boolean(field.source?.snippet)}
+                  citationWrong={citationWrong?.(field.key) ?? false}
+                  relocated={relocated?.(field.key) ?? false}
+                  located={hasBox ? hasBox(field.key) : true}
+                />
               </span>
             </li>
           ))}
@@ -82,4 +131,60 @@ export function ReviewerFields({ documentId }: { documentId: string | null }) {
 
 function Note({ children }: { children: React.ReactNode }) {
   return <p className="max-w-prose p-3 text-sm text-muted-foreground">{children}</p>;
+}
+
+/**
+ * What the page can and cannot show for one field.
+ *
+ * Its own component because these three sentences are the honest part of the
+ * feature and each of them is a claim about the extraction, not about the UI. A
+ * citation naming a page the document does not have is shown as exactly that —
+ * silently rendering a better page would turn a provenance trail into a guess.
+ */
+export function CitationNote({
+  cited,
+  citationWrong,
+  relocated,
+  located,
+}: {
+  /** The extraction quoted text for this field. Without one there is no claim to check. */
+  cited: boolean;
+  /** The cited page number is beyond the document's length. */
+  citationWrong: boolean;
+  /** The quoted text was found on a page other than the one cited. */
+  relocated: boolean;
+  /** The quoted text was located somewhere in the document. */
+  located: boolean;
+}) {
+  // A field the extraction never filled has nothing to locate, and telling the
+  // processor it could not be found reads as a lookup failure rather than an
+  // empty field.
+  if (!cited) return null;
+
+  if (citationWrong) {
+    return (
+      <span className="mt-0.5 block text-xs text-warning">
+        The extraction cited a page this document does not have
+        {relocated ? " — the text is shown where it actually appears." : "."}
+      </span>
+    );
+  }
+  if (relocated) {
+    return (
+      <span className="mt-0.5 block text-xs text-warning">
+        Found on a different page than the one cited.
+      </span>
+    );
+  }
+  // No box is ORDINARY — roughly a quarter of real fields. Saying so beats a
+  // field that simply never highlights, leaving the processor wondering whether
+  // the click registered.
+  if (!located) {
+    return (
+      <span className="mt-0.5 block text-xs text-muted-foreground">
+        Not locatable on the page — read the quoted text above.
+      </span>
+    );
+  }
+  return null;
 }

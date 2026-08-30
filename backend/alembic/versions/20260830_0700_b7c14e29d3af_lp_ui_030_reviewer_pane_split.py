@@ -9,6 +9,12 @@ and splitting it across columns invites them to disagree. Nullable, so "never
 adjusted" stays distinguishable from "adjusted back to the default"; the UI shows
 its default layout for NULL rather than writing one on first load.
 
+KEPT OUT OF THE READONLY VIEWS (`tests/test_readonly_query.py::EXCLUDED`). The
+readonly surface exists to answer questions about loan data from staging, and a
+processor's pane geometry answers none of them. It is not sensitive — it is two
+integers — so this is a noise decision rather than a privacy one, and rebuilding
+`readonly.users` to carry it would add a column no query will ever select.
+
 Hand-written. `--autogenerate` proposes eighteen destructive operations against
 this schema (drops `finding_prose`, borrower address columns, `properties.county`
 and more), so every migration here is written by hand.

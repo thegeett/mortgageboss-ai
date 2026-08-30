@@ -305,7 +305,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     "mismo_imports": frozenset({"catch_all", "raw_file_path"}),
     "findings": frozenset({"source_snippet"}),
     "companies": frozenset({"settings"}),
-    "users": frozenset({"hashed_password", "email", "first_name", "last_name"}),
+    # `reviewer_pane_split` is a UI preference, not data anyone queries staging for
+    # (LP-UI-030) — kept out for noise, not for privacy. Reason in that migration.
+    "users": frozenset(
+        {"hashed_password", "email", "first_name", "last_name", "reviewer_pane_split"}
+    ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
     "communications": frozenset({"sender", "recipient", "subject", "body"}),
 }

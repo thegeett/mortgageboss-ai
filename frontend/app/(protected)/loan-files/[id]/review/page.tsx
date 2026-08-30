@@ -1,17 +1,20 @@
 "use client";
 
+import { BoxOverlay } from "@/components/file/documents/reviewer/box-overlay";
 import { PageCanvas } from "@/components/file/documents/reviewer/page-canvas";
 import { ReviewerFields } from "@/components/file/documents/reviewer/reviewer-fields";
 import { type PaneSplit, ReviewerShell } from "@/components/file/documents/reviewer/reviewer-shell";
+import { useFieldSelection } from "@/components/file/documents/reviewer/use-field-selection";
 import { StatusToken } from "@/components/status-token";
-import { useLoanFileDocuments } from "@/lib/api/documents";
+import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
+import { useFieldBoxes } from "@/lib/api/field-boxes";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
-import { currentDocuments } from "@/lib/loan-files/documents";
+import { currentDocuments, extractionFields } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 /**
  * The document reviewer (LP-UI-030) — list, page, fields.
@@ -42,6 +45,10 @@ function Reviewer() {
   const current = currentDocuments(documents ?? []);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const field = useFieldSelection();
+  // Alt reveals every other candidate box at once. Held, not toggled: it is a
+  // peek at what else the extraction found, not a mode to be left switched on.
+  const showAll = useAltHeld();
 
   // `?doc=` opens straight into one document — the same parameter the Documents
   // tab uses for its drawer (LP-114), so a link keeps working whichever surface
@@ -50,6 +57,34 @@ function Reviewer() {
   const documentId = selected ?? requested ?? current[0]?.id ?? null;
 
   const split: PaneSplit | null = preferences?.reviewer_pane_split ?? null;
+
+  const { data: boxes } = useFieldBoxes(documentId);
+  const { data: detail } = useDocumentDetail(documentId);
+
+  const byField = useMemo(() => {
+    const map = new Map<string, { page: number }>();
+    for (const box of boxes?.boxes ?? []) if (!map.has(box.field_key)) map.set(box.field_key, box);
+    return map;
+  }, [boxes]);
+
+  const labels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of extractionFields(detail?.current_extraction?.extracted_data ?? {}))
+      map.set(f.key, f.label);
+    return map;
+  }, [detail]);
+
+  // FOCUS A FIELD -> THE PAGE FOLLOWS. The page number is the whole navigation
+  // here: the overlay only draws boxes belonging to the page on screen, so
+  // moving the page IS scrolling to the box.
+  useEffect(() => {
+    if (!field.selected) return;
+    const box = byField.get(field.selected);
+    if (box && box.page !== page) setPage(box.page);
+  }, [field.selected, byField, page]);
+
+  const fabricated = new Set(boxes?.fabricated_pages ?? []);
+  const relocated = new Set(boxes?.relocated ?? []);
 
   return (
     <div className="h-[calc(100vh-var(--topbar-h)-1px)]">
@@ -68,6 +103,7 @@ function Reviewer() {
                   onClick={() => {
                     setSelected(doc.id);
                     setPage(1);
+                    field.select(null);
                   }}
                   aria-current={doc.id === documentId ? "true" : undefined}
                   className={cn(
@@ -99,10 +135,69 @@ function Reviewer() {
           </ul>
         }
         canvas={
-          <PageCanvas documentId={documentId} page={page} pageCount={null} onPageChange={setPage} />
+          <PageCanvas
+            documentId={documentId}
+            page={page}
+            pageCount={null}
+            onPageChange={setPage}
+            overlay={
+              <BoxOverlay
+                boxes={boxes?.boxes ?? []}
+                page={page}
+                selected={field.selected}
+                hovered={field.hovered}
+                showAll={showAll}
+                // CLICK A VALUE ON THE PAGE -> GO TO ITS FIELD. Never write it
+                // into whichever field happened to be selected; see the hook.
+                onSelect={(key) => field.clickBox(key)}
+                onHover={field.hover}
+                labelFor={(key) => labels.get(key) ?? key}
+              />
+            }
+          />
         }
-        fields={<ReviewerFields documentId={documentId} />}
+        fields={
+          <ReviewerFields
+            documentId={documentId}
+            selected={field.selected}
+            hovered={field.hovered}
+            onSelect={field.select}
+            onHover={field.hover}
+            hasBox={(key) => byField.has(key)}
+            citationWrong={(key) => fabricated.has(key)}
+            relocated={(key) => relocated.has(key)}
+          />
+        }
       />
     </div>
   );
+}
+
+/**
+ * Whether Alt is held right now.
+ *
+ * `blur` matters as much as `keyup`: alt-tabbing away is the ordinary way to
+ * leave this page, and the keyup then lands in another window, leaving every box
+ * drawn until the next Alt press.
+ */
+function useAltHeld(): boolean {
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.altKey) setHeld(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (!e.altKey) setHeld(false);
+    };
+    const clear = () => setHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", clear);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", clear);
+    };
+  }, []);
+  return held;
 }

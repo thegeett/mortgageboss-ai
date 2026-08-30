@@ -855,6 +855,102 @@ makes the engine overlay-aware while the ledger stays default-aware, which
 `reconciliation.py` in the same change.** Recorded here because the two live in
 different parts of the codebase and nothing connects them.
 
+## 2026-08-30 · A24 — from LP-UI-030, and the first half corrects MY answer to LP-UI-029
+
+### A24a — my 99.1% figure measured the wrong thing
+
+LP-UI-029's blocker was "no bounding boxes exist; is snippet matching viable?" I
+answered yes, on **99.1% page+snippet coverage**. That number is real and it is
+the wrong number: it measured the snippet being **present in the extraction
+record**. What decides whether a highlight can be drawn is the snippet being
+**findable in the PDF's text layer**, by the mechanism that will draw it.
+
+LP-UI-030 measured that, over 105 real stored PDFs, 752 current-extraction
+fields, using `page.search_for()` — the same call LP-UI-031 will use, so it is
+the instrument and not a proxy:
+
+| | |
+|---|---|
+| 548 (72.9%) | snippet found on the cited page |
+| 28 (3.7%) | snippet findable, but the cited page does not exist |
+| 89 (11.8%) | absent from the text layer entirely |
+| 83 (11.0%) | on a scan, with no text layer at all |
+| 4 (0.5%) | cited page out of range and absent |
+
+**A derived box is reachable for about 77% of fields, not 99%.** No whitespace
+normalisation was applied, so 77% is a lower bound. 12 of 105 documents are scans
+for which no highlight is derivable at all.
+
+The design consequence is that the "page known, spot not located" field state I
+added to the Review screen is not an edge case to be drawn small — it is roughly
+one field in four, and on a scanned document it is every field. It has to be
+designed as a first-class state, and the Review screen must be legible with no
+boxes at all.
+
+**The lesson, and it is mine:** I answered a feasibility question with the
+closest number to hand rather than the number the question was about. Coverage of
+a *record* is not coverage of a *capability*. Where a ticket is unblocked by a
+measurement, the measurement has to be taken with the mechanism that will do the
+work.
+
+### A24b — 4.3% of fields cite a page the document does not have
+
+The sharper finding, and it is not about boxes at all. The measurement script
+buckets a recoverable snippet as `found_on_another_page` when the cited page is
+in range, and `oob_found_elsewhere` when it is not. Its output carries
+`oob_found_elsewhere: 28` **and no `found_on_another_page` key at all** — and a
+`Counter` only holds keys it incremented, so that bucket is zero.
+
+So no field cites a wrong-but-existing page. All 28, plus the 4 out of range and
+absent, cite a page number **the document does not have**: **32 of 752 fields,
+4.3%.**
+
+That is categorically different from an attribution drifting by one page. It is
+the model **inventing a page number** — "p.7" of a three-page letter — and
+**LP-UI-018's ledger renders that string to a processor as provenance, as fact, on
+a compliance screen.** A processor who turns to p.7 to check a figure finds no
+p.7, and the product's central promise — *here is where this came from* — is
+false 4% of the time.
+
+**Design consequence, binding on LP-UI-031 and on the ledger:** a page citation
+must be validated against the document's page count before it is rendered as
+provenance. Where the cited page does not exist, the ledger says the snippet was
+found and the location is unknown, rather than printing a page number that is not
+true. This is cheap — the page count is already known wherever the PDF is opened.
+
+**Product consequence, for the user:** page attribution is wrong on ~4% of
+extracted fields today. Whether that is acceptable at pilot, and whether the
+extraction prompt or a post-hoc validation step should fix it, is a product and
+model question, not a UI one.
+
+## 2026-08-30 · A25 — LP-UI-031 acted on A24b in the reviewer; the ledger still prints `p.N`
+
+A24b made page-citation validation binding on **LP-UI-031 and on the ledger**.
+LP-UI-031 has done the first half and not the second, and the gap is worth
+naming rather than leaving to be discovered.
+
+**Done, in the reviewer.** `find_field_boxes` knows whether the cited page
+exists, and `cited_page_exists=False` travels with the result. The field row says
+*"The extraction cited a page this document does not have"* — and, where the text
+was located elsewhere, that it is being shown where it actually appears. The
+better page is never substituted silently; a provenance trail that quietly
+corrects the model is not one.
+
+**Not done, in the ledger.** LP-UI-018 renders `p.N` from the finding's stored
+citation with nothing checking N against the document's page count. On ~4% of
+fields that string is invented. The reviewer now contradicts the ledger on the
+same document: one screen says the page does not exist, the other prints it as
+fact.
+
+Closing it needs the page count where the ledger renders a citation, which the
+ledger does not have today — it reads findings, not documents. That is a small
+piece of plumbing and a real one, and it is not field↔box linking, so it is
+recorded here as an open item rather than folded into LP-UI-031.
+
+**Until it is closed, the honest reading is:** the document reviewer tells the
+truth about page attribution and the ledger does not.
+
+
 ---
 
 ## Standing note

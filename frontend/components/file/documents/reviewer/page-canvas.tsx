@@ -24,12 +24,15 @@ export function PageCanvas({
   page,
   pageCount,
   onPageChange,
+  overlay,
 }: {
   documentId: string | null;
   page: number;
   /** `null` when unknown — the control then only guards the lower bound. */
   pageCount: number | null;
   onPageChange: (page: number) => void;
+  /** The highlight boxes, positioned against the image (LP-UI-031). */
+  overlay?: React.ReactNode;
 }) {
   const { data, isPending, isError } = usePageImage(documentId, page);
   useRevokeOnUnmount(data?.url);
@@ -83,13 +86,20 @@ export function PageCanvas({
           // `alt` is deliberately not the page's content: it is an image of a
           // borrower's document, and describing it would mean transcribing PII
           // into the accessibility tree. The fields panel is the readable form.
-          <img
-            src={data.url}
-            alt={`Page ${page} of the document`}
-            width={data.widthPoints * data.zoom}
-            height={data.heightPoints * data.zoom}
-            className="mx-auto h-auto w-full max-w-[46rem] rounded border border-border bg-background shadow-sm"
-          />
+          // `relative` so the overlay's normalised percentages resolve against
+          // the IMAGE's box rather than the scroll container's — the boxes are
+          // 0..1 of the page, and any other positioning parent puts them
+          // somewhere confidently wrong.
+          <div className="relative mx-auto w-full max-w-[46rem]">
+            <img
+              src={data.url}
+              alt={`Page ${page} of the document`}
+              width={data.widthPoints * data.zoom}
+              height={data.heightPoints * data.zoom}
+              className="h-auto w-full rounded border border-border bg-background shadow-sm"
+            />
+            {overlay}
+          </div>
         )}
       </div>
     </div>

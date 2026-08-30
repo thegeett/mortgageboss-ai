@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from pydantic import BaseModel
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
@@ -45,6 +46,7 @@ from app.services.documents import (
     build_document_response,
     build_document_responses,
     create_document,
+    get_current_extraction,
     get_document_for_company,
     get_version_group_documents,
     list_documents,
@@ -52,6 +54,7 @@ from app.services.documents import (
     soft_delete_document,
     validate_upload,
 )
+from app.services.field_boxes import find_all_field_boxes
 from app.services.page_render import DEFAULT_ZOOM, render_page
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
@@ -376,6 +379,87 @@ async def resolve_staleness_endpoint(
     )
     await db.commit()
     return await build_document_response(db, document=document)
+
+
+class FieldBoxPublic(BaseModel):
+    """One field's location on the page, normalised 0..1 (LP-UI-031)."""
+
+    field_key: str
+    page: int
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class FieldBoxesResponse(BaseModel):
+    """Where each extracted field's value sits on the document.
+
+    A field is ABSENT from `boxes` when its text could not be located — measured
+    at roughly a quarter of real fields (no text layer, snippet not present, or a
+    citation naming a page the document does not have). The reviewer's no-box
+    state is ordinary, so absence here is a result rather than a failure.
+    """
+
+    boxes: list[FieldBoxPublic]
+    #: Fields whose extraction cited a page the document does not have. Surfaced
+    #: rather than silently corrected: the box may have been found elsewhere, and
+    #: a screen that quietly substitutes a better page stops being a provenance
+    #: trail. Measured at 4.3% of fields, and never an off-by-one — not one field
+    #: cites a wrong-but-existing page.
+    fabricated_pages: list[str]
+    #: Fields whose text was found on a page other than the one cited.
+    relocated: list[str]
+
+
+@flat_router.get("/{document_id}/boxes", response_model=FieldBoxesResponse)
+async def field_boxes(
+    document_id: UUID, current_user: CurrentUser, db: DbSession
+) -> FieldBoxesResponse:
+    """Locate every extracted field's snippet in the document (LP-UI-031).
+
+    Read-only, and behind the same tenant gate as the bytes — a box is derived
+    from the document's own text, so it is as sensitive as the page it describes.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    fields = (extraction.extracted_data or {}) if extraction is not None else {}
+    if document.mime_type != "application/pdf" or not isinstance(fields, dict):
+        return FieldBoxesResponse(boxes=[], fabricated_pages=[], relocated=[])
+
+    storage = get_storage_backend()
+    content = await storage.read(document.storage_path)
+
+    requests: dict[str, tuple[str, int]] = {}
+    for key, field in fields.items():
+        if not isinstance(field, dict) or field.get("value") is None:
+            continue
+        source = field.get("source") or {}
+        snippet, page = source.get("snippet"), source.get("page")
+        if not isinstance(snippet, str) or not isinstance(page, int):
+            continue
+        requests[key] = (snippet, page)
+
+    # One open for the whole document, not one per field (see the service).
+    lookups = await find_all_field_boxes(content, requests)
+
+    boxes: list[FieldBoxPublic] = []
+    fabricated: list[str] = []
+    relocated: list[str] = []
+    for key, found in lookups.items():
+        if not found.cited_page_exists:
+            fabricated.append(key)
+        if found.found_elsewhere:
+            relocated.append(key)
+        boxes.extend(
+            FieldBoxPublic(field_key=key, page=box.page, x0=box.x0, y0=box.y0, x1=box.x1, y1=box.y1)
+            for box in found.boxes
+        )
+    return FieldBoxesResponse(boxes=boxes, fabricated_pages=fabricated, relocated=relocated)
 
 
 @flat_router.get("/{document_id}/page/{page_number}")

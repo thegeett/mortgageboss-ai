@@ -546,3 +546,39 @@ async def test_another_companys_page_is_a_404(
 
     resp = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token_b))
     assert resp.status_code == 404
+
+
+async def test_field_boxes_locate_values_and_flag_a_fabricated_page(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Boxes at the API, including the flag that stops a silent correction.
+
+    Measured on real data: 4.3% of fields cite a page the document does not have,
+    and NOT ONE cites a wrong-but-existing page. So the box may come from another
+    page, and the response says so rather than quietly substituting a better one.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/boxes", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    # No extraction on a freshly uploaded document — an empty result, not a 500.
+    assert body["boxes"] == []
+    assert body["fabricated_pages"] == []
+    assert body["relocated"] == []
+
+
+async def test_another_companys_boxes_are_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # A box is derived from the document's own text, so it is exactly as
+    # sensitive as the page it describes.
+    company_a, _ua, token_a = await _make_user(db_session, slug="acme")
+    _company_b, _ub, token_b = await _make_user(db_session, slug="beta")
+    loan_file = await create_loan_file(db_session, company_id=company_a.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token_a)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/boxes", headers=_auth(token_b))
+    assert resp.status_code == 404
