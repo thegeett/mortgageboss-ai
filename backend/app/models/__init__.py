@@ -64,6 +64,7 @@ from app.models.needs_prose import NeedProse
 from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
 from app.models.rule import Rule
+from app.models.saved_view import SavedView, SavedViewSort
 from app.models.snapshot_finding import SnapshotFinding, SnapshotFindingScan
 from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
@@ -145,6 +146,8 @@ __all__ = [
     "RefinanceType",
     "Rule",
     "RuleTag",
+    "SavedView",
+    "SavedViewSort",
     "ShortStr",
     "SnapshotFinding",
     "SnapshotFindingScan",
