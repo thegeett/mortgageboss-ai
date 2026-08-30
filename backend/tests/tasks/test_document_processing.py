@@ -459,34 +459,56 @@ async def test_document_name_survives_a_rejected_type_mismatch(
     assert doc.document_name == "a Canadian T4 slip"  # the name is not
 
 
+@pytest.mark.parametrize(
+    ("document_type", "confidence", "type_matches"),
+    [
+        pytest.param("pay_stub", 0.95, True, id="confident-known-type"),
+        pytest.param("unknown", 0.90, True, id="confident-unknown"),
+        pytest.param("w2", 0.85, False, id="rejected-type-mismatch"),
+    ],
+)
 async def test_document_name_is_never_logged_or_put_in_the_activity_detail(
-    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    document_type: str,
+    confidence: float,
+    type_matches: bool,
 ) -> None:
-    """It is model prose and can carry a borrower name, which the C7 scrub cannot catch.
+    """LP-636: it is model prose and can carry a borrower name, so it stays out of both.
 
-    The scrub matches identifier SHAPES, and a person's name is not digit-shaped, so a name in an
-    activity detail would reach a terminal and a transcript through the readonly query path. The
-    column is excluded from the readonly views for the same reason (tests/test_readonly_query.py).
-    Pinned here so a later "make it easier to debug" cannot quietly undo it."""
+    The C7 scrub matches identifier SHAPES, and a person's name is not digit-shaped, so a name in
+    an activity detail would cross ``readonly.activity_logs`` intact and reach a terminal and a
+    transcript. The column is excluded from the readonly views for the same reason
+    (``tests/test_readonly_query.py``).
+
+    PARAMETRIZED OVER ALL THREE BRANCHES, because the activity detail is branch-dependent: the
+    mismatch branch adds ``rejected_type`` / ``type_mismatch`` and a longer summary string, and it
+    is the branch a future "let's record the name here so we can debug it" would most naturally
+    land in — so it is the one most worth pinning."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     secret = "Jane Q Borrower's 2025 W-2"
     _patch_classify(
         monkeypatch,
         ClassificationResult(
-            document_type="w2",
-            confidence=0.95,
+            document_type=document_type,
+            confidence=confidence,
             reasoning="x",
             document_name=secret,
+            type_matches_document=type_matches,
         ),
     )
+    # Both downstream paths patched: which one runs depends on the branch, and the assertion
+    # below is about what was WRITTEN, not about which route was taken.
     _patch_extract(monkeypatch, _paystub_success())
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
 
     with structlog.testing.capture_logs() as logs:
         await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.document_name == secret  # stored …
+    # Stored — so removing the assignment fails this test rather than passing it vacuously.
+    assert doc.document_name == secret
     assert not any(secret in str(entry) for entry in logs), "document_name reached a log"
 
     rows = (
@@ -494,8 +516,8 @@ async def test_document_name_is_never_logged_or_put_in_the_activity_detail(
             select(ActivityLog).where(ActivityLog.loan_file_id == doc.loan_file_id)
         )
     ).scalars()
-    assert not any(secret in str(row.detail) for row in rows), (
-        "document_name reached an activity detail, which is readable through readonly.activity_logs"
+    assert not any(secret in str(row.detail) + str(row.summary) for row in rows), (
+        "document_name reached an activity record, which is readable through readonly.activity_logs"
     )
 
 

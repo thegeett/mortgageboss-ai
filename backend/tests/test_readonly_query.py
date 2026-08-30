@@ -251,6 +251,13 @@ EXCLUDED: dict[str, frozenset[str]] = {
 #: assertion over the whole migration text rather than per table.
 NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("documents", "full_text"),
+    # LP-636. Listing it in EXCLUDED only RECORDS the decision: a later migration that adds
+    # it to a view would pass both drift tests and silently turn that entry into a stale
+    # comment. This asserts absence from every view, so the decision cannot be undone
+    # quietly. It is here rather than only in EXCLUDED because the argument for excluding it
+    # is the strong form — the scrub matches identifier SHAPES, and a person's name is not
+    # digit-shaped, so a name in this column would cross a view intact.
+    ("documents", "document_name"),
     ("mismo_imports", "catch_all"),
     ("borrowers", "ssn"),
     ("users", "hashed_password"),
