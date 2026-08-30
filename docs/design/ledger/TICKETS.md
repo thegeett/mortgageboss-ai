@@ -3,6 +3,10 @@
 > **Amendments:** `AMENDMENTS.md` records changes made after implementation
 > started — currently affecting **LP-UI-002**, **LP-UI-004** and **LP-UI-011**.
 > Where it disagrees with this file, it wins.
+>
+> **A7 is binding on every ticket:** the acceptance greps were insufficient —
+> `white`/`black` neutrals are invisible to them. Every ticket now also needs
+> `rg -- "-(white|black)\\b"` and a per-element contrast sweep in both themes.
 
 Forty tickets, seven epics. Each names the mockup screen it must match, the files
 it touches, and what "done" means. Ticket records go in `docs/tickets/LP-UI-XXX.md`

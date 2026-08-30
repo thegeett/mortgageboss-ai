@@ -58,11 +58,29 @@ const MAP = {
     500: "muted-foreground", 400: "muted-foreground", 300: "muted-foreground",
   },
   placeholder: { 300: "muted-foreground", 400: "muted-foreground", 500: "muted-foreground" },
+  // `shadow-gray-900/5` and friends. LP-UI-004 found these were never even
+  // candidates, because `shadow` was missing from the prop list below.
+  shadow: { 900: "foreground", 800: "foreground", 700: "foreground-2" },
 };
+
+/**
+ * Neutrals the shade-based pattern structurally cannot see: `white` and `black`
+ * are not numbered shades, so they never become candidates and never appear in
+ * the NOT MAPPED report either. Silence there means "did not match", not
+ * "nothing left" — a clean run and a clean `rg gray-[0-9]` were both true while
+ * 45 of these remained, and `bg-white` is exactly what pins an app to light.
+ *
+ * They are REPORTED, never rewritten. Which token a white surface wants is a
+ * judgement — `card` for a panel that sits on the page, `popover` for one that
+ * floats, `primary-foreground` for text on the accent — and a scrim is not a
+ * surface at all. Mechanism and judgement belong in different commits.
+ */
+const NEEDS_A_DECISION =
+  /\b(?:(?:[a-z0-9[\]&>_.:-]+):)*(?:bg|text|border|divide|ring|fill|stroke|shadow|placeholder)-(?:white|black)(?:\/\d{1,3})?\b/g;
 
 // Optional Tailwind variants (hover:, focus-visible:, group-hover:, dark:, sm:, [&>x]: …)
 const PATTERN =
-  /((?:(?:[a-z0-9[\]&>_.:-]+):)*)\b(text|bg|border|divide|ring|fill|stroke|placeholder)-gray-(\d{2,3})(\/\d{1,3})?\b/g;
+  /((?:(?:[a-z0-9[\]&>_.:-]+):)*)\b(text|bg|border|divide|ring|fill|stroke|shadow|placeholder)-gray-(\d{2,3})(\/\d{1,3})?\b/g;
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -75,6 +93,7 @@ function walk(dir, out = []) {
 }
 
 const unmapped = new Map();
+const decisions = new Map();
 const perClass = new Map();
 let filesChanged = 0;
 let replacements = 0;
@@ -89,6 +108,10 @@ for (const root of ROOTS) {
   }
   for (const file of files) {
     const before = readFileSync(file, "utf8");
+    for (const m of before.matchAll(NEEDS_A_DECISION)) {
+      const key = `${m[0]}  ${file}`;
+      decisions.set(key, (decisions.get(key) ?? 0) + 1);
+    }
     const after = before.replace(PATTERN, (whole, variants, prop, shade, alpha) => {
       const token = MAP[prop]?.[Number(shade)];
       if (!token) {
@@ -122,6 +145,23 @@ if (unmapped.size) {
   }
 } else {
   console.log("\n  nothing left unmapped.");
+}
+
+if (decisions.size) {
+  const total = [...decisions.values()].reduce((a, b) => a + b, 0);
+  console.log(`\n  REQUIRES A DECISION — ${total} hardcoded white/black neutrals.`);
+  console.log("  NOT rewritten: which token each wants is a judgement, and a scrim");
+  console.log("  is not a surface. Do these by hand, in their own commit.\n");
+  const byClass = new Map();
+  for (const [key, n] of decisions) {
+    const cls = key.split("  ")[0];
+    byClass.set(cls, (byClass.get(cls) ?? 0) + n);
+  }
+  for (const [cls, n] of [...byClass.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${w(n, 5)} ${cls}`);
+  }
+  console.log("\n  A clean gray-[0-9] grep does NOT mean the palette is gone.");
+  console.log("  Also run: rg \"-(white|black)\\b\" app components lib");
 }
 
 // Re-measured against HEAD on 2026-08-29 19:5x: 803 replacements across 70 files,

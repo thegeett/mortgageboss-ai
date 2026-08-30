@@ -73,7 +73,12 @@ count. Those four numbers are the reason a processor switches tabs today.
   floor. No element pairs them today and none should; if a filled surface is
   wanted, use `bg-muted` (4.87:1 with the same text).
 - Status labels stay domain-specific (`lib/status.ts`); only the colour
-  vocabulary is shared. "Must fix" and "Blocked" are the same tone, different
+  vocabulary is shared. **The words are not ours to re-open.** They were argued
+  out in LP-583/LP-581 and they carry domain meaning: `completed` is where the
+  processing pipeline ends, `verified` is where a human confirmed something, and
+  in a product that tracks stated-versus-verified data those are different facts.
+  If an asset proposes different wording, the asset is wrong — say so on the
+  ticket (see AMENDMENTS A10). "Must fix" and "Blocked" are the same tone, different
   words, and the words are what processors quote.
 
 ## Accessibility floor
@@ -86,6 +91,32 @@ count. Those four numbers are the reason a processor switches tabs today.
   A 40-row × 9-column table must not be 360 tab stops.
 - Icon-only buttons are at least 24×24 CSS px.
 - Status is never colour-only. See rule 4.
+
+## Two rules the LP-UI-005 review earned
+
+- **Every status map stays exhaustive over its own union.** Never
+  `Record<string, StatusMeta>`. A fallback resolver plus a widened key type
+  removes the compile-time guarantee and the runtime one together, and a stale
+  test array then hides it (AMENDMENTS A11).
+- **Exhaustive over its PRODUCERS, not over what it replaced.** A map typed
+  against the display map it succeeded can still miss values the backend emits
+  (AMENDMENTS A13). Trace every caller.
+- **Never index a map raw and then use the result.** `map[x].push(...)` throws on
+  an unknown key and takes the whole page with it. Fall back explicitly
+  (AMENDMENTS A14).
+- **Form controls stay at 16px on mobile.** `text-field md:text-sm`, never
+  `text-sm` alone — Safari zooms under 16px and does not zoom back (AMENDMENTS A15).
+- **A sticky header is a property of the whole ancestor chain, not of the table.**
+  `position: sticky` resolves against the nearest scrollport, and *any* `overflow`
+  other than `visible` creates one — including `overflow: hidden`. Two independent
+  ancestors defeated it here: shadcn's `div.overflow-auto` wrapper, and a
+  `<Card className="overflow-hidden">` used to clip to the card radius. Note also
+  that `overflow-x: auto` forces `overflow-y` to compute to `auto`, so a
+  horizontally-scrolling wrapper is always a vertical scrollport too. Epic C adds
+  more tables — check the chain, not the table (LP-UI-007).
+- **A test that cannot fail is not a test.** Do not assert through a function
+  that synthesises a result for unknown input. Index the map, and assert its keys
+  equal the union.
 
 ## Definition of done, per ticket
 

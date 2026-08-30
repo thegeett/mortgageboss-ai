@@ -290,6 +290,284 @@ and points at `bg-muted` as the filled alternative.
 
 ---
 
+---
+
+## 2026-08-30 · from the LP-UI-004 review — three defects, all mine
+
+LP-UI-004 landed clean (803 / 70 / 3, matching the re-measured figures), and then
+found two failure modes in the codemod itself and one in what it did to a token.
+All three were verified independently before being accepted.
+
+### A7 — the codemod's silence was not evidence, and neither were my greps
+
+**The finding is right, and it is the sharpest one so far.** `PATTERN` matched
+`{prop}-gray-{shade}` over eight props. `shadow` was not in the prop list, and
+`white`/`black` are not numbered shades — so `shadow-gray-900/5`, `bg-white`,
+`text-white` and `bg-black` **never became candidates**. They are absent from the
+"NOT MAPPED" report rather than listed in it.
+
+Which means a clean codemod run and a clean `rg gray-[0-9]` were **both true while
+45 hardcoded neutrals remained**, and `bg-white` is precisely what pins an app to
+light. Its measurement makes the cost concrete: 2,088 text nodes walked across
+four screens in both themes, **147 dark-mode AA failures** before the follow-up
+commit, almost all the same shape — dark `--foreground` at 1.17:1 on a `bg-white`
+panel that never flipped. Zero after.
+
+My acceptance criteria said `rg "gray-[0-9]"` returning nothing was the proof.
+It was not. **Silence in a report means "did not match", not "nothing left."**
+
+Fixed in `assets/codemod-gray-to-token.mjs`:
+
+- `shadow` added to the mapped props.
+- A `NEEDS_A_DECISION` pass that finds every `white`/`black` neutral and **reports
+  it loudly without rewriting it.** The ticket proposed auto-mapping `white → card`;
+  I did not take that, because its own commit message makes the better argument —
+  the 43 were *judgement, not mechanism*: 38 wanted `card`, 2 wanted `popover`
+  because they float, 2 were `text-white` on the accent and wanted
+  `primary-foreground`, and a modal scrim is not a surface at all. Auto-mapping
+  would have got four of those wrong and buried the decision in a mechanical diff.
+  Reporting preserves the mechanism/judgement split the ticket correctly defended.
+- Re-run against the converted tree: reports the two remaining `bg-black` scrims
+  and nothing else, which is the right answer.
+
+**LP-UI-004's acceptance greps are extended** (below), and they now apply to every
+later ticket too.
+
+### A8 — the mapping is many-to-one, and meaning fell through the gap
+
+**Also right.** Wherever two distinct greys carried *different meaning* — a base
+tone and its hover, text-on-inverted versus text-on-surface — the mapping
+collapsed them onto one token and the distinction disappeared silently. Nothing
+errored; the classes still resolved, just to the same thing. A code review over
+ten commits found thirteen defects, twelve of this one shape.
+
+The worst was contrast on an inverted surface. `ltv-calculator.tsx:247` and
+`dti-calculator.tsx:502` are tooltip body copy on `bg-foreground`. `text-gray-300`
+took the generic `→ text-muted-foreground` mapping and fell from ~12:1 to
+**3.43:1 light / 2.63:1 dark** — below AA. Recomputed here independently and the
+numbers match to a rounding error; the fix to `text-background/75` gives
+**10.22 / 7.93**.
+
+This is a limit of shade-based mapping, not a bug to patch: a codemod cannot know
+what surface a class sits on. **A6 did not catch it either** — that pre-check only
+paired backgrounds and text that were *both* being converted, and `bg-gray-900`
+was not even in its background map. So the inverted-surface case was outside what
+I measured. Recorded rather than fixed: the mapping stays many-to-one, and the
+guard is the per-element contrast sweep the ticket built, which is now the
+standard for every screen ticket.
+
+### A9 — the codemod orphaned the token LP-UI-001 created
+
+`--skeleton` exists because `--muted` is too close to the card surface in dark —
+that is its own comment. The codemod then mapped `skeleton.tsx`'s `bg-gray-200/70`
+onto `bg-border/70`, routing the one component the token was created for away from
+it, leaving `--skeleton` with **zero consumers**. Now `bg-skeleton/70`. The two
+colours are within 0.2% lightness so nothing moves; the point is the token has its
+consumer back.
+
+---
+
+## LP-UI-004 acceptance greps — extended, and binding on every later ticket
+
+```
+rg "gray-[0-9]"            app components lib   # → nothing
+rg -- "-(white|black)\b"   app components lib   # → only deliberate scrims
+rg "217 91%|217_91%"       app components lib   # → nothing
+rg "#[0-9a-fA-F]{3,8}\b"   app components lib   # → nothing outside comments
+```
+
+And the one that actually proves it: **a per-element contrast sweep in both
+themes.** Walk every leaf node carrying visible text, resolve its colour against
+its nearest opaque ancestor background, and apply the WCAG threshold for that
+node's own size and weight. Greps prove a string is gone. Only the sweep proves
+the screen is legible.
+
+---
+
+---
+
+## 2026-08-30 · A10 — the asset called an unverified document "Verified"
+
+Caught by Claude Code mid-LP-UI-005, before it shipped. **The most consequential
+defect in the assets so far, and the only one that would have told a processor
+something false.**
+
+`assets/lib/status.ts` renamed the document status `completed` to **"Verified"**.
+It should have stayed **"Completed"**, and the reasoning is domain reasoning, not
+style:
+
+- `completed` is the terminal state of the **processing pipeline** —
+  `pending → classifying → classified → extracting → completed`. It means a model
+  finished reading the document.
+- This product tracks **stated versus verified** data as a first-class
+  distinction. That distinction is the thesis of the whole redesign.
+- So a document whose extraction finished has been read by a model and checked by
+  **nobody** — and the asset was about to label it with the exact word
+  `NEEDS_STATUS.verified` already uses for the case where a human really has
+  confirmed it. Two different truths, one word, on the same screen.
+
+In a mortgage compliance tool that is not a wording nit. It is a false claim about
+whether a document has been checked.
+
+The asset is corrected to the shipping labels — `Processing` / `Classified` /
+`Completed` / `Needs review` / `Failed` — with the reasoning written into the file
+so nobody re-opens it. The three-way rename of `pending`/`classifying`/`extracting`
+to "Queued"/"Classifying"/"Extracting" is dropped too: the app says "Processing"
+for all three, and splitting one word into three is a product decision this
+redesign has no business making.
+
+**What actually caught it was my own rule.** `SPEC.md` says only the *colour*
+vocabulary is being unified and the words stay — it was written because LP-583 and
+LP-581 argued that wording out. I then broke it in my own asset. The rule held
+because Claude Code applied it to me rather than following the file.
+
+**Observation, not a demand:** the tone is still named `verified`, so the corrected
+entry reads `{ tone: "verified", label: "Completed" }`. Tones are internal and
+never rendered, so no user sees the mismatch, but a developer might read it as a
+contradiction. If the tone vocabulary is ever revisited, `positive` or `settled`
+would carry the meaning without borrowing a word that means something specific in
+this domain. Not worth churning mid-epic.
+
+---
+
+---
+
+## 2026-08-30 · A11/A12 — from the LP-UI-005 review, and these are the serious ones
+
+A code review over the epic found six defects. Five were one story, and the story
+is that **my consolidation quietly removed guarantees the six original maps had.**
+Both were verified independently before being accepted; the asset now carries the
+corrected implementation rather than my draft.
+
+### A11 — consolidating the maps also widened them
+
+Each of the six maps I replaced was exhaustive over its own union —
+`Record<LoanFileStatus, …>`, `Record<DocumentStatus, …>`, `Record<NeedsItemStatus,
+…>`, `Record<NeedsItemPriority, …>`, `Record<EvaluationOutcome, …>`. My
+`lib/status.ts` typed all six as **`Record<string, StatusMeta>`**, and paired that
+with a `resolveStatus` that synthesises a fallback for any key.
+
+Those two changes together removed the compile-time guarantee *and* the runtime
+one in the same move. The proof it ran: deleting `withdrawn` from
+`LOAN_FILE_STATUS` and `waived` from `NEEDS_STATUS` left `tsc` silent and the
+suite green, and a withdrawn file then rendered as amber **"Withdrawn"** through
+the fallback — a status the app has always had, quietly reclassified as an error.
+
+**And my tests could not have caught it.** They asserted through `resolveStatus`,
+which by construction cannot fail: it returns `{tone: "attention", label:
+humanizeUnknown(value)}` for anything it does not know, so
+`expect(meta.label).toBeTruthy()` holds for *every string*. A test that cannot
+fail is not a test. They now index each map directly and assert that its keys
+equal the hand-written union, so a new enum member cannot be skipped by a stale
+test array.
+
+Fixed: every map is typed to its own union again; `CalculatorStatus` is declared
+in `lib/status.ts` because `CalculatorView.status` is `string | null` on the wire
+with no frontend union, so that map is exhaustive over *something*; and
+`resolveStatus` is generic in the key so passing a typed map does not launder it
+back to `Record<string, …>` at the call site.
+
+### A12 — `spin` was load-bearing, and I treated it as decoration
+
+The worse one, because it is a production behaviour change hiding in a visual
+refactor. My asset made `spin` the single source of truth for "the pipeline is
+still working". `isTerminalStatus` feeds `documentsRefetchInterval`.
+
+So an unrecognised status — no entry in the map, therefore no `spin` — counted as
+**terminal**. A backend that grew a new in-flight status would have stopped the
+document list and drawer from refetching, **parking the document until someone
+reloaded the page by hand.** It also coupled polling to a purely visual property:
+`classified` carries its own label, and a designer dropping its spinner as a
+tidy-up would have halted polling mid-pipeline.
+
+Fixed with an explicit `IN_FLIGHT` table that fails the safe way — an unknown
+status counts as *in flight*, because polling one state too long costs a request
+while stopping early strands a document.
+
+### What this run has taught, which belongs in the standing note
+
+Ten of the twelve defects so far are mine, and the two most dangerous —
+A10 ("Verified" on an unverified document) and A12 (polling stops silently) —
+were **not visual at all**. They were a design asset making claims about domain
+meaning and runtime behaviour that were not mine to make.
+
+The pattern is consistent: a design system can safely dictate colour, spacing and
+type. The moment it touches a *word with domain meaning* or a *value something
+else reads*, it needs the same scrutiny as application code — and the person best
+placed to apply that scrutiny is the one holding the codebase, not the one holding
+the palette.
+
+---
+
+---
+
+## 2026-08-30 · A13-A16 — from the LP-UI-006 review
+
+Four more, and two are repeats of failure modes already recorded here. The assets
+now take `tailwind.config.ts` and `lib/status.ts` from the implementation rather
+than from my draft.
+
+### A13 — `CalculatorStatus` was exhaustive over the wrong set
+
+A11 restored exhaustiveness and I checked that each map was exhaustive over
+*something*. That was not enough. `CALCULATOR_STATUS` was typed against the
+display map it replaced, not against its **producers** — there are three, all
+reaching it through `CalculatorsSection`'s `Tile`: `DtiTile` (`DtiLimitStatus`
+plus a literal `"unknown"` for a gated DTI), `LtvTile` (`LtvLimitStatus`), and
+`CalcTile` (`CalculatorView.status`).
+
+`unknown` and `binding:*` were in none of them. `services/calculators.py:573`
+emits `"binding:" + binding_key`, so those reached `humanizeUnknown`, which only
+swaps underscores — and a `variant="dot"` tile carries its label **only** in
+`title` and an sr-only span. So hovering the Maximum-loan tile showed the tooltip
+**"Binding:dti"**, and a screen reader read it aloud. The map this replaced fell
+back to a silent grey dot, so **the consolidation introduced this leak.**
+
+Exhaustive over *something* is not the test. **Exhaustive over the producers is.**
+
+### A14 — one unknown need blanked the entire Needs page
+
+`groupNeeds` indexed the group map raw and pushed into the result:
+`buckets[NEEDS_GROUP[need.status]].push(need)` throws a `TypeError` on any status
+the build does not know, and `NeedsDashboard` calls it *before* rendering a single
+card — so one unrecognised need took out the whole page, including the needs it
+understood perfectly well. `outstandingNeedsCount` had the quieter version,
+under-counting in silence.
+
+The shape predates this epic, but the consolidation was the moment to fix it and
+did not. The sting, in its own words: the previous review hardened
+`isTerminalStatus` against exactly this and wrote a comment explaining why, while
+the call that runs first kept the raw index. Both now fall back to
+`needs_action`, matching `resolveStatus`'s `attention` default.
+
+### A15 — the density retune re-armed iOS auto-zoom
+
+`input.tsx` and `textarea.tsx` shipped `text-base … md:text-sm` deliberately:
+mobile Safari zooms the viewport whenever a focused control computes under 16px,
+and never zooms back out. My retune flattened both to `text-sm` — 13px at every
+breakpoint.
+
+The obvious repair fails, and that is the interesting part: `text-base md:text-sm`
+is the standard guard, but **I retuned `base` to 14px**, still under the
+threshold. The scale now carries a named `field` size at exactly `1rem`, and both
+controls wear `text-field md:text-sm`, so the reason travels with the token
+instead of living in someone's memory.
+
+### A16 — `fontSize` was in `theme.extend`, seventeen lines under the comment about `fontWeight`
+
+The A1 trap, again, in the same file. `extend` merges, so the stock ramp survived
+above `2xl`: `text-3xl` resolved untracked while `xs`…`2xl` were retuned — and
+`text-3xl` has **six live sites** (the dashboard stat numbers, the marketing hero,
+four DTI/LTV headline figures).
+
+Worth noting what it did *not* do: moving `fontSize` to `theme` replaces the scale,
+which would have made those six resolve to nothing — the exact silent-weight-loss
+failure A1 caused with `font-bold`. It added `3xl` to the scale explicitly instead,
+keeping stock size and line-height and supplying the tracking the scale wanted.
+The lesson from A1 was applied rather than repeated.
+
+---
+
 ## Standing note
 
 The design assets are **not** infallible. LP-UI-001 found two real defects in them
