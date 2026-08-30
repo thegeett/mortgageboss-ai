@@ -130,3 +130,83 @@ Checked in light and dark. CI green: biome, tsc, 756 vitest; ruff, mypy strict,
 moved the shipped default to Haiku, so `tests/ai/test_model_selection_lp457.py`
 fails locally and passes in CI. Left alone — changing it changes which model the
 Tier-3 analyzer uses on this machine, which is not this ticket's call.
+
+## Review pass — the box led to a row nobody could see
+
+Reviewed on request from the session running the epic. One defect, the
+`outline` sweep clean, and both remaining concerns confirmed correct.
+
+### Clicking a box highlighted a field below the fold
+
+The guardrail is right and the wiring honours it: `clickBox`'s return value is
+discarded at the only call site, the hook holds no values, and there is no path
+by which a click can write one. That half is sound by construction rather than by
+discipline, which is the right way to build it.
+
+What the click *does* is tint a row. `ReviewerShell`'s fields section is
+`overflow-y-auto`, so on any document with more fields than fit the pane, the
+box's field highlights somewhere below the fold and nothing brings it into view.
+The ticket's headline interaction — box → field — appears to do nothing in the
+direction it exists for, on exactly the documents where linking matters most.
+
+The selected row now scrolls into view with `block: "nearest"`, so a row already
+on screen does not move: clicking a row directly must not scroll the list out
+from under the pointer.
+
+Worth naming the related smell that pointed at it. `BoxClick` is computed
+carefully — the ref exists so the outcome is right in the same tick — and **no
+caller reads it**. The only consumer is its own test. That is the shape LP-UI-005
+and LP-UI-013 both produced (an unread value is free to be wrong), and it is also
+the signal that should have driven this: `navigated` is precisely the case that
+needs the list to move.
+
+### The `outline` collision exists nowhere else
+
+Swept, and confirmed empirically rather than by reading tailwind-merge's rules.
+`twMerge("outline outline-1")` returns `outline-1` — the bare utility, which is
+the one setting `outline-style: solid`, is dropped, leaving a width with no style
+and an invisible ring. The diagnosis and the `[outline-style:solid]` fix are both
+correct.
+
+Scanning every class string under `app/`, `components/` and `lib/` for a bare
+`outline` beside an `outline-<n>`: **zero other occurrences.** All 33 bare
+`outline` strings in the tree are `variant="outline"` props on Button and Badge,
+which never reach `cn()`.
+
+The neighbouring groups are safe for a reason worth recording: `ring ring-2`,
+`border border-2` and `shadow shadow-md` all collide the same way and are all
+harmless, because in each the bare utility and the sized one set the **same**
+property, so dropping the earlier changes nothing. `outline` is the exception in
+Tailwind's vocabulary — bare sets style, numbered sets width — which is why this
+was the one that bit.
+
+### Confirmed, not changed
+
+- **The fabricated-citation handling.** Right, and traced end to end rather than
+  read: `cited_page_exists` is set in `field_boxes.py`, carried on the response,
+  and reaches the screen through `citationWrong` on `ReviewerFields`. Searching
+  other pages while saying the citation was wrong is the correct treatment of
+  the 4.3% measured in LP-UI-030 — recovering the box without silently
+  substituting a page number is the difference between helping and covering up.
+- **Excluding `users.reviewer_pane_split` from the readonly views**, with the
+  reason in the migration. A UI pane geometry is not analytical data, and the
+  drift guard's own instruction is to decide and say why, which is what happened.
+  Worth noting it was failing on `main` — the guard added in the LP-UI-015 review
+  caught a column added two tickets later, which is what it is for.
+
+### The two known failures were the `.env`, and only the `.env`
+
+Run with `ANTHROPIC_MODEL_ANALYSIS=claude-haiku-4-5` as the hand-off suggested,
+the backend suite is **6,093 passed, 0 failed**. Both long-standing failures were
+the local override and nothing else, which is now confirmed rather than assumed.
+
+### Verification
+
+Frontend `biome` clean, `tsc` clean, **760 tests** (from 756), build compiles
+into `.next-review`. Backend **6,093 pass** with the env override, `ruff`,
+`ruff format` and `mypy` clean.
+
+| mutation | result |
+| --- | --- |
+| drop the scroll-into-view effect | 3 tests fail |
+| scroll with `block: "center"` | 1 test fails |

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import { StatusToken } from "@/components/status-token";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentDetail } from "@/lib/api/documents";
@@ -43,6 +45,20 @@ export function ReviewerFields({
 }) {
   const { data, isPending, isError } = useDocumentDetail(documentId);
 
+  // BRING THE SELECTED ROW INTO VIEW. The fields pane scrolls
+  // (`ReviewerShell`'s section is `overflow-y-auto`), and selecting a field only
+  // changed a background colour — so clicking a box on the page highlighted a
+  // row that could be well below the fold, and the ticket's headline
+  // interaction appeared to do nothing in the direction it was built for.
+  //
+  // `block: "nearest"` so a row already on screen does not move: clicking a row
+  // directly must not scroll the list out from under the pointer.
+  const selectedRow = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    if (!selected) return;
+    selectedRow.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
   if (!documentId) {
     return <Note>No document selected.</Note>;
   }
@@ -80,6 +96,7 @@ export function ReviewerFields({
           {fields.map((field) => (
             <li
               key={field.key}
+              ref={field.key === selected ? selectedRow : undefined}
               className={cn(
                 "field-row rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
                 field.key === selected && "bg-primary/10",
