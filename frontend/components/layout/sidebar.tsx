@@ -24,7 +24,7 @@ export function Sidebar() {
           href="/dashboard"
           className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Layers className="h-4 w-4" />
           </span>
           <span className="text-base font-semibold tracking-tight text-foreground">

@@ -42,7 +42,7 @@ function DocumentRow({
     <button
       type="button"
       onClick={() => onSelect(document)}
-      className="flex w-full items-center gap-3 rounded-lg border border-border/80 bg-card px-3.5 py-3 text-left shadow-sm transition-colors hover:border-input hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="flex w-full items-center gap-3 rounded-lg border border-border/80 bg-card px-3.5 py-3 text-left transition-colors hover:border-input hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
         <FileText className="h-4 w-4" aria-hidden />

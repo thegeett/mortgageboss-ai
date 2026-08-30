@@ -25,7 +25,7 @@ export function ActivityFeed({
   onRetry?: () => void;
 }) {
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Activity className="h-4 w-4 text-muted-foreground" />

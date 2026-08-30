@@ -33,7 +33,7 @@ function StatTile({ card }: { card: StatCard }) {
   });
 
   return (
-    <Card className="border-border/80 p-4 shadow-sm">
+    <Card className="border-border/80 p-4">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{card.label}</span>
         <card.icon className={cn("h-4 w-4", card.iconClass)} />

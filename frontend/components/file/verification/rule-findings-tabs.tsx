@@ -262,7 +262,7 @@ function MissingVsPresent({
           {onAct !== undefined && (
             <Button
               size="sm"
-              className="h-6 px-2 text-[11px]"
+              className="px-2 text-[11px]"
               onClick={() =>
                 onAct({
                   kind: "request-docs-bulk",

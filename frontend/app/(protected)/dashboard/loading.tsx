@@ -24,7 +24,7 @@ export default function DashboardLoading() {
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[0, 1, 2, 3].map((card) => (
-          <Card key={card} className="border-border/80 p-4 shadow-sm">
+          <Card key={card} className="border-border/80 p-4">
             <div className="flex items-center justify-between">
               <Skeleton className="h-4 w-20" />
               <Skeleton className="h-4 w-4 rounded" />
@@ -35,7 +35,7 @@ export default function DashboardLoading() {
       </div>
 
       {/* Filter bar + table */}
-      <Card className="overflow-hidden border-border/80 shadow-sm">
+      <Card className="overflow-hidden border-border/80">
         <div className="flex items-center justify-between border-b border-border p-4">
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-8 w-48" />

@@ -245,7 +245,7 @@ export function ViewFixDialog({
           <Button
             type="button"
             variant="ghost"
-            className="h-8 text-xs"
+            className="text-xs"
             disabled={busy}
             onClick={() => onOpenChange(false)}
           >
@@ -253,7 +253,7 @@ export function ViewFixDialog({
           </Button>
           <Button
             type="button"
-            className="h-8 gap-1 text-xs"
+            className="gap-1 text-xs"
             disabled={busy || preview.isPending || preview.isError}
             onClick={() => {
               onApply(preview.data?.fingerprint);

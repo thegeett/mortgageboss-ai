@@ -43,7 +43,7 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
   const updating = !needs.isPending && (live || needs.isFetching);
 
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
         <div>
           <div className="flex items-center gap-2">

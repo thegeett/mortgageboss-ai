@@ -131,7 +131,7 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
   if (!isPending && !isError && !hasData) return null;
 
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />

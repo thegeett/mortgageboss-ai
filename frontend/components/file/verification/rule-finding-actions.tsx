@@ -132,9 +132,8 @@ export function RuleFindingActions({
         <div className="flex flex-wrap items-center gap-1.5">
           {canRatify && (
             <Button
-              size="sm"
               variant="default"
-              className="h-7 px-2 text-xs"
+              className="px-2 text-xs"
               disabled={pending}
               onClick={() => onAct({ kind: "ratify", findingId: finding.id })}
               // The verb matters: this records agreement with the AI's judgment, where Override
@@ -155,9 +154,8 @@ export function RuleFindingActions({
           )}
           {finding.can_apply && (
             <Button
-              size="sm"
               variant={canRatify ? "outline" : "default"}
-              className="h-7 px-2 text-xs"
+              className="px-2 text-xs"
               disabled={pending}
               // LP-577 — Apply WRITES TO THE LOAN and moves an underwriting number: on DT-8 the
               // back-end DTI swings from 58.59% to 34.39%, the difference between a file that fails
@@ -194,9 +192,8 @@ export function RuleFindingActions({
           )}
           {canRequest && (
             <Button
-              size="sm"
               variant={canRatify || finding.can_apply ? "outline" : "default"}
-              className="h-7 px-2 text-xs"
+              className="px-2 text-xs"
               disabled={pending}
               onClick={() => setForm("request-docs")}
             >
@@ -204,9 +201,8 @@ export function RuleFindingActions({
             </Button>
           )}
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs"
+            className="px-2 text-xs"
             disabled={pending}
             onClick={() => setForm("override")}
             title="The system got this wrong — dismiss it with a reason"
@@ -214,18 +210,16 @@ export function RuleFindingActions({
             Not an issue
           </Button>
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs"
+            className="px-2 text-xs"
             disabled={pending}
             onClick={() => setForm("accept-risk")}
           >
             Accept risk
           </Button>
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs"
+            className="px-2 text-xs"
             disabled={pending}
             onClick={() => setForm("note")}
           >
@@ -253,17 +247,15 @@ export function RuleFindingActions({
           />
           <div className="flex items-center gap-1.5">
             <Button
-              size="sm"
-              className="h-7 px-2 text-xs"
+              className="px-2 text-xs"
               onClick={submit}
               disabled={pending || (meta.required && text.trim() === "")}
             >
               {meta.submit}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs"
+              className="px-2 text-xs"
               onClick={() => {
                 setForm(null);
                 setText("");

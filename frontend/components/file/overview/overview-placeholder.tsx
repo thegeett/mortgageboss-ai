@@ -18,7 +18,7 @@ export function OverviewPlaceholder({
   icon: LucideIcon;
 }) {
   return (
-    <Card className="border-dashed border-input bg-card shadow-none">
+    <Card className="border-dashed border-input bg-card">
       <CardContent className="flex items-start gap-3 p-4">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <Icon className="h-4 w-4" />

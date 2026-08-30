@@ -28,7 +28,7 @@ export default function LoginPage() {
             href="/"
             className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Layers className="h-5 w-5" />
             </span>
             <span className="text-xl font-semibold tracking-tight text-foreground">
@@ -37,7 +37,7 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <Card className="border-border/80 shadow-xl shadow-foreground/5">
+        <Card className="border-border/80">
           <CardHeader className="space-y-1.5">
             <CardTitle className="text-2xl font-semibold tracking-tight text-foreground">
               Sign in

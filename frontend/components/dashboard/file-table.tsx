@@ -202,7 +202,7 @@ export function FileTable({
                       type="button"
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground-2"
+                      className="text-muted-foreground hover:text-foreground-2"
                       aria-label={`Actions for ${file.display_id}`}
                       onClick={(event) => event.stopPropagation()}
                     >

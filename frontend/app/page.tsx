@@ -148,10 +148,10 @@ export default function HomePage() {
       />
 
       <div className="relative z-10 w-full max-w-xl">
-        <Card className="border-border/80 shadow-xl shadow-foreground/5">
+        <Card className="border-border/80">
           <CardHeader className="items-center space-y-4 text-center">
             <div className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+              <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Layers className="h-6 w-6" />
               </span>
               <span className="text-2xl font-semibold tracking-tight text-foreground">

@@ -85,7 +85,7 @@ export function AggressionDial({
                 "flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                 active
-                  ? "bg-primary text-primary-foreground shadow-sm"
+                  ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 busy && "cursor-not-allowed opacity-70",
               )}

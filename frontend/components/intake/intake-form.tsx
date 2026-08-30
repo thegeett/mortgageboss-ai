@@ -124,7 +124,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader>
         <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

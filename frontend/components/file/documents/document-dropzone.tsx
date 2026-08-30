@@ -93,7 +93,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       <span
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-          isDragActive ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground shadow-sm",
+          isDragActive ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground",
         )}
       >
         {upload.isPending ? (

@@ -88,7 +88,7 @@ export function InlineErrorState({
         <button
           type="button"
           onClick={onRetry}
-          className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          className="font-medium text-primary underline-offset-2 hover:underline"
         >
           Retry
         </button>

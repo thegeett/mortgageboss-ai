@@ -42,7 +42,7 @@ export function LtvCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useLtv(fileId);
 
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="space-y-1 pb-4">
         <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -376,7 +376,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-success"
+            className="text-success"
             aria-label="Save override"
             disabled={disabled}
             onClick={() => onSave(item.key, draft)}
@@ -386,7 +386,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-muted-foreground"
+            className="text-muted-foreground"
             aria-label="Cancel"
             onClick={onCancel}
           >
@@ -413,7 +413,7 @@ function LineRow({
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground-2"
+              className="text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}

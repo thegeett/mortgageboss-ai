@@ -393,8 +393,7 @@ export function FindingCard({
                   {onApply && canApply(finding) && fileId && (
                     <Button
                       type="button"
-                      size="sm"
-                      className="h-7 gap-1 text-xs"
+                      className="gap-1 text-xs"
                       disabled={busy}
                       onClick={() => setViewFixOpen(true)}
                     >
@@ -404,9 +403,8 @@ export function FindingCard({
                   {onAcceptRisk && (
                     <Button
                       type="button"
-                      size="sm"
                       variant="outline"
-                      className="h-7 gap-1 text-xs"
+                      className="gap-1 text-xs"
                       disabled={busy}
                       onClick={() => openForm("accept")}
                     >
@@ -416,9 +414,8 @@ export function FindingCard({
                   {onRequestDocs && (
                     <Button
                       type="button"
-                      size="sm"
                       variant="outline"
-                      className="h-7 gap-1 text-xs"
+                      className="gap-1 text-xs"
                       disabled={busy || docsRequested}
                       onClick={() => openForm("request")}
                     >
@@ -428,9 +425,8 @@ export function FindingCard({
                   {onOverride && (
                     <Button
                       type="button"
-                      size="sm"
                       variant="outline"
-                      className="h-7 text-xs"
+                      className="text-xs"
                       disabled={busy}
                       onClick={() => openForm("override")}
                       title="The system got this wrong — dismiss it with a reason"
@@ -441,9 +437,8 @@ export function FindingCard({
                   {onNote && (
                     <Button
                       type="button"
-                      size="sm"
                       variant="ghost"
-                      className="h-7 gap-1 text-xs text-muted-foreground"
+                      className="gap-1 text-xs text-muted-foreground"
                       disabled={busy}
                       onClick={() => openForm("note")}
                     >
@@ -470,8 +465,7 @@ export function FindingCard({
                   <div className="flex items-center gap-1.5">
                     <Button
                       type="button"
-                      size="sm"
-                      className="h-7 gap-1 text-xs"
+                      className="gap-1 text-xs"
                       disabled={busy || (form === "override" && text.trim() === "")}
                       onClick={submit}
                     >
@@ -480,9 +474,8 @@ export function FindingCard({
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
                       variant="ghost"
-                      className="h-7 gap-1 text-xs text-muted-foreground"
+                      className="gap-1 text-xs text-muted-foreground"
                       disabled={busy}
                       onClick={() => setForm(null)}
                     >

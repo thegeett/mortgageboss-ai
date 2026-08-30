@@ -90,7 +90,7 @@ export function MismoUpload() {
       <input {...getInputProps()} aria-label="Upload a MISMO file" />
       <span
         className={cn(
-          "flex h-16 w-16 items-center justify-center rounded-2xl shadow-sm transition-colors",
+          "flex h-16 w-16 items-center justify-center rounded-2xl transition-colors",
           isDragActive ? "bg-primary text-primary-foreground" : "bg-primary/15 text-primary",
         )}
       >
@@ -107,7 +107,7 @@ export function MismoUpload() {
         type="button"
         onClick={open}
         disabled={pending}
-        className="mt-6 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60"
+        className="mt-6 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60"
       >
         {pending ? <Spinner /> : <FileUp className="h-4 w-4" />}
         {pending ? "Importing…" : "Choose MISMO file"}

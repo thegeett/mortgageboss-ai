@@ -69,9 +69,8 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
       </div>
       <div className="mt-2 flex gap-1.5 pl-5">
         <Button
-          size="sm"
           variant="outline"
-          className="h-7 gap-1.5 text-xs"
+          className="gap-1.5 text-xs"
           disabled={pending}
           onClick={() =>
             merge.mutate(need.id, {
@@ -84,9 +83,8 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
           Merge
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keepBoth.mutate(need.id, {
@@ -138,9 +136,8 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
       </div>
       <div className="mt-2 flex gap-1.5 pl-5">
         <Button
-          size="sm"
           variant="outline"
-          className="h-7 gap-1.5 text-xs"
+          className="gap-1.5 text-xs"
           disabled={pending}
           onClick={() =>
             dismiss.mutate(
@@ -156,9 +153,8 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
           Dismiss need
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keep.mutate(need.id, {
@@ -195,8 +191,7 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
     <div className="flex shrink-0 items-center gap-1.5">
       {attachedGraded && (
         <Button
-          size="sm"
-          className="h-8 gap-1.5"
+          className="gap-1.5"
           disabled={coverage.isPending}
           onClick={() =>
             coverage.mutate(need.id, {
@@ -215,8 +210,7 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
       )}
       {proposed && !attachedGraded && (
         <Button
-          size="sm"
-          className="h-8 gap-1.5"
+          className="gap-1.5"
           disabled={confirm.isPending}
           onClick={() =>
             confirm.mutate(need.id, {
@@ -239,7 +233,7 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground-2"
+            className="text-muted-foreground hover:text-foreground-2"
             aria-label={`Actions for ${need.title}`}
           >
             <MoreHorizontal className="h-4 w-4" />

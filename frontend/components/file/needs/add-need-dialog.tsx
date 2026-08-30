@@ -77,7 +77,7 @@ export function AddNeedDialog({ fileId }: { fileId: string }) {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="h-8 gap-1.5">
+        <Button variant="outline" className="gap-1.5">
           <Plus className="h-4 w-4" /> Add need
         </Button>
       </DialogTrigger>

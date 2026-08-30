@@ -89,9 +89,8 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
       {isOpen && (
         <div className="mt-2 flex gap-1.5">
           <Button
-            size="sm"
             variant="outline"
-            className="h-7 gap-1 px-2 text-xs"
+            className="gap-1 px-2 text-xs"
             disabled={setDisposition.isPending}
             onClick={() =>
               setDisposition.mutate({ findingId: finding.id, disposition: "signed_off" })
@@ -101,9 +100,8 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
             <Check className="h-3 w-3" /> Sign off
           </Button>
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
+            className="gap-1 px-2 text-xs"
             disabled={setDisposition.isPending}
             onClick={() =>
               setDisposition.mutate({ findingId: finding.id, disposition: "not_an_issue" })

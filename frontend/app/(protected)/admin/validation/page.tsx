@@ -246,26 +246,19 @@ function ItemRow({ item }: { item: InventoryItem }) {
         {mode === null ? (
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
-              size="sm"
               variant="outline"
-              className="h-7 text-xs"
+              className="text-xs"
               disabled={record.isPending}
               onClick={() => submit("validated")}
             >
               Validate
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => setMode("correct")}
-            >
+            <Button variant="outline" className="text-xs" onClick={() => setMode("correct")}>
               Correct…
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="text-xs text-muted-foreground"
               onClick={() => setMode("remove")}
             >
               Flag remove…
@@ -290,17 +283,15 @@ function ItemRow({ item }: { item: InventoryItem }) {
               className="h-7 w-56 text-xs"
             />
             <Button
-              size="sm"
-              className="h-7 text-xs"
+              className="text-xs"
               disabled={record.isPending}
               onClick={() => submit(mode === "correct" ? "corrected" : "flagged_remove")}
             >
               Save
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="text-xs text-muted-foreground"
               onClick={() => setMode(null)}
             >
               Cancel

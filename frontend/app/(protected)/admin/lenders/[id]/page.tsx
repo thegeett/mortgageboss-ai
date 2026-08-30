@@ -178,7 +178,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 text-muted-foreground hover:text-danger"
+                  className="text-muted-foreground hover:text-danger"
                   aria-label="Remove override"
                   onClick={() => setRows((rs) => rs.filter((r) => r.uid !== row.uid))}
                 >

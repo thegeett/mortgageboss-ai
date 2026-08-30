@@ -32,7 +32,7 @@ function OverviewCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Icon className="h-4 w-4 text-muted-foreground" />
@@ -53,10 +53,9 @@ function EditToggle({ editing, onToggle }: { editing: boolean; onToggle: () => v
   return (
     <Button
       type="button"
-      size="sm"
       variant={editing ? "default" : "outline"}
       onClick={onToggle}
-      className="h-7 gap-1.5 text-xs"
+      className="gap-1.5 text-xs"
     >
       {editing ? <Check className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
       {editing ? "Done" : "Edit"}

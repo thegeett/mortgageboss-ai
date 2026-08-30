@@ -206,7 +206,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   }, [activeLevel, updatePreferences, queryClient, fileId]);
 
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-4">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">

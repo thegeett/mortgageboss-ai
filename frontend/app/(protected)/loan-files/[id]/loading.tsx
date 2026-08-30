@@ -29,7 +29,7 @@ export default function FileWorkspaceLoading() {
       {/* Overview cards */}
       <div className="grid gap-4 lg:grid-cols-3">
         {[0, 1, 2].map((card) => (
-          <Card key={card} className="border-border/80 shadow-sm">
+          <Card key={card} className="border-border/80">
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-28" />
             </CardHeader>
