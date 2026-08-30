@@ -35,7 +35,7 @@ export default function DashboardLoading() {
       </div>
 
       {/* Filter bar + table */}
-      <Card className="overflow-hidden border-border/80">
+      <Card className="border-border/80">
         <div className="flex items-center justify-between border-b border-border p-4">
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-8 w-48" />

@@ -78,7 +78,7 @@ export default function DashboardPage() {
 
       <StatsCards />
 
-      <Card className="overflow-hidden border-border/80">
+      <Card className="border-border/80">
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
           <FilterPills value={filter} onChange={handleFilter} />
           <SearchInput value={searchInput} onChange={handleSearch} />
