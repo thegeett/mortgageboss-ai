@@ -123,3 +123,101 @@ recorded because the escape is the useful part:
   nothing on the screen: the governed outcomes total 75 and the legacy list is 13.
   That is the same disagreement class, on the calculator strip — **LP-UI-021's**
   surface, and it should not close without it.
+
+## Review pass — the rail stopped lying about one thing and kept lying about another
+
+Reviewed on request from the session running the epic. One defect, six changed
+tests judged, the judgement call confirmed, and the coordination problem fixed.
+
+### Build and dev no longer fight over `.next` — this one was mine
+
+Flagged in the hand-off after costing three restarts, and correctly attributed:
+`pnpm build` and `next dev` share `.next`, so a reviewer's verification build
+clobbers a running dev server's chunks and every request 404s. It presents as an
+auth failure, which is why it took three occurrences to connect.
+
+Fixed rather than negotiated, because "one of us stops doing something correct"
+is the wrong trade. `next.config.ts` now takes `distDir` from `NEXT_DIST_DIR`,
+defaulting to `.next` — CI, the container image and `pnpm dev` all behave exactly
+as before, and a review build runs `NEXT_DIST_DIR=.next-review pnpm build`.
+`.next-review/` is gitignored. Verified by running a full build against a live
+dev server: it compiled and the dev server survived.
+
+### The rail reported "Manual review" as "Needs review"
+
+The ticket's own finding was right and the fix was right, and it left a second
+version of the same defect one line below.
+
+`needsReview` was `buckets.attention.length - mustFix`. But `attention` holds
+**three** outcomes — `ATTENTION_ORDER` is `open`, `needs_review`,
+`pending_automation` — plus anything `tabForOutcome` cannot place, which it
+routes there deliberately so an unknown verdict surfaces rather than vanishing.
+
+So a file with three `pending_automation` findings and no `needs_review` read
+"Needs review 3". Those are different jobs: `pending_automation` is a rule that
+could not be automated and is explicitly "NEVER a trusted pass/fail", where
+`needs_review` is a result a human has to weigh. One number over two meanings, on
+the rail that had just been fixed for exactly that.
+
+Counted per outcome now, rendered from `ATTENTION_ORDER` with
+`EVALUATION_OUTCOME`'s own labels, so adding a fourth attention outcome adds a
+line rather than silently inflating an existing one. An unrecognised outcome gets
+its own "Other" line — it is in the tab, so the rail must not disagree about the
+total.
+
+Subtraction is what made this invisible: `a.length - b` cannot be wrong about a
+label, so nothing looked like a claim.
+
+### The six changed tests, judged
+
+All six are honest, and the hand-off's own account of each is accurate.
+
+- **The four fixture moves** (the factory's default `evaluation_outcome` is
+  `couldnt_check`, so the split relocated every bare fixture; three others open
+  the new tab with byte-identical assertions). Not tests changed to match code —
+  tests following a fixture default. No judgement needed.
+- **The inverted routing assertion** is the interesting one and it is correct.
+  It used to say "`couldnt_check` belongs in Tab 1" and now says it has its own
+  tab; the property was never the destination, it was *the outcome lands in
+  exactly one bucket and never leaks*. Seeding an `open` finding so the default
+  tab has content is what makes it a real assertion rather than a vacuous one —
+  the absence is now asserted against a tab that rendered. That is the companion
+  a not-assertion needs, applied without being asked.
+- **The banner colour** follows a fill to a rail. Same shape as LP-UI-012's
+  notices; the test describes what it always described.
+
+### Confirmed, not changed
+
+- **Two doors to one action.** Keeping the in-tab button alongside the rail's is
+  right, and for exactly the reason given: the rail is `hidden xl:block`, so
+  making it the sole home puts a primary action out of reach below 1280px —
+  LP-UI-016's rule, applied without prompting. Two entry points dispatching one
+  `request-docs-bulk` is one mechanism, not duplication. Duplication would be two
+  code paths that can disagree; there is one.
+- **The two escaped mutations** are both the general form of the not-assertion
+  rule, and the second is the sharper statement of it: *an assertion about the
+  visible half says nothing about the half that acts*. Asserting the button's
+  label while never asserting its payload is how "requests all fifteen" went
+  untested while reading as covered.
+
+### The two found and not fixed
+
+- **`CollapsedFindings` auto-expanding an `open` group.** Correctly left for a
+  decision rather than changed silently: the collapse exists to make N subjects
+  one row, and auto-expanding defeats it for precisely the groups that are worst
+  — CR-1's eight subjects become eight identical sentences with four buttons
+  each. It is pre-existing with its own rationale, so it belongs to whoever owns
+  that rationale, not to a reviewer passing through.
+- **"91 unresolved findings" reconciling with nothing** (75 governed + 13
+  legacy). Sixth instance of the disagreement class, and LP-UI-021's surface.
+  The same condition applies as this ticket carried: it should not close without
+  it.
+
+### Verification
+
+`tsc` and `biome` clean over 233 files, **669 tests** (from 665), build compiles
+— into `.next-review`, with the dev server left running. No backend changes.
+
+| mutation | result |
+| --- | --- |
+| derive needs-review by subtraction again | 2 tests fail |

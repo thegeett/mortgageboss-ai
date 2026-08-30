@@ -16,6 +16,7 @@ import { EVALUATION_OUTCOME, LOAN_FILE_STATUS, type Tone, resolveStatus } from "
 import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import {
+  ATTENTION_ORDER,
   awaitedDocuments,
   bucketRuleFindings,
   splitByMissingDocument,
@@ -294,9 +295,25 @@ function VerificationSection({ fileId }: { fileId: string }) {
   // request rather than a correction. The rail reads the same buckets the tab
   // strip renders, so a routing change moves both together or neither.
   const couldntCheck = buckets.couldnt_check.length;
-  const mustFix = buckets.attention.filter((f) => f.evaluation_outcome === "open").length;
-  const needsReview = buckets.attention.length - mustFix;
   const legacy = verification?.findings.length ?? 0;
+
+  // Counted PER OUTCOME, never by subtraction. `attention` holds three outcomes
+  // (`ATTENTION_ORDER`) and anything `tabForOutcome` cannot place, so
+  // `attention.length - mustFix` labelled `pending_automation` — "Manual
+  // review", a rule that could not be automated — as "Needs review", which
+  // means a human disagreed with a result. Two different jobs, one number,
+  // which is the lie this whole ticket set out to stop the rail telling.
+  const byOutcome = new Map<string, number>();
+  for (const finding of buckets.attention) {
+    const key = finding.evaluation_outcome;
+    byOutcome.set(key, (byOutcome.get(key) ?? 0) + 1);
+  }
+  const mustFix = byOutcome.get("open") ?? 0;
+  // Whatever the fallback routed here from an enum this build does not know. It
+  // is in the tab, so the rail must not quietly disagree about the total.
+  const unrecognised =
+    buckets.attention.length -
+    ATTENTION_ORDER.reduce((sum, outcome) => sum + (byOutcome.get(outcome) ?? 0), 0);
 
   return (
     <Section title="Verification">
@@ -310,11 +327,20 @@ function VerificationSection({ fileId }: { fileId: string }) {
         value={verification ? String(couldntCheck) : DASH}
         tone={couldntCheck > 0 ? "attention" : "neutral"}
       />
-      <Metric
-        label={EVALUATION_OUTCOME.needs_review.label}
-        value={verification ? String(needsReview) : DASH}
-        tone={needsReview > 0 ? "attention" : "neutral"}
-      />
+      {ATTENTION_ORDER.filter((outcome) => outcome !== "open").map((outcome) => {
+        const count = byOutcome.get(outcome) ?? 0;
+        return (
+          <Metric
+            key={outcome}
+            label={EVALUATION_OUTCOME[outcome].label}
+            value={verification ? String(count) : DASH}
+            tone={count > 0 ? "attention" : "neutral"}
+          />
+        );
+      })}
+      {unrecognised > 0 ? (
+        <Metric label="Other" value={String(unrecognised)} tone="attention" />
+      ) : null}
       <Metric
         label={EVALUATION_OUTCOME.satisfied.label}
         value={verification ? String(buckets.satisfied.length) : DASH}

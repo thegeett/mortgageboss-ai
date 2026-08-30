@@ -372,3 +372,54 @@ describe("FileContextRail — verification counts are the GOVERNED ones (LP-UI-0
     expect(action.findingIds).toHaveLength(7);
   });
 });
+
+describe("the rail counts each governed outcome, never by subtraction", () => {
+  // `attention` holds THREE outcomes (ATTENTION_ORDER) plus anything
+  // `tabForOutcome` cannot place. `attention.length - mustFix` therefore labelled
+  // `pending_automation` — "Manual review", a rule that could not be automated —
+  // as "Needs review", which means a human disagreed with a result. Two
+  // different jobs under one number, which is the lie this ticket set out to
+  // stop the rail telling.
+  function withOutcomes(outcomes: string[]) {
+    data.verification = {
+      latest_run: { completed_at: "2026-08-01T00:00:00Z" },
+      findings: [],
+      rule_findings: outcomes.map((outcome, i) => ({
+        id: `f${i}`,
+        rule_id: "AS-1",
+        evaluation_outcome: outcome,
+        message: "x",
+        tags: [],
+      })),
+    };
+    pathname.current = "/loan-files/abc/verification";
+    renderRail();
+  }
+
+  it("does not report a manual-review rule as needs-review", () => {
+    withOutcomes(["pending_automation", "pending_automation"]);
+    expect(metric("Needs review")).toBe("0");
+    expect(metric("Manual review")).toBe("2");
+  });
+
+  it("keeps the three attention outcomes apart", () => {
+    withOutcomes(["open", "needs_review", "pending_automation"]);
+    expect(metric("Must fix")).toBe("1");
+    expect(metric("Needs review")).toBe("1");
+    expect(metric("Manual review")).toBe("1");
+  });
+
+  it("surfaces an outcome this build does not know rather than absorbing it", () => {
+    // `tabForOutcome` routes an unrecognised verdict to `attention` deliberately,
+    // so it is in the tab. The rail must not disagree about the total.
+    withOutcomes(["open", "awaiting_investor_response"]);
+    expect(metric("Must fix")).toBe("1");
+    expect(metric("Other")).toBe("1");
+  });
+
+  it("shows no Other line when every outcome is recognised", () => {
+    withOutcomes(["open", "needs_review"]);
+    expect(screen.queryByText("Other")).toBeNull();
+    expect(metric("Must fix")).toBe("1");
+  });
+});

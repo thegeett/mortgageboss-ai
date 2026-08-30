@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Reviewer verification builds (see next.config.ts distDir).
+.next-review/
