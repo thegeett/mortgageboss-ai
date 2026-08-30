@@ -1554,3 +1554,85 @@ if one is needed, is to narrow the claim rather than patch the screen. An ADR is
 promise about what a processor can rely on; a promise inferred from arithmetic
 should say so, so that the person who finds the counterexample knows which of the
 two to change.
+
+---
+
+## 2026-08-30 · A35 — mine: A17 accepted the wrong half
+
+### A35 — I weighed the wasted requests and missed the missing feature
+
+A17 recorded the file context rail's `hidden xl:block` as **accepted, not fixed**:
+below 1280px the rail still mounts and its four always-on queries still fire for a
+user who cannot see it, and every fix I considered cost more than the waste.
+
+That reasoning was sound about the requests, and it was answering the smaller
+question. LP-UI-037 measured the screen and found the real one: below 1280px the
+rail **did not collapse, it vanished.** The file's status, its three ratios and
+its recent activity were simply absent, with nothing to open and no sign anything
+was missing. A 13-inch laptop is 1280 logical pixels at best, and fewer at any
+display scaling above 100% — so this was not a narrow-screen edge case, it was a
+common one.
+
+I had the evidence in front of me. I quoted `hidden xl:block` in A17 and reasoned
+about what it *costs*, never about what it *removes*. The SPEC rule from the
+LP-UI-016 review — *a route becoming unreachable is a regression, not a design
+deferral* — is the same rule, and I failed to apply it to content because content
+is not a route.
+
+**Fixed by LP-UI-037:** a `FileContextDrawer` behind a header button, shown only
+where the rail is hidden, rendering the same `ContextSections` — one definition,
+not a second copy. `RAIL_ONLY` / `DRAWER_ONLY` are defined together with a test
+asserting they name the same breakpoint in opposite directions, so the two cannot
+both hide. Verified at 1180 and 1440.
+
+**The general form, and it belongs beside the LP-UI-036 review's finding that a
+page has more states than it has URLs:** a component has more viewports than it
+has routes. "Accepted" is only honest once you have asked what the user at that
+width, or in that state, actually sees — not only what the code wastes.
+
+---
+
+## 2026-08-30 · A36 — mine, and it is the ticket format's own defect
+
+### A36 — the acceptance criteria did not cover the thing the ticket was named for
+
+LP-UI-021 is titled **"Verification: calculator strip"**. Its prose asks for *"six
+tiles in one strip"* and for *"the arithmetic shown rather than hidden: inputs with
+their source, the derivation steps, the result against the limit"*.
+
+Its three checkboxes ask for something else entirely: expanding without refetching,
+overrides visibly attributed, and a gated DTI never rendering a fabricated 0.
+
+All three were met. The ticket closed. And the screen did not look like the mockup
+— the calculators were still a 2- and 3-column grid, so six tiles took two rows and
+filled the first screen, pushing the outcome tabs (the point of that screen) below
+the fold. The result panel still ran down the page, so **the answer sat above the
+working** and checking 39.70% against the twenty lines producing it meant scrolling
+between the number and the numbers it came from. And the thoroughness dial, built
+since LP-79, was mounted inside the Old findings tab — the one tab a processor has
+no reason to open.
+
+Three tickets to repair it: LP-UI-044, 045 and 046, raised only because someone
+looked at the running screen and said it did not match.
+
+**The defect is mine and it is structural, not a one-off.** In this ticket format
+the prose carries the design and the checkboxes carry the acceptance. I wrote them
+as if the checkboxes were a summary of the prose; they were a *different, narrower*
+list, and nothing reconciled the two. The three requirements that went missing are
+exactly the three that were only ever in the prose.
+
+**It also defeated my own verification.** I checked each ticket against its
+criteria — which is precisely how the gap survived. A checklist that passes is not
+evidence the ticket is done.
+
+**The rule, for any future use of this format:** where a mockup is the
+specification, one acceptance criterion must be *"matches the named mockup screen,
+compared side by side"*, and every requirement stated in the prose must appear in
+the checkboxes or be deleted from the prose. Two lists describing one ticket is the
+same defect this epic found seven times in the code — one fact, maintained twice —
+arriving in the documents instead.
+
+`SPEC.md`'s "Definition of done" already carries *"Matches the mockup screen named
+on the ticket"*. It was there and it was not enforced, because per-ticket criteria
+are what a reader works through and a global list is what they skim past. Requiring
+it per ticket is what makes it real.
