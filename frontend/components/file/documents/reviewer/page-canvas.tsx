@@ -1,5 +1,6 @@
 "use client";
 
+import { usePan } from "@/components/file/documents/reviewer/use-pan";
 import {
   FIT,
   canZoomIn,
@@ -12,8 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePageImage } from "@/lib/api/page-image";
+import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 /**
  * One page of the document, rendered (LP-UI-030).
@@ -58,6 +60,9 @@ export function PageCanvas({
   // The state holds WHICH image failed rather than a boolean, so a new page is
   // unaffected by the previous page's failure without an effect to reset it. A
   // reset effect would be a second source of truth that can lag a render.
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const pan = usePan(scroller);
+
   const [failed, setFailed] = useState<string | null>(null);
   const identity = `${documentId}:${page}`;
   const imageBroken = failed === identity;
@@ -133,7 +138,28 @@ export function PageCanvas({
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      {/* THE PAGE MOVES BY HAND when it does not fit (LP-UI-043).
+          `data-pan-region` tells the reviewer's key handler to leave the arrow
+          keys alone in here, so a focused page scrolls with them instead of
+          moving to the next field — a page that can only be panned by dragging
+          is a page that cannot be read without a mouse.
+          `tabIndex` so it can take that focus at all; `aria-label` so what just
+          took focus is announced as something rather than as nothing. */}
+      <section
+        ref={scroller}
+        data-pan-region
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable box a keyboard user can reach is the WAI-recommended pattern — a named region with tabindex="0" so the arrow keys scroll it. The alternative is a zoomed page readable only with a mouse.
+        tabIndex={0}
+        aria-label="Document page — drag or use the arrow keys to move around it"
+        onPointerDown={pan.onPointerDown}
+        className={cn(
+          "min-h-0 flex-1 overflow-auto p-3",
+          pan.pannable && (pan.panning ? "cursor-grabbing" : "cursor-grab"),
+          // The browser's own text selection fights a drag; while panning there
+          // is nothing to select anyway.
+          pan.panning && "select-none",
+        )}
+      >
         {isPending ? (
           <div aria-busy>
             <output className="sr-only">Loading page {page}</output>
@@ -158,6 +184,11 @@ export function PageCanvas({
           <div className="relative mx-auto" style={{ width: zoomWidth(zoom) }}>
             <img
               src={data.url}
+              // The browser's native image drag fires `pointercancel`, which
+              // ended the pan the instant it started — the page felt dead under
+              // the hand while the cursor still said grab. Found by instrumenting
+              // the drag, not by looking at it.
+              draggable={false}
               onError={() => setFailed(identity)}
               alt={`Page ${page} of the document`}
               width={data.widthPoints * data.zoom}
@@ -167,7 +198,7 @@ export function PageCanvas({
             {overlay}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

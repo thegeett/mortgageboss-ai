@@ -50,6 +50,21 @@ export interface ReviewKeyActions {
  * one. `readOnly` inputs are NOT excluded — the caret is still there and the
  * shortcut would still feel like a typo.
  */
+/**
+ * Whether the event came from inside the scrollable page view.
+ *
+ * The arrow keys belong to that view while it has focus: a zoomed page has to be
+ * readable without a mouse, and stealing the arrows for field navigation left it
+ * pannable only by dragging. Everything else — Enter, E, R, the brackets — still
+ * fires, because none of them is how a person scrolls.
+ */
+export function isPanRegion(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest("[data-pan-region]") !== null;
+}
+
+/** Keys the page view keeps for itself when it has focus. */
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "]);
+
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -157,6 +172,8 @@ export function useReviewKeys(actions: ReviewKeyActions, enabled = true): void {
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return;
+      // Inside the page view the arrows and space scroll it, natively.
+      if (isPanRegion(event.target) && SCROLL_KEYS.has(event.key)) return;
       const action = actionFor(event);
       if (!action) return;
       if (PREVENT_DEFAULT.has(action)) event.preventDefault();

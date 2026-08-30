@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type ReviewKeyActions,
   actionFor,
+  isPanRegion,
   isTypingTarget,
   shortcutsEnabled,
   useReviewKeys,
@@ -112,8 +113,31 @@ function actions(): ReviewKeyActions {
 
 function Harness({ on, enabled = true }: { on: ReviewKeyActions; enabled?: boolean }) {
   useReviewKeys(on, enabled);
-  return <input aria-label="a note" />;
+  return (
+    <>
+      <input aria-label="a note" />
+      <div data-pan-region>
+        <button type="button" aria-label="inside the page">
+          box
+        </button>
+      </div>
+    </>
+  );
 }
+
+describe("isPanRegion", () => {
+  it("recognises anything inside the page view", () => {
+    const region = document.createElement("div");
+    region.setAttribute("data-pan-region", "");
+    const child = document.createElement("button");
+    region.appendChild(child);
+    document.body.appendChild(region);
+    expect(isPanRegion(child)).toBe(true);
+    expect(isPanRegion(document.body)).toBe(false);
+    expect(isPanRegion(null)).toBe(false);
+    region.remove();
+  });
+});
 
 describe("useReviewKeys", () => {
   it("runs the bound action", () => {
@@ -133,6 +157,32 @@ describe("useReviewKeys", () => {
       fireEvent.keyDown(input, { key });
     }
     for (const action of Object.values(on)) expect(action).not.toHaveBeenCalled();
+  });
+
+  it("leaves the arrow keys to the page view when focus is inside it", () => {
+    // A zoomed page has to be readable without a mouse. Stealing the arrows for
+    // field navigation left it pannable only by dragging.
+    const on = actions();
+    const { getByLabelText } = render(<Harness on={on} />);
+    const inside = getByLabelText("inside the page");
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", " "]) {
+      fireEvent.keyDown(inside, { key });
+    }
+    expect(on.nextField).not.toHaveBeenCalled();
+    expect(on.previousField).not.toHaveBeenCalled();
+    expect(on.toggleOverlay).not.toHaveBeenCalled();
+  });
+
+  it("still answers its other keys inside the page view", () => {
+    // Only the scroll keys are given up. Enter, R and the brackets are not how
+    // anyone scrolls, and a reader with focus on the page still wants them.
+    const on = actions();
+    const { getByLabelText } = render(<Harness on={on} />);
+    const inside = getByLabelText("inside the page");
+    fireEvent.keyDown(inside, { key: "r" });
+    fireEvent.keyDown(inside, { key: "]" });
+    expect(on.reject).toHaveBeenCalledTimes(1);
+    expect(on.nextDocument).toHaveBeenCalledTimes(1);
   });
 
   it("stops listening when disabled", () => {

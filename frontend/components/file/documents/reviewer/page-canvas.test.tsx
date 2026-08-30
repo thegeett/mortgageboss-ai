@@ -109,6 +109,27 @@ describe("PageCanvas", () => {
     });
   });
 
+  describe("moving around a zoomed page", () => {
+    it("does not let the browser drag the image away", () => {
+      // The native image drag fires `pointercancel`, which ended the pan the
+      // instant it started: the cursor said grab and the page did not move.
+      image.value = { data: PAGE, isPending: false, isError: false };
+      render(canvas({ zoom: 2 }));
+      expect(screen.getByRole("img").getAttribute("draggable")).toBe("false");
+    });
+
+    it("marks the scroller so the arrow keys stay with it", () => {
+      // `data-pan-region` is what tells the reviewer's key handler to leave the
+      // arrows alone in here, so a zoomed page is readable without a mouse.
+      image.value = { data: PAGE, isPending: false, isError: false };
+      const { container } = render(canvas({ zoom: 2 }));
+      const region = container.querySelector("[data-pan-region]");
+      expect(region).toBeTruthy();
+      expect(region?.getAttribute("tabindex")).toBe("0");
+      expect(region?.getAttribute("aria-label")).toBeTruthy();
+    });
+  });
+
   describe("zoom", () => {
     it("shows the current zoom and offers both directions", () => {
       image.value = { data: PAGE, isPending: false, isError: false };
