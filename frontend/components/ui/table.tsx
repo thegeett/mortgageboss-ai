@@ -1,13 +1,28 @@
+"use client";
+
 import * as React from "react";
 
+import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { cn } from "@/lib/utils";
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
-    </div>
-  ),
+  ({ className, ...props }, ref) => {
+    // Drag-to-scroll a table that is WIDER THAN ITS CONTAINER. The hook is a no-op when it is not:
+    // `useDragScroll` measures overflow and offers neither the grab cursor nor the drag until there
+    // is something to pan, which is what keeps ordinary text selection intact on the tables that fit
+    // — the common case, and the reason this was left off tables the first time round.
+    //
+    // Selecting text inside a WIDE table now competes with panning it, and panning wins past the 4px
+    // threshold. That is the accepted trade: a table you cannot see the right-hand side of is not one
+    // you can usefully select from either.
+    const drag = useDragScroll<HTMLDivElement>();
+
+    return (
+      <div ref={drag.ref} className={cn("relative w-full overflow-auto", drag.className)}>
+        <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+      </div>
+    );
+  },
 );
 Table.displayName = "Table";
 

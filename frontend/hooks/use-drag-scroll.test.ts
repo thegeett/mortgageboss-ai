@@ -100,3 +100,24 @@ describe("useDragScroll", () => {
     expect(result.current.className).toBe("");
   });
 });
+
+describe("useDragScroll on a table", () => {
+  it("leaves a table that fits entirely alone", () => {
+    // The reason tables were safe to add: text selection inside them is untouched unless the table is
+    // genuinely wider than its container, and most are not.
+    const el = mountStrip({ scrollWidth: 600, clientWidth: 600 });
+    renderHook(() => useAttached(el));
+    const onClick = vi.fn();
+    el.addEventListener("click", onClick);
+
+    act(() => {
+      el.dispatchEvent(pointer("pointerdown", 400));
+      el.dispatchEvent(pointer("pointermove", 200)); // a long drag — a text selection, not a pan
+      el.dispatchEvent(pointer("pointerup", 200));
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(el.scrollLeft).toBe(0); // nothing panned
+    expect(onClick).toHaveBeenCalledTimes(1); // and the click was not swallowed
+  });
+});
