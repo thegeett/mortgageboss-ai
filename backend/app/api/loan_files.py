@@ -31,6 +31,7 @@ from app.schemas.loan_file import (
 )
 from app.schemas.mismo import MismoImportResponse
 from app.schemas.stated_financials import StatedFinancialsResponse
+from app.services.attention import attention_for_files
 from app.services.loan_files import (
     FileBlockedError,
     create_loan_file_with_setup,
@@ -224,8 +225,10 @@ async def list_files(
         statuses=status,
         search=search,
     )
+    # One derivation for the whole page — four aggregates, not four per row.
+    attention = await attention_for_files(db, items)
     return PaginatedLoanFiles(
-        items=[LoanFileSummary.from_model(item) for item in items],
+        items=[LoanFileSummary.list_item(item, attention.get(item.id)) for item in items],
         total=total,
         page=page,
         page_size=page_size,

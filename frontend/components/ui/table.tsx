@@ -123,7 +123,12 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
       className={cn(
         // The hairline is on the CELLS, not the row: `border-separate` (needed
         // for sticky cells) drops row borders entirely.
-        "transition-colors [&>*]:border-b [&>*]:border-border",
+        //
+        // `border-b-border`, not `border-border`: the latter colours all FOUR
+        // sides, so a cell that wants its own left border — the pipeline's
+        // attention stripe — silently loses to it. A row that draws one line
+        // should only colour that line.
+        "transition-colors [&>*]:border-b [&>*]:border-b-border",
         "hover:bg-muted/50 data-[state=selected]:bg-muted",
         className,
       )}

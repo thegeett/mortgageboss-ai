@@ -169,10 +169,10 @@ describe("FileTable — grid keyboard navigation (LP-UI-007)", () => {
     renderTable({ files: files(3) });
     const grid = screen.getByRole("grid", { name: /loan files/i });
     expect(grid.getAttribute("aria-rowcount")).toBe("4"); // 3 rows + header
-    expect(grid.getAttribute("aria-colcount")).toBe("7");
+    expect(grid.getAttribute("aria-colcount")).toBe("10");
     expect(row(0).getAttribute("aria-rowindex")).toBe("2"); // header is row 1
     const cells = row(0).querySelectorAll("[aria-colindex]");
-    expect(cells).toHaveLength(7);
+    expect(cells).toHaveLength(10);
     expect(cells[0]?.getAttribute("aria-colindex")).toBe("1");
   });
 

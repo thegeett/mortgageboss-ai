@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  ATTENTION_STRIPE,
+  AttentionCell,
+  NeedsProgress,
+} from "@/components/dashboard/attention-cell";
 import { DeleteFileDialog } from "@/components/file/delete-file-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -18,13 +23,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatMoney } from "@/lib/format";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { FolderPlus, MoreHorizontal, SearchX, Trash2, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const COLUMNS = ["File ID", "Borrower", "Property", "Status", "Lender", "Last activity"] as const;
+const COLUMNS = [
+  "File",
+  "Borrower",
+  "Property",
+  "Amount",
+  "Stage",
+  "Attention",
+  "Needs",
+  "Lender",
+  "Touched",
+] as const;
 
 /**
  * Roving tabindex over the rows (LP-UI-007).
@@ -309,7 +325,17 @@ export function FileTable({
               tabIndex={index === active ? 0 : -1}
               onKeyDown={(event) => onKeyDown(event, index)}
             >
-              <TableCell aria-colindex={1} className="font-medium text-foreground">
+              <TableCell
+                aria-colindex={1}
+                // The stripe says the same thing as the Attention column, so the
+                // row reads while scanning without stopping to read the words.
+                className={cn(
+                  "font-medium text-foreground",
+                  file.attention
+                    ? ATTENTION_STRIPE[file.attention.tone]
+                    : "border-l-2 border-l-transparent",
+                )}
+              >
                 {file.display_id}
               </TableCell>
               <TableCell aria-colindex={2} className="text-foreground-2">
@@ -318,17 +344,26 @@ export function FileTable({
               <TableCell aria-colindex={3} className="max-w-[16rem] truncate text-foreground-2">
                 {file.property_address ?? "—"}
               </TableCell>
-              <TableCell aria-colindex={4}>
+              <TableCell aria-colindex={4} className="tabular text-right text-foreground-2">
+                {file.loan_amount ? formatMoney(file.loan_amount) : "—"}
+              </TableCell>
+              <TableCell aria-colindex={5}>
                 <StatusBadge status={file.status} />
               </TableCell>
-              <TableCell aria-colindex={5} className="text-foreground-2">
+              <TableCell aria-colindex={6} className="max-w-[18rem] truncate">
+                <AttentionCell attention={file.attention} />
+              </TableCell>
+              <TableCell aria-colindex={7} className="text-right">
+                <NeedsProgress attention={file.attention} />
+              </TableCell>
+              <TableCell aria-colindex={8} className="text-foreground-2">
                 {file.lender_name ?? "—"}
               </TableCell>
-              <TableCell aria-colindex={6} className="whitespace-nowrap text-muted-foreground">
+              <TableCell aria-colindex={9} className="whitespace-nowrap text-muted-foreground">
                 {lastActivity(file.updated_at)}
               </TableCell>
               <TableCell
-                aria-colindex={7}
+                aria-colindex={10}
                 onKeyDown={(event) => onCellKeyDown(event, index)}
                 className="text-right"
                 // The row navigates on click; the menu must not. Stop propagation for

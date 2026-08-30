@@ -3,11 +3,11 @@
 import { FileTable } from "@/components/dashboard/file-table";
 import { FilterPills } from "@/components/dashboard/filter-pills";
 import { SearchInput } from "@/components/dashboard/search-input";
-import { StatsCards } from "@/components/dashboard/stats-cards";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
+import { byAttention } from "@/lib/loan-files/attention";
 import { type FilterKey, statusesForFilter } from "@/lib/loan-files/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
@@ -51,6 +51,9 @@ export default function DashboardPage() {
     statuses,
     search,
   });
+  // Default order is "what needs me first" (LP-UI-013), not most-recently-
+  // touched. Memoised so the table is not handed a new array every render.
+  const sorted = useMemo(() => byAttention(data?.items ?? []), [data?.items]);
 
   const isFiltered = filter !== "all" || search !== "";
   const total = data?.total ?? 0;
@@ -76,8 +79,6 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <StatsCards />
-
       <Card className="border-border/80">
         <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
           <FilterPills value={filter} onChange={handleFilter} />
@@ -85,7 +86,7 @@ export default function DashboardPage() {
         </div>
 
         <FileTable
-          files={data?.items ?? []}
+          files={sorted}
           isPending={isPending}
           isError={isError}
           isFiltered={isFiltered}
