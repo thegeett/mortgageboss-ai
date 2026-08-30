@@ -170,6 +170,10 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         onSelect={vi.fn()}
       />,
     );
+    // Asserted alongside a POSITIVE. A bare `toBeNull` passes just as well when
+    // the list rendered nothing at all — the same shape as a mutation run that
+    // finds no tests, which is indistinguishable from one that finds no failures.
+    expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
     expect(screen.queryByText(/1 other/i)).toBeNull();
   });
 

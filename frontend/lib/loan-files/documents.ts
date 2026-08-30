@@ -481,6 +481,28 @@ export interface DocumentCoverage {
  * history and counting it would make "8 of 12 qualified" describe a list of
  * twelve the processor cannot see.
  */
+/**
+ * Documents still moving through the pipeline THAT WILL LAND IN THE TABLE.
+ *
+ * One definition, because there were two. `DocumentList` shows
+ * `is_current && isTerminalStatus`, and `documentCoverage` counts `is_current` —
+ * but the processing strip and the rail's "Processing" metric each filtered on
+ * `!isTerminalStatus` alone. A SUPERSEDED document mid-flight was therefore
+ * counted as arriving and shown in the strip, and could never appear in the
+ * table below it when it settled, because it is not current.
+ *
+ * The strip is a promise that these rows are on their way to the list. A row
+ * that is not is a count a processor cannot reconcile with what they can see.
+ */
+export function inFlightDocuments(documents: DocumentResponse[]): DocumentResponse[] {
+  return documents.filter((doc) => doc.is_current && !isTerminalStatus(doc.status));
+}
+
+/** The documents the table can show — current, whatever their status. */
+export function currentDocuments(documents: DocumentResponse[]): DocumentResponse[] {
+  return documents.filter((doc) => doc.is_current);
+}
+
 export function documentCoverage(documents: DocumentResponse[]): DocumentCoverage {
   const current = documents.filter((doc) => doc.is_current);
 

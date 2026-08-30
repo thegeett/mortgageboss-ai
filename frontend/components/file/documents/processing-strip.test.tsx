@@ -85,3 +85,44 @@ describe("ProcessingStrip (LP-UI-019)", () => {
     expect(screen.getByText("w2.pdf")).toBeTruthy();
   });
 });
+
+describe("the strip and the table split one list", () => {
+  // The strip is a promise that these rows are on their way to the list. It
+  // filtered on `!isTerminalStatus` alone while DocumentList requires
+  // `is_current && isTerminalStatus`, so a SUPERSEDED document mid-flight was
+  // counted as arriving and could never appear in the table when it settled.
+  it("leaves a superseded in-flight document out", () => {
+    render(
+      <ProcessingStrip
+        documents={[
+          doc({ id: "a", status: "extracting", is_current: true, standard_name: "Arriving" }),
+          doc({ id: "b", status: "extracting", is_current: false, standard_name: "Old version" }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("Arriving")).toBeTruthy();
+    expect(screen.queryByText("Old version")).toBeNull();
+  });
+
+  it("counts against what the table holds, not every row ever uploaded", () => {
+    // "3 of 18" where the table shows 15 is a count a processor cannot
+    // reconcile with what is in front of them.
+    render(
+      <ProcessingStrip
+        documents={[
+          doc({ id: "a", status: "extracting", is_current: true }),
+          doc({ id: "b", status: "completed", is_current: true }),
+          doc({ id: "c", status: "completed", is_current: false }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Processing — 1 of 2/)).toBeTruthy();
+  });
+
+  it("renders nothing when only superseded documents are in flight", () => {
+    const { container } = render(
+      <ProcessingStrip documents={[doc({ id: "b", status: "extracting", is_current: false })]} />,
+    );
+    expect(container.textContent).toBe("");
+  });
+});

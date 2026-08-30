@@ -9,7 +9,7 @@ import { useLoanFile, useLoanFileActivity } from "@/lib/api/loan-files";
 import { useLtv } from "@/lib/api/ltv";
 import { useVerification } from "@/lib/api/verification";
 import { formatMoney, humanize } from "@/lib/format";
-import { documentCoverage, isTerminalStatus } from "@/lib/loan-files/documents";
+import { documentCoverage, inFlightDocuments } from "@/lib/loan-files/documents";
 import { fileTabSegment } from "@/lib/navigation";
 import { LOAN_FILE_STATUS, type Tone, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -191,7 +191,7 @@ export function FileContextRail({ fileId }: { fileId: string }) {
 function DocumentsSection({ fileId }: { fileId: string }) {
   const { data: documents } = useLoanFileDocuments(fileId);
   const all = documents ?? [];
-  const processing = all.filter((doc) => !isTerminalStatus(doc.status)).length;
+  const processing = inFlightDocuments(all).length;
   const coverage = documentCoverage(all);
 
   return (

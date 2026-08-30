@@ -189,6 +189,21 @@ describe("FileContextRail — documents coverage, freshness, duplicates (LP-UI-0
     expect(screen.queryByText("60 days old at close")).toBeNull();
   });
 
+  it("counts as processing only what will reach the table", () => {
+    // The rail and the strip both answer "how many are arriving", and both
+    // filtered on `!isTerminalStatus` alone while the table requires
+    // `is_current` too — so a SUPERSEDED document mid-flight was counted as
+    // arriving and could never appear below when it settled. One definition now.
+    pathname.current = "/loan-files/abc/documents";
+    data.documents = [
+      doc({ id: "a", status: "extracting", is_current: true }),
+      doc({ id: "b", status: "extracting", is_current: false }),
+      doc({ id: "c", status: "completed", is_current: true }),
+    ];
+    renderRail();
+    expect(metric("Still processing")).toBe("1");
+  });
+
   it("answers the duplicate question once for the file, not once per row", () => {
     // The property moved here from DocumentList, where two pay stubs each read
     // "1 other pay stub" — the same fact told twice.

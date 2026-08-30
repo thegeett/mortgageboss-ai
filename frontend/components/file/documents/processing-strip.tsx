@@ -1,7 +1,7 @@
 "use client";
 
 import { StatusToken } from "@/components/status-token";
-import { isTerminalStatus } from "@/lib/loan-files/documents";
+import { currentDocuments, inFlightDocuments } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import type { DocumentResponse } from "@/lib/types/document";
 
@@ -22,8 +22,12 @@ import type { DocumentResponse } from "@/lib/types/document";
  * a permanent reminder of a thing that is not happening.
  */
 export function ProcessingStrip({ documents }: { documents: DocumentResponse[] }) {
-  const inFlight = documents.filter((doc) => !isTerminalStatus(doc.status));
+  const inFlight = inFlightDocuments(documents);
   if (inFlight.length === 0) return null;
+  // The denominator is what the TABLE holds, not every row ever uploaded.
+  // `documents.length` counted superseded versions too, so "3 of 18" described
+  // no set the reader could see.
+  const total = currentDocuments(documents).length;
 
   return (
     <section
@@ -34,7 +38,7 @@ export function ProcessingStrip({ documents }: { documents: DocumentResponse[] }
         id="processing-heading"
         className="border-b border-border bg-muted px-3 py-1.5 text-label uppercase text-muted-foreground"
       >
-        Processing — {inFlight.length} of {documents.length}
+        Processing — {inFlight.length} of {total}
       </h3>
       <ul>
         {inFlight.map((doc) => (
