@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.ai.client import close_anthropic_client
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
@@ -57,18 +58,33 @@ def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     hundreds of times. The bug is reuse ACROSS tasks, and that is what this boundary ends.
 
     The same shape ``task_session`` uses below: build per task, release at the end.
+
+    THIS IS SAFE ONLY BECAUSE THE WORKER IS PREFORK. Under a threaded or gevent pool, two tasks
+    would share one process — and one task's cleanup would close the client another was midway
+    through using. Celery's default pool is prefork and
+    ``infra/modules/compute/main.tf`` launches ``celery worker --concurrency=N`` with no
+    ``--pool``, so each child is a separate process running one task at a time, with its own
+    cache. Nothing in Python enforces that; it is a property of the deploy command, which is why
+    it is written down here.
     """
 
     async def _with_task_scoped_client() -> T:
         try:
             return await coro
         finally:
-            # Import here, not at module scope: `app.ai.client` pulls in settings and the
-            # provider SDKs, and `base` is imported by every task module including ones with no
-            # AI in them (health.py pings the database and nothing else).
-            from app.ai.client import close_anthropic_client
-
-            await close_anthropic_client()
+            # SWALLOWED, DELIBERATELY. An exception from cleanup in a `finally` REPLACES whatever
+            # the task was failing with — so a close error would reach `retry_or_terminal` in
+            # place of the real one, which classifies retry-vs-terminal and would then be
+            # classifying the wrong exception, while the actual cause never reaches the log.
+            #
+            # Not hypothetical on this path: the client being closed here is the one whose
+            # transports may have just been failing, which is the state most likely to raise on
+            # shutdown — so it would fire exactly when a task is already going wrong, and take
+            # the diagnosis with it.
+            try:
+                await close_anthropic_client()
+            except Exception:  # broad: cleanup must never speak over the task's own error
+                logger.warning("anthropic_client_close_failed", exc_info=True)
 
     return asyncio.run(_with_task_scoped_client())
 

@@ -541,14 +541,25 @@ async def _extract_branch(
     #
     # ABSENCE IS NOT TREATED AS LOW CONFIDENCE, deliberately. An extraction that captured nothing
     # is already handled above — FAILED → Tier 3 fallback — so by this line the extraction HAS
-    # typed fields and the only missing thing is the model's self-report. That is not evidence of
-    # unsureness, and a 13% false-flag rate is how a review queue stops being read.
+    # typed fields, and a missing self-report is not evidence of unsureness. A 13% false-flag rate
+    # is how a review queue stops being read, and it costs the true flags along with the false.
     #
-    # A CONSEQUENCE TO BE HONEST ABOUT: a model that reports exactly 0.0 is indistinguishable from
-    # one that reported nothing, because ``document_confidence_provenance`` maps 0.0 → (None,
-    # not_provided). Such a document is no longer flagged, where before it was. That follows
-    # LP-201's own position — a defaulted 0.0 carries no information and must not be dressed as a
-    # self-report — but it is a behaviour change on that input, not an oversight.
+    # WHAT THAT SAFETY NET DOES NOT COVER, stated plainly so the argument is not stronger than it
+    # is: FAILED → Tier 3 catches EMPTY, not POOR. An extraction that captured something badly and
+    # omitted its confidence is no longer flagged. So this trades a MEASURED 13% false-positive
+    # rate against an UNMEASURED false-negative one — accepted because the false negatives were
+    # never being caught for a good reason anyway (they were flagged by a coerced 0.0, not by any
+    # judgement about quality), and because ``extraction_confidence_not_reported`` below plus the
+    # persisted ``confidence_source`` make the population measurable if that ever needs revisiting.
+    #
+    # NOT A CONFLATION THIS GATE INTRODUCES. A model reporting exactly 0.0 is indistinguishable
+    # from one reporting nothing — but that happens two layers up, before anything here sees it:
+    # ``coerce_confidence`` collapses missing/non-numeric to 0.0, and
+    # ``document_confidence_provenance`` maps ``0.0 → (None, not_provided)``. This gate never had
+    # the distinction to lose; what it stops doing is MIS-LABELLING the conflated value as "low
+    # confidence". If the distinction is ever wanted back, the fix is upstream —
+    # ``coerce_optional_confidence`` already keeps genuine absence as ``None``, and the
+    # document-level path simply does not use it.
     #
     # The population stays measurable: ``confidence_source`` is persisted on the extraction
     # version and is exposed by ``readonly.extractions``, so this decision can be revisited with

@@ -30,7 +30,9 @@ from functools import lru_cache
 
 import httpx
 import pytest
+import structlog
 from app.ai import client as client_module
+from app.tasks import base as base_module
 from app.tasks.base import run_async
 
 
@@ -170,3 +172,48 @@ async def test_close_anthropic_client_is_a_no_op_when_none_was_built() -> None:
     await client_module.close_anthropic_client()
 
     assert client_module.get_anthropic_client.cache_info().currsize == 0
+
+
+def test_a_failing_close_does_not_replace_the_tasks_own_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup in a ``finally`` must never speak over the thing it is cleaning up after.
+
+    An exception raised by ``close_anthropic_client`` would REPLACE whatever the task was failing
+    with, so ``retry_or_terminal`` would classify the close error instead of the real one — a
+    transient failure could be read as terminal, or the reverse, and the actual cause would never
+    reach the log. It is not a remote risk on this path: the client being closed is the one whose
+    transports may have just been failing, so it fires exactly when a task is already going
+    wrong."""
+
+    async def _boom() -> None:
+        raise ValueError("the task's own failure")
+
+    async def _close_explodes() -> None:
+        raise RuntimeError("close failed, and must not be what surfaces")
+
+    monkeypatch.setattr(base_module, "close_anthropic_client", _close_explodes)
+
+    with pytest.raises(ValueError, match="the task's own failure"):
+        run_async(_boom())
+
+
+def test_a_failing_close_is_logged_rather_than_lost() -> None:
+    """Swallowed is not the same as hidden — the close failure still has to be findable."""
+
+    async def _close_explodes() -> None:
+        raise RuntimeError("close failed")
+
+    original = base_module.close_anthropic_client
+    base_module.close_anthropic_client = _close_explodes  # type: ignore[assignment]
+    try:
+        with structlog.testing.capture_logs() as logs:
+            run_async(_ok())
+    finally:
+        base_module.close_anthropic_client = original  # type: ignore[assignment]
+
+    assert any(entry["event"] == "anthropic_client_close_failed" for entry in logs)
+
+
+async def _ok() -> str:
+    return "fine"
