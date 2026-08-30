@@ -134,6 +134,50 @@ describe("validateUploadFile", () => {
   });
 });
 
+describe("extractionFields — identifiers never render in the clear (LP-UI-032)", () => {
+  const ssnEntry = { borrower_ssn: { value: "035-98-0128", confidence: 0.99 } };
+
+  it("masks a field the backend flags as an identifier", () => {
+    const [field] = extractionFields(ssnEntry, new Set(["borrower_ssn"]));
+    expect(field?.value).toBe("•••-••-0128");
+    expect(field?.value).not.toContain("035");
+  });
+
+  it("masks any ssn/itin key with the SSN format, not just last-4", () => {
+    const fields = extractionFields(
+      { co_borrower_ssn: { value: "111-22-3333" }, taxpayer_ssn_masked: { value: "444-55-6666" } },
+      new Set(["co_borrower_ssn", "taxpayer_ssn_masked"]),
+    );
+    for (const field of fields) expect(field.value).toMatch(/^•••-••-\d{4}$/);
+  });
+
+  it("still masks the built-in set when the backend says nothing", () => {
+    // The floor. A backend that stops answering must not be able to un-mask a
+    // field that is masked today.
+    const [field] = extractionFields({ employee_ssn: { value: "035-98-0128" } });
+    expect(field?.value).toBe("•••-••-0128");
+  });
+
+  it("leaves an ordinary field alone", () => {
+    const [field] = extractionFields({ employer_name: { value: "ACME Corp" } }, new Set());
+    expect(field?.value).toBe("ACME Corp");
+  });
+
+  it("carries a per-field confidence through, and null when there is none", () => {
+    const fields = extractionFields({
+      a: { value: "1", confidence: 0.42 },
+      b: { value: "2" },
+      c: { value: "3", confidence: "not a number" },
+    });
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f.confidence]));
+    expect(byKey.a).toBe(0.42);
+    // Absent and unparseable both become null — never a fabricated 1.0, which
+    // would read as the model being certain about a value it never rated.
+    expect(byKey.b).toBeNull();
+    expect(byKey.c).toBeNull();
+  });
+});
+
 describe("extractionFields (LP-39a typed core)", () => {
   it("reads {value, source}, orders known fields, formats money, nulls as —", () => {
     const fields = extractionFields({

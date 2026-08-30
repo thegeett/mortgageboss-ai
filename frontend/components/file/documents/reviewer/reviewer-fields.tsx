@@ -2,10 +2,13 @@
 
 import { useEffect, useRef } from "react";
 
+import { ScrutinyMark } from "@/components/file/documents/reviewer/scrutiny-mark";
 import { StatusToken } from "@/components/status-token";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDocumentDetail } from "@/lib/api/documents";
-import { extractionFields } from "@/lib/loan-files/documents";
+import { tierInputFor } from "@/lib/confidence";
+import { EMPTY_VALUE, extractionFields } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -76,73 +79,89 @@ export function ReviewerFields({
     return <Note>Couldn&rsquo;t load this document&rsquo;s fields.</Note>;
   }
 
-  const fields = extractionFields(data.current_extraction?.extracted_data ?? {});
+  const scrutiny = data.field_scrutiny ?? {};
+  const sensitiveKeys = new Set(
+    Object.entries(scrutiny)
+      .filter(([, s]) => s.sensitive)
+      .map(([key]) => key),
+  );
+  const fields = extractionFields(data.current_extraction?.extracted_data ?? {}, sensitiveKeys);
 
   return (
-    <div className="field-pane p-3">
-      <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pb-2">
-        <h3 className="text-label uppercase text-muted-foreground">Extracted fields</h3>
-        <StatusToken meta={resolveStatus(DOCUMENT_STATUS, data.status)} className="text-xs" />
-      </header>
+    // One provider for the pane rather than one per row — forty providers is forty
+    // subscriptions to the same delay.
+    <TooltipProvider delayDuration={150}>
+      <div className="field-pane p-3">
+        <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pb-2">
+          <h3 className="text-label uppercase text-muted-foreground">Extracted fields</h3>
+          <StatusToken meta={resolveStatus(DOCUMENT_STATUS, data.status)} className="text-xs" />
+        </header>
 
-      {fields.length === 0 ? (
-        <Note>
-          Nothing has been extracted from this document yet. That is not the same as a document with
-          no values — an extraction may still be running, or this type may be recorded rather than
-          read.
-        </Note>
-      ) : (
-        <ul className="space-y-2">
-          {fields.map((field) => (
-            <li
-              key={field.key}
-              ref={field.key === selected ? selectedRow : undefined}
-              className={cn(
-                "field-row rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
-                field.key === selected && "bg-primary/10",
-                field.key === hovered && field.key !== selected && "bg-muted",
-              )}
-            >
-              {/* FOCUS A FIELD -> THE VIEWER GOES TO ITS BOX. The ticket calls
+        {fields.length === 0 ? (
+          <Note>
+            Nothing has been extracted from this document yet. That is not the same as a document
+            with no values — an extraction may still be running, or this type may be recorded rather
+            than read.
+          </Note>
+        ) : (
+          <ul className="space-y-2">
+            {fields.map((field) => (
+              <li
+                key={field.key}
+                ref={field.key === selected ? selectedRow : undefined}
+                className={cn(
+                  "field-row rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
+                  field.key === selected && "bg-primary/10",
+                  field.key === hovered && field.key !== selected && "bg-muted",
+                )}
+              >
+                {/* FOCUS A FIELD -> THE VIEWER GOES TO ITS BOX. The ticket calls
                   this the direction that actually saves time, so the whole row
                   is the control rather than a small affordance inside it. */}
-              <button
-                type="button"
-                className="text-left text-xs text-muted-foreground"
-                onClick={() => onSelect?.(field.key)}
-                onFocus={() => onHover?.(field.key)}
-                onBlur={() => onHover?.(null)}
-                onMouseEnter={() => onHover?.(field.key)}
-                onMouseLeave={() => onHover?.(null)}
-              >
-                {field.label}
-              </button>
-              <span className="min-w-0">
-                <span className="block break-words text-sm font-medium text-foreground">
-                  {field.value ?? "—"}
-                </span>
-                {/* The text the value was read from. On a document with no page
+                <button
+                  type="button"
+                  className="text-left text-xs text-muted-foreground"
+                  onClick={() => onSelect?.(field.key)}
+                  onFocus={() => onHover?.(field.key)}
+                  onBlur={() => onHover?.(null)}
+                  onMouseEnter={() => onHover?.(field.key)}
+                  onMouseLeave={() => onHover?.(null)}
+                >
+                  {field.label}
+                </button>
+                <span className="min-w-0">
+                  <span className="block break-words text-sm font-medium text-foreground">
+                    {field.value || EMPTY_VALUE}
+                  </span>
+                  {/* The text the value was read from. On a document with no page
                     image this is the only provenance a processor has, so it is
                     shown rather than hidden behind a hover. */}
-                {field.source?.snippet ? (
-                  <span className="mt-0.5 block break-words text-xs text-muted-foreground">
-                    &ldquo;{field.source.snippet}&rdquo;
-                    {field.source.page ? ` · p.${field.source.page}` : ""}
-                  </span>
-                ) : null}
+                  {field.source?.snippet ? (
+                    <span className="mt-0.5 block break-words text-xs text-muted-foreground">
+                      &ldquo;{field.source.snippet}&rdquo;
+                      {field.source.page ? ` · p.${field.source.page}` : ""}
+                    </span>
+                  ) : null}
 
-                <CitationNote
-                  cited={Boolean(field.source?.snippet)}
-                  citationWrong={citationWrong?.(field.key) ?? false}
-                  relocated={relocated?.(field.key) ?? false}
-                  located={hasBox ? hasBox(field.key) : true}
-                />
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                  {/* A field with no value has nothing to check — a mark here
+                      would be telling a processor to go and read a dash. */}
+                  {field.value && field.value !== EMPTY_VALUE ? (
+                    <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                  ) : null}
+
+                  <CitationNote
+                    cited={Boolean(field.source?.snippet)}
+                    citationWrong={citationWrong?.(field.key) ?? false}
+                    relocated={relocated?.(field.key) ?? false}
+                    located={hasBox ? hasBox(field.key) : true}
+                  />
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 

@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pymupdf
 import pytest
@@ -23,6 +24,8 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
+from app.models.document import Document
+from app.models.extraction import ExtractionStatus
 from app.services.loan_files import create_loan_file
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
@@ -288,6 +291,50 @@ async def test_get_document_detail_has_null_extraction(
     assert body["id"] == doc["id"]
     assert body["current_extraction"] is None
     assert "storage_path" not in body
+
+
+async def test_field_scrutiny_reaches_the_endpoint(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Criticality and distrust arrive on the response, not just in the helper (LP-UI-032).
+
+    Tested at the API because a guarded helper with unguarded wiring is exactly the
+    shape the last review found — the screen reads this response, not the module.
+    """
+    from app.services.extractions import create_extraction_version
+
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    document = await db_session.get(Document, UUID(doc["id"]))
+    assert document is not None
+    document.document_type = "credit_report"
+    await create_extraction_version(
+        db_session,
+        document_id=document.id,
+        extracted_data={
+            # Critical (money) and sensitive (identity) and ordinary and distrusted.
+            "gross_pay": {"value": "4200.00", "confidence": 0.99},
+            "borrower_ssn": {"value": "035-98-0128"},
+            "employer_name": {"value": "ACME Corp"},
+            "report_date": {"value": "2026-07-17"},
+        },
+        extraction_status=ExtractionStatus.SUCCEEDED,
+    )
+    await db_session.commit()
+
+    body = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    scrutiny = body["field_scrutiny"]
+
+    assert scrutiny["gross_pay"]["critical"] is True
+    assert scrutiny["gross_pay"]["sensitive"] is False
+    assert scrutiny["borrower_ssn"]["sensitive"] is True
+    # A confirmed-wrong extractor field on THIS document type, with its reason.
+    assert scrutiny["report_date"]["distrusted_reason"]
+    # An ordinary field is ABSENT rather than present-and-false — the payload must
+    # not grow with the 1,603-key spec vocabulary.
+    assert "employer_name" not in scrutiny
 
 
 async def test_download_returns_exact_bytes(client: AsyncClient, db_session: AsyncSession) -> None:

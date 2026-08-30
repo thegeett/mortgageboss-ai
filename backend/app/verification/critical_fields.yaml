@@ -1,0 +1,301 @@
+# CRITICAL EXTRACTION FIELDS (LP-UI-032) — the fields that get checked even when the model is sure.
+#
+# A processor cannot re-read every field on every document. Confidence tiering exists so the ones
+# that need a human eye get one — but the model's own certainty is the wrong sole input, because the
+# expensive errors are the confident ones. A hallucinated licence expiry arrives at 0.99 (LP-508,
+# docs 146/294). So: a field listed here is flagged whatever the number beside it says.
+#
+# WHAT MAKES A FIELD CRITICAL. It carries a money figure, a rate, or an identity — the three shapes
+# where being wrong is expensive rather than untidy. A wrong employer NAME is caught by the next
+# person who reads the file; a wrong gross pay is caught by an underwriter, or by nobody.
+#
+# THIS FILE IS DATA so it is reviewable and prunable, the same posture as `distrusted_fields.yaml`.
+# It is keyed on the FIELD NAME, not on (document_type, field): a money figure is a money figure on
+# whatever document it appears, and a name-keyed list stays legible at 1,603 typed-core keys where a
+# per-document one would not.
+#
+# NOT REVIEWED BY THE DOMAIN EXPERT YET. The ticket asks for that and it has not happened; the
+# classification below is mine, from the field names and the schema specs. `reviewed_not_critical`
+# carries the reason for each exclusion precisely so that review is a reading task rather than an
+# archaeology one.
+#
+# THREE ENTRIES ARE NOT TYPED-CORE SPEC KEYS — `amount`, `current_income_amount` and `total_value`.
+# They occur in stored extractions as nested-list row fields and from extractor versions that predate
+# the current specs. Listed anyway: the list is matched against what a document actually carries, and
+# dropping them because today's specs do not declare them would un-flag real money on real files.
+#
+# DRIFT IS GUARDED. `test_no_critical_field_drifts` fails when a schema spec introduces a key of
+# critical SHAPE that appears in neither list. A new extractor cannot quietly add an unclassified
+# money field — the decision is forced at the point where it is cheap.
+
+critical:
+  # --- Identity. A wrong one corrupts an identity match rather than failing it (LP-508, ID-3). ---
+  identity:
+    - borrower_ssn
+    - borrower_ssn_or_itin
+    - borrower_ssn_or_itin_2
+    - co_borrower_ssn
+    - employee_ssn
+    - employee_ssn_masked
+    - spouse_ssn_masked
+    - taxpayer_ssn_masked
+    - ssn_or_itin_last4
+    - ssn_or_itin_last4_2
+
+  # --- Credit scores. Three bureau scores drive pricing and eligibility outright. ---
+  credit:
+    - aus_credit_score
+    - score_equifax
+    - score_experian
+    - score_transunion
+
+  # --- Rates and ratios. A note rate is the loan; a ratio is the eligibility answer. ---
+  rates:
+    - apr
+    - aus_cltv_ratio
+    - aus_dti_ratio
+    - aus_ltv_ratio
+    - base_salary_or_hourly_rate
+    - interest_rate
+    - note_rate
+    - rate
+    - total_interest_percentage
+
+  # --- Income. The DTI numerator, and the most-reworked figure in a loan file. ---
+  income:
+    - adjusted_gross_income
+    - aus_qualifying_income
+    - base_pay_increase_amount
+    - current_income_amount
+    - distributable_net_income
+    - equity_award_amount
+    - federal_taxable_wages_current
+    - federal_taxable_wages_ytd
+    - gross_benefit_amount
+    - gross_distribution_amount
+    - current_gross_base_pay
+    - end_of_month_pay
+    - gross_pay
+    - gross_payment_amount
+    - income_amount
+    - income_distribution_deduction
+    - local_wages
+    - medicare_wages
+    - net_benefit_amount
+    - net_check_amount
+    - net_distribution_amount
+    - net_pay
+    - net_pay_ytd
+    - operating_income
+    - ordinary_or_taxable_income
+    - retroactive_benefit_amount
+    - retroactive_or_lump_sum_amount
+    - social_security_wages
+    - state_taxable_income
+    - state_wages
+    - taxable_income
+    - total_income
+    - total_net_rental_income
+    - wages_salaries_tips
+    - wages_tips_other_comp
+    - ytd_gross
+    - ytd_income
+    # Hours are the income calculation's multiplicand — a wrong one is a wrong
+    # income by exactly the same arithmetic as a wrong rate.
+    - average_hours_per_week
+    - guaranteed_hours_per_week
+    - hours
+    - base_pay_increase_percent
+    - bonus_target_percent
+    - borrower_paid_compensation
+    - lender_paid_compensation
+    - guaranteed_payments_or_compensation
+    - gross_entitlements
+    - gross_monthly_benefit
+    - gross_periodic_benefit
+    - net_periodic_benefit
+    # Self-employed income is computed from these; they ARE the income.
+    - current_year_net_income_or_loss
+    - gross_profit
+    - gross_receipts_or_sales
+    - net_income_or_loss
+    - net_worth
+    - retained_earnings_or_capital
+
+  # --- Loan and payment figures. The denominator, and everything that blocks a submission. ---
+  loan:
+    - balloon_payment
+    - estimated_total_monthly_payment
+    - loan_amount
+    - loan_amount_stated
+    - minimum_or_scheduled_payment
+    - monthly_or_periodic_payment_amount
+    - net_monthly_payment
+    - note_monthly_payment
+    - original_loan_amount
+    - original_principal_amount
+    - outstanding_loan_balance
+    - outstanding_principal_balance
+    - past_due_amount
+    - payment_amount
+    - payoff_or_settlement_amount
+    - plan_loan_balance
+    - plan_loan_payment
+    - principal_amount
+    - principal_and_interest_payment
+    - related_note_payment_amount
+    - scheduled_monthly_payment
+    - total_monthly_debt_payment
+    - total_payoff_amount
+    - unpaid_principal_balance
+
+  # --- Assets and reserves. Reserve months are computed from these; a wrong one buys a false pass. ---
+  assets:
+    - available_balance
+    - average_daily_balance
+    - beginning_balance
+    - cash_amount
+    - current_availability_or_balance
+    - current_balance
+    - current_principal_balance
+    - ending_balance
+    - net_cash_value
+    - net_liquidation_value
+    - previous_balance
+    - prior_balance
+    - remaining_available_balance
+    - securities_market_value
+    - total_account_balance
+    - total_average_balance
+    - total_balance
+    - total_current_balance
+    - vested_balance
+    - vested_or_available_value
+    - withdrawal_amount
+    - cash_surrender_value
+    - ending_account_value
+    - deposit_or_application_fee
+    - deposit_or_earnest_money
+    - deposit_total
+    - security_deposit
+    - total_deposits
+    # Masked account tails. Identity: asset sourcing matches on these, and a wrong
+    # tail sends a processor looking for a statement that does not exist.
+    - deposit_account_last4
+    - direct_deposit_account_last4
+    - margin_or_securities_backed_loan_balance
+
+  # --- Property and transaction. LTV's numerator and denominator both live here. ---
+  property:
+    - appraised_value
+    - assessed_improvement_value
+    - assessed_land_value
+    - aus_property_value
+    - automated_or_reported_value
+    - estimated_value
+    - credited_to_purchase_price
+    - down_payment_amount
+    - earnest_money_amount
+    - gift_amount
+    - other_concessions_amount
+    - personal_property_value
+    - prior_sale_price
+    - property_value_or_purchase_price
+    - sale_price
+    - sales_price
+    - seller_credit_amount
+    - taxable_value
+    - total_assessed_value
+    - total_value
+
+  # --- Ownership shares. They decide how much of a business's income is the
+  # borrower's, and how much of a project's risk the lender is taking. ---
+  ownership:
+    - borrower_ownership_percentage
+    - owner_occupancy_percentage
+    - ownership_percentage
+    - profit_loss_capital_or_ownership_percentages
+    - vested_percentage
+
+  # --- Condo/PUD project eligibility. Each of these is compared to a hard agency
+  # threshold, so a wrong figure is a wrong eligibility answer, not a wrong detail. ---
+  project:
+    - coinsurance_percentage
+    - commercial_space_percentage
+    - delinquency_percentage
+    - delinquent_units_percentage
+    - reserve_contribution_percentage
+    - reserve_percentage
+    - single_entity_max_percentage
+
+  # --- Recurring housing costs. They land in the PITI and therefore in the DTI. ---
+  housing:
+    - annual_budget_amount
+    - annual_tax_amount
+    - arrears_balance
+    - base_tax_amount
+    - escrow_amount
+    - escrow_balance
+    - escrow_payment
+    - hoa_dues_amount
+    - master_insurance_amount
+    - master_policy_coverage_amount
+    - policy_amount
+    - policy_loan_balance
+    - annual_premium
+    - premium_amount
+    - regular_assessment_amount
+    - reserve_fund_balance
+    - special_assessment_amount
+    - total_subsidy_amount
+
+  # --- Everything else that is money on the page. ---
+  other_money:
+    - amount
+    - amount_balance_or_payment
+    - available_entitlement_amount
+    - basic_entitlement_amount
+    - charged_amount
+    - credit_limit_or_original_amount
+    - fidelity_bond_amount
+    - fidelity_crime_coverage_amount
+    - interest_amount
+    - invoice_amount
+    - one_time_payment_amount
+    - ordered_amount
+    - primary_amount
+    - related_purchase_contract_amount
+    - total_amount
+    - written_amount
+
+# Ruled out, each with the reason. An entry here says "looked critical, is not" — which is
+# information, and is why this half exists rather than an unexplained absence.
+reviewed_not_critical:
+  account_status_after_payment: a status word, not the payment figure itself
+  aus_loan_amount: >-
+    the AUS findings' echo of a figure that is critical at its own source; flagging the copy as well
+    doubles the work without doubling what a processor learns
+  balance_after_payment: a derived arithmetic result shown for legibility, not a read figure
+  balance_before_payment: as above — the read figures are the balances themselves
+  declaration_borrowed_down_payment: a yes/no declaration; the amount it refers to is listed
+  income_continuance_expectation: a likelihood in words (e.g. "3+ years"), not a figure
+  income_documentation_level: a documentation category, not an income figure
+  income_issue_type: a classification of a problem, not a number
+  income_or_compensation_facts: free prose captured from the document
+  leave_balance: accrued PTO in hours; it never reaches a calculation
+  score_date: the date a score was pulled — the score is listed, the date is ordinary
+  score_model: the scoring model's name (e.g. FICO 5), not a score
+  ssn_alert_status: a fraud-alert flag about an SSN, not the SSN
+  ssn_first_reported_date: a date about an SSN, not the SSN
+  waiting_period_or_effective_condition: a policy condition in words
+  broker_compensation_method: which party pays, not how much
+  deposit_channel: how a deposit arrived (wire, ATM), not the amount
+  deposit_date: a date; the deposit's amount is listed
+  deposit_or_posting_date: as above — a date, not a figure
+  deposit_time: a clock time on a deposit slip
+  depository_institution_address: a postal address, not a figure
+  depository_institution_name: a bank's name; wrong is untidy, and visible
+  disability_compensation_status: a status word, not the benefit amount
+  gross_living_area: >-
+    square footage. Material to an appraisal review and not money, a rate or an
+    identity — it belongs to whoever reviews comparables, not to this tier

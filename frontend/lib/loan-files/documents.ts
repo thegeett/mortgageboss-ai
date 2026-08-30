@@ -17,6 +17,15 @@ import type {
 } from "@/lib/types/document";
 
 /**
+ * What a field with no value renders as.
+ *
+ * Named because it is COMPARED as well as produced: the reviewer asks "is there
+ * anything here to check?" and a comparison against a repeated em-dash literal
+ * would silently stop matching the day one of them changed.
+ */
+export const EMPTY_VALUE = "—";
+
+/**
  * Whether the pipeline can still move a document out of this status on its own.
  *
  * Declared here rather than read off `StatusMeta.spin`: polling is BEHAVIOUR and
@@ -287,6 +296,8 @@ export interface ExtractionField {
   label: string;
   value: string;
   source: SourceLocation | null;
+  /** The model's self-rating, or null when it gave none — which is the common case. */
+  confidence: number | null;
 }
 
 /** Money-ish keys we render as currency (pay stub + W-2 boxes + bank balances). */
@@ -318,7 +329,7 @@ function labelFor(key: string): string {
 }
 
 function displayValue(key: string, raw: unknown): string {
-  if (raw === null || raw === undefined || raw === "") return "—";
+  if (raw === null || raw === undefined || raw === "") return EMPTY_VALUE;
   if (MONEY_KEYS.has(key)) {
     const amount = Number(raw);
     if (!Number.isNaN(amount)) {
@@ -328,39 +339,60 @@ function displayValue(key: string, raw: unknown): string {
   return String(raw);
 }
 
-/** Pull `{value, source}` out of a typed-core entry, tolerating odd shapes. */
-function readTypedField(entry: unknown): { value: unknown; source: SourceLocation | null } {
+/**
+ * Pull `{value, source, confidence}` out of a typed-core entry, tolerating odd shapes.
+ *
+ * `confidence` (LP-201) is nullable and OFTEN ABSENT — three-quarters of stored
+ * fields carry no key at all. A missing one stays `null` rather than defaulting to
+ * anything: a fabricated 1.0 would read as the model being certain about a value it
+ * never rated.
+ */
+function readTypedField(entry: unknown): {
+  value: unknown;
+  source: SourceLocation | null;
+  confidence: number | null;
+} {
   if (entry && typeof entry === "object" && "value" in entry) {
-    const obj = entry as { value?: unknown; source?: unknown };
+    const obj = entry as { value?: unknown; source?: unknown; confidence?: unknown };
     const source =
       obj.source && typeof obj.source === "object" ? (obj.source as SourceLocation) : null;
-    return { value: obj.value ?? null, source };
+    const confidence = typeof obj.confidence === "number" ? obj.confidence : null;
+    return { value: obj.value ?? null, source, confidence };
   }
-  return { value: entry ?? null, source: null }; // tolerant: a bare value
+  return { value: entry ?? null, source: null, confidence: null }; // tolerant: a bare value
 }
 
 /**
  * The typed core as ordered, labelled rows (value + source). Works for any
  * document type — known fields (pay stub / W-2) appear first in a sensible order,
  * then any others. Sensitive fields (e.g. the W-2 SSN) are **masked** in display;
- * absent/null values render as "—".
+ * absent/null values render as `EMPTY_VALUE`.
  */
 function maskedDisplay(key: string, value: unknown): string {
   const raw = value == null ? null : String(value);
-  // The SSN gets the ***-**-#### format; other ids (account number) get last-4.
-  return key === "employee_ssn" ? maskSsn(raw) : maskLast4(raw);
+  // An SSN or ITIN gets the ***-**-#### format; other ids (account number) get last-4.
+  return /ssn|itin/.test(key) ? maskSsn(raw) : maskLast4(raw);
 }
 
-export function extractionFields(data: Record<string, unknown>): ExtractionField[] {
+export function extractionFields(
+  data: Record<string, unknown>,
+  /**
+   * Field keys the backend says are identifiers (LP-UI-032). Masked ON TOP of
+   * `MASKED_FIELD_KEYS`, never instead of it: a backend that stops answering must
+   * not be able to un-mask something that is masked today.
+   */
+  sensitiveKeys?: ReadonlySet<string>,
+): ExtractionField[] {
   const fields: ExtractionField[] = [];
   for (const key of Object.keys(data)) {
     // The catch-all and the transactions list are rendered separately.
     if (key === "additional_sections" || key === "transactions") continue;
-    const { value, source } = readTypedField(data[key]);
-    const display = MASKED_FIELD_KEYS.has(key)
-      ? maskedDisplay(key, value)
-      : displayValue(key, value);
-    fields.push({ key, label: labelFor(key), value: display, source });
+    const { value, source, confidence } = readTypedField(data[key]);
+    const display =
+      MASKED_FIELD_KEYS.has(key) || sensitiveKeys?.has(key)
+        ? maskedDisplay(key, value)
+        : displayValue(key, value);
+    fields.push({ key, label: labelFor(key), value: display, source, confidence });
   }
   // Known typed-core fields first (in order), then any others.
   const orderIndex = (k: string) => {
@@ -426,7 +458,7 @@ export function typeReExtracts(documentType: string | null | undefined): boolean
  * `masked_ssn` discipline. The raw value is never shown in full and never logged.
  */
 export function maskSsn(ssn: string | null | undefined): string {
-  if (!ssn) return "—";
+  if (!ssn) return EMPTY_VALUE;
   const digits = ssn.replace(/\D/g, "");
   if (digits.length < 4) return "•••";
   return `•••-••-${digits.slice(-4)}`;
@@ -438,7 +470,7 @@ export function maskSsn(ssn: string | null | undefined): string {
  * its last 4. Never shown in full.
  */
 export function maskLast4(value: string | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return EMPTY_VALUE;
   const trimmed = value.trim();
   const tail = trimmed.replace(/[^A-Za-z0-9]/g, "").slice(-4);
   return tail ? `••••${tail}` : "••••";

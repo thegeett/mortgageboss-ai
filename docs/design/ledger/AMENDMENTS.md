@@ -600,6 +600,44 @@ rediscover it as a defect.
 on `dti.py` and has no counterpart in `ltv.py`, so there is no gated LTV to
 mirror.
 
+## 2026-08-30 · A18 — from the LP-UI-012 review
+
+### A18 — the serif carries two registers, and only the italic one is reserved
+
+LP-UI-012 renders the login page's thesis line in **upright** Plex Serif, and
+LP-UI-003's brief says *"Plex Serif italic appears in exactly one place, text
+quoted verbatim from a document"*. Raised as a contradiction that would force
+either a reworded rule or a drop to sans.
+
+Neither, because the rule is about a face the login page does not use. Checked
+in the tree: the only `font-serif` today is `app/(auth)/login/page.tsx:44`, with
+no `italic`, and LP-UI-029's verbatim snippet — the reserved use — is specified
+as serif *italic* and has not shipped. Two faces, and the sentence governs one of
+them. It is not false; it is silent about the other.
+
+So the rule stands and gains a second clause:
+
+- **Plex Serif italic** — text quoted verbatim from a document. Reserved,
+  exceptionless, and the reason it reads as "the document speaking" without a
+  label. Nothing decorative may borrow it.
+- **Plex Serif upright** — the product speaking about itself, in the pre-
+  authentication chrome. One line on the login page, and no use inside the
+  working surfaces, where a serif that is not a quotation would teach against
+  the rule above.
+
+Recorded rather than resolved by deleting the line because the distinction is
+load-bearing: the value of "serif means the document" comes from being
+exceptionless, and an upright face used somewhere a processor never meets a
+document costs that nothing. What would cost it is upright serif appearing on a
+file screen, which this clause forbids.
+
+Worth noting the dependency: upright serif only renders at all because the
+LP-UI-003 review corrected `plexSerif` from `style: ["italic"]` to
+`["normal", "italic"]`. Before that this line would have silently fallen back to
+Georgia.
+
+---
+
 ## 2026-08-30 · A19 — from LP-UI-015, and this one is the ticket's fault too
 
 ### A19 — "current user" is not a filter this product can express
@@ -950,6 +988,60 @@ recorded here as an open item rather than folded into LP-UI-031.
 **Until it is closed, the honest reading is:** the document reviewer tells the
 truth about page attribution and the ledger does not.
 
+## 2026-08-30 · A26 — from LP-UI-032: a tier with no producer, and an SSN on the screen
+
+### A26a — "Verified (human-confirmed)" cannot occur, and needs a product decision
+
+LP-UI-032's first tier is human confirmation. Searched exhaustively:
+`create_extraction_version` is written by the extraction task and the seed script
+and by nothing else — no endpoint, service or model lets a processor confirm or
+correct an extracted field value. The LP-44 document-type override is the only
+human correction nearby and it corrects the TYPE, then re-extracts.
+
+So the tier is implemented, tested, and **unreachable**. `humanConfirmed` is
+always false because nothing can set it.
+
+**This is not a UI gap.** "A processor marks a field as checked" is a workflow with
+real questions behind it: does confirming a field survive re-extraction, does it
+travel to the underwriter, is it auditable, does it block or unblock anything. The
+screen can render the answer; it cannot invent the question. Until that exists,
+the reviewer has three live tiers, not four.
+
+### A26b — the fields pane was printing unmasked Social Security numbers
+
+Found by looking at a real credit report while checking tier rendering.
+`MASKED_FIELD_KEYS` held exactly two keys, `employee_ssn` and
+`account_number_masked`, while the corpus carries `borrower_ssn`,
+`co_borrower_ssn`, `spouse_ssn_masked`, `taxpayer_ssn_masked`,
+`borrower_ssn_or_itin` and others. Every one of those rendered **in the clear**.
+
+Fixed in LP-UI-032: the backend answers `sensitive` from the same `identity`
+category of `critical_fields.yaml` that makes those fields critical — one list, so
+an SSN field added to it is masked by construction — and the frontend keeps its own
+set as a floor so a backend that stops answering cannot un-mask anything.
+
+**The general shape, which is worth more than the fix:** a deny-list of things to
+hide is wrong by default for PII. It protects exactly what someone remembered, and
+it fails silently and invisibly — nothing errors when an SSN is printed. The
+identity list is now derived from a list that has a drift guard over the schema
+specs, so a new identifier field fails a test rather than reaching a screen. Any
+other place that masks by enumerating keys has the same defect and has not been
+audited.
+
+### A26c — the ticket's own two thresholds contradict its override rule
+
+0.97 for critical fields AND criticality overriding confidence cannot both bind:
+if a critical field is checked whatever its number, no number decides anything.
+Resolved toward the AC's explicit sentence (a 0.97 loan amount still gets flagged);
+`CONFIDENCE_CRITICAL` is kept and parity-tested against the stylesheet with the
+tension recorded at its definition. Worth a decision if the intent was the other
+reading — that critical fields use the HIGHER bar rather than always flagging.
+
+### A26d — the ticket's three tiers do not cover the data
+
+74% of stored fields carry no confidence at all. A fourth tier, "Not rated", in
+neutral. The measurement is in `docs/tickets/LP-UI-032.md`.
+
 
 ---
 
@@ -959,37 +1051,3 @@ The design assets are **not** infallible. LP-UI-001 found two real defects in th
 by verifying rather than trusting, which is exactly right. Keep doing that: if a
 ticket's premise does not survive contact with the code, say so on the ticket
 rather than working around it, and the asset gets corrected here.
-
-### A18 — the serif carries two registers, and only the italic one is reserved
-
-LP-UI-012 renders the login page's thesis line in **upright** Plex Serif, and
-LP-UI-003's brief says *"Plex Serif italic appears in exactly one place, text
-quoted verbatim from a document"*. Raised as a contradiction that would force
-either a reworded rule or a drop to sans.
-
-Neither, because the rule is about a face the login page does not use. Checked
-in the tree: the only `font-serif` today is `app/(auth)/login/page.tsx:44`, with
-no `italic`, and LP-UI-029's verbatim snippet — the reserved use — is specified
-as serif *italic* and has not shipped. Two faces, and the sentence governs one of
-them. It is not false; it is silent about the other.
-
-So the rule stands and gains a second clause:
-
-- **Plex Serif italic** — text quoted verbatim from a document. Reserved,
-  exceptionless, and the reason it reads as "the document speaking" without a
-  label. Nothing decorative may borrow it.
-- **Plex Serif upright** — the product speaking about itself, in the pre-
-  authentication chrome. One line on the login page, and no use inside the
-  working surfaces, where a serif that is not a quotation would teach against
-  the rule above.
-
-Recorded rather than resolved by deleting the line because the distinction is
-load-bearing: the value of "serif means the document" comes from being
-exceptionless, and an upright face used somewhere a processor never meets a
-document costs that nothing. What would cost it is upright serif appearing on a
-file screen, which this clause forbids.
-
-Worth noting the dependency: upright serif only renders at all because the
-LP-UI-003 review corrected `plexSerif` from `style: ["italic"]` to
-`["normal", "italic"]`. Before that this line would have silently fallen back to
-Georgia.

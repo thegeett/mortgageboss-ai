@@ -129,9 +129,34 @@ class ExtractionPublic(BaseModel):
     created_at: datetime
 
 
+class FieldScrutiny(BaseModel):
+    """How much scrutiny one extracted field deserves, independent of the model's confidence (LP-UI-032).
+
+    Both signals are BACKEND knowledge — the critical list lives beside the schema
+    specs and the distrust list beside the rule engine — so they are resolved here
+    rather than reimplemented on a screen where they would drift from the specs.
+    """
+
+    #: Checked whatever the confidence says: money, a rate, or an identity.
+    critical: bool = False
+    #: Why this (document type, field) has a confirmed wrong value in the corpus, or
+    #: ``None``. A REASON rather than a flag, because a screen that says "distrusted"
+    #: without saying why is asking the processor to distrust it on faith.
+    distrusted_reason: str | None = None
+    #: An identifier — an SSN or ITIN. A screen must not render it in the clear.
+    #: Answered here because the identity list already lives beside the schema specs;
+    #: the frontend keeps its own masking set as a floor rather than relying on this.
+    sensitive: bool = False
+
+
 class DocumentDetailResponse(DocumentResponse):
     """A document plus its current extraction (``None`` until extraction runs)."""
 
     current_extraction: ExtractionPublic | None
+    #: ``{field: scrutiny}``, for the fields this document's extraction actually
+    #: carries. Only fields with something to say appear — an ordinary field is
+    #: absent rather than present-and-false, so the payload does not grow with the
+    #: 1,603-key spec vocabulary.
+    field_scrutiny: dict[str, FieldScrutiny] = {}
     # The Tier 3 generic-analyzer output (LP-66), if any — for the LP-72 detail view.
     generic_analysis: dict[str, Any] | None = None

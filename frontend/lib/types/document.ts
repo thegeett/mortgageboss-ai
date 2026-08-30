@@ -146,6 +146,20 @@ export interface Transaction {
   source: SourceLocation | null;
 }
 
+/**
+ * How much scrutiny one extracted field asks for (LP-UI-032), resolved by the
+ * backend against the schema specs and the LP-508 distrust list. Only fields with
+ * something to say appear in the map — an ordinary field is absent.
+ */
+export interface FieldScrutiny {
+  /** Money, a rate, or an identity: checked whatever the confidence says. */
+  critical: boolean;
+  /** Why this field has a confirmed wrong value in the corpus, or null. */
+  distrusted_reason: string | null;
+  /** An identifier (SSN/ITIN) — must never be rendered in the clear. */
+  sensitive: boolean;
+}
+
 /** The current extraction (pay stubs in V1); `extracted_data` is a flexible record. */
 export interface ExtractionPublic {
   id: string;
@@ -189,6 +203,8 @@ export interface DocumentDetailResponse extends DocumentResponse {
   current_extraction: ExtractionPublic | null;
   /** Tier 3 only — the generic analyzer's parties/dates/amounts/findings (LP-66). */
   generic_analysis: GenericAnalysis | null;
+  /** `{field: scrutiny}` for the fields this extraction carries (LP-UI-032). */
+  field_scrutiny: Record<string, FieldScrutiny>;
 }
 
 /** The dev-only text-layer extraction (LP-40; non-production endpoint). */

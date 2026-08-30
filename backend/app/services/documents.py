@@ -34,9 +34,16 @@ from app.models.document import Document, DocumentStatus, StalenessResolution, U
 from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
-from app.schemas.document import DocumentDetailResponse, DocumentResponse, ExtractionPublic
+from app.schemas.document import (
+    DocumentDetailResponse,
+    DocumentResponse,
+    ExtractionPublic,
+    FieldScrutiny,
+)
 from app.services.document_versioning import version_count, version_counts_for_group_ids
 from app.services.verifications import mark_verification_stale
+from app.verification.field_criticality import is_critical, is_sensitive
+from app.verification.rules.distrust import load_distrusted_fields
 
 # --------------------------------------------------------------------------- #
 # Upload validation
@@ -286,7 +293,37 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
             ExtractionPublic.model_validate(extraction) if extraction is not None else None
         ),
         generic_analysis=document.generic_analysis,
+        field_scrutiny=_field_scrutiny(document, extraction),
     )
+
+
+def _field_scrutiny(document: Document, extraction: Extraction | None) -> dict[str, FieldScrutiny]:
+    """Per-field criticality + distrust for the fields this extraction carries (LP-UI-032).
+
+    Scoped to the extraction's own keys rather than the whole vocabulary: the answer
+    is about this document, and returning 156 critical field names to a screen
+    showing thirteen of them is noise the client would have to filter anyway.
+
+    A field with nothing to say is ABSENT. Present-and-false and absent would render
+    identically, and only one of them costs bytes on every document fetch.
+    """
+    data = extraction.extracted_data if extraction is not None else None
+    if not isinstance(data, dict):
+        return {}
+    distrusted = load_distrusted_fields()
+    doc_type = document.document_type or ""
+    out: dict[str, FieldScrutiny] = {}
+    for field in data:
+        if field in ("additional_sections", "transactions"):
+            continue
+        critical = is_critical(field)
+        reason = distrusted.get((doc_type, field))
+        sensitive = is_sensitive(field)
+        if critical or reason or sensitive:
+            out[field] = FieldScrutiny(
+                critical=critical, distrusted_reason=reason, sensitive=sensitive
+            )
+    return out
 
 
 async def build_document_responses(
