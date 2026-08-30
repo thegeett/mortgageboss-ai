@@ -40,6 +40,7 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
+from app.services.reconciliation import ReconciliationRow, reconcile_loan_file
 from app.services.stated_financials import get_stated_financials
 from app.tasks.needs import propose_ai_needs
 
@@ -304,3 +305,18 @@ async def delete(identifier: str, db: DbSession, current_user: CurrentUser) -> N
         db, loan_file=loan_file, actor_user_id=current_user.id
     )
     await db.commit()
+
+
+@router.get("/{identifier}/reconciliation", response_model=list[ReconciliationRow])
+async def get_reconciliation(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> list[ReconciliationRow]:
+    """The file's reconciliation ledger — stated against found, with provenance.
+
+    Tenant-scoped through the same `get_loan_file` gate every other file route
+    uses, so an id from another company is a 404 before any row is built.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    return await reconcile_loan_file(db, loan_file)

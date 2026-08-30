@@ -15660,3 +15660,73 @@ work ships.
 **Related:** LP-UI-011, LP-UI-008 (the rail and context column these feed), LP-UI-012 (the saved
 views that give the dashboard its column back), LP-27 (which added both placeholders, correctly at
 the time), `docs/design/ledger/AMENDMENTS.md`.
+
+## ADR-391
+
+**What counts as agreement in the reconciliation ledger — and where each rule came from.**
+
+*Context.* LP-UI-017 adds the read model the redesign is built around: for one loan file, the fields
+that have both a *stated* value (the 1003 / MISMO application) and a *found* value (what an
+extraction read out of a document), with per-row agreement and provenance. The data all existed;
+the join did not. The risk in building it is not the join — it is that "these two numbers disagree"
+is a judgement the rule engine **already makes**, and a ledger answering that question differently
+from the finding shown beside it would be worse than no ledger. LP-UI-013 made exactly that mistake
+one ticket earlier: a dashboard count derived from the enums rather than from `finding_blocking.py`,
+which disagreed with the file screen in both directions.
+
+*Decision.* Every comparison rule is either imported from where the concept already lives, or —
+where it does not exist — is recorded here as new.
+
+**Income: the engine's 10% variance, reused.** `abs(stated − documented) / documented × 100 ≤ 10`,
+the threshold `_VARIANCE_10` in `app/verification/cross_source/rules.py`. The boundary is `≤`,
+matching the rule's `Operator.LE`; a ledger that called 10.0% a disagreement while the finding
+called it a pass would be the same defect in miniature.
+
+**Income units: a documented monthly figure, or none.** The found side prefers a W-2's annual wages
+divided by twelve, because annual is annual and that conversion assumes nothing. A pay stub's
+`gross_pay` is **one pay period**, and ADR-328 already forbids converting it without a known
+frequency — "an assumed [frequency] is a silent 12x miscalculation". Where only a pay-period figure
+exists, the row shows it, keeps its provenance, and reports `missing` with the reason, rather than
+claiming a disagreement that is really a unit error. The first implementation of this row did claim
+one: stated $28,168.80/month against a $8,076.93 pay stub, marked `differs`.
+
+**Money elsewhere: exact to the cent, no tolerance.** A valuation or a balance is a number both
+sides copied from the same source; if they differ at all, someone transcribed one of them. A
+tolerance here would hide the only kind of error the row can find.
+
+**Employer names: new, and recorded as new.** The engine has no employer matcher.
+`normalize_name` (`app/services/borrower_name_matching.py`) is reused for tokenising, casing and
+accents, but it is a PERSON-name normaliser and stops there — measured,
+`normalize_name("Cascade Robotics Inc.") != normalize_name("Cascade Robotics")`, and using it alone
+reported the same employer as a disagreement on real seed data. So legal-form and trading tokens
+(`inc`, `llc`, `dba`, `co`, `na`, …) are dropped and the smaller token set must be **contained in**
+the larger. Subset rather than equality because the two sources genuinely carry different amounts of
+the name, and requiring equality would make the fuller spelling a defect. Two names that reduce to
+nothing identifying are `differs`, never `match` — agreeing from emptiness is agreeing that two
+unknowns are the same company.
+
+**Four agreement states, not three.** `match | differs | missing | not_stated`. The last two are
+kept apart deliberately: a value the application claimed with no document behind it is a *gap to
+chase*, while a value a document shows that the application never mentioned is a *disclosure
+problem*. They are different work for different people, and collapsing them into "mismatch" loses
+which one a processor is looking at.
+
+**Every row carries provenance or an explicit reason it has none.** `source` (document id, filename,
+page, snippet) or `source_note`, never both null. A blank cell in an audit surface is
+indistinguishable from an unanswered question.
+
+*Consequences.* The ledger cannot drift from the findings on income, because both read one
+threshold; it can drift on employer names, because only the ledger has that rule — the day the
+engine grows an employer check, it must import this one rather than write a second. The exact-cents
+rule will produce `differs` on rounding differences between systems, which is intended and will look
+noisy the first time a lender's export rounds to the dollar; that is a real disagreement to see, not
+one to hide. And the income row will read `missing` for a file whose only income document is a pay
+stub, which understates what is known — the honest cost of refusing to guess a pay frequency, and
+the reason a W-2 is worth chasing.
+
+*Applies to.* Any comparison added to the reconciliation ledger. Before adding one, look for the
+concept in `app/verification/` first; if it exists, import it, and if it does not, add a clause here.
+
+**Related:** LP-UI-017, LP-UI-018 (the ledger UI), ADR-328 (an assumed pay frequency is a silent
+12x miscalculation), `_VARIANCE_10` in the cross-source rules, `borrower_name_matching.py`,
+LP-UI-013 (the dashboard that disagreed with the screen it links to).
