@@ -234,7 +234,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
         }
     ),
     "properties": frozenset({"address_line", "address_line_2", "postal_code"}),
-    "documents": frozenset({"full_text", "generic_analysis", "summary", "storage_path"}),
+    # document_name (LP-636) joins summary/generic_analysis for the same reason: model
+    # prose over the document, and the scrub matches identifier shapes, not names.
+    "documents": frozenset(
+        {"full_text", "generic_analysis", "summary", "storage_path", "document_name"}
+    ),
     "mismo_imports": frozenset({"catch_all", "raw_file_path"}),
     "findings": frozenset({"source_snippet"}),
     "companies": frozenset({"settings"}),

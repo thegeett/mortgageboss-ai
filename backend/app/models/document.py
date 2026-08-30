@@ -167,6 +167,18 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     tier: Mapped[Tier | None] = mapped_column(str_enum(Tier), nullable=True)
     # Classifier confidence in [0.0, 1.0]; bounds are an app-layer concern.
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # The model's own free-text name for what the document IS ("a driver's license",
+    # "wiring instructions from a law firm"), emitted BEFORE it picks a document_type
+    # (LP-463). Persisted by LP-636: it was computed, used for the
+    # ``type_matches_document`` self-check, and then discarded — so a confident
+    # ``unknown`` that the model had already named correctly left no trace anywhere,
+    # and the frequency of that could not be measured at all.
+    #
+    # MODEL PROSE OVER THE DOCUMENT, so it is EXCLUDED from the readonly.* views for
+    # the same reason as ``summary`` and ``generic_analysis``: the C7 scrub matches
+    # identifier SHAPES, and a name is not digit-shaped, so "John Smith's 2024 W-2"
+    # would pass through a view intact. Excluded in tests/test_readonly_query.py.
+    document_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     # A short 1-2 sentence human-readable gist (LP-65), set by the Tier 2 shared
     # summary path for *recognized* documents — what the document is, for quick
     # processor reference. NOT structured data (that is the Tier 1 extraction). Null

@@ -24,6 +24,7 @@ from app.ai.extraction.shape import TypedField
 from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
+from app.models.activity_log import ActivityLog
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
 from app.models.extraction import Extraction, ExtractionStatus
@@ -367,6 +368,135 @@ async def test_tier3_analyzed_findings_recorded_and_text_indexed(
 # --------------------------------------------------------------------------- #
 # LP-463 — decline / guard / free-extraction routing
 # --------------------------------------------------------------------------- #
+
+
+async def test_document_name_is_persisted_on_a_normal_classification(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636: the model's own name for the document is STORED, not just used and dropped.
+
+    LP-463 emits ``document_name`` before the constrained pick and calls it the more reliable
+    signal; it was consumed by the ``type_matches_document`` self-check and then lost. Persisting
+    it changes no routing — asserted here so the fix cannot be mistaken for a behaviour change."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="pay_stub",
+            confidence=0.95,
+            reasoning="x",
+            document_name="a bi-weekly pay stub",
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_name == "a bi-weekly pay stub"
+    # Unchanged by the new line: same type, same terminal status.
+    assert doc.document_type == "pay_stub"
+    assert doc.status == DocumentStatus.COMPLETED
+
+
+async def test_document_name_is_persisted_for_a_confident_unknown(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 5, the case this exists for.
+
+    A confident ``unknown`` completes and routes to Tier 3, so it raises no flag at all — and the
+    model's own name for it was the only evidence that a catalog type had been missed. That name
+    now survives, which is what makes the miss measurable. Routing is deliberately NOT changed
+    here: the document still completes via Tier 3, exactly as before."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.90,
+            reasoning="none of the listed types fit",
+            document_name="a driver's license",
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_name == "a driver's license"
+    assert doc.document_type == "unknown"
+    assert analyze.call_count == 1  # still Tier 3 — this change routes nothing
+    assert doc.status == DocumentStatus.COMPLETED  # and still raises no flag
+
+
+async def test_document_name_survives_a_rejected_type_mismatch(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The name is stored even when the model's TYPE is thrown away.
+
+    ``type_matches_document=False`` discards the pick and stores ``unknown``. The name is the
+    part worth keeping in exactly that case — it is the only record of what the document was."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="w2",
+            confidence=0.85,
+            reasoning="a Canadian T4",
+            document_name="a Canadian T4 slip",
+            type_matches_document=False,
+        ),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_type == "unknown"  # the pick is still rejected
+    assert doc.document_name == "a Canadian T4 slip"  # the name is not
+
+
+async def test_document_name_is_never_logged_or_put_in_the_activity_detail(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """It is model prose and can carry a borrower name, which the C7 scrub cannot catch.
+
+    The scrub matches identifier SHAPES, and a person's name is not digit-shaped, so a name in an
+    activity detail would reach a terminal and a transcript through the readonly query path. The
+    column is excluded from the readonly views for the same reason (tests/test_readonly_query.py).
+    Pinned here so a later "make it easier to debug" cannot quietly undo it."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    secret = "Jane Q Borrower's 2025 W-2"
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="w2",
+            confidence=0.95,
+            reasoning="x",
+            document_name=secret,
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_name == secret  # stored …
+    assert not any(secret in str(entry) for entry in logs), "document_name reached a log"
+
+    rows = (
+        await db_session.execute(
+            select(ActivityLog).where(ActivityLog.loan_file_id == doc.loan_file_id)
+        )
+    ).scalars()
+    assert not any(secret in str(row.detail) for row in rows), (
+        "document_name reached an activity detail, which is readable through readonly.activity_logs"
+    )
 
 
 async def test_type_mismatch_not_applied_and_free_extracted_for_review(

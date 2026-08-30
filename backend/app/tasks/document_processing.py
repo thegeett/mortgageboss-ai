@@ -176,6 +176,17 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         document.tier = get_tier(effective_type)
         document.category = get_category(effective_type)
         document.classification_confidence = classification.confidence
+        # LP-636: keep the model's OWN name for the document. LP-463 emits it before the
+        # constrained pick and calls it "a more reliable signal than the constrained pick";
+        # until now it was used for the type_matches_document self-check and discarded, so a
+        # confident `unknown` the model had already named correctly left no trace. Stored, not
+        # acted on: routing is unchanged by this line.
+        #
+        # NOT logged and NOT put in the activity detail. It is model prose over the document and
+        # can carry a borrower name, which the C7 scrub cannot catch (it matches identifier
+        # shapes, and a name is not digit-shaped) — activity detail is readable through the
+        # readonly query path, so a name there would reach a terminal and a transcript.
+        document.document_name = classification.document_name
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
         await log_activity(
