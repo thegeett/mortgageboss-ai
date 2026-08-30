@@ -198,11 +198,14 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   }, [data, activeLevel, setAggression]);
 
   const setAsDefault = useCallback(() => {
-    updatePreferences.mutate(activeLevel, {
-      // The verification status carries the (server-derived) default — refetch it.
-      onSuccess: () =>
-        void queryClient.invalidateQueries({ queryKey: verificationQueryKey(fileId) }),
-    });
+    updatePreferences.mutate(
+      { default_aggression_level: activeLevel },
+      {
+        // The verification status carries the (server-derived) default — refetch it.
+        onSuccess: () =>
+          void queryClient.invalidateQueries({ queryKey: verificationQueryKey(fileId) }),
+      },
+    );
   }, [activeLevel, updatePreferences, queryClient, fileId]);
 
   return (

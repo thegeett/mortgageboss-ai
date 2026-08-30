@@ -19,13 +19,19 @@ export default async function RootLayout({
 }>) {
   // Read on the SERVER so the collapsed state is right in the first byte. Doing
   // this in a client effect would flash the column open on every refresh.
-  const navCollapsed = (await cookies()).get("ledger-nav")?.value === "collapsed";
+  const jar = await cookies();
+  const navCollapsed = jar.get("ledger-nav")?.value === "collapsed";
+  // Compact is the default, so only the other two are ever stamped. Anything
+  // unexpected in the cookie falls through to compact rather than to nothing.
+  const density = jar.get("ledger-density")?.value;
+  const densityAttr = density === "comfortable" || density === "relaxed" ? density : undefined;
 
   return (
     <html
       lang="en"
       className={`${plexSans.variable} ${plexMono.variable} ${plexSerif.variable}`}
       data-nav={navCollapsed ? "collapsed" : undefined}
+      data-density={densityAttr}
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background font-sans antialiased">

@@ -9,9 +9,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
+import { useDensity } from "@/hooks/use-density";
 import { logout } from "@/lib/api/auth";
+import { DENSITY_LABEL, ROW_DENSITIES } from "@/lib/api/preferences";
 import type { User } from "@/lib/auth/types";
-import { ChevronDown, LogOut, Settings, UserRound } from "lucide-react";
+import { Check, ChevronDown, LogOut, Rows3, Settings, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -31,6 +33,7 @@ function initialsOf(user: User): string {
 export function UserMenu({ user }: { user: User }) {
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const { density, choose } = useDensity();
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -71,6 +74,26 @@ export function UserMenu({ user }: { user: User }) {
           Settings
           <span className="ml-auto text-xs text-muted-foreground">Soon</span>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {/* Density is a per-person ergonomic preference, so it belongs with the
+            person — not in a view's toolbar, where it would read as view state
+            and imply it only applies here. */}
+        <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
+          <Rows3 className="h-3.5 w-3.5" />
+          Row density
+        </DropdownMenuLabel>
+        {ROW_DENSITIES.map((option) => (
+          <DropdownMenuItem
+            key={option}
+            onSelect={() => choose(option)}
+            aria-current={option === density ? "true" : undefined}
+          >
+            <span className="mr-2 flex h-3.5 w-3.5 items-center justify-center">
+              {option === density ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+            </span>
+            {DENSITY_LABEL[option]}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={(event) => {

@@ -26,13 +26,17 @@ async def get_preferences(current_user: CurrentUser) -> UserPreferences:
 async def update_preferences(
     payload: UserPreferencesUpdate, db: DbSession, current_user: CurrentUser
 ) -> UserPreferences:
-    """Update the caller's default aggression level (their verification thoroughness).
+    """Update the caller's preferences — thoroughness, row density, or both.
 
     The default applies to every file the user opens unless that file has a per-file
     override. Changing it never re-runs any AI — it only changes the cutoff the
     read-time filter applies.
     """
-    current_user.default_aggression_level = payload.default_aggression_level
+    # Only what was sent. A partial update must not reset the field it omits.
+    if payload.default_aggression_level is not None:
+        current_user.default_aggression_level = payload.default_aggression_level
+    if payload.density is not None:
+        current_user.density = payload.density
     await db.commit()
     await db.refresh(current_user)
     return UserPreferences.model_validate(current_user)

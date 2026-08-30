@@ -435,7 +435,9 @@ describe("VerificationPanel", () => {
     render(<VerificationPanel fileId="LF-1" />);
     openLegacy();
     fireEvent.click(screen.getByRole("button", { name: /set thorough as my default/i }));
-    expect(updatePreferencesMutate.mock.calls[0]?.[0]).toBe("thorough");
+    expect(updatePreferencesMutate.mock.calls[0]?.[0]).toEqual({
+      default_aggression_level: "thorough",
+    });
   });
 
   it("shows the blocked submit status with the active thoroughness", () => {

@@ -18,6 +18,23 @@ from app.models.enums import str_enum
 from app.models.types import MediumStr, ShortStr
 from app.verification.confidence import DEFAULT_AGGRESSION, AggressionLevel
 
+
+class RowDensity(StrEnum):
+    """How tall a table row is for this user (LP-UI-010).
+
+    An ergonomic preference, not view state: a processor decides once and every
+    dense surface follows. Compact is the default because the product is a
+    worklist — at 28px rows a processor scanning forty files sees twenty-four of
+    them rather than fifteen.
+    """
+
+    COMPACT = "compact"
+    COMFORTABLE = "comfortable"
+    RELAXED = "relaxed"
+
+
+DEFAULT_DENSITY = RowDensity.COMPACT
+
 if TYPE_CHECKING:
     from app.models.company import Company
 
@@ -60,6 +77,14 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         str_enum(AggressionLevel),
         default=DEFAULT_AGGRESSION,
         server_default=DEFAULT_AGGRESSION.value,
+        nullable=False,
+    )
+    # The user's row density (LP-UI-010). Per USER, deliberately — not per view
+    # and not per screen. See RowDensity.
+    density: Mapped[RowDensity] = mapped_column(
+        str_enum(RowDensity),
+        default=DEFAULT_DENSITY,
+        server_default=DEFAULT_DENSITY.value,
         nullable=False,
     )
 
