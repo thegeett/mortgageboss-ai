@@ -14,6 +14,7 @@ The three things the ticket names, plus the one it implies:
 
 from collections.abc import AsyncIterator
 
+import pytest
 import pytest_asyncio
 from app.core.database import get_db
 from app.core.jwt import create_access_token
@@ -22,6 +23,7 @@ from app.main import app
 from app.models import Company, User, UserRole
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 URL = "/api/v1/saved-views"
@@ -256,3 +258,36 @@ async def test_a_deleted_name_can_be_reused(client: AsyncClient, db: AsyncSessio
     again = await _create(client, token)
     assert again["name"] == "Blocked to submit"
     assert again["id"] != first["id"]
+
+
+async def test_two_live_views_cannot_share_a_name(client: AsyncClient, db: AsyncSession) -> None:
+    """The constraint the model documents, actually enforced.
+
+    It was a UNIQUE over (owner_user_id, name, deleted_at). In Postgres a unique
+    key containing a NULL treats every such row as distinct, so two LIVE views —
+    both with deleted_at NULL — never collided and the constraint enforced
+    nothing it claimed. A partial unique index WHERE deleted_at IS NULL is what
+    was meant, and this is the assertion that says so.
+    """
+    _company, _owner, token = await _user(db, slug="dup", email="dup@acme.com")
+    body = {"name": "My files", "filters": {}, "sort": "attention"}
+
+    first = await client.post(URL, json=body, headers=_auth(token))
+    assert first.status_code == 201, first.text
+
+    with pytest.raises(IntegrityError):
+        await client.post(URL, json=body, headers=_auth(token))
+
+
+async def test_deleting_a_view_frees_its_name(client: AsyncClient, db: AsyncSession) -> None:
+    """The half the partial index preserves — a name is reserved only while live."""
+    _company, _owner, token = await _user(db, slug="reuse", email="reuse@acme.com")
+    body = {"name": "My files", "filters": {}, "sort": "attention"}
+
+    created = await client.post(URL, json=body, headers=_auth(token))
+    assert created.status_code == 201, created.text
+    deleted = await client.delete(f"{URL}/{created.json()['id']}", headers=_auth(token))
+    assert deleted.status_code in (200, 204), deleted.text
+
+    again = await client.post(URL, json=body, headers=_auth(token))
+    assert again.status_code == 201, "the deleted name stayed reserved"

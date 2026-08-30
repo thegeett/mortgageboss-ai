@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -54,9 +54,22 @@ class SavedView(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "saved_views"
     __table_args__ = (
         # A person should not end up with two views of the same name; two people
-        # in the same company may. Scoped to the owner, not the company, and
-        # soft-deleted rows are excluded so a deleted name can be reused.
-        UniqueConstraint("owner_user_id", "name", "deleted_at", name="uq_saved_views_owner_name"),
+        # in the same company may. Scoped to the owner, not the company.
+        #
+        # PARTIAL, not a UniqueConstraint over (owner, name, deleted_at). In
+        # Postgres a unique key containing a NULL treats every such row as
+        # distinct, so two LIVE views — both with deleted_at NULL — did not
+        # collide and the constraint enforced nothing it claimed. Verified by
+        # inserting the duplicate before this changed. `postgresql_where` is the
+        # same idiom `uq_findings_loan_file_rule_subject` uses for the same
+        # reason, and it still frees the name on delete.
+        Index(
+            "uq_saved_views_owner_name",
+            "owner_user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     company_id: Mapped[UUID] = mapped_column(

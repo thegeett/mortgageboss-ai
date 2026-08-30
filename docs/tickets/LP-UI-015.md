@@ -107,3 +107,107 @@ holds neither. `filters` goes through `readonly.scrub_json()`.
   `app/api/saved_views.py`, `app/models/__init__.py`, `app/main.py`,
   two migrations, `tests/api/test_saved_views_endpoints.py`
 - frontend: `lib/api/saved-views.ts`
+
+## Review pass — a constraint that enforced nothing, and the guard that could not see it
+
+Reviewed on request from the session running the epic. The hand-off's own
+suspicion about the unique constraint was right, and the guard gap it noticed in
+passing turned out to be hiding two other tables.
+
+### The name constraint enforced nothing it documented
+
+`UniqueConstraint("owner_user_id", "name", "deleted_at")`. In Postgres a unique
+key containing a NULL treats every such row as distinct, so two LIVE views —
+both with `deleted_at` NULL — never collided. Proven before changing anything by
+inserting the duplicate: two rows, same owner, same name, no error.
+
+Replaced with a partial unique index over `(owner_user_id, name) WHERE
+deleted_at IS NULL`, which is what the comment described and what
+`uq_findings_loan_file_rule_subject` already uses for the same reason. It still
+frees the name on delete — both halves are now asserted, one test per half.
+
+Migration `e2c9f47a80b1` recreates it under the same name, so nothing else has to
+learn a new one.
+
+### The drift guard could not see a missing view for a whole table
+
+Raised in the hand-off as worth knowing independently, and it was.
+`test_no_model_column_drifts` walks VIEWS and asks what columns they are missing,
+which by construction cannot see a table that has no view at all.
+
+Added the other direction. It immediately found **two** tables shipped without a
+readonly view — `needs_prose` and `finding_prose`, both LP-634's caches —
+neither of which is a small omission: both hold model-authored prose about a
+finding or a need, which names creditors and amounts. `saved_views` would have
+been the third. Both now exposed with their prose columns scrubbed, matching
+`needs_items.reasoning`, which goes through `scrub` for exactly that reason
+(migrations `f3a1b62c95d7`, `a8d3f70b41c2`).
+
+### The guard was green alone and red in the full suite
+
+Worth recording, because the first version of the new check had the defect it
+was written to prevent. `Base.metadata` knows only the models something has
+imported, and `app/models/__init__.py` does not export all of them —
+`finding_prose` registers only when a test that uses it runs. So the check
+reported one missing table in isolation and two in the full suite: an answer that
+depended on test ordering.
+
+`_all_tables()` imports every module under `app/models/` first. The
+pre-existing `test_every_view_targets_a_real_table` had the same flaw pointing
+the other way — it would have called a perfectly real table unknown — and now
+uses the same helper.
+
+### Nothing asserted that the readonly view scrubs
+
+Every other assertion about a view checks a column is MENTIONED before the FROM.
+An unscrubbed `SELECT filters` mentions it too, so "exposed" and "safe" are
+different claims and only one was being made. A saved view's filter payload is
+user-authored — a `search` string is whatever someone typed, which is exactly
+where an identifier ends up.
+
+The new test runs the SHIPPED view SQL over a real row rather than a restatement
+of it: create the company, user and view, install the scrub functions, execute
+the migration's own projection, and assert an SSN in the filter payload comes
+back redacted. Mutation-checked by removing `scrub_json` from the migration.
+
+Two things that cost a few minutes and are worth knowing before writing another
+of these: `_view_bodies()` returns the SELECT BODY only, with `{_SCHEMA}` still a
+literal placeholder — both deliberate, because that is what lets the guard read
+migrations as text without importing `alembic.op`.
+
+### Confirmed, not changed
+
+- **`sa.JSON` rather than JSONB is right here.** It is the tree's majority
+  convention (JSONB appears only on `finding_event.payload` and one `finding`
+  column). JSONB earns its cost when the column is queried INTO; `filters` is
+  stored and returned whole. Worth revisiting the day a view is searched by its
+  filter contents, not before.
+- **The PATCH ownership 404 is indistinguishable from the scoping 404** — more
+  strongly than "verified equivalent". Both branches `raise _NOT_FOUND`, the
+  *same module-level exception instance*, so the status and body cannot diverge:
+  there is no second object to drift. The remaining difference is one Python
+  attribute comparison, which is not a timing oracle over a network.
+- **File ownership really does block LP-UI-014's third criterion.** Checked
+  rather than taken on trust: `LoanFile` has no assignment column, the only
+  "assign" mention in the model is about the *lender*, and `loan_officer_name`
+  carries the comment "the LO is not a system user". So "My files" and
+  "Unassigned" have nothing to filter on. `extra="forbid"` is the right call —
+  a 422 says the filter is not supported, where silently dropping `assigned_to`
+  would give a view that looks configured and returns everything. File
+  assignment is a feature, and LP-UI-014 should ship without those two views
+  rather than fake them.
+
+### Verification
+
+`ruff`, `ruff format`, `mypy` clean over 447 files; **5,961 pass** (from 5,956)
+with the two known `.env` failures. Every fix mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| revert to the `UniqueConstraint` | 1 test fails |
+| remove the `needs_prose` view migration | guard fails |
+| drop `scrub_json` from the saved-views view | 1 test fails |
+
+Both new migrations were checked by emitting their SQL offline, and the partial
+index reads `CREATE UNIQUE INDEX uq_saved_views_owner_name ON saved_views
+(owner_user_id, name) WHERE deleted_at IS NULL`.
