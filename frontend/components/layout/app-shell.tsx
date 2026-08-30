@@ -23,12 +23,12 @@ import { useNavCollapse } from "@/hooks/use-nav-collapse";
  * leaves the rail and the column usable, so the user can navigate away.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { toggle } = useNavCollapse();
+  const { collapsed, toggle } = useNavCollapse();
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-screen overflow-hidden bg-background">
-        <IconRail onToggleContext={toggle} />
+        <IconRail collapsed={collapsed} onToggleContext={toggle} />
         <ContextColumn />
         <div className="flex min-w-0 flex-1 flex-col">
           <Header />

@@ -1,9 +1,12 @@
 "use client";
 
-import { contextSection, isActivePath } from "@/lib/navigation";
+import { activeItemHref, contextSection } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+
+/** Referenced by the rail's toggle via `aria-controls`. */
+export const CONTEXT_COLUMN_ID = "context-column";
 
 /**
  * The 216px context column (LP-UI-008). What it holds depends on the route:
@@ -19,20 +22,26 @@ import { usePathname } from "next/navigation";
 export function ContextColumn() {
   const pathname = usePathname();
   const section = contextSection(pathname);
+  // Computed once for the list rather than per item: "current" is a property of
+  // the whole set (the most specific match), not of any item on its own.
+  const currentHref = activeItemHref(
+    pathname,
+    section ? section.items.map((item) => item.href) : [],
+  );
 
   if (!section) return null;
 
   return (
     <div
       // `w-nav` reads --nav-w; at 0 the column must not still claim its border.
+      id={CONTEXT_COLUMN_ID}
       className="hidden w-nav shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-150 md:block"
       data-context-column
     >
       <nav aria-label={section.title} className="w-nav p-2">
         <p className="px-2 pb-1 pt-1 text-label uppercase text-muted-foreground">{section.title}</p>
         {section.items.map((item) => {
-          const active =
-            item.href === pathname || (item.href !== pathname && isActivePath(pathname, item.href));
+          const active = item.href === currentHref;
           return (
             <Link
               key={item.href}

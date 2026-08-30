@@ -1,7 +1,8 @@
 "use client";
 
+import { CONTEXT_COLUMN_ID } from "@/components/layout/context-column";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isActivePath, visibleNavItems } from "@/lib/navigation";
+import { contextSection, isActivePath, visibleNavItems } from "@/lib/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { cn } from "@/lib/utils";
 import { Layers, PanelLeft } from "lucide-react";
@@ -17,10 +18,20 @@ import { usePathname } from "next/navigation";
  * AND a tooltip: the name for assistive tech, the tooltip for the sighted user
  * who has not yet learned the glyphs.
  */
-export function IconRail({ onToggleContext }: { onToggleContext: () => void }) {
+export function IconRail({
+  collapsed,
+  onToggleContext,
+}: {
+  collapsed: boolean;
+  onToggleContext: () => void;
+}) {
   const pathname = usePathname();
   const role = useAuthStore((state) => state.user?.role);
   const items = visibleNavItems(role);
+  // ContextColumn renders nothing on a route with no section (/dev/*), and an
+  // aria-controls pointing at an element that is not in the document is worse
+  // than none at all.
+  const hasColumn = contextSection(pathname) !== null;
 
   return (
     <nav
@@ -67,6 +78,12 @@ export function IconRail({ onToggleContext }: { onToggleContext: () => void }) {
             type="button"
             onClick={onToggleContext}
             aria-label="Toggle the context column"
+            // A disclosure button has to say which way it is pointing; without
+            // this the control is identical in both states to anyone who cannot
+            // see the column. This is what the hook's React value is FOR — it
+            // had no consumer at all, which is why it was free to drift.
+            aria-expanded={!collapsed}
+            aria-controls={hasColumn ? CONTEXT_COLUMN_ID : undefined}
             aria-keyshortcuts="Meta+B Control+B"
             className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >

@@ -7,12 +7,16 @@ export const NAV_COOKIE = "ledger-nav";
 /**
  * ⌘B collapse for the context column (LP-UI-008).
  *
- * The state lives in TWO places on purpose, and neither is React state that the
- * server cannot see:
+ * `data-nav` on `<html>` is the SINGLE source of truth. The server stamps it from
+ * a cookie so the collapsed state is right in the first byte; the cookie is only
+ * that attribute's persistence, and the React value below is only its mirror for
+ * rendering `aria-expanded`. Neither decides anything.
  *
- *  - a cookie, so the SERVER knows the answer while rendering the first byte;
- *  - `data-nav` on `<html>`, which the server stamps from that cookie and this
- *    hook flips thereafter.
+ * That ordering is the point. `toggle` used to compute the next state from the
+ * React value and write the DOM from it, which made three producers of one fact
+ * out of what is really one — and any divergence would have cost a silent no-op
+ * press. Reading the attribute means the thing that drives the pixels is also the
+ * thing that decides.
  *
  * The width itself is CSS (`[data-nav="collapsed"] { --nav-w: 0 }`), so a
  * collapsed sidebar is collapsed in the first paint. Storing it in React state
@@ -29,16 +33,23 @@ export function useNavCollapse() {
   }, []);
 
   const toggle = useCallback(() => {
-    setCollapsed((previous) => {
-      const next = !previous;
-      const root = document.documentElement;
-      if (next) root.dataset.nav = "collapsed";
-      else root.removeAttribute("data-nav");
-      // `max-age` a year, `SameSite=Lax` so it rides a normal navigation. Not
-      // httpOnly by necessity: the client half of the pair has to write it.
-      document.cookie = `${NAV_COOKIE}=${next ? "collapsed" : "expanded"};path=/;max-age=31536000;samesite=lax`;
-      return next;
-    });
+    const root = document.documentElement;
+    const next = root.dataset.nav !== "collapsed";
+    if (next) root.dataset.nav = "collapsed";
+    else root.removeAttribute("data-nav");
+    // Expanded is the DEFAULT, and the server tests for "collapsed" exactly — so
+    // expanding deletes the cookie rather than writing "expanded". A cookie whose
+    // only value means "the default" is a second way to spell no cookie, and the
+    // two would eventually disagree about which is canonical.
+    document.cookie = next
+      ? // `max-age` a year, `SameSite=Lax` so it rides a normal navigation. Not
+        // httpOnly by necessity: the client half of the pair has to write it.
+        `${NAV_COOKIE}=collapsed;path=/;max-age=31536000;samesite=lax`
+      : `${NAV_COOKIE}=;path=/;max-age=0;samesite=lax`;
+    // Mirrors, after the fact. Side effects never belong in a setState updater:
+    // React may invoke it twice, or discard the render it ran in, and the DOM
+    // write and the cookie would already have happened.
+    setCollapsed(next);
   }, []);
 
   useEffect(() => {
@@ -47,6 +58,11 @@ export function useNavCollapse() {
       if (!event.metaKey && !event.ctrlKey) return;
       // Don't fight a browser or OS binding the user meant for something else.
       if (event.altKey || event.shiftKey) return;
+      // In rich text ⌘B means BOLD, and stealing it there would break the one
+      // place the user definitely meant something else. Plain inputs and
+      // textareas are deliberately NOT excluded: ⌘B does nothing native in them,
+      // so a processor who presses it while a field has focus meant this.
+      if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
       event.preventDefault();
       toggle();
     }

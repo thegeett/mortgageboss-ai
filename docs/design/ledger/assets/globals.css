@@ -125,9 +125,17 @@
     --nav-w: 0rem;
   }
   /* At zero width the column would still paint its 1px right border, leaving a
-     stray hairline against the rail. Measured: 1px, not 0. */
+     stray hairline against the rail. Measured: 1px, not 0.
+
+     `visibility: hidden` is the load-bearing half. Width 0 + overflow-hidden
+     clips the links out of SIGHT but leaves them focusable and in the
+     accessibility tree, so ⌘B "hid" a nav a keyboard user still tabbed through
+     — six invisible stops between the rail and the page — and a screen reader
+     still announced. Visibility is what actually removes them, and unlike
+     `display: none` it leaves the width transition intact. */
   [data-nav="collapsed"] [data-context-column] {
     border-right-width: 0;
+    visibility: hidden;
   }
 
   [data-density="comfortable"] {

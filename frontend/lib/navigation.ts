@@ -94,6 +94,26 @@ const PIPELINE_SECTION: ContextSection = {
   ],
 };
 
+/**
+ * Which of `hrefs` is the CURRENT one for `pathname` — the longest match, or null.
+ *
+ * `isActivePath` alone is wrong for a list whose first item is the section index.
+ * "Overview" is `/loan-files/<id>` and "Documents" is `/loan-files/<id>/documents`,
+ * so on the documents page `isActivePath` is true for BOTH and the column marked
+ * two links `aria-current="page"` at once — a screen reader announces two current
+ * pages, and two rows read as selected. Administration has the same shape
+ * (`/admin` beside `/admin/lenders`). The longest match is the specific one.
+ */
+export function activeItemHref(pathname: string, hrefs: string[]): string | null {
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (isActivePath(pathname, href) && (best === null || href.length > best.length)) {
+      best = href;
+    }
+  }
+  return best;
+}
+
 /** Extract a loan-file id from a `/loan-files/<id>` path, or null. */
 export function loanFileIdFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/loan-files\/([^/]+)/);
