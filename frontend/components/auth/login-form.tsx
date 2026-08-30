@@ -16,7 +16,7 @@ import { type LoginFormValues, loginSchema } from "@/lib/auth/schema";
 import { useIsAuthenticated } from "@/lib/stores/auth-store";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { isAxiosError } from "axios";
-import { AlertCircle, Eye, EyeOff, LogIn } from "lucide-react";
+import { CircleX, Eye, EyeOff, LogIn, TriangleAlert } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -78,17 +78,17 @@ export function LoginForm() {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
         {sessionExpired && !formError && (
-          <output className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <output className="flex items-start gap-2 border-l-2 border-l-warning bg-muted/60 px-3 py-2 text-sm text-foreground-2">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
             <span>Your session expired. Please sign in again to continue.</span>
           </output>
         )}
         {formError && (
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+            className="flex items-start gap-2 border-l-2 border-l-destructive bg-muted/60 px-3 py-2 text-sm text-foreground-2"
           >
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <CircleX className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
             <span>{formError}</span>
           </div>
         )}
