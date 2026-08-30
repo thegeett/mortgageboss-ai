@@ -194,7 +194,13 @@ export function PropertyCard({
                     onSuccess: () => {
                       notifySuccess({
                         title: "Property added",
-                        consequence: "LTV and the property rules can now run on this file.",
+                        // The row created here is EMPTY (`mutate({})`), and LTV
+                        // reads a purchase price or an appraised value — with
+                        // neither it returns "unknown". Its siblings all say
+                        // "Fill it in and…" for exactly this reason; this one
+                        // claimed the end state at the moment the row was blank.
+                        consequence:
+                          "Fill in its value and LTV and the property rules can run on this file.",
                       });
                       setEditing(true);
                     },

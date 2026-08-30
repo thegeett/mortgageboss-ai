@@ -100,3 +100,80 @@ figures to hand. Saying *what kind* of thing changed ("its payment counts toward
 the back-end DTI") is honest and useful; quoting the movement would need each
 mutation to return the recalculated ratio. That is a backend shape change, not a
 copy change, and it is the difference between this ticket's letter and its intent.
+
+---
+
+## Review (LP-UI-035 review commit)
+
+Reviewed on request from the session running the epic. Five findings. Three of
+them are the ticket's own worry about the rewritten messages, and they are the
+ones that matter: each was a confident false statement to a processor.
+
+### 1. Three consequence lines were wrong about how the system behaves
+
+Checked against the backend rather than read.
+
+- **"Fill it in and its payment counts towards the back-end DTI."** A liability
+  marked paid off at closing is EXCLUDED from the back-end ratio (LP-568,
+  `_auto_debt_lines`). On a refinance the mortgage being replaced is exactly that,
+  and it is the most common liability a processor adds here — counting it charges
+  the same house twice. This is the field where getting it wrong moved a real
+  file's DTI from 34% to 59%. Now: "…unless it is paid off at closing."
+- **"Fill it in and its value counts towards reserves."** `build_reserves_view`
+  excludes gifts and borrowed funds outright and takes retirement at a factor —
+  0.60 on FHA. Now names both.
+- **"LTV and the property rules can now run on this file."** The button creates an
+  EMPTY property row (`mutate({})`), and LTV reads a purchase price or an
+  appraised value; with neither it returns "unknown". Its three siblings all say
+  "Fill it in and…"; this one claimed the end state at the moment the row was
+  blank. Now matches them.
+
+The income line — "it counts towards the stated income" — is correct: no
+exclusion applies to a stated income item.
+
+### 2. The rail fix is complete; its guard is not
+
+The scoping to `data-[type=default]` is right, and `TOASTER_CLASSNAMES`' test
+catches an unscoped rail colour coming back — verified by reintroducing it.
+
+But the hazard is not about rails. Sonner applies the base slot AND the typed slot
+to the same element, both with `!`, so ANY shared property is decided by Tailwind's
+output order. Giving `error` a `!text-destructive` against the base's
+`!text-foreground` is the same bug on a different property, and every existing test
+passes. Added a guard that compares the CSS property each utility sets, so no typed
+slot can set something the base slot already sets unscoped.
+
+### 3. The Sonner ban only banned one syntax
+
+`from "sonner"` was the only shape matched. Verified by planting each in a real
+component: `await import("sonner")` and `require("sonner")` both reached Sonner
+with the guard green. Now matches static, dynamic and require forms, either quote
+style, pinned by a table of samples in both directions.
+
+The ticket's own worry about the `*.test.ts` exemption does not hold: the scan is
+static over source, so what a test mocks at runtime cannot hide a component's
+import. The exemption is sound.
+
+### 4. The undo's failure was not silent — it was mislabelled
+
+`act` serves both the resolutions and the undo, and `onError` always said
+"Couldn't resolve the finding". A processor who clicked Undo and hit a failure was
+told a resolution failed: the one message they get about what just happened,
+describing the wrong action. The title now names the action attempted, tested in
+both directions so the fix cannot be "always say undo".
+
+### Confirmed, not changed
+
+- **The undo cannot fire twice in practice.** Sonner dismisses a toast when its
+  action is clicked, and the recursion is correctly bounded — `kind: "undo"` and
+  any action without a `findingId` both fall through to no undo. A double-fire
+  would need two clicks in one frame, and the second would surface an error rather
+  than pass silently.
+- **The remaining consequence lines** — the checklist, the stated totals, and "the
+  rules that read it run again on the next verification" — are accurate. The last
+  one is correctly hedged: a verification run is triggered, not automatic.
+
+### Verification
+
+biome 0, tsc 0, **929 vitest**, build clean. No backend change, so no pytest run.
+Seven mutations, all caught.

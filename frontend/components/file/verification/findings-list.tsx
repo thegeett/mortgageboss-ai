@@ -84,7 +84,17 @@ export function FindingsList({
               }),
         }),
       onError: (e) =>
-        notifyError({ title: "Couldn’t resolve the finding", whatToDo: getErrorMessage(e) }),
+        notifyError({
+          // NAMES WHAT THE PROCESSOR ACTUALLY DID. `act` serves both the
+          // resolutions and the undo, and a fixed "couldn't resolve" told someone
+          // who had just clicked Undo that a resolution failed — a false account
+          // of their own action, in the one message they get about it.
+          title:
+            action.kind === "undo"
+              ? "Couldn’t undo the resolution"
+              : "Couldn’t resolve the finding",
+          whatToDo: getErrorMessage(e),
+        }),
     });
   }
 

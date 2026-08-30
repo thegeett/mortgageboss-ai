@@ -1403,3 +1403,54 @@ moment it ran, and neither is a regression test. The structural facts — the
 skeleton has a heading, the heading precedes the table, the row and the skeleton
 agree on cell count — are pinned by tests that survive the next change to either
 side.
+
+## 2026-08-30 · A32 — from the LP-UI-035 review: a helpful sentence that is wrong
+
+### A32a — three consequence lines described behaviour the backend does not have
+
+The rewrite from bare labels to "what this means" is the right move, and it moves
+the risk. A label that says "Liability added" cannot be wrong. A line that says
+"its payment counts towards the back-end DTI" can be, and was: a liability paid
+off at closing is excluded from the back-end ratio, which on a refinance is the
+mortgage being replaced — the most common liability anyone adds on that screen,
+and the exact case where a real file read 58.59% instead of 34.39%.
+
+Two more: reserves exclude gifts and borrowed funds and discount retirement, and
+the property button creates an EMPTY row while claiming LTV "can now run" — it
+returns "unknown" without a value.
+
+**The general shape.** Explanatory copy is a claim about the system, and it is the
+only kind of claim in the codebase that nothing type-checks, nothing tests, and no
+reviewer reads as code. Its three siblings all said "Fill it in and…" and the
+fourth said "can now run"; that inconsistency was the visible edge of the error.
+Copy that states a consequence should be checked the way a computation is — the
+backend either does that or it does not.
+
+### A32b — the guard caught the instance, not the class
+
+The rail collision is fixed and pinned. But the test asks about `border-l-<colour>`
+and the mechanism is not about rails: Sonner applies the base slot and the typed
+slot to one element, both with `!`, so any shared CSS property is settled by
+Tailwind's output order. `!text-destructive` on `error` against `!text-foreground`
+on the base reproduces the bug exactly and passes every test written for it.
+
+Same relationship as A31a, and the same fix: guard the property, not the instance.
+
+### A32c — a ban that names one syntax bans one syntax
+
+`from "sonner"` was the only import shape the wrapper's guard matched.
+`await import("sonner")` and `require("sonner")` both reached Sonner with the
+suite green, verified by planting each in a real component.
+
+Worth putting beside A31a and A27a, because it is now three tickets running: a
+guard's coverage — which directories, which spellings, which syntaxes — is itself
+authored, and the authored part is where guards fail. The guard's own coverage
+needs the same adversarial treatment as the code it guards, and the way to get it
+is to plant the violation and watch.
+
+### A32d — the failure was reported, about the wrong action
+
+`act` serves the resolutions and the undo, and its error toast always said
+"Couldn't resolve the finding". The undo's failure was never silent — it was
+mislabelled, which is worse in one specific way: silence prompts a processor to
+check, and a confident wrong sentence does not.

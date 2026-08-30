@@ -133,6 +133,51 @@ describe("TOASTER_CLASSNAMES", () => {
     }
   });
 
+  /**
+   * The CSS property a utility sets, for the prefixes this map uses.
+   *
+   * Explicit rather than clever, because the distinction that matters is one a
+   * string comparison gets wrong: `border-l-2` and `border-l-destructive` share
+   * a prefix and set DIFFERENT properties (width, colour), while `text-foreground`
+   * and `text-destructive` share a prefix and set the SAME one.
+   */
+  const property = (cls: string): string => {
+    const u = cls.replace(/^!/, "");
+    if (u === "border" || /^border(-[a-z])?-\d+$/.test(u)) return "border-width";
+    if (/^border-[a-z]-/.test(u)) return "border-left-color";
+    if (/^border-/.test(u)) return "border-color";
+    if (/^text-(xs|sm|base|lg|xl|\dxl)$/.test(u)) return "font-size";
+    if (/^text-/.test(u)) return "color";
+    if (/^bg-/.test(u)) return "background-color";
+    if (/^font-/.test(u)) return "font-weight";
+    if (/^rounded/.test(u)) return "border-radius";
+    if (/^shadow/.test(u)) return "box-shadow";
+    return u;
+  };
+
+  it("no typed slot sets a property the base slot already sets unscoped", () => {
+    // THE GENERAL FORM of the rail bug. The test above pins the one instance that
+    // shipped — a rail colour — and the hazard is not about rails: Sonner applies
+    // the base slot AND the typed slot to the same element, both with `!`, so any
+    // shared property is decided by Tailwind's output order rather than by intent.
+    // Verified by giving `error` a `!text-destructive` against the base's
+    // `!text-foreground`: the rail-specific test passes, this one does not.
+    const baseUnscoped = new Set(
+      TOASTER_CLASSNAMES.toast
+        .split(/\s+/)
+        .filter((cls) => cls.length > 0 && !cls.includes(":"))
+        .map(property),
+    );
+    for (const key of ["success", "error", "warning", "info"] as const) {
+      for (const cls of TOASTER_CLASSNAMES[key].split(/\s+/).filter(Boolean)) {
+        expect(
+          baseUnscoped.has(property(cls)),
+          `${key}'s \`${cls}\` sets ${property(cls)}, which the base slot also sets unscoped`,
+        ).toBe(false);
+      }
+    }
+  });
+
   it("uses tokens, never a raw colour", () => {
     const all = Object.values(TOASTER_CLASSNAMES).join(" ");
     expect(all).not.toMatch(/#[0-9a-f]{3,8}\b/i);

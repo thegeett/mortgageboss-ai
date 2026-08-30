@@ -53,6 +53,14 @@ function walk(dir: string): string[] {
  */
 const ALLOWED = ["lib/toast.ts", "components/providers.tsx"];
 
+/** Every syntax that pulls the module in. Quotes either way — lint prefers double,
+ *  and a guard should not depend on lint having run. */
+const REACHES_SONNER = [
+  /from\s+["']sonner["']/,
+  /import\s*\(\s*["']sonner["']\s*\)/,
+  /require\s*\(\s*["']sonner["']\s*\)/,
+];
+
 describe("every toast goes through the wrapper", () => {
   it("scans the whole tree, not a list of directories", () => {
     // The positive control, and the LP-UI-034 lesson: a missing directory is
@@ -71,8 +79,12 @@ describe("every toast goes through the wrapper", () => {
         const relative = file.replace(ROOT, "");
         if (ALLOWED.includes(relative) || /\.test\.tsx?$/.test(relative)) continue;
         const source = readFileSync(file, "utf8");
-        if (/from "sonner"/.test(source)) {
-          offenders.push(`${relative} imports sonner directly`);
+        // EVERY way in, not just the one the 49 call sites happened to use. A
+        // static `from "sonner"` was the only shape checked; `await
+        // import("sonner")` and `require("sonner")` both reached Sonner and both
+        // left the guard green. A ban that names one syntax bans one syntax.
+        if (REACHES_SONNER.some((pattern) => pattern.test(source))) {
+          offenders.push(`${relative} reaches sonner directly`);
         }
       }
     }
@@ -83,5 +95,33 @@ describe("every toast goes through the wrapper", () => {
 
   it("finds files at all", () => {
     expect(sourceRoots().flatMap(walk).length).toBeGreaterThan(100);
+  });
+});
+
+describe("the ban covers every way in", () => {
+  /**
+   * The scan matched a static `from "sonner"` and nothing else, so
+   * `await import("sonner")` and `require("sonner")` both reached Sonner with the
+   * guard green — verified by planting each in a real component. A ban that names
+   * one syntax bans one syntax.
+   */
+  const reaches = (source: string) => REACHES_SONNER.some((p) => p.test(source));
+
+  it.each([
+    ['import { toast } from "sonner";', "static import"],
+    ["import { toast } from 'sonner';", "static import, single quotes"],
+    ['const { toast } = await import("sonner");', "dynamic import"],
+    ['const { toast } = require("sonner");', "require"],
+    ['import * as sonner from "sonner";', "namespace import"],
+  ])("catches %s (%s)", (source) => {
+    expect(reaches(source)).toBe(true);
+  });
+
+  it.each([
+    ['import { notifySuccess } from "@/lib/toast";', "the wrapper"],
+    ["// we do not import sonner here", "a mention in a comment is not a match"],
+    ['import { Toaster } from "sonner-lite";', "a different package"],
+  ])("does not catch %s (%s)", (source) => {
+    expect(reaches(source)).toBe(false);
   });
 });

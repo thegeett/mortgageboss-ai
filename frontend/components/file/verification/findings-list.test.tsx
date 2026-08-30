@@ -140,3 +140,39 @@ describe("FindingsList", () => {
     expect(resolveMutate.mock.calls[0]?.[0]).toEqual({ kind: "apply", findingId: "x" });
   });
 });
+
+describe("when the resolve call fails", () => {
+  /**
+   * `act` serves both the resolutions and the undo, and the error toast named
+   * only the resolution — so a processor who clicked Undo and hit a failure was
+   * told a resolution failed. It is the one message they get about what just
+   * happened, and it described the wrong action.
+   */
+  async function errorTitle(): Promise<unknown> {
+    const options = resolveMutate.mock.calls[0]?.[1];
+    options?.onError?.(new Error("the server said no"));
+    const { toast } = await import("sonner");
+    return (toast.error as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+  }
+
+  it("says the UNDO failed when the undo failed", async () => {
+    const data = status([
+      finding({ id: "done", resolution_status: "applied", message: "Applied one." }),
+    ]);
+    render(<FindingsList fileId="LF-1" data={data} activeLevel="balanced" />);
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    expect(await errorTitle()).toMatch(/undo/i);
+  });
+
+  it("still says the resolution failed when a resolution failed", async () => {
+    // The other direction, so the fix cannot be "always say undo".
+    render(
+      <FindingsList fileId="LF-1" data={status([finding({ id: "x" })])} activeLevel="balanced" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /View fix/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Apply fix/ }));
+    const title = await errorTitle();
+    expect(title).toMatch(/resolve/i);
+    expect(title).not.toMatch(/undo/i);
+  });
+});

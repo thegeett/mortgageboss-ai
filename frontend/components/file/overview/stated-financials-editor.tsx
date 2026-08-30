@@ -188,7 +188,16 @@ export function StatedFinancialsEditor({
               onSuccess: () =>
                 notifySuccess({
                   title: "Liability added",
-                  consequence: "Fill it in and its payment counts towards the back-end DTI.",
+                  // NOT an unconditional "counts towards the back-end DTI". A
+                  // liability marked paid off at closing is EXCLUDED from the
+                  // back-end ratio (LP-568, `_auto_debt_lines`) — and on a
+                  // refinance the mortgage being replaced is exactly that, which
+                  // is the single most common liability a processor adds here.
+                  // Telling them it counts is a confident false statement about
+                  // the one field where getting it wrong moved a real file's DTI
+                  // from 34% to 59%.
+                  consequence:
+                    "Fill it in and its payment counts towards the back-end DTI, unless it is paid off at closing.",
                 }),
               onError,
             },
@@ -223,7 +232,12 @@ export function StatedFinancialsEditor({
               onSuccess: () =>
                 notifySuccess({
                   title: "Asset added",
-                  consequence: "Fill it in and its value counts towards reserves.",
+                  // Reserves do not take every asset at face value
+                  // (`build_reserves_view`): gifts and borrowed funds are
+                  // excluded outright, and retirement counts at a factor — 0.60
+                  // on FHA. "Its value counts" overstates both.
+                  consequence:
+                    "Fill it in and it counts towards reserves — gifts and borrowed funds do not, and retirement counts at a discount.",
                 }),
               onError,
             },
