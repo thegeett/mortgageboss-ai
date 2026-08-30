@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.borrower import Borrower
 from app.models.document import Document
+from app.models.finding import Finding, FindingOrigin, FindingResolutionStatus
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import Property
@@ -76,6 +77,68 @@ class Agreement(StrEnum):
     NOT_STATED = "not_stated"
 
 
+class RowUnit(StrEnum):
+    """What kind of quantity a row's two values are.
+
+    The browser cannot tell ``"85,087.00"`` from an employer's name by looking at
+    it, and a comparison screen has to right-align and tabular-set amounts for
+    two columns to be readable against each other at all. Which rows are money is
+    domain knowledge this module already holds at the point it builds the row;
+    re-deriving it in the UI from the shape of a string would be a second
+    mechanism answering a question this one has already answered.
+    """
+
+    MONEY = "money"
+    TEXT = "text"
+
+
+class RowFinding(BaseModel):
+    """The rule engine's verdict on the same question a row asks (A20).
+
+    When one of these is present the FINDING is the authority and the row's own
+    comparison is the evidence beneath it — never the other way round. See the
+    `_ROW_RULE` docstring for why that ordering is not merely tidy.
+    """
+
+    finding_id: UUID
+    rule_id: str
+    #: The finding's own severity — `red` | `yellow` | `green`.
+    status: str
+    message: str
+    #: How many open findings that rule has on this file. A row defers to one
+    #: verdict but must not imply it is the only one.
+    count: int
+
+
+#: Ledger row -> the engine rule that asks the SAME question of the SAME two
+#: quantities.
+#
+# A20 (design amendment, 2026-08-30): the ledger's verdict is not always the
+# engine's. LP-80 makes the income variance overlay-overrideable per lender by
+# `rule_id`, and this read model does not resolve overlays — so under an overlay
+# the ledger compares against the default while the engine compares against the
+# lender's number. Where a finding exists, it wins; the row shows its own
+# comparison as evidence rather than as a second answer.
+#
+# ONLY EXACT CORRESPONDENCES BELONG HERE. Two rules that were considered and
+# deliberately left out:
+#
+#   * `xsrc.asset.stated_missing_document` asks whether a stated asset has a
+#     supporting document AT ALL. That is this ledger's `missing` case, not its
+#     value comparison — mapping it would make a row reporting two different
+#     balances defer to a rule about presence.
+#   * `xsrc.income.employer_count_matches_items` counts employers against income
+#     items. The employer row compares one NAME against another.
+#
+# `appraised_value` and `homeowners_insurance` have no rule that asks their
+# question, which is precisely where this read model earns its keep — the
+# `not_stated` direction has no finding anywhere.
+_ROW_RULE: dict[str, str] = {
+    "base_monthly_income": "xsrc.income.stated_vs_documented",
+    "employer": "xsrc.income.employer_name_consistency",
+}
+
+
 class RowSource(BaseModel):
     """Where the found value came from — the audit anchor for one row."""
 
@@ -92,8 +155,12 @@ class ReconciliationRow(BaseModel):
     label: str
     stated_value: str | None
     found_value: str | None
+    #: How to render the two values. See `RowUnit`.
+    unit: RowUnit = RowUnit.TEXT
     agreement: Agreement
     source: RowSource | None = None
+    #: The engine's verdict on this row's question, when it has one (A20).
+    finding: RowFinding | None = None
     #: Why this row has no `source`. Never null when `source` is null — the
     #: ticket's "every row carries provenance or an explicit reason it has none".
     source_note: str | None = None
@@ -303,7 +370,20 @@ def name_agreement(stated: str | None, found: str | None) -> Agreement:
 
 
 def _money_text(value: Decimal | None) -> str | None:
+    """A money amount for PROSE — a sentence in a `source_note` wants commas."""
     return None if value is None else f"{value:,.2f}"
+
+
+def _money_value(value: Decimal | None) -> str | None:
+    """A money amount for the two COLUMNS: raw, not display-formatted.
+
+    `formatMoneyPrecise` in the frontend is the app's single money formatter and
+    it parses a plain decimal string. Emitting `"85,087.00"` here leaves it
+    unparseable, so the browser falls back to printing the string verbatim and
+    the ledger becomes the one screen in the product showing amounts with no
+    currency symbol. Formatting stays in one place; this side sends the number.
+    """
+    return None if value is None else str(value)
 
 
 # --------------------------------------------------------------------------- #
@@ -331,6 +411,16 @@ async def reconcile_loan_file(db: AsyncSession, loan_file: LoanFile) -> list[Rec
         _valuation_row(property_, found),
         _insurance_row(found),
     ]
+
+    # A20: where the engine has ruled on a row's question, the row carries that
+    # verdict. Attached here rather than inside each builder so that a row's own
+    # comparison is computed the same way whether or not a finding exists — the
+    # evidence must not change depending on the verdict sitting above it.
+    engine = await _open_row_findings(db, loan_file.id)
+    for row in rows:
+        rule_id = _ROW_RULE.get(row.field_key)
+        if rule_id is not None:
+            row.finding = engine.get(rule_id)
     return rows
 
 
@@ -374,8 +464,9 @@ def _income_row(
         return ReconciliationRow(
             field_key="base_monthly_income",
             label="Base monthly income",
-            stated_value=_money_text(stated_total),
+            stated_value=_money_value(stated_total),
             found_value=None,
+            unit=RowUnit.MONEY,
             agreement=Agreement.MISSING,
             source=annual.source,
             source_note=(
@@ -392,11 +483,12 @@ def _income_row(
         return _row(
             "base_monthly_income",
             "Base monthly income",
-            _money_text(stated_total),
-            _money_text(found_monthly),
+            _money_value(stated_total),
+            _money_value(found_monthly),
             income_agreement(stated_total, found_monthly),
             annual,
             no_source_note="No W-2 has been extracted for this file.",
+            unit=RowUnit.MONEY,
         )
 
     # A pay stub alone: show what the document says, and say why it is not a
@@ -407,8 +499,9 @@ def _income_row(
         return ReconciliationRow(
             field_key="base_monthly_income",
             label="Base monthly income",
-            stated_value=_money_text(stated_total),
+            stated_value=_money_value(stated_total),
             found_value=None,
+            unit=RowUnit.MONEY,
             agreement=Agreement.MISSING,
             source=period.source,
             source_note=(
@@ -422,11 +515,12 @@ def _income_row(
     return _row(
         "base_monthly_income",
         "Base monthly income",
-        _money_text(stated_total),
+        _money_value(stated_total),
         None,
         income_agreement(stated_total, None),
         None,
         no_source_note="No pay stub or W-2 has been extracted for this file.",
+        unit=RowUnit.MONEY,
     )
 
 
@@ -498,8 +592,9 @@ def _assets_row(
         return ReconciliationRow(
             field_key="checking_balance",
             label="Checking balance",
-            stated_value=_money_text(stated_total),
-            found_value=_money_text(found_amount),
+            stated_value=_money_value(stated_total),
+            found_value=_money_value(found_amount),
+            unit=RowUnit.MONEY,
             agreement=Agreement.MISSING,
             source=hit.source if hit else None,
             source_note=(
@@ -523,11 +618,12 @@ def _assets_row(
     return _row(
         "checking_balance",
         "Checking balance",
-        _money_text(stated_value),
-        _money_text(found_amount),
+        _money_value(stated_value),
+        _money_value(found_amount),
         money_agreement(stated_value, found_amount),
         hit,
         no_source_note=note or "No bank statement has been extracted for this file.",
+        unit=RowUnit.MONEY,
     )
 
 
@@ -545,11 +641,12 @@ def _valuation_row(
     return _row(
         "appraised_value",
         "Appraised value",
-        _money_text(stated_value),
-        _money_text(found_amount),
+        _money_value(stated_value),
+        _money_value(found_amount),
         money_agreement(stated_value, found_amount),
         hit,
         no_source_note="No appraisal has been extracted for this file.",
+        unit=RowUnit.MONEY,
     )
 
 
@@ -570,6 +667,7 @@ def _insurance_row(found: dict[str, list[_FoundField]]) -> ReconciliationRow:
         Agreement.NOT_STATED if hit else Agreement.MISSING,
         hit,
         no_source_note="Not stated on the application, and no declaration page has been received.",
+        unit=RowUnit.MONEY,
     )
 
 
@@ -582,6 +680,7 @@ def _row(
     hit: _FoundField | None,
     *,
     no_source_note: str,
+    unit: RowUnit = RowUnit.TEXT,
 ) -> ReconciliationRow:
     """Assemble one row, guaranteeing provenance OR a reason for its absence."""
     return ReconciliationRow(
@@ -589,6 +688,7 @@ def _row(
         label=label,
         stated_value=stated_value,
         found_value=found_value,
+        unit=unit,
         agreement=agreement,
         source=hit.source if hit else None,
         source_note=None if hit else no_source_note,
@@ -598,6 +698,54 @@ def _row(
 # --------------------------------------------------------------------------- #
 # loaders
 # --------------------------------------------------------------------------- #
+
+
+async def _open_row_findings(db: AsyncSession, loan_file_id: UUID) -> dict[str, RowFinding]:
+    """Open, DETERMINISTIC findings for the rules the ledger's rows correspond to.
+
+    Two filters carry real weight.
+
+    `FindingOrigin.DETERMINISTIC_RULE` — the same `Finding` table also holds the
+    legacy AI cross-source sweep, and those two are never merged or summed
+    (LP-375). A ledger row deferring to an AI finding would put the redesign's
+    one structural separation inside its centrepiece.
+
+    `FindingResolutionStatus.OPEN` — a finding that was APPLIED (folded into the
+    data) or OVERRIDDEN (dismissed with a recorded reason) has been dealt with,
+    and the row goes back to reporting its own comparison. Deferring to a
+    resolved finding would show a processor a verdict they have already answered.
+    """
+    if not _ROW_RULE:
+        return {}
+    stmt = only_active(
+        select(Finding).where(
+            Finding.loan_file_id == loan_file_id,
+            Finding.rule_id.in_(set(_ROW_RULE.values())),
+            Finding.origin == FindingOrigin.DETERMINISTIC_RULE,
+            Finding.resolution_status == FindingResolutionStatus.OPEN,
+        ),
+        Finding,
+    ).order_by(Finding.created_at.desc())
+    findings = list((await db.scalars(stmt)).all())
+
+    counts: dict[str, int] = {}
+    for finding in findings:
+        counts[finding.rule_id] = counts.get(finding.rule_id, 0) + 1
+
+    # Newest per rule — `order_by` desc plus first-wins, so a row cites the most
+    # recent verdict rather than an arbitrary one.
+    out: dict[str, RowFinding] = {}
+    for finding in findings:
+        if finding.rule_id in out:
+            continue
+        out[finding.rule_id] = RowFinding(
+            finding_id=finding.id,
+            rule_id=finding.rule_id,
+            status=str(finding.status),
+            message=finding.message,
+            count=counts[finding.rule_id],
+        )
+    return out
 
 
 async def _current_documents(db: AsyncSession, loan_file_id: UUID) -> list[Document]:

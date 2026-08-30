@@ -6,7 +6,7 @@ are tested directly rather than through the endpoint.
 """
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -16,7 +16,9 @@ from app.services.reconciliation import (
     INCOME_VARIANCE_PERCENT,
     Agreement,
     RowSource,
+    RowUnit,
     _assets_row,
+    _employer_row,
     _FoundField,
     _income_row,
     income_agreement,
@@ -152,7 +154,7 @@ class TestTheAssetsRow:
         )
         assert row.agreement is Agreement.MISSING
         assert "not comparable" in (row.source_note or "")
-        assert "14,000" in (row.stated_value or ""), "the total is still shown, just not compared"
+        assert row.stated_value == "14000.00", "the total is still shown, just not compared"
 
     def test_assets_a_statement_cannot_evidence_say_so(self) -> None:
         # A gift of cash is a real asset. "No stated value" would read as an
@@ -230,7 +232,7 @@ class TestAPartialYearW2:
     def test_a_full_year_w2_is_divided_by_twelve(self) -> None:
         row = _income_row([self._borrower(date(2019, 3, 1))], self._found("120000", "2025"))
         assert row.found_value is not None
-        assert "10,000" in row.found_value
+        assert row.found_value == "10000.00"
 
     def test_employment_starting_in_the_w2_year_is_not_divided(self) -> None:
         row = _income_row([self._borrower(date(2025, 7, 1))], self._found("60000", "2025"))
@@ -243,3 +245,68 @@ class TestAPartialYearW2:
         # because the application omitted a start date would delete the row.
         row = _income_row([self._borrower(None)], self._found("120000", "2025"))
         assert row.found_value is not None
+
+
+class TestTheRowUnit:
+    """Money rows must send a number the frontend's money formatter can read.
+
+    `formatMoneyPrecise` (frontend/lib/format.ts) is the app's single money
+    formatter and it falls back to printing its input verbatim when `Number()`
+    cannot parse it. So a comma in these two columns does not raise anything —
+    it silently drops the currency symbol from one screen and leaves the ledger
+    the only place in the product showing bare amounts. The unit flag and the
+    parseability are asserted together because they are one promise.
+
+    Scope note: the insurance row passes an extractor's own string through
+    untouched, so it carries the MONEY unit for alignment but cannot promise
+    parseability. Only rows this module computes from `Decimal`s are covered.
+    """
+
+    @staticmethod
+    def _parses(value: str | None) -> bool:
+        """Parseable by JS `Number()` — no thousands separators, no symbol."""
+        if value is None:
+            return True
+        try:
+            Decimal(value)
+        except InvalidOperation:
+            return False
+        return True
+
+    def test_a_computed_income_row_is_money_and_parses(self) -> None:
+        row = _income_row(
+            [TestAPartialYearW2._borrower(date(2019, 3, 1))],
+            TestAPartialYearW2._found("120000", "2025"),
+        )
+        assert row.unit is RowUnit.MONEY
+        assert self._parses(row.stated_value)
+        assert self._parses(row.found_value)
+
+    def test_the_uncomparable_assets_row_is_money_and_parses(self) -> None:
+        # The branch that builds its own ReconciliationRow rather than going
+        # through `_row` — the one most likely to be missed when the unit moves.
+        row = _assets_row(
+            [
+                TestTheAssetsRow._asset("CheckingAccount", "5000.00"),
+                TestTheAssetsRow._asset("SavingsAccount", "9000.00"),
+            ],
+            TestTheAssetsRow._statement("5000.00"),
+        )
+        assert row.unit is RowUnit.MONEY
+        assert self._parses(row.stated_value)
+        assert self._parses(row.found_value)
+
+    def test_the_prose_note_still_reads_as_a_sentence(self) -> None:
+        # The columns went raw; the NOTE did not. A sentence saying "totalling
+        # 14000.00" is the regression this guards.
+        row = _assets_row(
+            [
+                TestTheAssetsRow._asset("CheckingAccount", "5000.00"),
+                TestTheAssetsRow._asset("SavingsAccount", "9000.00"),
+            ],
+            TestTheAssetsRow._statement("5000.00"),
+        )
+        assert "14,000.00" in (row.source_note or "")
+
+    def test_an_employer_is_not_money(self) -> None:
+        assert _employer_row([], {}).unit is RowUnit.TEXT

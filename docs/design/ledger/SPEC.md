@@ -150,6 +150,14 @@ count. Those four numbers are the reason a processor switches tabs today.
   re-derive it (LP-UI-013 review). This is the product's own thesis applied to
   itself: reconciliation is the job, so our own surfaces must reconcile.
 
+- **A route becoming unreachable is a regression, not a design deferral.** LP-UI-016
+  moved the file tab strip into the context column, which is hidden below `md` — so
+  on a phone you could open a file and have no way to reach its Documents or
+  Verification. Not cramped: gone. The narrow-width ticket (LP-UI-037) owns how a
+  small screen should LOOK; it does not own restoring access a ticket removed the
+  same night. Any ticket that deletes a navigation affordance restores an
+  equivalent one before it lands (LP-UI-016 review).
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket

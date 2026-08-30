@@ -31,7 +31,8 @@ import type { DtiLimitStatus } from "@/lib/types/dti";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
 import type { LtvLimitStatus } from "@/lib/types/ltv";
 import type { NeedsItemPriority, NeedsItemStatus } from "@/lib/types/needs-item";
-import type { EvaluationOutcome } from "@/lib/types/verification";
+import type { Agreement } from "@/lib/types/reconciliation";
+import type { EvaluationOutcome, FindingSeverity } from "@/lib/types/verification";
 
 export type Tone =
   | "blocking" // a real problem that stops the file moving
@@ -109,6 +110,42 @@ export const EVALUATION_OUTCOME: Record<EvaluationOutcome, StatusMeta> = {
   satisfied: { tone: "verified", label: "Satisfied" },
   no_longer_applies: { tone: "neutral", label: "No longer applies" },
   not_applicable: { tone: "neutral", label: "Not applicable" },
+};
+
+// --- reconciliation (lib/types/reconciliation.ts Agreement) ----------------- //
+// Three of the four are `attention`, and that is deliberate rather than lazy.
+// Whether a disagreement BLOCKS submission is decided by the rule engine
+// (`finding_blocking.py`), not by this ledger — and LP-UI-013 shipped a
+// dashboard that re-derived exactly that judgement from enums and disagreed with
+// the file screen in both directions. The mockup tints one differing row red and
+// another amber; reproducing that split would mean inventing a severity the read
+// model does not carry, on the same screen as the findings that own it.
+//
+// So the tone says "a human needs to look at this" and the WORD says which kind
+// of looking: a stated figure no document supports is a gap to chase, a
+// documented figure the application never mentioned is a disclosure problem, and
+// collapsing those into one word loses which one a processor is holding.
+export const RECONCILIATION_AGREEMENT: Record<Agreement, StatusMeta> = {
+  match: { tone: "verified", label: "Agrees" },
+  differs: { tone: "attention", label: "Differs" },
+  missing: { tone: "attention", label: "Not found" },
+  not_stated: { tone: "attention", label: "Not stated" },
+};
+
+// --- finding severity (lib/types/verification.ts VerificationFinding.status) -- //
+// The SEVENTH domain, and the one LP-UI-005 missed: `finding.status` had no meta
+// map at all, just `const red = finding.status === "red"` written out wherever it
+// was needed. LP-UI-018 needs it as a row verdict, so it joins the vocabulary
+// rather than becoming an eighth ad-hoc comparison.
+//
+// WORDING: "Blocking" and "Warnings" are the shipped labels (finding-filters.tsx,
+// verification-stats.tsx), where they count a set. A single row's verdict needs
+// the singular, so `yellow` reads "Warning" here. That is a pluralisation, not a
+// re-opening of the labels LP-583 and LP-581 settled.
+export const FINDING_SEVERITY: Record<FindingSeverity, StatusMeta> = {
+  red: { tone: "blocking", label: "Blocking" },
+  yellow: { tone: "attention", label: "Warning" },
+  green: { tone: "verified", label: "Passed" },
 };
 
 // --- calculators ------------------------------------------------------------ //

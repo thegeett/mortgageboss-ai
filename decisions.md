@@ -15730,3 +15730,55 @@ concept in `app/verification/` first; if it exists, import it, and if it does no
 **Related:** LP-UI-017, LP-UI-018 (the ledger UI), ADR-328 (an assumed pay frequency is a silent
 12x miscalculation), `_VARIANCE_10` in the cross-source rules, `borrower_name_matching.py`,
 LP-UI-013 (the dashboard that disagreed with the screen it links to).
+
+---
+
+## ADR-392
+
+**Where the rule engine has ruled, a read model defers to it rather than answering again.**
+
+*Context.* ADR-391 settled what counts as agreement inside the reconciliation ledger, and did it the
+right way: every comparison is imported from where the concept already lives, so the ledger and the
+findings beside it agree by construction. That holds only as far as the import goes. LP-80 makes the
+income variance **overlay-overrideable per lender by `rule_id`**, and the read model does not resolve
+overlays — so for a file under a lender that widened or narrowed the variance, the ledger compares
+against the default while the engine compares against the lender's number. Both are correct about
+the number they were given, and they disagree about the same two figures on the same screen.
+
+The 017 review found the sharper version of this: importing a threshold is not the same as reusing a
+rule. The engine quantizes the variance to 0.1 before comparing, so 10.04% is `satisfied` to the
+engine and was `differs` to the ledger — the same two numbers, one screen, two answers, from code
+that had correctly imported the constant. Sharing a number is not sharing a comparison.
+
+*Decision.* A read model that restates a question the rule engine already answers **carries the
+engine's verdict and presents its own comparison as the evidence beneath it.** Where a finding
+exists, the finding is the authority; the row's two columns are what the reader checks it against,
+never a competing answer. Rows the engine has no rule for keep their own verdict — which is where a
+read model earns its keep, since the `not_stated` direction (a document shows what the application
+never claimed) has no finding anywhere in the product.
+
+The correspondence is an **explicit map**, not a naming convention: `_ROW_RULE` in
+`app/services/reconciliation.py`. Only rules asking the same question of the same two quantities
+belong in it. Two were considered and left out, and the reasons generalise:
+`xsrc.asset.stated_missing_document` asks whether a stated asset has a supporting document *at all*,
+which is the ledger's `missing` case rather than its value comparison — mapping it would make a row
+reporting two different balances defer to a rule about presence; and
+`xsrc.income.employer_count_matches_items` counts employers where the row compares names.
+
+Two filters are part of the decision, not implementation detail:
+
+- **Origin.** The `Finding` table also holds the legacy AI cross-source sweep. Those two are never
+  merged or summed (LP-375), so only `DETERMINISTIC_RULE` findings can become a row's verdict. A row
+  deferring to an AI finding would put that structural separation inside the feature the redesign is
+  named for.
+- **Resolution.** A finding that was APPLIED or OVERRIDDEN has been answered by a processor, and the
+  row returns to reporting its own comparison rather than re-asking.
+
+*Consequences.* A ledger row can show a verdict its own two columns do not obviously justify, and
+that is the intended behaviour — the columns are evidence, not the ruling. The map is the extension
+point: a new row with a corresponding rule adds one entry, and a row without one is not a gap to be
+filled by the nearest-looking rule. The alternative considered was resolving overlays inside the read
+model, which would have given it a second copy of the engine's threshold resolution — the drift ADR-391
+was written to prevent, one level up.
+
+*Status.* Accepted (LP-UI-018, design amendment A20).

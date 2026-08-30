@@ -630,6 +630,34 @@ The general form, and it is the same shape as A17: a ticket may not assert a
 capability of the existing data model without checking the model when the ticket
 is written. Both times the design assumed a field the schema does not have.
 
+## 2026-08-30 · A20 — a design consequence of LP-UI-017, before LP-UI-018 is built
+
+### A20 — the ledger's agreement verdict is not always the engine's
+
+LP-UI-017 builds the reconciliation read model — the comparison this whole
+redesign is named for. It correctly reads the income variance threshold off
+`XSRC_INCOME_STATED_VS_DOCUMENTED.threshold` rather than restating `10`, so the
+ledger and the cross-source rule agree by construction.
+
+**Except under a lender overlay.** LP-80 makes that threshold overrideable per
+lender by `rule_id`, and the read model does not resolve overlays — so for a file
+whose lender has widened or narrowed the variance, the ledger compares against the
+default while the engine compares against the overlay. Disclosed in the service's
+own docstring rather than hidden, which is the right call, but it is a live
+design constraint for **LP-UI-018** (the ledger screen) and it must not be
+discovered during implementation.
+
+The design consequence: **where a finding exists for a row, the finding is the
+authority and the ledger row defers to it.** The ledger screen may not paint its
+own agree/differ verdict as the answer over a row the engine has already ruled on
+— it shows the finding's verdict and its own comparison as the evidence beneath.
+Rows with no finding keep the ledger's verdict, which is where the read model
+earns its keep (the `not_stated` direction has no finding at all).
+
+This is SPEC's "an aggregate must reuse the predicate its detail screen uses"
+applied to a case where reuse is only *mostly* possible. Where it cannot be
+complete, the screen must say which source it is showing rather than average them.
+
 ---
 
 ## Standing note

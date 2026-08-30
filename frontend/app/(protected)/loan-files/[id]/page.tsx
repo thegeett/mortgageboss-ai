@@ -3,10 +3,9 @@
 import { NeedsDashboard } from "@/components/file/needs/needs-dashboard";
 import { ActivityFeed } from "@/components/file/overview/activity-feed";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
-import { OverviewPlaceholder } from "@/components/file/overview/overview-placeholder";
+import { ReconciliationLedger } from "@/components/file/overview/reconciliation-ledger";
 import { StatedFinancialsSection } from "@/components/file/overview/stated-financials-section";
 import { useLoanFile, useLoanFileActivity, useLoanFileBorrowers } from "@/lib/api/loan-files";
-import { Gauge, Sparkles } from "lucide-react";
 import { useParams } from "next/navigation";
 
 /**
@@ -14,6 +13,12 @@ import { useParams } from "next/navigation";
  * (cached by the layout's `useLoanFile`) with the borrowers/needs/activity reads.
  * Each section handles its own loading / empty / error state, so a sparse DRAFT
  * file degrades gracefully rather than erroring.
+ *
+ * LP-UI-018 put the reconciliation ledger at the top, because the comparison it
+ * draws is what this product is for. It also removed the two "coming in Phase N"
+ * placeholder cards: the DTI and LTV they promised are on screen already, pinned
+ * in the file context rail by LP-UI-009, so the cards were advertising a feature
+ * the processor could see from where they were standing.
  */
 export default function OverviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +28,8 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      <ReconciliationLedger fileId={id} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         <BorrowerCard
           borrowers={borrowers.data}
@@ -49,28 +56,12 @@ export default function OverviewPage() {
 
       <NeedsDashboard fileId={id} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ActivityFeed
-          activity={activity.data}
-          isPending={activity.isPending}
-          isError={activity.isError}
-          onRetry={() => void activity.refetch()}
-        />
-        <div className="space-y-4">
-          <OverviewPlaceholder
-            title="AI summary"
-            phase="Phase 6"
-            description="A generated plain-language summary of this file's status and what's outstanding."
-            icon={Sparkles}
-          />
-          <OverviewPlaceholder
-            title="Key metrics (DTI / LTV)"
-            phase="Phase 3"
-            description="Calculated ratios — debt-to-income, loan-to-value — surfaced once verification lands."
-            icon={Gauge}
-          />
-        </div>
-      </div>
+      <ActivityFeed
+        activity={activity.data}
+        isPending={activity.isPending}
+        isError={activity.isError}
+        onRetry={() => void activity.refetch()}
+      />
     </div>
   );
 }

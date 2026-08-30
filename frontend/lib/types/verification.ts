@@ -39,11 +39,21 @@ export interface VerificationRun {
   error_detail: string | null;
 }
 
+/**
+ * A finding's triage severity — how a processor sorts it, not what the rule
+ * decided. Named here so `FINDING_SEVERITY` in lib/status.ts is typed from the
+ * real union rather than a second copy of the three strings: `CalculatorStatus`
+ * was written from its display map instead of its producers and ended up
+ * exhaustive over the wrong set, which is how a screen reader came to read out
+ * "Binding:dti".
+ */
+export type FindingSeverity = "red" | "yellow" | "green";
+
 export interface VerificationFinding {
   id: string;
   rule_id: string;
   origin: string;
-  status: "red" | "yellow" | "green";
+  status: FindingSeverity;
   category: string;
   message: string;
   confidence: number;
@@ -116,7 +126,7 @@ export interface RuleFinding {
    *  it — the id is what a processor quotes when escalating and what every ticket calls the rule. */
   rule_name: string | null;
   evaluation_outcome: EvaluationOutcome;
-  status: "red" | "yellow" | "green";
+  status: FindingSeverity;
   category: string;
   /** The reason — every non-satisfied outcome carries one (§8's honesty contract). */
   message: string;
