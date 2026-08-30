@@ -39,15 +39,15 @@ function DocumentsWorkspace() {
   // drawer can be closed (and a refetch doesn't reopen it).
   const searchParams = useSearchParams();
   const router = useRouter();
+  // `?doc=` is a PROVENANCE link — it arrives from a finding, a ledger row or a
+  // snippet, and it means "show me the document this came from". It used to open
+  // the details drawer, which answers a different question. It goes to the
+  // document itself now.
   const docParam = searchParams.get("doc");
   useEffect(() => {
-    if (!docParam || !documents) return;
-    const match = documents.find((doc) => doc.id === docParam);
-    if (match) {
-      setSelected(match);
-      router.replace(`/loan-files/${id}/documents`, { scroll: false });
-    }
-  }, [docParam, documents, id, router]);
+    if (!docParam) return;
+    router.replace(`/loan-files/${id}/review?doc=${docParam}`, { scroll: false });
+  }, [docParam, id, router]);
 
   return (
     <div className="space-y-6">
@@ -72,7 +72,11 @@ function DocumentsWorkspace() {
         isPending={isPending}
         isError={isError}
         onRetry={() => void refetch()}
-        onSelect={setSelected}
+        // A row opens the DOCUMENT (LP-UI-030's reviewer: the page beside its
+        // extracted fields). The drawer is still one click away on each row, for
+        // the questions it answers — type, versions, freshness, replace, delete.
+        onOpen={(doc) => router.push(`/loan-files/${id}/review?doc=${doc.id}`)}
+        onOpenDetails={setSelected}
       />
       <DocumentDrawer document={selected} fileId={id} onClose={() => setSelected(null)} />
     </div>

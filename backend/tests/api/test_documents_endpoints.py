@@ -644,6 +644,35 @@ async def _upload_real_pdf(client: AsyncClient, ident: str, token: str) -> dict[
 # --------------------------------------------------------------------------- #
 
 
+async def test_the_page_endpoint_reports_the_document_length(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The reviewer says "Page 1 of 3" and stops at the last page.
+
+    The count rides with the page because the renderer already has the document
+    open; a second endpoint would reopen the same file to answer a question this
+    one already knows.
+    """
+    company, _user, token = await _make_user(db_session, slug="pagecount")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("three.pdf", _real_pdf(pages=3), "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    doc = resp.json()[0]
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200
+    assert page.headers["X-Page-Count"] == "3"
+
+    # A page the document does not have is absent, not a lie about the length.
+    beyond = await client.get(f"/api/v1/documents/{doc['id']}/page/4", headers=_auth(token))
+    assert beyond.status_code == 404
+
+
 async def test_page_image_renders_and_carries_its_geometry(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

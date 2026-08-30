@@ -19,6 +19,7 @@ import { StatusToken } from "@/components/status-token";
 import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
 import { useFieldBoxes } from "@/lib/api/field-boxes";
 import { useRecordFieldReview } from "@/lib/api/field-reviews";
+import { usePageImage } from "@/lib/api/page-image";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import { currentDocuments, extractionFields } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
@@ -69,6 +70,7 @@ function Reviewer() {
 
   const split: PaneSplit | null = preferences?.reviewer_pane_split ?? null;
 
+  const { data: pageImage } = usePageImage(documentId, page);
   const { data: boxes } = useFieldBoxes(documentId);
   const { data: detail } = useDocumentDetail(documentId);
 
@@ -217,7 +219,10 @@ function Reviewer() {
           <PageCanvas
             documentId={documentId}
             page={page}
-            pageCount={null}
+            // From the page endpoint, which counts while it already has the
+            // document open. Until page 1 arrives it is null and the control
+            // guards only the lower bound.
+            pageCount={pageImage?.pageCount ?? null}
             onPageChange={setPage}
             overlay={
               <BoxOverlay

@@ -112,6 +112,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    # A browser can read only the CORS-safelisted response headers unless they
+    # are named here — `allow_headers` is about the REQUEST and does not help.
+    # The reviewer's page endpoint returns its geometry and page count in
+    # headers, and without this they arrive at the client as absent: the width
+    # and height read back as 0 and nothing complained, because nothing was
+    # using them yet. The page count would have been the first thing to break.
+    expose_headers=[
+        "X-Page-Width-Points",
+        "X-Page-Height-Points",
+        "X-Page-Zoom",
+        "X-Page-Count",
+    ],
 )
 
 # Feature routers. Each router carries its own resource prefix under /api/v1, so

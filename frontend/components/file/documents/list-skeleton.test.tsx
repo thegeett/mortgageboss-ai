@@ -23,8 +23,10 @@ describe("ListSkeleton", () => {
       .getAllByRole("row")
       .filter((row) => row.querySelectorAll("td").length > 0);
     expect(bodyRows.length).toBeGreaterThan(0);
+    // +1 for the details control's column — nameless, like the pipeline's
+    // actions column, and present on the real row too.
     for (const row of bodyRows) {
-      expect(row.querySelectorAll("td")).toHaveLength(DOCUMENT_COLUMNS.length);
+      expect(row.querySelectorAll("td")).toHaveLength(DOCUMENT_COLUMNS.length + 1);
     }
   });
 

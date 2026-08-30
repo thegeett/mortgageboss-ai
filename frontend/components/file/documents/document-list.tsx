@@ -1,6 +1,7 @@
 "use client";
 
 import { StatusToken, railClass } from "@/components/status-token";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,7 +25,7 @@ import {
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import type { DocumentResponse } from "@/lib/types/document";
 import { cn } from "@/lib/utils";
-import { PackageCheck } from "lucide-react";
+import { Info, PackageCheck } from "lucide-react";
 
 /**
  * The file's documents, grouped by category, as table rows (LP-UI-019).
@@ -49,10 +50,14 @@ import { PackageCheck } from "lucide-react";
 /** Exported for `list-skeleton.test.tsx`, which compares its cell count to the skeleton's. */
 export function DocumentRow({
   document,
-  onSelect,
+  onOpen,
+  onOpenDetails,
 }: {
   document: DocumentResponse;
-  onSelect: (document: DocumentResponse) => void;
+  /** Open the document itself — the page beside its extracted fields. */
+  onOpen: (document: DocumentResponse) => void;
+  /** Open the details drawer: type, versions, staleness, replace, delete. */
+  onOpenDetails: (document: DocumentResponse) => void;
 }) {
   const stale = stalenessBadge(document);
   const meta = resolveStatus(DOCUMENT_STATUS, document.status);
@@ -60,15 +65,22 @@ export function DocumentRow({
 
   return (
     <TableRow
-      // A row is a button: click, Enter and Space all open the drawer. LP-UI-007
-      // shipped a row whose keyboard path did not match its mouse path and made
-      // an action unreachable without a pointer; this keeps the two the same.
+      // A row is a button: click, Enter and Space all OPEN THE DOCUMENT. It used
+      // to open the details drawer, which answered a different question — a
+      // processor clicking a pay stub wants to see the pay stub, and the mockup's
+      // Documents screen has no drawer on it at all. The drawer's own answers
+      // (type, versions, staleness, replace, delete) are a click away on the
+      // trailing button, so nothing became unreachable.
+      //
+      // LP-UI-007 shipped a row whose keyboard path did not match its mouse path
+      // and made an action unreachable without a pointer; this keeps the two the
+      // same.
       tabIndex={0}
-      onClick={() => onSelect(document)}
+      onClick={() => onOpen(document)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onSelect(document);
+          onOpen(document);
         }
       }}
       className="cursor-pointer"
@@ -121,6 +133,27 @@ export function DocumentRow({
       <TableCell className="py-1.5 align-top tabular text-muted-foreground">
         {formatFileSize(document.file_size_bytes)}
       </TableCell>
+
+      {/* The drawer's entry point. A row opens the DOCUMENT; this opens what is
+          known ABOUT it — type, versions, freshness, replace, delete. Its own
+          control because they are different questions, and because a row that
+          did both had to pick one. */}
+      <TableCell className="w-10 py-1.5 align-top">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Details for ${document.standard_name || document.original_filename}`}
+          onClick={(event) => {
+            // The row is a button too; without this the drawer opens and the
+            // reviewer navigates underneath it.
+            event.stopPropagation();
+            onOpenDetails(document);
+          }}
+        >
+          <Info className="h-3.5 w-3.5" />
+        </Button>
+      </TableCell>
     </TableRow>
   );
 }
@@ -162,6 +195,9 @@ function DocumentTableHeader() {
             {column.label}
           </TableHead>
         ))}
+        <TableHead className="w-10">
+          <span className="sr-only">Details</span>
+        </TableHead>
       </TableRow>
     </TableHeader>
   );
@@ -207,6 +243,11 @@ export function ListSkeleton() {
                   <Skeleton className={cn("h-5", column.skeleton)} />
                 </TableCell>
               ))}
+              {/* The details control's column, so the skeleton and the real row
+                  agree on cell count and nothing shifts sideways on arrival. */}
+              <TableCell className="w-10 py-1.5 align-top">
+                <Skeleton className="h-5 w-5" />
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -220,13 +261,17 @@ export function DocumentList({
   isPending,
   isError,
   onRetry,
-  onSelect,
+  onOpen,
+  onOpenDetails,
 }: {
   documents: DocumentResponse[] | undefined;
   isPending: boolean;
   isError: boolean;
   onRetry?: () => void;
-  onSelect: (document: DocumentResponse) => void;
+  /** Open the document — the page beside its extracted fields. */
+  onOpen: (document: DocumentResponse) => void;
+  /** Open the details drawer for one document. */
+  onOpenDetails: (document: DocumentResponse) => void;
 }) {
   if (isPending) return <ListSkeleton />;
   if (isError) {
@@ -286,7 +331,12 @@ export function DocumentList({
             <DocumentTableHeader />
             <TableBody>
               {group.documents.map((doc) => (
-                <DocumentRow key={doc.id} document={doc} onSelect={onSelect} />
+                <DocumentRow
+                  key={doc.id}
+                  document={doc}
+                  onOpen={onOpen}
+                  onOpenDetails={onOpenDetails}
+                />
               ))}
             </TableBody>
           </Table>

@@ -45,6 +45,11 @@ class PageImage:
     width_points: float
     height_points: float
     zoom: float
+    #: How many pages the document has. Carried with the page because the
+    #: renderer has the document open anyway — counting it here costs nothing,
+    #: and a second endpoint to ask "how many pages?" would open the same file
+    #: again to answer a question this one already knows.
+    page_count: int
 
     @property
     def pixel_width(self) -> int:
@@ -82,6 +87,7 @@ def _render_sync(content: bytes, page_number: int, zoom: float) -> PageImage | N
             width_points=float(rect.width),
             height_points=float(rect.height),
             zoom=zoom,
+            page_count=doc.page_count,
         )
     except Exception:
         # Never logs page CONTENT — a rendered page is borrower PII.

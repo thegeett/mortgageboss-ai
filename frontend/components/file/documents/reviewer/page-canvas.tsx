@@ -2,8 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePageImage, useRevokeOnUnmount } from "@/lib/api/page-image";
+import { usePageImage } from "@/lib/api/page-image";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 /**
  * One page of the document, rendered (LP-UI-030).
@@ -35,7 +36,17 @@ export function PageCanvas({
   overlay?: React.ReactNode;
 }) {
   const { data, isPending, isError } = usePageImage(documentId, page);
-  useRevokeOnUnmount(data?.url);
+  // An image that fails to DECODE is a different failure from one that fails to
+  // fetch, and only the fetch had a state. A dead object url, a truncated render
+  // — either drew the browser's broken-image icon, which tells a processor
+  // nothing. This turns any of them into the same honest sentence.
+  //
+  // The state holds WHICH image failed rather than a boolean, so a new page is
+  // unaffected by the previous page's failure without an effect to reset it. A
+  // reset effect would be a second source of truth that can lag a render.
+  const [failed, setFailed] = useState<string | null>(null);
+  const identity = `${documentId}:${page}`;
+  const imageBroken = failed === identity;
 
   if (!documentId) {
     return <Empty>Choose a document on the left to read it here.</Empty>;
@@ -76,7 +87,7 @@ export function PageCanvas({
             <output className="sr-only">Loading page {page}</output>
             <Skeleton className="mx-auto h-[60vh] w-full max-w-[46rem]" />
           </div>
-        ) : isError || !data ? (
+        ) : isError || !data || imageBroken ? (
           <Empty>
             No page image for this document. It may be a scan with no text layer, a file that is not
             a PDF, or a page the document does not have — the extracted fields are still on the
@@ -93,6 +104,7 @@ export function PageCanvas({
           <div className="relative mx-auto w-full max-w-[46rem]">
             <img
               src={data.url}
+              onError={() => setFailed(identity)}
               alt={`Page ${page} of the document`}
               width={data.widthPoints * data.zoom}
               height={data.heightPoints * data.zoom}

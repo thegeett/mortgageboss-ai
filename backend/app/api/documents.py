@@ -629,6 +629,9 @@ async def page_image(
             "X-Page-Width-Points": str(rendered.width_points),
             "X-Page-Height-Points": str(rendered.height_points),
             "X-Page-Zoom": str(rendered.zoom),
+            # So the reviewer can say "Page 1 of 5" and stop at the last page,
+            # rather than offering a Next that renders nothing.
+            "X-Page-Count": str(rendered.page_count),
             # A rendered page is borrower content: it must not sit in a shared
             # cache, and the browser may keep it only for this session.
             "Cache-Control": "private, max-age=300",

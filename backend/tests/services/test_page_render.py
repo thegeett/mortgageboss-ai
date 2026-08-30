@@ -22,6 +22,13 @@ def _pdf(pages: int = 1, width: float = 612, height: float = 792) -> bytes:
 
 
 class TestRenderingAPage:
+    async def test_it_reports_the_document_length(self) -> None:
+        # The reviewer needs "of 3" to stop at the last page, and the renderer
+        # already has the document open — counting here costs nothing.
+        image = await render_page(_pdf(pages=3), page_number=1)
+        assert image is not None
+        assert image.page_count == 3
+
     async def test_returns_a_png(self) -> None:
         image = await render_page(_pdf(), page_number=1)
         assert image is not None
@@ -76,5 +83,5 @@ class TestRenderingAPage:
         assert b.pixel_width == 3 * a.pixel_width
 
     def test_a_page_image_knows_its_pixel_size(self) -> None:
-        image = PageImage(png=b"", width_points=100.0, height_points=50.0, zoom=2.0)
+        image = PageImage(png=b"", width_points=100.0, height_points=50.0, zoom=2.0, page_count=1)
         assert (image.pixel_width, image.pixel_height) == (200, 100)
