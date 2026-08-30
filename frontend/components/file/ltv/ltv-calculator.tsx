@@ -259,7 +259,7 @@ function ValueBasisCallout({ data }: { data: LtvCalculation }) {
   // sees WHICH value drives the basis (no hidden field). The literal logic is in the tooltip.
   const sourceLabel = appraisedSourceLabel(data.appraised_value_source);
   return (
-    <div className="rounded-lg border border-border bg-white px-3 py-2 text-sm">
+    <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
         <Scale className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="text-muted-foreground">Value basis · {data.value_basis_label}</span>

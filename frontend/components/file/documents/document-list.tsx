@@ -42,7 +42,7 @@ function DocumentRow({
     <button
       type="button"
       onClick={() => onSelect(document)}
-      className="flex w-full items-center gap-3 rounded-lg border border-border/80 bg-white px-3.5 py-3 text-left shadow-sm transition-colors hover:border-input hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="flex w-full items-center gap-3 rounded-lg border border-border/80 bg-card px-3.5 py-3 text-left shadow-sm transition-colors hover:border-input hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
         <FileText className="h-4 w-4" aria-hidden />
@@ -154,7 +154,7 @@ export function DocumentList({
   }
   if (!documents || documents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-white px-6 py-10 text-center">
+      <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
         <p className="text-sm font-medium text-foreground">No documents yet</p>
         <p className="mt-1 text-sm text-muted-foreground">
           Drag files onto the area above to upload.

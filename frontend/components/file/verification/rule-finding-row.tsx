@@ -67,7 +67,7 @@ function TagProvenance({ tag }: { tag: RuleFindingTag }) {
   const confidence =
     hasReasoning && tag.confidence != null ? `${Math.round(tag.confidence * 100)}%` : null;
   return (
-    <li className="rounded-md border border-border bg-white px-2.5 py-2">
+    <li className="rounded-md border border-border bg-card px-2.5 py-2">
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate font-mono text-[11px] text-muted-foreground">{tag.tag_id}</span>
         <div className="flex shrink-0 items-baseline gap-2">

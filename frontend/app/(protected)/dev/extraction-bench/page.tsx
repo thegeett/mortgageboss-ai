@@ -108,7 +108,7 @@ export default function ExtractionBenchPage() {
 
   if (isProd) {
     return (
-      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
         The extraction bench is a development-only tool and is unavailable in this environment.
       </div>
     );
@@ -139,7 +139,7 @@ export default function ExtractionBenchPage() {
       </div>
 
       {/* Folder + preview */}
-      <div className="space-y-3 rounded-lg border border-border bg-white p-5">
+      <div className="space-y-3 rounded-lg border border-border bg-card p-5">
         <label htmlFor="root" className="block text-sm font-medium text-foreground">
           Document folder (absolute path on the backend host)
         </label>
@@ -157,7 +157,7 @@ export default function ExtractionBenchPage() {
             type="button"
             onClick={onPreview}
             disabled={!root.trim() || previewing || running}
-            className="rounded-md border border-input bg-white px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            className="rounded-md border border-input bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
             {previewing ? "Previewing…" : "Preview"}
           </button>
@@ -175,7 +175,7 @@ export default function ExtractionBenchPage() {
 
       {/* Preview result + Start */}
       {preview && (
-        <div className="space-y-4 rounded-lg border border-border bg-white p-5">
+        <div className="space-y-4 rounded-lg border border-border bg-card p-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="Files found" value={String(preview.total)} />
             <Stat label="Readable" value={String(preview.readable)} />
@@ -239,7 +239,7 @@ export default function ExtractionBenchPage() {
               type="button"
               onClick={() => onStart()}
               disabled={starting || running || preview.readable === 0}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {starting ? "Starting…" : `Start — run ${preview.readable} documents`}
             </button>
@@ -253,7 +253,7 @@ export default function ExtractionBenchPage() {
 
       {/* Run progress */}
       {status && (
-        <div className="space-y-3 rounded-lg border border-border bg-white p-5">
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-foreground">
               {status.finished ? (status.cancelled ? "Cancelled" : "Finished") : "Running…"}
@@ -322,7 +322,7 @@ export default function ExtractionBenchPage() {
                   type="button"
                   onClick={() => onStart(status.run_id)}
                   disabled={starting}
-                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   {starting
                     ? "Resuming…"

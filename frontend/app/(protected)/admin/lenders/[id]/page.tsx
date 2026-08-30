@@ -38,7 +38,7 @@ export default function EditLenderOverlayPage() {
 
   if (role !== "admin") {
     return (
-      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
         Lender overlays are available to admins only.
       </div>
     );
@@ -125,7 +125,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
       </div>
 
       {/* The overrides */}
-      <div className="space-y-3 rounded-lg border border-border bg-white p-4">
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
         {rows.length === 0 && (
           <p className="text-sm text-muted-foreground">No overrides yet — add one below.</p>
         )}
@@ -224,7 +224,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
 
       {/* The audit trail */}
       {view.audit.length > 0 && (
-        <div className="rounded-lg border border-border bg-white p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Audit trail
           </h3>

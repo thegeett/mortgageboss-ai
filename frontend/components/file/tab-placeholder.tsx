@@ -18,7 +18,7 @@ export function TabPlaceholder({
   icon: LucideIcon;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center">
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Icon className="h-6 w-6" />
       </span>

@@ -143,7 +143,7 @@ export function VersionSelector({
             card. `max-h` with its own scroll bounds the height and `max-w` the width, because the
             list is unbounded: twenty runs today and no cap on a busy file. */}
         {open && (
-          <div className="absolute left-0 z-20 mt-2 max-h-80 w-max min-w-full max-w-[min(28rem,calc(100vw-3rem))] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-white shadow-lg">
+          <div className="absolute left-0 z-20 mt-2 max-h-80 w-max min-w-full max-w-[min(28rem,calc(100vw-3rem))] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-popover shadow-lg">
             {runs === undefined ? (
               <p className="px-3 py-2 text-muted-foreground">Loading…</p>
             ) : count === 0 ? (

@@ -31,7 +31,7 @@ export function FilterPills({
               "rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               active
                 ? "bg-primary text-primary-foreground"
-                : "border border-border bg-white text-foreground-2 hover:bg-muted hover:text-foreground",
+                : "border border-border bg-card text-foreground-2 hover:bg-muted hover:text-foreground",
             )}
           >
             {pill.label}

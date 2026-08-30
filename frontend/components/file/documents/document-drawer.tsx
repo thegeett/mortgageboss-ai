@@ -124,7 +124,7 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
           value={selected}
           onChange={(e) => setSelected(e.target.value)}
           disabled={override.isPending}
-          className="h-9 flex-1 rounded-md border border-border bg-white px-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+          className="h-9 flex-1 rounded-md border border-border bg-card px-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
         >
           {options.map((o) => (
             <option key={o.value} value={o.value}>

@@ -26,7 +26,7 @@ export function Header() {
   const current = items.find((item) => isActivePath(pathname, item.href));
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-white px-4 sm:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-6">
       <div className="flex items-center gap-2">
         {/* Mobile nav: the sidebar is hidden below md, so surface the nav here. */}
         <DropdownMenu>

@@ -46,7 +46,7 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
     <li
       className={cn(
         "rounded-md border p-3",
-        isOpen ? "border-border bg-white" : "border-border bg-muted/60",
+        isOpen ? "border-border bg-card" : "border-border bg-muted/60",
       )}
     >
       <div className="flex items-start justify-between gap-3">

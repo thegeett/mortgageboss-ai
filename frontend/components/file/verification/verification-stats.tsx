@@ -58,7 +58,7 @@ export function VerificationStats({
       {tiles.map((t) => (
         <div
           key={t.label}
-          className="rounded-lg border border-border bg-white px-2 py-1.5 text-center"
+          className="rounded-lg border border-border bg-card px-2 py-1.5 text-center"
         >
           <div className={cn("text-lg font-semibold tabular-nums leading-none", t.tone)}>
             {t.value}

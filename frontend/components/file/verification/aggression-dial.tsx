@@ -71,7 +71,7 @@ export function AggressionDial({
       {/* The segmented dial — Conservative (most scrutiny filtered out) → Thorough.
           Toggle-button pattern (aria-pressed) so the active level is announced; the
           surrounding <section> already labels the group. */}
-      <div className="flex gap-1 rounded-md border border-border bg-white p-1">
+      <div className="flex gap-1 rounded-md border border-border bg-card p-1">
         {ORDER.map((level) => {
           const active = level === activeLevel;
           return (

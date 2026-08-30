@@ -23,7 +23,7 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
   return (
     <li
       className={cn(
-        "rounded-lg border border-border/80 bg-white px-3.5 py-3 transition-colors",
+        "rounded-lg border border-border/80 bg-card px-3.5 py-3 transition-colors",
         proposed && "border-l-[3px] border-l-primary",
       )}
     >

@@ -35,7 +35,7 @@ export default function ValidationAidPage() {
 
   if (role !== "admin") {
     return (
-      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
         The validation aid is available to admins only.
       </div>
     );
@@ -100,7 +100,7 @@ function Inventory({ data }: { data: ValidationInventory }) {
         ].map((t) => (
           <div
             key={t.label}
-            className="rounded-lg border border-border bg-white px-2 py-1.5 text-center"
+            className="rounded-lg border border-border bg-card px-2 py-1.5 text-center"
           >
             <div className={cn("text-lg font-semibold tabular-nums leading-none", t.tone)}>
               {t.value}
@@ -165,7 +165,7 @@ function Filter({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-border bg-white px-1.5 py-0.5 text-xs"
+        className="rounded border border-border bg-card px-1.5 py-0.5 text-xs"
       >
         {options.map((o) => (
           <option key={o} value={o}>

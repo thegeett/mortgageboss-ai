@@ -18,7 +18,7 @@ export function Sidebar() {
   const items = visibleNavItems(role);
 
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-border bg-white md:flex md:flex-col">
+    <aside className="hidden w-60 shrink-0 border-r border-border bg-card md:flex md:flex-col">
       <div className="flex h-16 items-center border-b border-border px-5">
         <Link
           href="/dashboard"

@@ -18,7 +18,7 @@ export default function AdminLendersPage() {
 
   if (role !== "admin") {
     return (
-      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
         Lender overlays are available to admins only.
       </div>
     );
@@ -42,11 +42,11 @@ export default function AdminLendersPage() {
       ) : isError || !data ? (
         <InlineErrorState message="Couldn't load lenders." onRetry={() => void refetch()} />
       ) : data.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-input bg-white px-6 py-12 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-input bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           No lenders configured for your company yet.
         </div>
       ) : (
-        <div className="divide-y divide-border rounded-lg border border-border bg-white">
+        <div className="divide-y divide-border rounded-lg border border-border bg-card">
           {data.map((lender) => (
             <Link
               key={lender.id}

@@ -93,7 +93,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       <span
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-          isDragActive ? "bg-primary/15 text-primary" : "bg-white text-muted-foreground shadow-sm",
+          isDragActive ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground shadow-sm",
         )}
       >
         {upload.isPending ? (
@@ -112,7 +112,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         type="button"
         onClick={open}
         disabled={upload.isPending}
-        className="mt-4 inline-flex items-center rounded-md border border-input bg-white px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
+        className="mt-4 inline-flex items-center rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Browse files
       </button>

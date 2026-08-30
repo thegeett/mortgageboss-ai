@@ -35,7 +35,7 @@ function Pill({
         "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-primary bg-primary/10 text-primary"
-          : "border-border bg-white text-muted-foreground hover:bg-muted",
+          : "border-border bg-card text-muted-foreground hover:bg-muted",
       )}
     >
       {children}

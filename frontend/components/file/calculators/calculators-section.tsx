@@ -56,7 +56,7 @@ function Tile({
       aria-expanded={expanded}
       className={cn(
         "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
-        expanded ? "border-primary/40 bg-primary/5" : "border-border bg-white hover:bg-muted",
+        expanded ? "border-primary/40 bg-primary/5" : "border-border bg-card hover:bg-muted",
       )}
     >
       <div className="min-w-0">

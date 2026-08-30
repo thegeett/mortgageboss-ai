@@ -485,7 +485,7 @@ function UseEstimateButton({
             disabled={disabled}
             onClick={() => onUse(suggestion.field_key, suggestion.monthly_amount, note)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-foreground-2 hover:bg-warning/10 disabled:opacity-50",
+              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-card px-2.5 py-1 text-xs font-medium text-foreground-2 hover:bg-warning/10 disabled:opacity-50",
               className,
             )}
           >
