@@ -3,6 +3,7 @@
 import { FileError } from "@/components/file/file-error";
 import { FileHeader } from "@/components/file/file-header";
 import { FileTabs } from "@/components/file/file-tabs";
+import { FileContextRail } from "@/components/layout/file-context-rail";
 import { useLoanFile } from "@/lib/api/loan-files";
 import { isAxiosError } from "axios";
 import { useParams } from "next/navigation";
@@ -28,12 +29,21 @@ export default function FileLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <FileHeader file={file} />
-        <FileTabs fileId={id} />
+    // The rail is a sibling of the work surface, not inside it, so it scrolls
+    // independently and keeps the four numbers on screen while the tab scrolls.
+    // `-m-4` cancels the shell's page padding: the rail meets the window edge
+    // and the border is the seam, which is the point of a full-bleed shell.
+    <div className="-m-4 flex h-full min-h-0">
+      <div className="min-w-0 flex-1 overflow-y-auto p-4">
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <FileHeader file={file} />
+            <FileTabs fileId={id} />
+          </div>
+          {children}
+        </div>
       </div>
-      {children}
+      <FileContextRail fileId={id} />
     </div>
   );
 }
