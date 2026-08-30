@@ -101,3 +101,100 @@ endpoint tests is a header and a comment, which is enough for upload and downloa
 because they move bytes, and not enough for anything that **opens** the file. The
 page tests build a real PDF; asserting a render against a stub would have been
 asserting a 404 and calling it success.
+
+## Review pass — the split meant the same thing twice, and the 28 are worse than reported
+
+Reviewed on request from the session running the epic. One gap closed, the
+measurement re-run and one of its conclusions corrected, and both remaining calls
+confirmed.
+
+### The pane split had two definitions that agree by coincidence
+
+Asked for directly, and they do agree: the browser clamps with `MIN_PANE = 10`
+and `MAX_TWO = 90`, the server rejects `pct < 10` and `sum > 90`. Same set,
+including the boundary — the clamp caps the first pane at 80 so the second always
+has at least 10 left, and both are rounded to integers for a `list[int]` column.
+
+Nothing pins it. Raise the server's floor to 15 and the browser goes on producing
+splits it now rejects: a drag that saves nothing and says nothing, because the
+value is written on drag end and the failure is a 422 nobody is watching for.
+
+Guarded with the instrument this repo already uses for cross-boundary agreement
+(`ledger-assets.test.ts`): the test reads the numbers out of
+`schemas/preferences.py` and asserts every clamp output satisfies them.
+Restating them in TypeScript would have been the second definition it exists to
+prevent. Mutation-checked by raising the server floor — six cases fail.
+
+### The measurement re-runs identically, and one flaw does not bite here
+
+Re-ran the script rather than reading it, with one correction: it selected
+**every** `Extraction`, including superseded versions, whose snippets belong to a
+document that may since have been replaced — fields no screen shows. Filtering to
+`is_current` reproduces the published numbers **exactly** (548 / 28 / 89 / 83 /
+4 of 752), because no superseded extraction exists in this database. The flaw is
+real as method and has no effect on this result.
+
+Two notes on the rest of the method, both favourable:
+
+- It uses `page.search_for()`, which is what LP-UI-031 will use to derive the
+  box. "Findable" therefore means findable *by the mechanism that will do it*,
+  which is the right instrument and not a proxy for it.
+- `norm()` is defined and never called, so no whitespace normalisation is
+  applied. `search_for` is fairly literal, so a snippet differing only in a line
+  break counts as absent. That makes 76.6% a **lower bound**, which is the safe
+  direction for a claim about reachability.
+
+Excluding the five seed stubs is right and correctly counted separately: their
+entire text is `DEMO <filename>`, and counting 43 fields against them as misses
+would have blamed the approach for data that was never a document.
+
+### The 28 are not "a different page" — the cited page does not exist
+
+The one correction. The script buckets a recoverable snippet two ways:
+`found_on_another_page` when the cited page is in range, and
+`oob_found_elsewhere` when it is not. The output carries
+**`oob_found_elsewhere: 28` and no `found_on_another_page` key at all** — and a
+`Counter` only holds keys it incremented, so that count is zero.
+
+So no field cites a wrong-but-existing page. All 28 cite a page number **the
+document does not have**, alongside the 4 that are out of range and absent
+entirely: **32 of 752 fields, 4.3%, cite a page that does not exist.**
+
+That is a different and worse defect than an attribution drifting by a page. It
+is the model inventing a page number — "p.7" of a three-page letter — and
+LP-UI-018's ledger renders exactly that string to a processor as provenance, as
+fact, on a compliance screen. Raised to the user with this review, along with the
+12 of 105 scans for which no highlight is derivable at all.
+
+### Confirmed, not changed
+
+- **Server-side rendering with PyMuPDF.** Right, and the coordinate argument is
+  the one that decides it. LP-UI-031 derives the box with `page.search_for()`,
+  which returns page-space rectangles; rendering with a second engine means two
+  coordinate spaces and a box a few points out — worse than no box, because it
+  points confidently at the wrong words. The dependency question is secondary and
+  would not have been enough on its own.
+- **Validating the split server-side.** Right for the reason given: the value is
+  JSON and it *survives*. A refresh does not fix a pane you cannot grab.
+- **Correcting `PDF_BYTES` rather than working around it.** Right, and it is the
+  fixture rule in a new shape: a stub that is a header and a comment is enough
+  for upload and download, which move bytes, and not for anything that OPENS the
+  file. Asserting a render against it would have asserted a 404 and called it
+  success.
+
+### The fourth route to one hazard
+
+Four mutations that silently did not apply, because a shell helper lost its
+argument passing. The family is now: a wrong path, an excluding `-k` filter
+(mine), a wrong target file, and arguments never reaching the edit. All four
+produce a green run that means nothing; none is visible in the result. The
+`IndexError` is what surfaced this one, and the anchor assert is what would have.
+
+### Verification
+
+Frontend `tsc` and `biome` clean over 249 files, **735 tests**. Backend `ruff`
+and `mypy` clean over 451 files.
+
+| mutation | result |
+| --- | --- |
+| raise the server's pane floor above the browser's | 6 tests fail |
