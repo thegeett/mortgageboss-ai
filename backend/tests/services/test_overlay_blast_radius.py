@@ -256,3 +256,46 @@ class TestAFileThatActuallyMoves:
         assert result.newly_blocking == []
         assert result.newly_clearing == []
         assert result.changed_only == []
+
+
+class TestOneDefinitionOfBlocking:
+    """The estimate and a real run must agree about what "blocking" means.
+
+    The docstring on `_blocks` said `_BLOCKING_SEVERITIES` was "the engine's own,
+    not a second opinion formed here", and the code wrote the pair inline —
+    LP-UI-021's `INCOME_VARIANCE_PERCENT` shape, a copied constant under a
+    comment claiming it was imported. A restatement agrees with its source only
+    until someone edits one of them, and this number is a blast radius: the whole
+    point is that it predicts what a real run would do.
+    """
+
+    @staticmethod
+    def _rule_with(severity: object) -> object:
+        """A real registry rule with one field swapped — frozen, so model_copy."""
+        from app.verification.registry import default_registry
+
+        base = default_registry().rules[0]
+        return base.model_copy(update={"severity": severity})
+
+    def test_blocks_agrees_with_the_writer_for_every_severity(self) -> None:
+        """BEHAVIOURAL, not an identity check on the import.
+
+        A first version asserted `overlay_blast_radius._BLOCKING_SEVERITIES is
+        finding_blocking._BLOCKING_SEVERITIES`, which pins that the constant is
+        IMPORTED and says nothing about whether `_blocks` USES it — a restatement
+        at the use site passes it, which I verified by mutating exactly that.
+        This compares the answers instead, so a different pair written anywhere
+        in the path fails here.
+        """
+        from app.services.finding_blocking import _BLOCKING_SEVERITIES as WRITER
+        from app.services.overlay_blast_radius import _SEVERITY_TO_STATUS, _blocks
+
+        for severity, status in _SEVERITY_TO_STATUS.items():
+            rule = self._rule_with(severity)
+            assert _blocks(rule, passed=False) is (status in WRITER), severity
+
+    def test_a_passing_rule_never_blocks_whatever_its_severity(self) -> None:
+        from app.services.overlay_blast_radius import _SEVERITY_TO_STATUS, _blocks
+
+        for severity in _SEVERITY_TO_STATUS:
+            assert _blocks(self._rule_with(severity), passed=True) is False, severity

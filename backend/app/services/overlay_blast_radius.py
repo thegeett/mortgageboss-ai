@@ -31,11 +31,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finding import FindingStatus
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender
 from app.models.loan_file import LoanFile, LoanFileStatus
 from app.schemas.overlay_admin import OverlayOverrideInput
+from app.services.finding_blocking import _BLOCKING_SEVERITIES
 from app.services.verification_engine import _SEVERITY_TO_STATUS, build_file_facts
 from app.verification.engine import evaluate
 from app.verification.facts import FileFacts
@@ -89,10 +89,17 @@ def _blocks(rule: VerificationRule, passed: bool) -> bool:
     `_SEVERITY_TO_STATUS` and `_BLOCKING_SEVERITIES` are the engine's own, not a
     second opinion formed here — the estimate and a real run must agree about what
     "blocking" means or the number is worse than no number.
+
+    Both are IMPORTED. An earlier version of this line said exactly the sentence
+    above and then wrote `(FindingStatus.RED, FindingStatus.YELLOW)` inline,
+    which is the third definition the docstring promises it is not — the same
+    shape as LP-UI-021's `INCOME_VARIANCE_PERCENT`, a copied constant under a
+    comment claiming it was imported. A restatement agrees with its source only
+    until someone edits one of them.
     """
     if passed:
         return False
-    return _SEVERITY_TO_STATUS[rule.severity] in (FindingStatus.RED, FindingStatus.YELLOW)
+    return _SEVERITY_TO_STATUS[rule.severity] in _BLOCKING_SEVERITIES
 
 
 def _with_proposed(
