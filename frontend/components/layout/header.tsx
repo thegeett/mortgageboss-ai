@@ -26,13 +26,13 @@ export function Header() {
   const current = items.find((item) => isActivePath(pathname, item.href));
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-6">
+    <header className="flex h-[--topbar-h] shrink-0 items-center justify-between border-b border-border bg-card px-3">
       <div className="flex items-center gap-2">
         {/* Mobile nav: the sidebar is hidden below md, so surface the nav here. */}
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label="Open navigation menu"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-foreground-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:hidden"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-foreground-2 hover:bg-muted md:hidden"
           >
             <Menu className="h-5 w-5" />
           </DropdownMenuTrigger>

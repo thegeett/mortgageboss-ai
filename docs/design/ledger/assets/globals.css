@@ -58,18 +58,18 @@
     --skeleton: 168.0 9.4% 89.6%;
 
     /* --- geometry: tool, not marketing site --- */
-    --radius: 0.3125rem;          /* 5px controls  (was 0.5rem) */
-    --radius-container: 0.5rem;   /* 8px cards, panels, tables */
+    --radius: 0.3125rem; /* 5px controls  (was 0.5rem) */
+    --radius-container: 0.5rem; /* 8px cards, panels, tables */
 
     /* --- density: driven by [data-density] on <html>, see LP-UI-010 --- */
-    --row-h: 1.75rem;             /* 28px — compact, the default */
-    --row-px: 0.75rem;            /* 12px horizontal cell padding */
+    --row-h: 1.75rem; /* 28px — compact, the default */
+    --row-px: 0.75rem; /* 12px horizontal cell padding */
 
     /* --- layout --- */
-    --rail-w: 3.25rem;            /* 52px icon rail */
-    --nav-w: 13.5rem;             /* 216px context column */
-    --ctx-w: 18rem;               /* 288px file context rail */
-    --topbar-h: 2.75rem;          /* 44px */
+    --rail-w: 3.25rem; /* 52px icon rail */
+    --nav-w: 13.5rem; /* 216px context column */
+    --ctx-w: 18rem; /* 288px file context rail */
+    --topbar-h: 2.75rem; /* 44px */
 
     /* --- confidence thresholds, shared with the backend --- */
     --confidence-standard: 0.85;
@@ -119,8 +119,25 @@
     --skeleton: 173.3 9.9% 17.8%;
   }
 
-  [data-density="comfortable"] { --row-h: 2.25rem; --row-px: 0.75rem; }
-  [data-density="relaxed"]     { --row-h: 2.75rem; --row-px: 1rem; }
+  /* ⌘B (LP-UI-008). The server stamps this from a cookie, so a collapsed
+     column is already collapsed in the first paint — no effect, no flash. */
+  [data-nav="collapsed"] {
+    --nav-w: 0rem;
+  }
+  /* At zero width the column would still paint its 1px right border, leaving a
+     stray hairline against the rail. Measured: 1px, not 0. */
+  [data-nav="collapsed"] [data-context-column] {
+    border-right-width: 0;
+  }
+
+  [data-density="comfortable"] {
+    --row-h: 2.25rem;
+    --row-px: 0.75rem;
+  }
+  [data-density="relaxed"] {
+    --row-h: 2.75rem;
+    --row-px: 1rem;
+  }
 }
 
 @layer base {
@@ -132,7 +149,8 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
   /* Money, ratios, dates, loan ids — anything that lines up in a column. */
-  .tabular, table {
+  .tabular,
+  table {
     font-variant-numeric: tabular-nums;
   }
   /* :focus-visible, never :focus — a dense table where every click paints a
@@ -148,7 +166,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }

@@ -1,0 +1,80 @@
+"use client";
+
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { isActivePath, visibleNavItems } from "@/lib/navigation";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { cn } from "@/lib/utils";
+import { Layers, PanelLeft } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+/**
+ * The 52px icon rail (LP-UI-008) — the one piece of chrome that is identical on
+ * every screen. Top-level destinations only; everything route-specific lives in
+ * the context column beside it.
+ *
+ * Each item is an icon with no visible label, so each carries an accessible name
+ * AND a tooltip: the name for assistive tech, the tooltip for the sighted user
+ * who has not yet learned the glyphs.
+ */
+export function IconRail({ onToggleContext }: { onToggleContext: () => void }) {
+  const pathname = usePathname();
+  const role = useAuthStore((state) => state.user?.role);
+  const items = visibleNavItems(role);
+
+  return (
+    <nav
+      aria-label="Main"
+      className="hidden w-rail shrink-0 flex-col items-center gap-1 border-r border-border bg-card py-2 md:flex"
+    >
+      <Link
+        href="/dashboard"
+        aria-label="mortgageboss·ai — dashboard"
+        className="mb-1 flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground"
+      >
+        <Layers className="h-4 w-4" />
+      </Link>
+
+      {items.map((item) => {
+        const active = isActivePath(pathname, item.href);
+        return (
+          <Tooltip key={item.href}>
+            <TooltipTrigger asChild>
+              <Link
+                href={item.href}
+                aria-label={item.label}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+                  active
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right">{item.label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+
+      <div className="flex-1" />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onToggleContext}
+            aria-label="Toggle the context column"
+            aria-keyshortcuts="Meta+B Control+B"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Toggle sidebar ⌘B</TooltipContent>
+      </Tooltip>
+    </nav>
+  );
+}

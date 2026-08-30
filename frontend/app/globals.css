@@ -119,6 +119,17 @@
     --skeleton: 173.3 9.9% 17.8%;
   }
 
+  /* ⌘B (LP-UI-008). The server stamps this from a cookie, so a collapsed
+     column is already collapsed in the first paint — no effect, no flash. */
+  [data-nav="collapsed"] {
+    --nav-w: 0rem;
+  }
+  /* At zero width the column would still paint its 1px right border, leaving a
+     stray hairline against the rail. Measured: 1px, not 0. */
+  [data-nav="collapsed"] [data-context-column] {
+    border-right-width: 0;
+  }
+
   [data-density="comfortable"] {
     --row-h: 2.25rem;
     --row-px: 0.75rem;
