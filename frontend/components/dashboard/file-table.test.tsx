@@ -267,3 +267,48 @@ describe("FileTable — grid keyboard navigation (LP-UI-007)", () => {
     search.remove();
   });
 });
+
+describe("FileTable — the attention stripe (LP-UI-013)", () => {
+  const rows = () => screen.getAllByRole("row").slice(1);
+
+  function withAttention(tone: string, label = "2 findings block submission") {
+    return {
+      ...FILE,
+      attention: { tone, label, needs_total: 4, needs_satisfied: 1 },
+    } as unknown as LoanFileSummary;
+  }
+
+  it("paints the row's stripe from its tone", () => {
+    // Asserted on the RENDERED ROW, not on ATTENTION_STRIPE. A map test leaves
+    // the table free to stop reading the map — LP-UI-011's lesson, where
+    // exactly that mutation survived four tests of the helper.
+    renderTable({ files: [withAttention("blocking")] });
+    const cell = rows()[0]?.firstElementChild;
+    expect(cell?.className).toContain("border-l-destructive");
+  });
+
+  it("uses a different stripe for a calm file", () => {
+    renderTable({ files: [withAttention("verified", "Nothing outstanding")] });
+    expect(rows()[0]?.firstElementChild?.className).toContain("border-l-success");
+  });
+
+  it("emits a LITERAL colour class, not an interpolated one", () => {
+    // The defect this ticket shipped and caught: `[&>*:first-child]:${MAP[tone]}`
+    // is never emitted by Tailwind, so the stripe renders as the default border
+    // and nothing fails. A leftover brace is what that looks like in the DOM.
+    renderTable({ files: [withAttention("attention", "Waiting on 3 documents")] });
+    const className = rows()[0]?.firstElementChild?.className ?? "";
+    expect(className).not.toContain("$");
+    expect(className).not.toContain("{");
+  });
+
+  it("renders the attention sentence, not the tone", () => {
+    renderTable({ files: [withAttention("blocking")] });
+    expect(screen.getByText("2 findings block submission")).toBeDefined();
+  });
+
+  it("says nothing rather than 'clear' when the backend sent no attention", () => {
+    renderTable({ files: [FILE] });
+    expect(screen.queryByText(/nothing outstanding/i)).toBeNull();
+  });
+});

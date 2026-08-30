@@ -16,9 +16,24 @@ import { cn } from "@/lib/utils";
  * and therefore carries colour, glyph shape and word like every other status.
  */
 
-/** The backend's four tones are a subset of the shared six. */
+/**
+ * The backend's four tones, MAPPED onto the shared six rather than cast into them.
+ *
+ * `attention.tone as Tone` compiled while `AttentionTone` happened to be a
+ * subset, and would have gone on compiling the day it stopped being one — a
+ * fifth backend tone would reach `StatusToken`, miss `GLYPH[tone]`, and render a
+ * row with no icon. That is LP-UI-005's widened-map shape exactly. An explicit
+ * `Record` is a compile error instead, on the day the enum grows.
+ */
+const TONE: Record<AttentionTone, Tone> = {
+  blocking: "blocking",
+  attention: "attention",
+  verified: "verified",
+  neutral: "neutral",
+};
+
 function toMeta(attention: FileAttention): StatusMeta {
-  return { tone: attention.tone as Tone, label: attention.label };
+  return { tone: TONE[attention.tone], label: attention.label };
 }
 
 export function AttentionCell({ attention }: { attention: FileAttention | null | undefined }) {

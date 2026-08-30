@@ -225,8 +225,10 @@ async def list_files(
         statuses=status,
         search=search,
     )
-    # One derivation for the whole page — four aggregates, not four per row.
-    attention = await attention_for_files(db, items)
+    # One derivation for the whole page — three aggregates, not three per row.
+    # The user is what fixes the confidence cutoff each file's blocking count is
+    # measured against, so the dashboard agrees with the file screen it links to.
+    attention = await attention_for_files(db, items, user=current_user)
     return PaginatedLoanFiles(
         items=[LoanFileSummary.list_item(item, attention.get(item.id)) for item in items],
         total=total,

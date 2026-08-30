@@ -21,6 +21,7 @@ the ticket rather than faked.
 
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 from uuid import UUID
@@ -32,9 +33,13 @@ from sqlalchemy.orm import selectinload
 
 from app.documents.staleness import evaluate_staleness
 from app.models.document import Document, DocumentStatus
-from app.models.finding import EvaluationOutcome, Finding, FindingResolutionStatus
+from app.models.extraction import Extraction
+from app.models.finding import Finding, FindingResolutionStatus, FindingStatus
+from app.models.helpers import only_active
 from app.models.loan_file import LoanFile, LoanFileStatus
 from app.models.needs_item import NeedsItem, NeedsItemStatus
+from app.models.user import User
+from app.services.aggression import active_cutoff
 
 
 class AttentionTone(StrEnum):
@@ -59,6 +64,10 @@ class FileAttention(BaseModel):
     needs_satisfied: int
 
 
+# Only actionable findings block; green is a passed check. Mirrors
+# `finding_blocking._BLOCKING_SEVERITIES`.
+_BLOCKING_SEVERITIES = (FindingStatus.RED, FindingStatus.YELLOW)
+
 # Terminal statuses have nothing to be done about them; saying so calmly is the
 # honest answer, not "Clear".
 _TERMINAL = {LoanFileStatus.CLOSED, LoanFileStatus.WITHDRAWN}
@@ -66,17 +75,42 @@ _TERMINAL = {LoanFileStatus.CLOSED, LoanFileStatus.WITHDRAWN}
 # A need is satisfied when nobody has to collect anything more for it.
 _SATISFIED_NEEDS = {NeedsItemStatus.VERIFIED, NeedsItemStatus.WAIVED}
 
+# Still waiting on a DOCUMENT. Mirrors `NEEDS_GROUP`'s `needs_action` bucket in
+# `frontend/lib/loan-files/needs.ts`, which is what the file's own needs screen
+# counts — `received` belongs to `in_review`, because the document arrived and
+# what is outstanding is the reading of it, not the collecting. Counting
+# `total - satisfied` instead put `received` in the waiting set, so the dashboard
+# and the file screen reported different numbers for the same idea.
+_AWAITING_NEEDS = {
+    NeedsItemStatus.PENDING,
+    NeedsItemStatus.REQUESTED,
+    NeedsItemStatus.REJECTED,
+}
+
+# Arrived, not yet verified. Outstanding work, but not outstanding COLLECTION.
+_IN_REVIEW_NEEDS = {NeedsItemStatus.RECEIVED}
+
 
 async def attention_for_files(
-    db: AsyncSession, loan_files: Sequence[LoanFile], *, today: date | None = None
+    db: AsyncSession,
+    loan_files: Sequence[LoanFile],
+    *,
+    user: User,
+    today: date | None = None,
 ) -> dict[UUID, FileAttention]:
-    """Derive one `FileAttention` per file, in four queries total."""
+    """Derive one `FileAttention` per file, in three queries total.
+
+    `user` is required rather than optional: whether a finding blocks depends on
+    the confidence cutoff in force, and that is the file's override or this
+    user's default (LP-79). A page-wide count that ignored it would disagree with
+    every file screen it links to.
+    """
     ids = [file.id for file in loan_files]
     if not ids:
         return {}
 
-    blocking = await _open_finding_counts(db, ids)
-    needs_total, needs_satisfied = await _needs_progress(db, ids)
+    blocking = await _blocking_finding_counts(db, loan_files, user=user)
+    counts = await _needs_counts(db, ids)
     documents = await _current_documents(db, ids)
 
     return {
@@ -84,8 +118,7 @@ async def attention_for_files(
             file,
             blocking=blocking.get(file.id, 0),
             documents=documents.get(file.id, []),
-            needs_total=needs_total.get(file.id, 0),
-            needs_satisfied=needs_satisfied.get(file.id, 0),
+            needs=counts.get(file.id, _NeedsCounts()),
             today=today,
         )
         for file in loan_files
@@ -97,8 +130,7 @@ def _decide(
     *,
     blocking: int,
     documents: list[Document],
-    needs_total: int,
-    needs_satisfied: int,
+    needs: "_NeedsCounts",
     today: date | None,
 ) -> FileAttention:
     """Pick the single most important thing wrong with one file.
@@ -107,7 +139,7 @@ def _decide(
     rule that blocks submission outranks a document that failed to read, which
     outranks one that is merely old.
     """
-    progress = {"needs_total": needs_total, "needs_satisfied": needs_satisfied}
+    progress = {"needs_total": needs.total, "needs_satisfied": needs.satisfied}
 
     if file.status in _TERMINAL:
         label = "Closed" if file.status is LoanFileStatus.CLOSED else "Withdrawn"
@@ -136,17 +168,29 @@ def _decide(
             **progress,
         )
 
-    if not documents:
-        return FileAttention(tone=AttentionTone.NEUTRAL, label="No documents yet", **progress)
-
-    if needs_total and needs_satisfied < needs_total:
-        outstanding = needs_total - needs_satisfied
-        noun = "document" if outstanding == 1 else "documents"
+    # BEFORE the empty-documents line, deliberately. A file opened this morning
+    # has no documents and eight needs, and "No documents yet" is both the less
+    # useful sentence and a NEUTRAL tone on the most actionable row on the page.
+    # "No documents yet" is the honest answer only when nothing is being waited on.
+    if needs.awaiting:
+        noun = "document" if needs.awaiting == 1 else "documents"
         return FileAttention(
             tone=AttentionTone.ATTENTION,
-            label=f"Waiting on {outstanding} {noun}",
+            label=f"Waiting on {needs.awaiting} {noun}",
             **progress,
         )
+
+    if needs.in_review:
+        # Arrived and unread. Not "Nothing outstanding" — the reading is the work.
+        noun = "document" if needs.in_review == 1 else "documents"
+        return FileAttention(
+            tone=AttentionTone.ATTENTION,
+            label=f"{needs.in_review} {noun} to review",
+            **progress,
+        )
+
+    if not documents:
+        return FileAttention(tone=AttentionTone.NEUTRAL, label="No documents yet", **progress)
 
     return FileAttention(tone=AttentionTone.VERIFIED, label="Nothing outstanding", **progress)
 
@@ -179,37 +223,75 @@ def _oldest_stale(
     return worst
 
 
-async def _open_finding_counts(db: AsyncSession, ids: Sequence[UUID]) -> dict[UUID, int]:
-    """Findings that a rule fired and nobody has dispositioned, per file."""
-    stmt = (
-        select(Finding.loan_file_id, func.count())
-        .where(
+async def _blocking_finding_counts(
+    db: AsyncSession, loan_files: Sequence[LoanFile], *, user: User
+) -> dict[UUID, int]:
+    """Open in-scope findings per file — the SAME definition the file screen uses.
+
+    `app/services/finding_blocking.py` owns what "blocks submission" means:
+    resolution OPEN, severity red or yellow, and confidence at or above the
+    cutoff in force. This mirrors that predicate rather than restating it, because
+    a dashboard that counts blocking findings differently from the screen it links
+    to is worse than either count being wrong on its own — the processor cannot
+    tell which one to believe.
+
+    The first version filtered `evaluation_outcome == OPEN` and ignored confidence,
+    which was wrong in BOTH directions: it counted low-confidence hunches the dial
+    deliberately excludes, and it missed AI cross-source findings, which carry a
+    severity but no rule-engine outcome.
+
+    Still one query. The cutoff is per FILE (its override, else the user default),
+    so the comparison happens here rather than in SQL — over the page's candidate
+    findings, not per row.
+    """
+    ids = [file.id for file in loan_files]
+    stmt = only_active(
+        select(Finding.loan_file_id, Finding.confidence).where(
             Finding.loan_file_id.in_(ids),
-            Finding.deleted_at.is_(None),
-            Finding.evaluation_outcome == EvaluationOutcome.OPEN,
             Finding.resolution_status == FindingResolutionStatus.OPEN,
-        )
-        .group_by(Finding.loan_file_id)
+            Finding.status.in_(_BLOCKING_SEVERITIES),
+        ),
+        Finding,
     )
-    return {row[0]: row[1] for row in (await db.execute(stmt)).all()}
+    cutoffs = {file.id: active_cutoff(file, user) for file in loan_files}
+    counts: dict[UUID, int] = defaultdict(int)
+    for loan_file_id, confidence in (await db.execute(stmt)).all():
+        if confidence is not None and confidence >= cutoffs[loan_file_id]:
+            counts[loan_file_id] += 1
+    return dict(counts)
 
 
-async def _needs_progress(
-    db: AsyncSession, ids: Sequence[UUID]
-) -> tuple[dict[UUID, int], dict[UUID, int]]:
-    """(total, satisfied) needs per file, from one grouped count."""
+@dataclass(frozen=True)
+class _NeedsCounts:
+    """One file's needs, split the way the needs screen splits them."""
+
+    total: int = 0
+    satisfied: int = 0
+    awaiting: int = 0
+    in_review: int = 0
+
+
+async def _needs_counts(db: AsyncSession, ids: Sequence[UUID]) -> dict[UUID, _NeedsCounts]:
+    """Needs per file, from one grouped count."""
     stmt = (
         select(NeedsItem.loan_file_id, NeedsItem.status, func.count())
         .where(NeedsItem.loan_file_id.in_(ids), NeedsItem.deleted_at.is_(None))
         .group_by(NeedsItem.loan_file_id, NeedsItem.status)
     )
-    total: dict[UUID, int] = defaultdict(int)
-    satisfied: dict[UUID, int] = defaultdict(int)
+    totals: dict[UUID, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     for loan_file_id, status, count in (await db.execute(stmt)).all():
-        total[loan_file_id] += count
+        bucket = totals[loan_file_id]
+        bucket[0] += count
         if status in _SATISFIED_NEEDS:
-            satisfied[loan_file_id] += count
-    return dict(total), dict(satisfied)
+            bucket[1] += count
+        if status in _AWAITING_NEEDS:
+            bucket[2] += count
+        if status in _IN_REVIEW_NEEDS:
+            bucket[3] += count
+    return {
+        loan_file_id: _NeedsCounts(total=b[0], satisfied=b[1], awaiting=b[2], in_review=b[3])
+        for loan_file_id, b in totals.items()
+    }
 
 
 async def _current_documents(db: AsyncSession, ids: Sequence[UUID]) -> dict[UUID, list[Document]]:
@@ -221,7 +303,12 @@ async def _current_documents(db: AsyncSession, ids: Sequence[UUID]) -> dict[UUID
             Document.deleted_at.is_(None),
             Document.is_current.is_(True),
         )
-        .options(selectinload(Document.extractions))
+        # ONLY the current extraction. `selectinload(Document.extractions)` loads
+        # every version ever made, for every document, for every file on the page
+        # — and `_oldest_stale` then discards all but the current one. Prior
+        # versions are kept for audit and are unbounded in principle, so this was
+        # a page-size-times-version-count load to answer a question about one row.
+        .options(selectinload(Document.extractions.and_(Extraction.is_current)))
     )
     by_file: dict[UUID, list[Document]] = defaultdict(list)
     for document in (await db.execute(stmt)).scalars().all():
