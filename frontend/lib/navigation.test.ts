@@ -1,7 +1,10 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   NAV_ITEMS,
   activeItemHref,
   contextSection,
+  fileSections,
   fileTabSegment,
   isActivePath,
   isNavItemActive,
@@ -173,5 +176,31 @@ describe("isNavItemActive", () => {
     if (!admin) throw new Error("the Administration rail item is gone");
     expect(isNavItemActive("/admin/lenders", admin)).toBe(true);
     expect(isNavItemActive("/loan-files/abc", admin)).toBe(false);
+  });
+});
+
+describe("fileSections (LP-UI-022)", () => {
+  it("lists Needs as its own destination", () => {
+    const items = fileSections("LF-1").items;
+    const needs = items.find((item) => item.label === "Needs");
+    expect(needs?.href).toBe("/loan-files/LF-1/needs");
+  });
+
+  it("points every file section at a route that exists", () => {
+    // The note this replaces said Needs was "deliberately absent" because
+    // `/loan-files/[id]/needs` did not exist and listing it would ship a link to
+    // a 404. The route exists now; this is what stops the next one going in
+    // ahead of its page.
+    const routes = readdirSync(
+      join(import.meta.dirname, "..", "app", "(protected)", "loan-files", "[id]"),
+      { withFileTypes: true },
+    )
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    for (const item of fileSections("LF-1").items) {
+      const segment = item.href.replace("/loan-files/LF-1", "").replace("/", "");
+      if (segment === "") continue; // Overview is the index route
+      expect(routes, `${item.label} links to /${segment}`).toContain(segment);
+    }
   });
 });

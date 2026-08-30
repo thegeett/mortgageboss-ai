@@ -2,7 +2,6 @@
 
 import { AddNeedDialog } from "@/components/file/needs/add-need-dialog";
 import { NeedCard } from "@/components/file/needs/need-card";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useLoanFileDocuments } from "@/lib/api/documents";
@@ -43,12 +42,17 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
   const updating = !needs.isPending && (live || needs.isFetching);
 
   return (
-    <Card className="border-border/80">
-      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+    // LP-UI-022: a section on its own route, not a card in the middle of the
+    // Overview. The list is the differentiator and it was the third thing on a
+    // page about something else; the Card came off for the same reason
+    // LP-UI-020's did — a box inside a box to reach one line.
+    <section aria-labelledby="needs-heading" className="space-y-4">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">Needs list</h2>
+            <h2 id="needs-heading" className="text-label uppercase text-muted-foreground">
+              Needs list
+            </h2>
             <UpdatingCue show={updating} />
           </div>
           {!needs.isPending && !needs.isError && items.length > 0 && (
@@ -65,9 +69,9 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
           )}
         </div>
         <AddNeedDialog fileId={fileId} />
-      </CardHeader>
+      </header>
 
-      <CardContent aria-busy={needs.isPending}>
+      <div aria-busy={needs.isPending}>
         <AiNeedsNote status={aiStatus} />
         {needs.isPending ? (
           <>
@@ -101,8 +105,8 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
             ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 

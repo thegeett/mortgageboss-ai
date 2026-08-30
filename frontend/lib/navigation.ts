@@ -12,6 +12,7 @@ import type { UserRole } from "@/lib/auth/types";
 import type { LucideIcon } from "lucide-react";
 import {
   Building2,
+  ClipboardList,
   FileText,
   FolderOpen,
   LayoutDashboard,
@@ -90,9 +91,9 @@ export function fileSections(fileId: string): ContextSection {
       { label: "Overview", href: base, icon: LayoutDashboard },
       { label: "Documents", href: `${base}/documents`, icon: FileText },
       { label: "Verification", href: `${base}/verification`, icon: ShieldCheck },
-      // Needs is deliberately absent. "Needs becomes its own route" is one of the
-      // standing decisions, but `/loan-files/[id]/needs` does not exist yet —
-      // listing it here would ship a link to a 404. It goes in with the route.
+      // LP-UI-022 built the route, so the link goes in with it — which is what
+      // the note that stood here said would happen.
+      { label: "Needs", href: `${base}/needs`, icon: ClipboardList },
       { label: "Communication", href: `${base}/communication`, icon: MessageSquare },
       { label: "Conditions", href: `${base}/conditions`, icon: ScrollText },
       { label: "Lender package", href: `${base}/lender-package`, icon: Package },

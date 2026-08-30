@@ -1,6 +1,6 @@
 "use client";
 
-import { NeedsDashboard } from "@/components/file/needs/needs-dashboard";
+import { NeedsSummary } from "@/components/file/needs/needs-summary";
 import { ActivityFeed } from "@/components/file/overview/activity-feed";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
 import { ReconciliationLedger } from "@/components/file/overview/reconciliation-ledger";
@@ -54,7 +54,9 @@ export default function OverviewPage() {
       {/* The data MISMO import populated (LP-55) — hidden for files without it. */}
       <StatedFinancialsSection fileId={id} />
 
-      <NeedsDashboard fileId={id} />
+      {/* The full list is its own route now (LP-UI-022); this is how much is
+          outstanding, and the way through. */}
+      <NeedsSummary fileId={id} />
 
       <ActivityFeed
         activity={activity.data}
