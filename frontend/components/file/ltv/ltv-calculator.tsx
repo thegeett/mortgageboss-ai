@@ -108,26 +108,34 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="space-y-6">
+      <div className="space-y-4">
         {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <LtvHeroTile ltv={data.ltv} limit={data.limit} />
-          <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
-          <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+        {/* The math on the left, the result beside it (LP-UI-045) — the same
+            arrangement as the DTI panel, for the same reason: the ratio and the
+            two figures that produce it belong on one screen. */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <div className="min-w-0 space-y-4">
+            <ValueBasisCallout data={data} />
+            <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
+            <BreakdownSection
+              title="Property value"
+              items={data.value_items}
+              appraisedValueSource={data.appraised_value_source}
+              {...rowProps}
+            />
+          </div>
+
+          <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
+            <LtvHeroTile ltv={data.ltv} limit={data.limit} />
+            <FormulaReceipt data={data} />
+            {/* CLTV and HCLTV are the same ratio with more of the debt stack in
+                the numerator; they read as variants of the headline, not as
+                three peers across the top. */}
+            <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
+            <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+          </div>
         </div>
-
-        <ValueBasisCallout data={data} />
-
-        <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
-        <BreakdownSection
-          title="Property value"
-          items={data.value_items}
-          appraisedValueSource={data.appraised_value_source}
-          {...rowProps}
-        />
-
-        <FormulaReceipt data={data} />
       </div>
     </TooltipProvider>
   );

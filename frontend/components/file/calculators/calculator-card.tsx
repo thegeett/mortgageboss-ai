@@ -108,101 +108,111 @@ function CalculatorBody({
   const tone = figureToneClass(status.tone);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
 
-      {/* Headline number */}
-      <div className="rounded-lg border border-border bg-muted/50 px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {data.headline_label}
-        </div>
-        <div className={cn("mt-0.5 text-2xl font-semibold tabular-nums", tone)}>
-          {data.headline ?? "—"}
-        </div>
-      </div>
-
-      {/* Overrideable inputs */}
-      {data.inputs.length > 0 && (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Inputs
-          </h4>
-          <div className="rounded-lg border border-border">
-            {data.inputs.map((item) => (
-              <LineRow
-                key={item.key}
-                item={item}
-                editing={editingKey === item.key}
-                disabled={busy}
-                onEdit={() => setEditingKey(item.key)}
-                onCancel={() => setEditingKey(null)}
-                onSave={onSave}
-                onClear={(key) => clearOverride.mutate(key)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* The transparent derivation steps */}
-      {data.steps.length > 0 && (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            The math
-          </h4>
-          <div className="rounded-lg border border-border">
-            {data.steps.map((step, i) => (
-              <div
-                key={`${step.label}-${i}`}
-                className={cn(
-                  "flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0",
-                  step.emphasis && "bg-muted/70",
-                )}
-              >
-                <span
-                  className={cn(
-                    "text-foreground-2",
-                    step.emphasis && "font-semibold text-foreground",
-                  )}
-                >
-                  {step.label}
-                </span>
-                <span
-                  className={cn(
-                    "tabular-nums text-foreground-2",
-                    step.emphasis && "font-semibold text-foreground",
-                  )}
-                >
-                  {step.value}
-                </span>
+      {/* The math on the left, the result beside it (LP-UI-045) — the same
+          arrangement as the DTI and LTV panels. These four calculators show
+          inputs, then derivation steps, then a formula, and the answer was above
+          all of it with the arithmetic that reaches it at the bottom. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0 space-y-4">
+          {/* Overrideable inputs */}
+          {data.inputs.length > 0 && (
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Inputs
+              </h4>
+              <div className="rounded-lg border border-border">
+                {data.inputs.map((item) => (
+                  <LineRow
+                    key={item.key}
+                    item={item}
+                    editing={editingKey === item.key}
+                    disabled={busy}
+                    onEdit={() => setEditingKey(item.key)}
+                    onCancel={() => setEditingKey(null)}
+                    onSave={onSave}
+                    onClear={(key) => clearOverride.mutate(key)}
+                  />
+                ))}
               </div>
+            </section>
+          )}
+
+          {/* The transparent derivation steps */}
+          {data.steps.length > 0 && (
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                The math
+              </h4>
+              <div className="rounded-lg border border-border">
+                {data.steps.map((step, i) => (
+                  <div
+                    key={`${step.label}-${i}`}
+                    className={cn(
+                      "flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0",
+                      step.emphasis && "bg-muted/70",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "text-foreground-2",
+                        step.emphasis && "font-semibold text-foreground",
+                      )}
+                    >
+                      {step.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "tabular-nums text-foreground-2",
+                        step.emphasis && "font-semibold text-foreground",
+                      )}
+                    >
+                      {step.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
+          {/* Headline number */}
+          <div className="rounded-lg border border-border bg-muted/50 px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {data.headline_label}
+            </div>
+            <div className={cn("mt-0.5 text-2xl font-semibold tabular-nums", tone)}>
+              {data.headline ?? "—"}
+            </div>
+          </div>
+
+          {/* The formula(s) */}
+          <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              The formula
+            </div>
+            {data.formulas.map((f) => (
+              <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
+                {f}
+              </p>
             ))}
           </div>
-        </section>
-      )}
 
-      {/* The formula(s) */}
-      <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          The formula
+          {/* The grounded-starter methodology note */}
+          {data.methodology.starter && (
+            <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-foreground-2">
+              <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                <span className="font-semibold text-primary">Methodology — starter.</span>{" "}
+                {data.methodology.text}
+              </span>
+            </div>
+          )}
         </div>
-        {data.formulas.map((f) => (
-          <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
-            {f}
-          </p>
-        ))}
       </div>
-
-      {/* The grounded-starter methodology note */}
-      {data.methodology.starter && (
-        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-foreground-2">
-          <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-          <span>
-            <span className="font-semibold text-primary">Methodology — starter.</span>{" "}
-            {data.methodology.text}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

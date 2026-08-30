@@ -104,47 +104,70 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
       {data.gated && <GatedBanner reason={data.gate_reason} />}
 
-      <HeroRatios data={data} />
+      {/* THE MATH ON THE LEFT, THE RESULT ON THE RIGHT — the mockup's
+          arrangement (LP-UI-045). It ran down the page before: ratios, then
+          three sections, then the formula, so the answer was above the working
+          and the arithmetic that produces it was a screen below. Reading it
+          meant scrolling between the number and the numbers it came from.
 
-      <BreakdownSection
-        title="Gross monthly income"
-        items={data.income_items}
-        subtotal={data.gross_monthly_income}
-        emptyHint="No income on file yet — add stated income or override below."
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Housing payment (PITI + MI + HOA)"
-        items={data.housing_items}
-        subtotal={data.housing_payment}
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Monthly debts"
-        items={data.debt_items}
-        subtotal={data.monthly_debts}
-        emptyHint="No other monthly debts on file."
-        {...rowProps}
-      />
+          Single column below `lg`, where two would make each too narrow to hold
+          a label, a figure and its source on one line. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0 space-y-4">
+          <BreakdownSection
+            title="Gross monthly income"
+            items={data.income_items}
+            subtotal={data.gross_monthly_income}
+            emptyHint="No income on file yet — add stated income or override below."
+            {...rowProps}
+          />
+          <BreakdownSection
+            title="Housing payment (PITI + MI + HOA)"
+            items={data.housing_items}
+            subtotal={data.housing_payment}
+            {...rowProps}
+          />
+          <BreakdownSection
+            title="Monthly debts"
+            items={data.debt_items}
+            subtotal={data.monthly_debts}
+            emptyHint="No other monthly debts on file."
+            {...rowProps}
+          />
+        </div>
 
-      <FormulaReceipt data={data} />
+        <ResultPanel data={data} />
+      </div>
     </div>
   );
 }
 
 // --------------------------------------------------------------------------- //
-// The headline ratios + the limit side-by-side
+// The result, beside the math that produced it
 // --------------------------------------------------------------------------- //
 
-function HeroRatios({ data }: { data: DtiCalculation }) {
+/**
+ * The answer, the arithmetic that reached it, and where it sits against the cap.
+ *
+ * One panel rather than three stacked pieces (a ratio tile, a limit bar and a
+ * formula receipt a screen apart): the figure means nothing without the division
+ * that produced it, and the division means nothing without the limit it is being
+ * judged against. The mockup puts all three together for that reason.
+ *
+ * STICKY on a wide screen, so the answer stays on screen while a processor reads
+ * down the twenty-odd lines that feed it. That is the whole point of putting it
+ * beside the math instead of after it.
+ */
+function ResultPanel({ data }: { data: DtiCalculation }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />
+    <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
       <BackEndTile back={data.back_end_dti} limit={data.limit} />
+      <FormulaReceipt data={data} />
+      <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />
     </div>
   );
 }

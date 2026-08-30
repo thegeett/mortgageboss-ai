@@ -131,6 +131,28 @@ describe("DtiCalculator", () => {
     expect(amount.className).toContain("line-through");
   });
 
+  it("puts the result BESIDE the math, not after it (LP-UI-045)", () => {
+    // It ran down the page: ratios, three sections, then the formula — so the
+    // answer was above the working and the arithmetic that produces it a screen
+    // below. Reading it meant scrolling between the number and the numbers it
+    // came from.
+    mockDti();
+    const { container } = render(<DtiCalculator fileId="LF-1" />);
+    const split = container.querySelector("div.grid.gap-4");
+    expect(split?.className).toContain("lg:grid-cols-[minmax(0,1fr)_19rem]");
+    // And it stays put while the math scrolls, which is the point of the split.
+    expect(container.querySelector(".lg\\:sticky")).toBeTruthy();
+  });
+
+  it("keeps a single column below lg, where two would be too narrow", () => {
+    // A line is a label, a figure and its source; at half a laptop's width that
+    // wraps three times.
+    mockDti();
+    const { container } = render(<DtiCalculator fileId="LF-1" />);
+    const split = container.querySelector("div.grid.gap-4");
+    expect(split?.className).not.toMatch(/(?<!lg:)grid-cols-2/);
+  });
+
   it("renders the two ratios, the breakdown, the formula and the limit", () => {
     mockDti();
     render(<DtiCalculator fileId="LF-1" />);
