@@ -2,7 +2,6 @@
 
 import { FileError } from "@/components/file/file-error";
 import { FileHeader } from "@/components/file/file-header";
-import { FileTabs } from "@/components/file/file-tabs";
 import { FileContextRail } from "@/components/layout/file-context-rail";
 import { useLoanFile } from "@/lib/api/loan-files";
 import { isAxiosError } from "axios";
@@ -44,11 +43,11 @@ export default function FileLayout({ children }: { children: React.ReactNode }) 
     // vertical seam behave like the horizontal one.
     <div className="-m-[var(--shell-pad)] flex h-[calc(100%_+_var(--shell-pad)_*_2)] min-h-0">
       <div className="min-w-0 flex-1 overflow-y-auto p-4">
-        <div className="space-y-6">
-          <div className="space-y-4">
-            <FileHeader file={file} />
-            <FileTabs fileId={id} />
-          </div>
+        <div className="space-y-4">
+          {/* The tab strip is gone (LP-UI-016). The shell's context column has
+              carried these six sections since LP-UI-008, and two navigations one
+              above the other is an unfinished migration, not a convenience. */}
+          <FileHeader file={file} />
           {children}
         </div>
       </div>

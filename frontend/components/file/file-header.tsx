@@ -1,84 +1,100 @@
 import { FileHeaderActions } from "@/components/file/file-header-actions";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusToken } from "@/components/status-token";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatMoney } from "@/lib/format";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
+import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
 import type { LoanFileDetail } from "@/lib/types/loan-file";
-import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
 
-function fmtDate(iso: string): string {
-  try {
-    return format(new Date(iso), "MMM d, yyyy");
-  } catch {
-    return "—";
-  }
-}
+/**
+ * The file's identity strip (LP-UI-016).
+ *
+ * One line of identity — who, which file, what kind of loan, whose lender, and
+ * where it stands — with the two numbers a processor checks first set right:
+ * the loan amount and the property it is secured on.
+ *
+ * Two things left this component. "Back to dashboard" became the topbar
+ * breadcrumb, because where you are is a property of the screen rather than of
+ * the file. And the tab strip moved into the shell's context column, so the
+ * header no longer competes with a second navigation directly beneath it —
+ * LP-UI-008 shipped that column, and this is the ticket that stops the
+ * duplication.
+ */
 
-function fmtRelative(iso: string): string {
-  try {
-    return formatDistanceToNow(new Date(iso), { addSuffix: true });
-  } catch {
-    return "—";
-  }
-}
+/**
+ * The strip's own height, shared by the loaded and loading states.
+ *
+ * 54px is the loaded strip's natural height — the 20px title line plus 6px and
+ * the 22px chip row. Measured, not guessed: at 3.25rem the skeleton came out
+ * 52px against a loaded 54px, and a 2px jump on every file open is exactly the
+ * shift this ticket's criterion exists to prevent.
+ */
+const STRIP = "flex min-h-[3.375rem] flex-wrap items-start justify-between gap-x-6 gap-y-2";
 
-/** The persistent file header: borrower name, display_id, status, and key dates.
- * Shows a skeleton while the file loads; the same component fills in once loaded. */
 export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
-  return (
-    <div className="space-y-3">
-      <Link
-        href="/dashboard"
-        className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to dashboard
-      </Link>
+  if (file === undefined) {
+    return (
+      // Same height as the loaded strip, so nothing below it moves when the
+      // file arrives. The bars sit inside the strip's own box rather than
+      // approximating it.
+      <div className={STRIP} aria-busy>
+        <output className="sr-only">Loading the file</output>
+        <div className="min-w-0 space-y-2">
+          <Skeleton className="h-6 w-56" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="space-y-2 text-right">
+          <Skeleton className="ml-auto h-6 w-32" />
+          <Skeleton className="ml-auto h-4 w-48" />
+        </div>
+      </div>
+    );
+  }
 
-      {file === undefined ? (
-        <div className="space-y-2" aria-busy>
-          <output className="sr-only">Loading the file</output>
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-80" />
+  return (
+    <div className={STRIP}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">
+            {file.primary_borrower_name ?? "Unnamed file"}
+          </h1>
+          <StatusToken meta={resolveStatus(LOAN_FILE_STATUS, file.status)} />
         </div>
-      ) : (
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              {file.primary_borrower_name ?? "Unnamed file"}
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-              <span className="font-mono font-medium text-foreground-2">{file.display_id}</span>
-              {file.loan_program && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{programLabel(file.loan_program)}</span>
-                </>
-              )}
-              {file.loan_purpose && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{purposeLabel(file.loan_purpose)}</span>
-                </>
-              )}
-              {file.lender_name && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{file.lender_name}</span>
-                </>
-              )}
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Created {fmtDate(file.created_at)} · Updated {fmtRelative(file.updated_at)}
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <StatusBadge status={file.status} />
-            <FileHeaderActions file={file} />
-          </div>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <Chip mono>{file.display_id}</Chip>
+          {file.loan_program ? <Chip>{programLabel(file.loan_program)}</Chip> : null}
+          {file.loan_purpose ? <Chip>{purposeLabel(file.loan_purpose)}</Chip> : null}
+          {file.lender_name ? <Chip>{file.lender_name}</Chip> : null}
         </div>
-      )}
+      </div>
+
+      <div className="flex shrink-0 items-start gap-3">
+        <div className="text-right">
+          <p className="tabular text-xl font-semibold tracking-tight text-foreground">
+            {file.loan_amount ? formatMoney(file.loan_amount) : "—"}
+          </p>
+          <p className="mt-0.5 max-w-[22rem] truncate text-sm text-muted-foreground">
+            {file.property_address ?? "No property address"}
+          </p>
+        </div>
+        <FileHeaderActions file={file} />
+      </div>
     </div>
+  );
+}
+
+/** A quiet fact about the file. Not a status — those go through StatusToken. */
+function Chip({ children, mono = false }: { children: React.ReactNode; mono?: boolean }) {
+  return (
+    <span
+      className={
+        mono
+          ? "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground-2"
+          : "rounded border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground-2"
+      }
+    >
+      {children}
+    </span>
   );
 }

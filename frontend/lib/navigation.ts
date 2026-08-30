@@ -74,7 +74,14 @@ export interface ContextSection {
   items: { label: string; href: string; icon: LucideIcon }[];
 }
 
-/** File sections, relative to a file's base route. */
+/**
+ * File sections, relative to a file's base route.
+ *
+ * The single source since LP-UI-016. `lib/loan-files/tabs.ts` held the same six
+ * as a tab strip until the strip moved into this column; keeping both would have
+ * been two producers of one list, and the one that renders should be the one
+ * that decides.
+ */
 export function fileSections(fileId: string): ContextSection {
   const base = `/loan-files/${fileId}`;
   return {

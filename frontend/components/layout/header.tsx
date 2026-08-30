@@ -1,5 +1,6 @@
 "use client";
 
+import { Breadcrumb } from "@/components/layout/breadcrumb";
 import { UserMenu } from "@/components/layout/user-menu";
 import {
   DropdownMenu,
@@ -51,9 +52,7 @@ export function Header() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <h1 className={cn("text-base font-semibold text-foreground")}>
-          {current?.label ?? "mortgageboss·ai"}
-        </h1>
+        <Breadcrumb fallback={current?.label ?? "mortgageboss·ai"} />
       </div>
 
       {user && <UserMenu user={user} />}
