@@ -101,3 +101,77 @@ The `globals.css` change is mirrored into `docs/design/ledger/assets/globals.css
 — the asset-drift guard caught the omission, which is what it is for.
 
 CI green by exit code: biome, tsc, 932 vitest. No backend changes.
+
+---
+
+## Review (LP-UI-036 review commit)
+
+Reviewed on request from the session running the epic. Three findings.
+
+### 1. Two h1s on every crashed screen
+
+The h1 work is right for every route that can be visited. `AppShell` renders
+`<Header/>` — whose breadcrumb is the page's h1 — **above**
+`<ErrorBoundary>{children}</ErrorBoundary>`, so when a screen crashes the
+fallback's own h1 is ADDED to the trail's rather than replacing it.
+
+This could not be found by visiting routes, because the crashed state is not a
+route. It is precisely the asymmetry the ticket named — it just is not in a page
+component.
+
+`ErrorBoundary` takes a `headingLevel` now: `2` inside the shell, where the trail
+has already named the page and stays on screen behind the failure; `1` at the app
+root, where `providers.tsx` mounts a boundary above the shell and the fallback is
+the only heading on the page. A page whose first heading is an h2 is its own
+violation, so both directions are tested.
+
+**The test that would have caught it has to render the composition.** A test on
+the fallback alone passes with the shell still asking for an h1 — verified by
+removing `headingLevel={2}` from `AppShell`, which left all 934 other tests green.
+`app-shell-headings.test.tsx` renders the shell around a throwing child.
+
+### 2. The faded-token guard missed every variant
+
+Independent of the token list, and the larger of the two gaps: the lookbehind was
+`(?<![\w:-])`, which bars a preceding colon — and a colon is exactly how a variant
+attaches. `hover:text-muted-foreground/80`, `dark:text-foreground/50` and
+`md:text-foreground-2/60` were all invisible to a guard that named the right
+tokens. Fixed to `(?<![\w-])`, which still bars a mid-token match.
+
+### 3. The token list named three, and the tree held five
+
+`text-primary/80` and `text-background/75` were both in use and neither was
+looked at. **Both measure fine** — 5.10:1 on card and 10.30:1 on the dark tooltip
+— which is the point rather than a reprieve: nothing was checking, and
+`text-primary/80` sits 0.6 above the line.
+
+The pattern matches any `text-*/opacity` now, with exceptions recorded as measured
+pairings carrying their ratio and surface, and a test that an exemption still
+names something in the tree. Same posture as the backend's `reviewed_not_critical`:
+ban the shape, and make the exception a written decision with a number in it.
+
+### Confirmed, not changed
+
+- **`sectionFromPath`** is correct across every route in the app, not just the two
+  checked: evaluated over all thirteen, including a uuid tail and a display-id
+  tail. `/loan-files/new` returns "New", which is weak but not wrong, and only
+  applies when no nav item matches.
+- **No route has two h1s.** Only `login` carries its own, and it is outside the
+  protected layout. `FileCrumb` renders spans throughout, so file routes take
+  theirs from `FileHeader` and `file-error` — one each.
+- **Item 4's scope call is right.** A border's 3:1 is against adjacent colours,
+  which a static scan cannot know, and extending the ban there without measuring
+  would be the guess this test exists to prevent.
+
+### On the contrast probe
+
+I did not re-run it — it is a browser measurement and the same shape as
+LP-UI-034's. The honest limit is the one already named: it answers for the
+elements it polled, on the routes it visited, at the moment it ran. What survives
+is the ban, which is why the two gaps above matter more than a re-measurement
+would.
+
+### Verification
+
+biome 0, tsc 0, **940 vitest**, build clean. No backend change, so no pytest run.
+Six mutations, all caught.

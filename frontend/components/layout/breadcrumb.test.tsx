@@ -6,6 +6,7 @@ const pathname = vi.hoisted(() => ({ value: "/dashboard" }));
 vi.mock("next/navigation", () => ({ usePathname: () => pathname.value }));
 vi.mock("@/lib/api/loan-files", () => ({ useLoanFile: () => ({ data: null }) }));
 
+import { DefaultErrorFallback } from "@/components/error-boundary";
 import { Breadcrumb } from "./breadcrumb";
 
 afterEach(() => {
@@ -48,5 +49,37 @@ describe("Breadcrumb", () => {
     render(<Breadcrumb fallback="Dashboard" />);
     expect(screen.getByRole("link", { name: "Pipeline" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).not.toContain("Pipeline");
+  });
+});
+
+describe("the crashed screen, which is not a route", () => {
+  /**
+   * The h1 count has to be asserted on what is ON THE PAGE TOGETHER, not on one
+   * component at a time.
+   *
+   * `AppShell` renders `<Header/>` — whose breadcrumb is the page's h1 — ABOVE
+   * `<ErrorBoundary>{children}</ErrorBoundary>`. So when a screen crashed, the
+   * fallback's own h1 was ADDED to the trail's rather than replacing it: two h1s
+   * on every crashed non-file screen. Visiting routes cannot find this, because
+   * the crashed state is not a route — which is exactly why it survived a
+   * six-route measurement.
+   */
+  it("adds a section heading beneath the trail, not a second h1", () => {
+    render(
+      <>
+        <Breadcrumb fallback="Dashboard" />
+        <DefaultErrorFallback onRetry={() => {}} headingLevel={2} />
+      </>,
+    );
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/stopped working/i);
+  });
+
+  it("is still an h1 at the app root, where no trail has rendered", () => {
+    // The other direction. The boundary in `providers.tsx` sits ABOVE the shell:
+    // if that one fires, this is the only heading on the page, and a page whose
+    // first heading is an h2 is its own violation.
+    render(<DefaultErrorFallback onRetry={() => {}} />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/stopped working/i);
   });
 });

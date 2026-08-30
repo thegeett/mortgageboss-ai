@@ -1454,3 +1454,56 @@ is to plant the violation and watch.
 "Couldn't resolve the finding". The undo's failure was never silent — it was
 mislabelled, which is worse in one specific way: silence prompts a processor to
 check, and a confident wrong sentence does not.
+
+## 2026-08-30 · A33 — from the LP-UI-036 review: the state that is not a route
+
+### A33a — two h1s on every crashed screen
+
+The heading work is right for every route that can be visited, and the bug is not
+on a route. `AppShell` renders `<Header/>` — whose breadcrumb is the page's h1 —
+ABOVE `<ErrorBoundary>{children}</ErrorBoundary>`, so a crash ADDED a second h1
+rather than replacing the first.
+
+**A route inventory cannot find it, because the crashed state is not a route.**
+Neither is an empty state, a loading state, a permission-denied state, or a
+mid-drag state. A page has more states than it has URLs, and a check that
+enumerates URLs has enumerated one of them.
+
+The fix takes a `headingLevel`, since the same component is mounted in two places
+with different heading contexts — inside the shell, where the trail owns the h1,
+and at the app root, where the fallback is the only heading and must stay an h1.
+
+### A33b — the test has to render the composition, not the component
+
+The fix lives in `ErrorBoundary` and the bug lives in how `AppShell` wires it.
+Removing `headingLevel={2}` from the shell left **all 934 other tests green** — a
+component test cannot see a caller passing the wrong thing, and heading structure
+is a property of the assembled page rather than of any part of it.
+
+Third time in this epic: fixing in the shared piece leaves the caller untested
+(LP-UI-030's helper, LP-UI-034's renderer, this).
+
+### A33c — a colon is how a variant attaches
+
+The faded-token ban used a lookbehind of `(?<![\w:-])`, which bars a preceding
+colon — so `hover:text-muted-foreground/80`, `dark:text-foreground/50` and
+`md:text-foreground-2/60` were all invisible to a guard that named exactly the
+right tokens. The character excluded to prevent a mid-token match was the same
+character that introduces every variant.
+
+Sixth instance of the same class, and the first where the gap was in the
+*boundary* of the pattern rather than its *content*. Worth recording separately
+for that reason: reviewing a guard means reading what it excludes as carefully as
+what it includes.
+
+### A33d — ban the shape, measure the exception
+
+The list named three text tokens and the tree held five. `text-primary/80` and
+`text-background/75` both measure fine — 5.10:1 and 10.30:1 — and that is the
+finding, not a reprieve: nothing was checking, and 5.10 has 0.6 of headroom.
+
+The pattern matches any `text-*/opacity` now, and an exception is a recorded
+pairing carrying its ratio and the surface it was measured against, with a test
+that the exemption still names something real. A static scan cannot know what is
+behind a token, so it bans the shape and a person supplies the number — the same
+posture as `reviewed_not_critical` on the backend, and the same reason.

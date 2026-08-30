@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               breathing room, not a column cap — a table inside a screen ticket
               can still opt out of it. */}
           <main className="flex-1 overflow-y-auto p-[var(--shell-pad)]">
-            <ErrorBoundary>{children}</ErrorBoundary>
+            <ErrorBoundary headingLevel={2}>{children}</ErrorBoundary>
           </main>
         </div>
       </div>
