@@ -17,10 +17,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useAddNeed } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { NeedsItemPriority } from "@/lib/types/needs-item";
 import { Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 
 const PRIORITIES: NeedsItemPriority[] = ["blocking", "standard", "low"];
 
@@ -59,11 +59,15 @@ export function AddNeedDialog({ fileId }: { fileId: string }) {
       },
       {
         onSuccess: () => {
-          toast.success("Need added");
+          notifySuccess({
+            title: "Need added",
+            consequence: "It is on the checklist and counts towards the file's outstanding items.",
+          });
           reset();
           setOpen(false);
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) =>
+          notifyError({ title: "Couldn’t add the need", whatToDo: getErrorMessage(error) }),
       },
     );
   }

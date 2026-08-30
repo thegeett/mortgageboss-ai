@@ -32,6 +32,7 @@ import {
   validateUploadFile,
   versionLabel,
 } from "@/lib/loan-files/documents";
+import { notifyError, notifyStarted, notifySuccess } from "@/lib/toast";
 import type { DocumentDetailResponse, DocumentResponse, DocumentTier } from "@/lib/types/document";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -48,7 +49,6 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
 import { GenericAnalysisView } from "./generic-analysis-view";
@@ -98,13 +98,14 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
   function handleSave() {
     override.mutate(selected, {
       onSuccess: () =>
-        toast.success(`Type set to ${humanize(selected)}`, {
-          description: typeReExtracts(selected)
-            ? "Re-extracting in the background…"
-            : "Relabeled — this type isn’t extracted.",
+        notifySuccess({
+          title: `Type set to ${humanize(selected)}`,
+          consequence: typeReExtracts(selected)
+            ? "The document is being read again; its fields update when that finishes."
+            : "Relabeled only — this type isn’t extracted, so no fields change.",
         }),
       onError: (error) =>
-        toast.error("Couldn’t update the type", { description: getErrorMessage(error) }),
+        notifyError({ title: "Couldn’t update the type", whatToDo: getErrorMessage(error) }),
     });
   }
 
@@ -179,15 +180,17 @@ function ReplaceButton({
     if (!file) return;
     const error = validateUploadFile(file);
     if (error) {
-      toast.error("Can’t replace", { description: error.reason });
+      notifyError({ title: "Can’t replace this document", whatToDo: error.reason });
       return;
     }
     replace.mutate(file, {
       onSuccess: () =>
-        toast.success("Replacing document", {
-          description: "The new version is processing; the old one is kept as history.",
+        notifyStarted({
+          title: "Replacing the document",
+          consequence: "The new version is processing; the old one is kept as history.",
         }),
-      onError: (err) => toast.error("Couldn’t replace", { description: getErrorMessage(err) }),
+      onError: (err) =>
+        notifyError({ title: "Couldn’t replace the document", whatToDo: getErrorMessage(err) }),
     });
   }
 
@@ -243,8 +246,19 @@ function StalenessWarning({ summary, fileId }: { summary: DocumentResponse; file
       { action },
       {
         onSuccess: () =>
-          toast.success(action === "waive" ? "Staleness waived" : "Document accepted"),
-        onError: (err) => toast.error("Couldn’t resolve", { description: getErrorMessage(err) }),
+          notifySuccess(
+            action === "waive"
+              ? {
+                  title: "Staleness waived",
+                  consequence: "The age warning is recorded as accepted and stops blocking.",
+                }
+              : {
+                  title: "Document accepted",
+                  consequence: "It counts as current for the rules that read it.",
+                },
+          ),
+        onError: (err) =>
+          notifyError({ title: "Couldn’t record that", whatToDo: getErrorMessage(err) }),
       },
     );
   }
@@ -513,7 +527,10 @@ function DrawerBody({
     try {
       await downloadDocument(summary.id, summary.original_filename);
     } catch {
-      toast.error("Download failed", { description: "Please try again." });
+      notifyError({
+        title: "The download didn’t start",
+        whatToDo: "Nothing changed on the file. Try again, or open the document in the reviewer.",
+      });
     } finally {
       setDownloading(false);
     }
@@ -525,11 +542,14 @@ function DrawerBody({
     }
     del.mutate(summary.id, {
       onSuccess: () => {
-        toast.success("Document removed");
+        notifySuccess({
+          title: "Document removed",
+          consequence: "It has left the file. Anything it satisfied is outstanding again.",
+        });
         onClose();
       },
       onError: (error) =>
-        toast.error("Couldn’t remove the document", { description: getErrorMessage(error) }),
+        notifyError({ title: "Couldn’t remove the document", whatToDo: getErrorMessage(error) }),
     });
   }
 

@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { type StatedKind, useStatedFinancialsEdit } from "@/lib/api/mismo";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { StatedFinancials } from "@/lib/types/stated-financials";
 import { Check, Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 
 const LIABILITY_FIELDS: FieldDef[] = [
   { key: "liability_type", label: "Type", kind: "text" },
@@ -84,13 +84,28 @@ export function StatedFinancialsEditor({
   const termsId = useId();
 
   const onError = (error: unknown) =>
-    toast.error("Couldn't save the change", { description: getErrorMessage(error) });
-  const saved = () => toast.success("Saved");
+    notifyError({ title: "Couldn’t save the change", whatToDo: getErrorMessage(error) });
+  const saved = () =>
+    notifySuccess({
+      title: "Saved",
+      consequence:
+        "The stated figure is updated; the rules that read it run again on the next verification.",
+    });
 
   const updateRow = (kind: StatedKind, id: string, body: Record<string, unknown>) =>
     edit.updateRow.mutate({ kind, id, body }, { onSuccess: saved, onError });
   const removeRow = (kind: StatedKind, id: string) =>
-    edit.deleteRow.mutate({ kind, id }, { onSuccess: () => toast.success("Removed"), onError });
+    edit.deleteRow.mutate(
+      { kind, id },
+      {
+        onSuccess: () =>
+          notifySuccess({
+            title: "Row removed",
+            consequence: "It no longer counts towards the stated totals.",
+          }),
+        onError,
+      },
+    );
 
   const busy = edit.updateRow.isPending || edit.deleteRow.isPending;
 
@@ -124,7 +139,14 @@ export function StatedFinancialsEditor({
           onAdd={() =>
             edit.addIncome.mutate(
               { borrowerId: b.id, body: {} },
-              { onSuccess: () => toast.success("Income row added"), onError },
+              {
+                onSuccess: () =>
+                  notifySuccess({
+                    title: "Income row added",
+                    consequence: "Fill it in and it counts towards the stated income.",
+                  }),
+                onError,
+              },
             )
           }
         >
@@ -162,7 +184,14 @@ export function StatedFinancialsEditor({
         onAdd={() =>
           edit.addLiability.mutate(
             {},
-            { onSuccess: () => toast.success("Liability added"), onError },
+            {
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Liability added",
+                  consequence: "Fill it in and its payment counts towards the back-end DTI.",
+                }),
+              onError,
+            },
           )
         }
       >
@@ -188,7 +217,17 @@ export function StatedFinancialsEditor({
         title="Assets"
         empty={data.assets.length === 0}
         onAdd={() =>
-          edit.addAsset.mutate({}, { onSuccess: () => toast.success("Asset added"), onError })
+          edit.addAsset.mutate(
+            {},
+            {
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Asset added",
+                  consequence: "Fill it in and its value counts towards reserves.",
+                }),
+              onError,
+            },
+          )
         }
       >
         {data.assets.map((a) => (

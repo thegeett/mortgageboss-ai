@@ -34,6 +34,7 @@ import {
 } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { isProposed } from "@/lib/loan-files/needs";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { NeedsItemPriority, NeedsItemPublic } from "@/lib/types/needs-item";
 import {
   Check,
@@ -45,7 +46,6 @@ import {
   XCircle,
 } from "lucide-react";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 
 /**
  * The possible-duplicate flag (LP-111). When the AI FLAGGED this proposed need as a likely
@@ -74,8 +74,16 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
           disabled={pending}
           onClick={() =>
             merge.mutate(need.id, {
-              onSuccess: () => toast.success("Merged duplicate"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Merged duplicate",
+                  consequence: "One need remains, carrying both documents' requirements.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t merge the needs",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -88,8 +96,14 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
           disabled={pending}
           onClick={() =>
             keepBoth.mutate(need.id, {
-              onSuccess: () => toast.success("Kept both"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Kept both",
+                  consequence:
+                    "They stay as separate needs and won't be offered as a duplicate again.",
+                }),
+              onError: (error) =>
+                notifyError({ title: "Couldn’t keep both", whatToDo: getErrorMessage(error) }),
             })
           }
         >
@@ -143,8 +157,16 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
             dismiss.mutate(
               { needId: need.id },
               {
-                onSuccess: () => toast.success("Need dismissed"),
-                onError: (error) => toast.error(getErrorMessage(error)),
+                onSuccess: () =>
+                  notifySuccess({
+                    title: "Need dismissed",
+                    consequence: "It has left the checklist and no longer counts against the file.",
+                  }),
+                onError: (error) =>
+                  notifyError({
+                    title: "Couldn’t dismiss the need",
+                    whatToDo: getErrorMessage(error),
+                  }),
               },
             )
           }
@@ -158,8 +180,13 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
           disabled={pending}
           onClick={() =>
             keep.mutate(need.id, {
-              onSuccess: () => toast.success("Kept — we won't ask again"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Kept",
+                  consequence: "The need stays on the checklist and we won't ask about it again.",
+                }),
+              onError: (error) =>
+                notifyError({ title: "Couldn’t keep the need", whatToDo: getErrorMessage(error) }),
             })
           }
         >
@@ -195,8 +222,16 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
           disabled={coverage.isPending}
           onClick={() =>
             coverage.mutate(need.id, {
-              onSuccess: () => toast.success("Coverage confirmed"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Coverage confirmed",
+                  consequence: "The need is satisfied by the document you named.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t confirm the coverage",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -214,8 +249,16 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
           disabled={confirm.isPending}
           onClick={() =>
             confirm.mutate(need.id, {
-              onSuccess: () => toast.success("Need confirmed"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Need confirmed",
+                  consequence: "It has moved from proposed onto the working checklist.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t confirm the need",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -304,10 +347,14 @@ function AdjustDialog({
       { needId: need.id, input },
       {
         onSuccess: () => {
-          toast.success("Need updated");
+          notifySuccess({
+            title: "Need updated",
+            consequence: "The checklist now shows your wording.",
+          });
           onClose();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) =>
+          notifyError({ title: "Couldn’t update the need", whatToDo: getErrorMessage(error) }),
       },
     );
   }
@@ -402,10 +449,21 @@ function ReasonDialog({
       { needId: need.id, reason: reason.trim() || undefined },
       {
         onSuccess: () => {
-          toast.success(kind === "dismiss" ? "Need dismissed" : "Need waived");
+          notifySuccess(
+            kind === "dismiss"
+              ? {
+                  title: "Need dismissed",
+                  consequence: "It has left the checklist and no longer counts against the file.",
+                }
+              : {
+                  title: "Need waived",
+                  consequence: "It stays visible as waived, with your reason, and stops blocking.",
+                },
+          );
           onClose();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) =>
+          notifyError({ title: "Couldn’t record that", whatToDo: getErrorMessage(error) }),
       },
     );
   }

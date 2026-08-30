@@ -4,11 +4,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { useUploadDocuments } from "@/lib/api/documents";
 import { normalizeError } from "@/lib/errors/api-error";
 import { validateUploadFile } from "@/lib/loan-files/documents";
+import { notifyError, notifyStarted } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { CloudUpload } from "lucide-react";
 import { useCallback } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
-import { toast } from "sonner";
 
 /** Map a server upload failure to a friendly message (LP-36 server is authoritative). */
 function serverErrorMessage(error: unknown): string {
@@ -39,15 +39,16 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
     (accepted: File[], rejected: FileRejection[]) => {
       // react-dropzone rejects by the accept map; add our size/type messages.
       for (const r of rejected) {
-        toast.error(`${r.file.name} can't be uploaded`, {
-          description: "Use a PDF, JPG, or PNG up to 50 MB.",
+        notifyError({
+          title: `${r.file.name} can’t be uploaded`,
+          whatToDo: "Use a PDF, JPG, or PNG up to 50 MB.",
         });
       }
       const valid: File[] = [];
       for (const file of accepted) {
         const problem = validateUploadFile(file);
         if (problem) {
-          toast.error(`${problem.file} can't be uploaded`, { description: problem.reason });
+          notifyError({ title: `${problem.file} can’t be uploaded`, whatToDo: problem.reason });
         } else {
           valid.push(file);
         }
@@ -57,12 +58,14 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       upload.mutate(valid, {
         onSuccess: (created) => {
           const count = created.length;
-          toast.success(`Uploaded ${count} document${count === 1 ? "" : "s"}`, {
-            description: "Processing has started.",
+          notifyStarted({
+            title: `Uploaded ${count} document${count === 1 ? "" : "s"}`,
+            consequence:
+              "Each one is being read now; its fields appear on the file as it finishes.",
           });
         },
         onError: (error) => {
-          toast.error("Upload failed", { description: serverErrorMessage(error) });
+          notifyError({ title: "The upload didn’t finish", whatToDo: serverErrorMessage(error) });
         },
       });
     },

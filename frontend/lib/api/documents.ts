@@ -57,11 +57,13 @@ export async function fetchLoanFileDocuments(fileId: string): Promise<DocumentRe
   return res.data;
 }
 
-export function useLoanFileDocuments(fileId: string) {
+export function useLoanFileDocuments(fileId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: documentsQueryKey(fileId),
     queryFn: () => fetchLoanFileDocuments(fileId),
-    enabled: Boolean(fileId),
+    // `enabled` so a caller can ask only when the answer matters — the delete
+    // confirmation (LP-UI-035) needs a document count, and only while it is open.
+    enabled: Boolean(fileId) && (options?.enabled ?? true),
     retry: noRetryOn404,
     // Poll WHILE any document is in-progress; STOP once all are terminal or the
     // backstop trips (dataUpdateCount = the number of successful fetches so far).

@@ -9,9 +9,9 @@
 import { EditableRow, type FieldDef } from "@/components/file/overview/editable-row";
 import { useUpdateProperty } from "@/lib/api/overview-edit";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { PropertyPublic } from "@/lib/types/loan-file";
 import { OCCUPANCY_TYPE_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/validation/intake";
-import { toast } from "sonner";
 
 const PROPERTY_FIELDS: FieldDef[] = [
   { key: "address_line", label: "Address", kind: "text" },
@@ -46,9 +46,13 @@ export function PropertyEditor({ fileId, property }: { fileId: string; property:
       }}
       onSave={(changed) =>
         update.mutate(changed, {
-          onSuccess: () => toast.success("Property updated"),
+          onSuccess: () =>
+            notifySuccess({
+              title: "Property updated",
+              consequence: "LTV and the property rules recalculate on the next run.",
+            }),
           onError: (e) =>
-            toast.error("Couldn't save the property", { description: getErrorMessage(e) }),
+            notifyError({ title: "Couldn’t save the property", whatToDo: getErrorMessage(e) }),
         })
       }
       busy={update.isPending}

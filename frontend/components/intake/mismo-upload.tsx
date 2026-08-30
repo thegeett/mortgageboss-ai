@@ -3,12 +3,12 @@
 import { Spinner } from "@/components/ui/spinner";
 import { useImportMismo } from "@/lib/api/mismo";
 import { normalizeError } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { FileUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
-import { toast } from "sonner";
 
 /** Friendly message for an import failure (LP-54 safe envelope via LP-46). */
 function importErrorMessage(error: unknown): string {
@@ -35,8 +35,9 @@ export function MismoUpload() {
   const onDrop = useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
       if (rejected.length > 0) {
-        toast.error("That file type isn't supported", {
-          description: "Upload the MISMO file (.xml or .html) from your loan origination system.",
+        notifyError({
+          title: "That file type isn’t supported",
+          whatToDo: "Upload the MISMO file (.xml or .html) from your loan origination system.",
         });
         return;
       }
@@ -45,17 +46,18 @@ export function MismoUpload() {
       importMismo.mutate(file, {
         onSuccess: (result) => {
           const n = result.warnings.length;
-          toast.success("Loan file imported", {
-            description:
+          notifySuccess({
+            title: "Loan file imported",
+            consequence:
               n > 0
-                ? `Imported with ${n} field${n === 1 ? "" : "s"} to review.`
-                : "The application data is filled in.",
+                ? `${n} field${n === 1 ? " needs" : "s need"} a look — ${n === 1 ? "it is" : "they are"} flagged on the file.`
+                : "The application data is filled in and the file is ready to work.",
           });
           // Import-directly: open the populated file immediately.
           router.push(`/loan-files/${result.loan_file.display_id}`);
         },
         onError: (error) => {
-          toast.error("Import failed", { description: importErrorMessage(error) });
+          notifyError({ title: "The import didn’t finish", whatToDo: importErrorMessage(error) });
         },
       });
     },

@@ -11,12 +11,12 @@ import { useCreateProperty } from "@/lib/api/overview-edit";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { formatMoney, humanize } from "@/lib/format";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail } from "@/lib/types/loan-file";
 import { Building2, Check, Landmark, Pencil, Plus, TriangleAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 function OverviewCard({
   title,
@@ -192,12 +192,16 @@ export function PropertyCard({
                   {},
                   {
                     onSuccess: () => {
-                      toast.success("Property added");
+                      notifySuccess({
+                        title: "Property added",
+                        consequence: "LTV and the property rules can now run on this file.",
+                      });
                       setEditing(true);
                     },
                     onError: (e) =>
-                      toast.error("Couldn't add the property", {
-                        description: getErrorMessage(e),
+                      notifyError({
+                        title: "Couldn’t add the property",
+                        whatToDo: getErrorMessage(e),
                       }),
                   },
                 )

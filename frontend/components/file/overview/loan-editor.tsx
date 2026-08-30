@@ -22,6 +22,7 @@ import { useLenders } from "@/lib/api/lenders";
 import { useUpdateLoanFile } from "@/lib/api/overview-edit";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { programLabel } from "@/lib/loan-files/labels";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { LoanFileDetail, LoanProgram } from "@/lib/types/loan-file";
 import {
   LOAN_PROGRAM_OPTIONS,
@@ -29,7 +30,6 @@ import {
   REFINANCE_TYPE_OPTIONS,
 } from "@/lib/validation/intake";
 import { useState } from "react";
-import { toast } from "sonner";
 
 export function LoanEditor({ file }: { file: LoanFileDetail }) {
   const update = useUpdateLoanFile(file.id);
@@ -67,8 +67,14 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
 
   function commit(changed: Record<string, unknown>) {
     update.mutate(changed, {
-      onSuccess: () => toast.success("Loan updated"),
-      onError: (e) => toast.error("Couldn't save the loan", { description: getErrorMessage(e) }),
+      onSuccess: () =>
+        notifySuccess({
+          title: "Loan updated",
+          consequence:
+            "The ratios and any rule that reads these figures recalculate on the next run.",
+        }),
+      onError: (e) =>
+        notifyError({ title: "Couldn’t save the loan", whatToDo: getErrorMessage(e) }),
     });
   }
 
