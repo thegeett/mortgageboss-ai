@@ -196,3 +196,22 @@ describe("ValidationAidPage", () => {
     expect(starter.className).not.toBe(validated.className);
   });
 });
+
+describe("the status filter offers every status", () => {
+  // VALIDATION_STATUS is exhaustive over `ValidationStatus`, so a fifth status
+  // is a compile error there. A hardcoded list of options beside it would stay
+  // green while silently offering no way to filter for the new one — one
+  // concept, two enumerations, which is the shape this epic keeps finding.
+  it("derives its options from the vocabulary", async () => {
+    const { VALIDATION_STATUS } = await import("@/lib/status");
+    useInventoryMock.mockReturnValue({ data: INVENTORY, isPending: false, isError: false });
+    render(<ValidationAidPage />);
+
+    const select = screen.getByLabelText(/status/i) as HTMLSelectElement;
+    const options = [...select.options].map((o) => o.value);
+    for (const status of Object.keys(VALIDATION_STATUS)) {
+      expect(options, `${status} cannot be filtered for`).toContain(status);
+    }
+    expect(options).toContain("all");
+  });
+});

@@ -19,7 +19,11 @@ import { SkeletonText } from "@/components/ui/skeleton";
 import { useRecordVerdict, useValidationInventory } from "@/lib/api/validation-aid";
 import { VALIDATION_STATUS, resolveStatus } from "@/lib/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import type { InventoryItem, ValidationInventory } from "@/lib/types/validation-aid";
+import type {
+  InventoryItem,
+  ValidationInventory,
+  ValidationStatus,
+} from "@/lib/types/validation-aid";
 import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -129,7 +133,11 @@ function Inventory({ data }: { data: ValidationInventory }) {
           label="Status"
           value={statusFilter}
           onChange={setStatusFilter}
-          options={["all", "grounded_starter", "validated", "corrected", "flagged_remove"]}
+          // DERIVED from the vocabulary, not restated beside it. VALIDATION_STATUS
+          // is exhaustive over `ValidationStatus`, so a fifth status is a compile
+          // error there — and a hardcoded list here would stay green while
+          // silently offering no way to filter for it.
+          options={["all", ...(Object.keys(VALIDATION_STATUS) as ValidationStatus[])]}
         />
         <span className="ml-auto text-muted-foreground">
           {shown.length} of {data.total}
