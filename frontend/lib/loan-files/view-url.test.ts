@@ -4,6 +4,7 @@ import {
   readPipelineUrl,
   writePipelineUrl,
 } from "@/lib/loan-files/view-url";
+import { LOAN_FILE_STATUS } from "@/lib/status";
 import { describe, expect, it } from "vitest";
 
 describe("pipeline URL state (LP-UI-014)", () => {
@@ -56,5 +57,36 @@ describe("pipeline URL state (LP-UI-014)", () => {
     expect(isFiltered({ statuses: [], search: "", viewId: "abc" })).toBe(false);
     expect(isFiltered({ statuses: ["draft"], search: "", viewId: null })).toBe(true);
     expect(isFiltered({ statuses: [], search: "smith", viewId: null })).toBe(true);
+  });
+});
+
+describe("readPipelineUrl rejects a status this build does not know", () => {
+  // The endpoint types `status` as `list[LoanFileStatus]`, so FastAPI answers an
+  // unknown one with a 422 and the dashboard renders its error state. A URL is a
+  // paste-able, bookmarkable artifact: a typo in one should drop the filter, not
+  // break the page — and the day a status is retired, every saved view carrying
+  // it should widen rather than start failing.
+  it("drops an unknown status and keeps the known ones", () => {
+    const state = readPipelineUrl(
+      new URLSearchParams("status=draft&status=nonsense&status=closed"),
+    );
+    expect(state.statuses).toEqual(["draft", "closed"]);
+  });
+
+  it("drops them all rather than sending one through", () => {
+    expect(readPipelineUrl(new URLSearchParams("status=nope&status=alsonope")).statuses).toEqual(
+      [],
+    );
+  });
+
+  it("still accepts every status the app defines", () => {
+    const all = Object.keys(LOAN_FILE_STATUS);
+    const params = new URLSearchParams(all.map((s) => ["status", s]));
+    expect(readPipelineUrl(params).statuses).toEqual(all);
+  });
+
+  it("round-trips through writePipelineUrl", () => {
+    const state = readPipelineUrl(new URLSearchParams("status=draft&q=smith&view=abc"));
+    expect(readPipelineUrl(new URLSearchParams(writePipelineUrl(state)))).toEqual(state);
   });
 });

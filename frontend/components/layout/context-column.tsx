@@ -1,11 +1,11 @@
 "use client";
 
 import { SavedViews } from "@/components/dashboard/saved-views";
-import { isFiltered, readPipelineUrl } from "@/lib/loan-files/view-url";
+import { isFiltered, usePipelineUrl } from "@/lib/loan-files/view-url";
 import { activeItemHref, contextSection } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 /** Referenced by the rail's toggle via `aria-controls`. */
 export const CONTEXT_COLUMN_ID = "context-column";
@@ -23,7 +23,7 @@ export const CONTEXT_COLUMN_ID = "context-column";
  */
 export function ContextColumn() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const urlState = usePipelineUrl();
   const section = contextSection(pathname);
   // The pipeline's column is saved views (LP-UI-014), not a link list — it is
   // the one section whose contents are data rather than routes.
@@ -42,10 +42,7 @@ export function ContextColumn() {
         className="hidden w-nav shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-150 md:block"
         data-context-column
       >
-        <SavedViews
-          activeViewId={searchParams.get("view")}
-          filtered={isFiltered(readPipelineUrl(new URLSearchParams(searchParams.toString())))}
-        />
+        <SavedViews activeViewId={urlState.viewId} filtered={isFiltered(urlState)} />
       </div>
     );
   }

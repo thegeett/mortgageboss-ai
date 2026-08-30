@@ -134,3 +134,109 @@ filtered.
   `lib/loan-files/status.ts` (+ test); `filter-pills.tsx` deleted
 - backend: `services/loan_files.py`, `api/saved_views.py`,
   `schemas/saved_view.py`, `tests/api/test_saved_views_endpoints.py`
+
+## Review pass — a URL that could break the page it describes
+
+Reviewed on request from the session running the epic. Four defects, and both
+judgement calls confirmed.
+
+### An unknown status in the URL broke the dashboard
+
+`readPipelineUrl` cast `params.getAll("status")` to `LoanFileStatus[]`. The
+endpoint types it as `list[LoanFileStatus]`, so FastAPI answers an unrecognised
+one with a **422** and the dashboard renders its error state. A URL here is a
+paste-able, bookmarkable artifact — the entire premise of putting filter state in
+it — so a typo in one should drop the filter, not break the screen.
+
+The sharper case is the one nobody types: the day a status is retired, every
+saved view and every bookmark carrying it starts failing rather than quietly
+widening.
+
+Filtered rather than cast, against `LOAN_FILE_STATUS` — the map LP-UI-005 already
+made exhaustive over the union. Not a second list of statuses; a second list is
+how the two drift.
+
+### Changing the filter left you on page 3 of a two-row result
+
+`setPage(1)` was keyed on `urlState.search` alone. Selecting a saved view changes
+`?view=` and `?status=`, not `q`, so switching from "All files" on page 3 to a
+view with two matches left `page` at 3 — an empty table under "Showing 41–60 of
+2". Now keyed on the serialised filter, so statuses and the selected view count.
+
+Adjusted **during render** rather than in an effect. React documents the pattern
+for exactly this, and it is not a style preference here: an effect resets after a
+paint, so the wrong page is fetched and rendered first and the corrected one
+arrives behind it. It also takes the reset off the effect graph, which answers
+the hand-off's own worry — the search sync is now the only effect writing state,
+so there is no second one to feed it.
+
+On the loop the hand-off could not reproduce: it converges, and the trimming
+asymmetry is why it looks like it should not. `debouncedSearch` is trimmed and
+`urlState.search` is not, so `?q=%20smith%20` does take one extra `replace` — and
+then settles, because `writePipelineUrl` trims too and the second pass agrees.
+`?q=%20%20` settles the same way, via the empty string. Traced rather than
+assumed, but it is one extra history-free navigation, not a cycle.
+
+### Two parsers of one URL
+
+The dashboard and the context column each built a `URLSearchParams` and parsed
+it. The same many-producers shape flagged twice before, and the cost here is only
+that they can drift — which is enough. `usePipelineUrl()` is now the one reader,
+memoised on the query string.
+
+### `view-url.ts` had six tests and its consumer had none
+
+The hand-off named this as the wrong half to have covered, and it is exactly
+LP-UI-011's lesson: a helper stays green while the component stops calling it.
+Seven tests on the rendered `SavedViews`, including two properties worth naming:
+
+- **"All files" is not current on a hand-edited filter.** The defect the ticket
+  caught on the way; now it cannot come back.
+- **A failed request says "unavailable", not "No saved views yet."** Those are
+  different facts. Telling a processor they have no saved views when the request
+  failed is a lie about their own data.
+
+Plus three dashboard-paging tests, on the rendered page rather than the reset
+logic, including one asserting it does NOT reset when the URL is unchanged — a
+reset keyed on object identity would send the reader back to page 1 every render.
+
+### Confirmed, not changed
+
+- **`useSavedViews` does not run on every route with a column.** `SavedViews` is
+  behind `pathname === "/dashboard"` in `ContextColumn`, so the hook mounts only
+  there. Checked, because the hand-off was right that it would have been a real
+  cost if true.
+- **`router.replace` for the debounced search is right**, and the consequence the
+  hand-off worried about is the intended one. A keystroke is not a destination;
+  filling the back stack with `?q=s`, `?q=sm`, `?q=smi` makes the back button
+  useless, which is a worse loss than not being able to reverse a search by
+  going back. Saved views navigate with a real link and so DO land in history,
+  which is the coarse-grained half that should.
+- **Deleting `FILTER_PILLS` / `statusesForFilter`.** Genuinely orphaned —
+  nothing under `app/`, `components/` or `lib/` references either. Recording the
+  groupings in the ticket as views worth seeding is the right disposal.
+- **Moving the "toggle is not rendered where there is no column" test.** It
+  preserves what it was for. The property is "a disclosure button that discloses
+  nothing is a control that lies"; `/dashboard` was only ever an EXAMPLE of a
+  column-less route, and it stopped being one when this ticket gave it saved
+  views. Moving it to `/dev/extraction-bench` keeps the property with a valid
+  example, and the added case asserting the toggle IS present on the dashboard is
+  a better test than the original — it pins both directions where the original
+  pinned one.
+- **`_apply_filters` is genuinely shared.** Both `count_loan_files` and
+  `list_loan_files` build on it, so a count cannot drift from the list it counts.
+  This is the LP-UI-013 lesson applied before the fact rather than after, which
+  is the first time in this epic that has happened.
+
+### Verification
+
+Frontend `tsc` clean, `biome` clean over 227 files, **611 tests** (from 597),
+build compiles. Backend unchanged by this review and still green. Every fix
+mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| revert to the unvalidated status cast | 2 tests fail |
+| key the page reset on search alone | 2 tests fail |
+| mark "All files" current on a hand-edited filter | 1 test fails |
+| show "no saved views yet" on a failed request | 1 test fails |

@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
 import { byAttention } from "@/lib/loan-files/attention";
-import { isFiltered, readPipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
+import { isFiltered, usePipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
@@ -30,11 +30,7 @@ export default function DashboardPage() {
   // processor can paste what they are looking at to a colleague. The search box
   // keeps local state only for what has been typed but not yet committed —
   // pushing a route on every keystroke would fill the history with fragments.
-  const searchParams = useSearchParams();
-  const urlState = useMemo(
-    () => readPipelineUrl(new URLSearchParams(searchParams.toString())),
-    [searchParams],
-  );
+  const urlState = usePipelineUrl();
 
   const [searchInput, setSearchInput] = useState(urlState.search);
   const [page, setPage] = useState(1);
@@ -43,8 +39,25 @@ export default function DashboardPage() {
   // The URL is the source of truth; the typed value catches up to it.
   useEffect(() => {
     setSearchInput(urlState.search);
-    setPage(1);
   }, [urlState.search]);
+
+  // Page 1 whenever the FILTER changes — any part of it, not just the search.
+  // Keyed on the serialised state so statuses and the selected view count too:
+  // switching from "All files" on page 3 to a view with two matches left `page`
+  // at 3, and the table came back empty under "Showing 41–60 of 2".
+  //
+  // Adjusted DURING RENDER rather than in an effect. React documents this for
+  // exactly this case, and it is not a style preference here: an effect resets
+  // after a paint, so the wrong page is fetched and rendered first and the
+  // corrected one arrives behind it. It also keeps this off the effect graph —
+  // the search sync below is then the only effect writing state, so the two
+  // cannot feed each other.
+  const filterKey = writePipelineUrl(urlState);
+  const [pagedFilter, setPagedFilter] = useState(filterKey);
+  if (pagedFilter !== filterKey) {
+    setPagedFilter(filterKey);
+    setPage(1);
+  }
 
   // ...and it catches up the other way once typing settles.
   useEffect(() => {
