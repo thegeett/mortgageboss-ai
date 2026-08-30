@@ -186,7 +186,8 @@ export const DOCUMENT_COLUMNS: ReadonlyArray<{ label: string; width: string; ske
   { label: "Size", width: "w-[9%]", skeleton: "w-1/3" },
 ];
 
-function DocumentTableHeader() {
+/** Exported so a test can render it beside a real row and compare cell counts. */
+export function DocumentTableHeader() {
   return (
     <TableHeader>
       <TableRow>

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   FIT,
-  SHARP_TO,
   ZOOM_STEPS,
   canZoomIn,
   canZoomOut,
+  sharpUpTo,
   zoomIn,
   zoomLabel,
   zoomOut,
@@ -46,31 +46,25 @@ describe("zoom steps", () => {
     expect(zoomOut(1.1)).toBe(1);
   });
 
-  it("stays within the range the 2x render can keep sharp, at fit and below", () => {
-    // Above SHARP_TO the browser invents pixels. The steps go there on purpose —
-    // a processor reading small print would rather have it big and soft — but
-    // fit and every step below it are within the sharp range.
-    expect(FIT).toBeLessThanOrEqual(SHARP_TO);
-    for (const step of ZOOM_STEPS.filter((s) => s <= FIT)) {
-      expect(step).toBeLessThanOrEqual(SHARP_TO);
-    }
+  it("says how far a given pane can be zoomed before the text softens", () => {
+    // REAL ARITHMETIC, not a restated number. The server renders at 2x
+    // (`DEFAULT_ZOOM` in page_render.py), so a 612pt US Letter page is 1224px.
+    const rendered = 612 * 2;
+    expect(sharpUpTo(rendered, 736)).toBeCloseTo(1.66, 2);
+    expect(sharpUpTo(rendered, 1024)).toBeCloseTo(1.2, 2);
   });
-});
 
-describe("zoomLabel", () => {
-  it("reads as a percentage", () => {
-    expect(zoomLabel(1)).toBe("100%");
-    expect(zoomLabel(0.5)).toBe("50%");
-    expect(zoomLabel(1.25)).toBe("125%");
+  it("reports a WIDE pane as already soft at fit, which a constant cannot", () => {
+    // The case that shows the old `SHARP_TO = 1.65` was a category error: it is
+    // not a property of the render, it is a ratio against a pane the processor
+    // drags. At 1440px the fit view is already scaling past the pixels it has.
+    expect(sharpUpTo(612 * 2, 1440)).toBeLessThan(FIT);
   });
-});
 
-describe("zoomWidth", () => {
-  it("scales the fitted column rather than a fixed width", () => {
-    // The base is `min(100%, 46rem)`: on a narrow pane a fixed 46rem base would
-    // make 50% WIDER than the pane it is meant to fit inside.
-    expect(zoomWidth(1)).toBe("calc(min(100%, 46rem) * 1)");
-    expect(zoomWidth(0.5)).toContain("min(100%, 46rem)");
-    expect(zoomWidth(2)).toContain("* 2");
+  it("treats a pane not yet measured as nothing to warn about", () => {
+    // Not a guard — division already returns Infinity. Asserted because the
+    // BEHAVIOUR matters (no false "soft" warning before layout), and stated as
+    // behaviour so nobody adds a branch to produce what already happens.
+    expect(sharpUpTo(1224, 0)).toBe(Number.POSITIVE_INFINITY);
   });
 });

@@ -1,7 +1,6 @@
 import { apiClient } from "@/lib/api/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { useEffect } from "react";
 
 /**
  * One rendered page of a document (LP-UI-030).
@@ -72,7 +71,6 @@ export async function fetchPageImage(documentId: string, page: number): Promise<
  * retrying it would just be slower on the common case.
  */
 export function usePageImage(documentId: string | null, page: number) {
-  useRevokeOnEviction();
   return useQuery({
     queryKey: pageImageQueryKey(documentId ?? "", page),
     queryFn: () => fetchPageImage(documentId as string, page),
@@ -86,22 +84,24 @@ export function usePageImage(documentId: string | null, page: number) {
 /**
  * Revoke a page image's object URL when the query cache evicts it.
  *
- * Subscribing per hook instance is deliberate and safe: `revokeObjectURL` on an
- * already-revoked url is a no-op, and the subscription is torn down with the
- * component. What matters is that SOMETHING outlives the component that first
- * fetched the page, because the cached url does.
+ * SUBSCRIBED TO THE CLIENT, not from a component, and that is the whole point.
+ * The first version ran inside `usePageImage`, so the subscription was torn down
+ * on unmount — while eviction happens LATER by design, five minutes after the
+ * last observer goes away (TanStack's default `gcTime`). Leaving the reviewer
+ * therefore removed every listener, and when the cache finally dropped the
+ * entries there was nobody to revoke them: every page a processor had looked at
+ * stayed held, as full-page PNGs, for the rest of the session.
+ *
+ * The old comment had the right requirement — "something must outlive the
+ * component, because the cached url does" — and a per-component subscription
+ * cannot satisfy it. This one lives as long as the cache it is watching.
  */
-function useRevokeOnEviction(): void {
-  const queryClient = useQueryClient();
-  useEffect(
-    () =>
-      queryClient.getQueryCache().subscribe((event) => {
-        if (event.type !== "removed") return;
-        const key = event.query.queryKey;
-        if (!Array.isArray(key) || key[0] !== PAGE_IMAGE_KEY) return;
-        const data = event.query.state.data as PageImage | undefined;
-        if (data?.url) URL.revokeObjectURL(data.url);
-      }),
-    [queryClient],
-  );
+export function revokePageImagesOnEviction(queryClient: QueryClient): () => void {
+  return queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "removed") return;
+    const key = event.query.queryKey;
+    if (!Array.isArray(key) || key[0] !== PAGE_IMAGE_KEY) return;
+    const data = event.query.state.data as PageImage | undefined;
+    if (data?.url) URL.revokeObjectURL(data.url);
+  });
 }

@@ -2,7 +2,7 @@
 import type { DocumentResponse } from "@/lib/types/document";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DOCUMENT_COLUMNS, DocumentList, DocumentRow } from "./document-list";
+import { DOCUMENT_COLUMNS, DocumentList, DocumentRow, DocumentTableHeader } from "./document-list";
 
 afterEach(cleanup);
 
@@ -393,6 +393,27 @@ describe("the real row against the declared columns", () => {
     expect(container.querySelector("tr")?.querySelectorAll("td")).toHaveLength(
       DOCUMENT_COLUMNS.length + 1,
     );
+  });
+
+  it("renders exactly as many cells as the HEADER renders columns", () => {
+    // The comparison LP-UI-037 added for the pipeline, brought here. Both the row
+    // and the skeleton are checked against `DOCUMENT_COLUMNS.length + 1`, which
+    // is the same derived number twice — so they agree with each other and
+    // neither is compared to the thing they must line up WITH. If the header ever
+    // stops rendering its nameless Details cell, both would still pass and every
+    // row would sit one column off its header.
+    const { container } = render(
+      <table>
+        <DocumentTableHeader />
+        <tbody>
+          <DocumentRow document={doc()} onOpen={() => {}} onOpenDetails={() => {}} />
+        </tbody>
+      </table>,
+    );
+    const head = container.querySelectorAll("thead th");
+    const row = container.querySelector("tbody tr");
+    expect(head.length, "no header rendered — the comparison would be vacuous").toBeGreaterThan(0);
+    expect(row?.querySelectorAll("td")).toHaveLength(head.length);
   });
 
   it("opens the DOCUMENT from the row and the DRAWER from the details button", () => {

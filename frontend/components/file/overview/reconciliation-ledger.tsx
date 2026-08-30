@@ -190,11 +190,15 @@ function Row({ row, fileId }: { row: ReconciliationRow; fileId: string }) {
 /**
  * Provenance for one row — a link to the document, or the reason there is none.
  *
- * The page number is SHOWN but is not part of the link, and that is a
- * dependency, not an oversight. `?doc=` (LP-114) opens the document's drawer,
- * which is metadata and extracted fields — there is no page canvas in the
- * product yet, so no URL can open one at page 2. LP-UI-030 builds that canvas;
- * the page becomes a link target there. Until then the snippet is the evidence:
+ * The page number is SHOWN but is not part of the link, and the reason has
+ * CHANGED. It used to be a real dependency: `?doc=` opened the details drawer,
+ * which is metadata and extracted fields, and no page canvas existed for a URL
+ * to open at page 2. LP-UI-030 built that canvas and LP-UI-041 pointed `?doc=`
+ * at it, so the blocker named here is gone — what remains is that the reviewer
+ * holds its page in component state rather than in the URL, so there is no
+ * parameter to carry the number. That is a small piece of work, not a missing
+ * capability, and it is worth doing precisely because the snippet below is
+ * currently standing in for it. Until then the snippet is the evidence:
  * it is the text the extraction actually read, which is the thing a processor
  * would open the page to check.
  */

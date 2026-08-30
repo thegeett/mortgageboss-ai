@@ -47,8 +47,10 @@ import { type ReactNode, useId, useState } from "react";
 /**
  * The finding's SOURCE DOCUMENTS (LP-114 → LP-114.1) — names ALL the documents that derived the
  * finding (a cross-source finding spans several: a pay stub AND a W-2 for one employer), so a
- * processor can verify the judgment against every one. Each name links to open that document (its
- * drawer, via the Documents tab's ?doc= param) when the file id is known; otherwise it's text.
+ * processor can verify the judgment against every one. Each name links to open that document — the
+ * ?doc= param, which LP-UI-041 redirects to the REVIEWER rather than the details drawer, because a
+ * provenance link means "show me the document this came from" — when the file id is known;
+ * otherwise it's text.
  * Renders nothing when no source could be attributed (a file-level/computed rule, or no distinctive
  * value to match) — graceful, never a broken "Source:" or a guessed-wrong link.
  */

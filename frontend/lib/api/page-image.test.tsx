@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const get = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/client", () => ({ apiClient: { get } }));
 
+import { makeQueryClient } from "@/lib/query-client";
+
 import { pageImageQueryKey, usePageImage } from "./page-image";
 
 const revoke = vi.fn();
@@ -104,7 +106,11 @@ describe("usePageImage", () => {
 
   it("revokes when the cache evicts the entry", async () => {
     // The other half. Without this a forty-page document leaks forty images.
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    //
+    // `makeQueryClient()` rather than a bare `new QueryClient` — the revoke
+    // subscription belongs to the client now, not to the hook, so a hand-built
+    // client here would be testing a client the app never constructs.
+    const client = makeQueryClient();
     const { result } = renderHook(() => usePageImage("d1", 1), { wrapper: wrapper(client) });
     await waitFor(() => expect(result.current.data).toBeTruthy());
     const url = result.current.data?.url as string;
@@ -114,5 +120,38 @@ describe("usePageImage", () => {
     expect(entry, "the query should be in the cache to evict").toBeTruthy();
     if (entry) cache.remove(entry);
     expect(revoke).toHaveBeenCalledWith(url);
+  });
+});
+
+describe("the blob survives the component that fetched it", () => {
+  /**
+   * The revoke subscription used to live inside `usePageImage`, so it was torn
+   * down with the component — and eviction happens LATER, by design, five
+   * minutes after the last observer unmounts (TanStack's default `gcTime`).
+   *
+   * So leaving the reviewer removed every listener, and when the cache finally
+   * dropped the entries nothing was there to revoke them. The comment said
+   * "something must outlive the component, because the cached url does"; nothing
+   * outlived ALL of them. Page after page of full-page PNGs stayed held for the
+   * rest of the session.
+   */
+  it("revokes on eviction even after every component has unmounted", async () => {
+    // The real client, because the subscription is now part of what MAKES one —
+    // a hand-built QueryClient here would test a client the app never uses.
+    const client = makeQueryClient();
+    const { result, unmount } = renderHook(() => usePageImage("doc-1", 1), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.data?.url).toBeTruthy());
+    const url = result.current.data?.url;
+
+    unmount(); // the processor leaves the reviewer
+    expect(revoke).not.toHaveBeenCalled(); // still cached — correct so far
+
+    const cache = client.getQueryCache();
+    const entry = cache.find({ queryKey: pageImageQueryKey("doc-1", 1) });
+    expect(entry, "the entry should still be cached after unmount").toBeTruthy();
+    if (entry) cache.remove(entry);
+    expect(revoke, "the blob leaked for the rest of the session").toHaveBeenCalledWith(url);
   });
 });

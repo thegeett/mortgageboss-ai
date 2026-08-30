@@ -22,8 +22,34 @@ export const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 export const FIT: number = 1;
 
-/** Above this, CSS scaling outruns the 2× render and the text softens. */
-export const SHARP_TO = 1.65;
+/**
+ * The zoom above which CSS scaling outruns the render and the text softens.
+ *
+ * IT IS NOT A CONSTANT, which is what the previous `SHARP_TO = 1.65` said it was.
+ * Sharpness holds while the displayed width stays inside the rendered width, so
+ * the threshold is a RATIO of the two — and the displayed width is the canvas
+ * pane, which a processor drags. The server renders at `DEFAULT_ZOOM = 2.0`
+ * (`page_render.py`), so a 612pt US Letter page arrives as 1224px:
+ *
+ * | pane   | sharp up to |
+ * |--------|-------------|
+ * | 560px  | 2.19x       |
+ * | 736px  | 1.66x       |
+ * | 1024px | 1.20x       |
+ * | 1440px | 0.85x       |
+ *
+ * 1.65 was the 736px row, written down as though it held everywhere. At a
+ * 1440px pane even FIT is already soft — the case a single number cannot say.
+ *
+ * Both widths are available now: the rendered width comes from
+ * `X-Page-Width-Points` (readable since LP-UI-041's CORS fix) and the displayed
+ * width from the pane. Nothing calls this yet; it is here so the arithmetic is
+ * written where it can be used, rather than as a number that looks measured.
+ */
+export function sharpUpTo(renderedWidthPx: number, displayedWidthPx: number): number {
+  if (displayedWidthPx <= 0) return Number.POSITIVE_INFINITY;
+  return renderedWidthPx / displayedWidthPx;
+}
 
 export function zoomIn(current: number): number {
   return ZOOM_STEPS.find((step) => step > current) ?? current;
