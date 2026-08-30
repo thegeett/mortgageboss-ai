@@ -54,11 +54,15 @@ export function loanFilesQueryKey(query: LoanFilesQuery) {
   ] as const;
 }
 
-export function useLoanFiles(query: LoanFilesQuery) {
+export function useLoanFiles(query: LoanFilesQuery, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: loanFilesQueryKey(query),
     queryFn: () => fetchLoanFiles(query),
     placeholderData: keepPreviousData,
+    // `enabled` so a caller can ask a question only when the answer matters —
+    // the empty-state count (LP-UI-034) is worth one request when a processor is
+    // stuck, and worth none the rest of the time.
+    enabled: options?.enabled,
   });
 }
 

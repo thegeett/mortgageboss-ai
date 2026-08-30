@@ -1,8 +1,9 @@
 "use client";
 
 import { StatusToken, railClass } from "@/components/status-token";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -123,11 +124,78 @@ function DocumentRow({
   );
 }
 
-function ListSkeleton() {
+/**
+ * The loading state, built from the SAME table primitives as the real rows.
+ *
+ * It used to be a stack of `h-[58px]` bars, and by the time anyone measured it
+ * the rows were 53px — a 5px jump per row on every documents tab. A hardcoded
+ * height is a copy of a number that lives somewhere else, and it rots silently
+ * because nothing renders both and compares.
+ *
+ * Cells inherit their height from the row primitive, so the skeleton cannot
+ * drift from the row again: change the density and both move together. This is
+ * what `file-table`'s `LoadingRows` does, and that one measures 0px of shift.
+ */
+/**
+ * The table's columns, declared once.
+ *
+ * The loading skeleton and the real table both render this. Writing the header
+ * twice — which is what this replaces — lets a new column reach the rows and not
+ * the skeleton, and the two then disagree about how many cells a row has, which
+ * shows up as a column that jumps sideways when the data lands.
+ */
+export const DOCUMENT_COLUMNS: ReadonlyArray<{ label: string; width: string; skeleton: string }> = [
+  { label: "Document", width: "w-[40%]", skeleton: "w-3/4" },
+  { label: "Period", width: "w-[18%]", skeleton: "w-2/3" },
+  { label: "Type", width: "w-[14%]", skeleton: "w-1/2" },
+  { label: "Status", width: "w-[19%]", skeleton: "w-2/3" },
+  { label: "Size", width: "w-[9%]", skeleton: "w-1/3" },
+];
+
+function DocumentTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        {DOCUMENT_COLUMNS.map((column) => (
+          <TableHead key={column.label} className={column.width}>
+            {column.label}
+          </TableHead>
+        ))}
+      </TableRow>
+    </TableHeader>
+  );
+}
+
+export function ListSkeleton() {
   return (
     <div aria-busy>
       <output className="sr-only">Loading documents</output>
-      <SkeletonRows count={3} itemClassName="h-[58px]" />
+      <Table className="table-fixed">
+        <DocumentTableHeader />
+        <TableBody>
+          {Array.from({ length: 3 }, (_, row) => row).map((row) => (
+            <TableRow key={row}>
+              {/* The first cell carries TWO lines on a real row — the standard
+                  name and, for a recognised document, its gist — and two lines
+                  are what make the row 53px rather than 28px. The skeleton
+                  reproduces the shape, not just the primitive, because the
+                  primitive alone measured a 25px jump. */}
+              <TableCell className="py-1.5 align-top">
+                {/* h-5 / h-4 are the LINE HEIGHTS of `text-sm` and `text-xs`,
+                    not guesses: the bars stand in for those two lines, so they
+                    take their sizes. */}
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="mt-0.5 h-4 w-1/2" />
+              </TableCell>
+              {DOCUMENT_COLUMNS.slice(1).map((column) => (
+                <TableCell key={column.label} className="py-1.5 align-top">
+                  <Skeleton className={cn("h-5", column.skeleton)} />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -150,18 +218,20 @@ export function DocumentList({
     return (
       <ErrorState
         title="Couldn’t load your documents"
-        message="Something went wrong loading this file’s documents."
+        // Names what failed and what still holds. "Something went wrong" said
+        // neither, and the ticket bans the phrase for that reason.
+        message="The list didn’t come back. Nothing has been changed — the documents are still on the file."
         onRetry={onRetry}
       />
     );
   }
   if (!documents || documents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
-        <p className="text-sm font-medium text-foreground">No documents yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Drag files onto the area above to upload.
-        </p>
+      <div className="rounded-lg border border-dashed border-border bg-card">
+        <EmptyState kind="nothing-yet" title="No documents yet">
+          Drop a pay stub, a bank statement or a W-2 onto the area above. Each one is read and its
+          figures land on this file.
+        </EmptyState>
       </div>
     );
   }
@@ -198,15 +268,7 @@ export function DocumentList({
               Scoped here rather than on the shared Table: fixed layout needs every
               width declared, and the pipeline grid does not declare all ten. */}
           <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40%]">Document</TableHead>
-                <TableHead className="w-[18%]">Period</TableHead>
-                <TableHead className="w-[14%]">Type</TableHead>
-                <TableHead className="w-[19%]">Status</TableHead>
-                <TableHead className="w-[9%]">Size</TableHead>
-              </TableRow>
-            </TableHeader>
+            <DocumentTableHeader />
             <TableBody>
               {group.documents.map((doc) => (
                 <DocumentRow key={doc.id} document={doc} onSelect={onSelect} />

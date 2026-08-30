@@ -17,8 +17,11 @@ function serverErrorMessage(error: unknown): string {
   if (normalized.status === 413) return "A file exceeds the 50 MB limit.";
   if (normalized.status === 415) return "A file type isn't supported (use PDF, JPG, or PNG).";
   if (normalized.kind === "network") return normalized.message;
-  return normalized.message === "Something went wrong. Please try again."
-    ? "Upload failed. Please try again."
+  // `isGeneric` rather than a string comparison: matching on the fallback's
+  // WORDING silently stops working the moment the wording changes, which is
+  // exactly what LP-UI-034 did to it.
+  return normalized.isGeneric
+    ? "The upload didn't complete. Nothing was added to the file."
     : normalized.message;
 }
 

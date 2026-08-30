@@ -18,7 +18,7 @@ describe("ErrorBoundary", () => {
         <Boom />
       </ErrorBoundary>,
     );
-    expect(screen.getByText("Something went wrong")).toBeDefined();
+    expect(screen.getByText("This screen stopped working")).toBeDefined();
     expect(screen.getByRole("button", { name: /try again/i })).toBeDefined();
     // The raw error text / internal path is NEVER shown to the user.
     expect(screen.queryByText(/internal\/secret\/path/)).toBeNull();
@@ -39,7 +39,7 @@ describe("ErrorBoundary", () => {
         <Flaky />
       </ErrorBoundary>,
     );
-    expect(screen.getByText("Something went wrong")).toBeDefined();
+    expect(screen.getByText("This screen stopped working")).toBeDefined();
 
     shouldThrow = false; // the next mount renders healthy
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));

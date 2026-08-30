@@ -2,6 +2,7 @@
 
 import { AddNeedDialog } from "@/components/file/needs/add-need-dialog";
 import { NeedCard } from "@/components/file/needs/need-card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useLoanFileDocuments } from "@/lib/api/documents";
@@ -163,13 +164,9 @@ function UpdatingCue({ show }: { show: boolean }) {
 
 function EmptyNeeds() {
   return (
-    <div className="py-8 text-center">
-      <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
-      <p className="mt-2 text-sm font-medium text-foreground-2">No needs yet</p>
-      <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-        A tailored checklist appears once the file is imported and documents are read. You can also
-        add a need yourself.
-      </p>
-    </div>
+    <EmptyState kind="nothing-yet" title="No needs yet">
+      A tailored checklist appears once the file is imported and its documents are read. You can
+      also add a need yourself.
+    </EmptyState>
   );
 }

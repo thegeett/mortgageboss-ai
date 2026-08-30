@@ -34,7 +34,9 @@ function getLoginErrorMessage(error: unknown): string {
   if (isAxiosError(error) && error.response?.status === 401) {
     return "Invalid email or password.";
   }
-  return "Something went wrong. Please try again.";
+  // Names what failed without enumerating accounts, and says nothing changed —
+  // a processor who fails to sign in wants to know they have not locked anything.
+  return "We couldn't sign you in. Nothing has changed — try again.";
 }
 
 export function LoginForm() {

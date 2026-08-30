@@ -11,12 +11,12 @@ describe("ErrorState", () => {
     render(<ErrorState title="Couldn’t load your documents" message="boom" onRetry={onRetry} />);
     expect(screen.getByText("Couldn’t load your documents")).toBeDefined();
     expect(screen.getByRole("alert")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
   it("omits the Retry button when no onRetry is given", () => {
-    render(<ErrorState message="no retry here" />);
+    render(<ErrorState title="This file wouldn’t open" message="no retry here" />);
     expect(screen.queryByRole("button")).toBeNull();
   });
 });
@@ -25,6 +25,8 @@ describe("InlineErrorState", () => {
   it("renders an inline Retry that calls onRetry", () => {
     const onRetry = vi.fn();
     render(<InlineErrorState message="Couldn't load activity." onRetry={onRetry} />);
+    // The section error keeps "Retry"; the whole-page one says "Try again". Both
+    // match the mockup, which uses different words for the different scopes.
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(onRetry).toHaveBeenCalledOnce();
   });

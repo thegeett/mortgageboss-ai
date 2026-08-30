@@ -117,7 +117,20 @@ function TabStrip({
   );
 }
 
-function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
+/**
+ * An outcome tab with nothing in it — deliberately NOT `components/ui/empty-state`.
+ *
+ * That primitive answers "this list has no rows yet / your filter hid them / it
+ * is correct to be empty", and its icon is derived from which of those it is.
+ * Here empty is a VERDICT: "Nothing needs attention" is good news and carries a
+ * check, "Nothing to show — and that's by design" is structural, and
+ * "Nothing has stopped applying" is neither. The caller chooses the glyph
+ * because the glyph is the finding.
+ *
+ * Renamed from `EmptyState` in LP-UI-034: two components with one name, meaning
+ * two different things, is how the wrong one gets reached for.
+ */
+function OutcomeEmpty({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
       <div className="text-muted-foreground">{icon}</div>
@@ -140,7 +153,7 @@ function AttentionTab({
 }) {
   if (findings.length === 0) {
     return (
-      <EmptyState
+      <OutcomeEmpty
         icon={<CheckCircle2 className="h-8 w-8" />}
         title="Nothing needs attention"
         body="No rule fired, could-not-check, or is awaiting review on this file. When the engine finds a violation, a gap, or a judgment to ratify, it appears here — grouped by kind."
@@ -624,7 +637,7 @@ export function RuleFindingsTabs({
               <MissingVsPresent findings={buckets.couldnt_check} onAct={onAct} fileId={fileId} />
             </div>
           ) : (
-            <EmptyState
+            <OutcomeEmpty
               icon={<CheckCircle2 className="h-8 w-8" />}
               title="Every rule had what it needed"
               body="Nothing was skipped for want of a document — a rule that could not run would appear here."
@@ -641,7 +654,7 @@ export function RuleFindingsTabs({
               <FindingList findings={buckets.satisfied} onAct={onAct} fileId={fileId} />
             </div>
           ) : (
-            <EmptyState
+            <OutcomeEmpty
               icon={<CheckCircle2 className="h-8 w-8" />}
               title="No satisfied rules yet"
               body="When a rule runs and passes with evidence, it appears here — so a pass is visible, never assumed."
@@ -652,7 +665,7 @@ export function RuleFindingsTabs({
           (buckets.no_longer_applies.length > 0 ? (
             <FindingList findings={buckets.no_longer_applies} onAct={onAct} fileId={fileId} />
           ) : (
-            <EmptyState
+            <OutcomeEmpty
               icon={<History className="h-8 w-8" />}
               title="Nothing has stopped applying"
               body="A finding lands here when its subject leaves the file between runs (e.g. a deposit that's gone). It needs a prior run to compare against, so a first run never populates it. It is NOT the same as 'not applicable'."
@@ -667,7 +680,7 @@ export function RuleFindingsTabs({
         )}
 
         {shown === "not_applicable" && buckets.not_applicable.length === 0 && (
-          <EmptyState
+          <OutcomeEmpty
             icon={<CircleSlash className="h-8 w-8" />}
             title="Nothing to show — and that's by design"
             body="Subjects a rule doesn't apply to (e.g. AS-1's money-OUT transactions) are not recorded as findings, so this tab is structurally empty on every file. It exists so that 'not applicable' can never quietly absorb a 'couldn't check' — a real gap always stays in Needs attention."

@@ -8,8 +8,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
  * Top-level React error boundary (LP-46) — the no-white-screen guarantee.
  *
  * A render-time throw anywhere in the subtree is caught here and replaced with a
- * clean, friendly fallback ("Something went wrong" + a Retry) instead of an
- * unmounted, blank page. Retry bumps a key to remount the subtree (recovering
+ * fallback that says what happened instead of an unmounted, blank page. Retry bumps a key to remount the subtree (recovering
  * from transient render errors without a full page reload); the fallback also
  * offers a hard reload as a last resort.
  *
@@ -70,10 +69,15 @@ export function DefaultErrorFallback({ onRetry }: { onRetry: () => void }) {
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <TriangleAlert className="h-7 w-7" />
       </span>
-      <h1 className="mt-5 text-xl font-semibold text-foreground">Something went wrong</h1>
+      {/* NAMES WHAT FAILED AND WHAT IS SAFE (LP-UI-034). The old copy was
+          "Something went wrong" over "An unexpected error interrupted this view"
+          — an apology and a restatement, and nothing a processor could act on.
+          The thing they actually need to know after a screen dies mid-edit is
+          whether their work survived. */}
+      <h1 className="mt-5 text-xl font-semibold text-foreground">This screen stopped working</h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        An unexpected error interrupted this view. You can try again — if it keeps happening, reload
-        the page.
+        The page failed to draw. Nothing you have entered has been sent or changed. Try again — if
+        it keeps happening, reload.
       </p>
       <div className="mt-6 flex items-center gap-3">
         <Button type="button" onClick={onRetry} className="gap-1.5">

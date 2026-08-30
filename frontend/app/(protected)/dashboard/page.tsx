@@ -8,6 +8,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
 import { byAttention } from "@/lib/loan-files/attention";
 import { isFiltered, usePipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
+import { LOAN_FILE_STATUS } from "@/lib/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
@@ -79,6 +80,28 @@ export default function DashboardPage() {
   const sorted = useMemo(() => byAttention(data?.items ?? []), [data?.items]);
 
   const filtered = isFiltered(urlState);
+
+  // How many files exist with NOTHING filtered — fetched only when the processor
+  // is already looking at an empty filtered list, so the extra request happens in
+  // the one state where the answer is worth a round trip. `page_size: 1` because
+  // only `total` is read.
+  const { data: unfiltered } = useLoanFiles(
+    { page: 1, pageSize: 1, statuses: [], search: "" },
+    { enabled: filtered && !isPending && (data?.items.length ?? 0) === 0 },
+  );
+
+  const filterSummary = {
+    search,
+    statusLabel:
+      statuses.length === 1 && statuses[0]
+        ? LOAN_FILE_STATUS[statuses[0]].label
+        : statuses.length > 1
+          ? `${statuses.length} statuses`
+          : null,
+    unfilteredTotal: unfiltered?.total ?? null,
+  };
+
+  const clearFilters = () => router.replace("/dashboard");
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -119,6 +142,8 @@ export default function DashboardPage() {
           isPending={isPending}
           isError={isError}
           isFiltered={filtered}
+          filterSummary={filterSummary}
+          onClearFilters={clearFilters}
           onSelect={goToFile}
           onNewFile={newFile}
         />

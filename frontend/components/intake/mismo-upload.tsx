@@ -2,7 +2,7 @@
 
 import { Spinner } from "@/components/ui/spinner";
 import { useImportMismo } from "@/lib/api/mismo";
-import { getErrorMessage } from "@/lib/errors/api-error";
+import { normalizeError } from "@/lib/errors/api-error";
 import { cn } from "@/lib/utils";
 import { FileUp } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -12,11 +12,13 @@ import { toast } from "sonner";
 
 /** Friendly message for an import failure (LP-54 safe envelope via LP-46). */
 function importErrorMessage(error: unknown): string {
-  const message = getErrorMessage(error);
-  // The backend's safe messages are already friendly; only soften the generic one.
-  return message === "Something went wrong. Please try again."
+  // The backend's safe messages are already friendly; only replace the generic
+  // one. `isGeneric` rather than a string comparison — matching on the fallback's
+  // wording stops working the moment the wording changes (LP-UI-034 changed it).
+  const normalized = normalizeError(error);
+  return normalized.isGeneric
     ? "This file couldn't be read as a MISMO file. Check the file and try again."
-    : message;
+    : normalized.message;
 }
 
 /**

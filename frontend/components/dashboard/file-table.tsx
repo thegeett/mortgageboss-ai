@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -208,11 +209,38 @@ function StatePanel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * The filtered-empty sentence, naming what a processor can undo.
+ *
+ * Degrades honestly: with no summary it says the general thing rather than
+ * inventing a filter name, and it only promises a count when it has one — "see
+ * all four" is a claim, and a wrong one sends a processor looking for files that
+ * are not there.
+ */
+export function describeFilter(summary?: {
+  search: string;
+  statusLabel: string | null;
+  unfilteredTotal: number | null;
+}): string {
+  if (!summary) return "Nothing matches the filters on this list. Clear them to see every file.";
+  const { search, statusLabel, unfilteredTotal } = summary;
+  const query = search.trim();
+  const where = statusLabel ? `Nothing in ${statusLabel}` : "Nothing on this list";
+  const matching = query ? ` matches “${query}”` : "";
+  const back =
+    unfilteredTotal === null
+      ? " Clear the filters to see every file."
+      : ` Clear the filters to see ${unfilteredTotal === 1 ? "the one file" : `all ${unfilteredTotal}`}.`;
+  return `${where}${matching}.${back}`;
+}
+
 export function FileTable({
   files,
   isPending,
   isError,
   isFiltered,
+  filterSummary,
+  onClearFilters,
   onSelect,
   onNewFile,
 }: {
@@ -220,6 +248,13 @@ export function FileTable({
   isPending: boolean;
   isError: boolean;
   isFiltered: boolean;
+  /**
+   * What is actually hiding the rows (LP-UI-034). "No files match your current
+   * filters" tells a processor nothing they can undo; naming the filter, the
+   * query and how many would come back tells them exactly what to click.
+   */
+  filterSummary?: { search: string; statusLabel: string | null; unfilteredTotal: number | null };
+  onClearFilters?: () => void;
   onSelect: (file: LoanFileSummary) => void;
   onNewFile: () => void;
 }) {
@@ -249,7 +284,8 @@ export function FileTable({
           Couldn&apos;t load loan files
         </h3>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          Something went wrong fetching your files. Check your connection and try again.
+          The list didn&apos;t come back. Your files are unaffected — check your connection and try
+          again.
         </p>
       </StatePanel>
     );
@@ -270,25 +306,35 @@ export function FileTable({
   if (files.length === 0) {
     return isFiltered ? (
       <StatePanel>
-        <SearchX className="h-8 w-8 text-muted-foreground" />
-        <h3 className="mt-3 text-sm font-semibold text-foreground">No matching files</h3>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          No loan files match your current filters. Try clearing the search or a different filter.
-        </p>
+        <EmptyState
+          kind="filtered"
+          title="No files match"
+          action={
+            onClearFilters ? (
+              <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
+                Clear the filters
+              </Button>
+            ) : null
+          }
+        >
+          {describeFilter(filterSummary)}
+        </EmptyState>
       </StatePanel>
     ) : (
       <StatePanel>
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <FolderPlus className="h-6 w-6" />
-        </span>
-        <h3 className="mt-4 text-sm font-semibold text-foreground">No loan files yet</h3>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          Create your first loan file to start assembling documents and tracking requirements.
-        </p>
-        <Button type="button" onClick={onNewFile} className="mt-5 gap-2">
-          <FolderPlus className="h-4 w-4" />
-          Create your first file
-        </Button>
+        <EmptyState
+          kind="nothing-yet"
+          title="No loan files yet"
+          action={
+            <Button type="button" onClick={onNewFile} className="gap-2">
+              <FolderPlus className="h-4 w-4" />
+              Create your first file
+            </Button>
+          }
+        >
+          A file holds the documents, the extracted data and the conditions for one loan. Create one
+          and it starts assembling itself.
+        </EmptyState>
       </StatePanel>
     );
   }

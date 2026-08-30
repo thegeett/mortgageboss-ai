@@ -25,7 +25,7 @@ export function FileError({ notFound, onRetry }: { notFound: boolean; onRetry?: 
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         {notFound
           ? "This loan file doesn't exist, or you don't have access to it."
-          : "Something went wrong loading this file. Check your connection and try again."}
+          : "The file didn't load. Nothing has been changed — check your connection and try again."}
       </p>
       <div className="mt-5 flex items-center gap-3">
         {showRetry && (
