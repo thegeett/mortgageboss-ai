@@ -695,6 +695,50 @@ Amendments written for a specific upcoming ticket are only binding once
 committed. Where this session cannot commit, the amendment must be stated in the
 check-in that reaches the implementing session as well as written to the file.
 
+## 2026-08-30 · A22 — the pattern this epic keeps finding, and what to do about it
+
+### A22 — "one file, two screens, different numbers" is systemic, not incidental
+
+Six instances so far, all found by verifying rather than by anyone reporting a
+bug, and every one of them a *live* disagreement a processor could have hit:
+
+1. **LP-UI-013** — the dashboard counted blocking findings with its own filter,
+   ignoring the confidence cutoff and missing AI findings. A file its own
+   verification screen calls clear read as blocked, and vice versa.
+2. **LP-UI-013** — the needs count put `received` in the waiting set, so the
+   dashboard said "Waiting on 5" against the file screen's 3.
+3. **LP-UI-017** — the ledger compared income without the engine's `quantize`, so
+   10.04% variance was a pass to the engine and a disagreement on the ledger.
+4. **LP-UI-018** — the ledger deferred to `xsrc.income.employer_name_consistency`,
+   a rule LP-606 **retired** precisely because it disagreed with IN-5 on real
+   files. The ledger had adopted the answer that lost.
+5. **LP-UI-019** — three readers of one document list had two definitions of
+   "in flight", so "Processing 3 of 18" described no set on the screen.
+6. **LP-UI-020** — the file context rail printed the **legacy** sweep's severity
+   counts under the **governed** engine's words: "Must fix 0" on a file with ten
+   open violations. The block had no test at all.
+
+This is not six unrelated bugs. It is one architectural condition: the codebase
+carries **two generations of verification** (legacy sweep and governed engine)
+plus retired-but-still-defined rules, and nothing structurally prevents a new
+surface from binding to the wrong generation. Every new read model is a fresh
+chance to pick the loser.
+
+**What this epic can do, and has:** the SPEC rule ("an aggregate must reuse the
+predicate its detail screen uses"), A20's deference rule, and now a test
+asserting every rule the ledger defers to is still in `CROSS_SOURCE_RULES`.
+
+**What it cannot do, and should be raised as product work:** the two generations
+need a stated end-state — is the legacy sweep being retired, and by when? Until
+that is decided, every screen in Epics C–G is a new place for the two to
+disagree, and the reviews will keep finding them one at a time. This belongs in
+the backlog as its own item, not inside a UI ticket.
+
+**Open and unexplained** (LP-UI-020 flagged it for LP-UI-021): the DTI banner's
+"91 unresolved findings" reconciles with nothing on screen — and the note's own
+decomposition, 75 governed plus 13 legacy, is 88. The remaining 3 are
+unaccounted for. Do not let LP-UI-021 close with that number unexplained.
+
 ---
 
 ## Standing note

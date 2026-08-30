@@ -14,6 +14,10 @@ export interface CalcLine {
   amount: string; // effective
   source: string;
   overridden: boolean;
+  /** Who set the override and why (LP-UI-021). Null when the line is not overridden,
+   *  and `override_by` alone is null for an override with no recorded actor. */
+  override_by: string | null;
+  override_note: string | null;
 }
 
 export interface CalcStep {
@@ -27,9 +31,29 @@ export interface MethodologyNote {
   text: string;
 }
 
+/**
+ * The in-scope findings split by the system that produced them (LP-UI-021).
+ *
+ * A single total merges three generators. LP-375 keeps the governed rule engine
+ * and the legacy AI sweep structurally separate, and "91 unresolved findings"
+ * was that separation collapsed into a number a processor could not reconcile
+ * with anything on screen: the tabs showed 75 governed and 13 legacy, and the
+ * remaining 3 appeared nowhere at all.
+ *
+ * `other` is counted, not inferred — a generator this split does not know about
+ * gets its own number rather than inflating one of the three.
+ */
+export interface FindingBreakdown {
+  governed: number;
+  cross_source: number;
+  legacy: number;
+  other: number;
+}
+
 export interface CalcFindings {
   unresolved: boolean;
   open_in_scope_count: number;
+  breakdown: FindingBreakdown;
 }
 
 export interface CalculatorView {

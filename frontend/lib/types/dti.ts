@@ -1,3 +1,4 @@
+import type { FindingBreakdown } from "@/lib/types/calculators";
 /**
  * DTI calculator types (LP-76) — the transparent, itemized calculation.
  *
@@ -14,6 +15,10 @@ export interface DtiLineItem {
   amount: string;
   source: string;
   overridden: boolean;
+  /** Who set the override and why (LP-UI-021). Null when the line is not overridden,
+   *  and `override_by` alone is null for an override with no recorded actor. */
+  override_by: string | null;
+  override_note: string | null;
   /** LP-375: a REQUIRED input (taxes/insurance) that could not be derived and was not overridden — its
    * `amount` of 0 is a fail-closed placeholder, NOT an extracted $0.00 (absent≠0). Render as "Unknown". */
   unknown?: boolean;
@@ -39,6 +44,7 @@ export interface DtiLimit {
 export interface DtiFindingsStatus {
   unresolved: boolean;
   open_in_scope_count: number;
+  breakdown: FindingBreakdown;
 }
 
 export interface DtiCalculation {

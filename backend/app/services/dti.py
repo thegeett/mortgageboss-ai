@@ -56,8 +56,9 @@ from app.schemas.dti import (
     UnverifiedInput,
 )
 from app.services.activity_log import log_activity
-from app.services.finding_blocking import open_in_scope_findings
+from app.services.finding_blocking import breakdown_by_system, open_in_scope_findings
 from app.services.mi import compute_loan_mi
+from app.services.override_attribution import OverrideAttribution, attribute_overrides
 from app.services.rental_treatment import subject_rental_treatment
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.dti import (
@@ -485,22 +486,23 @@ async def _extracted_hoa_monthly(
 # --------------------------------------------------------------------------- #
 
 
-async def _active_overrides(db: AsyncSession, loan_file_id: UUID) -> dict[str, Decimal]:
+async def _active_overrides(db: AsyncSession, loan_file_id: UUID) -> dict[str, OverrideAttribution]:
+    """Overrides WITH their provenance (LP-UI-021) — see `override_attribution`."""
     stmt = only_active(
         select(DtiOverride).where(DtiOverride.loan_file_id == loan_file_id), DtiOverride
     )
-    return {row.field_key: row.value for row in (await db.execute(stmt)).scalars().all()}
+    return await attribute_overrides(db, list((await db.execute(stmt)).scalars().all()))
 
 
 def _to_items(
-    autos: Sequence[_AutoLine], overrides: dict[str, Decimal]
+    autos: Sequence[_AutoLine], overrides: dict[str, OverrideAttribution]
 ) -> tuple[list[DtiLineItem], list[DtiLine]]:
     """Build response line items + the engine lines (effective = override ?? auto ?? 0)."""
     items: list[DtiLineItem] = []
     engine_lines: list[DtiLine] = []
     for auto in autos:
         override = overrides.get(auto.key)
-        effective = override if override is not None else (auto.auto or Decimal(0))
+        effective = override.value if override is not None else (auto.auto or Decimal(0))
         # LP-569 review — AN OVERRIDE RE-INCLUDES THE LINE. The exclusion is a claim about the file
         # ("this debt is retired at closing"); a processor who overrides the line is disputing that
         # claim, and the endpoint already accepts, persists and audits the override. Dropping it
@@ -513,10 +515,12 @@ def _to_items(
                 key=auto.key,
                 label=auto.label,
                 auto_amount=auto.auto,
-                override_amount=override,
+                override_amount=override.value if override is not None else None,
                 amount=effective,
                 source="override" if override is not None else auto.source,
                 overridden=override is not None,
+                override_by=override.by if override is not None else None,
+                override_note=override.note if override is not None else None,
                 # LP-375: a REQUIRED input that could not be derived and was not overridden → its ``amount``
                 # of 0 is a fail-closed placeholder, NOT an extracted $0.00. The display renders "unknown".
                 # LP-413 extends this to a line the auto-populator explicitly marked ``unknown`` on THIS file
@@ -696,7 +700,11 @@ async def build_dti_calculation(
         back_end_formula=BACK_END_FORMULA,
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         limit=limit,
-        findings=DtiFindingsStatus(unresolved=len(in_scope) > 0, open_in_scope_count=len(in_scope)),
+        findings=DtiFindingsStatus(
+            unresolved=len(in_scope) > 0,
+            open_in_scope_count=len(in_scope),
+            breakdown=breakdown_by_system(in_scope),
+        ),
     )
 
 

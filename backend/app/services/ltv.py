@@ -38,7 +38,8 @@ from app.schemas.ltv import (
     LtvOverrideInput,
 )
 from app.services.activity_log import log_activity
-from app.services.finding_blocking import open_in_scope_findings
+from app.services.finding_blocking import breakdown_by_system, open_in_scope_findings
+from app.services.override_attribution import OverrideAttribution, attribute_overrides
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.ltv import (
     CLTV_FORMULA,
@@ -143,32 +144,35 @@ async def _property(db: AsyncSession, loan_file_id: UUID) -> Property | None:
     return (await db.execute(stmt)).scalars().first()
 
 
-async def _active_overrides(db: AsyncSession, loan_file_id: UUID) -> dict[str, Decimal]:
+async def _active_overrides(db: AsyncSession, loan_file_id: UUID) -> dict[str, OverrideAttribution]:
+    """Overrides WITH their provenance (LP-UI-021) — see `override_attribution`."""
     stmt = only_active(
         select(LtvOverride).where(LtvOverride.loan_file_id == loan_file_id), LtvOverride
     )
-    return {row.field_key: row.value for row in (await db.execute(stmt)).scalars().all()}
+    return await attribute_overrides(db, list((await db.execute(stmt)).scalars().all()))
 
 
 def _to_items(
-    autos: Sequence[_AutoLine], overrides: dict[str, Decimal]
+    autos: Sequence[_AutoLine], overrides: dict[str, OverrideAttribution]
 ) -> tuple[list[LtvLineItem], dict[str, Decimal]]:
     """Build response line items + an effective-amount map (override ?? auto ?? 0)."""
     items: list[LtvLineItem] = []
     effective: dict[str, Decimal] = {}
     for auto in autos:
         override = overrides.get(auto.key)
-        value = override if override is not None else (auto.auto or Decimal(0))
+        value = override.value if override is not None else (auto.auto or Decimal(0))
         effective[auto.key] = value
         items.append(
             LtvLineItem(
                 key=auto.key,
                 label=auto.label,
                 auto_amount=auto.auto,
-                override_amount=override,
+                override_amount=override.value if override is not None else None,
                 amount=value,
                 source="override" if override is not None else auto.source,
                 overridden=override is not None,
+                override_by=override.by if override is not None else None,
+                override_note=override.note if override is not None else None,
             )
         )
     return items, effective
@@ -236,7 +240,11 @@ async def build_ltv_calculation(
         purpose=purpose.value,
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         limit=limit,
-        findings=LtvFindingsStatus(unresolved=len(in_scope) > 0, open_in_scope_count=len(in_scope)),
+        findings=LtvFindingsStatus(
+            unresolved=len(in_scope) > 0,
+            open_in_scope_count=len(in_scope),
+            breakdown=breakdown_by_system(in_scope),
+        ),
     )
 
 

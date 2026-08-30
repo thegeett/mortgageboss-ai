@@ -1,5 +1,7 @@
 "use client";
 
+import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
+
 /**
  * The LTV calculator (LP-77) — the second qualification pillar (equity / risk),
  * the parallel to the DTI calculator (LP-76). Same transparent, auto-populated,
@@ -107,7 +109,7 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-6">
-        {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
+        {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
 
         <div className="grid gap-3 sm:grid-cols-3">
           <LtvHeroTile ltv={data.ltv} limit={data.limit} />
@@ -345,7 +347,14 @@ function LineRow({
         <span className="text-[11px] text-muted-foreground">
           {item.overridden ? (
             <span className="text-primary">
-              overridden · auto {formatMoneyPrecise(item.auto_amount)}
+              {/* WHO, not just that. "Someone changed this number" and "Priya
+                  changed this number" are different statements on a compliance
+                  file, and the actor was already recorded — it was dropped on
+                  the way out of the service (LP-UI-021). No actor recorded is
+                  left as a bare "overridden": inventing "unknown" would read as
+                  a name nobody checked. */}
+              overridden{item.override_by ? ` by ${item.override_by}` : ""} · auto{" "}
+              {formatMoneyPrecise(item.auto_amount)}
             </span>
           ) : sourceLabel ? (
             <span className="inline-flex items-center gap-1">
@@ -446,23 +455,6 @@ function FormulaReceipt({ data }: { data: LtvCalculation }) {
         {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)} ={" "}
         <span className="font-semibold">{formatPercent(data.ltv)}</span>
       </p>
-    </div>
-  );
-}
-
-function UnresolvedAlert({ count }: { count: number }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
-    >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-      <span>
-        <span className="font-medium text-foreground">
-          {count} unresolved finding{count === 1 ? "" : "s"}
-        </span>{" "}
-        — this calculation may be incomplete until they're applied or overridden.
-      </span>
     </div>
   );
 }

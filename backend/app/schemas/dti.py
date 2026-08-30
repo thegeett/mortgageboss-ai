@@ -13,6 +13,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.services.finding_blocking import FindingBreakdown
+
 
 class DtiLineItem(BaseModel):
     """One itemized input line — auto value, override (if any), and the effective."""
@@ -24,6 +26,11 @@ class DtiLineItem(BaseModel):
     amount: Decimal  # the effective value used in the math (override ?? auto ?? 0)
     source: str  # stated / computed / extracted / manual / override
     overridden: bool
+    #: Who set the override and why (LP-UI-021). Both `None` when the line is not
+    #: overridden; `override_by` alone may be `None` for an override with no
+    #: recorded actor, which is different from one nobody has looked at.
+    override_by: str | None = None
+    override_note: str | None = None
     # LP-375: a REQUIRED input (taxes/insurance) that could NOT be derived and was NOT overridden — i.e.
     # its ``amount`` of 0 is a FAIL-CLOSED placeholder, NOT an extracted $0.00 (absent≠0). The display must
     # render this as "unknown", never "$0.00 Extracted". False for a legitimately-zero input (HOA/MI).
@@ -57,6 +64,10 @@ class DtiFindingsStatus(BaseModel):
 
     unresolved: bool  # any open in-scope finding → the calc may be incomplete
     open_in_scope_count: int
+    #: The same findings split by the system that produced them (LP-UI-021), so
+    #: the alert's number reconciles with the verification screen instead of
+    #: merging three generators into one figure a processor cannot place.
+    breakdown: FindingBreakdown = FindingBreakdown()
 
 
 class UnverifiedInput(BaseModel):

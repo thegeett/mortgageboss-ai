@@ -31,6 +31,8 @@ const CALC: DtiCalculation = {
       amount: "10000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   housing_items: [
@@ -42,6 +44,8 @@ const CALC: DtiCalculation = {
       amount: "277.78",
       source: "computed",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   debt_items: [
@@ -53,6 +57,8 @@ const CALC: DtiCalculation = {
       amount: "2000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   front_end_formula: "Front-end DTI = housing payment ÷ gross monthly income",
@@ -65,7 +71,11 @@ const CALC: DtiCalculation = {
     rule_id: "conv.dti.back_end_max",
     status: "pass",
   },
-  findings: { unresolved: false, open_in_scope_count: 0 },
+  findings: {
+    unresolved: false,
+    open_in_scope_count: 0,
+    breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+  },
 };
 
 function mockDti(overrides: Partial<ReturnType<typeof useDtiMock>> = {}) {
@@ -103,6 +113,8 @@ describe("DtiCalculator", () => {
             amount: "3186.00",
             source: "stated",
             overridden: false,
+            override_by: null,
+            override_note: null,
             excluded: true,
             excluded_reason: "paid off at closing",
           },
@@ -141,12 +153,20 @@ describe("DtiCalculator", () => {
 
   it("shows the unresolved-findings alert when findings are open", () => {
     mockDti({
-      data: { ...CALC, findings: { unresolved: true, open_in_scope_count: 2 } },
+      data: {
+        ...CALC,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 2,
+          breakdown: { governed: 2, cross_source: 0, legacy: 0, other: 0 },
+        },
+      },
     });
     render(<DtiCalculator fileId="LF-1" />);
 
     expect(screen.getByRole("alert")).toBeDefined();
-    expect(screen.getByText(/2 unresolved findings/)).toBeDefined();
+    // LP-UI-021: named by system rather than one merged total.
+    expect(screen.getByText(/2 rule findings unresolved/)).toBeDefined();
   });
 
   it("flags over-limit in red", () => {
@@ -221,6 +241,8 @@ describe("bug-001 — using a stated estimate", () => {
         amount: "0.00",
         source: "extracted",
         overridden: false,
+        override_by: null,
+        override_note: null,
         unknown: true,
       },
     ],
@@ -293,7 +315,14 @@ describe("bug-001 — using a stated estimate", () => {
       ...gated,
       housing_items: gated.housing_items.map((i) =>
         i.key === "housing.taxes"
-          ? { ...i, overridden: true, unknown: false, override_amount: "464.92" }
+          ? {
+              ...i,
+              overridden: true,
+              override_by: null,
+              override_note: null,
+              unknown: false,
+              override_amount: "464.92",
+            }
           : i,
       ),
     };
@@ -301,5 +330,58 @@ describe("bug-001 — using a stated estimate", () => {
     render(<DtiCalculator fileId="LF-ABRS" />);
 
     expect(screen.queryByRole("button", { name: /figure \(\$/ })).toBeNull();
+  });
+
+  it("names who set an override, not just that one exists (LP-UI-021)", () => {
+    // The actor was already recorded on DtiOverride and dropped on the way out
+    // of the service. On a compliance file "someone changed this number" and
+    // "Priya changed this number" are different statements.
+    mockDti({
+      data: {
+        ...CALC,
+        income_items: [
+          {
+            key: "income.bonus",
+            label: "Bonus — Pat",
+            auto_amount: "583.33",
+            override_amount: "0.00",
+            amount: "0.00",
+            source: "override",
+            overridden: true,
+            override_by: "Priya Desai",
+            override_note: null,
+          },
+        ],
+      },
+    });
+    render(<DtiCalculator fileId="LF-1" />);
+    expect(screen.getByText(/overridden by Priya Desai/)).toBeDefined();
+  });
+
+  it("stays silent about an actor it does not have", () => {
+    // An override written before the column existed, or by a process rather than
+    // a person. A placeholder name in an audit trail reads as one nobody checked,
+    // so the line says "overridden" and stops there.
+    mockDti({
+      data: {
+        ...CALC,
+        income_items: [
+          {
+            key: "income.bonus",
+            label: "Bonus — Pat",
+            auto_amount: "583.33",
+            override_amount: "0.00",
+            amount: "0.00",
+            source: "override",
+            overridden: true,
+            override_by: null,
+            override_note: null,
+          },
+        ],
+      },
+    });
+    render(<DtiCalculator fileId="LF-1" />);
+    expect(screen.getByText(/overridden · auto/)).toBeDefined();
+    expect(screen.queryByText(/overridden by/)).toBeNull();
   });
 });

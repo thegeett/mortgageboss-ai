@@ -41,9 +41,10 @@ from app.schemas.calculators import (
 )
 from app.services.activity_log import log_activity
 from app.services.dti import build_dti_calculation
-from app.services.finding_blocking import open_in_scope_findings
+from app.services.finding_blocking import breakdown_by_system, open_in_scope_findings
 from app.services.ltv import build_ltv_calculation
 from app.services.mi import compute_loan_mi
+from app.services.override_attribution import OverrideAttribution, attribute_overrides
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.max_loan import (
     DTI_CONSTRAINT_FORMULA,
@@ -116,7 +117,13 @@ class _Auto:
 
 async def _active_overrides(
     db: AsyncSession, loan_file_id: UUID, calculator: str
-) -> dict[str, Decimal]:
+) -> dict[str, OverrideAttribution]:
+    """Overrides WITH their provenance — see `override_attribution`.
+
+    This returned `{field_key: value}` and dropped the actor and the note the
+    model already records, so the panel could say a figure was overridden but
+    never by whom.
+    """
     stmt = only_active(
         select(CalculatorOverride).where(
             CalculatorOverride.loan_file_id == loan_file_id,
@@ -124,28 +131,30 @@ async def _active_overrides(
         ),
         CalculatorOverride,
     )
-    return {row.field_key: row.value for row in (await db.execute(stmt)).scalars().all()}
+    return await attribute_overrides(db, list((await db.execute(stmt)).scalars().all()))
 
 
 def _apply(
-    autos: Sequence[_Auto], overrides: dict[str, Decimal]
+    autos: Sequence[_Auto], overrides: dict[str, OverrideAttribution]
 ) -> tuple[list[CalcLine], dict[str, Decimal]]:
     """Build response input lines + an effective-value map (effective = override ?? auto ?? 0)."""
     lines: list[CalcLine] = []
     effective: dict[str, Decimal] = {}
     for auto in autos:
         override = overrides.get(auto.key)
-        value = override if override is not None else (auto.auto or Decimal(0))
+        value = override.value if override is not None else (auto.auto or Decimal(0))
         effective[auto.key] = value
         lines.append(
             CalcLine(
                 key=auto.key,
                 label=auto.label,
                 auto_amount=auto.auto,
-                override_amount=override,
+                override_amount=override.value if override is not None else None,
                 amount=value,
                 source="override" if override is not None else auto.source,
                 overridden=override is not None,
+                override_by=override.by if override is not None else None,
+                override_note=override.note if override is not None else None,
             )
         )
     return lines, effective
@@ -153,7 +162,11 @@ def _apply(
 
 async def _findings(db: AsyncSession, loan_file_id: UUID, cutoff: float) -> CalcFindings:
     in_scope = await open_in_scope_findings(db, loan_file_id=loan_file_id, confidence_cutoff=cutoff)
-    return CalcFindings(unresolved=len(in_scope) > 0, open_in_scope_count=len(in_scope))
+    return CalcFindings(
+        unresolved=len(in_scope) > 0,
+        open_in_scope_count=len(in_scope),
+        breakdown=breakdown_by_system(in_scope),
+    )
 
 
 def _money(value: Decimal | None) -> str:

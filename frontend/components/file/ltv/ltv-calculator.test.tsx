@@ -31,6 +31,8 @@ const CALC: LtvCalculation = {
       amount: "180000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
     {
       key: "ltv.heloc_credit_limit",
@@ -40,6 +42,8 @@ const CALC: LtvCalculation = {
       amount: "20000.00",
       source: "override",
       overridden: true,
+      override_by: null,
+      override_note: null,
     },
   ],
   value_items: [
@@ -51,6 +55,8 @@ const CALC: LtvCalculation = {
       amount: "190000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
     {
       key: "ltv.appraised_value",
@@ -60,6 +66,8 @@ const CALC: LtvCalculation = {
       amount: "200000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   ltv_formula: "LTV = first loan ÷ lesser of (purchase price, appraised value)",
@@ -75,7 +83,11 @@ const CALC: LtvCalculation = {
     purpose_basis: "purchase",
     status: "pass",
   },
-  findings: { unresolved: false, open_in_scope_count: 0 },
+  findings: {
+    unresolved: false,
+    open_in_scope_count: 0,
+    breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+  },
 };
 
 function mockLtv(overrides: Partial<ReturnType<typeof useLtvMock>> = {}) {
@@ -170,7 +182,11 @@ describe("LtvCalculator", () => {
       data: {
         ...CALC,
         purpose: "cash_out_refinance",
-        findings: { unresolved: true, open_in_scope_count: 1 },
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 1,
+          breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+        },
       },
     });
     render(<LtvCalculator fileId="LF-1" />);
