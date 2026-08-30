@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   NAV_ITEMS,
@@ -191,11 +191,15 @@ describe("fileSections (LP-UI-022)", () => {
     // `/loan-files/[id]/needs` did not exist and listing it would ship a link to
     // a 404. The route exists now; this is what stops the next one going in
     // ahead of its page.
-    const routes = readdirSync(
-      join(import.meta.dirname, "..", "app", "(protected)", "loan-files", "[id]"),
-      { withFileTypes: true },
-    )
+    // A DIRECTORY is not a route. Next serves a segment only if it contains a
+    // `page.tsx`, so a folder holding just a `layout.tsx` — or a stray
+    // directory — would satisfy a name check while still 404ing, which is the
+    // exact failure this guards. Asserting the page file is what makes it a
+    // test of routes rather than of folder names.
+    const base = join(import.meta.dirname, "..", "app", "(protected)", "loan-files", "[id]");
+    const routes = readdirSync(base, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
+      .filter((entry) => existsSync(join(base, entry.name, "page.tsx")))
       .map((entry) => entry.name);
     for (const item of fileSections("LF-1").items) {
       const segment = item.href.replace("/loan-files/LF-1", "").replace("/", "");

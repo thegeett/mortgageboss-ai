@@ -86,3 +86,94 @@ does not exist.
 The proposals fixture used `source_attribution: "ai_proposed"` when `isProposed`
 reads `disposition`. It type-checked and described a need the product never
 produces — the same fixture-coherence trap as LP-UI-021's, in a new field.
+
+## Review pass — a route test that tested folder names
+
+Reviewed on request from the session running the epic. One defect, and the
+unbuilt criterion upheld — with a correction to the evidence for it.
+
+### The route-exists test asserted a directory, not a route
+
+The instrument is right. Nothing else in the stack catches "a nav item points at
+a page that does not exist": TypeScript does not know Next routes, and no test
+renders them all. The `navigation.ts` note predicted this failure in words, and a
+comment is not a guard — turning it into one is correct.
+
+What it actually asserted was weaker than what it claimed. `readdirSync` filtered
+to directories and checked the name, and a **directory is not a route**: Next
+serves a segment only if it contains a `page.tsx`, so a folder holding just a
+`layout.tsx` — or any stray directory that happens to match — satisfied the check
+while still 404ing. That is the exact failure being guarded, passing the guard.
+
+It now requires the `page.tsx`. Mutation-checked by adding a nav item pointing at
+a directory containing only a layout: it fails, where before it passed.
+
+On the coupling the hand-off was unsure about: the test does break if the App
+Router convention changes, and that is the right trade. A convention change is
+precisely when links break, so failing loudly and taking a one-line update is the
+behaviour you want — the alternative fails silently at the moment of highest
+risk.
+
+### The unbuilt criterion is upheld, and the reasoning was righter than its evidence
+
+"Batch 'request all outstanding' composes one message" cannot be built honestly,
+and should not be faked. Checked independently, because the hand-off asked:
+
+- `app/services/communications.py` **does exist** — the hand-off's stated check
+  ("no message or email module under `app/api/` or `app/services/`") was wrong on
+  that point. Worth recording, because the conclusion survived a false premise,
+  and next time it might not.
+- Its own docstring settles the question anyway: *"Just persists the message
+  state — actually sending an email (outbound) and routing an inbound one are
+  Phase 4."*
+- It has **no production caller**. The only importer anywhere is its own test.
+- No `smtplib` / `aiosmtplib` / `sendgrid` / `send_email` anywhere in `app/`.
+
+So: nothing sends, and the conclusion holds.
+
+**The shortcut analysis is right and is the important part.** Marking outstanding
+needs `REQUESTED` without sending puts a lie in the data that outlives the
+session: the next processor reads it as "the borrower was asked". A status is a
+record of an event, and writing it without the event is not a partial
+implementation — it is a false one.
+
+One honest partial the hand-off did not mention DOES exist, and still should not
+be built. `CommunicationStatus.DRAFT` means "outbound, not yet sent", so creating
+draft records would claim nothing false. It fails for a different reason: the
+Communication tab is a `TabPlaceholder`, so the drafts would be invisible, and a
+button labelled "request all outstanding" that produces an artefact nobody can
+see still tells the processor an action occurred. Not building it is right on
+both counts.
+
+### The Overview summary earns its place
+
+Asked as a design question, and the test is whether the number changes what the
+reader does next rather than whether it is smaller than the page it summarises.
+"22 Needs action" answers "is this file close?" without a click, which is the
+Overview's job — the same standard the reconciliation ledger's rows meet on the
+same screen.
+
+It is also reconcilable: counted with `groupNeeds`, the function the list groups
+by, so the summary and the page cannot disagree. That is the property that makes
+a summary worth having and is the one this epic has watched fail six times.
+
+### The fixture trap, third instance
+
+`source_attribution` where `isProposed` reads `disposition` — type-checked,
+described a need the product never produces, and the test passed for the wrong
+reason. Third time in three tickets, in a third shape: a wrong field name, an
+incoherent field combination, and a state the type forbids.
+
+The rule the hand-off wrote down covers all three — `tsc` proves the shape, not
+the coherence — and the practical form is that a fixture asserting a behaviour
+should be built through the helper that reads it, or checked against one, rather
+than assembled field by field.
+
+### Verification
+
+`tsc` and `biome` clean over 238 files, **686 tests**, build compiles into
+`.next-review` with the dev server left running. No backend changes.
+
+| mutation | result |
+| --- | --- |
+| nav item pointing at a directory with no `page.tsx` | 1 test fails |
