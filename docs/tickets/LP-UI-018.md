@@ -206,3 +206,91 @@ Frontend: 635 pass, tsc and biome clean. Backend below.
   disagreement, which is correct — they are different companies. Noting it only
   because an earlier build compared against `Ambio, DBA Ambio, Inc` and got it
   wrong; the newest-document fix changed which evidence the row cites.
+
+## Review pass — the ledger deferred to a rule the engine had retired
+
+Reviewed on request from the session running the epic. Two defects, both in the
+A20 deference itself.
+
+### The employer row deferred to a rule that cannot fire
+
+`_ROW_RULE["employer"] → xsrc.income.employer_name_consistency`. That rule asks
+the employer row's question exactly — *"documented employer not among the stated
+employers"* — which is why it was mapped, and the mapping is still wrong:
+**LP-606 retired it.** It is not in `CROSS_SOURCE_RULES` and cannot fire again.
+
+Every one of the 45 findings behind it is historical. A row deferring to it
+renders a verdict from a rule this codebase deliberately removed — forever on the
+files that already have one, never on a file processed since.
+
+And it was retired for **A20's own reason**. Its `_norm` folds case and
+whitespace and nothing else, so on a real file it emitted
+`yellow "Documented employer not among the stated employers: SUMITOMO PHARMA
+AMERICAS INC."` while IN-5 said `satisfied` — one trailing letter apart. A20
+exists so the ledger and the engine cannot say different things about one
+question; this mapping put the ledger on the losing side of a disagreement the
+engine had already settled, using the answer that lost.
+
+**IN-5 is not the substitute.** It compares employer names ACROSS DOCUMENT
+SOURCES (paystub / W-2 / VOE); this row compares the APPLICATION against a
+document. Different two quantities, so mapping it would repeat the same mistake
+facing the other way. The employer row keeps its own verdict — which is also the
+better one, since this module's matcher handles company suffixes (ADR-391) and
+the retired rule's could not tell a spelling variant from a different company.
+
+A test now asserts every rule in `_ROW_RULE` is one the engine still runs, so a
+retirement elsewhere fails here rather than going quiet.
+
+The hand-off's two A20 tests used the employer row as their example, so they
+moved to the income row — the mapping that is actually live. Property unchanged,
+example replaced, same call as LP-UI-014's toggle test. That also answers point 1
+of the hand-off: the income deference now has coverage that exercises it, which
+is not the same as production data but is more than it had.
+
+### The verdict owned the rail and not the value beside it
+
+The hand-off found this in one channel — an empty cell rendering "Warning"
+instead of "Not found" — and said the split looked easy to get wrong elsewhere.
+It was wrong in the cell immediately next to it: the found value's colour came
+from `row.agreement`, the ledger's own comparison, not from the verdict.
+
+So a row the engine has PASSED could render a green rail, a green glyph, and an
+amber number: the overruled answer put back in a channel a reader takes for the
+verdict, and a row saying both things at once. Now keyed on the verdict where one
+exists, and on the ledger's own comparison where none does.
+
+### On the hand-off's own points
+
+- **The mutation harness that tested a nonexistent file.** The observation
+  generalises further than the typo: *a run finding no tests is indistinguishable
+  from a run finding no failures*, and both print reassuringly. The habit that
+  makes it safe is reading the counts, not the exit code — every mutation in this
+  review is recorded as `N failed, M passed`, and a mutation that reports `0
+  failed` against a file with tests is the signal to stop and look. I checked my
+  own runs here for the same shape.
+- **Changing LP-UI-017's contract the same night it was reviewed.** The right
+  call, and the reasoning holds: `unit` on the row and raw money values move the
+  formatting decision to the one place that owns money formatting. Discovering it
+  at the consumer is not a process failure — it is where the requirement became
+  visible. Worth keeping the failure mode on record though: the ledger printed
+  `8,812.50` with no currency symbol and threw nothing, against a stale uvicorn
+  with no `--reload`. A contract change that degrades silently is one only a
+  screenshot catches, which is an argument for the test that now pins it.
+- **Not building the three ACs.** Each argued rather than dropped, and the
+  page-canvas one is right on the facts — an AC that depends on Epic E is not
+  this ticket's to satisfy.
+- **The double stop in "AMBIOPHARM , INC.."** — no longer reachable from the
+  ledger, since the employer row no longer renders that rule's message. Left
+  alone deliberately: it is a retired rule's template, and editing the copy of a
+  rule that can never fire again is churn.
+
+### Verification
+
+Backend `ruff` and `mypy` clean over 448 files, **6,007 pass** with the two known
+`.env` failures. Frontend `tsc` and `biome` clean over 231 files, **639 pass**,
+build compiles. Both fixes mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| map the employer row back to the retired rule | 2 tests fail |
+| colour the value from the ledger's own agreement | 1 test fails |

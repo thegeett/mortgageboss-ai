@@ -129,6 +129,13 @@ function Row({ row, fileId }: { row: ReconciliationRow; fileId: string }) {
   // "Warning" because a finding exists answers a question the reader did not
   // ask and drops the one they did.
   const observed = resolveStatus(RECONCILIATION_AGREEMENT, row.agreement);
+  // The VALUE's emphasis follows the row's VERDICT, not the ledger's own
+  // comparison — the same split the empty cell needed, in the channel next to
+  // it. Where the engine has ruled, a row can be green on the rail and the glyph
+  // while `agreement` still says `differs`; that is A20 working. Painting the
+  // number amber anyway puts the overruled answer back in a channel the reader
+  // takes for the verdict, and the row then says both things at once.
+  const disagrees = row.finding ? meta.tone !== "verified" : row.agreement !== "match";
   const stated = display(row, row.stated_value);
   const found = display(row, row.found_value);
   const money = row.unit === "money" ? "font-mono text-[13px]" : undefined;
@@ -162,7 +169,7 @@ function Row({ row, fileId }: { row: ReconciliationRow; fileId: string }) {
           // Mono is for FIGURES. A "Not found" token inheriting it renders the
           // word in monospace, which reads as data rather than as a state.
           found !== null && money,
-          row.agreement === "match" ? "text-foreground-2" : "text-warning",
+          disagrees ? "text-warning" : "text-foreground-2",
         )}
       >
         {found ?? <StatusToken meta={observed} className="text-xs" />}

@@ -253,3 +253,64 @@ describe("ReconciliationLedger", () => {
     });
   });
 });
+
+describe("the verdict owns every channel, not just the rail", () => {
+  // A20: where the engine has ruled, that verdict wins. The empty cell needed
+  // this split and got it; the VALUE cell next to it was still painted from the
+  // ledger's own `agreement`, so a row the engine calls satisfied rendered a
+  // green rail, a green glyph and an amber number — the overruled answer back in
+  // a channel the reader takes for the verdict.
+  const passing: RowFinding = {
+    finding_id: "f1",
+    rule_id: "xsrc.income.stated_vs_documented",
+    status: "green" as const,
+    message: "Within the lender's variance.",
+    count: 1,
+  };
+
+  it("does not paint the value amber when the engine passed the row", () => {
+    loaded([
+      row({
+        field_key: "base_monthly_income",
+        agreement: "differs",
+        stated_value: "10000.00",
+        found_value: "11500.00",
+        unit: "money",
+        finding: passing,
+      }),
+    ]);
+    render(<ReconciliationLedger fileId="LF-96SV" />);
+    const cell = screen.getByText(/11,500/).closest("td");
+    expect(cell?.className).not.toContain("text-warning");
+  });
+
+  it("still paints it amber when the engine flags the row", () => {
+    loaded([
+      row({
+        field_key: "base_monthly_income",
+        agreement: "differs",
+        stated_value: "10000.00",
+        found_value: "11500.00",
+        unit: "money",
+        finding: { ...passing, status: "yellow" as const, message: "Income variance." },
+      }),
+    ]);
+    render(<ReconciliationLedger fileId="LF-96SV" />);
+    expect(screen.getByText(/11,500/).closest("td")?.className).toContain("text-warning");
+  });
+
+  it("falls back to its own comparison where no rule has ruled", () => {
+    loaded([
+      row({
+        field_key: "appraised_value",
+        agreement: "differs",
+        stated_value: "720000.00",
+        found_value: "700000.00",
+        unit: "money",
+        finding: null,
+      }),
+    ]);
+    render(<ReconciliationLedger fileId="LF-96SV" />);
+    expect(screen.getByText(/700,000/).closest("td")?.className).toContain("text-warning");
+  });
+});

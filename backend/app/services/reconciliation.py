@@ -130,12 +130,34 @@ class RowFinding(BaseModel):
 #   * `xsrc.income.employer_count_matches_items` counts employers against income
 #     items. The employer row compares one NAME against another.
 #
+#   * `xsrc.income.employer_name_consistency` asks the employer row's question
+#     exactly — "documented employer not among the stated employers" — and is
+#     nonetheless ABSENT, because LP-606 RETIRED it. It is not in
+#     `CROSS_SOURCE_RULES` and cannot fire again. Every finding it left behind is
+#     historical, so a row deferring to it renders a verdict from a rule this
+#     codebase deliberately removed, forever on old files and never on new ones.
+#
+#     Worse, it was retired for A20's own reason. Its `_norm` folds case and
+#     whitespace and nothing else, so on one real file it emitted
+#     `yellow "Documented employer not among the stated employers: SUMITOMO
+#     PHARMA AMERICAS INC."` while IN-5 said `satisfied` — one trailing letter
+#     apart. Deferring to it would put the ledger back on the losing side of a
+#     disagreement the engine has already settled.
+#
+#     IN-5, which superseded it, is NOT a substitute: it compares employer names
+#     ACROSS DOCUMENT SOURCES (paystub / W-2 / VOE), where this row compares the
+#     APPLICATION against a document. Different two quantities, so mapping it
+#     would repeat the same mistake facing the other way.
+#
+#     So the employer row owns its verdict — which is also the better one. This
+#     module's matcher handles company suffixes (ADR-391); the retired rule's
+#     could not tell a spelling variant from a different company.
+#
 # `appraised_value` and `homeowners_insurance` have no rule that asks their
 # question, which is precisely where this read model earns its keep — the
 # `not_stated` direction has no finding anywhere.
 _ROW_RULE: dict[str, str] = {
     "base_monthly_income": "xsrc.income.stated_vs_documented",
-    "employer": "xsrc.income.employer_name_consistency",
 }
 
 
