@@ -734,10 +734,34 @@ that is decided, every screen in Epics C–G is a new place for the two to
 disagree, and the reviews will keep finding them one at a time. This belongs in
 the backlog as its own item, not inside a UI ticket.
 
-**Open and unexplained** (LP-UI-020 flagged it for LP-UI-021): the DTI banner's
-"91 unresolved findings" reconciles with nothing on screen — and the note's own
-decomposition, 75 governed plus 13 legacy, is 88. The remaining 3 are
-unaccounted for. Do not let LP-UI-021 close with that number unexplained.
+**RESOLVED, and the answer is worse than the question** (LP-UI-021). The 91 is
+**75 governed + 3 deterministic cross-source + 13 legacy AI sweep**. Two faults,
+not one:
+
+- The headline merged three generators into one figure, collapsing the very
+  separation LP-375 keeps structural. `open_in_scope_findings` queries `Finding`
+  with no origin filter — right for "can this file submit", wrong as a headline.
+  The alert now names each system, and `breakdown_by_system()` counts **per
+  system** with a real `other` else-branch, so a fourth generator gets its own
+  number rather than inflating an existing one.
+- **The missing 3 appear on no screen at all.** The governed tabs read
+  `rule_findings`; the "Old findings" tab reads `data.findings`, which is
+  `ai_cross_source` only. The three deterministic `xsrc.*` findings are in
+  neither — and **two of them come from `xsrc.income.employer_name_consistency`,
+  the retired rule from instance 4 above.**
+
+**The production consequence, stated plainly:** those three findings are *open*,
+they are *counted as blocking*, and the alert says they can be applied or
+overridden — but **no screen offers either action, or lists them at all**. A loan
+file can therefore be blocked from submission by findings a processor cannot see
+and cannot resolve. That is not a UI defect. It is the retirement being half
+done: the rule stopped running, and its open findings were never migrated,
+resolved, or given a home.
+
+**This is now the top open item and it needs a product decision, not a ticket:**
+what happens to open findings from retired rules? Backfill-resolve them, migrate
+them to their successor, or give the deterministic cross-source family a surface.
+Until that is answered, "blocked by something invisible" is live behaviour.
 
 ---
 

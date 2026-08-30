@@ -136,12 +136,15 @@ export function activeItemHref(pathname: string, hrefs: string[]): string | null
   return best;
 }
 
+/** The create-a-file page. Named so the breadcrumb and the id parser agree. */
+export const NEW_FILE_PATH = "/loan-files/new";
+
 /** Extract a loan-file id from a `/loan-files/<id>` path, or null. */
 export function loanFileIdFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/loan-files\/([^/]+)/);
   const id = match?.[1];
   // `/loan-files/new` is a page, not a file.
-  return id && id !== "new" ? id : null;
+  return id && id !== NEW_FILE_PATH.split("/").pop() ? id : null;
 }
 
 /**

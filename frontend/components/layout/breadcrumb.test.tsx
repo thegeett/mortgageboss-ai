@@ -62,4 +62,16 @@ describe("Breadcrumb", () => {
     render(<Breadcrumb fallback="x" />);
     expect(screen.getByRole("link", { name: /pipeline/i }).getAttribute("href")).toBe("/dashboard");
   });
+
+  it("names the new-file page and links back (LP-UI-023)", () => {
+    // `/loan-files/new` is a page, not a file, so this fell through to the
+    // fallback — which is the current NAV ITEM's label, and the dashboard owns
+    // `/loan-files`. The topbar said "Dashboard" while a processor was creating
+    // a file. It is also the only way back from that page.
+    pathname.current = "/loan-files/new";
+    render(<Breadcrumb fallback="Dashboard" />);
+    expect(screen.getByText("New file")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Pipeline" }).getAttribute("href")).toBe("/dashboard");
+    expect(screen.queryByText("Dashboard")).toBeNull();
+  });
 });

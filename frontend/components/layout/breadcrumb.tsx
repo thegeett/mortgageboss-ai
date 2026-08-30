@@ -1,7 +1,7 @@
 "use client";
 
 import { useLoanFile } from "@/lib/api/loan-files";
-import { loanFileIdFromPath } from "@/lib/navigation";
+import { NEW_FILE_PATH, loanFileIdFromPath } from "@/lib/navigation";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -20,10 +20,36 @@ export function Breadcrumb({ fallback }: { fallback: string }) {
   const pathname = usePathname();
   const fileId = loanFileIdFromPath(pathname);
 
+  // `/loan-files/new` is a page, not a file, so `loanFileIdFromPath` returns
+  // null and this fell through to the fallback — which is the CURRENT NAV
+  // ITEM's label, and the dashboard owns `/loan-files`. The topbar therefore
+  // said "Dashboard" while a processor was creating a file, naming where they
+  // were as somewhere else. It is also the only way back from this page.
+  if (pathname === NEW_FILE_PATH) {
+    return <Trail>New file</Trail>;
+  }
   if (!fileId) {
     return <h1 className="text-sm font-semibold text-foreground">{fallback}</h1>;
   }
   return <FileCrumb fileId={fileId} />;
+}
+
+/** Pipeline / <where you are>. The shape every crumb on this app shares. */
+function Trail({ children }: { children: React.ReactNode }) {
+  return (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+      <Link
+        href="/dashboard"
+        className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+      >
+        Pipeline
+      </Link>
+      <span aria-hidden className="text-muted-foreground">
+        /
+      </span>
+      <span className="truncate font-semibold text-foreground">{children}</span>
+    </nav>
+  );
 }
 
 function FileCrumb({ fileId }: { fileId: string }) {
