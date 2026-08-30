@@ -59,7 +59,7 @@ from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
-from app.models.extraction import ExtractionStatus
+from app.models.extraction import ConfidenceSource, ExtractionStatus
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
 from app.services.document_borrower_links import assign_document_borrower_links
@@ -530,14 +530,48 @@ async def _extract_branch(
         )
         # A CONTENT failure (not a throttle) — the need is correctly advanced to REJECTED below.
         return False
-    if result.confidence < _CONFIDENCE_THRESHOLD:
+    # LP-636 defect 3 — gate on the HONEST pair, not the coerced float.
+    #
+    # This used to read ``result.confidence < _CONFIDENCE_THRESHOLD``. ``coerce_confidence``
+    # collapses a model that OMITTED confidence to 0.0, so "the model did not say" was read as
+    # "the model said zero" and the document was flagged "extraction low confidence" — a reason
+    # that was not true. LP-201 keeps the distinction two lines up (NULL / ``not_provided``,
+    # "absence is a legitimate state") and this gate immediately re-conflated it. Measured on
+    # staging: 15 of 115 successful extractions (13%) carried no confidence, every one flagged.
+    #
+    # ABSENCE IS NOT TREATED AS LOW CONFIDENCE, deliberately. An extraction that captured nothing
+    # is already handled above — FAILED → Tier 3 fallback — so by this line the extraction HAS
+    # typed fields and the only missing thing is the model's self-report. That is not evidence of
+    # unsureness, and a 13% false-flag rate is how a review queue stops being read.
+    #
+    # A CONSEQUENCE TO BE HONEST ABOUT: a model that reports exactly 0.0 is indistinguishable from
+    # one that reported nothing, because ``document_confidence_provenance`` maps 0.0 → (None,
+    # not_provided). Such a document is no longer flagged, where before it was. That follows
+    # LP-201's own position — a defaulted 0.0 carries no information and must not be dressed as a
+    # self-report — but it is a behaviour change on that input, not an oversight.
+    #
+    # The population stays measurable: ``confidence_source`` is persisted on the extraction
+    # version and is exposed by ``readonly.extractions``, so this decision can be revisited with
+    # data rather than reopened by argument.
+    if confidence_source is ConfidenceSource.NOT_PROVIDED:
+        logger.info(
+            "extraction_confidence_not_reported",
+            document_id=str(document.id),
+            document_type=document.document_type,
+        )
+    elif reported_confidence is not None and reported_confidence < _CONFIDENCE_THRESHOLD:
         # LOW confidence but NOT empty — the extraction captured typed fields (LP-471 A6: do NOT fall back;
         # mixing typed + untyped data for one document would let a reader conflate them). Keep the typed
         # fields; a human reviews. No Tier-3 fallback.
         document.status = DocumentStatus.NEEDS_REVIEW
         document.processing_error = "extraction low confidence"
         await db.commit()
-        logger.info("document_needs_review", document_id=str(document.id), reason="low_confidence")
+        logger.info(
+            "document_needs_review",
+            document_id=str(document.id),
+            reason="low_confidence",
+            confidence=reported_confidence,
+        )
         return False
 
     document.status = DocumentStatus.COMPLETED

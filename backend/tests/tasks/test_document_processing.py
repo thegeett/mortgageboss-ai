@@ -27,7 +27,7 @@ from app.models import Company, User, UserRole
 from app.models.activity_log import ActivityLog
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
-from app.models.extraction import Extraction, ExtractionStatus
+from app.models.extraction import ConfidenceSource, Extraction, ExtractionStatus
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemOrigin,
@@ -368,6 +368,85 @@ async def test_tier3_analyzed_findings_recorded_and_text_indexed(
 # --------------------------------------------------------------------------- #
 # LP-463 — decline / guard / free-extraction routing
 # --------------------------------------------------------------------------- #
+
+
+def _paystub_with_confidence(confidence: float) -> PayStubExtractionResult:
+    """A SUCCEEDED extraction that captured typed fields, at a given self-reported confidence.
+
+    0.0 is how a model that OMITTED the field arrives here: ``coerce_confidence`` collapses a
+    missing/non-numeric value to 0.0 before the result is built (``ai/parsing.py``)."""
+    return PayStubExtractionResult(
+        data=PayStubExtraction(
+            employer_name=TypedField(value="ACME Corp"),
+            gross_pay=TypedField(value=Decimal("4200.00")),
+        ),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=confidence,
+        reasoning="clear",
+        input_tokens=300,
+        output_tokens=90,
+    )
+
+
+async def test_absent_extraction_confidence_is_not_treated_as_low_confidence(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 3: "the model did not say" is not "the model said zero".
+
+    ``coerce_confidence`` collapses an omitted confidence to 0.0 and the gate compared that to the
+    threshold, so a SUCCEEDED extraction with typed fields was flagged "extraction low confidence"
+    — a reason that was not true. On staging this hit 15 of 115 successful extractions (13%).
+
+    LP-201 already keeps the distinction in storage (NULL / ``not_provided``, "absence is a
+    legitimate state"); this asserts the review gate now honours it."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_with_confidence(0.0))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.processing_error is None or "low confidence" not in doc.processing_error
+    # The absence is still RECORDED — honestly, and without claiming a judgement was made.
+    assert any(e["event"] == "extraction_confidence_not_reported" for e in logs)
+    assert not any(e.get("reason") == "low_confidence" for e in logs)
+
+    # And it is persisted as absence, not as a zero the reader could mistake for a self-report.
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None
+    assert extraction.confidence is None
+    assert extraction.confidence_source == ConfidenceSource.NOT_PROVIDED
+
+
+async def test_a_genuinely_low_reported_confidence_is_still_flagged(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The real gate must survive the fix — a model that SAYS it is unsure still gets a human.
+
+    Without this, "stop flagging absence" could be implemented as "stop flagging", and the whole
+    low-confidence review path would quietly disappear with every test still green."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_with_confidence(0.3))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert doc.processing_error == "extraction low confidence"
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "low_confidence"
 
 
 async def test_document_name_is_persisted_on_a_normal_classification(
