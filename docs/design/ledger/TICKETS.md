@@ -223,7 +223,9 @@ Contents vary by tab (coverage and freshness on Documents, run stats and
 thoroughness on Verification) but the rail itself is one component.
 
 - [ ] Present on every file route, scrolls independently
-- [ ] Reads from the queries already cached by the file layout — no extra fetches
+- [ ] Adds no DUPLICATE requests — the rail's queries dedupe by key against the
+      tab's own (AMENDMENTS A17). It *will* add requests on tabs that do not
+      already fetch DTI/LTV/reserves; that is the feature, not a regression.
 - [ ] Collapses below `xl` rather than squeezing the work surface
 
 ### LP-UI-010 — Density preference, persisted

@@ -566,6 +566,40 @@ failure A1 caused with `font-bold`. It added `3xl` to the scale explicitly inste
 keeping stock size and line-height and supplying the tracking the scale wanted.
 The lesson from A1 was applied rather than repeated.
 
+## 2026-08-30 · A17 — from the LP-UI-009 review, and this one is the ticket's fault
+
+### A17 — an acceptance criterion that forbade the feature it was written for
+
+LP-UI-009's second checkbox read *"Reads from the queries already cached by the
+file layout — no extra fetches."* Checked against the code rather than assumed:
+`app/(protected)/loan-files/[id]/layout.tsx` caches exactly **one** query,
+`useLoanFile`. DTI, LTV and reserves are fetched by the Verification tab, because
+that is the tab that owns them — and the entire premise of the rail is that a
+processor should not have to go to Verification to see those three numbers. A
+criterion forbidding those requests forbids the rail.
+
+What the criterion *meant* is **no duplicate requests**, and the implementation
+meets that: on Verification the rail's dti/ltv/reserves cost zero, deduped by
+React Query key. Measured deltas were +3 on Overview, +4 on Documents, +1 on
+Verification.
+
+The criterion is reworded in TICKETS.md. The general form of the mistake: an
+acceptance criterion asserting a fact about the *existing* code ("already
+cached") has to be checked against that code when it is written, not when it is
+tested — otherwise it ships as a constraint on the new work rather than a
+description of the old.
+
+**Accepted, not fixed:** the rail is `hidden xl:block`, so below 1280px it still
+mounts and its four always-on queries still fire for a user who cannot see it.
+Every fix costs more than the bug: the viewport is only known after hydration, so
+deferring the queries trades four requests on narrow screens for a guaranteed
+skeleton flash on every wide one. Recorded here so the next person does not
+rediscover it as a defect.
+
+**Not a defect, checked:** the DTI-only "Gated" wording is right — `gated` exists
+on `dti.py` and has no counterpart in `ltv.py`, so there is no gated LTV to
+mirror.
+
 ---
 
 ## Standing note
