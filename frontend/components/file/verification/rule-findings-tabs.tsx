@@ -11,6 +11,7 @@
  */
 
 import { Button } from "@/components/ui/button";
+import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { humanize } from "@/lib/format";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
@@ -67,11 +68,14 @@ function TabStrip({
   active: TabId;
   onPick: (id: TabId) => void;
 }) {
+  const drag = useDragScroll<HTMLDivElement>();
+
   return (
     <div
+      ref={drag.ref}
       role="tablist"
       aria-label="Verification outcomes"
-      className="flex gap-1 overflow-x-auto border-b border-gray-200"
+      className={cn("flex gap-1 overflow-x-auto border-b border-gray-200", drag.className)}
     >
       {tabs.map((tab) => {
         const isActive = tab.id === active;

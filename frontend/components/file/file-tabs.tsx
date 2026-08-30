@@ -1,5 +1,6 @@
 "use client";
 
+import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { FILE_TABS, activeTabKey, tabHref } from "@/lib/loan-files/tabs";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -15,10 +16,13 @@ export function FileTabs({ fileId }: { fileId: string }) {
   const pathname = usePathname();
   const active = activeTabKey(pathname);
 
+  const drag = useDragScroll<HTMLElement>();
+
   return (
     <nav
+      ref={drag.ref}
       aria-label="File sections"
-      className="-mb-px flex gap-1 overflow-x-auto border-b border-gray-200"
+      className={cn("-mb-px flex gap-1 overflow-x-auto border-b border-gray-200", drag.className)}
     >
       {FILE_TABS.map((tab) => {
         const isActive = tab.key === active;
