@@ -27,7 +27,9 @@
  * fall through to `resolveStatus`'s amber fallback at runtime.
  */
 import type { DocumentStatus } from "@/lib/types/document";
+import type { DtiLimitStatus } from "@/lib/types/dti";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
+import type { LtvLimitStatus } from "@/lib/types/ltv";
 import type { NeedsItemPriority, NeedsItemStatus } from "@/lib/types/needs-item";
 import type { EvaluationOutcome } from "@/lib/types/verification";
 
@@ -109,18 +111,38 @@ export const EVALUATION_OUTCOME: Record<EvaluationOutcome, StatusMeta> = {
   not_applicable: { tone: "neutral", label: "Not applicable" },
 };
 
-// --- calculators (backend CalculatorView.status) ---------------------------- //
-// `CalculatorView.status` arrives as `string | null`, so unlike the five above
-// there is no shared union to key on. Declared here instead, so the map is still
-// exhaustive over something and an entry cannot quietly go missing.
+// --- calculators ------------------------------------------------------------ //
+// THREE producers feed this map through CalculatorsSection's `Tile`, and the
+// union must be derived from all three. An earlier version of this type was
+// written from the display map it replaced instead, which left it exhaustive
+// over the wrong set: `binding:*` and `unknown` both fell through to
+// `humanizeUnknown`, and because a `variant="dot"` tile carries its label ONLY
+// in `title` and an `sr-only` span, the Maximum-loan tile showed the tooltip
+// "Binding:dti" and read that string out to a screen reader.
+//
+//  1. DtiTile   — `DtiLimitStatus`, plus a literal "unknown" for a gated DTI.
+//  2. LtvTile   — `LtvLimitStatus`.
+//  3. CalcTile  — `CalculatorView.status`, which is `str | None` on the wire.
+//
+// The first two are pulled in BY TYPE rather than retyped, so a new member there
+// breaks this map at compile time. The third has no frontend union to import;
+// its values are listed below against the lines that emit them, which is the
+// only place they can be checked against.
 export type CalculatorStatus =
-  | "pass"
-  | "sufficient"
-  | "not_required"
+  | DtiLimitStatus // "pass" | "over" | "unknown"
+  | LtvLimitStatus // "pass" | "over" | "unknown"
+  // services/calculators.py:267 — mortgage insurance
   | "required"
+  | "not_required"
+  // services/calculators.py:342 — self-employed income
   | "declining"
-  | "over"
-  | "insufficient";
+  // services/calculators.py:455 — reserves
+  | "sufficient"
+  | "insufficient"
+  // services/calculators.py:573 — max loan, as "binding:" + MaxLoanConstraint.key
+  | "binding:dti"
+  | "binding:ltv"
+  | "binding:loan_limit";
 
 export const CALCULATOR_STATUS: Record<CalculatorStatus, StatusMeta> = {
   pass: { tone: "verified", label: "Within limit" },
@@ -130,6 +152,14 @@ export const CALCULATOR_STATUS: Record<CalculatorStatus, StatusMeta> = {
   declining: { tone: "attention", label: "Declining" },
   over: { tone: "blocking", label: "Over the limit" },
   insufficient: { tone: "blocking", label: "Insufficient" },
+  // Not a finding: it says the limit (or the ratio, for a gated DTI) could not be
+  // determined, which is honest rather than alarming.
+  unknown: { tone: "neutral", label: "Not determined" },
+  // Which of the three ceilings came out lowest. EVERY file with a computed max
+  // loan has one, so this is information, not a problem — `neutral`, never amber.
+  "binding:dti": { tone: "neutral", label: "Limited by DTI" },
+  "binding:ltv": { tone: "neutral", label: "Limited by LTV" },
+  "binding:loan_limit": { tone: "neutral", label: "Limited by the program limit" },
 };
 
 /**

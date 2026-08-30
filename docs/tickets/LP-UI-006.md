@@ -161,3 +161,119 @@ surface step, which is what rule 1 is asking for.
 - `components/ui/`: button, input, select, textarea, card, badge, dialog, sheet,
   tooltip, error-state
 - 21 files, shadows removed; ~30 files, Button height overrides removed
+
+## Review pass — four defects across three tickets
+
+A `/code-review` over the LP-UI epic found four. Two land in LP-UI-005's status
+vocabulary, one in this ticket's density retune, and one in LP-UI-001's config;
+they are recorded together here because they were found together, with the file
+each fix touches named.
+
+### `CalculatorStatus` was exhaustive over the wrong set (LP-UI-005's file)
+
+LP-UI-005's review pass declared `CalculatorStatus` in `lib/status.ts` "so the
+map is still exhaustive over something". It was — over the display map it
+replaced, rather than over the producers. There are **three**, not one, and they
+all reach `CALCULATOR_STATUS` through `CalculatorsSection`'s `Tile`:
+
+| producer | values |
+| --- | --- |
+| `DtiTile` | `DtiLimitStatus`, plus a literal `"unknown"` for a gated DTI |
+| `LtvTile` | `LtvLimitStatus` |
+| `CalcTile` | `CalculatorView.status` — `str \| None` on the wire |
+
+`unknown` and `binding:*` were in neither. `services/calculators.py:573` emits
+`"binding:" + result.binding_key` for `dti` / `ltv` / `loan_limit`, so those fell
+through to `humanizeUnknown`, which only swaps underscores: `"binding:dti"` →
+`"Binding:dti"`. A `variant="dot"` tile carries its label **only** in `title` and
+an `sr-only` span, so on any file where max_loan resolves — which is most —
+hovering the Maximum-loan tile showed the tooltip "Binding:dti" and a screen
+reader read that string aloud. The `STATUS_DOT`/`dot()` map this replaced fell
+back to a silent grey dot with no text at all, so the leak was new.
+
+The two limit unions are now imported **by type** rather than retyped, so a new
+member in `lib/types/dti.ts` breaks the map at compile time. The third has no
+frontend union to import, so its values are listed against the backend lines that
+emit them — the only place they can be checked against — and a test pins the full
+producer output, asserting no label contains a colon or equals its own key.
+
+`unknown` reads "Not determined" (`neutral`): it says the limit, or the ratio for
+a gated DTI, could not be established, which is honest rather than alarming. The
+three `binding:*` read "Limited by DTI / LTV / the program limit", also `neutral`
+— every file with a computed max loan has a binding constraint, so it is
+information, not a finding.
+
+### `groupNeeds` still hard-crashed the Needs dashboard (LP-UI-005's file)
+
+`buckets[NEEDS_GROUP[need.status]].push(need)`: an unrecognised status makes the
+index `undefined`, `buckets[undefined]` `undefined`, and `.push` a `TypeError`.
+`NeedsDashboard` calls `groupNeeds` before rendering any card, so **one**
+unrecognised need blanked the entire page — including the needs the build did
+understand. Now `?? "needs_action"`, matching `resolveStatus`'s `attention`
+default: an unrecognised need is work someone has to look at, and the chase pile
+is where they will see it.
+
+`outstandingNeedsCount` had the milder version — it silently under-counted — and
+got the same fallback. It is the headline number sitting beside the group it
+counts, and the two disagreeing would be worse than either being wrong alone.
+
+The sting is that LP-UI-005's review pass hardened `isTerminalStatus` against
+precisely this and wrote a comment explaining why, while the call that runs first
+and fails hardest kept the unguarded index.
+
+### The density retune re-armed iOS auto-zoom (this ticket's file)
+
+`input.tsx` and `textarea.tsx` lost their `text-base … md:text-sm` pair for a
+flat `text-sm`. Mobile Safari zooms the viewport whenever a focused control
+computes under 16px and does not zoom back out; `text-sm` is 0.8125rem (13px) at
+every breakpoint, so tapping the dashboard search, any intake field or any
+override input zoomed the page. `header.tsx` carries a `md:hidden` mobile nav, so
+the viewport is reachable rather than theoretical.
+
+The obvious fix is wrong here. **`text-base md:text-sm` does not work in this
+scale** — `base` was retuned to 0.875rem (14px), still under the threshold. The
+scale now carries a named `field` size at exactly 1rem, and both controls wear
+`text-field md:text-sm`, so the reason travels with the token instead of resting
+on `base` never being retuned again. A test pins `field` at 1rem.
+
+### `fontSize` sat under `theme.extend` (LP-UI-001's file)
+
+The same trap `tailwind.config.ts` documents seventeen lines above it for
+`fontWeight`, and for the same reason: `extend` **merges**. `xs`…`2xl` were
+retuned while Tailwind's stock ramp survived above them, so `text-3xl` and up
+resolved to stock — no tracking — and the scale jumped from a tracked 26px `2xl`
+straight to an untracked 30px `3xl`. Six live sites: the dashboard stat numbers,
+the marketing hero, and the four DTI/LTV headline figures.
+
+Moved to `theme` level, which REPLACES the ramp — so `3xl` had to join the scale
+or all six would have compiled to nothing, which is the LP-UI-002 failure exactly.
+It keeps stock size and line-height (the 1.2 ratio the rest of the scale uses was
+already right) and adds the missing tracking. `text-4xl` and up now genuinely do
+not exist, matching the weight cap's discipline, and a test pins the key set.
+
+### Verification
+
+`tsc --noEmit` clean, `biome check` clean over 206 files, 491 tests pass,
+`pnpm build` compiles. Each fix was mutation-checked against the failure it
+prevents:
+
+| mutation | result |
+| --- | --- |
+| remove the `binding:*` entries | 1 test fails |
+| revert `groupNeeds` to the unguarded index | 2 tests fail, on the real `TypeError` |
+| move `fontSize` back under `extend` | 2 tests fail |
+| drop `field` below 16px | 1 test fails |
+
+The stylesheet was compiled and all ten distinct font-size classes in the tree
+checked individually — every one emits CSS, including `file:text-sm` and the new
+`text-field` and `text-3xl`.
+
+### Noted, not changed
+
+- **`text-label` has zero consumers.** A purpose-built token in the same position
+  `--skeleton` and `--ai` were in twice before: introduced for the uppercase
+  eyebrow and shipped with nothing using it. The uppercase eyebrows in the tree
+  are still spelled as `text-[11px] uppercase tracking-wide` by hand.
+- **`input.tsx` is `h-7` (28px).** With `text-field` at 16px/20px on mobile that
+  leaves a 4px gutter — workable but tight. If the mobile fields read as cramped,
+  the fix is a responsive height, not shrinking the text back under 16px.

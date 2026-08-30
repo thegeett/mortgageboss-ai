@@ -110,6 +110,35 @@ describe("the font-weight cap", () => {
   });
 });
 
+describe("the type scale", () => {
+  // Same trap as the weight cap, and it caught this file out once: `fontSize` sat
+  // under `theme.extend`, which MERGES, so Tailwind's stock ramp survived above
+  // `2xl` — `text-3xl` resolved to 30px with no tracking while xs..2xl had been
+  // retuned. Moving it to theme level replaces the scale; this pins the result.
+  it("replaces the stock ramp rather than extending it", () => {
+    expect(Object.keys(theme?.fontSize ?? {}).sort()).toEqual(
+      ["2xl", "3xl", "base", "field", "label", "lg", "sm", "xl", "xs"].sort(),
+    );
+  });
+
+  it("has no size above 3xl — the scale is the whole vocabulary", () => {
+    const sizes = theme?.fontSize as Record<string, unknown>;
+    for (const absent of ["4xl", "5xl", "6xl", "7xl", "8xl", "9xl"]) {
+      expect(sizes[absent], `\`text-${absent}\` would compile to nothing`).toBeUndefined();
+    }
+  });
+
+  it("keeps `field` at 16px, the iOS auto-zoom floor", () => {
+    // Mobile Safari zooms the viewport whenever a focused control computes under
+    // 16px, and does not zoom back out. Every form control wears
+    // `text-field md:text-sm`; dropping this below 1rem re-arms that on every
+    // field in the app. `text-base md:text-sm`, the usual guard, does NOT work
+    // in this scale — `base` is 14px here.
+    const field = (theme?.fontSize as Record<string, [string, unknown] | undefined>).field;
+    expect(field?.[0]).toBe("1rem");
+  });
+});
+
 describe("the tokens the redesign adds", () => {
   // These are new in LP-UI-001 and the screen tickets are about to lean on them.
   // A missing one fails the same silent way `danger` did.

@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CALCULATOR_STATUS,
+  type CalculatorStatus,
   DOCUMENT_STATUS,
   EVALUATION_OUTCOME,
   LOAN_FILE_STATUS,
@@ -95,6 +96,36 @@ describe("resolveStatus never returns undefined", () => {
   it("does not throw on any unknown key", () => {
     for (const map of Object.values(MAPS)) {
       expect(() => resolveStatus(map, "definitely_not_a_status")).not.toThrow();
+    }
+  });
+
+  it("has an entry for every value the calculator producers actually emit", () => {
+    // The union was once written from the display map it replaced rather than
+    // from the producers, so `binding:*` and `unknown` fell through to
+    // `humanizeUnknown` — and a `variant="dot"` tile carries its label ONLY in
+    // `title` and an `sr-only` span, so the Maximum-loan tile's tooltip read
+    // "Binding:dti" and a screen reader said it aloud. This list is the three
+    // producers' full output; a value missing an entry fails here.
+    const emitted: CalculatorStatus[] = [
+      "pass", // DtiLimitStatus / LtvLimitStatus
+      "over",
+      "unknown",
+      "required", // services/calculators.py:267 mortgage insurance
+      "not_required",
+      "declining", // :342 self-employed
+      "sufficient", // :455 reserves
+      "insufficient",
+      "binding:dti", // :573 max loan
+      "binding:ltv",
+      "binding:loan_limit",
+    ];
+    for (const value of emitted) {
+      const meta = CALCULATOR_STATUS[value];
+      expect(meta, `CALCULATOR_STATUS has no entry for "${value}"`).toBeDefined();
+      // No raw machine token may reach a label: humanizeUnknown only swaps
+      // underscores, so a missed one shows up as a colon or a lowercase word.
+      expect(meta.label).not.toContain(":");
+      expect(meta.label).not.toBe(value);
     }
   });
 

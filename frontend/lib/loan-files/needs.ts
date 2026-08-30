@@ -145,7 +145,14 @@ export function groupNeeds(needs: NeedsItemPublic[]): NeedsGroup[] {
     set_aside: [],
   };
   for (const need of needs) {
-    buckets[NEEDS_GROUP[need.status]].push(need);
+    // A status this build does not know lands in `needs_action` rather than
+    // throwing. `NEEDS_GROUP[status]` would be undefined, `buckets[undefined]`
+    // undefined, and `.push` a TypeError — and NeedsDashboard calls this before
+    // rendering any card, so ONE unrecognised need blanked the whole page,
+    // including the needs it did understand. `needs_action` matches the
+    // `attention` default in `resolveStatus`: an unrecognised need is work
+    // someone has to look at, and the chase pile is where they will see it.
+    buckets[NEEDS_GROUP[need.status] ?? "needs_action"].push(need);
   }
   return GROUP_ORDER.map((key) => ({ key, meta: GROUP_META[key], items: buckets[key] })).filter(
     (group) => group.items.length > 0,
@@ -154,7 +161,11 @@ export function groupNeeds(needs: NeedsItemPublic[]): NeedsGroup[] {
 
 /** Items still needing action — the chase pile (the headline count). */
 export function outstandingNeedsCount(needs: NeedsItemPublic[]): number {
-  return needs.filter((need) => NEEDS_GROUP[need.status] === "needs_action").length;
+  // Same fallback as `groupNeeds`, for the same reason: this is the headline
+  // count beside the group it counts, and the two disagreeing is worse than
+  // either being wrong. Unguarded, this silently under-counted instead.
+  return needs.filter((need) => (NEEDS_GROUP[need.status] ?? "needs_action") === "needs_action")
+    .length;
 }
 
 /** How many AI/suggested needs still await the processor's confirmation. */
