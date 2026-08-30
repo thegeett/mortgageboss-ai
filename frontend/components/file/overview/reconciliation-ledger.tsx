@@ -85,8 +85,13 @@ export function ReconciliationLedger({ fileId }: { fileId: string }) {
         </Empty>
       ) : null}
 
+      {/* `table-fixed` so the percentage widths below are HONOURED. Without it the
+          layout is auto, and a `truncate` cell — which sets nowrap — widens its
+          column to fit instead of ellipsing, pushing the table off screen. Scoped
+          here rather than on the shared Table: fixed layout needs every width
+          declared, and the pipeline grid does not declare all ten. */}
       {rows !== undefined && rows.length > 0 && !nothingFound ? (
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[26%]">Field</TableHead>

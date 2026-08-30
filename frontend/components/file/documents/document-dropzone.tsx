@@ -82,7 +82,12 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
     <div
       {...getRootProps()}
       className={cn(
-        "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+        // LP-UI-019: a row, not a panel. At py-10 with a stacked icon, label,
+        // hint and button this stood ~290px tall — the first screen of the
+        // Documents tab was the invitation to add a document rather than the
+        // documents. Dropping is still the whole area; it just no longer
+        // outranks the eighteen files already on the file.
+        "group relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-lg border border-dashed px-4 py-3 text-center transition-colors",
         isDragActive
           ? "border-primary bg-primary/5"
           : "border-input bg-muted/60 hover:border-foreground-2",
@@ -92,27 +97,27 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       <input {...getInputProps()} aria-label="Upload documents" />
       <span
         className={cn(
-          "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
           isDragActive ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground",
         )}
       >
         {upload.isPending ? (
-          <Spinner className="h-5 w-5" />
+          <Spinner className="h-3.5 w-3.5" />
         ) : (
-          <CloudUpload className="h-5 w-5" aria-hidden />
+          <CloudUpload className="h-3.5 w-3.5" aria-hidden />
         )}
       </span>
-      <p className="mt-3 text-sm font-medium text-foreground">
+      <p className="text-sm font-medium text-foreground">
         {upload.isPending ? "Uploading…" : isDragActive ? "Drop to upload" : "Drag documents here"}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         PDF, JPG, or PNG · up to 50 MB · multiple at once
       </p>
       <button
         type="button"
         onClick={open}
         disabled={upload.isPending}
-        className="mt-4 inline-flex items-center rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
+        className="inline-flex items-center rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Browse files
       </button>

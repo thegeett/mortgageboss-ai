@@ -658,6 +658,43 @@ This is SPEC's "an aggregate must reuse the predicate its detail screen uses"
 applied to a case where reuse is only *mostly* possible. Where it cannot be
 complete, the screen must say which source it is showing rather than average them.
 
+## 2026-08-30 · A21 — from LP-UI-018, and it is LP-UI-005's undercount
+
+### A21 — the status vocabulary had seven domains, not six
+
+LP-UI-005 is titled *"One status vocabulary"* and opens *"Six independent status
+maps"*. Building the ledger screen turned up a seventh: **`finding.status`**
+(red / yellow / green) had no map at all.
+
+The undercount is understandable and worth naming precisely, because it is the
+A13 shape again. My ticket listed `lib/verification/rule-findings.ts` as a call
+site — but that file's map is the rule **outcome** (satisfied / violated /
+unknown), which is a different axis from the finding's **severity**. Two maps in
+one file, counted as one. The severity axis had no consolidated home, so a
+processor met a seventh amber.
+
+`FINDING_SEVERITY` now sits in `lib/status.ts` beside the other six:
+`red → blocking / "Blocking"`, `yellow → attention / "Warning"`,
+`green → verified / "Passed"`. Recorded rather than silently absorbed, because
+LP-UI-005's acceptance criterion *"the six old maps are deleted, not left
+orphaned"* was satisfiable while a seventh survived — the count was load-bearing
+and it was wrong.
+
+**The general form:** when a ticket asserts a COUNT of things to consolidate, the
+count is an acceptance criterion and has to be derived from the code, not from
+the survey that motivated the ticket. Two maps living in one file read as one.
+
+### Operational note — an unstaged amendment is an invisible amendment
+
+A20 was written the night before LP-UI-018 precisely so the ticket would honour
+it, and sat unstaged in the shared working tree. LP-UI-018 built the ledger with
+no reference to findings and found the amendment only while staging its own work,
+then implemented it. It landed correctly, and it landed on luck.
+
+Amendments written for a specific upcoming ticket are only binding once
+committed. Where this session cannot commit, the amendment must be stated in the
+check-in that reaches the implementing session as well as written to the file.
+
 ---
 
 ## Standing note

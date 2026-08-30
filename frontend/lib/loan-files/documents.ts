@@ -11,6 +11,7 @@ import type {
   DocumentCategory,
   DocumentResponse,
   DocumentStatus,
+  QualificationReason,
   SourceLocation,
   Transaction,
 } from "@/lib/types/document";
@@ -441,4 +442,79 @@ export function maskLast4(value: string | null | undefined): string {
   const trimmed = value.trim();
   const tail = trimmed.replace(/[^A-Za-z0-9]/g, "").slice(-4);
   return tail ? `••••${tail}` : "••••";
+}
+
+// --- Coverage, freshness, duplicates (LP-UI-019) ---------------------------- //
+
+/**
+ * Why a document is not package-qualified, in the processor's words.
+ *
+ * The reasons are the BACKEND's (`app/documents/staleness.py`), which checks
+ * them in priority order and reports the first failure. They are not restated
+ * here as a second opinion — this map only gives each one a label.
+ */
+export const QUALIFICATION_REASON_LABEL: Record<QualificationReason, string> = {
+  superseded: "Superseded",
+  stale: "Out of date",
+  untyped: "Not recognised",
+  not_extracted: "Not extracted yet",
+};
+
+export interface DocumentCoverage {
+  /** Current, fresh, typed and extracted — the backend's four criteria. */
+  qualified: number;
+  total: number;
+  /** The rest, grouped by the FIRST criterion each one failed. */
+  shortfalls: { reason: QualificationReason; label: string; count: number }[];
+  /** Unresolved staleness — a processor can act on each of these. */
+  stale: DocumentResponse[];
+  /** Documents sharing a type with another current document on the file. */
+  duplicated: { type: string; documents: DocumentResponse[] }[];
+}
+
+/**
+ * What the Documents context rail reports, derived from the list the page has
+ * already fetched. Nothing here is a second request — the rail exists to keep
+ * these answerable in one action, not to add a round trip per question.
+ *
+ * CURRENT documents only. A superseded version is reachable through the version
+ * history and counting it would make "8 of 12 qualified" describe a list of
+ * twelve the processor cannot see.
+ */
+export function documentCoverage(documents: DocumentResponse[]): DocumentCoverage {
+  const current = documents.filter((doc) => doc.is_current);
+
+  const counts = new Map<QualificationReason, number>();
+  let qualified = 0;
+  for (const doc of current) {
+    if (doc.package_qualification.qualified) {
+      qualified += 1;
+      continue;
+    }
+    const reason = doc.package_qualification.reason;
+    if (reason) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+
+  const shortfalls = (Object.keys(QUALIFICATION_REASON_LABEL) as QualificationReason[])
+    .filter((reason) => (counts.get(reason) ?? 0) > 0)
+    .map((reason) => ({
+      reason,
+      label: QUALIFICATION_REASON_LABEL[reason],
+      count: counts.get(reason) ?? 0,
+    }));
+
+  // A staleness a processor has already answered (replaced, waived, accepted) is
+  // not a thing to chase — LP-71 records the resolution for exactly this reason.
+  const stale = current.filter((doc) => doc.staleness?.is_stale && !doc.staleness.resolution);
+
+  const byType = new Map<string, DocumentResponse[]>();
+  for (const doc of current) {
+    if (!doc.document_type) continue;
+    byType.set(doc.document_type, [...(byType.get(doc.document_type) ?? []), doc]);
+  }
+  const duplicated = [...byType.entries()]
+    .filter(([, docs]) => docs.length > 1)
+    .map(([type, docs]) => ({ type, documents: docs }));
+
+  return { qualified, total: current.length, shortfalls, stale, duplicated };
 }

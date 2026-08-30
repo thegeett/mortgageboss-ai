@@ -135,7 +135,8 @@ call sites in `lib/loan-files/status.ts`, `lib/loan-files/documents.ts`,
 **Assets** `assets/lib/status.ts`, `assets/components/status-token.tsx`
 **Mockup** Foundations — "Status: three channels, always"
 
-Six independent status maps each invented their own colour language. A processor
+~~Six~~ **Seven** independent status maps each invented their own colour language
+(`finding.status` severity was missed in the original survey — see AMENDMENTS A21). A processor
 learns amber six times and it means something different each time. Collapse them
 onto six **tones** (blocking, attention, verified, progress, neutral, ai) rendered
 one way: colour + glyph shape + word.

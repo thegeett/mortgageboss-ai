@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { DocumentResponse } from "@/lib/types/document";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentList } from "./document-list";
 
@@ -153,7 +153,12 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
     expect(screen.queryByText("old.pdf")).toBeNull(); // reached via version history, not the list
   });
 
-  it("gently surfaces other current documents of the same type", () => {
+  it("no longer repeats the duplicate cue on every row (LP-UI-019)", () => {
+    // This cue used to read "1 other pay stub" under each of two rows — the same
+    // fact told twice, once per document, and noticed one row at a time. It moved
+    // to the context rail's Duplicates block, where it is one answer for the
+    // whole file; file-context-rail.test.tsx pins it there. The signal is not
+    // gone, so this asserts WHERE it is not, rather than deleting the property.
     render(
       <DocumentList
         documents={[
@@ -165,8 +170,42 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         onSelect={vi.fn()}
       />,
     );
-    // Each row notes the other same-type document (informational, not blocking).
-    expect(screen.getAllByText(/1 other/i).length).toBe(2);
+    expect(screen.queryByText(/1 other/i)).toBeNull();
+  });
+
+  it("keeps in-flight documents out of the table (LP-UI-019)", () => {
+    // They are in the ProcessingStrip above. A classifying document holding a
+    // row it changes every few seconds is what moves the settled list.
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", standard_name: "Settled W-2", status: "completed" }),
+          doc({ id: "b", standard_name: "Arriving now", status: "extracting" }),
+        ]}
+        isPending={false}
+        isError={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Settled W-2")).toBeTruthy();
+    expect(screen.queryByText("Arriving now")).toBeNull();
+  });
+
+  it("opens a document from the keyboard, not only the mouse", () => {
+    // LP-UI-007 shipped a row whose Enter key did something other than what its
+    // click did, and made an action reachable only with a pointer.
+    const onSelect = vi.fn();
+    render(
+      <DocumentList
+        documents={[doc({ id: "a", standard_name: "Kapadiya pay stub — Feb" })]}
+        isPending={false}
+        isError={false}
+        onSelect={onSelect}
+      />,
+    );
+    const row = screen.getByText("Kapadiya pay stub — Feb").closest("tr") as HTMLElement;
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });
 

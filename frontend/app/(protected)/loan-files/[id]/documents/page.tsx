@@ -3,6 +3,7 @@
 import { DocumentDrawer } from "@/components/file/documents/document-drawer";
 import { DocumentDropzone } from "@/components/file/documents/document-dropzone";
 import { DocumentList } from "@/components/file/documents/document-list";
+import { ProcessingStrip } from "@/components/file/documents/processing-strip";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -50,6 +51,9 @@ function DocumentsWorkspace() {
   return (
     <div className="space-y-6">
       <DocumentDropzone fileId={id} />
+      {/* Above the list on purpose (LP-UI-019): watching uploads land must not
+          move the documents already settled underneath them. */}
+      <ProcessingStrip documents={documents ?? []} />
       <DocumentList
         documents={documents}
         isPending={isPending}

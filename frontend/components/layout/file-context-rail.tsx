@@ -9,7 +9,7 @@ import { useLoanFile, useLoanFileActivity } from "@/lib/api/loan-files";
 import { useLtv } from "@/lib/api/ltv";
 import { useVerification } from "@/lib/api/verification";
 import { formatMoney, humanize } from "@/lib/format";
-import { isTerminalStatus } from "@/lib/loan-files/documents";
+import { documentCoverage, isTerminalStatus } from "@/lib/loan-files/documents";
 import { fileTabSegment } from "@/lib/navigation";
 import { LOAN_FILE_STATUS, type Tone, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -179,23 +179,81 @@ export function FileContextRail({ fileId }: { fileId: string }) {
   );
 }
 
-/** Coverage and freshness — only on the Documents tab, which already fetches these. */
+/**
+ * Coverage, freshness and duplicates — only on the Documents tab, which has
+ * already fetched the list these are derived from (LP-UI-019).
+ *
+ * Each of these was a per-row cue you noticed one document at a time: a badge on
+ * a stale row, a "2 other pay stubs" line under a name. In the rail each is one
+ * answer for the whole file, which is the difference between spotting a problem
+ * and being able to act on it.
+ */
 function DocumentsSection({ fileId }: { fileId: string }) {
   const { data: documents } = useLoanFileDocuments(fileId);
   const all = documents ?? [];
-  const settled = all.filter((doc) => isTerminalStatus(doc.status)).length;
-  const stale = all.filter((doc) => doc.staleness?.is_stale && !doc.staleness.resolution).length;
+  const processing = all.filter((doc) => !isTerminalStatus(doc.status)).length;
+  const coverage = documentCoverage(all);
 
   return (
-    <Section title="Documents">
-      <Metric label="In the file" value={String(all.length)} />
-      <Metric label="Processed" value={`${settled} / ${all.length}`} />
-      <Metric
-        label="May be stale"
-        value={String(stale)}
-        tone={stale > 0 ? "attention" : "neutral"}
-      />
-    </Section>
+    <>
+      <Section title="Coverage">
+        <Metric
+          label="Package-qualified"
+          value={`${coverage.qualified} / ${coverage.total}`}
+          tone={coverage.qualified === coverage.total ? "verified" : "neutral"}
+        />
+        {/* The backend checks four criteria in priority order and reports the
+            FIRST one each document failed, so these are its words, not a second
+            opinion formed here. */}
+        {coverage.shortfalls.map((shortfall) => (
+          <Metric
+            key={shortfall.reason}
+            label={shortfall.label}
+            value={String(shortfall.count)}
+            tone="attention"
+          />
+        ))}
+        {processing > 0 ? <Metric label="Still processing" value={String(processing)} /> : null}
+        <p className="pt-1 text-xs leading-snug text-muted-foreground">
+          A document is package-qualified when it is current, fresh, typed and extracted.
+        </p>
+      </Section>
+
+      <Section title="Freshness">
+        {coverage.stale.length === 0 ? (
+          <p className="py-1 text-xs text-muted-foreground">
+            Nothing on this file has passed its window.
+          </p>
+        ) : (
+          <ul className="space-y-1 py-1">
+            {coverage.stale.map((doc) => (
+              <li key={doc.id} className="text-xs leading-snug">
+                <span className="block truncate text-foreground-2">
+                  {doc.standard_name || doc.original_filename}
+                </span>
+                <span className="text-warning">{doc.staleness?.reason}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title="Duplicates">
+        {coverage.duplicated.length === 0 ? (
+          <p className="py-1 text-xs text-muted-foreground">
+            No two current documents share a type.
+          </p>
+        ) : (
+          <ul className="space-y-1 py-1">
+            {coverage.duplicated.map((group) => (
+              <li key={group.type} className="text-xs leading-snug text-foreground-2">
+                {group.documents.length} × {humanize(group.type)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </>
   );
 }
 
