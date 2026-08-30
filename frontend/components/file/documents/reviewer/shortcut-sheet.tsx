@@ -31,6 +31,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: "R", what: "Can't verify — say why" },
   { keys: "Space", what: "Show or hide the highlight boxes" },
   { keys: "Alt (hold)", what: "Reveal every other highlight at once" },
+  { keys: "+ / -", what: "Zoom the page in or out" },
+  { keys: "0", what: "Back to fitting the column" },
   { keys: "[ / ]", what: "Previous / next document" },
   { keys: "⌘Enter", what: "Mark reviewed and move to the next document" },
   { keys: "?", what: "This list" },

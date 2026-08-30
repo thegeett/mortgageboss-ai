@@ -1,9 +1,18 @@
 "use client";
 
+import {
+  FIT,
+  canZoomIn,
+  canZoomOut,
+  zoomIn,
+  zoomLabel,
+  zoomOut,
+  zoomWidth,
+} from "@/components/file/documents/reviewer/zoom";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePageImage } from "@/lib/api/page-image";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -25,6 +34,8 @@ export function PageCanvas({
   page,
   pageCount,
   onPageChange,
+  zoom,
+  onZoomChange,
   overlay,
 }: {
   documentId: string | null;
@@ -32,6 +43,9 @@ export function PageCanvas({
   /** `null` when unknown — the control then only guards the lower bound. */
   pageCount: number | null;
   onPageChange: (page: number) => void;
+  /** 1 is fit-to-column. See `zoom.ts` for why this is CSS and not a re-render. */
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
   /** The highlight boxes, positioned against the image (LP-UI-031). */
   overlay?: React.ReactNode;
 }) {
@@ -79,6 +93,44 @@ export function PageCanvas({
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
+
+        {/* The zoom, to the right of the pager and separated from it: they move
+            different things, and a processor reaching for one must not find the
+            other. */}
+        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Zoom out"
+          disabled={!canZoomOut(zoom)}
+          onClick={() => onZoomChange(zoomOut(zoom))}
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+        {/* The readout is the reset. A separate "fit" button would be a third
+            control for a job this one can do, and its label already says what
+            pressing it undoes. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 min-w-[3.25rem] px-1.5 tabular text-xs text-muted-foreground"
+          aria-label={`Zoom is ${zoomLabel(zoom)}. Reset to fit the column.`}
+          disabled={zoom === FIT}
+          onClick={() => onZoomChange(FIT)}
+        >
+          {zoomLabel(zoom)}
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          aria-label="Zoom in"
+          disabled={!canZoomIn(zoom)}
+          onClick={() => onZoomChange(zoomIn(zoom))}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -101,7 +153,9 @@ export function PageCanvas({
           // the IMAGE's box rather than the scroll container's — the boxes are
           // 0..1 of the page, and any other positioning parent puts them
           // somewhere confidently wrong.
-          <div className="relative mx-auto w-full max-w-[46rem]">
+          // `mx-auto` centres it while it fits and lets it overflow into the
+          // parent's scroller once zoomed past the pane.
+          <div className="relative mx-auto" style={{ width: zoomWidth(zoom) }}>
             <img
               src={data.url}
               onError={() => setFailed(identity)}

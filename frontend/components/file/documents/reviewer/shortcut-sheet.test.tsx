@@ -43,6 +43,8 @@ describe("the sheet and the bindings agree", () => {
     ["E", { ...NONE, key: "e" }, "edit"],
     ["R", { ...NONE, key: "r" }, "reject"],
     ["Space", { ...NONE, key: " " }, "toggleOverlay"],
+    ["+ / -", { ...NONE, key: "+" }, "zoomIn"],
+    ["0", { ...NONE, key: "0" }, "zoomReset"],
     ["[ / ]", { ...NONE, key: "[" }, "previousDocument"],
     ["⌘Enter", { ...NONE, key: "Enter", metaKey: true }, "markReviewed"],
     ["?", { ...NONE, key: "?" }, "toggleHelp"],

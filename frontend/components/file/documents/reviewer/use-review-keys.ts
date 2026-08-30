@@ -30,6 +30,10 @@ export interface ReviewKeyActions {
   reject: () => void;
   /** Show or hide every highlight box. */
   toggleOverlay: () => void;
+  /** Enlarge / shrink the page, and back to fitting the column. */
+  zoomIn: () => void;
+  zoomOut: () => void;
+  zoomReset: () => void;
   previousDocument: () => void;
   nextDocument: () => void;
   /** Mark the document reviewed and advance the queue. */
@@ -116,6 +120,16 @@ export function actionFor(event: {
       return "reject";
     case " ":
       return "toggleOverlay";
+    // `+` needs no shift on the numeric keypad and `=` is the unshifted key it
+    // shares on a full keyboard, so both mean the same thing.
+    case "+":
+    case "=":
+      return "zoomIn";
+    case "-":
+    case "_":
+      return "zoomOut";
+    case "0":
+      return "zoomReset";
     case "[":
       return "previousDocument";
     case "]":

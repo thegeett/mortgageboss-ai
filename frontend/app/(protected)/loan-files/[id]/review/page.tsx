@@ -15,6 +15,11 @@ import {
   shortcutsEnabled,
   useReviewKeys,
 } from "@/components/file/documents/reviewer/use-review-keys";
+import {
+  FIT,
+  zoomIn as stepIn,
+  zoomOut as stepOut,
+} from "@/components/file/documents/reviewer/zoom";
 import { StatusToken } from "@/components/status-token";
 import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
 import { useFieldBoxes } from "@/lib/api/field-boxes";
@@ -114,6 +119,9 @@ function Reviewer() {
   const recordReview = useRecordFieldReview(documentId);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showBoxes, setShowBoxes] = useState(true);
+  // Zoom persists across pages and documents for the session: a processor who
+  // zoomed in to read small print is still reading small print on the next page.
+  const [zoom, setZoom] = useState<number>(FIT);
   const [editing, setEditing] = useState<string | null>(null);
 
   const documentIndex = current.findIndex((doc) => doc.id === documentId);
@@ -157,6 +165,9 @@ function Reviewer() {
       // rather than recording a bare verdict the API would refuse anyway.
       reject: () => field.selected && setEditing(field.selected),
       toggleOverlay: () => setShowBoxes((on) => !on),
+      zoomIn: () => setZoom(stepIn),
+      zoomOut: () => setZoom(stepOut),
+      zoomReset: () => setZoom(FIT),
       previousDocument: () => goToDocument(-1),
       nextDocument: () => goToDocument(1),
       markReviewed: () => isFullyReviewed(queue) && goToDocument(1),
@@ -224,6 +235,8 @@ function Reviewer() {
             // guards only the lower bound.
             pageCount={pageImage?.pageCount ?? null}
             onPageChange={setPage}
+            zoom={zoom}
+            onZoomChange={setZoom}
             overlay={
               <BoxOverlay
                 // Space hides every box. Passing an empty list rather than a
