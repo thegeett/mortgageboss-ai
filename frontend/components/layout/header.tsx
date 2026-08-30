@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { isActivePath, visibleNavItems } from "@/lib/navigation";
+import { isActivePath, isNavItemActive, visibleNavItems } from "@/lib/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
@@ -23,7 +23,7 @@ export function Header() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
   const items = visibleNavItems(user?.role);
-  const current = items.find((item) => isActivePath(pathname, item.href));
+  const current = items.find((item) => isNavItemActive(pathname, item));
 
   return (
     <header className="flex h-[--topbar-h] shrink-0 items-center justify-between border-b border-border bg-card px-3">

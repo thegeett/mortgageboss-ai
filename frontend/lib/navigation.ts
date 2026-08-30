@@ -28,6 +28,19 @@ export interface NavItem {
   icon: LucideIcon;
   /** If set, the item is only shown to users with this role. */
   requiredRole?: UserRole;
+  /**
+   * Extra path prefixes this destination REPRESENTS without linking to.
+   *
+   * LP-UI-011 removed the "Loan Files" rail item because `/loan-files` now
+   * redirects to the dashboard — correctly, since two destinations meaning one
+   * screen is the duplication it set out to remove. But `/loan-files/<id>` is
+   * still a real place, and it was the only thing marking the rail while a
+   * processor was in a file. Without this the rail shows NOTHING current on the
+   * screen the product is mostly used on, and the header falls back to the
+   * wordmark. The dashboard is the loan-file list (ADR-390), so a file is inside
+   * its territory; saying so is what keeps the rail honest.
+   */
+  owns?: string[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -35,7 +48,7 @@ export const NAV_ITEMS: NavItem[] = [
   // said the real thing arrived in Epic 4; Epic 4 arrived, and the dashboard is
   // that list. Two rail destinations meaning one screen is the duplication this
   // ticket removes — `/loan-files` now redirects here.
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, owns: ["/loan-files"] },
   { label: "Administration", href: "/admin", icon: ShieldCheck, requiredRole: "admin" },
 ];
 
@@ -88,6 +101,12 @@ const ADMIN_SECTION: ContextSection = {
     { label: "Validation", href: "/admin/validation", icon: SlidersHorizontal },
   ],
 };
+
+/** Whether a rail destination represents `pathname` — its own route or one it owns. */
+export function isNavItemActive(pathname: string, item: NavItem): boolean {
+  if (isActivePath(pathname, item.href)) return true;
+  return (item.owns ?? []).some((prefix) => isActivePath(pathname, prefix));
+}
 
 /**
  * Which of `hrefs` is the CURRENT one for `pathname` — the longest match, or null.

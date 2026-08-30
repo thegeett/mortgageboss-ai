@@ -1,8 +1,10 @@
 import {
+  NAV_ITEMS,
   activeItemHref,
   contextSection,
   fileTabSegment,
   isActivePath,
+  isNavItemActive,
   visibleNavItems,
 } from "@/lib/navigation";
 import { describe, expect, it } from "vitest";
@@ -140,5 +142,36 @@ describe("fileTabSegment", () => {
     expect(fileTabSegment("/loan-files")).toBeNull();
     expect(fileTabSegment("/loan-files/new")).toBeNull();
     expect(fileTabSegment("/admin/lenders")).toBeNull();
+  });
+});
+
+describe("isNavItemActive", () => {
+  const dashboard = NAV_ITEMS.find((item) => item.href === "/dashboard");
+  if (!dashboard) throw new Error("the Dashboard rail item is gone");
+
+  it("marks Dashboard while you are inside a file", () => {
+    // LP-UI-011 removed the "Loan Files" rail item, which was the only thing
+    // marking the rail in the file workspace — so the rail showed NOTHING
+    // current on the screen the product is mostly used on, and the header fell
+    // back to the wordmark. The dashboard IS the loan-file list (ADR-390), so a
+    // file is inside its territory.
+    expect(isNavItemActive("/loan-files/abc", dashboard)).toBe(true);
+    expect(isNavItemActive("/loan-files/abc/documents", dashboard)).toBe(true);
+  });
+
+  it("still marks it on its own route", () => {
+    expect(isNavItemActive("/dashboard", dashboard)).toBe(true);
+  });
+
+  it("does not reach routes it merely prefixes", () => {
+    expect(isNavItemActive("/loan-files-archive", dashboard)).toBe(false);
+    expect(isNavItemActive("/admin/lenders", dashboard)).toBe(false);
+  });
+
+  it("leaves an item with no `owns` exactly as before", () => {
+    const admin = NAV_ITEMS.find((item) => item.href === "/admin");
+    if (!admin) throw new Error("the Administration rail item is gone");
+    expect(isNavItemActive("/admin/lenders", admin)).toBe(true);
+    expect(isNavItemActive("/loan-files/abc", admin)).toBe(false);
   });
 });

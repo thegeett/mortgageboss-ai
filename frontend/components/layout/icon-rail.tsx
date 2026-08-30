@@ -2,7 +2,7 @@
 
 import { CONTEXT_COLUMN_ID } from "@/components/layout/context-column";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { contextSection, isActivePath, visibleNavItems } from "@/lib/navigation";
+import { contextSection, isNavItemActive, visibleNavItems } from "@/lib/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { cn } from "@/lib/utils";
 import { Layers, PanelLeft } from "lucide-react";
@@ -47,7 +47,7 @@ export function IconRail({
       </Link>
 
       {items.map((item) => {
-        const active = isActivePath(pathname, item.href);
+        const active = isNavItemActive(pathname, item);
         return (
           <Tooltip key={item.href}>
             <TooltipTrigger asChild>
@@ -72,26 +72,34 @@ export function IconRail({
 
       <div className="flex-1" />
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onToggleContext}
-            aria-label="Toggle the context column"
-            // A disclosure button has to say which way it is pointing; without
-            // this the control is identical in both states to anyone who cannot
-            // see the column. This is what the hook's React value is FOR — it
-            // had no consumer at all, which is why it was free to drift.
-            aria-expanded={!collapsed}
-            aria-controls={hasColumn ? CONTEXT_COLUMN_ID : undefined}
-            aria-keyshortcuts="Meta+B Control+B"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">Toggle sidebar ⌘B</TooltipContent>
-      </Tooltip>
+      {/* Only where there is a column to toggle. LP-UI-011 left the dashboard —
+          the app's primary screen — with no context section, and a disclosure
+          button that discloses nothing is a control that lies. Hidden rather
+          than disabled: the rail is a column of icons separated by a spacer, so
+          one fewer at the bottom reads as "nothing to toggle here" without
+          adding a dead affordance to tab through. */}
+      {hasColumn ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleContext}
+              aria-label="Toggle the context column"
+              // A disclosure button has to say which way it is pointing; without
+              // this the control is identical in both states to anyone who cannot
+              // see the column. This is what the hook's React value is FOR — it
+              // had no consumer at all, which is why it was free to drift.
+              aria-expanded={!collapsed}
+              aria-controls={CONTEXT_COLUMN_ID}
+              aria-keyshortcuts="Meta+B Control+B"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Toggle sidebar ⌘B</TooltipContent>
+        </Tooltip>
+      ) : null}
     </nav>
   );
 }

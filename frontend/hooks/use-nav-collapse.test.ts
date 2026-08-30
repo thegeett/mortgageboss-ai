@@ -105,3 +105,22 @@ describe("useNavCollapse", () => {
     expect(result.current.collapsed).toBe(false);
   });
 });
+
+describe("useNavCollapse on a route with no column", () => {
+  it("ignores Cmd+B, rather than silently flipping state nothing can show", () => {
+    // The rail's button is hidden where there is no column; a shortcut that
+    // disagrees with the visible affordance is just an invisible one.
+    const { result } = renderHook(() => useNavCollapse({ enabled: false }));
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true }));
+    });
+    expect(result.current.collapsed).toBe(false);
+    expect(document.documentElement.dataset.nav).toBeUndefined();
+  });
+
+  it("still exposes toggle(), so the state itself is not route-dependent", () => {
+    const { result } = renderHook(() => useNavCollapse({ enabled: false }));
+    act(() => result.current.toggle());
+    expect(document.documentElement.dataset.nav).toBe("collapsed");
+  });
+});

@@ -93,3 +93,102 @@ ticket; no backend files changed.
 - `lib/navigation.ts`, `lib/navigation.test.ts`,
   `lib/navigation.redirects.test.ts` (new)
 - `decisions.md` — ADR-390
+
+## Review pass — what the removed nav item was still doing
+
+Reviewed on request from the session running the epic. Four defects, and three
+of the ticket's own judgement calls confirmed.
+
+### Nothing marked the rail while you were inside a file
+
+Removing "Loan Files" from `NAV_ITEMS` is right — it pointed at a stub and
+`/loan-files` now redirects to the dashboard, so two rail destinations meant one
+screen. But that item was also the only thing marking the rail in the FILE
+workspace, and nothing replaced it. Measured on `/loan-files/abc`: zero rail
+items carry `aria-current="page"`, and `Header`'s `current` resolves to
+`undefined`, so the top bar falls back to the wordmark.
+
+That is the screen the product is mostly used on. A persistent nav that shows
+nothing current there is worse than one destination too many.
+
+`NavItem` now takes an optional `owns` — extra path prefixes a destination
+represents without linking to — and Dashboard owns `/loan-files`. ADR-390 says
+the dashboard IS the loan-file list, so a file is inside its territory; `owns` is
+that sentence made true in the rail. `isNavItemActive()` replaces the bare
+`isActivePath(item.href)` in both `IconRail` and `Header`.
+
+### The sidebar toggle controlled nothing on the primary screen
+
+Raised in the hand-off, and it is a defect. With `PIPELINE_SECTION` gone,
+`contextSection("/dashboard")` is null and `ContextColumn` renders nothing — but
+the rail's toggle still rendered, still took focus, and still announced
+`aria-expanded`. A disclosure button that discloses nothing is a control that
+lies, and after this ticket that is the dashboard, not an edge case.
+
+The button is now rendered only where there is a column, and ⌘B is gated the same
+way through a new `enabled` option on `useNavCollapse`. Gating both matters: a
+shortcut that silently flips hidden state from a screen that cannot show the
+result is just an invisible one, and it would disagree with the affordance beside
+it. Hidden rather than disabled — the rail is a column of icons behind a spacer,
+so one fewer at the bottom reads as "nothing to toggle here" without adding a
+dead stop to tab through.
+
+This also simplifies the LP-UI-008 review's fix: `aria-controls` was conditional
+because the column might not exist, and now the button itself does not exist in
+that case, so the attribute is unconditional again.
+
+### The redirect test could not fail
+
+Correctly identified in the hand-off, and there is a better idiom. Asserting
+`readFileSync(...).toContain('redirect("/dashboard")')` passes on the string
+appearing anywhere — a comment, a disabled branch, a copy-pasted docstring — so
+it could not tell a page that redirects from one that mentions redirecting.
+
+The tests now CALL the pages with `redirect` mocked, which is the supported way
+to assert on the destination: the real one throws `NEXT_REDIRECT` by design, and
+the destination is the whole behaviour. Mutation-checked — pointing `/` at
+`/login` fails, where before it would not have. A third case asserts neither page
+returns markup, since a redirect page that also renders is one that flashes
+content before it moves. The health-page check imports the route module rather
+than grepping it for a function name.
+
+### Confirmed, not changed
+
+- **Moving the health page from a public route to a protected one is right, and
+  is a small security improvement rather than a neutral move.** It rendered
+  backend health and dependency rows to anyone who loaded `/`, signed in or not.
+  The API already exposes its own unauthenticated `/health`, `/health/live` and
+  `/health/ready` for the uses that genuinely need no session, so nothing is lost
+  by putting the UI behind auth. Worth noting separately: `/dev/*` carries no
+  role gate, so any authenticated user reaches it — that is the existing
+  convention (extraction-bench was already there) and not this ticket's to
+  change, but it is a ticket someone should write.
+- **Removing `PIPELINE_SECTION` rather than leaving a one-item column.** Right. A
+  column whose only content is a link to the screen you are already on is noise
+  with a border.
+- **Changing `contextSection("/loan-files/new")` from "Pipeline" to null.**
+  Flagged in the hand-off as "changing a test to match my code", which is the
+  move that hides regressions — but this one is honest. The section it asserted
+  no longer exists, so the old expectation could not be kept under any
+  implementation; and the property the test is actually for, that `/loan-files/new`
+  is not treated as a FILE, is still asserted. A test updated because the
+  behaviour deliberately changed is different from a test relaxed until it
+  passed, and the tell is whether the load-bearing assertion survived. It did.
+
+### Verification
+
+`tsc` clean, `biome` clean over 218 files, 577 tests (from 566), build compiles.
+The route table still shows `/` and `/loan-files` at 152 B — redirects, not
+pages — and `/dev/health` present at 4.74 kB. Every fix mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| drop `owns` from Dashboard | 1 test fails |
+| revert the rail to `isActivePath(item.href)` | 1 test fails |
+| render the toggle unconditionally | 1 test fails |
+| point the root redirect at `/login` | 1 test fails |
+
+The second of those is the one worth recording. It passed at first: the new
+`isNavItemActive` tests covered the helper, leaving `IconRail` free to go on
+calling `isActivePath(item.href)` with nothing noticing. The helper was never
+what regressed — the wiring was — so the assertion moved onto the rendered rail.

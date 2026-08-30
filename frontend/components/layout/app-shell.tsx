@@ -6,6 +6,8 @@ import { Header } from "@/components/layout/header";
 import { IconRail } from "@/components/layout/icon-rail";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useNavCollapse } from "@/hooks/use-nav-collapse";
+import { contextSection } from "@/lib/navigation";
+import { usePathname } from "next/navigation";
 
 /**
  * The authenticated app shell (LP-27, rebuilt in LP-UI-008).
@@ -23,7 +25,12 @@ import { useNavCollapse } from "@/hooks/use-nav-collapse";
  * leaves the rail and the column usable, so the user can navigate away.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { collapsed, toggle } = useNavCollapse();
+  const pathname = usePathname();
+  // Whether there is a column to collapse at all. LP-UI-011 left the dashboard
+  // with no context section, so both the shortcut and the rail's button are
+  // gated on this rather than acting on a column that is not there.
+  const hasColumn = contextSection(pathname) !== null;
+  const { collapsed, toggle } = useNavCollapse({ enabled: hasColumn });
 
   return (
     <TooltipProvider delayDuration={200}>

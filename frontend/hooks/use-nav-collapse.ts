@@ -24,7 +24,7 @@ export const NAV_COOKIE = "ledger-nav";
  * and flash it on every refresh, which the ticket calls out as infuriating in an
  * all-day tool — correctly.
  */
-export function useNavCollapse() {
+export function useNavCollapse({ enabled = true }: { enabled?: boolean } = {}) {
   const [collapsed, setCollapsed] = useState(false);
 
   // Adopt whatever the server already stamped, without changing it.
@@ -63,12 +63,18 @@ export function useNavCollapse() {
       // textareas are deliberately NOT excluded: ⌘B does nothing native in them,
       // so a processor who presses it while a field has focus meant this.
       if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
+      // Nothing to toggle on a route with no context column. Silently flipping
+      // hidden state from a screen that cannot show the result is worse than the
+      // shortcut doing nothing — the rail's button is hidden there for the same
+      // reason, and a shortcut that disagrees with the visible affordance is
+      // just an invisible one.
+      if (!enabled) return;
       event.preventDefault();
       toggle();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggle]);
+  }, [toggle, enabled]);
 
   return { collapsed, toggle };
 }
