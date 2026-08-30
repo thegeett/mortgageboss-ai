@@ -2,6 +2,7 @@
 
 import { StatusToken, figureToneClass } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCalculator } from "@/lib/api/calculators";
 import { useLoanFileDocuments } from "@/lib/api/documents";
@@ -22,7 +23,9 @@ import {
   splitByMissingDocument,
 } from "@/lib/verification/rule-findings";
 import { formatDistanceToNow } from "date-fns";
+import { PanelRight } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 /**
  * The 288px file context rail (LP-UI-009).
@@ -90,6 +93,73 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 const DASH = "—";
 
 export function FileContextRail({ fileId }: { fileId: string }) {
+  return (
+    // Hidden below `xl`, where `FileContextDrawer` carries the same body. The
+    // two render `ContextSections` rather than each holding a copy — a rail and
+    // a drawer showing different numbers for the same file is the failure this
+    // epic has found three times in other places.
+    <aside
+      aria-label="File context"
+      className="hidden w-ctx shrink-0 overflow-y-auto border-l border-border bg-card xl:block"
+    >
+      <ContextSections fileId={fileId} />
+    </aside>
+  );
+}
+
+/**
+ * The same context, reachable below `xl` (LP-UI-037).
+ *
+ * The rail is `hidden xl:block`, which below 1280px meant the file's status, its
+ * three ratios and its activity were not collapsed but GONE, with nothing to
+ * open. A 13-inch laptop is 1280 logical pixels at its widest common setting and
+ * less at any scaling above 100%, so this is the ordinary case rather than an
+ * edge one.
+ *
+ * A drawer rather than a stacked section: these six numbers are reference
+ * material a processor checks and dismisses, and stacking them above the work
+ * surface would push the work down the page on exactly the screens with the
+ * least room for it.
+ */
+export function FileContextDrawer({ fileId }: { fileId: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          // Mirrors the rail exactly: shown only where the rail is hidden, so the
+          // context is reachable at every width and duplicated at none.
+          className="gap-1.5 xl:hidden"
+        >
+          <PanelRight className="h-3.5 w-3.5" />
+          File context
+        </Button>
+      </SheetTrigger>
+      {/* The sheet already slides from the right and carries its own header
+          border; only the width and the scrolling are ours. */}
+      <SheetContent className="overflow-y-auto sm:max-w-[var(--ctx-w,22rem)]">
+        <SheetHeader>
+          <SheetTitle className="text-sm">File context</SheetTitle>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ContextSections fileId={fileId} />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/**
+ * The rail's contents, without the rail.
+ *
+ * Below `xl` the aside is hidden and this is what the drawer shows. Extracted so
+ * there is ONE definition of what "file context" means — the alternative is two
+ * lists that agree until one of them is edited.
+ */
+function ContextSections({ fileId }: { fileId: string }) {
   const pathname = usePathname();
   const { data: file, isPending: filePending } = useLoanFile(fileId);
   const { data: dti, isPending: dtiPending } = useDti(fileId);
@@ -102,10 +172,7 @@ export function FileContextRail({ fileId }: { fileId: string }) {
   const tab = fileTabSegment(pathname);
 
   return (
-    <aside
-      aria-label="File context"
-      className="hidden w-ctx shrink-0 overflow-y-auto border-l border-border bg-card xl:block"
-    >
+    <>
       <Section title="Status">
         <div className="py-1">
           {filePending ? (
@@ -183,7 +250,7 @@ export function FileContextRail({ fileId }: { fileId: string }) {
           <p className="py-1 text-xs text-muted-foreground">Nothing yet.</p>
         )}
       </Section>
-    </aside>
+    </>
   );
 }
 

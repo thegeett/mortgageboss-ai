@@ -1,4 +1,5 @@
 import { FileHeaderActions } from "@/components/file/file-header-actions";
+import { FileContextDrawer } from "@/components/layout/file-context-rail";
 import { StatusToken } from "@/components/status-token";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMoney } from "@/lib/format";
@@ -78,6 +79,11 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
             {file.property_address ?? "No property address"}
           </p>
         </div>
+        {/* Below `xl` the context rail is hidden, and this is the only way to
+            the file's status, ratios and activity (LP-UI-037). It lives beside
+            the file's other actions rather than in the topbar, because it is
+            about THIS file. */}
+        <FileContextDrawer fileId={file.display_id} />
         <FileHeaderActions file={file} />
       </div>
     </div>

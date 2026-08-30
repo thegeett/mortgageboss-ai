@@ -15848,3 +15848,53 @@ the snapshot — and it is recorded in design amendment A28 rather than settled 
 a correction is a note to the next human, not a fix.
 
 *Status.* Accepted (LP-UI-033).
+
+---
+
+## ADR-394
+
+**Desktop-first, down to a 1280px laptop and a landscape tablet. Below that the app is
+usable rather than designed, and no phone layout is claimed.**
+
+*Context.* LP-UI-037 asked for the 13-inch laptop and tablet behaviour to be decided rather
+than assumed. Measured first: horizontal page overflow is **zero** at 1280 and at 1024 on
+every route, so the literal AC already passed. That is not the same as usable, and the
+screenshot said so — at 1280 the reviewer showed **six** vertical bands and squeezed the
+page canvas, the thing being read, to about 550px while the context rail spent 450 on loan
+facts nobody needs while reading a pay stub.
+
+The rail is `hidden xl:block`, so below 1280 it did not collapse — it **vanished**, taking
+the file's status, its three ratios and its activity with it and offering nothing to open.
+A 13-inch laptop is 1280 logical pixels at its widest common setting and fewer at any
+scaling above 100%, so that was the ordinary case rather than an edge one.
+
+*Decision.* Three commitments, in descending confidence.
+
+**1280 and above is designed.** Every screen is laid out for it, and the pipeline shows the
+columns that fit at each step of a recorded ladder rather than shrinking all nine equally.
+Shrinking equally is a decision too; it is just one nobody made, and it degrades the columns
+a processor triages on at the same rate as the ones they do not. The order — Touched, then
+Property and Lender, then Amount and Needs, with File, Borrower, Stage and Attention never
+dropped — is data in `COLUMNS`, with a test.
+
+**1024 to 1280 — a landscape tablet — is supported.** The context rail is a drawer reached
+from the file header, so nothing becomes unreachable; the reviewer's three panes keep their
+side-by-side arrangement, which measurement says still works at 1100 once the rail is out of
+the way.
+
+**Below 1024 is neither designed nor blocked.** It does not overflow and it does not lie,
+and that is the whole claim. A processor assembling a loan file is reading a document beside
+its extracted values, and two things side by side is the product.
+
+*What was NOT done, and why.* The ticket proposed that the reviewer stacks. It does not.
+Once the rail collapses, the three panes have more room at 1100 than they had at 1280 with
+the rail in place, so stacking would cost the side-by-side comparison that is the reviewer's
+entire purpose in order to solve a problem the drawer already solved. The proposal was a
+reasonable guess about what would be needed; the measurement disagreed with it.
+
+*Consequences.* A width below 1024 will eventually be reported as broken by someone, and the
+honest answer is that it is out of scope rather than that it is a bug. If phone support is
+ever wanted, the reviewer is the screen that has to be redesigned rather than reflowed —
+everything else already degrades acceptably.
+
+*Status.* Accepted (LP-UI-037).

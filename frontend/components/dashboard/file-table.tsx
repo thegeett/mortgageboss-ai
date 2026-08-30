@@ -31,17 +31,56 @@ import { formatDistanceToNow } from "date-fns";
 import { FolderPlus, MoreHorizontal, SearchX, Trash2, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const COLUMNS = [
-  "File",
-  "Borrower",
-  "Property",
-  "Amount",
-  "Stage",
-  "Attention",
-  "Needs",
-  "Lender",
-  "Touched",
+/**
+ * The pipeline's columns, and the order they are given up in (LP-UI-037).
+ *
+ * THE DROP ORDER IS RECORDED, NOT EMERGENT. All nine used to render at every
+ * width; below a laptop they simply got narrower until the addresses were three
+ * words and an ellipsis. Truncating everything equally is a decision too — it is
+ * just one nobody made, and it degrades the columns a processor triages on at
+ * the same rate as the ones they do not.
+ *
+ * The ranking is what a processor needs to TRIAGE, which is what this screen is
+ * for (LP-UI-013 sorts by attention for the same reason):
+ *
+ *   File, Attention   what it is and whether it needs me — never dropped
+ *   Borrower, Stage   who and where in the process
+ *   Needs, Amount     progress and size
+ *   Property          identifying, but the borrower already identifies it
+ *   Lender            rarely the reason a file is opened from this screen
+ *   Touched           recency; the default sort already encodes it
+ *
+ * `hideBelow` is a Tailwind breakpoint the column is hidden BELOW. Nothing is
+ * hidden below `sm` because the narrow-width pass stops at the tablet: this app
+ * is desktop-first by intent (ADR-394) and a phone layout is not being claimed.
+ */
+export const COLUMNS = [
+  { label: "File", hideBelow: null },
+  { label: "Borrower", hideBelow: null },
+  { label: "Property", hideBelow: "xl" },
+  { label: "Amount", hideBelow: "lg" },
+  { label: "Stage", hideBelow: null },
+  { label: "Attention", hideBelow: null },
+  { label: "Needs", hideBelow: "lg" },
+  { label: "Lender", hideBelow: "xl" },
+  { label: "Touched", hideBelow: "2xl" },
 ] as const;
+
+/** The class that hides a column below its breakpoint, or "" for one that stays. */
+export function columnClass(hideBelow: string | null): string {
+  // Written out rather than interpolated: Tailwind scans source text, and a
+  // template literal produces a class name that never reaches the stylesheet.
+  switch (hideBelow) {
+    case "lg":
+      return "hidden lg:table-cell";
+    case "xl":
+      return "hidden xl:table-cell";
+    case "2xl":
+      return "hidden 2xl:table-cell";
+    default:
+      return "";
+  }
+}
 
 /**
  * Roving tabindex over the rows (LP-UI-007).
@@ -162,8 +201,13 @@ function HeaderRow() {
           "column 3 of 7" from any cell, header or body. */}
       <TableRow className="hover:bg-transparent" aria-rowindex={1}>
         {COLUMNS.map((col, i) => (
-          <TableHead key={col} aria-colindex={i + 1} scope="col">
-            {col}
+          <TableHead
+            key={col.label}
+            aria-colindex={i + 1}
+            scope="col"
+            className={columnClass(col.hideBelow)}
+          >
+            {col.label}
           </TableHead>
         ))}
         <TableHead className="w-10" aria-colindex={COLUMNS.length + 1} scope="col">
@@ -184,7 +228,7 @@ function LoadingRows() {
       {Array.from({ length: 6 }, (_, i) => i).map((row) => (
         <TableRow key={row} aria-rowindex={row + 2}>
           {COLUMNS.map((col, i) => (
-            <TableCell key={col} aria-colindex={i + 1}>
+            <TableCell key={col.label} aria-colindex={i + 1} className={columnClass(col.hideBelow)}>
               {/* The CELL is --row-h; the bar inside it is deliberately shorter,
                   so a skeleton row and a real row are the same height and the
                   table does not jump when data arrives. */}
@@ -387,10 +431,16 @@ export function FileTable({
               <TableCell aria-colindex={2} className="text-foreground-2">
                 {file.primary_borrower_name ?? "—"}
               </TableCell>
-              <TableCell aria-colindex={3} className="max-w-[16rem] truncate text-foreground-2">
+              <TableCell
+                aria-colindex={3}
+                className={cn("max-w-[16rem] truncate text-foreground-2", columnClass("xl"))}
+              >
                 {file.property_address ?? "—"}
               </TableCell>
-              <TableCell aria-colindex={4} className="tabular text-right text-foreground-2">
+              <TableCell
+                aria-colindex={4}
+                className={cn("tabular text-right text-foreground-2", columnClass("lg"))}
+              >
                 {file.loan_amount ? formatMoney(file.loan_amount) : "—"}
               </TableCell>
               <TableCell aria-colindex={5}>
@@ -399,13 +449,16 @@ export function FileTable({
               <TableCell aria-colindex={6} className="max-w-[18rem] truncate">
                 <AttentionCell attention={file.attention} />
               </TableCell>
-              <TableCell aria-colindex={7} className="text-right">
+              <TableCell aria-colindex={7} className={cn("text-right", columnClass("lg"))}>
                 <NeedsProgress attention={file.attention} />
               </TableCell>
-              <TableCell aria-colindex={8} className="text-foreground-2">
+              <TableCell aria-colindex={8} className={cn("text-foreground-2", columnClass("xl"))}>
                 {file.lender_name ?? "—"}
               </TableCell>
-              <TableCell aria-colindex={9} className="whitespace-nowrap text-muted-foreground">
+              <TableCell
+                aria-colindex={9}
+                className={cn("whitespace-nowrap text-muted-foreground", columnClass("2xl"))}
+              >
                 {lastActivity(file.updated_at)}
               </TableCell>
               <TableCell
