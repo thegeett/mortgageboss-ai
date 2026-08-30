@@ -45,7 +45,9 @@ export type FieldTier =
   /** Read this one: critical, or under threshold, or a known-bad extractor field. */
   | "check"
   /** No confidence was reported. Not a judgement, and not silence either. */
-  | "unrated";
+  | "unrated"
+  /** A person read this and said it is wrong. Their finding, not the model's doubt. */
+  | "rejected";
 
 export interface TierInput {
   /** The model's self-rating in [0,1], or null when it gave none. */
@@ -54,8 +56,10 @@ export interface TierInput {
   critical: boolean;
   /** Why this field has a confirmed wrong value in the corpus (LP-508), or null. */
   distrustedReason: string | null;
-  /** Whether a person has confirmed this value. Always false today. */
+  /** Whether a person has confirmed this value (accepted it, or corrected it). */
   humanConfirmed?: boolean;
+  /** Whether a person read this value and said it is wrong. */
+  rejected?: boolean;
 }
 
 /**
@@ -71,9 +75,19 @@ export function tierFor({
   critical,
   distrustedReason,
   humanConfirmed = false,
+  rejected = false,
 }: TierInput): FieldTier {
   // A person looked at it. Nothing the model reports can downgrade that.
   if (humanConfirmed) return "verified";
+
+  // AND NEITHER CAN A HIGH NUMBER ERASE A REJECTION. Setting `humanConfirmed:
+  // false` for a rejection is right — "I could not verify this" is not "this is
+  // right" — but false only returns the field to the ordinary path, where a
+  // non-critical field rated above the standard threshold is `confident` and
+  // renders nothing at all. A processor would reject a value and watch their own
+  // decision vanish from the row. A rejection outranks every model signal for the
+  // same reason a confirmation does: a person looked.
+  if (rejected) return "rejected";
 
   // A field the system already knows this extractor gets wrong. Independent of the
   // number, because the whole point of the distrust list is that the number lied.
@@ -94,6 +108,7 @@ export const TIER_LABEL: Record<FieldTier, string> = {
   confident: "Confident",
   check: "Check this",
   unrated: "Not rated",
+  rejected: "Rejected",
 };
 
 /**
@@ -117,5 +132,6 @@ export function tierInputFor(
     // A rejection is NOT confirmation — "I could not verify this" is the opposite
     // of "this is right", and it must keep its mark.
     humanConfirmed: scrutiny?.verdict === "accepted" || scrutiny?.verdict === "corrected",
+    rejected: scrutiny?.verdict === "rejected",
   };
 }

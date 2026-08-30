@@ -10,18 +10,23 @@ LP-508 distrust ledger is entirely that question — and overwriting the value t
 record a correction destroys the evidence to store the verdict.
 
 WHY KEYED ON THE EXTRACTION RATHER THAN THE DOCUMENT. A re-extraction produces a
-new version with possibly different values. A verdict recorded against the old one
-must not silently vouch for the new, so the ON DELETE CASCADE from `extractions`
-means a superseded version's reviews go with it and the fields return to
+new version with possibly different values, and a verdict recorded against the old
+one must not silently vouch for the new. Because the row is keyed on
+`extraction_id`, the new version simply HAS no verdicts and its fields return to
 unreviewed. That costs a processor a second pass; the alternative costs an
 underwriter a wrong file.
 
-THE UNIQUE INDEX INCLUDES `deleted_at`, which makes it a partial-uniqueness
-approximation rather than a true partial index: two soft-deleted rows with the
-same timestamp would collide. That cannot happen through the service (a revert
-soft-deletes exactly one live row), and the ordinary Postgres alternative — a
-partial index `WHERE deleted_at IS NULL` — is used here instead, matching
-`uq_extractions_document_id_current`.
+THE CASCADE IS NOT WHAT DOES THAT, despite an earlier version of this docstring
+saying so. Re-extraction deletes nothing — `create_extraction_version` demotes the
+current row to `is_current = False` and inserts a new one, and no code path deletes
+an `Extraction` at all. The `ON DELETE CASCADE` below is real and worth keeping (a
+document delete has to take its reviews with it) but it never fires on the
+re-extraction path. The superseded version keeps its verdicts, as history.
+
+THE UNIQUE INDEX IS A TRUE PARTIAL INDEX — `WHERE deleted_at IS NULL`, matching
+`uq_extractions_document_id_current`. Including `deleted_at` as a fourth column
+instead would only approximate it: two soft-deleted rows sharing a timestamp would
+collide.
 
 Hand-written. `--autogenerate` proposes eighteen destructive operations against
 this schema, so every migration here is written by hand.

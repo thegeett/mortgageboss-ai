@@ -107,9 +107,68 @@ def identity_fields() -> frozenset[str]:
     return frozenset(str(n).strip() for n in names if str(n or "").strip())
 
 
+@cache
+def identity_readable_fields() -> frozenset[str]:
+    """Identity a processor must be able to READ — critical, but never masked.
+
+    Verifying a date of birth against the 1003, or an employer's EIN against the
+    W-2, is the processor's job, and a masked value cannot be verified.
+    """
+    groups = _document().get("critical") or {}
+    if not isinstance(groups, dict):
+        raise CriticalityError("critical_fields.yaml `critical` must map a category to a list")
+    names = groups.get("identity_readable") or []
+    if not isinstance(names, list):
+        raise CriticalityError("critical_fields.yaml critical.identity_readable must be a list")
+    return frozenset(str(n).strip() for n in names if str(n or "").strip())
+
+
+@cache
+def pii_readable_fields() -> frozenset[str]:
+    """PII-registry names a processor reads anyway — a loan number, a policy number.
+
+    Top-level rather than a `critical` category, because readable and critical are
+    different questions: listing a loan number under `critical` would put a mark
+    beside every one of them, and a mark on every row is a mark on no row.
+    """
+    raw = _document().get("pii_readable") or []
+    if not isinstance(raw, list):
+        raise CriticalityError("critical_fields.yaml `pii_readable` must be a list")
+    return frozenset(str(n).strip() for n in raw if str(n or "").strip())
+
+
+@cache
+def _known_pii_fields() -> frozenset[str]:
+    """The field names `verification/snapshot` ALREADY classifies as PII.
+
+    Imported lazily to keep this module's import graph flat — it is read by the
+    document API on every detail request.
+    """
+    from app.verification.snapshot.documents_section import _PII_FIELDS
+
+    return frozenset(_PII_FIELDS)
+
+
 def is_sensitive(field: str) -> bool:
-    """Whether displaying `field` in the clear would put an identifier on a screen."""
-    return field in identity_fields()
+    """Whether displaying `field` in the clear would put an identifier on a screen.
+
+    DERIVED FROM BOTH LISTS, and the second one is the point. `critical.identity`
+    is a list somebody authored for this feature; `_PII_FIELDS` in
+    `verification/snapshot/documents_section.py` is a registry of 83 field names
+    already classified by `PiiKind`, used by the snapshot and scrubbing layer all
+    along. It carried `aba_routing_number` and `account_number` — a routing number
+    beside an account number — while the reviewer's fields pane printed both in the
+    clear. **The codebase already knew those were identifiers. The masking that
+    leaked them was not asking the list that knew.**
+
+    So the default is now MASK, and `identity_readable` is the explicit exception.
+    A new PII field added to either list is hidden without anyone remembering to
+    add it here, which is the only arrangement that survives being forgotten.
+    """
+    if field in identity_fields():
+        return True
+    readable = identity_readable_fields() | pii_readable_fields()
+    return field in _known_pii_fields() and field not in readable
 
 
 def is_critical(field: str) -> bool:

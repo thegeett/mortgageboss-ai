@@ -288,6 +288,12 @@ def test_scrub_patterns_match_the_at_rest_guard() -> None:
 #: The reason for each is in the migration next to the view.
 EXCLUDED: dict[str, frozenset[str]] = {
     "loan_files": frozenset({"inbox_token", "loan_officer_name", "loan_officer_email"}),
+    # A correction is whatever a processor typed, on whatever field they were correcting —
+    # correct an SSN field and the correction IS an SSN. The note is free prose about one
+    # borrower's document. Both are dropped rather than scrubbed: scrubbing catches the
+    # shapes it knows, and a hand-typed value is the one place a raw identifier arrives in
+    # a shape nobody predicted. The view answers "was there a correction?" with a boolean.
+    "field_reviews": frozenset({"corrected_value", "note"}),
     "borrowers": frozenset(
         {
             "first_name",
@@ -438,6 +444,49 @@ def test_excluded_tables_are_real() -> None:
     assert not unknown, f"EXCLUDED_TABLES names tables that do not exist: {unknown}"
 
 
+def _output_columns(view_sql: str) -> set[str]:
+    """The names a view actually RETURNS, not the names that appear in its text.
+
+    Substring-matching the select list is not the same question, and LP-UI-033's
+    view is where the difference showed: `(corrected_value IS NOT NULL) AS
+    has_corrected_value` contains the string `corrected_value`, so a `\bname\b`
+    search called that column exposed while the view deliberately drops its VALUE
+    and returns only a boolean. The check meant to force a decision was satisfied
+    by a column being *mentioned in a predicate about itself*.
+
+    So each select item is reduced to the name it comes out as: its alias if it has
+    one, otherwise the bare column name. `scrub(x) AS x` still counts as exposing
+    `x` — scrubbed is exposed, just not in the raw.
+    """
+    select_part = view_sql.split("FROM")[0]
+    select_part = select_part[select_part.upper().rindex("SELECT") + len("SELECT") :]
+
+    items, depth, current = [], 0, ""
+    for char in select_part:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            items.append(current)
+            current = ""
+        else:
+            current += char
+    items.append(current)
+
+    names: set[str] = set()
+    for item in items:
+        item = " ".join(item.split())
+        if not item:
+            continue
+        alias = re.search(r"\bAS\s+(\w+)$", item, re.IGNORECASE)
+        if alias:
+            names.add(alias.group(1))
+        elif re.fullmatch(r"\w+", item):
+            names.add(item)
+    return names
+
+
 def test_no_model_column_drifts() -> None:
     """A model column must be exposed by its view or explicitly excluded — never neither.
 
@@ -450,12 +499,10 @@ def test_no_model_column_drifts() -> None:
     for table_name, view_sql in bodies.items():
         table = Base.metadata.tables[table_name]
         excluded = EXCLUDED.get(table_name, frozenset())
-        # The column list is everything before FROM; a bare name or one inside scrub(...).
-        select_part = view_sql.split("FROM")[0]
+        exposed = _output_columns(view_sql)
         for column in table.columns:
             name = column.name
-            mentioned = re.search(rf"\b{re.escape(name)}\b", select_part) is not None
-            if not mentioned and name not in excluded:
+            if name not in exposed and name not in excluded:
                 problems.append(f"{table_name}.{name}")
 
     assert not problems, (

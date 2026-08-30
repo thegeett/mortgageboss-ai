@@ -85,6 +85,7 @@ critical:
     - pest_control_business_license_number
     - recipient_or_escrow_account_last4
 
+
   credit:
     - aus_credit_score
     - score_equifax
@@ -364,6 +365,48 @@ critical:
     - annual_property_taxes
     - estimated_construction_cost
     - withdrawal_penalty_or_tax
+
+# Names `_PII_FIELDS` classifies as PII (kind `account`) that a processor nonetheless READS:
+# a loan number, a policy number, a parcel number, an invoice. They are kept out of LLM
+# snapshots and analytics views by that registry and shown on the processor's own screen.
+#
+# SEPARATE FROM `critical:` ON PURPOSE. Listing them there would also make every one of them
+# CRITICAL — a mark beside every loan number on every document — and a mark that appears
+# everywhere stops being a mark. Readable and critical are different questions.
+#
+# `_PII_FIELDS` has only two kinds, `ssn` (19) and `account` (64), and `account` is too coarse
+# to drive a screen: it holds `aba_routing_number` and `loan_number` alike. Masking stays the
+# DEFAULT for that kind and every name here is an exception someone wrote down. Money-movement
+# identifiers (account, routing, card, wire) and identity documents (passport, visa, i94) are
+# not here and must never be. `tax_bill_or_account_number` is deliberately absent: it reads as
+# an account number, and a value that has to be argued about belongs on the masked side.
+pii_readable:
+  - loan_number
+  - loan_number_masked
+  - invoice_number
+  - invoice_or_receipt_number
+  - policy_number
+  - policy_number_masked
+  - master_policy_number
+  - receipt_number
+  - control_number
+  - document_number
+  - project_or_job_number
+  - employee_number
+  - state_employer_id
+  - certificate_or_state_file_number
+  - local_file_or_registration_number
+  - parcel_or_apn
+  - expiration_month_year
+  - lender_phone
+  - verification_phone
+  - case_number
+  - permit_number
+  - quote_number
+  - commitment_number
+  - form_number
+  - amendment_number
+  - submission_number
 
 reviewed_not_critical:
   account_status_after_payment: a status word, not the payment figure itself

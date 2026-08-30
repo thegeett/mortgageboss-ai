@@ -11,7 +11,10 @@ import { ReviewerFields } from "@/components/file/documents/reviewer/reviewer-fi
 import { type PaneSplit, ReviewerShell } from "@/components/file/documents/reviewer/reviewer-shell";
 import { ShortcutSheet } from "@/components/file/documents/reviewer/shortcut-sheet";
 import { useFieldSelection } from "@/components/file/documents/reviewer/use-field-selection";
-import { useReviewKeys } from "@/components/file/documents/reviewer/use-review-keys";
+import {
+  shortcutsEnabled,
+  useReviewKeys,
+} from "@/components/file/documents/reviewer/use-review-keys";
 import { StatusToken } from "@/components/status-token";
 import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
 import { useFieldBoxes } from "@/lib/api/field-boxes";
@@ -157,9 +160,9 @@ function Reviewer() {
       markReviewed: () => isFullyReviewed(queue) && goToDocument(1),
       toggleHelp: () => setHelpOpen((open) => !open),
     },
-    // The sheet is a dialog with its own Escape handling; leaving the global
-    // listener live behind it would act on keys aimed at the dialog.
-    !helpOpen,
+    // The sheet and the verdict editor each own the keyboard while they are open;
+    // leaving the global listener live behind either one acts on keys aimed at it.
+    shortcutsEnabled({ helpOpen, editing }),
   );
 
   return (

@@ -262,3 +262,66 @@ def test_a_personal_identifier_lands_in_the_group_that_gets_MASKED() -> None:
         "These name a personal identifier but are not in `critical.identity`, so they render "
         f"in the clear: {misfiled}"
     )
+
+
+class TestOneDefinitionOfIdentifier:
+    """`is_sensitive` must answer from every list that classifies PII, not one.
+
+    A29 found the gap: `_PII_FIELDS` in `verification/snapshot/documents_section.py`
+    already classified 83 field names by `PiiKind`, and `is_sensitive` consulted
+    only the `identity` category authored for LP-UI-032. `aba_routing_number` and
+    `account_number` sat in that registry — a routing number beside an account
+    number, which together are enough to originate a debit — while the reviewer's
+    fields pane printed both in the clear.
+    """
+
+    def test_the_banking_identifiers_the_other_list_knew_about_are_masked(self) -> None:
+        for field in (
+            "aba_routing_number",
+            "account_number",
+            "account_number_masked",
+            "passport_number",
+            "visa_number",
+            "wire_ach_trace_number",
+        ):
+            assert is_sensitive(field), f"{field} is classified PII and renders in the clear"
+
+    def test_every_known_pii_field_is_masked_unless_declared_readable(self) -> None:
+        """The default is MASK. Readable is the exception, and it has to be written down.
+
+        Stated as a behavioural sweep rather than trusting the implementation: if
+        someone re-introduces an authored allow-list, this fails on whatever it forgot.
+        """
+        from app.verification.field_criticality import (
+            identity_readable_fields,
+            pii_readable_fields,
+        )
+        from app.verification.snapshot.documents_section import _PII_FIELDS
+
+        readable = identity_readable_fields() | pii_readable_fields()
+        leaking = sorted(f for f in _PII_FIELDS if not is_sensitive(f) and f not in readable)
+        assert not leaking, (
+            f"classified as PII, masked by nothing, not declared readable: {leaking}"
+        )
+
+    def test_nothing_shaped_like_a_money_or_identity_document_is_declared_readable(self) -> None:
+        """The readable lists are for what a processor must READ — a loan number, a
+        DOB, an EIN, a policy number. A bank account, a routing number, a card, a
+        wire reference or an identity document can never be argued onto that side.
+
+        This is the guard on the escape hatch. `is_sensitive` defaults to MASK for
+        anything in the PII registry, and these two lists are the only way out of
+        it — so the way out needs a lock.
+        """
+        from app.verification.field_criticality import (
+            identity_readable_fields,
+            pii_readable_fields,
+        )
+
+        forbidden = re.compile(
+            r"((^|_)(ssn|itin|tin)(_|$)|social_security_number|routing|account_number(_|$)"
+            r"|(^|_)card_|wire_|passport|visa_number|i94)"
+        )
+        readable = identity_readable_fields() | pii_readable_fields()
+        misfiled = sorted(f for f in readable if forbidden.search(f))
+        assert not misfiled, f"declared readable but must be masked: {misfiled}"

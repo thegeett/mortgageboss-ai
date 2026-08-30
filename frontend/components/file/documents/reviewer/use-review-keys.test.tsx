@@ -2,7 +2,13 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type ReviewKeyActions, actionFor, isTypingTarget, useReviewKeys } from "./use-review-keys";
+import {
+  type ReviewKeyActions,
+  actionFor,
+  isTypingTarget,
+  shortcutsEnabled,
+  useReviewKeys,
+} from "./use-review-keys";
 
 afterEach(cleanup);
 
@@ -152,5 +158,38 @@ describe("useReviewKeys", () => {
     render(<Harness on={on} />);
     const prevented = !fireEvent.keyDown(window, { key: "r", cancelable: true });
     expect(prevented).toBe(false);
+  });
+});
+
+describe("shortcutsEnabled", () => {
+  /**
+   * The gap `isTypingTarget` cannot close.
+   *
+   * It guards the INPUT a correction is typed into. The verdict editor also has
+   * buttons, and a `<button>` is not a typing target — so with the editor open and
+   * focus on Cancel, `Enter` activated the button AND fired `accept`, recording an
+   * acceptance on the field someone had opened in order to reject it.
+   */
+  it("stands down while the verdict editor is open", () => {
+    expect(shortcutsEnabled({ helpOpen: false, editing: "gross_pay" })).toBe(false);
+  });
+
+  it("stands down while the shortcut sheet is open", () => {
+    expect(shortcutsEnabled({ helpOpen: true, editing: null })).toBe(false);
+  });
+
+  it("is live when nothing owns the keyboard", () => {
+    expect(shortcutsEnabled({ helpOpen: false, editing: null })).toBe(true);
+  });
+});
+
+describe("the button-focus path the editor exposed", () => {
+  it("does not treat a button as a place someone is typing", () => {
+    // NOT a bug in isTypingTarget — a button genuinely is not a text field, and
+    // shortcuts SHOULD work with one focused elsewhere on the page. It is the
+    // reason the editor needs shortcutsEnabled: the guard was never going to
+    // cover it, so something else had to.
+    const button = document.createElement("button");
+    expect(isTypingTarget(button)).toBe(false);
   });
 });

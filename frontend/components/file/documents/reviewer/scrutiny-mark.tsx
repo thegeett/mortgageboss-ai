@@ -19,6 +19,10 @@ import type { Tone } from "@/lib/status";
 const TONE: Record<Exclude<FieldTier, "confident">, Tone> = {
   verified: "verified",
   check: "attention",
+  // BLOCKING, where `check` is only attention. The distinction is the one the tier
+  // exists to draw: `check` means the system does not know, a rejection means a
+  // person does — they read the document and this value is wrong.
+  rejected: "blocking",
   // Neutral, deliberately. "Nobody rated this" is not a warning, and colouring it
   // as one would put three-quarters of every document in amber.
   unrated: "neutral",
@@ -29,6 +33,9 @@ function reason(input: TierInput, tier: FieldTier): string | null {
   if (tier === "verified") return "Confirmed by a person.";
   if (input.distrustedReason) {
     return `This extractor has read this field wrong before, so it is always checked. ${input.distrustedReason}`;
+  }
+  if (tier === "rejected") {
+    return "You marked this value wrong. The extraction still says what the model read.";
   }
   if (tier === "check" && input.critical) {
     return "A money figure, a rate or an identity — always checked, however sure the model is.";

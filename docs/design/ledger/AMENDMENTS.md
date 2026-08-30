@@ -1240,3 +1240,119 @@ places disagrees the moment one of them learns something. Worth reading as a
 standing hazard rather than three incidents — when a second caller needs a derived
 fact, the fix is to reach for the first caller's function, not to rebuild the
 mapping beside it.
+
+## 2026-08-30 · A30 — from the LP-UI-033 review: a documented mechanism that never runs
+
+### A30a — the CASCADE that retires a verdict does not fire on re-extraction
+
+ADR-393 said a superseded extraction's verdicts "go with it" through the
+`ON DELETE CASCADE` on `extractions`, and the migration docstring said the same.
+**Re-extraction deletes nothing.** `create_extraction_version` demotes the current
+row to `is_current = False` and inserts a new one, because prior versions are kept
+for audit — and no code path deletes an `Extraction` at all.
+
+The behaviour the ADR wants is correct anyway: a verdict is keyed on
+`extraction_id`, so a new version simply has none of its own. But the *mechanism*
+is the key, not the cascade, and the difference is not pedantic. A cascade is a
+guarantee about deletion; a key is a guarantee about identity. Anyone who changed
+re-extraction to update a row **in place** — a plausible optimisation — would keep
+every verdict attached to values nobody reviewed, and the cascade the ADR pointed
+at would not save them.
+
+`TestReExtraction` pins all three facts, including that the superseded version
+*keeps* its verdicts. That last one is what shows the cascade is not what runs: if
+reviews really died with their extraction, the history assertion would be empty.
+
+**The general shape:** the ticket's own open-items list named "no test that a
+re-extraction drops the verdicts" as the gap to attack first. That instinct was
+right, and the test it asked for would have failed for a reason nobody expected —
+not "the cascade is broken" but "the cascade was never involved". A test written
+against a mechanism you have not confirmed runs will pass or fail for reasons
+unrelated to the mechanism.
+
+### A30b — a rejection rendered as nothing at all
+
+`tierInputFor` set `humanConfirmed: false` for a rejection, with a comment saying a
+rejection "is not confirmation ... and it must keep its mark". It kept no mark.
+`false` only returns the field to the ordinary path, and on that path a
+non-critical field rated at or above the standard threshold is `confident` — which
+renders **null** by design. A processor could reject a value and watch their own
+decision vanish from the row it was made on.
+
+Fixed with a `rejected` tier, toned `blocking` rather than `attention`: `check`
+means the system does not know, and a rejection means a person does. The comment
+was right about the intent and the code did the opposite, which is the shape this
+epic keeps producing — a sentence describing a guarantee that nothing enforces.
+
+While fixing it: `TIER_LABEL`'s "has one for every tier" test enumerated the four
+tiers by hand, so it went on passing after a fifth was added. It derives the list
+from `TIER_LABEL`'s own keys now, which `Record<FieldTier, string>` makes complete.
+
+### A30c — `isTypingTarget` was never going to cover the editor's buttons
+
+The input guard is right and it is not sufficient. It excludes `INPUT`,
+`TEXTAREA`, `SELECT` and `contentEditable` — a `<button>` is none of those, and
+correctly so. But the verdict editor is inline, the global listener stayed live
+behind it, and focus lands on its buttons: **`Enter` on Cancel activated the button
+AND fired `accept`**, recording an acceptance on the very field someone had opened
+in order to reject. `Tab` was quieter and worse — the hook calls `preventDefault`
+on it, so a keyboard user could not tab from the note field to Save at all.
+
+The shortcut sheet was already handled with `!helpOpen`. The editor is the same
+situation and was missed because it is not a dialog. `shortcutsEnabled({ helpOpen,
+editing })` now states the rule once, as a named predicate rather than an inline
+`&&`, so the part that was wrong is the part that has a test.
+
+### A30d — the drift guard passed because the column's NAME appeared in a predicate
+
+`test_no_model_column_drifts` asked whether a column is "mentioned" in a view's
+select list with a `\bname\b` search. The new view drops two columns deliberately
+and returns booleans about them: `(corrected_value IS NOT NULL) AS
+has_corrected_value`. That contains the string `corrected_value`, so the guard
+called the column exposed while the view exposes only whether it is null — and the
+decision to drop it went unrecorded in `EXCLUDED`, which is where this file's
+posture says decisions live.
+
+The guard now reduces each select item to the name it comes out as. Tightening it
+surfaced exactly those two columns and nothing else, so no other view was leaning
+on the loophole.
+
+### A30e — `is_sensitive` was still not asking the list that knew
+
+A29 is right, and the check confirms it: `_PII_FIELDS` in
+`verification/snapshot/documents_section.py` classifies **83** field names by
+`PiiKind`, and `is_sensitive` consulted only the 27 in `critical.identity`. Among
+the 56 it did not ask about: `aba_routing_number` and `account_number` — a routing
+number beside an account number, which together are enough to originate a debit —
+both rendering in the clear in the reviewer's fields pane.
+
+This is A27a's lesson recurring one level up. There, a guard missed a *spelling*.
+Here, a guard missed an entire *list that already existed*, and the fix I wrote for
+A27 authored a new one beside it rather than deriving from it. Two definitions of
+"identifier", and the newer one was narrower.
+
+`is_sensitive` now answers from both, and the default is MASK.
+
+**But not everything in that registry should be masked on a processor's screen,
+and getting this wrong in the other direction is also a bug.** `_PII_FIELDS` has
+exactly two kinds — `ssn` (19) and `account` (64) — and `account` is too coarse to
+drive a display: it holds `aba_routing_number` and `loan_number` alike. The
+registry is calibrated for a different question ("may this reach an LLM snapshot
+or an analytics view?") than the screen asks ("may the person working this file
+read it?"). A first pass at this fix masked the loan number, which a processor
+needs on every document.
+
+So there are two written exception lists and they answer different questions.
+`critical.identity_readable` is critical AND shown — a date of birth, an EIN, a
+licence number, each one a thing a processor VERIFIES. Top-level `pii_readable` is
+shown and not critical — a loan number, a policy number, a parcel number. Keeping
+the second out of `critical:` matters: listing a loan number there would put a
+mark beside every one of them, and a mark on every row is a mark on no row.
+
+Masking stays the default, every exception is a name somebody wrote down, and
+`test_nothing_shaped_like_a_money_or_identity_document_is_declared_readable` locks
+the escape hatch — an account number, a routing number, a card, a wire reference
+or an identity document cannot be argued onto the readable side.
+`tax_bill_or_account_number` is deliberately masked on that principle: it reads as
+an account number, and a value that has to be argued about belongs on the masked
+side.

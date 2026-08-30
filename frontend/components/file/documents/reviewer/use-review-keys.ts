@@ -53,6 +53,32 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/**
+ * Whether the reviewer's shortcuts own the keyboard right now.
+ *
+ * `isTypingTarget` is not enough on its own, and the verdict editor is where that
+ * shows. It covers the INPUT the processor types a correction into — but the
+ * editor also has buttons, and a `<button>` is not a typing target. With the
+ * editor open and focus on Cancel or Save, `Enter` activated the button AND fired
+ * `accept`, recording an acceptance on the very field someone had opened in order
+ * to REJECT. `Tab` was worse in a quieter way: the hook calls `preventDefault` on
+ * it, so a keyboard user could not tab from the note field to Save at all — the
+ * selection moved behind the editor instead.
+ *
+ * So an open overlay takes the keyboard entirely, the same way the shortcut sheet
+ * already did. This is a predicate rather than an inline `&&` at the call site so
+ * that the rule can be tested, since the rule is the part that was wrong.
+ */
+export function shortcutsEnabled({
+  helpOpen,
+  editing,
+}: {
+  helpOpen: boolean;
+  editing: string | null;
+}): boolean {
+  return !helpOpen && editing === null;
+}
+
 /** Which action a key event asks for, or null. Pure, so the table is testable. */
 export function actionFor(event: {
   key: string;

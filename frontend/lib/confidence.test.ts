@@ -92,6 +92,7 @@ describe("tierInputFor", () => {
       critical: false,
       distrustedReason: null,
       humanConfirmed: false,
+      rejected: false,
     });
   });
 
@@ -108,6 +109,7 @@ describe("tierInputFor", () => {
       critical: true,
       distrustedReason: "doc 104",
       humanConfirmed: false,
+      rejected: false,
     });
   });
 
@@ -138,7 +140,51 @@ describe("tierInputFor", () => {
 
 describe("the words", () => {
   it("has one for every tier", () => {
-    const tiers: FieldTier[] = ["verified", "confident", "check", "unrated"];
+    // DERIVED, not listed. The hand-written list said "verified, confident, check,
+    // unrated" and went on passing after `rejected` was added — a test named "every
+    // tier" that could only ever check the tiers its author remembered. `TIER_LABEL`
+    // is a `Record<FieldTier, string>`, so tsc guarantees its keys ARE every tier.
+    const tiers = Object.keys(TIER_LABEL) as FieldTier[];
+    expect(tiers).toContain("rejected");
     for (const tier of tiers) expect(TIER_LABEL[tier]).toBeTruthy();
+  });
+});
+
+describe("a field a person rejected", () => {
+  /**
+   * `tierInputFor` says a rejection "must keep its mark". It did not.
+   *
+   * A rejection sets `humanConfirmed: false`, correctly — "I could not verify this"
+   * is not "this is right". But false only returns the field to the ordinary path,
+   * and on that path a non-critical field rated at or above the standard threshold
+   * is `confident`, which renders NOTHING. So a processor could reject a value and
+   * watch the row go silent: their own decision, invisible, on the screen built to
+   * show decisions.
+   */
+  const rejected = {
+    critical: false,
+    distrusted_reason: null,
+    sensitive: false,
+    corrected_value: null,
+    verdict: "rejected",
+  } as const;
+
+  it("is not confident, however sure the model was", () => {
+    expect(tierFor(tierInputFor(0.99, rejected))).not.toBe("confident");
+  });
+
+  it("is not treated as confirmed either", () => {
+    expect(tierFor(tierInputFor(0.99, rejected))).not.toBe("verified");
+  });
+
+  it("says it was rejected, rather than borrowing the model's word for it", () => {
+    // "Check this" is what an unrated or low-confidence field says. A rejection is a
+    // person's finding, not the model's hesitation, and the row has to tell them apart.
+    expect(tierFor(tierInputFor(0.99, rejected))).toBe("rejected");
+    expect(TIER_LABEL.rejected).toBe("Rejected");
+  });
+
+  it("still says so when the model gave no rating at all", () => {
+    expect(tierFor(tierInputFor(null, rejected))).toBe("rejected");
   });
 });

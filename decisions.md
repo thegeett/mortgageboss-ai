@@ -15812,10 +15812,26 @@ never saw.
 correction records what the processor says is right; `extracted_data` continues to say what the
 model read; the display resolves the two and both stay answerable.
 
-The row is keyed on `extraction_id` with `ON DELETE CASCADE`, so **a superseded extraction's
-verdicts go with it** and the new version's fields return to unreviewed. This is the conservative
-direction on purpose: re-reviewing costs a processor a second pass, while inheriting costs an
-underwriter a file that carries a human confirmation nobody gave.
+The row is keyed on `extraction_id`, so **a new version has no verdicts of its own** and its
+fields return to unreviewed. This is the conservative direction on purpose: re-reviewing costs a
+processor a second pass, while inheriting costs an underwriter a file that carries a human
+confirmation nobody gave.
+
+*Corrected in review.* An earlier draft of this ADR said the retirement happened through the
+`ON DELETE CASCADE` on `extractions` — "a superseded extraction's verdicts go with it". **That
+cascade never fires on this path.** Re-extraction deletes nothing: `create_extraction_version`
+demotes the current row to `is_current = False` and inserts a new one, because prior versions are
+kept for audit, and no code path deletes an `Extraction`. The behaviour above is correct, but the
+mechanism is the KEY, not the cascade — the superseded version keeps its verdicts as history, which
+is what an accuracy investigation needs, since "someone accepted THIS value" is only answerable
+while both the value and the verdict still exist.
+
+The difference is not pedantic. The cascade is a guarantee about *deletion*; keying is a guarantee
+about *identity*. Anyone who changed re-extraction to update a row **in place** would keep every
+verdict attached to values nobody reviewed, and the cascade this ADR pointed at would not save
+them. `TestReExtraction` in `tests/integration/test_field_reviews.py` pins all three facts: the new
+version is unreviewed, the old version's verdict survives, and the cascade does work on an actual
+delete.
 
 Lifecycle is the LP-76/77/87 override pattern unchanged — one live row per (extraction, field) via a
 partial unique index, soft-delete to revert, the activity log as the immutable trail. Replacing a

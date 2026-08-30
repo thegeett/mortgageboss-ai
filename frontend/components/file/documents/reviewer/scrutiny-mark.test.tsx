@@ -65,3 +65,23 @@ describe("ScrutinyMark", () => {
     expect(trigger?.getAttribute("type")).toBe("button");
   });
 });
+
+describe("a rejected field", () => {
+  it("renders a mark rather than nothing", () => {
+    // The defect: `rejected` fell through to the ordinary path, where 0.99 and
+    // not-critical is `confident` — and a confident field renders null. The
+    // processor's own decision disappeared from the row it was made on.
+    const { container } = renderMark({ rejected: true });
+    expect(container.textContent).toContain("Rejected");
+  });
+
+  it("outranks a high confidence the same way a confirmation does", () => {
+    const { container } = renderMark({ rejected: true, confidence: 1 });
+    expect(container.textContent).not.toBe("");
+  });
+
+  it("still marks a rejected field the model never rated", () => {
+    const { container } = renderMark({ rejected: true, confidence: null });
+    expect(container.textContent).toContain("Rejected");
+  });
+});

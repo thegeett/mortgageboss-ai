@@ -250,3 +250,105 @@ class TestTheAuditTrail:
             .all()
         )
         assert any(e.activity_type is ActivityType.FIELD_REVIEW_REVERTED for e in entries)
+
+
+class TestReExtraction:
+    """What a re-extraction does to a verdict (LP-UI-033 review).
+
+    ADR-393 says a superseded version's reviews "go with it" via the ON DELETE
+    CASCADE on `extractions`. THE CASCADE NEVER FIRES. Re-extraction does not
+    delete anything: `create_extraction_version` demotes the current row
+    (`is_current = False`) and inserts a new one, because prior versions are kept
+    for audit (`app/models/extraction.py`). No code path deletes an Extraction.
+
+    The BEHAVIOUR the ADR wants is still correct, and these tests pin it: a verdict
+    is keyed on `extraction_id`, so a new version simply has none of its own. That
+    is a different mechanism with a different failure mode, and the difference
+    matters — anyone who changed re-extraction to update a row IN PLACE would keep
+    the verdicts, and the cascade the ADR points at would not save them.
+    """
+
+    async def test_a_re_extraction_leaves_every_field_unreviewed(self, db: AsyncSession) -> None:
+        from app.models.extraction import ExtractionStatus
+        from app.services.extractions import create_extraction_version
+
+        document, extraction = await _subject(db)
+        await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="gross_pay",
+            verdict=FieldVerdict.ACCEPTED,
+        )
+        assert len(await list_reviews(db, extraction_id=extraction.id)) == 1
+
+        fresh = await create_extraction_version(
+            db,
+            document_id=document.id,
+            extracted_data={"gross_pay": {"value": "9999.00"}},
+            extraction_status=ExtractionStatus.SUCCEEDED,
+        )
+        await db.flush()
+
+        # THE ASSERTION THAT MATTERS: the new figure carries nobody's name.
+        assert await list_reviews(db, extraction_id=fresh.id) == []
+
+    async def test_the_superseded_versions_verdict_survives_as_history(
+        self, db: AsyncSession
+    ) -> None:
+        """The other half, and the one that shows the cascade is not what runs.
+
+        If reviews were really deleted with their extraction, this would be empty.
+        It is not: the row stays attached to the version it was recorded against,
+        which is what an accuracy investigation needs — "someone accepted THIS
+        value" is only answerable while both the value and the verdict exist.
+        """
+        from app.models.extraction import ExtractionStatus
+        from app.services.extractions import create_extraction_version
+
+        document, extraction = await _subject(db)
+        await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="gross_pay",
+            verdict=FieldVerdict.ACCEPTED,
+        )
+        await create_extraction_version(
+            db,
+            document_id=document.id,
+            extracted_data={"gross_pay": {"value": "9999.00"}},
+            extraction_status=ExtractionStatus.SUCCEEDED,
+        )
+        await db.flush()
+        await db.refresh(extraction)
+
+        assert extraction.is_current is False
+        assert [r.field_key for r in await list_reviews(db, extraction_id=extraction.id)] == [
+            "gross_pay"
+        ]
+
+    async def test_deleting_the_extraction_does_cascade(self, db: AsyncSession) -> None:
+        """The cascade is real — it just is not on the re-extraction path.
+
+        Worth pinning so the FK is not removed as dead weight: a document delete
+        cascades to its extractions, and their reviews have to go too.
+        """
+        from app.models.field_review import FieldReview
+
+        document, extraction = await _subject(db)
+        await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="gross_pay",
+            verdict=FieldVerdict.ACCEPTED,
+        )
+        await db.flush()
+        await db.delete(extraction)
+        await db.flush()
+
+        remaining = (
+            await db.scalars(select(FieldReview).where(FieldReview.extraction_id == extraction.id))
+        ).all()
+        assert list(remaining) == []
