@@ -337,6 +337,103 @@ async def test_field_scrutiny_reaches_the_endpoint(
     assert "employer_name" not in scrutiny
 
 
+async def _reviewable(client: AsyncClient, db_session: AsyncSession, slug: str = "acme"):
+    from app.services.extractions import create_extraction_version
+
+    company, _user, token = await _make_user(db_session, slug=slug)
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    document = await db_session.get(Document, UUID(doc["id"]))
+    assert document is not None
+    await create_extraction_version(
+        db_session,
+        document_id=document.id,
+        extracted_data={"gross_pay": {"value": "4200.00"}, "net_pay": {"value": "3100.00"}},
+        extraction_status=ExtractionStatus.SUCCEEDED,
+    )
+    await db_session.commit()
+    return doc, token
+
+
+async def test_a_field_can_be_accepted_and_withdrawn(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+
+    put = await client.put(
+        url, json={"field_key": "gross_pay", "verdict": "accepted"}, headers=_auth(token)
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["verdict"] == "accepted"
+
+    listed = (await client.get(url, headers=_auth(token))).json()
+    assert [r["field_key"] for r in listed] == ["gross_pay"]
+
+    # The verdict also reaches the screen's own call, beside the scrutiny.
+    detail = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    assert detail["field_scrutiny"]["gross_pay"]["verdict"] == "accepted"
+
+    gone = await client.delete(f"{url}/gross_pay", headers=_auth(token))
+    assert gone.status_code == 204
+    assert (await client.get(url, headers=_auth(token))).json() == []
+    # Idempotent: withdrawing nothing is not an error.
+    assert (await client.delete(f"{url}/gross_pay", headers=_auth(token))).status_code == 204
+
+
+async def test_a_correction_shows_beside_the_model_value_not_instead_of_it(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+    body = {"field_key": "gross_pay", "verdict": "corrected", "corrected_value": "4250.00"}
+    assert (await client.put(url, json=body, headers=_auth(token))).status_code == 200
+
+    detail = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    assert detail["field_scrutiny"]["gross_pay"]["corrected_value"] == "4250.00"
+    # The extraction still says what the model read.
+    assert detail["current_extraction"]["extracted_data"]["gross_pay"]["value"] == "4200.00"
+
+
+async def test_a_rejection_without_a_reason_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    res = await client.put(
+        f"/api/v1/documents/{doc['id']}/reviews",
+        json={"field_key": "gross_pay", "verdict": "rejected"},
+        headers=_auth(token),
+    )
+    assert res.status_code == 422
+
+
+async def test_a_verdict_on_a_field_the_extraction_lacks_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Storing it would put a row in the table that no screen can ever show.
+    doc, token = await _reviewable(client, db_session)
+    res = await client.put(
+        f"/api/v1/documents/{doc['id']}/reviews",
+        json={"field_key": "not_a_field", "verdict": "accepted"},
+        headers=_auth(token),
+    )
+    assert res.status_code == 422
+
+
+async def test_reviews_are_tenant_scoped(client: AsyncClient, db_session: AsyncSession) -> None:
+    doc, _token = await _reviewable(client, db_session, slug="acme")
+    _other_doc, other_token = await _reviewable(client, db_session, slug="rival")
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+    for call in (
+        client.get(url, headers=_auth(other_token)),
+        client.put(
+            url, json={"field_key": "gross_pay", "verdict": "accepted"}, headers=_auth(other_token)
+        ),
+        client.delete(f"{url}/gross_pay", headers=_auth(other_token)),
+    ):
+        assert (await call).status_code == 404
+
+
 async def test_download_returns_exact_bytes(client: AsyncClient, db_session: AsyncSession) -> None:
     company, _user, token = await _make_user(db_session, slug="acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)

@@ -32,6 +32,7 @@ from app.documents.staleness import evaluate_staleness, package_fitness, package
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
+from app.models.field_review import FieldReview
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
@@ -41,6 +42,7 @@ from app.schemas.document import (
     FieldScrutiny,
 )
 from app.services.document_versioning import version_count, version_counts_for_group_ids
+from app.services.field_reviews import list_reviews
 from app.services.verifications import mark_verification_stale
 from app.verification.field_criticality import is_critical, is_sensitive
 from app.verification.rules.distrust import load_distrusted_fields
@@ -286,6 +288,11 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
     """Build the enriched detail response (base + current extraction + generic analysis)."""
     extraction = await get_current_extraction(db, document=document)
     count = await version_count(db, document=document)
+    reviews = (
+        {r.field_key: r for r in await list_reviews(db, extraction_id=extraction.id)}
+        if extraction is not None
+        else {}
+    )
     base = _enrich(document, extraction, version_count=count)
     return DocumentDetailResponse(
         **base.model_dump(),
@@ -293,12 +300,19 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
             ExtractionPublic.model_validate(extraction) if extraction is not None else None
         ),
         generic_analysis=document.generic_analysis,
-        field_scrutiny=_field_scrutiny(document, extraction),
+        field_scrutiny=_field_scrutiny(document, extraction, reviews),
     )
 
 
-def _field_scrutiny(document: Document, extraction: Extraction | None) -> dict[str, FieldScrutiny]:
+def _field_scrutiny(
+    document: Document,
+    extraction: Extraction | None,
+    reviews: dict[str, FieldReview],
+) -> dict[str, FieldScrutiny]:
     """Per-field criticality + distrust for the fields this extraction carries (LP-UI-032).
+
+    Also carries the processor's verdict on each field (LP-UI-033), so a reviewed
+    field is answered by the same call that says how much scrutiny it wanted.
 
     Scoped to the extraction's own keys rather than the whole vocabulary: the answer
     is about this document, and returning 156 critical field names to a screen
@@ -319,9 +333,14 @@ def _field_scrutiny(document: Document, extraction: Extraction | None) -> dict[s
         critical = is_critical(field)
         reason = distrusted.get((doc_type, field))
         sensitive = is_sensitive(field)
-        if critical or reason or sensitive:
+        review = reviews.get(field)
+        if critical or reason or sensitive or review is not None:
             out[field] = FieldScrutiny(
-                critical=critical, distrusted_reason=reason, sensitive=sensitive
+                critical=critical,
+                distrusted_reason=reason,
+                sensitive=sensitive,
+                verdict=review.verdict.value if review is not None else None,
+                corrected_value=review.corrected_value if review is not None else None,
             )
     return out
 

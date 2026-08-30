@@ -3,6 +3,71 @@
 Changes to the spec, tickets or assets made *after* implementation started.
 Read this alongside `TICKETS.md` — where the two disagree, this file wins.
 
+Amendments run **A1 upward in order below**, newest last. New ones append at
+the END of the file. The standing note is pinned here at the top so it cannot be
+stranded mid-file again — it has happened twice.
+
+## 2026-08-30 · A28 — from LP-UI-033: the Verified tier now has a producer, and a correction fixes nothing
+
+### A28a — A26a is closed
+
+LP-UI-032 reported "Verified (human-confirmed)" as a tier no field could reach,
+because no action anywhere in the product confirmed an extracted value. LP-UI-033
+builds that action: `Enter` accepts, `E` corrects, `R` rejects, and a verdict is
+recorded per (extraction, field) in `field_reviews`. The tier is live, and a
+processor's accepted field renders as Verified and drops out of the keyboard loop.
+
+The design questions A26a raised are answered, and the answers are in ADR-393: a
+verdict sits beside the extraction rather than inside it, so the model's own value
+stays answerable; and it is keyed on the extraction version, so a re-extraction
+retires it rather than attaching a person's name to a figure they never saw.
+
+### A28b — a correction is a note, not a fix
+
+**Nothing consumes a corrected value.** The rule engine reads `extracted_data`,
+which a correction deliberately does not touch. So a processor can read the pay
+stub, see that the extracted gross pay is wrong, type the right figure — and the
+DTI will still be computed from the model's number. The screen will show the
+correction; the verification will not.
+
+This is the honest state and it is not a small gap. It is the difference between a
+correction being a record of disagreement and a correction being a repair, and a
+processor has every reason to assume the second.
+
+Closing it is a verification-layer decision, not a UI one, and it has its own
+questions: does a correction re-trigger a verification run; does it invalidate
+findings that cited the old value; does a corrected value need its own provenance
+in the snapshot so a rule can say where its input came from; and what happens to a
+correction when the field it corrects is one the LP-508 list already distrusts.
+
+**Until it is closed, the reviewer must not imply otherwise** — which is why the
+correction renders beside the model's value rather than replacing it outright.
+
+### A28c — the same fact was computed in two places again
+
+`Enter` recorded the verdict, the API stored it, the field left the keyboard
+queue, and the mark beside the row went on saying "Check this". `buildQueue` knew
+about verdicts; `tierInputFor`, written in LP-UI-032 before verdicts existed, did
+not. Both callers now derive the tier through one function.
+
+Third time in this epic (A20/ADR-391, ADR-392, this): a value derived in two
+places disagrees the moment one of them learns something. Worth reading as a
+standing hazard rather than three incidents — when a second caller needs a derived
+fact, the fix is to reach for the first caller's function, not to rebuild the
+mapping beside it.
+
+
+---
+
+---
+
+## Standing note
+
+The design assets are **not** infallible. LP-UI-001 found two real defects in them
+by verifying rather than trusting, which is exactly right. Keep doing that: if a
+ticket's premise does not survive contact with the code, say so on the ticket
+rather than working around it, and the asset gets corrected here.
+
 ---
 
 ## 2026-08-29 · from the LP-UI-001 review
@@ -1042,15 +1107,6 @@ reading — that critical fields use the HIGHER bar rather than always flagging.
 74% of stored fields carry no confidence at all. A fourth tier, "Not rated", in
 neutral. The measurement is in `docs/tickets/LP-UI-032.md`.
 
-
----
-
-## Standing note
-
-The design assets are **not** infallible. LP-UI-001 found two real defects in them
-by verifying rather than trusting, which is exactly right. Keep doing that: if a
-ticket's premise does not survive contact with the code, say so on the ticket
-rather than working around it, and the asset gets corrected here.
 
 ## 2026-08-30 · A27 — from the LP-UI-032 review: a guard with a hole shaped like a spelling
 

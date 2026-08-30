@@ -54,6 +54,11 @@ class ActivityType(StrEnum):
         "document_replaced"  # explicit replace — old historical, new current (LP-71)
     )
     DOCUMENT_STALENESS_RESOLVED = "document_staleness_resolved"  # processor waived/accepted (LP-71)
+    # A processor's verdict on one extracted field (LP-UI-033). One value, not three:
+    # the verdict itself is in `detail`, and three enum members would put the same
+    # fact in two places and let them disagree.
+    FIELD_REVIEWED = "field_reviewed"
+    FIELD_REVIEW_REVERTED = "field_review_reverted"  # the verdict withdrawn
     FINDING_RESOLVED = "finding_resolved"
     FINDING_UNDONE = "finding_undone"  # processor reversed a resolution — Undo (LP-98)
     VERIFICATION_RUN = "verification_run"

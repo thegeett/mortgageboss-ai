@@ -2,19 +2,27 @@
 
 import { BoxOverlay } from "@/components/file/documents/reviewer/box-overlay";
 import { PageCanvas } from "@/components/file/documents/reviewer/page-canvas";
+import {
+  buildQueue,
+  isFullyReviewed,
+  nextAttention,
+} from "@/components/file/documents/reviewer/review-queue";
 import { ReviewerFields } from "@/components/file/documents/reviewer/reviewer-fields";
 import { type PaneSplit, ReviewerShell } from "@/components/file/documents/reviewer/reviewer-shell";
+import { ShortcutSheet } from "@/components/file/documents/reviewer/shortcut-sheet";
 import { useFieldSelection } from "@/components/file/documents/reviewer/use-field-selection";
+import { useReviewKeys } from "@/components/file/documents/reviewer/use-review-keys";
 import { StatusToken } from "@/components/status-token";
 import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
 import { useFieldBoxes } from "@/lib/api/field-boxes";
+import { useRecordFieldReview } from "@/lib/api/field-reviews";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import { currentDocuments, extractionFields } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 /**
  * The document reviewer (LP-UI-030) — list, page, fields.
@@ -86,6 +94,74 @@ function Reviewer() {
   const fabricated = new Set(boxes?.fabricated_pages ?? []);
   const relocated = new Set(boxes?.relocated ?? []);
 
+  // --- The keyboard loop (LP-UI-033) -------------------------------------- //
+
+  const scrutiny = detail?.field_scrutiny ?? {};
+  const queue = useMemo(
+    () =>
+      buildQueue(
+        extractionFields(detail?.current_extraction?.extracted_data ?? {}),
+        detail?.field_scrutiny ?? {},
+      ),
+    [detail],
+  );
+
+  const recordReview = useRecordFieldReview(documentId);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [showBoxes, setShowBoxes] = useState(true);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const documentIndex = current.findIndex((doc) => doc.id === documentId);
+  const goToDocument = useCallback(
+    (step: 1 | -1) => {
+      if (documentIndex === -1 || current.length === 0) return;
+      const next = current[(documentIndex + step + current.length) % current.length];
+      if (!next) return;
+      setSelected(next.id);
+      setPage(1);
+      field.select(null);
+      setEditing(null);
+    },
+    [current, documentIndex, field],
+  );
+
+  const move = useCallback(
+    (direction: 1 | -1) => field.select(nextAttention(queue, field.selected, direction)),
+    [queue, field],
+  );
+
+  // ACCEPT WITHOUT A SELECTED FIELD DOES NOTHING. Enter is one keystroke from
+  // every other action, and "accept whichever field is first" would silently
+  // vouch for a value the processor never looked at.
+  const accept = useCallback(() => {
+    if (!field.selected) return;
+    recordReview.mutate({ fieldKey: field.selected, verdict: "accepted" });
+  }, [field.selected, recordReview]);
+
+  useReviewKeys(
+    {
+      nextField: () => move(1),
+      previousField: () => move(-1),
+      accept,
+      acceptAndAdvance: () => {
+        accept();
+        move(1);
+      },
+      edit: () => field.selected && setEditing(field.selected),
+      // A rejection needs a reason, so `R` opens the editor on the reject tab
+      // rather than recording a bare verdict the API would refuse anyway.
+      reject: () => field.selected && setEditing(field.selected),
+      toggleOverlay: () => setShowBoxes((on) => !on),
+      previousDocument: () => goToDocument(-1),
+      nextDocument: () => goToDocument(1),
+      markReviewed: () => isFullyReviewed(queue) && goToDocument(1),
+      toggleHelp: () => setHelpOpen((open) => !open),
+    },
+    // The sheet is a dialog with its own Escape handling; leaving the global
+    // listener live behind it would act on keys aimed at the dialog.
+    !helpOpen,
+  );
+
   return (
     <div className="h-[calc(100vh-var(--topbar-h)-1px)]">
       <ReviewerShell
@@ -142,7 +218,10 @@ function Reviewer() {
             onPageChange={setPage}
             overlay={
               <BoxOverlay
-                boxes={boxes?.boxes ?? []}
+                // Space hides every box. Passing an empty list rather than a
+                // `hidden` flag keeps the overlay with one job: draw what it is
+                // given.
+                boxes={showBoxes ? (boxes?.boxes ?? []) : []}
                 page={page}
                 selected={field.selected}
                 hovered={field.hovered}
@@ -166,9 +245,21 @@ function Reviewer() {
             hasBox={(key) => byField.has(key)}
             citationWrong={(key) => fabricated.has(key)}
             relocated={(key) => relocated.has(key)}
+            editing={editing}
+            busy={recordReview.isPending}
+            onCancelEdit={() => setEditing(null)}
+            onCorrect={(fieldKey, value) => {
+              recordReview.mutate({ fieldKey, verdict: "corrected", correctedValue: value });
+              setEditing(null);
+            }}
+            onReject={(fieldKey, reason) => {
+              recordReview.mutate({ fieldKey, verdict: "rejected", note: reason });
+              setEditing(null);
+            }}
           />
         }
       />
+      <ShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

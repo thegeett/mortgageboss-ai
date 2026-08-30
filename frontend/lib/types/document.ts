@@ -146,6 +146,9 @@ export interface Transaction {
   source: SourceLocation | null;
 }
 
+/** A processor's decision about one extracted value (LP-UI-033). */
+export type FieldVerdict = "accepted" | "corrected" | "rejected";
+
 /**
  * How much scrutiny one extracted field asks for (LP-UI-032), resolved by the
  * backend against the schema specs and the LP-508 distrust list. Only fields with
@@ -158,6 +161,13 @@ export interface FieldScrutiny {
   distrusted_reason: string | null;
   /** An identifier (SSN/ITIN) — must never be rendered in the clear. */
   sensitive: boolean;
+  /**
+   * The processor's verdict (LP-UI-033), or null when nobody has decided yet.
+   * Undecided is not the same as accepted and must never render as it.
+   */
+  verdict: FieldVerdict | null;
+  /** What the processor says the value should be (`corrected` only). */
+  corrected_value: string | null;
 }
 
 /** The current extraction (pay stubs in V1); `extracted_data` is a flexible record. */

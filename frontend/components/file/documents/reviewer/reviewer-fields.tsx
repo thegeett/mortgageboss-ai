@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { ScrutinyMark } from "@/components/file/documents/reviewer/scrutiny-mark";
+import { VerdictEditor } from "@/components/file/documents/reviewer/verdict-editor";
 import { StatusToken } from "@/components/status-token";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -33,6 +34,11 @@ export function ReviewerFields({
   hasBox,
   citationWrong,
   relocated,
+  editing,
+  onCorrect,
+  onReject,
+  onCancelEdit,
+  busy,
 }: {
   documentId: string | null;
   selected?: string | null;
@@ -45,6 +51,12 @@ export function ReviewerFields({
   citationWrong?: (fieldKey: string) => boolean;
   /** The text was found on a page other than the one cited. */
   relocated?: (fieldKey: string) => boolean;
+  /** The field whose inline editor is open (LP-UI-033), if any. */
+  editing?: string | null;
+  onCorrect?: (fieldKey: string, value: string) => void;
+  onReject?: (fieldKey: string, reason: string) => void;
+  onCancelEdit?: () => void;
+  busy?: boolean;
 }) {
   const { data, isPending, isError } = useDocumentDetail(documentId);
 
@@ -147,6 +159,17 @@ export function ReviewerFields({
                       would be telling a processor to go and read a dash. */}
                   {field.value && field.value !== EMPTY_VALUE ? (
                     <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                  ) : null}
+
+                  {editing === field.key ? (
+                    <VerdictEditor
+                      fieldLabel={field.label}
+                      currentValue={field.value}
+                      onCorrect={(value) => onCorrect?.(field.key, value)}
+                      onReject={(reason) => onReject?.(field.key, reason)}
+                      onCancel={() => onCancelEdit?.()}
+                      busy={busy}
+                    />
                   ) : null}
 
                   <CitationNote

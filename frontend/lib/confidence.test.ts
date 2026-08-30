@@ -91,16 +91,48 @@ describe("tierInputFor", () => {
       confidence: 0.9,
       critical: false,
       distrustedReason: null,
+      humanConfirmed: false,
     });
   });
 
   it("carries the backend's flags through", () => {
-    const scrutiny = { critical: true, distrusted_reason: "doc 104", sensitive: false };
+    const scrutiny = {
+      critical: true,
+      distrusted_reason: "doc 104",
+      sensitive: false,
+      verdict: null,
+      corrected_value: null,
+    };
     expect(tierInputFor(null, scrutiny)).toEqual({
       confidence: null,
       critical: true,
       distrustedReason: "doc 104",
+      humanConfirmed: false,
     });
+  });
+
+  it("reads an accepted or corrected verdict as human confirmation", () => {
+    // The bug this closes: the mark beside a row built its inputs separately from
+    // the keyboard queue, so an accepted field dropped out of the loop and went on
+    // rendering "Check this".
+    const base = {
+      critical: true,
+      distrusted_reason: null,
+      sensitive: false,
+      corrected_value: null,
+    };
+    expect(tierInputFor(0.5, { ...base, verdict: "accepted" }).humanConfirmed).toBe(true);
+    expect(tierInputFor(0.5, { ...base, verdict: "corrected" }).humanConfirmed).toBe(true);
+  });
+
+  it("does not read a rejection as confirmation", () => {
+    const base = {
+      critical: true,
+      distrusted_reason: null,
+      sensitive: false,
+      corrected_value: null,
+    };
+    expect(tierInputFor(0.5, { ...base, verdict: "rejected" }).humanConfirmed).toBe(false);
   });
 });
 

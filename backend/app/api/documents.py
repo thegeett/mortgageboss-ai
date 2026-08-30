@@ -17,19 +17,21 @@ picks them up). The stored ``storage_path`` is internal — never in a response;
 bytes are returned only through the auth'd ``/download`` route.
 """
 
+from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import Document
+from app.models.field_review import FieldVerdict
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
@@ -55,6 +57,12 @@ from app.services.documents import (
     validate_upload,
 )
 from app.services.field_boxes import find_all_field_boxes
+from app.services.field_reviews import (
+    FieldReviewError,
+    list_reviews,
+    record_review,
+    revert_review,
+)
 from app.services.page_render import DEFAULT_ZOOM, render_page
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
@@ -410,6 +418,123 @@ class FieldBoxesResponse(BaseModel):
     fabricated_pages: list[str]
     #: Fields whose text was found on a page other than the one cited.
     relocated: list[str]
+
+
+class FieldReviewRequest(BaseModel):
+    """Record a verdict on one extracted field (LP-UI-033)."""
+
+    field_key: str = Field(min_length=1, max_length=100)
+    verdict: FieldVerdict
+    #: Required for CORRECTED, forbidden otherwise.
+    corrected_value: str | None = Field(default=None, max_length=1000)
+    #: Required for REJECTED — an unverifiable field with no reason tells the next
+    #: processor nothing, and the next processor is the whole audience.
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class FieldReviewPublic(BaseModel):
+    """One live verdict."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    field_key: str
+    verdict: FieldVerdict
+    corrected_value: str | None
+    note: str | None
+    reviewed_by_user_id: UUID | None
+    created_at: datetime
+
+
+@flat_router.get("/{document_id}/reviews", response_model=list[FieldReviewPublic])
+async def list_field_reviews(
+    document_id: UUID, current_user: CurrentUser, db: DbSession
+) -> list[FieldReviewPublic]:
+    """Every live verdict on this document's CURRENT extraction (LP-UI-033).
+
+    Scoped to the current version deliberately: a verdict on a superseded
+    extraction described a value that may no longer be there.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is None:
+        return []
+    reviews = await list_reviews(db, extraction_id=extraction.id)
+    return [FieldReviewPublic.model_validate(r) for r in reviews]
+
+
+@flat_router.put("/{document_id}/reviews", response_model=FieldReviewPublic)
+async def record_field_review(
+    document_id: UUID, body: FieldReviewRequest, current_user: CurrentUser, db: DbSession
+) -> FieldReviewPublic:
+    """Accept, correct or reject one extracted field (LP-UI-033).
+
+    PUT rather than POST: a field has at most one live verdict, and re-deciding is
+    replacing it, not adding a second.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document has no extraction to review yet.",
+        )
+    # A verdict on a field the extraction does not carry is a client bug, and
+    # storing it would put a row in the table that no screen can ever show.
+    data = extraction.extracted_data if isinstance(extraction.extracted_data, dict) else {}
+    if body.field_key not in data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This extraction has no field {body.field_key!r}.",
+        )
+    try:
+        review = await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key=body.field_key,
+            verdict=body.verdict,
+            corrected_value=body.corrected_value,
+            note=body.note,
+            actor_user_id=current_user.id,
+        )
+    except FieldReviewError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await db.commit()
+    await db.refresh(review)
+    return FieldReviewPublic.model_validate(review)
+
+
+@flat_router.delete("/{document_id}/reviews/{field_key}", status_code=status.HTTP_204_NO_CONTENT)
+async def revert_field_review(
+    document_id: UUID, field_key: str, current_user: CurrentUser, db: DbSession
+) -> Response:
+    """Withdraw the verdict on one field. Idempotent — 204 whether or not there was one."""
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is not None:
+        await revert_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key=field_key,
+            actor_user_id=current_user.id,
+        )
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @flat_router.get("/{document_id}/boxes", response_model=FieldBoxesResponse)

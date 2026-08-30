@@ -39,6 +39,7 @@ from app.models.dti_override import DtiOverride
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
+from app.models.field_review import FieldReview, FieldVerdict
 from app.models.finding import (
     EvaluationOutcome,
     Finding,
@@ -112,6 +113,8 @@ __all__ = [
     "EvaluationOutcome",
     "Extraction",
     "ExtractionStatus",
+    "FieldReview",
+    "FieldVerdict",
     "Finding",
     "FindingCategory",
     "FindingEvent",

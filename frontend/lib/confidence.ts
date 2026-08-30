@@ -96,7 +96,16 @@ export const TIER_LABEL: Record<FieldTier, string> = {
   unrated: "Not rated",
 };
 
-/** Read the tier inputs for one field out of an extraction entry + the backend's scrutiny. */
+/**
+ * Read the tier inputs for one field out of an extraction entry + the backend's
+ * scrutiny.
+ *
+ * THE ONE PLACE THIS IS DERIVED. It shipped without the verdict in LP-UI-032
+ * (there were no verdicts yet) and the review queue grew its own copy in
+ * LP-UI-033 — so a field could be accepted, drop out of the keyboard loop, and go
+ * on rendering "Check this" beside it. Two computations of one fact, disagreeing.
+ * Both callers use this now.
+ */
 export function tierInputFor(
   confidence: number | null,
   scrutiny: FieldScrutiny | undefined,
@@ -105,5 +114,8 @@ export function tierInputFor(
     confidence,
     critical: scrutiny?.critical ?? false,
     distrustedReason: scrutiny?.distrusted_reason ?? null,
+    // A rejection is NOT confirmation — "I could not verify this" is the opposite
+    // of "this is right", and it must keep its mark.
+    humanConfirmed: scrutiny?.verdict === "accepted" || scrutiny?.verdict === "corrected",
   };
 }

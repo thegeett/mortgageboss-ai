@@ -143,6 +143,14 @@ class FieldScrutiny(BaseModel):
     #: ``None``. A REASON rather than a flag, because a screen that says "distrusted"
     #: without saying why is asking the processor to distrust it on faith.
     distrusted_reason: str | None = None
+    #: The processor's verdict on this field, if any (LP-UI-033) — "accepted",
+    #: "corrected" or "rejected". Absent means nobody has decided yet, which is not
+    #: the same as accepted and must not render as it.
+    verdict: str | None = None
+    #: The value the processor says is right (CORRECTED only). Shown INSTEAD of the
+    #: extracted value, with the model's own value still available beneath it: the
+    #: extraction is never rewritten, so both are always answerable.
+    corrected_value: str | None = None
     #: An identifier — an SSN or ITIN. A screen must not render it in the clear.
     #: Answered here because the identity list already lives beside the schema specs;
     #: the frontend keeps its own masking set as a floor rather than relying on this.

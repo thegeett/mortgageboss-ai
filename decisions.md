@@ -15782,3 +15782,53 @@ model, which would have given it a second copy of the engine's threshold resolut
 was written to prevent, one level up.
 
 *Status.* Accepted (LP-UI-018, design amendment A20).
+
+---
+
+## ADR-393
+
+**A processor's verdict on an extracted field is recorded beside the value and keyed on the
+extraction version, so a re-extraction retires it rather than inheriting it.**
+
+*Context.* LP-UI-033 gives the reviewer a keyboard loop whose three verbs are accept, correct and
+reject. Each is a claim by a named person about a specific value, and until this ticket the product
+had nowhere to put one: `create_extraction_version` is written by the extraction task and the seed
+script and by nothing else, so no human correction of an extracted value existed anywhere.
+
+Two designs were available and the obvious one is wrong. Writing the correction into
+`extracted_data` makes every downstream reader — the rule engine, the snapshot, the calculators —
+see the corrected figure with no further work, which is exactly the appeal. It also destroys the
+extraction. "What did the model actually say?" is the question every accuracy investigation starts
+from; the LP-508 distrust ledger is *entirely* that question, and each of its entries names a
+document and the value the extractor read. An extraction that has been edited by hand cannot answer
+it, and nothing on the row would say it had been.
+
+The second question is what a verdict means after the document is extracted again. A re-extraction
+produces a new version whose values may differ — a better model, a corrected document type, a
+re-uploaded page. A verdict that carried forward would be a person's name attached to a figure they
+never saw.
+
+*Decision.* A verdict is a row in `field_reviews`, **beside** the extraction and never inside it. A
+correction records what the processor says is right; `extracted_data` continues to say what the
+model read; the display resolves the two and both stay answerable.
+
+The row is keyed on `extraction_id` with `ON DELETE CASCADE`, so **a superseded extraction's
+verdicts go with it** and the new version's fields return to unreviewed. This is the conservative
+direction on purpose: re-reviewing costs a processor a second pass, while inheriting costs an
+underwriter a file that carries a human confirmation nobody gave.
+
+Lifecycle is the LP-76/77/87 override pattern unchanged — one live row per (extraction, field) via a
+partial unique index, soft-delete to revert, the activity log as the immutable trail. Replacing a
+verdict soft-deletes the previous one rather than mutating it: a processor who accepts and then
+rejects has made two decisions, and an audit showing only the second cannot say what they thought
+first.
+
+*Consequences.* The one that matters and is not yet resolved: **nothing consumes a correction.** The
+rule engine reads `extracted_data`, which a correction deliberately does not touch, so a processor
+can fix a wrong gross pay and the DTI will still be computed from the model's figure. Closing that
+is a verification-layer decision with its own questions — does a correction re-trigger a run, does
+it invalidate findings that cited the old value, does a corrected value need its own provenance in
+the snapshot — and it is recorded in design amendment A28 rather than settled here. Until it is,
+a correction is a note to the next human, not a fix.
+
+*Status.* Accepted (LP-UI-033).
