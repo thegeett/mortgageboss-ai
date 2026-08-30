@@ -191,6 +191,27 @@ count. Those four numbers are the reason a processor switches tabs today.
   under test uses it — a restatement at the use site passes. Assert the behaviour
   across the whole domain instead (LP-UI-027 review).
 
+- **Explanatory copy is a claim about the system, and it is the only claim here
+  that nothing checks.** "Liability added" cannot be wrong. "Fill it in and its
+  payment counts towards the back-end DTI" can be, and was — a liability paid off
+  at closing is EXCLUDED from the back-end ratio (`dti.py`, LP-568), and on a
+  refinance that is the mortgage being replaced, so the sentence told a processor
+  the product would charge the same house twice. Two more shipped beside it:
+  reserves excludes gifts outright and takes retirement at a factor, and "LTV can
+  now run on this file" was printed by a button that creates an EMPTY property
+  row. Nothing type-checks a sentence, no test asserts it, and no reviewer reads
+  it as code. **Any copy that says what the system will do gets verified against
+  the code that does it, at the same standard as a number** (LP-UI-035 review).
+- **A guard is only as wide as what it looks at, and a narrow one is
+  indistinguishable from a clean result.** Five instances now: a PII regex that
+  matched `ssn` but not `social_security_number`; a source scan listing three of
+  four source directories, so `hooks/` was never read; a comment-stripper that
+  dropped a whole line when code shared it with a block comment; an import ban
+  matching `from "x"` but not `await import("x")` or `require("x")`; and a
+  column-name search satisfied by a substring inside `… AS has_corrected_value`.
+  Every one printed green. **Derive the scope from the tree or the schema rather
+  than typing a list, and prove the guard fails by planting the thing it forbids.**
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket
