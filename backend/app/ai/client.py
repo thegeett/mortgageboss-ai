@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+import httpx
 import structlog
 from anthropic import (
     APIConnectionError,
@@ -201,6 +202,41 @@ def build_document_message(
     return {"role": "user", "content": blocks}
 
 
+#: The SDK's own defaults, restated because injecting an ``http_client`` REPLACES them with
+#: httpx's — and httpx's are wrong here in a way that fails silently.
+#:
+#: ``read`` is the dangerous one: httpx defaults to 5s FLAT, these calls stream for minutes, so a
+#: bare ``httpx.AsyncClient()`` would break almost every extraction while looking like a tidy
+#: refactor. ``max_connections`` matters under the worker's four children.
+#: (`anthropic._constants`: DEFAULT_TIMEOUT, DEFAULT_CONNECTION_LIMITS — copied, not imported: a
+#: private constant that changed shape under us would be worse than a stated value that does not.)
+_SDK_TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=600.0, pool=600.0)
+
+#: **max_keepalive_connections=0 is the fix for LP-636 defect 1**, not a tuning knob.
+#:
+#: ``get_anthropic_client`` is ``lru_cache``d — one client for the process — while ``run_async``
+#: (``app/tasks/base.py``) is ``asyncio.run``: a FRESH event loop per Celery task, closed when the
+#: task ends. A pooled keep-alive connection outlives the loop it was opened on, and the next task
+#: that takes it from the pool fails instantly with ``RuntimeError: Event loop is closed``, which
+#: the SDK surfaces as ``APIConnectionError``. On staging that cost 5 of 44 documents in one upload
+#: and produced 91 failures at 1-5ms — too fast to have reached AWS.
+#:
+#: Reproduced and fixed under test (``tests/ai/test_client_event_loops_lp636.py``): 4 of 8 calls
+#: fail across successive ``asyncio.run`` loops with pooling on, 8 of 8 pass with it off.
+#:
+#: This is the same decision the database layer already made for the same reason — ``task_session``
+#: builds its engine with ``NullPool`` "so no connection is shared across loops". Doing it
+#: unconditionally, rather than only under Celery, means any script, bench or test that runs its
+#: own loop is covered too. The cost is a TCP+TLS handshake per call, which against a
+#: multi-second model call is noise.
+_NO_KEEPALIVE_LIMITS = httpx.Limits(max_connections=1000, max_keepalive_connections=0)
+
+
+def _build_http_client() -> httpx.AsyncClient:
+    """An httpx client that never pools a connection across event loops (LP-636)."""
+    return httpx.AsyncClient(timeout=_SDK_TIMEOUT, limits=_NO_KEEPALIVE_LIMITS)
+
+
 @lru_cache(maxsize=1)
 def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     """The shared singleton async client for the ACTIVE provider (lazy, cached — LP-35 style).
@@ -226,14 +262,23 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
 
     **Caching is safe for both providers, verified rather than assumed (B1):**
 
-    * *Event loops.* C0 found ``aioboto3`` clients are event-loop-bound, and the Celery
-      bridge builds a fresh loop per task (``app/tasks/base.py:41-43``). Both Anthropic
-      clients are **httpx**-based (``AsyncHttpxClientWrapper`` — the same wrapper class
-      for direct and Bedrock), and httpx re-establishes a pooled connection whose loop has
+    * *Event loops.* The original measurement here was too gentle, and it shipped a bug
+      (LP-636 defect 1). It read: "httpx re-establishes a pooled connection whose loop has
       gone rather than raising. Measured: one client instance issuing SUCCESSFUL requests
-      across three separate ``asyncio.run()`` loops returned 200 each time. So this is not
-      the aioboto3 situation, and Bedrock adds no constraint the direct client did not
-      already have under the same ``lru_cache``.
+      across three separate ``asyncio.run()`` loops returned 200 each time."
+
+      httpx does NOT re-establish it. A pooled keep-alive connection whose loop has been
+      closed raises ``RuntimeError: Event loop is closed`` when the next caller takes it,
+      which the SDK surfaces as ``APIConnectionError``. The three-loop test passed because
+      the SDK pool sets ``keepalive_expiry=5.0``: three sequential calls, each slow enough
+      to clear five seconds, never reuse a connection. The bug needs consecutive calls
+      INSIDE that window — a burst, which is exactly when it matters. On staging it cost
+      5 of 44 documents in one upload.
+
+      Caching is safe **because the pool is disabled** (``_NO_KEEPALIVE_LIMITS`` above), not
+      because a shared pool tolerates a closed loop. Keep the two facts attached: if the
+      keep-alive limit is ever raised, this bug returns. ``tests/ai/test_client_event_loops_lp636.py``
+      fails if it is.
     * *Credential refresh.* ``AsyncAnthropicBedrock`` signs **per request** (its
       ``_prepare_request`` calls the SigV4 signer), and the cached ``boto3.Session`` it
       signs with resolves credentials through the provider chain, so a rotating ECS task
@@ -261,10 +306,15 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
             aws_region=settings.bedrock_region,
             aws_profile=settings.aws_profile,  # None → the default chain, unchanged
             max_retries=0,
+            http_client=_build_http_client(),  # LP-636 — no cross-loop connection reuse
         )
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
-    return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
+    return AsyncAnthropic(
+        api_key=settings.anthropic_api_key,
+        max_retries=0,
+        http_client=_build_http_client(),  # LP-636 — same reason; both providers are httpx-based
+    )
 
 
 #: Bedrock error codes that mean "try again shortly", matched on the SDK exception's
