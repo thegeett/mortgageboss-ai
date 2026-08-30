@@ -118,6 +118,19 @@ count. Those four numbers are the reason a processor switches tabs today.
   that synthesises a result for unknown input. Index the map, and assert its keys
   equal the union.
 
+- **A collapsed region has to be hidden from the keyboard, not just from the eye.**
+  Zeroing a width token and clipping with `overflow: hidden` removes a region from
+  sight while leaving every control in the tab order and in the accessibility
+  tree — ⌘B "hid" a six-link nav that a keyboard user still tabbed through, focus
+  seeming to vanish, and that a screen reader still announced. Pair the width rule
+  with `visibility: hidden`, which removes it from both and, unlike
+  `display: none`, leaves a width transition intact. This applies to every
+  token-driven collapse, including `--ctx-w` in LP-UI-009 (LP-UI-008 review).
+- **`aria-current` is a property of the set, not of an item.** A prefix match per
+  item marks both a section index and the child you are on, so two links announce
+  as the current page. Pick the longest match across the whole list (LP-UI-008
+  review).
+
 ## Definition of done, per ticket
 
 - [ ] Matches the mockup screen named on the ticket
