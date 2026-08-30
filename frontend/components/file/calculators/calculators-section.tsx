@@ -154,8 +154,17 @@ export function CalculatorsSection({ fileId }: { fileId: string }) {
   const toggle = (key: CalcKey) => setExpanded((cur) => (cur === key ? null : key));
 
   return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground-2">
+    // NAMED, because it is now nested inside the panel's "Verification" region
+    // (LP-UI-046 moved it there). An unnamed `section` is not exposed as a
+    // landmark at all, so the calculators were reachable only by walking the
+    // Verification region — and they are a distinct thing with their own
+    // heading. Naming it makes the nesting deliberate rather than incidental,
+    // and gives landmark navigation somewhere to land.
+    <section aria-labelledby="calculators-heading" className="space-y-3">
+      <h3
+        id="calculators-heading"
+        className="flex items-center gap-2 text-sm font-semibold text-foreground-2"
+      >
         <Calculator className="h-4 w-4 text-primary" />
         Calculators
         <span className="text-xs font-normal text-muted-foreground">

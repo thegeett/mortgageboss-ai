@@ -1,5 +1,6 @@
 "use client";
 
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "@/components/file/calculators/layout";
 import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
 
 /**
@@ -114,7 +115,7 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
         {/* The math on the left, the result beside it (LP-UI-045) — the same
             arrangement as the DTI panel, for the same reason: the ratio and the
             two figures that produce it belong on one screen. */}
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className={CALCULATOR_GRID}>
           <div className="min-w-0 space-y-4">
             <ValueBasisCallout data={data} />
             <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
@@ -126,7 +127,7 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
             />
           </div>
 
-          <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
+          <div className={CALCULATOR_RESULT_COLUMN}>
             <LtvHeroTile ltv={data.ltv} limit={data.limit} />
             <FormulaReceipt data={data} />
             {/* CLTV and HCLTV are the same ratio with more of the debt stack in

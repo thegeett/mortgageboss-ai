@@ -88,3 +88,92 @@ about this control.
 findings tab. The block has actions the header does not (reset to default, set as
 my default), so it is not simply redundant — but a processor who finds both will
 reasonably wonder which one is real.
+
+---
+
+## Review (LP-UI-044/045/046 review commit)
+
+Reviewed on request from the session running the epic. Three fixes, two claims
+strengthened, one description corrected. Staged narrowly — `SPEC.md` and
+`AMENDMENTS.md` are both modified in the working tree by a third session and are
+left alone, so this commit adds no amendment.
+
+### 1. The dial judgement is right, and the evidence is much stronger than one file
+
+The ticket held back the confidence dial from the governed tabs because, on one
+file, the only two governed findings below the Balanced cutoff were
+`needs_review` — and worried that was a single observation.
+
+Measured across the whole corpus (589 findings, 6 files, 238 of them
+`deterministic_rule`):
+
+| outcome | n | min | median | below 0.5 |
+|---|---|---|---|---|
+| couldnt_check | 75 | 1.00 | 1.00 | 0 |
+| (none) | 64 | 1.00 | 1.00 | 0 |
+| no_longer_applies | 47 | 1.00 | 1.00 | 0 |
+| satisfied | 32 | 0.85 | 0.95 | 0 |
+| open | 12 | 0.85 | 0.95 | 0 |
+| **needs_review** | **8** | **0.40** | 0.95 | **2** |
+
+`needs_review` is the **only governed outcome that produces any confidence below
+the Balanced cutoff at all** — every other outcome's minimum is 0.85. So the
+conclusion is not an accident of one file: a confidence dial on the governed tabs
+could, by construction on this data, hide nothing except the findings that
+explicitly ask for a person.
+
+It also answers the second worry directly: `needs_review` does **not** routinely
+carry low confidence. Its median is 0.95, the same as `satisfied` and `open` — it
+simply has the only low tail.
+
+Two honest limits. This is the dev corpus, and all 11 below-cutoff findings (9 of
+them legacy `ai_cross_source`, outside the governed tabs) sit on a single loan
+file; the other five files have none at all. So the ladder is barely exercised
+here. The claim is about outcome shape rather than volume, and it should be
+re-measured against production data before it is treated as settled.
+
+### 2. The calculators' move into the panel was untested, and the stub hid it
+
+`CalculatorsSection` was stubbed as `() => null`, so nothing could assert it, and
+deleting `<CalculatorsSection fileId={fileId} />` from the panel left every test
+green — while that move IS the ticket. The stub renders a marker now, and two
+tests pin it: that the panel renders it with the file id, and that it sits ABOVE
+the outcomes, which is the whole reason for the move. Both verified by mutation.
+
+On the a11y question: the calculators nesting inside the "Verification" region is
+right — they are the math the rules run on. But their `<section>` had no
+accessible name, so it was not exposed as a landmark at all. It is
+`aria-labelledby` its own heading now, which makes the nesting deliberate and
+gives landmark navigation somewhere to land.
+
+### 3. The three-times layout is one definition
+
+`CALCULATOR_GRID` and `CALCULATOR_RESULT_COLUMN` live in
+`components/file/calculators/layout.ts`, used by DTI, LTV and the generic card,
+with a scan that fails if any file writes the literal again. Verified by reverting
+LTV to the literal.
+
+### 4. Two controls, one write — recorded rather than resolved
+
+Both the header control and `AggressionDial` are rendered by `VerificationPanel`
+and both go through `pickLevel`, so they cannot disagree about the value. The
+split is by job: the header sets the level, the dial also owns reset-to-default
+and set-as-my-default. That is written down at the shared handler now, because a
+future reader will see two controls for one setting and reach for the delete key.
+
+**What remains genuinely undecided** — whether the header should eventually carry
+the defaults too — is a product call and is left to the user rather than settled
+here.
+
+### 5. `data.title` is not ignored
+
+The ticket says "the tile now ignores `data.title` entirely". It does not: the
+tile takes `fullTitle={data?.title}` and uses it in its `aria-label`, so the API's
+own name reaches assistive tech while the short label carries the visual. And
+`CalculatorName` is a closed union, so a new calculator fails type-checking until
+someone gives it a label. Nothing to fix.
+
+### Verification
+
+biome 0, tsc 0, **1,021 vitest**, build clean. No backend change in any of the
+three commits, so no pytest run. Five mutations, all caught.

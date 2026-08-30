@@ -1,6 +1,7 @@
 "use client";
 
 import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "./layout";
 
 /**
  * The generic transparent calculator card (LP-87) — one component, four calculators.
@@ -115,7 +116,7 @@ function CalculatorBody({
           arrangement as the DTI and LTV panels. These four calculators show
           inputs, then derivation steps, then a formula, and the answer was above
           all of it with the arithmetic that reaches it at the bottom. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+      <div className={CALCULATOR_GRID}>
         <div className="min-w-0 space-y-4">
           {/* Overrideable inputs */}
           {data.inputs.length > 0 && (
@@ -178,7 +179,7 @@ function CalculatorBody({
           )}
         </div>
 
-        <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
+        <div className={CALCULATOR_RESULT_COLUMN}>
           {/* Headline number */}
           <div className="rounded-lg border border-border bg-muted/50 px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

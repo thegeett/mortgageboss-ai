@@ -1,5 +1,6 @@
 "use client";
 
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "@/components/file/calculators/layout";
 import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
 
 /**
@@ -116,7 +117,7 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
 
           Single column below `lg`, where two would make each too narrow to hold
           a label, a figure and its source on one line. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+      <div className={CALCULATOR_GRID}>
         <div className="min-w-0 space-y-4">
           <BreakdownSection
             title="Gross monthly income"
@@ -164,7 +165,7 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
  */
 function ResultPanel({ data }: { data: DtiCalculation }) {
   return (
-    <div className="space-y-3 lg:sticky lg:top-3 lg:self-start">
+    <div className={CALCULATOR_RESULT_COLUMN}>
       <BackEndTile back={data.back_end_dti} limit={data.limit} />
       <FormulaReceipt data={data} />
       <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />

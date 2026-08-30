@@ -24,7 +24,12 @@ const invalidateQueries = vi.fn();
 // outcomes (LP-UI-046). It has its own tests and its own hooks; stubbing it here
 // keeps this file about the panel.
 vi.mock("@/components/file/calculators/calculators-section", () => ({
-  CalculatorsSection: () => null,
+  // A MARKER, not `() => null`. A stub that renders nothing cannot be asserted
+  // on, so deleting <CalculatorsSection/> from the panel left every test green —
+  // and the whole point of LP-UI-046 was moving it INTO the panel.
+  CalculatorsSection: ({ fileId }: { fileId: string }) => (
+    <div data-testid="calculators-section" data-file-id={fileId} />
+  ),
 }));
 
 vi.mock("@/lib/api/verification", () => ({
@@ -574,5 +579,33 @@ describe("VerificationPanel", () => {
       render(<VerificationPanel fileId="LF-1" />);
       expect(screen.queryByText(/Verification didn't complete/)).toBeNull();
     });
+  });
+});
+
+describe("the calculators live inside the panel", () => {
+  /**
+   * LP-UI-046 moved `CalculatorsSection` out of the route and into the panel, so
+   * the run controls and the thoroughness dial sit above the fold instead of
+   * ~1,400px down. That move is the ticket, and nothing asserted it: the stub
+   * rendered `null`, so removing the component from the panel changed no test.
+   */
+  it("renders the calculators, with the file id passed through", () => {
+    mock();
+    render(<VerificationPanel fileId="LF-1" />);
+    const section = screen.getByTestId("calculators-section");
+    expect(section).toBeDefined();
+    expect(section.getAttribute("data-file-id")).toBe("LF-1");
+  });
+
+  it("puts them ABOVE the outcomes, which is the reason for the move", () => {
+    // Order is the point. Below the outcomes it would be back under the fold.
+    mock();
+    const { container } = render(<VerificationPanel fileId="LF-1" />);
+    const section = screen.getByTestId("calculators-section");
+    const outcomes = container.querySelector("[aria-busy]");
+    expect(outcomes).not.toBeNull();
+    expect(section.compareDocumentPosition(outcomes as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 });

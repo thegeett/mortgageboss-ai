@@ -158,6 +158,21 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   // was created and nothing about the cache is suspect, so a network blip must not buy a full AI pass.
   const triggerRun = useCallback(() => run.mutate(failedRun?.kind === "run"), [run, failedRun]);
 
+  /**
+   * The ONE write for the thoroughness level, shared by both controls.
+   *
+   * There are two: the compact control in the header (LP-UI-046) and the
+   * `AggressionDial` on the Old findings tab. That is deliberate rather than
+   * duplication, and the split is by JOB — the header sets the level, which is
+   * the frequent action and belongs where the file is being read; the dial also
+   * owns the two rarer ones, "reset to default" and "set as my default", which
+   * need the explanation that sits around them.
+   *
+   * They cannot disagree about the value, because both go through this. Recorded
+   * because a future reader will see two controls for one setting and reach for
+   * the delete key; what is genuinely undecided is whether the header should
+   * eventually carry the defaults too, and that is a product call, not a tidy-up.
+   */
   const pickLevel = useCallback(
     (level: AggressionLevel) => {
       if (!data || level === activeLevel) return;
