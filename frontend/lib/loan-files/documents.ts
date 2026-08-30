@@ -96,7 +96,7 @@ export function stalenessBadge(doc: DocumentResponse): DocumentBadge | null {
   if (resolution) {
     return {
       label: resolution === "waived" ? "Staleness waived" : "Staleness accepted",
-      className: "bg-gray-100 text-gray-500 border-gray-200",
+      className: "bg-muted text-muted-foreground border-border",
     };
   }
   return null;

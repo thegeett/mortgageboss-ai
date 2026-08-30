@@ -125,7 +125,7 @@ export function VersionSelector({
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-800"
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
         >
           <History className="h-3.5 w-3.5" />
           Run history
@@ -143,23 +143,23 @@ export function VersionSelector({
             card. `max-h` with its own scroll bounds the height and `max-w` the width, because the
             list is unbounded: twenty runs today and no cap on a busy file. */}
         {open && (
-          <div className="absolute left-0 z-20 mt-2 max-h-80 w-max min-w-full max-w-[min(28rem,calc(100vw-3rem))] overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+          <div className="absolute left-0 z-20 mt-2 max-h-80 w-max min-w-full max-w-[min(28rem,calc(100vw-3rem))] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-white shadow-lg">
             {runs === undefined ? (
-              <p className="px-3 py-2 text-gray-400">Loading…</p>
+              <p className="px-3 py-2 text-muted-foreground">Loading…</p>
             ) : count === 0 ? (
-              <p className="px-3 py-2 text-gray-400">No runs yet.</p>
+              <p className="px-3 py-2 text-muted-foreground">No runs yet.</p>
             ) : (
-              <ul className="divide-y divide-gray-100">
+              <ul className="divide-y divide-border">
                 {runs.map((run) => (
                   <li key={run.id} className="flex items-center justify-between gap-2 px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-600">{runWhen(run)}</span>
+                      <span className="text-foreground-2">{runWhen(run)}</span>
                       {run.id === currentRunId && (
                         <span className="rounded bg-primary/10 px-1 py-px text-[10px] font-medium text-primary">
                           current
                         </span>
                       )}
-                      <span className="text-gray-400">· {run.trigger}</span>
+                      <span className="text-muted-foreground">· {run.trigger}</span>
                     </div>
                     {/* LP-593 — the counts a processor reads on the TAB STRIP, not the legacy
                       sweep's severity letters. `R` and `Y` were colour codes needing decoding, and
@@ -192,7 +192,7 @@ export function VersionSelector({
                           <Count
                             value="—"
                             label="This run produced no findings"
-                            tone="text-gray-400"
+                            tone="text-muted-foreground"
                           />
                         )}
                     </div>

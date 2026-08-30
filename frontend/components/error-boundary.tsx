@@ -70,8 +70,8 @@ export function DefaultErrorFallback({ onRetry }: { onRetry: () => void }) {
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <TriangleAlert className="h-7 w-7" />
       </span>
-      <h1 className="mt-5 text-xl font-semibold text-gray-900">Something went wrong</h1>
-      <p className="mt-2 max-w-md text-sm text-gray-500">
+      <h1 className="mt-5 text-xl font-semibold text-foreground">Something went wrong</h1>
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">
         An unexpected error interrupted this view. You can try again — if it keeps happening, reload
         the page.
       </p>

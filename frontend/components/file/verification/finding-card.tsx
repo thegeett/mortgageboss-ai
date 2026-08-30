@@ -64,8 +64,8 @@ function SourceDocLink({ fileId, finding }: { fileId?: string; finding: Verifica
   const single = docs.length === 1;
   const pageSuffix = single && finding.source_page !== null ? `, p.${finding.source_page}` : "";
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-gray-500">
-      <FileText className="h-3 w-3 shrink-0 text-gray-400" aria-hidden />
+    <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5 text-muted-foreground">
+      <FileText className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
       {single ? "Source:" : "Sources:"}{" "}
       {docs.map((doc, index) => {
         const label = `${doc.filename}${pageSuffix}`;
@@ -80,7 +80,7 @@ function SourceDocLink({ fileId, finding }: { fileId?: string; finding: Verifica
                 {label}
               </Link>
             ) : (
-              <span className="font-medium text-gray-600">{label}</span>
+              <span className="font-medium text-foreground-2">{label}</span>
             )}
             {index < docs.length - 1 ? "," : ""}
           </span>
@@ -216,7 +216,7 @@ export function FindingCard({
   };
 
   return (
-    <li className="rounded-lg border border-gray-200 px-3 py-2.5">
+    <li className="rounded-lg border border-border px-3 py-2.5">
       <div className="flex items-start gap-2.5">
         <span
           className={cn(
@@ -227,7 +227,7 @@ export function FindingCard({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <span className="text-sm font-medium text-gray-900">{headline}</span>
+            <span className="text-sm font-medium text-foreground">{headline}</span>
             {resolved && (
               <Badge
                 variant="outline"
@@ -243,7 +243,7 @@ export function FindingCard({
               are long, so a single clamped line reads as broken. ``line-clamp-3`` keeps the list
               scannable while giving real context; the FULL text is in the Details expansion below. */}
           {collapsedWhat && (
-            <p className="mt-0.5 line-clamp-3 text-xs text-gray-500">{collapsedWhat}</p>
+            <p className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">{collapsedWhat}</p>
           )}
 
           {/* LP-114.1: name ALL the source documents at a glance (no need to expand Details) — every
@@ -254,7 +254,7 @@ export function FindingCard({
             </p>
           )}
 
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-400">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <span>{findingTypeLabel(finding)}</span>
             <span>· {formatPercent(String(finding.confidence * 100))} confidence</span>
             {/* Source-origin (LP-86): deterministic = stable/certain; AI = the novel frontier. */}
@@ -268,7 +268,7 @@ export function FindingCard({
             </span>
             {/* Lender overlay provenance (LP-80) — lender-specific result. */}
             {overlay && (
-              <span className="rounded bg-gray-100 px-1 py-px font-medium text-gray-500">
+              <span className="rounded bg-muted px-1 py-px font-medium text-muted-foreground">
                 {overlay} overlay
               </span>
             )}
@@ -302,9 +302,9 @@ export function FindingCard({
               shown); Why-it-matters + Suggested-fix are AI slots (LP-96) that render ONLY when
               populated — so today the card looks complete with just the deterministic content. */}
           {expanded && !resolved && (
-            <div className="mt-2 space-y-2 rounded-md border border-gray-100 bg-gray-50/70 px-2.5 py-2">
+            <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/70 px-2.5 py-2">
               <FindingSection title="What we found">
-                <p className="text-gray-600">{whatWeFound}</p>
+                <p className="text-foreground-2">{whatWeFound}</p>
               </FindingSection>
 
               {/* The AI-generated Why-it-matters + Suggested-fix (LP-96) — VISUALLY DISTINCT from
@@ -318,22 +318,22 @@ export function FindingCard({
                   </div>
                   {whyItMatters && (
                     <div className="mt-1.5">
-                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Why it matters
                       </h5>
-                      <p className="mt-0.5 text-xs text-gray-700">{whyItMatters}</p>
+                      <p className="mt-0.5 text-xs text-foreground-2">{whyItMatters}</p>
                     </div>
                   )}
                   {suggestedFix && (
                     <div className="mt-1.5">
-                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Suggested fix
                       </h5>
-                      <p className="mt-0.5 text-xs text-gray-700">{suggestedFix}</p>
+                      <p className="mt-0.5 text-xs text-foreground-2">{suggestedFix}</p>
                     </div>
                   )}
                   {guidanceStarter && (
-                    <p className="mt-1.5 text-[10px] text-gray-400">
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
                       Grounded starter — pending expert review.
                     </p>
                   )}
@@ -350,18 +350,18 @@ export function FindingCard({
                       <SourceDocLink fileId={fileId} finding={finding} />
                     ) : (
                       finding.source_page !== null && (
-                        <p className="text-gray-500">Document page {finding.source_page}</p>
+                        <p className="text-muted-foreground">Document page {finding.source_page}</p>
                       )
                     )}
                     {finding.source_snippet && (
-                      <p className="font-mono text-gray-600">
+                      <p className="font-mono text-foreground-2">
                         &ldquo;{finding.source_snippet}&rdquo;
                       </p>
                     )}
-                    <p className="text-gray-400">{authority}</p>
+                    <p className="text-muted-foreground">{authority}</p>
                   </div>
                 ) : (
-                  <p className="text-gray-400">No single document line — {authority}.</p>
+                  <p className="text-muted-foreground">No single document line — {authority}.</p>
                 )}
               </FindingSection>
             </div>
@@ -373,9 +373,9 @@ export function FindingCard({
               {notes.map((n, i) => (
                 <li
                   key={`${n.at ?? i}`}
-                  className="flex items-start gap-1.5 text-[11px] text-gray-500"
+                  className="flex items-start gap-1.5 text-[11px] text-muted-foreground"
                 >
-                  <MessageSquarePlus className="mt-0.5 h-3 w-3 shrink-0 text-gray-300" />
+                  <MessageSquarePlus className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                   <span>{n.note}</span>
                 </li>
               ))}
@@ -443,7 +443,7 @@ export function FindingCard({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="h-7 gap-1 text-xs text-gray-500"
+                      className="h-7 gap-1 text-xs text-muted-foreground"
                       disabled={busy}
                       onClick={() => openForm("note")}
                     >
@@ -453,7 +453,10 @@ export function FindingCard({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <label htmlFor={fieldId} className="text-[11px] font-medium text-gray-500">
+                  <label
+                    htmlFor={fieldId}
+                    className="text-[11px] font-medium text-muted-foreground"
+                  >
                     {FORM_META[form].label}
                   </label>
                   <Textarea
@@ -479,7 +482,7 @@ export function FindingCard({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="h-7 gap-1 text-xs text-gray-500"
+                      className="h-7 gap-1 text-xs text-muted-foreground"
                       disabled={busy}
                       onClick={() => setForm(null)}
                     >
@@ -494,19 +497,19 @@ export function FindingCard({
           {/* Resolved renders COMPACT: the disposition + what was done + Undo (LP-98). */}
           {resolved && (
             <div className="mt-1.5 flex items-start justify-between gap-2">
-              <p className="min-w-0 text-[11px] text-gray-500">
+              <p className="min-w-0 text-[11px] text-muted-foreground">
                 {finding.resolution_status === "applied" ? (
-                  <span className="text-gray-400">{appliedEffect}</span>
+                  <span className="text-muted-foreground">{appliedEffect}</span>
                 ) : finding.resolution_status === "overridden" ||
                   finding.resolution_status === "accepted_risk" ? (
                   <>
-                    <span className="text-gray-400">
+                    <span className="text-muted-foreground">
                       {finding.resolution_status === "accepted_risk" ? "Accepted: " : "Reason: "}
                     </span>
                     {finding.resolution_note ?? "—"}
                   </>
                 ) : (
-                  <span className="text-gray-400">
+                  <span className="text-muted-foreground">
                     {resolutionLabel(finding.resolution_status)}
                   </span>
                 )}
@@ -547,7 +550,9 @@ export function FindingCard({
 function FindingSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{title}</h5>
+      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h5>
       <div className="mt-0.5 text-xs">{children}</div>
     </div>
   );

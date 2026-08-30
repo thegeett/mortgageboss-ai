@@ -11,11 +11,11 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-gray-50 px-4 py-12">
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-muted px-4 py-12">
       {/* Ambient background accents — consistent with the home page. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_hsl(217_91%_60%_/_0.08),_transparent_55%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)_/_0.08),_transparent_55%)]"
       />
       <div
         aria-hidden
@@ -31,18 +31,18 @@ export default function LoginPage() {
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
               <Layers className="h-5 w-5" />
             </span>
-            <span className="text-xl font-semibold tracking-tight text-gray-900">
+            <span className="text-xl font-semibold tracking-tight text-foreground">
               mortgageboss<span className="text-primary">·ai</span>
             </span>
           </Link>
         </div>
 
-        <Card className="border-gray-200/80 shadow-xl shadow-gray-900/5">
+        <Card className="border-border/80 shadow-xl shadow-foreground/5">
           <CardHeader className="space-y-1.5">
-            <CardTitle className="text-2xl font-semibold tracking-tight text-gray-900">
+            <CardTitle className="text-2xl font-semibold tracking-tight text-foreground">
               Sign in
             </CardTitle>
-            <CardDescription className="text-gray-500">
+            <CardDescription className="text-muted-foreground">
               Enter your credentials to access your loan files.
             </CardDescription>
           </CardHeader>
@@ -59,7 +59,7 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
+        <p className="mt-6 text-center text-xs text-muted-foreground">
           Accounts are provisioned by your administrator.
         </p>
       </div>

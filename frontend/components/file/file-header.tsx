@@ -30,7 +30,7 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
     <div className="space-y-3">
       <Link
         href="/dashboard"
-        className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-gray-500 transition-colors hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to dashboard
@@ -45,11 +45,11 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
       ) : (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {file.primary_borrower_name ?? "Unnamed file"}
             </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
-              <span className="font-mono font-medium text-gray-600">{file.display_id}</span>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <span className="font-mono font-medium text-foreground-2">{file.display_id}</span>
               {file.loan_program && (
                 <>
                   <span aria-hidden>·</span>
@@ -69,7 +69,7 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
                 </>
               )}
             </div>
-            <p className="mt-2 text-xs text-gray-400">
+            <p className="mt-2 text-xs text-muted-foreground">
               Created {fmtDate(file.created_at)} · Updated {fmtRelative(file.updated_at)}
             </p>
           </div>

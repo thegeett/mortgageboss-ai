@@ -9,7 +9,7 @@ function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>)
   return (
     <div
       aria-hidden
-      className={cn("animate-pulse rounded-md bg-gray-200/70", className)}
+      className={cn("animate-pulse rounded-md bg-border/70", className)}
       {...props}
     />
   );

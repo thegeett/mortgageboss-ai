@@ -30,7 +30,7 @@ import { useState } from "react";
 
 const STATUS_TONE: Record<string, string> = {
   required: "text-warning",
-  not_required: "text-gray-500",
+  not_required: "text-muted-foreground",
   sufficient: "text-success",
   insufficient: "text-danger",
   declining: "text-warning",
@@ -48,9 +48,9 @@ export function CalculatorCard({
   const { data, isPending, isError, refetch } = useCalculator(fileId, calculator);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Calculator className="h-4 w-4" />
           </span>
@@ -61,7 +61,7 @@ export function CalculatorCard({
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Deterministic math · auto-populated from the file · every input shown and override-able.
         </p>
       </CardHeader>
@@ -105,15 +105,15 @@ function CalculatorBody({
     );
   };
 
-  const tone = (data.status && STATUS_TONE[data.status]) || "text-gray-900";
+  const tone = (data.status && STATUS_TONE[data.status]) || "text-foreground";
 
   return (
     <div className="space-y-5">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
 
       {/* Headline number */}
-      <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <div className="rounded-lg border border-border bg-muted/50 px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {data.headline_label}
         </div>
         <div className={cn("mt-0.5 text-2xl font-semibold tabular-nums", tone)}>
@@ -124,10 +124,10 @@ function CalculatorBody({
       {/* Overrideable inputs */}
       {data.inputs.length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Inputs
           </h4>
-          <div className="rounded-lg border border-gray-200">
+          <div className="rounded-lg border border-border">
             {data.inputs.map((item) => (
               <LineRow
                 key={item.key}
@@ -147,27 +147,30 @@ function CalculatorBody({
       {/* The transparent derivation steps */}
       {data.steps.length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             The math
           </h4>
-          <div className="rounded-lg border border-gray-200">
+          <div className="rounded-lg border border-border">
             {data.steps.map((step, i) => (
               <div
                 key={`${step.label}-${i}`}
                 className={cn(
-                  "flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0",
-                  step.emphasis && "bg-gray-50/70",
+                  "flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0",
+                  step.emphasis && "bg-muted/70",
                 )}
               >
                 <span
-                  className={cn("text-gray-600", step.emphasis && "font-semibold text-gray-900")}
+                  className={cn(
+                    "text-foreground-2",
+                    step.emphasis && "font-semibold text-foreground",
+                  )}
                 >
                   {step.label}
                 </span>
                 <span
                   className={cn(
-                    "tabular-nums text-gray-700",
-                    step.emphasis && "font-semibold text-gray-900",
+                    "tabular-nums text-foreground-2",
+                    step.emphasis && "font-semibold text-foreground",
                   )}
                 >
                   {step.value}
@@ -179,12 +182,12 @@ function CalculatorBody({
       )}
 
       {/* The formula(s) */}
-      <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           The formula
         </div>
         {data.formulas.map((f) => (
-          <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-gray-600">
+          <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
             {f}
           </p>
         ))}
@@ -192,7 +195,7 @@ function CalculatorBody({
 
       {/* The grounded-starter methodology note */}
       {data.methodology.starter && (
-        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-gray-600">
+        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-foreground-2">
           <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           <span>
             <span className="font-semibold text-primary">Methodology — starter.</span>{" "}
@@ -224,10 +227,10 @@ function LineRow({
   const [draft, setDraft] = useState<string>(item.amount);
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
           {item.overridden ? (
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
@@ -240,7 +243,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -266,7 +269,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="h-8 w-8 text-muted-foreground"
             aria-label="Cancel"
             onClick={onCancel}
           >
@@ -282,18 +285,18 @@ function LineRow({
               onEdit();
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.overridden ? "font-semibold text-primary" : "font-medium text-gray-900",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
+              item.overridden ? "font-semibold text-primary" : "font-medium text-foreground",
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -311,7 +314,7 @@ function UnresolvedAlert({ count }: { count: number }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>

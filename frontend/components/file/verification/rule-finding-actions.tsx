@@ -89,11 +89,11 @@ export function RuleFindingActions({
   const resolved = finding.resolution_status !== "open";
   if (resolved) {
     return (
-      <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
+      <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
         <span>{resolutionLabel(finding.resolution_status)}</span>
         <button
           type="button"
-          className="underline underline-offset-2 hover:text-gray-700"
+          className="underline underline-offset-2 hover:text-foreground-2"
           onClick={() => onAct({ kind: "undo", findingId: finding.id })}
           disabled={pending}
         >
@@ -233,9 +233,9 @@ export function RuleFindingActions({
           </Button>
         </div>
       ) : (
-        <div className="space-y-1.5 rounded-md border border-gray-200 bg-gray-50/70 p-2">
+        <div className="space-y-1.5 rounded-md border border-border bg-muted/70 p-2">
           <label
-            className="block text-[11px] font-medium text-gray-600"
+            className="block text-[11px] font-medium text-foreground-2"
             htmlFor={`f-${finding.id}`}
           >
             {meta.label}
@@ -247,7 +247,7 @@ export function RuleFindingActions({
             placeholder={meta.placeholder}
             rows={2}
             className={cn(
-              "w-full rounded border border-gray-200 px-2 py-1 text-xs",
+              "w-full rounded border border-border px-2 py-1 text-xs",
               "focus:border-primary focus:outline-none",
             )}
           />

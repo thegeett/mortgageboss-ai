@@ -58,7 +58,7 @@ export function FindingsList({
   return (
     <div className="space-y-4">
       {shownOpen.length === 0 ? (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-muted-foreground">
           {!data.latest_run
             ? "Not run yet — run verification to compare the stated data against the documents."
             : openAll.length === 0
@@ -118,7 +118,7 @@ function ResolvedGroup({
 }) {
   return (
     <section>
-      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Resolved · {findings.length}
       </h4>
       <ul className="space-y-2 opacity-80">

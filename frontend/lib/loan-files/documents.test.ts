@@ -289,7 +289,9 @@ describe("stalenessBadge", () => {
   it("shows a muted note once resolved", () => {
     const badge = stalenessBadge(doc({ staleness: staleness({ resolution: "waived" }) }));
     expect(badge?.label).toBe("Staleness waived");
-    expect(badge?.className).toContain("gray");
+    // LP-UI-004: was `toContain("gray")`. The assertion's intent is "this note is
+    // muted, not a status" — it just happened to be spelled in the old palette.
+    expect(badge?.className).toContain("text-muted-foreground");
   });
 
   it("is null for a fresh document", () => {

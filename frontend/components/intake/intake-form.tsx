@@ -124,9 +124,9 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader>
-        <CardTitle className="text-base font-semibold text-gray-900">{title}</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2">{children}</CardContent>

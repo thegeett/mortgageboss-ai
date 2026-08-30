@@ -70,8 +70,8 @@ export const STATE_META: Record<NeedsItemStatus, StateMeta> = {
   waived: {
     label: "Waived",
     group: "set_aside",
-    dotClass: "bg-gray-300",
-    pillClass: "bg-gray-100 text-gray-500 border-gray-200",
+    dotClass: "bg-border",
+    pillClass: "bg-muted text-muted-foreground border-border",
   },
 };
 
@@ -95,8 +95,8 @@ export const PRIORITY_META: Record<NeedsItemPriority, { label: string; className
     label: "Blocking",
     className: "bg-destructive/10 text-destructive border-destructive/20",
   },
-  standard: { label: "Standard", className: "bg-gray-100 text-gray-600 border-gray-200" },
-  low: { label: "Low", className: "bg-gray-50 text-gray-400 border-gray-200" },
+  standard: { label: "Standard", className: "bg-muted text-foreground-2 border-border" },
+  low: { label: "Low", className: "bg-muted text-muted-foreground border-border" },
 };
 
 const SOURCE_LABELS: Record<NeedsItemOrigin, string> = {
@@ -150,7 +150,7 @@ export const SOURCE_ATTRIBUTION_META: Record<NeedSourceAttribution, SourceAttrib
   manual: {
     lead: "Added by you",
     pill: "manual",
-    pillClass: "bg-gray-100 text-gray-500",
+    pillClass: "bg-muted text-muted-foreground",
     aiIdentified: false,
   },
 };

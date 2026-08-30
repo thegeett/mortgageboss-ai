@@ -47,10 +47,10 @@ const TONE: Record<OutcomeTone, { text: string; chipBg: string; border: string; 
     dot: "bg-success",
   },
   muted: {
-    text: "text-gray-500",
-    chipBg: "bg-gray-100 text-gray-500",
-    border: "border-gray-200",
-    dot: "bg-gray-300",
+    text: "text-muted-foreground",
+    chipBg: "bg-muted text-muted-foreground",
+    border: "border-border",
+    dot: "bg-border",
   },
 };
 
@@ -67,20 +67,20 @@ function TagProvenance({ tag }: { tag: RuleFindingTag }) {
   const confidence =
     hasReasoning && tag.confidence != null ? `${Math.round(tag.confidence * 100)}%` : null;
   return (
-    <li className="rounded-md border border-gray-200 bg-white px-2.5 py-2">
+    <li className="rounded-md border border-border bg-white px-2.5 py-2">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate font-mono text-[11px] text-gray-500">{tag.tag_id}</span>
+        <span className="truncate font-mono text-[11px] text-muted-foreground">{tag.tag_id}</span>
         <div className="flex shrink-0 items-baseline gap-2">
-          <span className="text-xs font-semibold tabular-nums text-gray-900">
+          <span className="text-xs font-semibold tabular-nums text-foreground">
             {formatTagValue(tag.value)}
           </span>
           {confidence != null && (
-            <span className="text-[11px] font-medium text-gray-400">conf {confidence}</span>
+            <span className="text-[11px] font-medium text-muted-foreground">conf {confidence}</span>
           )}
         </div>
       </div>
       {hasReasoning && (
-        <p className="mt-1 text-xs leading-relaxed text-gray-600">{tag.reasoning}</p>
+        <p className="mt-1 text-xs leading-relaxed text-foreground-2">{tag.reasoning}</p>
       )}
     </li>
   );
@@ -89,7 +89,9 @@ function TagProvenance({ tag }: { tag: RuleFindingTag }) {
 function DetailBlock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
       <div className="mt-0.5">{children}</div>
     </div>
   );
@@ -106,11 +108,13 @@ function DetailBlock({ label, children }: { label: string; children: React.React
 export function RuleLabel({ finding }: { finding: RuleFinding }) {
   return (
     <>
-      <span className="font-mono text-[11px] text-gray-400">{finding.rule_id}</span>
+      <span className="font-mono text-[11px] text-muted-foreground">{finding.rule_id}</span>
       {finding.rule_name !== null && (
-        <span className="text-xs font-semibold text-gray-800">{finding.rule_name}</span>
+        <span className="text-xs font-semibold text-foreground">{finding.rule_name}</span>
       )}
-      <span className="text-[11px] text-gray-400">{ruleCategoryLabel(finding.category)}</span>
+      <span className="text-[11px] text-muted-foreground">
+        {ruleCategoryLabel(finding.category)}
+      </span>
       {/* LP-542 — the missing-document marker OUTSIDE Couldn't check, where the request/read split
        *  already carries it. DT-7 is the case that needs it: it lands in NEEDS REVIEW saying every
        *  ability-to-repay factor is documented, while the credit report it declares is not on the
@@ -146,8 +150,8 @@ function SourceDocuments({
 }) {
   if (documents.length === 0) return null;
   return (
-    <p className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-gray-400">
-      <FileText className="h-3 w-3 shrink-0 text-gray-400" aria-hidden />
+    <p className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted-foreground">
+      <FileText className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
       {documents.length === 1 ? "Document:" : "Documents:"}{" "}
       {documents.map((doc, index) => (
         <span key={doc.id || doc.filename}>
@@ -159,7 +163,7 @@ function SourceDocuments({
               {doc.filename}
             </Link>
           ) : (
-            <span className="font-medium text-gray-500">{doc.filename}</span>
+            <span className="font-medium text-muted-foreground">{doc.filename}</span>
           )}
           {index < documents.length - 1 ? "," : ""}
         </span>
@@ -192,20 +196,20 @@ export function RuleFindingRow({
   const panelId = useId();
 
   return (
-    <div className={cn("rounded-lg border", expanded ? tone.border : "border-gray-200/70")}>
+    <div className={cn("rounded-lg border", expanded ? tone.border : "border-border/70")}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50/70"
+        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-muted/70"
       >
         <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", tone.dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <RuleLabel finding={finding} />
             {chip.length > 0 && (
-              <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
+              <span className="rounded bg-muted px-1.5 py-px text-[11px] font-medium text-foreground-2">
                 {chip}
               </span>
             )}
@@ -215,7 +219,7 @@ export function RuleFindingRow({
               </span>
             )}
           </div>
-          <p className="mt-0.5 line-clamp-2 text-sm text-gray-700">{finding.message}</p>
+          <p className="mt-0.5 line-clamp-2 text-sm text-foreground-2">{finding.message}</p>
         </div>
         <span
           className={cn("shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold", tone.chipBg)}
@@ -224,7 +228,7 @@ export function RuleFindingRow({
         </span>
         <ChevronDown
           className={cn(
-            "mt-0.5 h-4 w-4 shrink-0 text-gray-300 transition-transform",
+            "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform",
             expanded && "rotate-180",
           )}
         />
@@ -233,16 +237,16 @@ export function RuleFindingRow({
       {expanded && (
         <div
           id={panelId}
-          className="space-y-3 border-t border-gray-100 bg-gray-50/40 px-3 py-3 pl-[1.375rem]"
+          className="space-y-3 border-t border-border bg-muted/40 px-3 py-3 pl-[1.375rem]"
         >
           <DetailBlock label={`Outcome — ${meta.label}`}>
             <p className={cn("text-xs font-medium", tone.text)}>{meta.blurb}</p>
-            <p className="mt-1 text-sm text-gray-700">{finding.message}</p>
+            <p className="mt-1 text-sm text-foreground-2">{finding.message}</p>
           </DetailBlock>
 
           {finding.how_to_fix != null && finding.how_to_fix.trim().length > 0 && (
             <DetailBlock label="How to fix">
-              <p className="text-sm text-gray-700">{finding.how_to_fix}</p>
+              <p className="text-sm text-foreground-2">{finding.how_to_fix}</p>
             </DetailBlock>
           )}
 
@@ -252,12 +256,14 @@ export function RuleFindingRow({
               source (Fannie Mae B3-6-05, and so on). */}
           {finding.guideline != null && finding.guideline.trim().length > 0 && (
             <DetailBlock label="Guideline">
-              <p className="text-sm italic leading-relaxed text-gray-600">{finding.guideline}</p>
+              <p className="text-sm italic leading-relaxed text-foreground-2">
+                {finding.guideline}
+              </p>
             </DetailBlock>
           )}
 
           {finding.ratification_pending && (
-            <p className="flex items-start gap-1.5 rounded-md border border-info/30 bg-info/5 px-2.5 py-2 text-xs text-gray-600">
+            <p className="flex items-start gap-1.5 rounded-md border border-info/30 bg-info/5 px-2.5 py-2 text-xs text-foreground-2">
               <Gavel className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
               This is a judgment (AI) verdict awaiting your sign-off — it is not an auto-shipped
               conclusion, and it is not a violation.
@@ -273,7 +279,7 @@ export function RuleFindingRow({
             // opposite-polarity values sat adjacent with no legend, and a skimmed `yes` on a
             // borrowed-funds check reads as "yes, fine" when it means the opposite.
             <details className="group">
-              <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600">
+              <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground-2">
                 <span className="group-open:hidden">
                   Show the {finding.load_bearing_tags.length} facts this rested on
                 </span>
@@ -290,8 +296,9 @@ export function RuleFindingRow({
           {finding.subject_label.length > 0 && (
             // LP-377-B: the subject in human terms (a filename / borrower / "Loan-level"), never the raw
             // content-id an engineer's `subject_key` carries — a processor should not see a hash here.
-            <p className="text-[11px] text-gray-400">
-              Subject: <span className="font-medium text-gray-500">{finding.subject_label}</span>
+            <p className="text-[11px] text-muted-foreground">
+              Subject:{" "}
+              <span className="font-medium text-muted-foreground">{finding.subject_label}</span>
             </p>
           )}
 

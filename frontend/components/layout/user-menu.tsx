@@ -44,32 +44,32 @@ export function UserMenu({ user }: { user: User }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 text-sm transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      <DropdownMenuTrigger className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
           {initialsOf(user)}
         </span>
-        <span className="hidden text-sm font-medium text-gray-700 sm:block">
+        <span className="hidden text-sm font-medium text-foreground-2 sm:block">
           {user.first_name} {user.last_name}
         </span>
-        <ChevronDown className="hidden h-4 w-4 text-gray-400 sm:block" />
+        <ChevronDown className="hidden h-4 w-4 text-muted-foreground sm:block" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="font-normal">
-          <p className="text-sm font-medium text-gray-900">
+          <p className="text-sm font-medium text-foreground">
             {user.first_name} {user.last_name}
           </p>
-          <p className="truncate text-xs font-normal text-gray-500">{user.email}</p>
+          <p className="truncate text-xs font-normal text-muted-foreground">{user.email}</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled>
           <UserRound className="mr-2 h-4 w-4" />
           Profile
-          <span className="ml-auto text-xs text-gray-400">Soon</span>
+          <span className="ml-auto text-xs text-muted-foreground">Soon</span>
         </DropdownMenuItem>
         <DropdownMenuItem disabled>
           <Settings className="mr-2 h-4 w-4" />
           Settings
-          <span className="ml-auto text-xs text-gray-400">Soon</span>
+          <span className="ml-auto text-xs text-muted-foreground">Soon</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem

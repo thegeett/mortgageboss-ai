@@ -32,8 +32,8 @@ const DISPOSITION: Record<string, { label: string; tone: string }> = {
   open: { label: "Open", tone: "bg-primary/10 text-primary" },
   resolved: { label: "Resolved by a file change", tone: "bg-success/10 text-success" },
   // The PROCESSOR's two.
-  signed_off: { label: "Signed off", tone: "bg-gray-100 text-gray-600" },
-  not_an_issue: { label: "Not an issue", tone: "bg-gray-100 text-gray-600" },
+  signed_off: { label: "Signed off", tone: "bg-muted text-foreground-2" },
+  not_an_issue: { label: "Not an issue", tone: "bg-muted text-foreground-2" },
 };
 
 function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) {
@@ -46,15 +46,20 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
     <li
       className={cn(
         "rounded-md border p-3",
-        isOpen ? "border-gray-200 bg-white" : "border-gray-100 bg-gray-50/60",
+        isOpen ? "border-border bg-white" : "border-border bg-muted/60",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <p className={cn("text-sm font-medium", isOpen ? "text-gray-900" : "text-gray-500")}>
+          <p
+            className={cn(
+              "text-sm font-medium",
+              isOpen ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
             {finding.title}
           </p>
-          <p className="text-xs leading-relaxed text-gray-600">{finding.detail}</p>
+          <p className="text-xs leading-relaxed text-foreground-2">{finding.detail}</p>
         </div>
         <span
           className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", meta?.tone)}
@@ -66,18 +71,18 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
       {/* THE TWO SIDES. A cross-source finding is only checkable if the processor can see both
           figures without reopening every document — that is the whole value of the pairing. */}
       {finding.sources.length > 0 && (
-        <dl className="mt-2 grid gap-x-4 gap-y-1 border-t border-gray-100 pt-2 text-xs sm:grid-cols-2">
+        <dl className="mt-2 grid gap-x-4 gap-y-1 border-t border-border pt-2 text-xs sm:grid-cols-2">
           {finding.sources.map((source) => (
             <div key={`${source.label}-${source.value}`} className="flex justify-between gap-2">
-              <dt className="truncate text-gray-500">{source.label}</dt>
-              <dd className="shrink-0 font-medium tabular-nums text-gray-800">{source.value}</dd>
+              <dt className="truncate text-muted-foreground">{source.label}</dt>
+              <dd className="shrink-0 font-medium tabular-nums text-foreground">{source.value}</dd>
             </div>
           ))}
         </dl>
       )}
 
       {finding.disposition_note && (
-        <p className="mt-2 text-[11px] italic text-gray-500">{finding.disposition_note}</p>
+        <p className="mt-2 text-[11px] italic text-muted-foreground">{finding.disposition_note}</p>
       )}
 
       {/* NO APPLY — see the header. These record a decision and change nothing on the loan. */}
@@ -117,7 +122,7 @@ function Row({ finding, fileId }: { finding: SnapshotFinding; fileId: string }) 
       {!isOpen && !isResolved && (
         <button
           type="button"
-          className="mt-2 text-[11px] text-gray-400 underline hover:text-gray-600"
+          className="mt-2 text-[11px] text-muted-foreground underline hover:text-foreground-2"
           disabled={setDisposition.isPending}
           onClick={() => setDisposition.mutate({ findingId: finding.id, disposition: "open" })}
         >
@@ -142,9 +147,9 @@ export function SnapshotFindingsTab({ fileId }: { fileId: string }) {
   if (findings.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
-        <Layers className="h-8 w-8 text-gray-300" />
-        <p className="text-sm font-medium text-gray-700">Nothing flagged on a cross-check</p>
-        <p className="max-w-md text-xs text-gray-500">
+        <Layers className="h-8 w-8 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground-2">Nothing flagged on a cross-check</p>
+        <p className="max-w-md text-xs text-muted-foreground">
           This pass reads the whole snapshot for a fact in one source that can be checked against a
           fact in another. It runs with verification, and only re-reads when the file actually
           changes — so an empty list here means the last run found nothing to reconcile, not that
@@ -168,7 +173,7 @@ export function SnapshotFindingsTab({ fileId }: { fileId: string }) {
       )}
       {rest.length > 0 && (
         <section className="space-y-2">
-          <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <CheckCircle2 className="h-3 w-3" /> Reviewed
           </h4>
           <ul className="space-y-2">

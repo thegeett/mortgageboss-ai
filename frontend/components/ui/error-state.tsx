@@ -36,7 +36,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white px-6 py-10 text-center",
+        "flex flex-col items-center justify-center gap-3 rounded-lg border border-border bg-white px-6 py-10 text-center",
         className,
       )}
     >
@@ -44,8 +44,8 @@ export function ErrorState({
         <Icon className="h-5 w-5" />
       </span>
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-gray-900">{title}</p>
-        <p className="mx-auto max-w-sm text-sm text-gray-500">{message}</p>
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="mx-auto max-w-sm text-sm text-muted-foreground">{message}</p>
       </div>
       {children}
       {onRetry && (
@@ -80,7 +80,7 @@ export function InlineErrorState({
   return (
     <div
       role="alert"
-      className={cn("flex items-center gap-2 py-4 text-sm text-gray-500", className)}
+      className={cn("flex items-center gap-2 py-4 text-sm text-muted-foreground", className)}
     >
       <TriangleAlert className="h-4 w-4 shrink-0 text-destructive" />
       <span>{message}</span>

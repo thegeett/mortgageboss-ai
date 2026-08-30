@@ -54,16 +54,16 @@ export function AggressionDial({
 
   return (
     <section
-      className="rounded-lg border border-gray-200 bg-gray-50/60 p-3"
+      className="rounded-lg border border-border bg-muted/60 p-3"
       aria-label="Verification thoroughness"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground-2">
           <Gauge className="h-3.5 w-3.5 text-primary" />
           Thoroughness
-          {busy && <Spinner className="h-3 w-3 text-gray-400" />}
+          {busy && <Spinner className="h-3 w-3 text-muted-foreground" />}
         </span>
-        <span className="text-[11px] tabular-nums text-gray-400">
+        <span className="text-[11px] tabular-nums text-muted-foreground">
           shows findings ≥ {Math.round(cutoff * 100)}% confidence
         </span>
       </div>
@@ -71,7 +71,7 @@ export function AggressionDial({
       {/* The segmented dial — Conservative (most scrutiny filtered out) → Thorough.
           Toggle-button pattern (aria-pressed) so the active level is announced; the
           surrounding <section> already labels the group. */}
-      <div className="flex gap-1 rounded-md border border-gray-200 bg-white p-1">
+      <div className="flex gap-1 rounded-md border border-border bg-white p-1">
         {ORDER.map((level) => {
           const active = level === activeLevel;
           return (
@@ -86,7 +86,7 @@ export function AggressionDial({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                 active
                   ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-800",
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 busy && "cursor-not-allowed opacity-70",
               )}
             >
@@ -96,16 +96,16 @@ export function AggressionDial({
         })}
       </div>
 
-      <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
         {AGGRESSION_META[activeLevel].blurb}
       </p>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         {overriding ? (
           <>
-            <span className="text-gray-400">
+            <span className="text-muted-foreground">
               Overridden for this file (your default is{" "}
-              <span className="font-medium text-gray-600">
+              <span className="font-medium text-foreground-2">
                 {AGGRESSION_META[aggression.default].label}
               </span>
               )
@@ -120,14 +120,14 @@ export function AggressionDial({
             </button>
           </>
         ) : (
-          <span className="text-gray-400">Using your default.</span>
+          <span className="text-muted-foreground">Using your default.</span>
         )}
         {!isDefault && (
           <button
             type="button"
             disabled={busy}
             onClick={onSetAsDefault}
-            className="text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline disabled:opacity-50"
+            className="text-muted-foreground underline-offset-2 hover:text-foreground-2 hover:underline disabled:opacity-50"
           >
             Set {AGGRESSION_META[activeLevel].label} as my default
           </button>

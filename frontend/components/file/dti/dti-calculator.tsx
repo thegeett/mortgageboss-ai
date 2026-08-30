@@ -30,9 +30,9 @@ export function DtiCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useDti(fileId);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Calculator className="h-4 w-4" />
           </span>
@@ -43,7 +43,7 @@ export function DtiCalculator({ fileId }: { fileId: string }) {
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Deterministic math · auto-populated from the file · every input shown and override-able.
         </p>
       </CardHeader>
@@ -157,12 +157,14 @@ function RatioTile({
   hint: string;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">
+    <div className="rounded-lg border border-border bg-muted/60 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
         {formatPercent(value)}
       </div>
-      <div className="mt-0.5 text-xs text-gray-400">{hint}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -182,7 +184,7 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Back-end DTI
         </span>
         {known && (
@@ -200,33 +202,33 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
         <span
           className={cn(
             "text-3xl font-semibold tabular-nums",
-            over ? "text-destructive" : "text-gray-900",
+            over ? "text-destructive" : "text-foreground",
           )}
         >
           {formatPercent(back)}
         </span>
         {limit.back_end_max !== null && (
-          <span className="whitespace-nowrap text-sm text-gray-400">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
             / {formatPercent(limit.back_end_max)} limit
           </span>
         )}
       </div>
       {cap ? (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className={cn("h-full rounded-full", over ? "bg-destructive" : "bg-success")}
               style={{ width: `${fill}%` }}
             />
           </div>
-          <div className="mt-1 text-[11px] text-gray-400">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {limit.source === "overlay"
               ? `Lender overlay${limit.lender_slug ? ` · ${limit.lender_slug}` : ""}`
               : "Program default"}
           </div>
         </div>
       ) : (
-        <div className="mt-1 text-xs text-gray-400">No program limit set</div>
+        <div className="mt-1 text-xs text-muted-foreground">No program limit set</div>
       )}
     </div>
   );
@@ -264,18 +266,20 @@ function BreakdownSection({
 } & RowControls) {
   return (
     <section>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
-      <div className="rounded-lg border border-gray-200">
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      <div className="rounded-lg border border-border">
         {items.length === 0 && emptyHint ? (
-          <p className="px-3 py-2.5 text-sm text-gray-400">{emptyHint}</p>
+          <p className="px-3 py-2.5 text-sm text-muted-foreground">{emptyHint}</p>
         ) : (
           items.map((item) => <LineRow key={item.key} item={item} {...controls} />)
         )}
-        <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50/60 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="flex items-center justify-between border-t border-border bg-muted/60 px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Subtotal
           </span>
-          <span className="text-sm font-semibold tabular-nums text-gray-900">
+          <span className="text-sm font-semibold tabular-nums text-foreground">
             {formatMoneyPrecise(subtotal)}
           </span>
         </div>
@@ -308,10 +312,10 @@ function LineRow({
   const [draft, setDraft] = useState<string>(item.amount);
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
           {/* LP-569 review — this chain and the amount-styling chain below MUST test in the same
               order. They disagreed (overridden→excluded→unknown here, unknown→excluded→overridden
               there), so a row that was both rendered struck through with a caption reading
@@ -320,7 +324,7 @@ function LineRow({
               mutually exclusive at the source; keeping the order identical stops a future change
               from re-opening the gap. */}
           {item.excluded ? (
-            <span className="text-gray-500">
+            <span className="text-muted-foreground">
               not counted — {item.excluded_reason ?? "excluded"}
             </span>
           ) : item.overridden ? (
@@ -350,7 +354,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -376,7 +380,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="h-8 w-8 text-muted-foreground"
             aria-label="Cancel"
             onClick={onCancel}
           >
@@ -392,25 +396,25 @@ function LineRow({
               onEdit(item.key);
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
               // Same order as the caption chain above — see the note there.
               item.excluded
-                ? "font-medium text-gray-400 line-through"
+                ? "font-medium text-muted-foreground line-through"
                 : item.overridden
                   ? "font-semibold text-primary"
                   : item.unknown
                     ? "font-medium text-warning"
-                    : "font-medium text-gray-900",
+                    : "font-medium text-foreground",
             )}
           >
             {item.unknown && !item.excluded ? "Unknown" : formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -434,12 +438,12 @@ function GatedBanner({ reason }: { reason?: string | null }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="space-y-2">
         <span>
-          <span className="font-medium text-gray-900">The DTI can't be computed yet</span> —{" "}
+          <span className="font-medium text-foreground">The DTI can't be computed yet</span> —{" "}
           {reason?.replace(/^calculation gated \(fail-closed\):\s*/, "") ??
             "a required housing input is unknown"}
           . It's shown as gated rather than a confident ratio resting on a missing value.
@@ -481,7 +485,7 @@ function UseEstimateButton({
             disabled={disabled}
             onClick={() => onUse(suggestion.field_key, suggestion.monthly_amount, note)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-warning/10 disabled:opacity-50",
+              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-foreground-2 hover:bg-warning/10 disabled:opacity-50",
               className,
             )}
           >
@@ -495,7 +499,7 @@ function UseEstimateButton({
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">
           <p>{suggestion.sentence}</p>
-          <p className="mt-1.5 text-gray-300">
+          <p className="mt-1.5 text-muted-foreground">
             Using it records an override in your name — the file will still show this figure is an
             estimate, and the tax bill is still outstanding.
           </p>
@@ -507,14 +511,14 @@ function UseEstimateButton({
 
 function FormulaReceipt({ data }: { data: DtiCalculation }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+    <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         The formula
       </div>
-      <p className="mt-1.5 font-mono text-xs leading-relaxed text-gray-600">
+      <p className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
         {data.back_end_formula}
       </p>
-      <p className="mt-1 font-mono text-xs leading-relaxed text-gray-900">
+      <p className="mt-1 font-mono text-xs leading-relaxed text-foreground">
         = ({formatMoneyPrecise(data.housing_payment)} + {formatMoneyPrecise(data.monthly_debts)}) ÷{" "}
         {formatMoneyPrecise(data.gross_monthly_income)} ={" "}
         <span className="font-semibold">{formatPercent(data.back_end_dti)}</span>
@@ -527,11 +531,11 @@ function UnresolvedAlert({ count }: { count: number }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>
-        <span className="font-medium text-gray-900">
+        <span className="font-medium text-foreground">
           {count} unresolved finding{count === 1 ? "" : "s"}
         </span>{" "}
         — this calculation may be incomplete until they're applied or overridden.

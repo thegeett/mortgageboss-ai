@@ -41,7 +41,7 @@ function HeaderRow() {
         {COLUMNS.map((col) => (
           <TableHead
             key={col}
-            className="text-xs font-medium uppercase tracking-wide text-gray-400"
+            className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
           >
             {col}
           </TableHead>
@@ -109,8 +109,10 @@ export function FileTable({
     return (
       <StatePanel>
         <TriangleAlert className="h-8 w-8 text-destructive" />
-        <h3 className="mt-3 text-sm font-semibold text-gray-900">Couldn&apos;t load loan files</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
+        <h3 className="mt-3 text-sm font-semibold text-foreground">
+          Couldn&apos;t load loan files
+        </h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           Something went wrong fetching your files. Check your connection and try again.
         </p>
       </StatePanel>
@@ -132,9 +134,9 @@ export function FileTable({
   if (files.length === 0) {
     return isFiltered ? (
       <StatePanel>
-        <SearchX className="h-8 w-8 text-gray-300" />
-        <h3 className="mt-3 text-sm font-semibold text-gray-900">No matching files</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
+        <SearchX className="h-8 w-8 text-muted-foreground" />
+        <h3 className="mt-3 text-sm font-semibold text-foreground">No matching files</h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           No loan files match your current filters. Try clearing the search or a different filter.
         </p>
       </StatePanel>
@@ -143,8 +145,8 @@ export function FileTable({
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
           <FolderPlus className="h-6 w-6" />
         </span>
-        <h3 className="mt-4 text-sm font-semibold text-gray-900">No loan files yet</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
+        <h3 className="mt-4 text-sm font-semibold text-foreground">No loan files yet</h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           Create your first loan file to start assembling documents and tracking requirements.
         </p>
         <Button type="button" onClick={onNewFile} className="mt-5 gap-2">
@@ -170,16 +172,18 @@ export function FileTable({
                 if (event.key === "Enter") onSelect(file);
               }}
             >
-              <TableCell className="font-medium text-gray-900">{file.display_id}</TableCell>
-              <TableCell className="text-gray-700">{file.primary_borrower_name ?? "—"}</TableCell>
-              <TableCell className="max-w-[16rem] truncate text-gray-700">
+              <TableCell className="font-medium text-foreground">{file.display_id}</TableCell>
+              <TableCell className="text-foreground-2">
+                {file.primary_borrower_name ?? "—"}
+              </TableCell>
+              <TableCell className="max-w-[16rem] truncate text-foreground-2">
                 {file.property_address ?? "—"}
               </TableCell>
               <TableCell>
                 <StatusBadge status={file.status} />
               </TableCell>
-              <TableCell className="text-gray-700">{file.lender_name ?? "—"}</TableCell>
-              <TableCell className="whitespace-nowrap text-gray-500">
+              <TableCell className="text-foreground-2">{file.lender_name ?? "—"}</TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
                 {lastActivity(file.updated_at)}
               </TableCell>
               <TableCell
@@ -198,7 +202,7 @@ export function FileTable({
                       type="button"
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 text-gray-400 hover:text-gray-700"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground-2"
                       aria-label={`Actions for ${file.display_id}`}
                       onClick={(event) => event.stopPropagation()}
                     >

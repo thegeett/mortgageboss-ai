@@ -42,19 +42,19 @@ function DocumentRow({
     <button
       type="button"
       onClick={() => onSelect(document)}
-      className="flex w-full items-center gap-3 rounded-lg border border-gray-200/80 bg-white px-3.5 py-3 text-left shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="flex w-full items-center gap-3 rounded-lg border border-border/80 bg-white px-3.5 py-3 text-left shadow-sm transition-colors hover:border-input hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-400">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
         <FileText className="h-4 w-4" aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           {/* The derived standard name (LP-72) is the scannable primary label. */}
-          <span className="truncate text-sm font-medium text-gray-900">
+          <span className="truncate text-sm font-medium text-foreground">
             {document.standard_name || document.original_filename}
           </span>
           {vlabel && (
-            <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0 text-[10px] font-medium text-gray-500">
+            <span className="shrink-0 rounded-full border border-border bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
               {vlabel}
             </span>
           )}
@@ -68,20 +68,22 @@ function DocumentRow({
         {/* The consolidated period (LP-105) — the at-a-glance distinguisher for same-type
             documents (two pay stubs read "Jun 1 - 15" vs "Jun 16 - 30"). Omitted when absent. */}
         {document.period && (
-          <span className="mt-0.5 block truncate text-xs font-medium text-gray-600">
+          <span className="mt-0.5 block truncate text-xs font-medium text-foreground-2">
             {document.period.label}: {document.period.value}
           </span>
         )}
-        <span className="mt-0.5 block truncate text-xs text-gray-500">
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
           {document.document_type ? humanize(document.document_type) : "—"}
-          <span className="text-gray-300"> · </span>
+          <span className="text-muted-foreground"> · </span>
           {formatFileSize(document.file_size_bytes)}
-          <span className="text-gray-300"> · </span>
+          <span className="text-muted-foreground"> · </span>
           {relativeTime(document.created_at)}
         </span>
         {/* Tier 2 (recognized) docs carry a short summary gist (LP-65). */}
         {document.summary && (
-          <span className="mt-0.5 block truncate text-xs text-gray-400">{document.summary}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            {document.summary}
+          </span>
         )}
         {/* Calm, informational cues — staleness + gentle duplicate surfacing (LP-71). */}
         {(stale || others.length > 0) && (
@@ -97,7 +99,7 @@ function DocumentRow({
               </span>
             )}
             {others.length > 0 && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Copy className="h-3 w-3" aria-hidden />
                 {others.length} other{" "}
                 {document.document_type ? humanize(document.document_type) : "document"}
@@ -152,9 +154,11 @@ export function DocumentList({
   }
   if (!documents || documents.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-200 bg-white px-6 py-10 text-center">
-        <p className="text-sm font-medium text-gray-900">No documents yet</p>
-        <p className="mt-1 text-sm text-gray-500">Drag files onto the area above to upload.</p>
+      <div className="rounded-lg border border-dashed border-border bg-white px-6 py-10 text-center">
+        <p className="text-sm font-medium text-foreground">No documents yet</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Drag files onto the area above to upload.
+        </p>
       </div>
     );
   }
@@ -168,10 +172,10 @@ export function DocumentList({
       {groups.map((group) => (
         <section key={group.key}>
           <div className="mb-2 flex items-center gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {group.label}
             </h3>
-            <span className="rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500">
+            <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
               {group.documents.length}
             </span>
           </div>

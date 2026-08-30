@@ -23,7 +23,7 @@ import { FlaskConical, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const STATUS_BADGE: Record<string, string> = {
-  grounded_starter: "border-gray-200 text-gray-400",
+  grounded_starter: "border-border text-muted-foreground",
   validated: "border-success/40 text-success",
   corrected: "border-warning/50 text-warning",
   flagged_remove: "border-destructive/40 text-destructive",
@@ -35,7 +35,7 @@ export default function ValidationAidPage() {
 
   if (role !== "admin") {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-500">
+      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
         The validation aid is available to admins only.
       </div>
     );
@@ -44,11 +44,11 @@ export default function ValidationAidPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900">
+        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
           <FlaskConical className="h-6 w-6 text-primary" />
           Rule &amp; calculator validation
         </h2>
-        <p className="mt-1 max-w-3xl text-sm text-gray-500">
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Every rule and calculator methodology is a <strong>grounded starter</strong> — researched
           against the real sources but <strong>not yet validated</strong> by Priya. Walk these with
           her and record her verdict per item. Nothing is &ldquo;validated&rdquo; until she says so.
@@ -88,20 +88,24 @@ function Inventory({ data }: { data: ValidationInventory }) {
       {/* Counts (the honest progress: how much still needs validation). */}
       <div className="grid grid-cols-5 gap-2">
         {[
-          { label: "Total", value: data.total, tone: "text-gray-900" },
-          { label: "Grounded starter", value: data.grounded_starter, tone: "text-gray-500" },
+          { label: "Total", value: data.total, tone: "text-foreground" },
+          {
+            label: "Grounded starter",
+            value: data.grounded_starter,
+            tone: "text-muted-foreground",
+          },
           { label: "Validated", value: data.validated, tone: "text-success" },
           { label: "Corrected", value: data.corrected, tone: "text-warning" },
           { label: "Flagged remove", value: data.flagged_remove, tone: "text-destructive" },
         ].map((t) => (
           <div
             key={t.label}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-center"
+            className="rounded-lg border border-border bg-white px-2 py-1.5 text-center"
           >
             <div className={cn("text-lg font-semibold tabular-nums leading-none", t.tone)}>
               {t.value}
             </div>
-            <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+            <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {t.label}
             </div>
           </div>
@@ -128,7 +132,7 @@ function Inventory({ data }: { data: ValidationInventory }) {
           onChange={setStatusFilter}
           options={["all", "grounded_starter", "validated", "corrected", "flagged_remove"]}
         />
-        <span className="ml-auto text-gray-400">
+        <span className="ml-auto text-muted-foreground">
           {shown.length} of {data.total}
         </span>
       </div>
@@ -156,12 +160,12 @@ function Filter({
   options: string[];
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-gray-500">
+    <label className="flex items-center gap-1.5 text-muted-foreground">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs"
+        className="rounded border border-border bg-white px-1.5 py-0.5 text-xs"
       >
         {options.map((o) => (
           <option key={o} value={o}>
@@ -192,17 +196,17 @@ function ItemRow({ item }: { item: InventoryItem }) {
   };
 
   return (
-    <li className="rounded-lg border border-gray-200 px-3 py-2.5">
+    <li className="rounded-lg border border-border px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[11px] text-gray-400">{item.item_id}</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{item.item_id}</span>
             {item.program && (
               <Badge variant="secondary" className="font-normal">
                 {item.program}
               </Badge>
             )}
-            <Badge variant="outline" className="font-normal text-gray-400">
+            <Badge variant="outline" className="font-normal text-muted-foreground">
               {item.category}
             </Badge>
             {item.to_verify && (
@@ -211,10 +215,10 @@ function ItemRow({ item }: { item: InventoryItem }) {
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-sm text-gray-800">{item.description}</p>
-          <p className="mt-0.5 text-[11px] text-gray-400">
+          <p className="mt-0.5 text-sm text-foreground">{item.description}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
             {item.value !== null && (
-              <span className="font-medium text-gray-600">
+              <span className="font-medium text-foreground-2">
                 {item.op ? `${item.op} ` : ""}
                 {item.value}
                 {item.unit ? ` ${item.unit}` : ""}
@@ -261,7 +265,7 @@ function ItemRow({ item }: { item: InventoryItem }) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-gray-500"
+              className="h-7 text-xs text-muted-foreground"
               onClick={() => setMode("remove")}
             >
               Flag remove…
@@ -296,7 +300,7 @@ function ItemRow({ item }: { item: InventoryItem }) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-gray-500"
+              className="h-7 text-xs text-muted-foreground"
               onClick={() => setMode(null)}
             >
               Cancel
@@ -356,7 +360,12 @@ function AddNew() {
         >
           Capture proposal
         </Button>
-        <Button size="sm" variant="ghost" className="text-gray-500" onClick={() => setOpen(false)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          onClick={() => setOpen(false)}
+        >
           Cancel
         </Button>
       </div>

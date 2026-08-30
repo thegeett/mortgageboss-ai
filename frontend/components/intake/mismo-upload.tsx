@@ -96,10 +96,10 @@ export function MismoUpload() {
       >
         {pending ? <Spinner className="h-7 w-7" /> : <FileUp className="h-7 w-7" aria-hidden />}
       </span>
-      <h2 className="mt-5 text-lg font-semibold text-gray-900">
+      <h2 className="mt-5 text-lg font-semibold text-foreground">
         {pending ? "Importing…" : isDragActive ? "Drop to import" : "Upload a MISMO file"}
       </h2>
-      <p className="mt-1.5 max-w-md text-sm text-gray-500">
+      <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
         Drop the MISMO file from your loan origination system — the application data fills in
         automatically.
       </p>
@@ -112,7 +112,7 @@ export function MismoUpload() {
         {pending ? <Spinner /> : <FileUp className="h-4 w-4" />}
         {pending ? "Importing…" : "Choose MISMO file"}
       </button>
-      <p className="mt-3 text-xs text-gray-400">XML or HTML · from your LOS</p>
+      <p className="mt-3 text-xs text-muted-foreground">XML or HTML · from your LOS</p>
     </div>
   );
 }

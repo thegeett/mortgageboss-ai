@@ -20,7 +20,7 @@ interface StatCard {
 // for its grouping and reads the server-side `total`. Reuses the list endpoint —
 // no fabricated numbers and no separate counts endpoint needed.
 const CARDS: StatCard[] = [
-  { key: "all", label: "Total files", icon: Files, iconClass: "text-gray-400" },
+  { key: "all", label: "Total files", icon: Files, iconClass: "text-muted-foreground" },
   { key: "active", label: "Active", icon: FolderOpen, iconClass: "text-primary" },
   { key: "action_needed", label: "Action needed", icon: CircleAlert, iconClass: "text-warning" },
   { key: "completed", label: "Completed", icon: CircleCheck, iconClass: "text-success" },
@@ -33,9 +33,9 @@ function StatTile({ card }: { card: StatCard }) {
   });
 
   return (
-    <Card className="border-gray-200/80 p-4 shadow-sm">
+    <Card className="border-border/80 p-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-gray-500">{card.label}</span>
+        <span className="text-sm font-medium text-muted-foreground">{card.label}</span>
         <card.icon className={cn("h-4 w-4", card.iconClass)} />
       </div>
       {isPending ? (
@@ -46,7 +46,7 @@ function StatTile({ card }: { card: StatCard }) {
           <Skeleton className="h-8 w-14" />
         </div>
       ) : (
-        <p className="mt-1 text-3xl font-semibold tracking-tight text-gray-900">
+        <p className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
           {isError ? "—" : (data?.total ?? 0)}
         </p>
       )}

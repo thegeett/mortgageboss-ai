@@ -25,10 +25,10 @@ export function ActivityFeed({
   onRetry?: () => void;
 }) {
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <Activity className="h-4 w-4 text-gray-400" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Activity className="h-4 w-4 text-muted-foreground" />
           Recent activity
         </CardTitle>
       </CardHeader>
@@ -45,7 +45,7 @@ export function ActivityFeed({
         ) : isError ? (
           <InlineErrorState message="Couldn't load activity." onRetry={onRetry} />
         ) : !activity || activity.length === 0 ? (
-          <p className="py-4 text-sm text-gray-400">No activity yet.</p>
+          <p className="py-4 text-sm text-muted-foreground">No activity yet.</p>
         ) : (
           <ul className="space-y-3">
             {activity.map((entry) => (
@@ -55,8 +55,8 @@ export function ActivityFeed({
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60"
                 />
                 <div className="min-w-0">
-                  <p className="text-sm text-gray-700">{entry.summary}</p>
-                  <p className="text-xs text-gray-400">{relative(entry.created_at)}</p>
+                  <p className="text-sm text-foreground-2">{entry.summary}</p>
+                  <p className="text-xs text-muted-foreground">{relative(entry.created_at)}</p>
                 </div>
               </li>
             ))}

@@ -19,7 +19,7 @@ export default function FileWorkspaceLoading() {
           <Skeleton className="h-4 w-80" />
         </div>
         {/* Tab bar */}
-        <div className="flex gap-6 border-b border-gray-100 pb-2">
+        <div className="flex gap-6 border-b border-border pb-2">
           {[0, 1, 2, 3, 4].map((tab) => (
             <Skeleton key={tab} className="h-5 w-20" />
           ))}
@@ -29,7 +29,7 @@ export default function FileWorkspaceLoading() {
       {/* Overview cards */}
       <div className="grid gap-4 lg:grid-cols-3">
         {[0, 1, 2].map((card) => (
-          <Card key={card} className="border-gray-200/80 shadow-sm">
+          <Card key={card} className="border-border/80 shadow-sm">
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-28" />
             </CardHeader>

@@ -44,7 +44,9 @@ function Group({
   return (
     <section className="mt-5 first:mt-0">
       <div className="mb-1.5 flex items-center justify-between">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h4>
         <button
           type="button"
           onClick={onAdd}
@@ -55,7 +57,7 @@ function Group({
         </button>
       </div>
       {empty ? (
-        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2.5 text-xs text-gray-400">
+        <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
           None imported — use “Add” if any apply.
         </p>
       ) : (
@@ -207,10 +209,10 @@ export function StatedFinancialsEditor({
 
       {/* Stated loan terms — a single PATCH on the file. */}
       <section className="mt-5">
-        <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Loan terms
         </h4>
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200/80 p-2.5">
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border/80 p-2.5">
           {(
             [
               ["note_rate_percent", "Note rate %"],
@@ -222,7 +224,7 @@ export function StatedFinancialsEditor({
             <label
               key={key}
               htmlFor={`${termsId}-${key}`}
-              className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-gray-500"
+              className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-muted-foreground"
             >
               {label}
               <Input
@@ -252,7 +254,9 @@ export function StatedFinancialsEditor({
       </section>
 
       {primaryBorrowerId === undefined && (
-        <p className="mt-3 text-xs text-gray-400">Add a borrower to record income or employers.</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Add a borrower to record income or employers.
+        </p>
       )}
     </div>
   );

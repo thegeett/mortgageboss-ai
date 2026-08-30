@@ -106,8 +106,9 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
             <DialogTitle>Change the loan program?</DialogTitle>
             <DialogDescription className="pt-1 leading-relaxed">
               Changing the program to{" "}
-              <span className="font-medium text-gray-900">{programLabel(nextProgram)}</span> changes
-              which rules and lender overlay apply, and will require re-running verification.
+              <span className="font-medium text-foreground">{programLabel(nextProgram)}</span>{" "}
+              changes which rules and lender overlay apply, and will require re-running
+              verification.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">

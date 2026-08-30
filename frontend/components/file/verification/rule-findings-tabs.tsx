@@ -71,7 +71,7 @@ function TabStrip({
     <div
       role="tablist"
       aria-label="Verification outcomes"
-      className="flex gap-1 overflow-x-auto border-b border-gray-200"
+      className="flex gap-1 overflow-x-auto border-b border-border"
     >
       {tabs.map((tab) => {
         const isActive = tab.id === active;
@@ -85,8 +85,8 @@ function TabStrip({
             className={cn(
               "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors",
               isActive
-                ? "border-primary font-semibold text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-800",
+                ? "border-primary font-semibold text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {tab.label}
@@ -105,7 +105,7 @@ function TabStrip({
                       ? "bg-warning/10 text-warning"
                       : isActive
                         ? "bg-primary/10 text-primary"
-                        : "bg-gray-100 text-gray-500",
+                        : "bg-muted text-muted-foreground",
                 )}
               >
                 {tab.count}
@@ -120,10 +120,10 @@ function TabStrip({
 
 function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 px-6 py-10 text-center">
-      <div className="text-gray-300">{icon}</div>
-      <p className="text-sm font-medium text-gray-600">{title}</p>
-      <p className="max-w-md text-xs leading-relaxed text-gray-400">{body}</p>
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
+      <div className="text-muted-foreground">{icon}</div>
+      <p className="text-sm font-medium text-foreground-2">{title}</p>
+      <p className="max-w-md text-xs leading-relaxed text-muted-foreground">{body}</p>
     </div>
   );
 }
@@ -194,7 +194,7 @@ function OutcomeGroup({
         <h4
           className={cn(
             "text-sm font-semibold",
-            isViolation ? "text-destructive" : "text-gray-800",
+            isViolation ? "text-destructive" : "text-foreground",
           )}
         >
           {meta.label}
@@ -202,12 +202,12 @@ function OutcomeGroup({
         <span
           className={cn(
             "text-xs tabular-nums",
-            isViolation ? "font-semibold text-destructive" : "text-gray-400",
+            isViolation ? "font-semibold text-destructive" : "text-muted-foreground",
           )}
         >
           {findings.length}
         </span>
-        <span className="text-xs text-gray-400">— {meta.blurb}</span>
+        <span className="text-xs text-muted-foreground">— {meta.blurb}</span>
       </div>
       {outcome === "couldnt_check" ? (
         <MissingVsPresent findings={findings} onAct={onAct} fileId={fileId} />
@@ -250,9 +250,9 @@ function MissingVsPresent({
     <div className="space-y-4">
       <div className="space-y-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <p className="text-xs font-medium text-gray-500">
+          <p className="text-xs font-medium text-muted-foreground">
             Not in the file — request these ({missing.length})
-            <span className="ml-1 font-normal text-gray-400">
+            <span className="ml-1 font-normal text-muted-foreground">
               waiting on {awaitedDocuments(missing).join(", ")}
             </span>
           </p>
@@ -281,7 +281,7 @@ function MissingVsPresent({
           nothing. The request side is what the split exists for; this half is the remainder. */}
       {present.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-gray-500">
+          <p className="text-xs font-medium text-muted-foreground">
             In the file — read or clarify these ({present.length})
           </p>
           <GroupedFindingList findings={present} onAct={onAct} fileId={fileId} />
@@ -326,7 +326,7 @@ const TONE_DOT: Record<OutcomeTone, string> = {
   warning: "bg-warning",
   info: "bg-info",
   success: "bg-success",
-  muted: "bg-gray-300",
+  muted: "bg-border",
 };
 
 /**
@@ -391,27 +391,27 @@ function CollapsedFindings({
   // would eventually disagree, and the bullets exist precisely to complement whatever the header says.
   const shared = findings.every((f) => f.message === first.message);
   return (
-    <div className="rounded-lg border border-gray-200/70">
+    <div className="rounded-lg border border-border/70">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50/70"
+        className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left hover:bg-muted/70"
       >
         <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)} aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <RuleLabel finding={first} />
-            <span className="rounded bg-gray-100 px-1.5 py-px text-[11px] font-medium text-gray-600">
+            <span className="rounded bg-muted px-1.5 py-px text-[11px] font-medium text-foreground-2">
               {findings.length} findings
             </span>
           </div>
-          <p className="mt-0.5 text-sm text-gray-700">{collapsedSummary(findings)}</p>
+          <p className="mt-0.5 text-sm text-foreground-2">{collapsedSummary(findings)}</p>
         </div>
         <ChevronDown
           className={cn(
-            "mt-0.5 h-4 w-4 shrink-0 text-gray-300 transition-transform",
+            "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform",
             open && "rotate-180",
           )}
         />
@@ -425,19 +425,19 @@ function CollapsedFindings({
        *
        * Bounded height because a rule's set is not: AS-2 carries 57 findings on one real file. */}
       {!open && (
-        <ul className="max-h-56 space-y-1 overflow-y-auto border-t border-gray-100 px-3 py-2">
+        <ul className="max-h-56 space-y-1 overflow-y-auto border-t border-border px-3 py-2">
           {findings.map((finding) => (
             <li key={finding.id} className="flex gap-2 text-xs leading-relaxed">
-              <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-gray-300" aria-hidden />
+              <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-border" aria-hidden />
               <span className="min-w-0">
                 {finding.subject_label.length > 0 && (
-                  <span className="font-medium text-gray-700">{finding.subject_label}</span>
+                  <span className="font-medium text-foreground-2">{finding.subject_label}</span>
                 )}
                 {/* When every member says the SAME thing the header already carries that sentence, so
                  * repeating it per bullet rebuilds the exact noise LP-376-C removed — four identical
                  * lines under a summary that exists to replace them. Subjects only, in that case. */}
                 {!shared && (
-                  <span className="text-gray-500">
+                  <span className="text-muted-foreground">
                     {finding.subject_label.length > 0 && " — "}
                     {actionLine(finding.message)}
                   </span>
@@ -449,7 +449,7 @@ function CollapsedFindings({
       )}
 
       {open && (
-        <div id={panelId} className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-3">
+        <div id={panelId} className="space-y-2 border-t border-border bg-muted/40 px-3 py-3">
           {/* bug-001 — `onAct` WAS ACCEPTED HERE AND DROPPED. RuleFindingRow gates its whole action
               bar on `onAct !== undefined`, so every finding inside a grouped rule rendered with no
               buttons: a rule with ONE finding was actionable and the same rule with two was not.
@@ -585,10 +585,10 @@ export function RuleFindingsTabs({
         // findings may be from an EARLIER run (carry-forward, LP-322). Say so — a processor must not read a
         // prior run's output as this run's. Worded around the RUN, not "the rule engine failed": a run can
         // fail on the sweep while the rule pass succeeded, so the findings can even be fresh.
-        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs text-gray-600">
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs text-foreground-2">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>
-            <span className="font-medium text-gray-700">
+            <span className="font-medium text-foreground-2">
               These rule-engine findings may be out of date.
             </span>{" "}
             The latest verification run didn&rsquo;t complete, so the results below may be from an
@@ -606,7 +606,7 @@ export function RuleFindingsTabs({
         {shown === "satisfied" &&
           (buckets.satisfied.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-muted-foreground">
                 {OUTCOME_META.satisfied.blurb} These ran and passed — visible so you know a rule was
                 actually checked, not silently skipped.
               </p>
@@ -650,10 +650,12 @@ export function RuleFindingsTabs({
 
         {shown === "legacy" && (
           <div className="space-y-3">
-            <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">
-              <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted px-3 py-2.5 text-xs text-muted-foreground">
+              <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span>
-                <span className="font-medium text-gray-600">Legacy — two deprecated systems</span>{" "}
+                <span className="font-medium text-foreground-2">
+                  Legacy — two deprecated systems
+                </span>{" "}
                 (the AI cross-source sweep + retired rules). These are NOT the governed rule engine
                 and are scheduled for removal; they carry their own counts and actions, separate
                 from the tabs above.

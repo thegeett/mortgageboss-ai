@@ -43,17 +43,17 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
   const updating = !needs.isPending && (live || needs.isFetching);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-900">Needs list</h2>
+            <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Needs list</h2>
             <UpdatingCue show={updating} />
           </div>
           {!needs.isPending && !needs.isError && items.length > 0 && (
-            <p className="mt-1 text-xs text-gray-500">
-              <span className="font-medium text-gray-700">{outstanding}</span> need
+            <p className="mt-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground-2">{outstanding}</span> need
               {outstanding === 1 ? "" : "s"} action
               {proposed > 0 && (
                 <>
@@ -86,11 +86,11 @@ export function NeedsDashboard({ fileId }: { fileId: string }) {
             {groups.map((group) => (
               <section key={group.key}>
                 <div className="mb-2 flex items-baseline gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {group.meta.label}
                   </h3>
-                  <span className="text-xs text-gray-400">{group.items.length}</span>
-                  <span className="text-xs text-gray-400">· {group.meta.hint}</span>
+                  <span className="text-xs text-muted-foreground">{group.items.length}</span>
+                  <span className="text-xs text-muted-foreground">· {group.meta.hint}</span>
                 </div>
                 <ul className="space-y-2">
                   {group.items.map((need) => (
@@ -120,7 +120,7 @@ function AiNeedsNote({ status }: { status: AiNeedsStatus | null }) {
         aria-live="polite"
       >
         <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-        <p className="text-xs text-gray-600">
+        <p className="text-xs text-foreground-2">
           AI is still reviewing this file — more needs may appear shortly.
         </p>
       </div>
@@ -133,7 +133,7 @@ function AiNeedsNote({ status }: { status: AiNeedsStatus | null }) {
         className="mb-3 flex items-start gap-2 rounded-md bg-warning/5 px-3 py-2"
       >
         <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-        <p className="text-xs text-gray-600">
+        <p className="text-xs text-foreground-2">
           AI review didn't finish, so this checklist may be incomplete. The required documents below
           are still accurate — re-import the file to retry the AI review.
         </p>
@@ -148,7 +148,7 @@ function UpdatingCue({ show }: { show: boolean }) {
   if (!show) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-400"
+      className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground"
       aria-live="polite"
     >
       <span className={cn("h-1.5 w-1.5 rounded-full bg-primary/60", "animate-pulse")} aria-hidden />
@@ -160,9 +160,9 @@ function UpdatingCue({ show }: { show: boolean }) {
 function EmptyNeeds() {
   return (
     <div className="py-8 text-center">
-      <ClipboardList className="mx-auto h-8 w-8 text-gray-300" aria-hidden />
-      <p className="mt-2 text-sm font-medium text-gray-700">No needs yet</p>
-      <p className="mx-auto mt-1 max-w-sm text-xs text-gray-500">
+      <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
+      <p className="mt-2 text-sm font-medium text-foreground-2">No needs yet</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
         A tailored checklist appears once the file is imported and documents are read. You can also
         add a need yourself.
       </p>

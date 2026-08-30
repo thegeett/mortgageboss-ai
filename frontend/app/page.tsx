@@ -32,9 +32,9 @@ function DependencyRow({
   const ok = state === "ok";
   const failed = state === "fail";
   return (
-    <div className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2">
-      <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
-        <Icon className="h-4 w-4 text-gray-400" />
+    <div className="flex items-center justify-between rounded-md border border-border bg-white px-3 py-2">
+      <span className="flex items-center gap-2 text-sm font-medium text-foreground-2">
+        <Icon className="h-4 w-4 text-muted-foreground" />
         {label}
       </span>
       {ok && (
@@ -49,7 +49,7 @@ function DependencyRow({
           Unavailable
         </span>
       )}
-      {state === "unknown" && <span className="text-sm text-gray-400">—</span>}
+      {state === "unknown" && <span className="text-sm text-muted-foreground">—</span>}
     </div>
   );
 }
@@ -63,9 +63,9 @@ function SystemStatus() {
   const healthy = data?.status === "healthy";
 
   return (
-    <div className="space-y-3 rounded-lg bg-gray-50 p-4">
+    <div className="space-y-3 rounded-lg bg-muted p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-900">System status</h2>
+        <h2 className="text-sm font-semibold text-foreground">System status</h2>
         {isPending ? (
           <Badge variant="secondary" className="gap-1.5">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -91,9 +91,9 @@ function SystemStatus() {
 
       {isError ? (
         <div className="space-y-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
-          <p className="text-sm text-gray-700">
+          <p className="text-sm text-foreground-2">
             Couldn&apos;t reach the backend at{" "}
-            <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground-2">
               {config.apiUrl}
             </code>
             . Make sure the API server is running.
@@ -124,7 +124,7 @@ function SystemStatus() {
             state={isPending ? "unknown" : data?.checks.redis === "ok" ? "ok" : "fail"}
           />
           {data && (
-            <p className="pt-1 text-center text-xs text-gray-400">
+            <p className="pt-1 text-center text-xs text-muted-foreground">
               {data.service} v{data.version}
             </p>
           )}
@@ -136,11 +136,11 @@ function SystemStatus() {
 
 export default function HomePage() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-gray-50 px-4 py-16">
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-muted px-4 py-16">
       {/* Ambient background accents */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_hsl(217_91%_60%_/_0.08),_transparent_55%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_hsl(var(--primary)_/_0.08),_transparent_55%)]"
       />
       <div
         aria-hidden
@@ -148,21 +148,21 @@ export default function HomePage() {
       />
 
       <div className="relative z-10 w-full max-w-xl">
-        <Card className="border-gray-200/80 shadow-xl shadow-gray-900/5">
+        <Card className="border-border/80 shadow-xl shadow-foreground/5">
           <CardHeader className="items-center space-y-4 text-center">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
                 <Layers className="h-6 w-6" />
               </span>
-              <span className="text-2xl font-semibold tracking-tight text-gray-900">
+              <span className="text-2xl font-semibold tracking-tight text-foreground">
                 mortgageboss<span className="text-primary">·ai</span>
               </span>
             </div>
             <div className="space-y-2">
-              <CardTitle className="text-3xl font-semibold tracking-tight text-gray-900">
+              <CardTitle className="text-3xl font-semibold tracking-tight text-foreground">
                 Loan processing, organized.
               </CardTitle>
-              <CardDescription className="mx-auto max-w-md text-base text-gray-500">
+              <CardDescription className="mx-auto max-w-md text-base text-muted-foreground">
                 An AI-powered assistant that helps mortgage loan processors manage files, documents,
                 and tasks — from intake to clear-to-close.
               </CardDescription>
@@ -188,7 +188,7 @@ export default function HomePage() {
 
             <Separator />
 
-            <p className="text-center text-xs text-gray-400">
+            <p className="text-center text-xs text-muted-foreground">
               {config.appName} v{config.appVersion} · Phase 1 — Foundation
             </p>
           </CardContent>

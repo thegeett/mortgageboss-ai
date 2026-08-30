@@ -25,12 +25,12 @@ function money(value: string | null): string {
 function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
   return (
     <div>
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-        Transactions <span className="text-gray-300">· {transactions.length}</span>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Transactions <span className="text-muted-foreground">· {transactions.length}</span>
       </p>
-      <div className="max-h-72 overflow-y-auto rounded-lg border border-gray-100">
+      <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-400">
+          <thead className="sticky top-0 bg-muted text-[11px] uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-2 py-1.5 text-left font-medium">Date</th>
               <th className="px-2 py-1.5 text-left font-medium">Description</th>
@@ -38,24 +38,26 @@ function TransactionsTable({ transactions }: { transactions: Transaction[] }) {
               <th className="px-2 py-1.5 text-right font-medium">Balance</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-border">
             {transactions.map((t, i) => {
               const isWithdrawal = /withdraw|debit|fee/i.test(t.transaction_type ?? "");
               return (
-                <tr key={`${t.date}-${i}`} className="hover:bg-gray-50/60">
-                  <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{t.date ?? "—"}</td>
+                <tr key={`${t.date}-${i}`} className="hover:bg-muted/60">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">
+                    {t.date ?? "—"}
+                  </td>
                   <td
-                    className="max-w-[10rem] truncate px-2 py-1.5 text-gray-900"
+                    className="max-w-[10rem] truncate px-2 py-1.5 text-foreground"
                     title={t.description ?? ""}
                   >
                     {t.description ?? "—"}
                   </td>
                   <td
-                    className={`whitespace-nowrap px-2 py-1.5 text-right font-medium ${isWithdrawal ? "text-gray-600" : "text-success"}`}
+                    className={`whitespace-nowrap px-2 py-1.5 text-right font-medium ${isWithdrawal ? "text-foreground-2" : "text-success"}`}
                   >
                     {money(t.amount)}
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-gray-500">
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right text-muted-foreground">
                     {money(t.running_balance)}
                   </td>
                 </tr>
@@ -87,7 +89,7 @@ function FieldRow({
   return (
     <div className="px-3 py-2 text-sm">
       <div className="flex items-start justify-between gap-3">
-        <span className="flex shrink-0 items-center gap-1.5 text-gray-500">
+        <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
           {label}
           {sourceText && (
             <button
@@ -96,16 +98,16 @@ function FieldRow({
               title={sourceText}
               aria-label={`Source for ${label}: ${sourceText}`}
               aria-expanded={open}
-              className="rounded p-0.5 text-gray-300 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Quote className="h-3 w-3" aria-hidden />
             </button>
           )}
         </span>
-        <span className="max-w-[62%] truncate text-right font-medium text-gray-900">{value}</span>
+        <span className="max-w-[62%] truncate text-right font-medium text-foreground">{value}</span>
       </div>
       {open && sourceText && (
-        <p className="mt-1 rounded bg-gray-50 px-2 py-1 text-[11px] leading-relaxed text-gray-500">
+        <p className="mt-1 rounded bg-muted px-2 py-1 text-[11px] leading-relaxed text-muted-foreground">
           {sourceText}
         </p>
       )}
@@ -127,7 +129,7 @@ export function ExtractionView({ data }: { data: Record<string, unknown> }) {
   return (
     <div className="space-y-4">
       {core.length > 0 && (
-        <dl className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+        <dl className="divide-y divide-border rounded-lg border border-border">
           {core.map((field) => (
             <FieldRow
               key={field.key}
@@ -143,25 +145,25 @@ export function ExtractionView({ data }: { data: Record<string, unknown> }) {
 
       {sections.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             All captured fields
           </p>
           {sections.map((section) => (
             <details
               key={section.section}
-              className="group rounded-lg border border-gray-100 [&[open]>summary_svg]:rotate-90"
+              className="group rounded-lg border border-border [&[open]>summary_svg]:rotate-90"
             >
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 marker:content-none">
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-2 marker:content-none">
                 <ChevronRight
-                  className="h-3.5 w-3.5 text-gray-400 transition-transform"
+                  className="h-3.5 w-3.5 text-muted-foreground transition-transform"
                   aria-hidden
                 />
                 {section.section}
-                <span className="ml-auto rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-500">
+                <span className="ml-auto rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
                   {section.fields.length}
                 </span>
               </summary>
-              <dl className="divide-y divide-gray-100 border-t border-gray-100">
+              <dl className="divide-y divide-border border-t border-border">
                 {section.fields.map((field, i) => (
                   <FieldRow
                     key={`${field.label}-${i}`}

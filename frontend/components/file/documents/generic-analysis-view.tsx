@@ -16,7 +16,7 @@ export function GenericAnalysisView({ analysis }: { analysis: GenericAnalysis })
 
   if (empty) {
     return (
-      <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-400">
+      <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
         No structured findings — see the summary above.
       </p>
     );
@@ -28,7 +28,7 @@ export function GenericAnalysisView({ analysis }: { analysis: GenericAnalysis })
         <Group label="Findings">
           <ul className="space-y-1.5">
             {findings.map((f) => (
-              <li key={JSON.stringify(f)} className="text-sm text-gray-700">
+              <li key={JSON.stringify(f)} className="text-sm text-foreground-2">
                 {f.finding_type && (
                   <span className="mr-1.5 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-info">
                     {humanize(f.finding_type)}
@@ -36,7 +36,7 @@ export function GenericAnalysisView({ analysis }: { analysis: GenericAnalysis })
                 )}
                 {f.description ?? "—"}
                 {f.amount != null && (
-                  <span className="text-gray-500">
+                  <span className="text-muted-foreground">
                     {" "}
                     · {String(f.amount)}
                     {f.frequency ? ` / ${f.frequency}` : ""}
@@ -88,7 +88,7 @@ export function GenericAnalysisView({ analysis }: { analysis: GenericAnalysis })
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section>
-      <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </h4>
       {children}
@@ -99,8 +99,8 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 function KeyValue({ k, v }: { k: string; v: string | null }) {
   return (
     <li className="flex items-start justify-between gap-3 text-sm">
-      <span className="font-medium text-gray-900">{k}</span>
-      {v && <span className="max-w-[60%] text-right text-gray-500">{v}</span>}
+      <span className="font-medium text-foreground">{k}</span>
+      {v && <span className="max-w-[60%] text-right text-muted-foreground">{v}</span>}
     </li>
   );
 }

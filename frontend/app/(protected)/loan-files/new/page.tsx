@@ -20,13 +20,15 @@ export default function NewLoanFilePage() {
       <div>
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-gray-500 transition-colors hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to dashboard
         </Link>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-gray-900">New loan file</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
+          New loan file
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Import the MISMO file from your loan origination system — or enter the application by
           hand.
         </p>
@@ -49,17 +51,17 @@ export default function NewLoanFilePage() {
           <MismoUpload />
 
           {/* Secondary path — clearly subordinate to the MISMO upload. */}
-          <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-gray-400">
-            <span className="h-px flex-1 bg-gray-200" />
+          <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
             or
-            <span className="h-px flex-1 bg-gray-200" />
+            <span className="h-px flex-1 bg-border" />
           </div>
           <div className="flex flex-col items-center gap-2 text-center">
-            <p className="text-sm text-gray-500">Don&apos;t have a MISMO file?</p>
+            <p className="text-sm text-muted-foreground">Don&apos;t have a MISMO file?</p>
             <button
               type="button"
               onClick={() => setManual(true)}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-2 rounded-md border border-input bg-white px-4 py-2 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <PencilLine className="h-4 w-4" />
               Create manually

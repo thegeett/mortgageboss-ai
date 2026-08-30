@@ -42,9 +42,9 @@ export function LtvCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useLtv(fileId);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Building2 className="h-4 w-4" />
           </span>
@@ -55,12 +55,12 @@ export function LtvCalculator({ fileId }: { fileId: string }) {
             </Badge>
           )}
           {data?.purpose && (
-            <Badge variant="outline" className="font-medium text-gray-600">
+            <Badge variant="outline" className="font-medium text-foreground-2">
               {humanize(data.purpose)}
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Equity vs. risk — LTV / CLTV / HCLTV, deterministic and itemized.
         </p>
       </CardHeader>
@@ -137,12 +137,14 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
 
 function RatioTile({ label, value, hint }: { label: string; value: string | null; hint: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">
+    <div className="rounded-lg border border-border bg-muted/60 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
         {formatPercent(value)}
       </div>
-      <div className="mt-0.5 text-xs text-gray-400">{hint}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -162,7 +164,9 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">LTV</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          LTV
+        </span>
         {known && (
           <span
             className={cn(
@@ -178,26 +182,26 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
         <span
           className={cn(
             "text-3xl font-semibold tabular-nums",
-            over ? "text-destructive" : "text-gray-900",
+            over ? "text-destructive" : "text-foreground",
           )}
         >
           {formatPercent(ltv)}
         </span>
         {limit.ltv_max !== null && (
-          <span className="whitespace-nowrap text-sm text-gray-400">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
             / {formatPercent(limit.ltv_max)} limit
           </span>
         )}
       </div>
       {cap ? (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className={cn("h-full rounded-full", over ? "bg-destructive" : "bg-success")}
               style={{ width: `${fill}%` }}
             />
           </div>
-          <div className="mt-1 text-[11px] text-gray-400">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {limit.source === "overlay"
               ? `Lender overlay${limit.lender_slug ? ` · ${limit.lender_slug}` : ""}`
               : "Program default"}
@@ -205,7 +209,7 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
           </div>
         </div>
       ) : (
-        <div className="mt-1 text-xs text-gray-400">No program limit set</div>
+        <div className="mt-1 text-xs text-muted-foreground">No program limit set</div>
       )}
     </div>
   );
@@ -231,16 +235,16 @@ function AppraisedSourceTooltip() {
         <button
           type="button"
           aria-label="How the appraised value is determined"
-          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <HelpCircle className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        <p className="font-mono text-[11px] text-gray-200">
+        <p className="font-mono text-[11px] text-background">
           appraised = valuation_amount or estimated_value
         </p>
-        <p className="mt-1 leading-relaxed text-gray-300">
+        <p className="mt-1 leading-relaxed text-muted-foreground">
           The appraised value basis uses the property valuation amount; if absent, it falls back to
           the estimated value. No appraisal document is on file yet.
         </p>
@@ -255,17 +259,17 @@ function ValueBasisCallout({ data }: { data: LtvCalculation }) {
   // sees WHICH value drives the basis (no hidden field). The literal logic is in the tooltip.
   const sourceLabel = appraisedSourceLabel(data.appraised_value_source);
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+    <div className="rounded-lg border border-border bg-white px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
-        <Scale className="h-4 w-4 shrink-0 text-gray-400" />
-        <span className="text-gray-500">Value basis · {data.value_basis_label}</span>
-        <span className="ml-auto font-semibold tabular-nums text-gray-900">
+        <Scale className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">Value basis · {data.value_basis_label}</span>
+        <span className="ml-auto font-semibold tabular-nums text-foreground">
           {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)}
         </span>
       </div>
       {sourceLabel && (
-        <div className="mt-1 flex items-center gap-1 pl-6 text-[11px] text-gray-400">
-          Appraised value <span className="font-medium text-gray-500">{sourceLabel}</span>
+        <div className="mt-1 flex items-center gap-1 pl-6 text-[11px] text-muted-foreground">
+          Appraised value <span className="font-medium text-muted-foreground">{sourceLabel}</span>
           <AppraisedSourceTooltip />
         </div>
       )}
@@ -298,8 +302,10 @@ function BreakdownSection({
 } & RowControls) {
   return (
     <section>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
-      <div className="rounded-lg border border-gray-200">
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      <div className="rounded-lg border border-border">
         {items.map((item) => (
           <LineRow
             key={item.key}
@@ -333,10 +339,10 @@ function LineRow({
   const sourceLabel = isAppraised ? appraisedSourceLabel(appraisedValueSource) : null;
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
           {item.overridden ? (
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
@@ -354,7 +360,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -380,7 +386,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="h-8 w-8 text-muted-foreground"
             aria-label="Cancel"
             onClick={onCancel}
           >
@@ -396,18 +402,18 @@ function LineRow({
               onEdit(item.key);
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.overridden ? "font-semibold text-primary" : "font-medium text-gray-900",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
+              item.overridden ? "font-semibold text-primary" : "font-medium text-foreground",
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-muted-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -428,14 +434,14 @@ function LineRow({
 function FormulaReceipt({ data }: { data: LtvCalculation }) {
   const firstLoan = data.loan_items.find((i) => i.key === "ltv.first_loan")?.amount ?? null;
   return (
-    <div className="space-y-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+    <div className="space-y-1.5 rounded-lg border border-dashed border-input bg-muted/80 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         The formulas
       </div>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.ltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.cltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.hcltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-900">
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.ltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.cltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.hcltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground">
         LTV = {formatMoneyPrecise(firstLoan)} ÷{" "}
         {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)} ={" "}
         <span className="font-semibold">{formatPercent(data.ltv)}</span>
@@ -448,11 +454,11 @@ function UnresolvedAlert({ count }: { count: number }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>
-        <span className="font-medium text-gray-900">
+        <span className="font-medium text-foreground">
           {count} unresolved finding{count === 1 ? "" : "s"}
         </span>{" "}
         — this calculation may be incomplete until they're applied or overridden.

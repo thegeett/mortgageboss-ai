@@ -21,7 +21,7 @@ export interface StatusMeta {
 }
 
 export const STATUS_META: Record<LoanFileStatus, StatusMeta> = {
-  draft: { label: "Draft", className: "bg-gray-100 text-gray-600 border-gray-200" },
+  draft: { label: "Draft", className: "bg-muted text-foreground-2 border-border" },
   in_processing: { label: "In processing", className: "bg-info/10 text-info border-info/20" },
   ready_to_submit: {
     label: "Ready to submit",
@@ -36,8 +36,8 @@ export const STATUS_META: Record<LoanFileStatus, StatusMeta> = {
     label: "Clear to close",
     className: "bg-success/10 text-success border-success/20",
   },
-  closed: { label: "Closed", className: "bg-gray-100 text-gray-500 border-gray-200" },
-  withdrawn: { label: "Withdrawn", className: "bg-gray-50 text-gray-400 border-gray-200" },
+  closed: { label: "Closed", className: "bg-muted text-muted-foreground border-border" },
+  withdrawn: { label: "Withdrawn", className: "bg-muted text-muted-foreground border-border" },
 };
 
 export type FilterKey = "all" | "active" | "action_needed" | "completed";

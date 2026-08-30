@@ -85,7 +85,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
         isDragActive
           ? "border-primary bg-primary/5"
-          : "border-gray-300 bg-gray-50/60 hover:border-gray-400",
+          : "border-input bg-muted/60 hover:border-input",
         upload.isPending && "pointer-events-none opacity-70",
       )}
     >
@@ -93,7 +93,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       <span
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-          isDragActive ? "bg-primary/15 text-primary" : "bg-white text-gray-400 shadow-sm",
+          isDragActive ? "bg-primary/15 text-primary" : "bg-white text-muted-foreground shadow-sm",
         )}
       >
         {upload.isPending ? (
@@ -102,17 +102,17 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
           <CloudUpload className="h-5 w-5" aria-hidden />
         )}
       </span>
-      <p className="mt-3 text-sm font-medium text-gray-900">
+      <p className="mt-3 text-sm font-medium text-foreground">
         {upload.isPending ? "Uploading…" : isDragActive ? "Drop to upload" : "Drag documents here"}
       </p>
-      <p className="mt-1 text-xs text-gray-500">
+      <p className="mt-1 text-xs text-muted-foreground">
         PDF, JPG, or PNG · up to 50 MB · multiple at once
       </p>
       <button
         type="button"
         onClick={open}
         disabled={upload.isPending}
-        className="mt-4 inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
+        className="mt-4 inline-flex items-center rounded-md border border-input bg-white px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Browse files
       </button>

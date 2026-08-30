@@ -71,10 +71,10 @@ export function DeleteFileDialog({
             Delete this loan file?
           </DialogTitle>
           <DialogDescription className="pt-1 text-sm leading-relaxed">
-            This removes <span className="font-medium text-gray-900">{who}</span>
-            {file ? <span className="text-gray-500"> ({file.display_id})</span> : null} and all its
-            documents, extracted data, and findings from your dashboard. The file is preserved —
-            this can be undone by an admin.
+            This removes <span className="font-medium text-foreground">{who}</span>
+            {file ? <span className="text-muted-foreground"> ({file.display_id})</span> : null} and
+            all its documents, extracted data, and findings from your dashboard. The file is
+            preserved — this can be undone by an admin.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:gap-2">

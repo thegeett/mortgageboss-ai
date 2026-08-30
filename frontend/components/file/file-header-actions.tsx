@@ -32,7 +32,7 @@ export function FileHeaderActions({ file }: { file: LoanFileDetail }) {
             type="button"
             size="icon"
             variant="ghost"
-            className="h-9 w-9 text-gray-400 hover:text-gray-700"
+            className="h-9 w-9 text-muted-foreground hover:text-foreground-2"
             aria-label="File actions"
           >
             <MoreHorizontal className="h-5 w-5" />

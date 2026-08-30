@@ -33,7 +33,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function dot(status: string | null | undefined): string {
-  return (status && STATUS_DOT[status]) || "bg-gray-300";
+  return (status && STATUS_DOT[status]) || "bg-border";
 }
 
 function Tile({
@@ -56,21 +56,21 @@ function Tile({
       aria-expanded={expanded}
       className={cn(
         "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
-        expanded ? "border-primary/40 bg-primary/5" : "border-gray-200 bg-white hover:bg-gray-50",
+        expanded ? "border-primary/40 bg-primary/5" : "border-border bg-white hover:bg-muted",
       )}
     >
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dot(status))} aria-hidden />
-          <span className="truncate text-xs font-medium text-gray-700">{title}</span>
+          <span className="truncate text-xs font-medium text-foreground-2">{title}</span>
         </div>
-        <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900">
+        <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">
           {headline}
         </div>
       </div>
       <ChevronDown
         className={cn(
-          "h-4 w-4 shrink-0 text-gray-300 transition-transform",
+          "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
           expanded && "rotate-180",
         )}
       />
@@ -146,10 +146,10 @@ export function CalculatorsSection({ fileId }: { fileId: string }) {
 
   return (
     <section className="space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground-2">
         <Calculator className="h-4 w-4 text-primary" />
         Calculators
-        <span className="text-xs font-normal text-gray-400">
+        <span className="text-xs font-normal text-muted-foreground">
           · deterministic, transparent, override-able — expand one to see the math
         </span>
       </h3>

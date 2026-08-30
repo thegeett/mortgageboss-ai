@@ -65,12 +65,12 @@ export function EditableRow({
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200/80 p-2.5">
+    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border/80 p-2.5">
       {fields.map((f) => (
         <label
           key={f.key}
           htmlFor={`${rowId}-${f.key}`}
-          className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-gray-500"
+          className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-muted-foreground"
         >
           {f.label}
           {f.kind === "bool" ? (
@@ -79,7 +79,7 @@ export function EditableRow({
               type="checkbox"
               checked={Boolean(values[f.key])}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.checked }))}
-              className="h-5 w-5 self-start rounded border-gray-300"
+              className="h-5 w-5 self-start rounded border-input"
             />
           ) : f.kind === "select" ? (
             <Select
@@ -123,7 +123,7 @@ export function EditableRow({
           onClick={onRemove}
           disabled={busy}
           aria-label="Remove row"
-          className="rounded p-1.5 text-gray-400 transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className="rounded p-1.5 text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
         >
           <Trash2 className="h-4 w-4" />
         </button>

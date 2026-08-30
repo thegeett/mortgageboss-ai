@@ -108,7 +108,7 @@ export default function ExtractionBenchPage() {
 
   if (isProd) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-500">
+      <div className="rounded-lg border border-dashed border-input bg-white px-6 py-16 text-center text-sm text-muted-foreground">
         The extraction bench is a development-only tool and is unavailable in this environment.
       </div>
     );
@@ -120,11 +120,11 @@ export default function ExtractionBenchPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900">
+        <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
           <FlaskConical className="h-6 w-6 text-primary" />
           Extraction bench
         </h2>
-        <p className="mt-1 text-gray-500">
+        <p className="mt-1 text-muted-foreground">
           Run a folder of real documents through the live classification + extraction pipeline and
           see what the schemas actually capture. Measures <strong>coverage, not accuracy</strong> —
           writes JSON to disk and persists <strong>nothing</strong> to the database.
@@ -139,8 +139,8 @@ export default function ExtractionBenchPage() {
       </div>
 
       {/* Folder + preview */}
-      <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-5">
-        <label htmlFor="root" className="block text-sm font-medium text-gray-900">
+      <div className="space-y-3 rounded-lg border border-border bg-white p-5">
+        <label htmlFor="root" className="block text-sm font-medium text-foreground">
           Document folder (absolute path on the backend host)
         </label>
         <div className="flex gap-2">
@@ -151,18 +151,18 @@ export default function ExtractionBenchPage() {
             onChange={(e) => setRoot(e.target.value)}
             placeholder="/path/to/real/documents"
             disabled={running}
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-gray-50"
+            className="flex-1 rounded-md border border-input px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-muted"
           />
           <button
             type="button"
             onClick={onPreview}
             disabled={!root.trim() || previewing || running}
-            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-input bg-white px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
             {previewing ? "Previewing…" : "Preview"}
           </button>
         </div>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           Nothing runs on preview — it only counts files and estimates cost. No model is called.
         </p>
       </div>
@@ -175,7 +175,7 @@ export default function ExtractionBenchPage() {
 
       {/* Preview result + Start */}
       {preview && (
-        <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-5">
+        <div className="space-y-4 rounded-lg border border-border bg-white p-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="Files found" value={String(preview.total)} />
             <Stat label="Readable" value={String(preview.readable)} />
@@ -183,14 +183,14 @@ export default function ExtractionBenchPage() {
             <Stat label="Est. cost" value={`$${preview.estimated_cost.toFixed(2)}`} />
           </div>
 
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-muted-foreground">
             {preview.provider} · {preview.extraction_model} · ${preview.per_doc_estimate.toFixed(3)}
             /doc
           </div>
 
           {/* Pacing — surfaced before Start so a multi-hour or unpaced run is never a surprise */}
           {preview.requests_per_minute != null ? (
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-muted-foreground">
               Paced at {preview.requests_per_minute} requests/min (2 calls/doc) · est.{" "}
               <strong>~{preview.estimated_minutes} min</strong> for {preview.readable} documents
             </div>
@@ -201,7 +201,9 @@ export default function ExtractionBenchPage() {
               re-preview.
             </div>
           ) : (
-            <div className="text-xs text-gray-500">Unpaced (no request limit configured).</div>
+            <div className="text-xs text-muted-foreground">
+              Unpaced (no request limit configured).
+            </div>
           )}
 
           {Object.keys(preview.by_extension).length > 0 && (
@@ -209,7 +211,7 @@ export default function ExtractionBenchPage() {
               {Object.entries(preview.by_extension).map(([ext, n]) => (
                 <span
                   key={ext}
-                  className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700"
+                  className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground-2"
                 >
                   {ext} · {n}
                 </span>
@@ -218,7 +220,7 @@ export default function ExtractionBenchPage() {
           )}
 
           {preview.unreadable.length > 0 && (
-            <details className="text-xs text-gray-600">
+            <details className="text-xs text-foreground-2">
               <summary className="cursor-pointer font-medium text-warning">
                 {preview.unreadable.length} unreadable — skipped
               </summary>
@@ -232,7 +234,7 @@ export default function ExtractionBenchPage() {
             </details>
           )}
 
-          <div className="flex items-center gap-3 border-t border-gray-100 pt-4">
+          <div className="flex items-center gap-3 border-t border-border pt-4">
             <button
               type="button"
               onClick={() => onStart()}
@@ -241,7 +243,7 @@ export default function ExtractionBenchPage() {
             >
               {starting ? "Starting…" : `Start — run ${preview.readable} documents`}
             </button>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-muted-foreground">
               This calls the model on every readable document (~${preview.estimated_cost.toFixed(2)}
               ).
             </span>
@@ -251,30 +253,30 @@ export default function ExtractionBenchPage() {
 
       {/* Run progress */}
       {status && (
-        <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-5">
+        <div className="space-y-3 rounded-lg border border-border bg-white p-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-900">
+            <h3 className="text-sm font-semibold text-foreground">
               {status.finished ? (status.cancelled ? "Cancelled" : "Finished") : "Running…"}
             </h3>
             {running && (
               <button
                 type="button"
                 onClick={onCancel}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground-2 hover:bg-muted"
               >
                 Cancel
               </button>
             )}
           </div>
 
-          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-primary transition-all"
               style={{ width: `${pct}%` }}
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground-2">
             <span>
               {status.done}/{status.total} documents
             </span>
@@ -309,7 +311,7 @@ export default function ExtractionBenchPage() {
           )}
 
           {status.finished && (
-            <div className="space-y-2 text-xs text-gray-500">
+            <div className="space-y-2 text-xs text-muted-foreground">
               <p>
                 Output written to <span className="font-mono">{status.output_dir}</span> —{" "}
                 <span className="font-mono">_SUMMARY.md</span>,{" "}
@@ -338,8 +340,8 @@ export default function ExtractionBenchPage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-2xl font-semibold text-gray-900">{value}</div>
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="text-2xl font-semibold text-foreground">{value}</div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
   );
 }

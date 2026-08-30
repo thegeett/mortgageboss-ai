@@ -65,10 +65,10 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {firstName ? `Welcome back, ${firstName}.` : "Dashboard"}
           </h1>
-          <p className="mt-1 text-sm text-gray-500">Your loan file worklist.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Your loan file worklist.</p>
         </div>
         <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">
           <Plus className="h-4 w-4" />
@@ -78,8 +78,8 @@ export default function DashboardPage() {
 
       <StatsCards />
 
-      <Card className="overflow-hidden border-gray-200/80 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="overflow-hidden border-border/80 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
           <FilterPills value={filter} onChange={handleFilter} />
           <SearchInput value={searchInput} onChange={handleSearch} />
         </div>
@@ -94,11 +94,11 @@ export default function DashboardPage() {
         />
 
         {!isError && total > 0 && (
-          <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm text-gray-500">
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
             <span>
-              Showing <span className="font-medium text-gray-700">{rangeStart}</span>–
-              <span className="font-medium text-gray-700">{rangeEnd}</span> of{" "}
-              <span className="font-medium text-gray-700">{total}</span>
+              Showing <span className="font-medium text-foreground-2">{rangeStart}</span>–
+              <span className="font-medium text-foreground-2">{rangeEnd}</span> of{" "}
+              <span className="font-medium text-foreground-2">{total}</span>
             </span>
             <div className="flex items-center gap-2">
               <Button

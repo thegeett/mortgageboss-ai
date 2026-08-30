@@ -23,9 +23,9 @@ function importedOn(iso: string): string {
 /** A labelled value row. */
 function Cell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 py-1.5 text-sm first:border-t-0">
-      <span className="min-w-0 truncate text-gray-600">{label}</span>
-      <span className="shrink-0 font-medium text-gray-900">{value}</span>
+    <div className="flex items-center justify-between gap-3 border-t border-border py-1.5 text-sm first:border-t-0">
+      <span className="min-w-0 truncate text-foreground-2">{label}</span>
+      <span className="shrink-0 font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -43,10 +43,10 @@ function SubSection({
 }) {
   return (
     <section className="mt-5 first:mt-0">
-      <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         {title}
-        {count !== undefined && <span className="text-gray-300">· {count}</span>}
+        {count !== undefined && <span className="text-muted-foreground">· {count}</span>}
       </h4>
       {children}
     </section>
@@ -55,10 +55,10 @@ function SubSection({
 
 function BorrowerBlock({ borrower }: { borrower: StatedBorrower }) {
   return (
-    <div className="rounded-lg border border-gray-200/80 p-3">
-      <p className="text-sm font-medium text-gray-900">
+    <div className="rounded-lg border border-border/80 p-3">
+      <p className="text-sm font-medium text-foreground">
         {borrower.full_name || "Borrower"}
-        {borrower.is_primary && <span className="ml-2 text-xs text-gray-400">Primary</span>}
+        {borrower.is_primary && <span className="ml-2 text-xs text-muted-foreground">Primary</span>}
       </p>
       {borrower.income_items.length > 0 && (
         <div className="mt-1.5">
@@ -72,8 +72,8 @@ function BorrowerBlock({ borrower }: { borrower: StatedBorrower }) {
         </div>
       )}
       {borrower.employers.length > 0 && (
-        <p className="mt-2 text-xs text-gray-500">
-          <span className="text-gray-400">Employers: </span>
+        <p className="mt-2 text-xs text-muted-foreground">
+          <span className="text-muted-foreground">Employers: </span>
           {borrower.employers
             .map((e) => e.employer_name)
             .filter(Boolean)
@@ -91,7 +91,9 @@ function LiabilityRow({ liability }: { liability: StatedLiability }) {
       value={
         <span className="tabular-nums">
           {formatMoney(liability.monthly_payment)}/mo
-          <span className="ml-2 text-gray-400">{formatMoney(liability.unpaid_balance)} bal</span>
+          <span className="ml-2 text-muted-foreground">
+            {formatMoney(liability.unpaid_balance)} bal
+          </span>
         </span>
       }
     />
@@ -129,13 +131,13 @@ export function StatedFinancialsSection({ fileId }: { fileId: string }) {
   if (!isPending && !isError && !hasData) return null;
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <FileSpreadsheet className="h-4 w-4 text-gray-400" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
           Application data (stated)
           {data?.mismo_import && (
-            <span className="text-xs font-normal text-gray-400">
+            <span className="text-xs font-normal text-muted-foreground">
               · imported from MISMO {importedOn(data.mismo_import.imported_at)}
             </span>
           )}

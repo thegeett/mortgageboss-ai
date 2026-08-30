@@ -35,7 +35,7 @@ function Pill({
         "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-primary bg-primary/10 text-primary"
-          : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50",
+          : "border-border bg-white text-muted-foreground hover:bg-muted",
       )}
     >
       {children}
@@ -65,7 +65,7 @@ export function FindingFilterPills({
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Severity
         </span>
         {severities.map((s) => (
@@ -80,7 +80,7 @@ export function FindingFilterPills({
       </div>
       {categories.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Category
           </span>
           <Pill

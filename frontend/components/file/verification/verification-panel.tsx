@@ -206,10 +206,10 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   }, [activeLevel, updatePreferences, queryClient, fileId]);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-4">
         <div className="space-y-1">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
               <ScanSearch className="h-4 w-4" />
             </span>
@@ -220,7 +220,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
               </Badge>
             )}
           </CardTitle>
-          <p className="pl-9 text-xs text-gray-500">
+          <p className="pl-9 text-xs text-muted-foreground">
             The full rule set + the AI cross-source pass, against the documents — program- and
             lender-specific.
           </p>
@@ -240,7 +240,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
               A position rather than a percentage, deliberately: stage A scales with the file's
               transaction count, so the phases are not evenly sized and a bar would visibly stall. */}
           {running && data?.latest_run?.phase && (
-            <span className="text-[11px] tabular-nums text-gray-500">
+            <span className="text-[11px] tabular-nums text-muted-foreground">
               {phaseLabel(data.latest_run.phase)}
               {data.latest_run.phase_index && data.latest_run.phase_total
                 ? ` (${data.latest_run.phase_index} of ${data.latest_run.phase_total})`
@@ -263,7 +263,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             <button
               type="button"
               onClick={() => run.mutate(true)}
-              className="text-[11px] text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
+              className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground-2 hover:underline"
             >
               Re-run anyway
             </button>
@@ -472,7 +472,7 @@ function ConsequenceBanner({
   return (
     <output
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm text-gray-700",
+        "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm text-foreground-2",
         tone.border,
         tone.bg,
       )}
@@ -483,7 +483,7 @@ function ConsequenceBanner({
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="shrink-0 text-gray-400 hover:text-gray-600"
+        className="shrink-0 text-muted-foreground hover:text-foreground-2"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -504,8 +504,8 @@ function SubmitStatus({
     return (
       <div className="flex items-center gap-2 text-xs text-warning">
         <Lock className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-gray-600">
-          <span className="font-medium text-gray-800">
+        <span className="text-foreground-2">
+          <span className="font-medium text-foreground">
             {data.in_scope_open_count} open finding{data.in_scope_open_count === 1 ? "" : "s"}
           </span>{" "}
           must be resolved to submit (at {label} thoroughness).
@@ -516,7 +516,7 @@ function SubmitStatus({
   return (
     <div className="flex items-center gap-2 text-xs text-success">
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-      <span className="text-gray-600">Clear to submit at {label} thoroughness.</span>
+      <span className="text-foreground-2">Clear to submit at {label} thoroughness.</span>
     </div>
   );
 }
@@ -550,15 +550,15 @@ function FailedRunBanner({
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <X className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
       <div className="flex-1 space-y-1.5">
         <p>
-          <span className="font-medium text-gray-900">Verification didn't complete</span> —{" "}
+          <span className="font-medium text-foreground">Verification didn't complete</span> —{" "}
           {message}
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           The findings below, if any, are from an earlier run.
         </p>
       </div>
@@ -579,11 +579,11 @@ function StaleBanner() {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>
-        <span className="font-medium text-gray-900">The file changed</span> — this verification is
+        <span className="font-medium text-foreground">The file changed</span> — this verification is
         out of date. Re-run it to compare against the current data.
       </span>
     </div>
@@ -601,7 +601,7 @@ function RunSummary({
 }) {
   if (running) {
     return (
-      <div className="flex items-center gap-2 text-sm text-gray-500">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="h-3.5 w-3.5" />
         Comparing the stated data against the documents…
       </div>
@@ -617,8 +617,8 @@ function RunSummary({
   const red = shown.filter((f) => f.status === "red").length;
   const yellow = shown.filter((f) => f.status === "yellow").length;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-      <span className="inline-flex items-center gap-1 font-medium text-gray-700">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1 font-medium text-foreground-2">
         <Sparkles className="h-3.5 w-3.5 text-primary" /> AI cross-source
       </span>
       <span>

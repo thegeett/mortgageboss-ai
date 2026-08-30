@@ -18,7 +18,7 @@ export function FileTabs({ fileId }: { fileId: string }) {
   return (
     <nav
       aria-label="File sections"
-      className="-mb-px flex gap-1 overflow-x-auto border-b border-gray-200"
+      className="-mb-px flex gap-1 overflow-x-auto border-b border-border"
     >
       {FILE_TABS.map((tab) => {
         const isActive = tab.key === active;
@@ -31,7 +31,7 @@ export function FileTabs({ fileId }: { fileId: string }) {
               "whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isActive
                 ? "border-primary text-primary"
-                : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-900",
+                : "border-transparent text-muted-foreground hover:border-input hover:text-foreground",
             )}
           >
             {tab.label}

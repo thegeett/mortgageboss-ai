@@ -62,7 +62,7 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
     <div className="mt-2.5 ml-4 rounded-md border border-warning/30 bg-warning/[0.06] px-3 py-2">
       <div className="flex items-start gap-2">
         <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-        <p className="text-xs leading-relaxed text-gray-600">
+        <p className="text-xs leading-relaxed text-foreground-2">
           Possible duplicate — the AI thinks this may already be requested by another need. Merge
           them, or keep both if they're different.
         </p>
@@ -86,7 +86,7 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 text-xs text-gray-500"
+          className="h-7 text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keepBoth.mutate(need.id, {
@@ -120,15 +120,17 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
     <div className="mt-2.5 ml-4 rounded-md border border-info/30 bg-info/[0.06] px-3 py-2">
       <div className="flex items-start gap-2">
         <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-        <div className="text-xs leading-relaxed text-gray-600">
+        <div className="text-xs leading-relaxed text-foreground-2">
           <p>
-            <span className="font-medium text-gray-700">The file may already answer this.</span>{" "}
+            <span className="font-medium text-foreground-2">The file may already answer this.</span>{" "}
             {need.coverage_note}
           </p>
           {need.possibly_covered_by && (
-            <p className="mt-1 text-gray-500">
+            <p className="mt-1 text-muted-foreground">
               Checked against{" "}
-              <span className="font-medium text-gray-700">{need.possibly_covered_by.filename}</span>
+              <span className="font-medium text-foreground-2">
+                {need.possibly_covered_by.filename}
+              </span>
               .
             </p>
           )}
@@ -156,7 +158,7 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 text-xs text-gray-500"
+          className="h-7 text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keep.mutate(need.id, {
@@ -237,7 +239,7 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400 hover:text-gray-600"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground-2"
             aria-label={`Actions for ${need.title}`}
           >
             <MoreHorizontal className="h-4 w-4" />

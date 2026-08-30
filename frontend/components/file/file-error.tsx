@@ -12,17 +12,17 @@ export function FileError({ notFound, onRetry }: { notFound: boolean; onRetry?: 
   const showRetry = !notFound && onRetry !== undefined;
   return (
     <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
         {notFound ? (
           <FileQuestion className="h-6 w-6" />
         ) : (
           <TriangleAlert className="h-6 w-6 text-destructive" />
         )}
       </span>
-      <h1 className="mt-4 text-lg font-semibold text-gray-900">
+      <h1 className="mt-4 text-lg font-semibold text-foreground">
         {notFound ? "File not found" : "Couldn't load this file"}
       </h1>
-      <p className="mt-1 max-w-sm text-sm text-gray-500">
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         {notFound
           ? "This loan file doesn't exist, or you don't have access to it."
           : "Something went wrong loading this file. Check your connection and try again."}

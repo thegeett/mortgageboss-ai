@@ -32,10 +32,10 @@ function OverviewCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <Icon className="h-4 w-4 text-gray-400" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Icon className="h-4 w-4 text-muted-foreground" />
           {title}
         </CardTitle>
         {action}
@@ -66,9 +66,9 @@ function EditToggle({ editing, onToggle }: { editing: boolean; onToggle: () => v
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-t border-gray-100 py-1.5 text-sm first:border-t-0">
-      <span className="shrink-0 text-gray-500">{label}</span>
-      <span className="max-w-[62%] truncate text-right font-medium text-gray-900">{value}</span>
+    <div className="flex items-start justify-between gap-3 border-t border-border py-1.5 text-sm first:border-t-0">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="max-w-[62%] truncate text-right font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -79,12 +79,12 @@ function CardSkeleton() {
 }
 
 function CardEmpty({ message }: { message: string }) {
-  return <p className="py-4 text-sm text-gray-400">{message}</p>;
+  return <p className="py-4 text-sm text-muted-foreground">{message}</p>;
 }
 
 function CardError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="flex items-center gap-2 py-4 text-sm text-gray-500">
+    <div role="alert" className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
       <TriangleAlert className="h-4 w-4 shrink-0 text-destructive" />
       <span>{message}</span>
       {onRetry && (
@@ -122,9 +122,9 @@ export function BorrowerCard({
         <CardEmpty message="No borrower added yet." />
       ) : (
         borrowers.map((borrower, index) => (
-          <div key={borrower.id} className={index > 0 ? "mt-3 border-t border-gray-100 pt-3" : ""}>
+          <div key={borrower.id} className={index > 0 ? "mt-3 border-t border-border pt-3" : ""}>
             <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900">
+              <span className="font-medium text-foreground">
                 {borrower.first_name} {borrower.last_name}
               </span>
               {borrower.is_primary && (
