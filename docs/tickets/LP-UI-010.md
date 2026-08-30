@@ -128,3 +128,130 @@ A density change is one custom-property write, not a re-render.
 - frontend: `lib/api/preferences.ts`, `hooks/use-density.ts` (new),
   `app/layout.tsx`, `components/layout/user-menu.tsx`,
   `components/file/verification/verification-panel.tsx` (+ its test)
+
+## Review pass — a column the readonly view never learned about
+
+Reviewed on request from the session running the epic. Five defects, one of them
+already failing in the suite at the commit.
+
+### `users.density` was invisible to the readonly views — and the suite said so
+
+`test_no_model_column_drifts` was **red at 00fda59**. Its whole job is this: a
+model column must be exposed by its readonly view or listed in the test's
+`EXCLUDED` map, never neither, so the decision gets made while it is cheap. The
+new column was neither.
+
+It was missed because the pre-commit check ran 75 backend tests; this one is in
+`tests/test_readonly_query.py`, outside that selection. The full suite is 5,932.
+
+Exposed rather than excluded. `EXCLUDED["users"]` holds credentials and
+identifiers — `hashed_password`, `email`, `first_name`, `last_name` — and density
+is neither: a bounded three-value ergonomic preference with no identifying
+content, whose sibling `default_aggression_level`, the other per-user preference
+enum, has been in the view since C7.
+
+Fixed in a **new** revision (b7f4a2d19c63) rather than by editing aaf8b36c61fa,
+which is already committed: an edited migration is only correct in the world
+where nothing has applied it yet, and a new one is correct in both. It follows
+LP-631's shape — drop, recreate, re-grant, because a dropped view takes its grant
+with it — and recreates rather than `CREATE OR REPLACE`, which in Postgres can
+only APPEND a column and would have stranded `density` after `deleted_at`
+instead of beside the preference it belongs with.
+
+One trap worth recording, because the first attempt walked into it. The drift
+guard reads later migrations as TEXT and treats everything before `def
+downgrade(` as the live definition — precisely so a rollback's `CREATE VIEW` does
+not win. Defining the old view as a module-level constant puts it above that
+split, so the guard read the ROLLBACK shape as current and still reported
+`density` unexposed. Its own docstring warns about this; a module-level constant
+walks straight past the warning. The old definition is inlined inside
+`downgrade()`.
+
+### The write path had three defects, all in `choose`
+
+- **A PUT per click, including re-picking the density already active.** Flagged
+  in the hand-off; guarded. `pickLevel` in VerificationPanel already guards its
+  own dial the same way, so the precedent was in the file next door.
+- **A failed write left the screen claiming a preference the database does not
+  hold.** The DOM and cookie change optimistically and nothing reverted them, so
+  the change "worked" and then silently reverted on some later load, when the
+  reconcile pulled the server's older answer. `onError` now snaps it back — the
+  honest version of the same outcome, and immediate.
+- **The reconcile could revert the choice while the write making it true was
+  still in flight.** The effect depends on the mutation's pending flag, so it
+  re-ran the moment the PUT started, read the server's still-old value, and
+  reverted. Guarded on `isPending`. This was not a narrow race — it was the
+  common path.
+
+### `density` state was read as truth where the attribute is the truth
+
+`choose` compared against the React value, which starts at the default and only
+catches up in an effect, so on a first render it answers "compact" for a relaxed
+user. `currentDensity()` reads `data-density` — the attribute the CSS hangs off,
+and therefore what is actually on screen. The React value stays a mirror for
+rendering the menu's checkmark.
+
+### The tests the hand-off asked for
+
+Both gaps it named, filled and mutation-checked:
+
+- `tests/api/test_preferences_endpoints.py` (7): both fields at their defaults,
+  density-alone preserves thoroughness, thoroughness-alone preserves density,
+  both together, an empty body, an unknown density rejected at 422, and an
+  explicit null treated as omission. The partial update is the reason both fields
+  became optional and nothing was asserting it — that is a data-loss shape.
+- `hooks/use-density.test.ts` (8), mocked at the TRANSPORT rather than at the
+  preferences module's exports: `usePreferences` and `useUpdatePreferences` reach
+  `fetchPreferences`/`updatePreferences` through module-internal references, so
+  mocking those exports changes nothing the hooks actually call. The first
+  version did exactly that and three tests failed for the wrong reason.
+
+### Checked and found correct
+
+- **The migration.** Verified by emitting the SQL offline rather than by reading
+  it: `ALTER TABLE users ADD COLUMN density VARCHAR(32) DEFAULT 'compact' NOT
+  NULL` followed by `ALTER TABLE users ADD CONSTRAINT ck_users_rowdensity CHECK
+  (density IN (...))` — the same shape, and the same constraint-naming
+  convention, as the LP-79 precedent for the identical pattern. The
+  `server_default` matches `DEFAULT_DENSITY.value`, so it cannot fight the model
+  default, and `drop_column` takes the constraint with it on downgrade.
+- **`UserPreferencesUpdate` accepting `{}`.** Left as-is: "only the provided
+  fields change" and none were. Pinned by a test so it is a decision.
+- **The other `updatePreferences` caller.** `verification-panel.tsx` sends only
+  `default_aggression_level`, so the partial shape is right there too.
+- **The reconcile logic itself.** Correct including the compact case, where the
+  attribute is absent rather than set to a value.
+
+### Two things for someone else
+
+- **Two backend tests fail on this machine and are not this ticket's.**
+  `test_model_selection_lp457.py` asserts `anthropic_model_analysis ==
+  "claude-haiku-4-5"`, which is the code default, but the local `.env` sets
+  `ANTHROPIC_MODEL_ANALYSIS=claude-sonnet-4-5` and settings load from it. A local
+  environment difference, not a regression — but a test that a developer's `.env`
+  can turn red is worth revisiting.
+- **The model-vs-database drift is still open** and is a DIFFERENT thing from the
+  drift guard above: this one is the local database lagging the models, which is
+  what made `--autogenerate` propose eighteen destructive operations. Not touched
+  here, correctly. Worth its own ticket before someone accepts an autogenerated
+  migration without reading it.
+
+### Verification
+
+Frontend: `tsc` clean, `biome` clean over 216 files, 563 tests (from 555), build
+compiles. Backend: `ruff` clean, `ruff format` clean, `mypy` clean over 443
+files, **5,930 pass** with the two `.env` failures above. Every fix
+mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| remove the re-pick guard | 1 test fails |
+| remove the `onError` revert | 1 test fails |
+| reconcile while a write is in flight | 1 test fails |
+| hoist the rollback view to module level | drift guard fails |
+
+Two of those mutations passed on the first attempt and the tests were rewritten
+until they did not: the re-pick test asserted "not called" synchronously, before
+the mutation's request happens a microtask later, so it passed with the guard
+deleted; and the in-flight test never had preferences loaded, so the reconcile
+bailed at its own null check before reaching the code under test.

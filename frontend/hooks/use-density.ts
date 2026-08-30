@@ -32,32 +32,68 @@ export function useDensity() {
 
   // Adopt whatever the server already stamped, without changing it.
   useEffect(() => {
-    const stamped = document.documentElement.dataset.density as RowDensity | undefined;
-    if (stamped) setDensity(stamped);
+    setDensity(currentDensity());
   }, []);
 
   // The database is the durable store; if this browser's cookie is stale
   // (changed on another machine), the server's answer wins.
+  const reconciling = updatePreferences.isPending;
   useEffect(() => {
+    // Never while our own write is in flight. A background refetch (window
+    // focus, say) resolving mid-PUT carries the value we are replacing, and
+    // reconciling to it would snap the whole UI back to the old density and
+    // then forward again when the PUT lands.
+    if (reconciling) return;
     const server = preferences?.density;
     if (!server) return;
-    if (document.documentElement.dataset.density === server) return;
+    if (currentDensity() === server) return;
     applyDensity(server);
     setDensity(server);
-  }, [preferences?.density]);
+  }, [preferences?.density, reconciling]);
 
   const choose = useCallback(
     (next: RowDensity) => {
+      // Re-picking the density you are already on is not a change. Without this
+      // the menu fired a PUT per click. `pickLevel` in VerificationPanel already
+      // guards its own dial the same way.
+      if (next === currentDensity()) return;
+      const previous = currentDensity();
       applyDensity(next);
       setDensity(next);
       // Only the field being changed — sending a stale thoroughness back is how
       // the other preference silently reverts.
-      updatePreferences.mutate({ density: next });
+      updatePreferences.mutate(
+        { density: next },
+        {
+          // The DOM was changed optimistically, so a failed PUT leaves the
+          // screen claiming a preference the database does not hold. Left alone
+          // it "worked" and then silently reverted on some later load, when the
+          // reconcile above pulled the server's older answer. Snapping back now
+          // is the honest version of the same outcome.
+          onError: () => {
+            applyDensity(previous);
+            setDensity(previous);
+          },
+        },
+      );
     },
     [updatePreferences],
   );
 
   return { density, choose };
+}
+
+/**
+ * What is on screen right now, read from the attribute that decides it.
+ *
+ * The attribute is the source of truth (the CSS hangs off it), so every decision
+ * here reads it rather than the React mirror — which starts at the default and
+ * only catches up in an effect, and would answer "compact" for a relaxed user on
+ * the first render.
+ */
+function currentDensity(): RowDensity {
+  const stamped = document.documentElement.dataset.density;
+  return stamped === "comfortable" || stamped === "relaxed" ? stamped : DEFAULT_DENSITY;
 }
 
 /** Write the attribute the CSS reads, and the cookie the server reads next time. */
