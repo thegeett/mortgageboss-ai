@@ -92,6 +92,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const DASH = "—";
 
+/**
+ * The one breakpoint at which the rail replaces the drawer, as the two literal
+ * class strings that implement it.
+ *
+ * DEFINED TOGETHER because the guarantee is that they are COMPLEMENTS — the
+ * context must be reachable at every width and duplicated at none. Written as two
+ * independent strings in two components, the pairing is an agreement nothing
+ * checks: make both `xl:hidden` and the context is unreachable above 1280px, and
+ * jsdom has no viewport to notice. `file-context-rail.test.tsx` asserts they name
+ * the same breakpoint in opposite directions.
+ *
+ * Literal strings, not built from a variable — Tailwind scans source text, and a
+ * class assembled at runtime is never emitted (LP-UI-037's own near-miss).
+ */
+export const RAIL_ONLY = "hidden xl:block";
+export const DRAWER_ONLY = "xl:hidden";
+
 export function FileContextRail({ fileId }: { fileId: string }) {
   return (
     // Hidden below `xl`, where `FileContextDrawer` carries the same body. The
@@ -100,7 +117,7 @@ export function FileContextRail({ fileId }: { fileId: string }) {
     // epic has found three times in other places.
     <aside
       aria-label="File context"
-      className="hidden w-ctx shrink-0 overflow-y-auto border-l border-border bg-card xl:block"
+      className={cn("w-ctx shrink-0 overflow-y-auto border-l border-border bg-card", RAIL_ONLY)}
     >
       <ContextSections fileId={fileId} />
     </aside>
@@ -132,7 +149,7 @@ export function FileContextDrawer({ fileId }: { fileId: string }) {
           size="sm"
           // Mirrors the rail exactly: shown only where the rail is hidden, so the
           // context is reachable at every width and duplicated at none.
-          className="gap-1.5 xl:hidden"
+          className={cn("gap-1.5", DRAWER_ONLY)}
         >
           <PanelRight className="h-3.5 w-3.5" />
           File context

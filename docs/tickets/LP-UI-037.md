@@ -104,3 +104,75 @@ tsc, 948 vitest. No backend changes.
 widths, but the thing that guarantees it — `xl:hidden` on the trigger against
 `hidden xl:block` on the rail — is a pair of classes in two files, and jsdom has
 no viewport to evaluate them against. The pairing is the kind that drifts.
+
+---
+
+## Review (LP-UI-037 review commit)
+
+Reviewed on request from the session running the epic. Two fixes, one sweep clean,
+one claim narrowed. Staged narrowly — `SPEC.md` is modified by neither of us and
+is left alone.
+
+### 1. The drawer/rail pairing is now one definition, and it is tested
+
+The guarantee is that the two classes are COMPLEMENTS: the context reachable at
+every width, duplicated at none. Written as two independent strings, that is an
+agreement nothing checks — and the failure the ticket names (both `xl:hidden`,
+context unreachable above 1280) is invisible to jsdom, which has no viewport.
+
+`RAIL_ONLY` and `DRAWER_ONLY` are defined together and used at both sites, and the
+test asserts they name the same breakpoint in opposite directions, plus that each
+rendered element carries its half. Three mutations, all caught: both halves hidden
+above `xl`, the two on different breakpoints, and a site dropping the constant.
+
+Literal strings, deliberately — the constants are scannable source text, which the
+next finding is about.
+
+### 2. The column ladder is read, not restated
+
+The header and the skeleton both map `COLUMNS` and cannot drift. The body cells
+restated the breakpoint — `columnClass("xl")` beside `aria-colindex={3}` — so the
+ladder was written twice and the two agreed with nothing making them agree.
+
+All nine were correct; the script that applied them did not miss one. But moving a
+column's `hideBelow` would have moved the header and the skeleton and left the
+body behind, giving a row a column its header had dropped. The body cells call
+`columnClassAt(n)` now, reading `COLUMNS` by the index already on the cell.
+
+**And the test compares the rendered header to the rendered body** at each
+`aria-colindex`, which is the comparison the guarantee is about — reading `COLUMNS`
+and the source cannot see a mismatch between two rendered cells. Demonstrated
+against the pre-refactor arrangement: restore one hardcoded `columnClass("2xl")`,
+move `COLUMNS` to `lg`, and it fails on column 9.
+
+*Worth recording:* my first attempt at this refactor was a scripted positional
+edit that matched the wrong cell — the exact failure the ticket warned about. The
+test above is what caught it, which is the argument for writing it.
+
+### 3. Nothing else builds a Tailwind class from a variable
+
+Swept three ways: `className` template literals, `+` concatenation, and any
+interpolation appearing mid-class. Every hit is either a whole class name
+substituted by a ternary (safe — both literals are in the source), a DOM id, or
+the docstring in `attention-cell.tsx` that explains why the pattern is banned. No
+live instance.
+
+### 4. ADR-394's band claim is narrowed to its evidence
+
+Nothing structural contradicts "1024–1280 is supported": the largest fixed content
+min-width in the tree is 8rem, the reviewer's pane minimum is a percentage rather
+than a pixel count, and the column ladder drops four of nine pipeline columns
+before 1280 — leaving ~724px of content at 1024 after the icon rail, the nav
+column and the shell padding.
+
+But arithmetic is not a reading of the screen, and the conditions, needs,
+communication, lender-package and admin screens were never visited in that band.
+The ADR now says which two screens the claim rests on and states that the
+correction, if one is needed, is to narrow the claim rather than patch the screen.
+That is the ticket's own instruction, written into the ADR so it survives the
+ticket.
+
+### Verification
+
+biome 0, tsc 0, **952 vitest**, build clean. No backend change, so no pytest run.
+Six mutations, all caught.

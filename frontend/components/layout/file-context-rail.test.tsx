@@ -32,7 +32,7 @@ vi.mock("@/lib/api/verification", () => ({
   useResolveFinding: () => ({ mutate: resolveMutate, isPending: false }),
 }));
 
-import { FileContextRail } from "./file-context-rail";
+import { DRAWER_ONLY, FileContextDrawer, FileContextRail, RAIL_ONLY } from "./file-context-rail";
 
 afterEach(() => {
   cleanup();
@@ -421,5 +421,47 @@ describe("the rail counts each governed outcome, never by subtraction", () => {
     withOutcomes(["open", "needs_review"]);
     expect(screen.queryByText("Other")).toBeNull();
     expect(metric("Must fix")).toBe("1");
+  });
+});
+
+describe("the rail and the drawer are complements", () => {
+  /**
+   * The guarantee jsdom cannot evaluate, asserted on the classes instead.
+   *
+   * The context must be reachable at EVERY width and duplicated at NONE. That is
+   * two class strings agreeing about one breakpoint in opposite directions — and
+   * if both said `xl:hidden`, the file's status, ratios and activity would be
+   * unreachable above 1280px with every test still green. There is no viewport
+   * here to catch it, so the pairing itself is what gets checked.
+   */
+  const breakpointOf = (cls: string) => cls.match(/(?:^|\s)([a-z]{2}):/)?.[1] ?? null;
+
+  it("hide on the same breakpoint, in opposite directions", () => {
+    expect(breakpointOf(RAIL_ONLY)).not.toBeNull();
+    expect(breakpointOf(RAIL_ONLY)).toBe(breakpointOf(DRAWER_ONLY));
+
+    const bp = breakpointOf(RAIL_ONLY);
+    // The rail: hidden by default, shown at the breakpoint.
+    expect(RAIL_ONLY.split(/\s+/)).toEqual(["hidden", `${bp}:block`]);
+    // The drawer's trigger: shown by default, hidden at the same breakpoint.
+    expect(DRAWER_ONLY.split(/\s+/)).toEqual([`${bp}:hidden`]);
+  });
+
+  /** Both halves have to be on the RENDERED elements, not merely exported. */
+  const inClient = (node: React.ReactNode) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  };
+
+  it("the rendered rail carries the rail half", () => {
+    const { container } = inClient(<FileContextRail fileId="abc" />);
+    const aside = container.querySelector("aside");
+    for (const cls of RAIL_ONLY.split(/\s+/)) expect(aside?.className).toContain(cls);
+  });
+
+  it("the rendered trigger carries the drawer half", () => {
+    inClient(<FileContextDrawer fileId="abc" />);
+    const trigger = screen.getByRole("button", { name: /file context/i });
+    for (const cls of DRAWER_ONLY.split(/\s+/)) expect(trigger.className).toContain(cls);
   });
 });

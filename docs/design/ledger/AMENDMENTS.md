@@ -1507,3 +1507,50 @@ pairing carrying its ratio and the surface it was measured against, with a test
 that the exemption still names something real. A static scan cannot know what is
 behind a token, so it bans the shape and a person supplies the number — the same
 posture as `reviewed_not_critical` on the backend, and the same reason.
+
+## 2026-08-30 · A34 — from the LP-UI-037 review: an agreement nothing checks
+
+### A34a — two classes that must be complements, written as two independent strings
+
+The rail is `hidden xl:block` and the drawer's trigger is `xl:hidden`. The
+guarantee is that those are COMPLEMENTS — the context reachable at every width,
+duplicated at none — and written as two strings in two components, that guarantee
+lives nowhere. Make both `xl:hidden` and a file's status, ratios and activity are
+unreachable above 1280px with the whole suite green, because jsdom has no viewport
+to evaluate a breakpoint against.
+
+Defined together now, as `RAIL_ONLY` and `DRAWER_ONLY`, with a test that they name
+the same breakpoint in opposite directions. **The absence of a viewport does not
+mean the pairing cannot be tested — it means the thing to test is the pairing
+rather than the rendering.**
+
+### A34b — a ladder written twice, and the script that applied it
+
+The pipeline's column visibility is applied in three places. The header and the
+skeleton map `COLUMNS`; the body cells restated the breakpoint beside an index. All
+nine agreed, and nothing made them agree — moving a column's `hideBelow` would have
+moved two of the three and left a row carrying a column its header had dropped.
+
+The instructive part is what happened when I fixed it. My first refactor was a
+scripted positional edit whose non-greedy match reached from one cell into the
+next, giving column 7 column 6's class — the exact failure the ticket warned that
+kind of edit produces, committed by the reviewer checking for it. The rendered
+header-to-body comparison caught it immediately.
+
+**A test that compares two rendered things is worth more than care taken while
+editing them**, and this is the third occasion in the epic where the durable fix
+was to make one thing read the other rather than to check that two agree.
+
+### A34c — narrowing a claim instead of patching a screen
+
+ADR-394 said 1024–1280 is "supported" on the evidence of one screenshot and an
+overflow probe. Nothing structural contradicts it — the largest fixed content
+min-width is 8rem, the reviewer's pane minimum is a percentage, and the column
+ladder sheds four of nine columns before 1280 — but five screens in that band were
+never opened.
+
+The ADR now states which two screens the claim rests on, and that the correction,
+if one is needed, is to narrow the claim rather than patch the screen. An ADR is a
+promise about what a processor can rely on; a promise inferred from arithmetic
+should say so, so that the person who finds the counterexample knows which of the
+two to change.

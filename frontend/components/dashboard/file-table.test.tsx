@@ -9,7 +9,7 @@ vi.mock("@/components/file/delete-file-dialog", () => ({
     open ? <div data-testid="delete-dialog">deleting {file?.display_id}</div> : null,
 }));
 
-import { FileTable } from "./file-table";
+import { COLUMNS, FileTable } from "./file-table";
 
 const FILE: LoanFileSummary = {
   id: "uuid-1",
@@ -310,5 +310,45 @@ describe("FileTable — the attention stripe (LP-UI-013)", () => {
   it("says nothing rather than 'clear' when the backend sent no attention", () => {
     renderTable({ files: [FILE] });
     expect(screen.queryByText(/nothing outstanding/i)).toBeNull();
+  });
+});
+
+describe("FileTable — the column ladder reaches every cell", () => {
+  /**
+   * The ladder is applied in THREE places: the header, the body cells, and the
+   * skeleton row. The header and the skeleton both map `COLUMNS` and cannot
+   * drift; the body cells are written out one per column, and a cell whose
+   * visibility class was missed would keep its data while its header vanished —
+   * a row misaligned against its own header, at one width, silently.
+   *
+   * Reading `COLUMNS` and the source cannot see this. Comparing the RENDERED
+   * header cell to the RENDERED body cell at the same `aria-colindex` can, and it
+   * is the comparison the guarantee is actually about.
+   */
+  const visibility = (el: Element) =>
+    (el.className.match(/(?:^|\s)(?:hidden|[a-z0-9]+:(?:table-cell|block|hidden))(?=\s|$)/g) ?? [])
+      .map((c) => c.trim())
+      .sort();
+
+  it("each body cell hides at exactly the width its header does", () => {
+    renderTable();
+    const rows = screen.getAllByRole("row");
+    const header = rows[0];
+    const body = rows.find((r) => r !== header && r.querySelector('[aria-colindex="1"]'));
+    expect(header, "no header row").toBeDefined();
+    expect(body, "no body row — the comparison would be vacuous").toBeDefined();
+
+    let compared = 0;
+    for (let index = 1; index <= COLUMNS.length; index++) {
+      const head = header?.querySelector(`[aria-colindex="${index}"]`);
+      const cell = body?.querySelector(`[aria-colindex="${index}"]`);
+      if (!head || !cell) continue;
+      compared++;
+      expect(visibility(cell), `column ${index} (${COLUMNS[index - 1]?.label})`).toEqual(
+        visibility(head),
+      );
+    }
+    // The positive control: an empty comparison passes every assertion above.
+    expect(compared).toBe(COLUMNS.length);
   });
 });

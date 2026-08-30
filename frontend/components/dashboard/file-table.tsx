@@ -67,6 +67,20 @@ export const COLUMNS = [
 ] as const;
 
 /** The class that hides a column below its breakpoint, or "" for one that stays. */
+/**
+ * The visibility class for column `index`, 1-based to match `aria-colindex`.
+ *
+ * The body cells restated the breakpoint — `columnClass("xl")` beside
+ * `aria-colindex={3}` — which is the ladder written twice: once in `COLUMNS` and
+ * once per cell. They agreed, and nothing made them agree. Moving a column's
+ * `hideBelow` moves the header and the skeleton (both map `COLUMNS`) and would
+ * have left the body behind, so a row would keep a column its header had dropped.
+ * One number per cell now, and it is the number already there.
+ */
+export function columnClassAt(index: number): string {
+  return columnClass(COLUMNS[index - 1]?.hideBelow ?? null);
+}
+
 export function columnClass(hideBelow: string | null): string {
   // Written out rather than interpolated: Tailwind scans source text, and a
   // template literal produces a class name that never reaches the stylesheet.
@@ -433,13 +447,13 @@ export function FileTable({
               </TableCell>
               <TableCell
                 aria-colindex={3}
-                className={cn("max-w-[16rem] truncate text-foreground-2", columnClass("xl"))}
+                className={cn("max-w-[16rem] truncate text-foreground-2", columnClassAt(3))}
               >
                 {file.property_address ?? "—"}
               </TableCell>
               <TableCell
                 aria-colindex={4}
-                className={cn("tabular text-right text-foreground-2", columnClass("lg"))}
+                className={cn("tabular text-right text-foreground-2", columnClassAt(4))}
               >
                 {file.loan_amount ? formatMoney(file.loan_amount) : "—"}
               </TableCell>
@@ -449,15 +463,15 @@ export function FileTable({
               <TableCell aria-colindex={6} className="max-w-[18rem] truncate">
                 <AttentionCell attention={file.attention} />
               </TableCell>
-              <TableCell aria-colindex={7} className={cn("text-right", columnClass("lg"))}>
+              <TableCell aria-colindex={7} className={cn("text-right", columnClassAt(7))}>
                 <NeedsProgress attention={file.attention} />
               </TableCell>
-              <TableCell aria-colindex={8} className={cn("text-foreground-2", columnClass("xl"))}>
+              <TableCell aria-colindex={8} className={cn("text-foreground-2", columnClassAt(8))}>
                 {file.lender_name ?? "—"}
               </TableCell>
               <TableCell
                 aria-colindex={9}
-                className={cn("whitespace-nowrap text-muted-foreground", columnClass("2xl"))}
+                className={cn("whitespace-nowrap text-muted-foreground", columnClassAt(9))}
               >
                 {lastActivity(file.updated_at)}
               </TableCell>

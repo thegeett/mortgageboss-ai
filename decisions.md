@@ -15877,10 +15877,23 @@ a processor triages on at the same rate as the ones they do not. The order — T
 Property and Lender, then Amount and Needs, with File, Borrower, Stage and Attention never
 dropped — is data in `COLUMNS`, with a test.
 
-**1024 to 1280 — a landscape tablet — is supported.** The context rail is a drawer reached
-from the file header, so nothing becomes unreachable; the reviewer's three panes keep their
-side-by-side arrangement, which measurement says still works at 1100 once the rail is out of
-the way.
+**1024 to 1280 — a landscape tablet — is supported, on the evidence stated.** The context
+rail is a drawer reached from the file header, so nothing becomes unreachable; the reviewer's
+three panes keep their side-by-side arrangement, which measurement says still works at 1100
+once the rail is out of the way.
+
+*Scoped in review.* "Supported" here rests on two things and it is worth saying which:
+horizontal overflow measured at zero on the pipeline and the reviewer, and the reviewer read
+at 1100. **Every other screen in this band is inferred, not observed** — the conditions,
+needs, communication, lender-package and admin screens were not visited between 1024 and
+1280. Nothing structural contradicts the claim (the largest fixed content min-width in the
+tree is 8rem, the reviewer's pane minimum is a percentage rather than a pixel count, and the
+column ladder drops four of the pipeline's nine columns before 1280), so the arithmetic
+leaves ~724px of content at 1024 after the icon rail, the nav column and the shell padding.
+But arithmetic is not a reading of the screen. If one of those screens turns out to be
+unusable in this band, **the fix is to narrow this claim to the screens that were measured,
+not to patch the screen** — the ADR is a promise about what a processor can rely on, and a
+promise made from an inference is the thing to correct.
 
 **Below 1024 is neither designed nor blocked.** It does not overflow and it does not lie,
 and that is the whole claim. A processor assembling a loan file is reading a document beside
