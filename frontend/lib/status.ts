@@ -19,7 +19,17 @@
  *
  * The LABELS stay domain-specific on purpose. "Must fix" and "Blocked" are the
  * same tone and different words, and the words are the part processors quote.
+ *
+ * Each map is typed to ITS OWN enum, not to `Record<string, StatusMeta>`. The six
+ * maps this file replaced were each exhaustive over their union, and widening to
+ * `string` would have thrown that away in one move: adding a member to any of
+ * the five unions, or deleting an entry from any map, would compile silently and
+ * fall through to `resolveStatus`'s amber fallback at runtime.
  */
+import type { DocumentStatus } from "@/lib/types/document";
+import type { LoanFileStatus } from "@/lib/types/loan-file";
+import type { NeedsItemPriority, NeedsItemStatus } from "@/lib/types/needs-item";
+import type { EvaluationOutcome } from "@/lib/types/verification";
 
 export type Tone =
   | "blocking" // a real problem that stops the file moving
@@ -37,7 +47,7 @@ export interface StatusMeta {
 }
 
 // --- loan file (lib/types/loan-file.ts LoanFileStatus) ---------------------- //
-export const LOAN_FILE_STATUS: Record<string, StatusMeta> = {
+export const LOAN_FILE_STATUS: Record<LoanFileStatus, StatusMeta> = {
   draft: { tone: "neutral", label: "Draft" },
   in_processing: { tone: "progress", label: "In processing" },
   ready_to_submit: { tone: "verified", label: "Ready to submit" },
@@ -60,7 +70,7 @@ export const LOAN_FILE_STATUS: Record<string, StatusMeta> = {
 //
 // This is the rule in SPEC.md doing its job: only the COLOUR vocabulary is being
 // unified. The words were argued out already and are not ours to re-open here.
-export const DOCUMENT_STATUS: Record<string, StatusMeta> = {
+export const DOCUMENT_STATUS: Record<DocumentStatus, StatusMeta> = {
   pending: { tone: "progress", label: "Processing", spin: true },
   classifying: { tone: "progress", label: "Processing", spin: true },
   classified: { tone: "progress", label: "Classified", spin: true },
@@ -71,7 +81,7 @@ export const DOCUMENT_STATUS: Record<string, StatusMeta> = {
 };
 
 // --- needs (lib/types/needs-item.ts NeedsItemStatus) ------------------------ //
-export const NEEDS_STATUS: Record<string, StatusMeta> = {
+export const NEEDS_STATUS: Record<NeedsItemStatus, StatusMeta> = {
   pending: { tone: "attention", label: "Pending" },
   requested: { tone: "progress", label: "Requested" },
   received: { tone: "progress", label: "Documents attached" },
@@ -80,7 +90,7 @@ export const NEEDS_STATUS: Record<string, StatusMeta> = {
   waived: { tone: "neutral", label: "Waived" },
 };
 
-export const NEEDS_PRIORITY: Record<string, StatusMeta> = {
+export const NEEDS_PRIORITY: Record<NeedsItemPriority, StatusMeta> = {
   blocking: { tone: "blocking", label: "Blocking" },
   standard: { tone: "neutral", label: "Standard" },
   low: { tone: "neutral", label: "Low" },
@@ -89,7 +99,7 @@ export const NEEDS_PRIORITY: Record<string, StatusMeta> = {
 // --- rule engine (lib/types/verification.ts EvaluationOutcome) -------------- //
 // Labels preserved verbatim from OUTCOME_META — they were argued over in LP-583
 // and LP-581 and are correct. Only the colour mapping is unified.
-export const EVALUATION_OUTCOME: Record<string, StatusMeta> = {
+export const EVALUATION_OUTCOME: Record<EvaluationOutcome, StatusMeta> = {
   open: { tone: "blocking", label: "Must fix" },
   couldnt_check: { tone: "attention", label: "Couldn't check" },
   needs_review: { tone: "attention", label: "Needs review" },
@@ -100,7 +110,19 @@ export const EVALUATION_OUTCOME: Record<string, StatusMeta> = {
 };
 
 // --- calculators (backend CalculatorView.status) ---------------------------- //
-export const CALCULATOR_STATUS: Record<string, StatusMeta> = {
+// `CalculatorView.status` arrives as `string | null`, so unlike the five above
+// there is no shared union to key on. Declared here instead, so the map is still
+// exhaustive over something and an entry cannot quietly go missing.
+export type CalculatorStatus =
+  | "pass"
+  | "sufficient"
+  | "not_required"
+  | "required"
+  | "declining"
+  | "over"
+  | "insufficient";
+
+export const CALCULATOR_STATUS: Record<CalculatorStatus, StatusMeta> = {
   pass: { tone: "verified", label: "Within limit" },
   sufficient: { tone: "verified", label: "Sufficient" },
   not_required: { tone: "neutral", label: "Not required" },
@@ -110,15 +132,29 @@ export const CALCULATOR_STATUS: Record<string, StatusMeta> = {
   insufficient: { tone: "blocking", label: "Insufficient" },
 };
 
-/** Never returns undefined: an enum the backend grew resolves to a visible,
- *  honest fallback rather than crashing the row. Mirrors the FALLBACK_META
- *  pattern already in lib/verification/rule-findings.ts. */
-export function resolveStatus(
-  map: Record<string, StatusMeta>,
+/**
+ * Never returns undefined: an enum the backend grew resolves to a visible,
+ * honest fallback rather than crashing the row. Mirrors the FALLBACK_META
+ * pattern already in lib/verification/rule-findings.ts.
+ *
+ * Generic in the map's key so a caller keeps its own exhaustiveness — passing
+ * `LOAN_FILE_STATUS` does not launder it into `Record<string, StatusMeta>`.
+ * `value` stays `string` on purpose: the point of this function is the value the
+ * backend sent that this build has never heard of.
+ *
+ * `fallbackTone` defaults to `attention` because an unrecognised value is
+ * usually work someone has to look at. It is a parameter because that is wrong
+ * on a numeric headline, where an unknown enum would paint an amber warning over
+ * a figure that has nothing wrong with it — see CalculatorCard.
+ */
+export function resolveStatus<K extends string>(
+  map: Record<K, StatusMeta>,
   value: string | null | undefined,
+  fallbackTone: Tone = "attention",
 ): StatusMeta {
   if (!value) return { tone: "neutral", label: "—" };
-  return map[value] ?? { tone: "attention", label: humanizeUnknown(value) };
+  const known = (map as Record<string, StatusMeta | undefined>)[value];
+  return known ?? { tone: fallbackTone, label: humanizeUnknown(value) };
 }
 
 function humanizeUnknown(value: string): string {

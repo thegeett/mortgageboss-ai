@@ -16,6 +16,7 @@ import {
   type Tone,
   resolveStatus,
 } from "@/lib/status";
+import type { EvaluationOutcome } from "@/lib/types/verification";
 import { describe, expect, it } from "vitest";
 
 const MAPS: Record<string, Record<string, StatusMeta>> = {
@@ -96,12 +97,21 @@ describe("resolveStatus never returns undefined", () => {
       expect(() => resolveStatus(map, "definitely_not_a_status")).not.toThrow();
     }
   });
+
+  it("takes a fallback tone, for surfaces where amber would be a false alarm", () => {
+    // `attention` is right for a row in a work queue and wrong for a headline
+    // figure: a calculator status this build does not recognise is not evidence
+    // that the DTI is bad. CalculatorCard passes `neutral` for that reason.
+    const meta = resolveStatus(CALCULATOR_STATUS, "capped_by_investor", "neutral");
+    expect(meta.tone).toBe("neutral");
+    expect(meta.label).toBe("Capped by investor");
+  });
 });
 
 describe("the wording LP-583 and LP-581 argued out is unchanged", () => {
   // These are the words processors quote in escalations. LP-UI-005 unified the
   // COLOUR vocabulary and nothing else; this test is what keeps that true.
-  it.each([
+  it.each<[EvaluationOutcome, string]>([
     ["open", "Must fix"],
     ["couldnt_check", "Couldn't check"],
     ["needs_review", "Needs review"],
@@ -110,14 +120,14 @@ describe("the wording LP-583 and LP-581 argued out is unchanged", () => {
     ["no_longer_applies", "No longer applies"],
     ["not_applicable", "Not applicable"],
   ])("%s reads %s", (key, label) => {
-    expect(EVALUATION_OUTCOME[key]?.label).toBe(label);
+    expect(EVALUATION_OUTCOME[key].label).toBe(label);
   });
 
   it("keeps `completed` as the processing pipeline's word, not a verification claim", () => {
     // `completed` means extraction finished. This product tracks stated vs
     // verified data as a first-class distinction, and NEEDS_STATUS.verified uses
     // "Verified" for the case where something actually was verified.
-    expect(DOCUMENT_STATUS.completed?.label).toBe("Completed");
-    expect(NEEDS_STATUS.verified?.label).toBe("Verified");
+    expect(DOCUMENT_STATUS.completed.label).toBe("Completed");
+    expect(NEEDS_STATUS.verified.label).toBe("Verified");
   });
 });

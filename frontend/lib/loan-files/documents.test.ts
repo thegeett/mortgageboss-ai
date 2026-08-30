@@ -64,6 +64,14 @@ describe("isTerminalStatus / polling", () => {
     for (const s of terminal) expect(isTerminalStatus(s)).toBe(true);
   });
 
+  it("keeps polling a status this build has never heard of", () => {
+    // The cast is the point: a backend that grows an in-flight status ships it
+    // before the frontend knows the name. Guessing "terminal" strands the
+    // document at a non-terminal state until someone reloads by hand; guessing
+    // "in flight" costs one more request and corrects itself on the next deploy.
+    expect(isTerminalStatus("ocr_pending" as DocumentStatus)).toBe(false);
+  });
+
   it("polls while ANY document is in-progress", () => {
     expect(hasInProgressDocuments([doc({ status: "completed" }), doc({ status: "pending" })])).toBe(
       true,

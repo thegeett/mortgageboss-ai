@@ -50,7 +50,7 @@ function Tile({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
-          <StatusToken meta={resolveStatus(CALCULATOR_STATUS, status)} variant="dot" />
+          <StatusToken meta={resolveStatus(CALCULATOR_STATUS, status, "neutral")} variant="dot" />
           <span className="truncate text-xs font-medium text-foreground-2">{title}</span>
         </div>
         <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">

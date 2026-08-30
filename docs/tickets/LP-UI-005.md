@@ -155,3 +155,125 @@ what SPEC rule 5 asks for anyway.
 - maps deleted from: `lib/loan-files/status.ts`, `lib/loan-files/documents.ts`,
   `lib/loan-files/needs.ts`, `lib/verification/rule-findings.ts`
 - tests updated: `status.test.ts`, `needs.test.ts`
+
+## Review pass — what consolidation traded away
+
+A `/code-review` over the LP-UI epic found six defects. Five of them are one
+story: **unifying the six maps also widened them**. The maps this ticket replaced
+were each exhaustive over their own union — `Record<LoanFileStatus, …>`,
+`Record<DocumentStatus, …>`, `Record<NeedsItemStatus, …>`,
+`Record<NeedsItemPriority, …>`, `Record<EvaluationOutcome, …>` — and
+`lib/status.ts` typed all six as `Record<string, StatusMeta>`. Combined with a
+`resolveStatus` that synthesizes a fallback for any key, that removed the
+compile-time guarantee and the runtime one in the same move.
+
+Two of this ticket's own decisions are reversed below. Both are recorded here
+rather than edited above, because the reasoning that produced them is the useful
+part.
+
+### The exhaustiveness, at both levels
+
+Deleting `withdrawn` from `LOAN_FILE_STATUS` and `waived` from `NEEDS_STATUS`
+left `tsc --noEmit` silent and the whole suite green, after which a withdrawn
+file rendered amber "Withdrawn" through the `attention` fallback. Two separate
+nets had gone:
+
+- **Compile time.** Each map is now typed to its own enum again.
+  `CalculatorView.status` arrives as `string | null` and has no frontend union,
+  so `CalculatorStatus` is declared in `lib/status.ts` and the map is held to it
+  — every map is exhaustive over *something*.
+- **Run time.** `status.test.ts` and `needs.test.ts` had been rewritten to assert
+  through `resolveStatus`, which by construction cannot fail: it returns
+  `{tone: "attention", label: humanizeUnknown(value)}` for anything it does not
+  know, so `expect(meta.label).toBeTruthy()` holds for *every string*. Both now
+  index the map directly, and each gained a second test asserting the map's keys
+  equal the hand-written union list — so a new member cannot be silently skipped
+  by a stale test array.
+
+`resolveStatus` is now generic in the map's key, so passing `LOAN_FILE_STATUS`
+does not launder it back into `Record<string, StatusMeta>` at the call site.
+`value` stays `string`: the value the backend sent that this build has never
+heard of is the entire point of the function.
+
+### Reversed: `spin` as the single source for "still working"
+
+> **Decided** to keep `spin` as the single source for "the pipeline is still
+> working" rather than reintroduce `inProgress`. The two sets are identical
+> today; one flag cannot disagree with itself.
+
+The sets being identical today was true and was not the risk. Two things were:
+
+1. `isTerminalStatus` fed `documentsRefetchInterval`, so an unrecognised status —
+   no entry, therefore no `spin` — counted as **terminal**. A backend that grew
+   an in-flight status (say `ocr_pending`) would have stopped the document list
+   and drawer refetching, leaving the document parked at a non-terminal state
+   until someone reloaded by hand. The pre-consolidation
+   `DOCUMENT_STATUS_META[status].inProgress` would have thrown: loud, not silent.
+2. It coupled polling to a **purely visual** property. `classified` carries its
+   own label rather than "Processing"; dropping its spinner is a reasonable
+   design edit that would have halted polling mid-pipeline.
+
+`documents.ts` now declares an exhaustive `Record<DocumentStatus, boolean>` and
+returns terminal only on an explicit `false`, so an unknown status keeps polling
+— one extra request against a document that never refreshes again. A new
+`DocumentStatus` is now a compile error in two places, `lib/status.ts` and this
+table, which is the correct number: they answer different questions.
+
+### Reversed: `attention` as the universal fallback
+
+> **Assumed** the `attention` tone for an unrecognised enum is right. It is what
+> the asset specifies and it matches the existing `tabForOutcome` fallback.
+
+Right for a row in a work queue, wrong for a headline figure. `CalculatorCard`
+colours the DTI/LTV number by tone, so an unrecognised calculator status painted
+an amber warning across a figure with nothing wrong with it — in a compliance
+tool, a backend enum addition shipping as a visible alarm. `resolveStatus` takes
+a `fallbackTone` (still defaulting to `attention`); the two calculator surfaces
+pass `neutral`. Both, deliberately: one amber dot beside a neutral figure
+reporting the *same* status would be worse than either alone. That also made
+`CalculatorCard`'s `data.status ? … : "text-foreground"` ternary redundant, since
+`neutral` already resolves there.
+
+### The `ai` token, again
+
+`need-card.tsx` still painted its AI-reasoning panel with `primary`. `--info`
+aliases `--primary`, so on a `received` need that panel and the "Documents
+attached" info panel sat one above the other in the same hue meaning different
+things. The 6% fills are near-white either way and were never the distinguishing
+channel — the **glyph** was, and `text-primary/70` against `text-info` is one hue
+at two lightnesses. Now `text-ai`, keyed off the `isAi` local that was already
+computed and unused. A need whose reasoning is not the AI's gets `Info` rather
+than `Sparkles`, because Sparkles is the `ai` tone's glyph in `StatusToken` and
+claiming it for a floor need puts the wrong provenance on the row. The prose is
+untouched — one voice, per LP-634.
+
+This is the third instance of the pattern noted under "Findings raised": a token
+introduced for a case, and the case shipping without it.
+
+### Nit
+
+`calculator-card.tsx` had `const TONE_TEXT` wedged **between two import
+statements** — legal, since imports hoist, but it breaks the file's import block
+and Biome's organiser will not move a statement across it. Moved below, with a
+comment recording its one deliberate difference from `StatusToken`'s `TEXT` map:
+`neutral` is `text-foreground`, not `text-muted-foreground`. A headline figure
+with no status to report is ordinary text; muting it would read as "this number
+matters less", which is the opposite of true on that card.
+
+### Verification
+
+`tsc --noEmit` clean, `biome check` clean over 206 files, 484 tests pass,
+`pnpm build` compiles. Every exhaustiveness fix was mutation-checked against the
+scenario that motivated it:
+
+| mutation | before | after |
+| --- | --- | --- |
+| delete `withdrawn` from `LOAN_FILE_STATUS` | silent, suite green | compile error + 2 test failures |
+| delete `waived` from `NEEDS_STATUS` | silent, suite green | compile error |
+| backend grows an in-flight `DocumentStatus` | silent, polling stops | compile error in `documents.ts` **and** `status.ts` |
+| drop `spin` from `classified` | polling halts mid-pipeline | polling unaffected |
+
+Two tests added for the new behaviour: `resolveStatus` honours `fallbackTone`,
+and `isTerminalStatus` keeps polling a status this build has never heard of. The
+`bg-ai/[0.06]`, `bg-muted/60` and `text-ai` classes were confirmed against a
+Tailwind CLI build rather than assumed.

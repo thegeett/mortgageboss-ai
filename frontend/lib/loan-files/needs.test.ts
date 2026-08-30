@@ -6,10 +6,11 @@ import {
   proposedNeedsCount,
   sourceLabel,
 } from "@/lib/loan-files/needs";
-import { NEEDS_PRIORITY, resolveStatus } from "@/lib/status";
+import { NEEDS_PRIORITY } from "@/lib/status";
 import type {
   NeedsItemDisposition,
   NeedsItemOrigin,
+  NeedsItemPriority,
   NeedsItemPublic,
   NeedsItemStatus,
 } from "@/lib/types/needs-item";
@@ -125,10 +126,19 @@ describe("categoryLabel", () => {
 });
 
 describe("NEEDS_PRIORITY", () => {
-  it("has a label + classes for each priority", () => {
-    for (const priority of ["blocking", "standard", "low"] as const) {
-      expect(resolveStatus(NEEDS_PRIORITY, priority).label).toBeTruthy();
-      expect(resolveStatus(NEEDS_PRIORITY, priority).tone).toBeTruthy();
+  const ALL_PRIORITIES: NeedsItemPriority[] = ["blocking", "standard", "low"];
+
+  it("has an entry for every priority", () => {
+    for (const priority of ALL_PRIORITIES) {
+      // Directly, not via `resolveStatus` — see the note in status.test.ts: the
+      // fallback makes the same assertion hold for any string at all.
+      const meta = NEEDS_PRIORITY[priority];
+      expect(meta, `NEEDS_PRIORITY has no entry for "${priority}"`).toBeDefined();
+      expect(meta?.label.trim()).toBeTruthy();
     }
+  });
+
+  it("ALL_PRIORITIES is the whole union", () => {
+    expect(new Set(Object.keys(NEEDS_PRIORITY))).toEqual(new Set(ALL_PRIORITIES));
   });
 });

@@ -26,7 +26,13 @@ import { formatMoneyPrecise, humanize } from "@/lib/format";
 import { CALCULATOR_STATUS, type Tone, resolveStatus } from "@/lib/status";
 import type { CalcLine, CalculatorName, CalculatorView } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
+import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
+import { useState } from "react";
 
+// StatusToken's own TEXT map with ONE deliberate difference: `neutral` is
+// `text-foreground`, not `text-muted-foreground`. A headline figure with no
+// status to report is ordinary text; muting it would read as "this number is
+// less important", which is the opposite of true on this card.
 const TONE_TEXT: Record<Tone, string> = {
   blocking: "text-destructive",
   attention: "text-warning",
@@ -35,8 +41,6 @@ const TONE_TEXT: Record<Tone, string> = {
   neutral: "text-foreground",
   ai: "text-ai",
 };
-import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
-import { useState } from "react";
 
 export function CalculatorCard({
   fileId,
@@ -105,9 +109,12 @@ function CalculatorBody({
     );
   };
 
-  const status = resolveStatus(CALCULATOR_STATUS, data.status);
-  // `neutral` is the no-status case; a headline figure reads as ordinary text, not muted.
-  const tone = data.status ? TONE_TEXT[status.tone] : "text-foreground";
+  // Falls back to `neutral`, not the default `attention`: a calculator status
+  // this build does not recognise is not evidence of a problem, and the default
+  // would paint an amber warning across a DTI/LTV figure that is perfectly fine.
+  // `neutral` also covers the no-status case, so no ternary is needed.
+  const status = resolveStatus(CALCULATOR_STATUS, data.status, "neutral");
+  const tone = TONE_TEXT[status.tone];
 
   return (
     <div className="space-y-5">

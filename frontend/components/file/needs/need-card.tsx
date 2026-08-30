@@ -8,7 +8,7 @@ import { isProposed, sourceLabel } from "@/lib/loan-files/needs";
 import { NEEDS_PRIORITY, NEEDS_STATUS, resolveStatus } from "@/lib/status";
 import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { cn } from "@/lib/utils";
-import { FileCheck2, Sparkles } from "lucide-react";
+import { FileCheck2, Info, Sparkles } from "lucide-react";
 
 /**
  * One need on the dashboard (LP-70). Shows its state (a colored dot + pill), its
@@ -74,9 +74,27 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
           PIPELINE when what makes a claim checkable is the CLAIM. "The application states a $438/month
           lease with Ally Financial" is verifiable in one glance at the 1003; `Revolving liability`
           plus a trust pill asked the reader to audit us instead of the file. */}
+      {/* PROVENANCE, not status. `--info` aliases `--primary`, so painting this
+          panel `primary` made it identical to the "Documents attached" info panel
+          below — on a `received` need the two sat one above the other in the same
+          colour, meaning different things. The `ai` token exists for exactly this
+          and `isAi` was already computed here. A need whose reasoning is NOT the
+          AI's gets the neutral inset and the neutral glyph: Sparkles is the `ai`
+          tone's glyph in StatusToken, and claiming it for a floor need would put
+          the wrong provenance on the row. The PROSE is untouched either way — one
+          voice, per LP-634. */}
       {(need.explanation ?? need.reasoning) && (
-        <div className="mt-2.5 ml-4 flex gap-2 rounded-md bg-primary/[0.04] px-3 py-2">
-          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/70" aria-hidden />
+        <div
+          className={cn(
+            "mt-2.5 ml-4 flex gap-2 rounded-md px-3 py-2",
+            isAi ? "bg-ai/[0.06]" : "bg-muted/60",
+          )}
+        >
+          {isAi ? (
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ai" aria-hidden />
+          ) : (
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          )}
           <p className="text-xs leading-relaxed text-foreground-2">
             <span className="sr-only">Why this is needed: </span>
             {need.explanation ?? need.reasoning}

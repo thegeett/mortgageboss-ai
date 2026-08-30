@@ -1,4 +1,3 @@
-import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 /**
  * Document presentation + logic helpers (LP-43).
  *
@@ -16,12 +15,33 @@ import type {
   Transaction,
 } from "@/lib/types/document";
 
+/**
+ * Whether the pipeline can still move a document out of this status on its own.
+ *
+ * Declared here rather than read off `StatusMeta.spin`: polling is BEHAVIOUR and
+ * `spin` is decoration, and the two are free to diverge — dropping the spinner
+ * from `classified` (which already carries its own label, not "Processing")
+ * would silently halt polling mid-pipeline. Exhaustive over `DocumentStatus`, so
+ * a status the backend grows is a compile error here rather than a document that
+ * quietly stops refreshing.
+ */
+const IN_FLIGHT: Record<DocumentStatus, boolean> = {
+  pending: true,
+  classifying: true,
+  classified: true,
+  extracting: true,
+  completed: false,
+  needs_review: false,
+  failed: false,
+};
+
 /** A document is settled once the pipeline can no longer change its status. */
 export function isTerminalStatus(status: DocumentStatus): boolean {
-  // `spin` marks the in-flight pipeline states and nothing else (LP-UI-005's
-  // StatusMeta documents it that way), so it is the same set the old
-  // `inProgress` flag carried — one source now instead of two that could drift.
-  return !resolveStatus(DOCUMENT_STATUS, status).spin;
+  // A value not in the table — a status the backend grew before this build knew
+  // of it — counts as IN FLIGHT. Polling one state longer than necessary costs a
+  // request; stopping early strands the document at a non-terminal status until
+  // someone reloads the page by hand.
+  return (IN_FLIGHT as Record<string, boolean | undefined>)[status] === false;
 }
 
 /** True if ANY document is still being processed (→ keep polling). */
