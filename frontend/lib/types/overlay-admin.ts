@@ -14,11 +14,21 @@ export interface OverlayOverrideView {
   reason: string | null;
 }
 
+export interface OverlayAuditChange {
+  field: string;
+  /** The rule's description, or null for a rule the catalog no longer carries. */
+  field_label: string | null;
+  from: string | null;
+  to: string | null;
+}
+
 export interface OverlayAuditEntry {
   at: string;
   actor_user_id: string | null;
+  /** Resolved for display (LP-UI-026); null when the actor is unknown. */
+  actor_name: string | null;
   reason: string;
-  changes: { field: string; from: string | null; to: string | null }[];
+  changes: OverlayAuditChange[];
 }
 
 /**

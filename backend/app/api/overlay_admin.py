@@ -21,6 +21,7 @@ from app.schemas.overlay_admin import (
 from app.services.lenders import list_lenders
 from app.services.overlay_admin import (
     UnknownOverlayRuleError,
+    attach_actor_names,
     build_lender_summary,
     build_overlay_view,
     get_lender,
@@ -58,7 +59,7 @@ async def get_overlay(
     lender = await get_lender(db, company_id=company_id, lender_id=lender_id)
     if lender is None:
         raise _NOT_FOUND
-    return build_overlay_view(lender)
+    return await attach_actor_names(db, build_overlay_view(lender))
 
 
 @router.put("/{lender_id}/overlay", response_model=LenderOverlayView)
@@ -85,4 +86,4 @@ async def put_overlay(
     if lender is None:
         raise _NOT_FOUND
     await db.commit()
-    return build_overlay_view(lender)
+    return await attach_actor_names(db, build_overlay_view(lender))

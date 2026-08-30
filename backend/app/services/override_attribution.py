@@ -43,6 +43,19 @@ class OverrideAttribution(BaseModel):
     note: str | None = None
 
 
+async def resolve_user_names(db: AsyncSession, ids: set[UUID]) -> dict[UUID, str]:
+    """Display names for a set of actors, in one query.
+
+    Shared because two surfaces need the same answer — the calculator lines'
+    override attribution and the overlay editor's audit trail (LP-UI-026) — and
+    two lookups would eventually give one actor two names.
+    """
+    if not ids:
+        return {}
+    users = (await db.scalars(select(User).where(User.id.in_(ids)))).all()
+    return {user.id: f"{user.first_name} {user.last_name}".strip() or user.email for user in users}
+
+
 async def attribute_overrides(
     db: AsyncSession, rows: list[_OverrideRow]
 ) -> dict[str, OverrideAttribution]:
@@ -51,13 +64,9 @@ async def attribute_overrides(
     One query for every actor rather than one per row: a DTI with eight
     overridden lines would otherwise issue eight lookups to render one panel.
     """
-    actor_ids = {row.actor_user_id for row in rows if row.actor_user_id is not None}
-    names: dict[UUID, str] = {}
-    if actor_ids:
-        users = (await db.scalars(select(User).where(User.id.in_(actor_ids)))).all()
-        names = {
-            user.id: f"{user.first_name} {user.last_name}".strip() or user.email for user in users
-        }
+    names = await resolve_user_names(
+        db, {row.actor_user_id for row in rows if row.actor_user_id is not None}
+    )
 
     return {
         row.field_key: OverrideAttribution(

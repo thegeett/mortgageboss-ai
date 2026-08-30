@@ -28,13 +28,37 @@ class OverlayOverrideView(BaseModel):
     reason: str | None
 
 
+class OverlayAuditChange(BaseModel):
+    """One rule's movement in an edit, with the words to say it (LP-UI-026).
+
+    The STORED shape is unchanged — `{field, from, to}` in the JSON blob, as it
+    has always been. This adds the label on the way out: `field` is a rule id, and
+    a history that reads "conv.income.credit_doc_age: 90 → 120" is a diff dump
+    wearing a sentence's clothes. The description comes from the base rule index
+    the editor already resolves against.
+    """
+
+    field: str
+    #: The rule's human description, or `None` for a rule the catalog no longer
+    #: has — a real case, since an audit outlives the rule it refers to.
+    field_label: str | None = None
+    from_value: str | None = Field(default=None, alias="from")
+    to_value: str | None = Field(default=None, alias="to")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class OverlayAuditEntry(BaseModel):
     """One audit record of an overlay edit (from→to values, who, when, why)."""
 
     at: str  # ISO-8601
     actor_user_id: str | None
+    #: Who made the change, resolved for display (LP-UI-026). `None` when the
+    #: actor is unknown — never a placeholder, which in an audit trail reads as a
+    #: name nobody checked.
+    actor_name: str | None = None
     reason: str
-    changes: list[dict[str, object]]  # [{field: rule_id, from, to}]
+    changes: list[OverlayAuditChange]
 
 
 class OverlayLenderSummary(BaseModel):
