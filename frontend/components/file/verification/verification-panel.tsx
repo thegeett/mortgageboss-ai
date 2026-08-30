@@ -10,6 +10,7 @@
  * wording / source location). The DTI/LTV calculators sit alongside it on the tab.
  */
 
+import { CalculatorsSection } from "@/components/file/calculators/calculators-section";
 import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
@@ -47,6 +48,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Lock, Play, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGGRESSION_META, AggressionDial } from "./aggression-dial";
+import { ThoroughnessControl } from "./thoroughness-control";
 
 /** The legible consequence of moving the dial (the in-scope/clear↔blocked change). */
 interface Consequence {
@@ -237,10 +239,24 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button size="sm" className="gap-1.5" disabled={running} onClick={triggerRun}>
-            {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-            {running ? "Running…" : "Run verification"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Beside Run verification, where the mockup puts it (LP-UI-046).
+                It was only inside the Old findings tab — the one tab a processor
+                has no reason to open. */}
+            {data && (
+              <ThoroughnessControl
+                aggression={data.aggression}
+                activeLevel={activeLevel}
+                shownAt={(level) => shownCount(data, level)}
+                onPick={pickLevel}
+                busy={dialBusy}
+              />
+            )}
+            <Button size="sm" className="gap-1.5" disabled={running} onClick={triggerRun}>
+              {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {running ? "Running…" : "Run verification"}
+            </Button>
+          </div>
           {/* LP-590 — WHICH phase, and where it sits in the sequence. A run takes about six and a
               half minutes; a bare spinner for that long is indistinguishable from a hung worker.
               A position rather than a percentage, deliberately: stage A scales with the file's
@@ -276,6 +292,13 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
           )}
         </div>
       </header>
+
+      {/* The calculators sit between the run controls and the outcomes, as the
+          mockup has them (LP-UI-046). They used to be rendered by the ROUTE
+          above this whole section, which put the run controls and the
+          thoroughness dial ~1,400px down the page — below the fold on a laptop,
+          which is the same as not having them. */}
+      <CalculatorsSection fileId={fileId} />
       <div aria-busy={isPending}>
         {isPending ? (
           <>

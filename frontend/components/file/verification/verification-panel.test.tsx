@@ -20,6 +20,13 @@ const useVerificationMock = vi.fn();
 const useNeedsMock = vi.fn(() => ({ data: [] }));
 const invalidateQueries = vi.fn();
 
+// The panel now renders the calculator strip between the run controls and the
+// outcomes (LP-UI-046). It has its own tests and its own hooks; stubbing it here
+// keeps this file about the panel.
+vi.mock("@/components/file/calculators/calculators-section", () => ({
+  CalculatorsSection: () => null,
+}));
+
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
   useRunVerification: () => useRunVerificationMock(),
