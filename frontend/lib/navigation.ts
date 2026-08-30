@@ -31,8 +31,11 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
+  // "Loan Files" is deliberately absent (LP-UI-011). It pointed at a stub that
+  // said the real thing arrived in Epic 4; Epic 4 arrived, and the dashboard is
+  // that list. Two rail destinations meaning one screen is the duplication this
+  // ticket removes — `/loan-files` now redirects here.
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Loan Files", href: "/loan-files", icon: FolderOpen },
   { label: "Administration", href: "/admin", icon: ShieldCheck, requiredRole: "admin" },
 ];
 
@@ -86,14 +89,6 @@ const ADMIN_SECTION: ContextSection = {
   ],
 };
 
-const PIPELINE_SECTION: ContextSection = {
-  title: "Pipeline",
-  items: [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "All loan files", href: "/loan-files", icon: FolderOpen },
-  ],
-};
-
 /**
  * Which of `hrefs` is the CURRENT one for `pathname` — the longest match, or null.
  *
@@ -144,8 +139,8 @@ export function contextSection(pathname: string): ContextSection | null {
   const fileId = loanFileIdFromPath(pathname);
   if (fileId) return fileSections(fileId);
   if (pathname.startsWith("/admin")) return ADMIN_SECTION;
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/loan-files")) {
-    return PIPELINE_SECTION;
-  }
+  // The dashboard has no context column yet. Its contents are the saved views
+  // from LP-UI-012; until those exist the column would hold a single link to the
+  // screen you are already on, and an empty column is worse than none.
   return null;
 }

@@ -15617,3 +15617,46 @@ their own copy of the palette.
 **Related:** LP-UI-001, LP-UI-002 (the undefined `danger`), LP-UI-004 (the codemod that makes the
 rule true), LP-UI-005 (one status vocabulary on top of these tokens), LP-5 (the palette this
 replaces), `docs/design/ledger/SPEC.md` rules 1, 2, 3 and 8.
+
+## ADR-390
+
+**A route that exists only to say "not built yet" is deleted, not decorated; `/` and
+`/loan-files` redirect to the dashboard.**
+
+*Context.* Two routes in the product were placeholders that had outlived their purpose. `/loan-files`
+was a stub whose empty state read "Loan-file management arrives in the next phase (Epic 4). This is
+where your files will live" — written when that was true, and still shipping long after Epic 4
+delivered the dashboard, its search, its filters and its pipeline table. So the rail offered two
+destinations, one of which was the real list and one of which was a promise that the real list was
+coming. And `/`, the first URL anyone types, was a 199-line developer splash: a backend health
+check, dependency rows for Postgres and Redis, and a link onward. It was never a processor screen
+and was deliberately never designed, so the first thing a user saw on opening the product was
+diagnostics about the product.
+
+*Decision.* Neither route keeps a page. `/loan-files` redirects to `/dashboard`, because the
+dashboard *is* the loan-file list and a bookmark from before should still land somewhere useful.
+`/` redirects to `/dashboard` as well, and the "Loan Files" rail item is gone. The health page is
+**moved rather than deleted** — it is genuinely useful — to `/dev/health`, beside
+`/dev/extraction-bench`, which is already where developer-only surfaces live.
+
+Sending `/` to `/dashboard` rather than to `/login` is deliberate and keeps one rule rather than
+two: the protected layout is the only thing that decides who is allowed in, and it already sends an
+unauthenticated visitor to `/login` once the silent refresh settles. Routing `/` straight to
+`/login` would duplicate that judgement in a second place and would bounce an already-signed-in
+user through a login screen they do not need.
+
+*Consequences.* Every entry point converges on one screen, which is the screen a processor actually
+starts their day on. The cost is that `/dev/health` now requires a session, where the splash did
+not — a developer checking whether the stack is up has to be signed in, or use the API's own
+unauthenticated `/health`, which is the better tool for that anyway. The dashboard also loses its
+context column for now: it held exactly one link, to the screen you were already on, and an empty
+216px column is worse than none. Its real contents are the saved views in LP-UI-012.
+
+*Applies to.* Any future route added before the feature behind it exists. The rule the two
+placeholders broke is the same one: a navigation item that leads to a description of unbuilt work
+costs a click and returns nothing, and it ages badly precisely because nobody revisits it once the
+work ships.
+
+**Related:** LP-UI-011, LP-UI-008 (the rail and context column these feed), LP-UI-012 (the saved
+views that give the dashboard its column back), LP-27 (which added both placeholders, correctly at
+the time), `docs/design/ledger/AMENDMENTS.md`.

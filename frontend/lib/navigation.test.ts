@@ -8,21 +8,24 @@ import {
 import { describe, expect, it } from "vitest";
 
 describe("visibleNavItems", () => {
-  it("shows processors only the non-gated items (Dashboard, Loan Files)", () => {
+  it("shows processors only the non-gated item (Dashboard)", () => {
     const labels = visibleNavItems("processor").map((item) => item.label);
-    expect(labels).toEqual(["Dashboard", "Loan Files"]);
+    // "Loan Files" was removed in LP-UI-011: it pointed at a stub, and the
+    // dashboard is the list. /loan-files now redirects here.
+    expect(labels).toEqual(["Dashboard"]);
+    expect(labels).not.toContain("Loan Files");
     expect(labels).not.toContain("Administration");
   });
 
   it("shows admins the admin-gated item too", () => {
     const labels = visibleNavItems("admin").map((item) => item.label);
     expect(labels).toContain("Administration");
-    expect(labels).toEqual(["Dashboard", "Loan Files", "Administration"]);
+    expect(labels).toEqual(["Dashboard", "Administration"]);
   });
 
   it("hides role-gated items when the role is unknown", () => {
     const labels = visibleNavItems(undefined).map((item) => item.label);
-    expect(labels).toEqual(["Dashboard", "Loan Files"]);
+    expect(labels).toEqual(["Dashboard"]);
   });
 });
 
@@ -95,10 +98,12 @@ describe("contextSection", () => {
     expect(contextSection("/loan-files/abc/documents")?.title).toBe("File");
   });
 
-  it("treats /loan-files/new as the pipeline, not a file", () => {
+  it("treats /loan-files/new as NOT a file", () => {
     // `new` is the only non-id segment under /loan-files today; every other child
-    // of the route group lives under [id].
-    expect(contextSection("/loan-files/new")?.title).toBe("Pipeline");
+    // of the route group lives under [id]. It resolves to no section rather than
+    // to "File" — the pipeline section went with the stub in LP-UI-011, and its
+    // replacement is LP-UI-012's saved views.
+    expect(contextSection("/loan-files/new")).toBeNull();
   });
 
   it("shows nothing on a route with no section", () => {
