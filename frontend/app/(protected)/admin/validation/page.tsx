@@ -165,7 +165,7 @@ function Filter({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-border bg-card px-1.5 py-0.5 text-xs"
+        className="rounded border border-input bg-card px-1.5 py-0.5 text-field md:text-xs"
       >
         {options.map((o) => (
           <option key={o} value={o}>
@@ -272,7 +272,7 @@ function ItemRow({ item }: { item: InventoryItem }) {
                 onChange={(e) => setValue(e.target.value)}
                 aria-label="Corrected value"
                 placeholder="new value"
-                className="h-7 w-28 text-xs"
+                className="h-7 w-28 md:text-xs"
               />
             )}
             <Input
@@ -280,7 +280,7 @@ function ItemRow({ item }: { item: InventoryItem }) {
               onChange={(e) => setNote(e.target.value)}
               aria-label="Verdict note"
               placeholder={mode === "remove" ? "why remove?" : "note (optional)"}
-              className="h-7 w-56 text-xs"
+              className="h-7 w-56 md:text-xs"
             />
             <Button
               className="text-xs"
@@ -323,14 +323,14 @@ function AddNew() {
         onChange={(e) => setTitle(e.target.value)}
         aria-label="New rule title"
         placeholder="The missing rule / check"
-        className="h-8 text-sm"
+        className="h-8"
       />
       <Input
         value={note}
         onChange={(e) => setNote(e.target.value)}
         aria-label="New rule description"
         placeholder="What it should check (Priya's words)"
-        className="h-8 text-sm"
+        className="h-8"
       />
       <div className="flex items-center gap-1.5">
         <Button

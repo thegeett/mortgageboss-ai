@@ -144,7 +144,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
                   placeholder="e.g. conv.dti.back_end_max"
                   aria-label="Rule id"
                   onChange={(e) => setRow(row.uid, { rule_id: e.target.value })}
-                  className="mt-0.5 h-8 font-mono text-xs"
+                  className="mt-0.5 h-8 font-mono md:text-xs"
                 />
                 {/* Effect-legible: investor base → lender effective. */}
                 {base !== null && (
@@ -161,7 +161,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
                   inputMode="decimal"
                   aria-label="Override value"
                   onChange={(e) => setRow(row.uid, { value: e.target.value })}
-                  className="mt-0.5 h-8 text-right text-sm tabular-nums"
+                  className="mt-0.5 h-8 text-right tabular-nums"
                 />
               </div>
               <div className="sm:col-span-4">
@@ -171,7 +171,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
                   placeholder="Why this lender deviates"
                   aria-label="Override reason"
                   onChange={(e) => setRow(row.uid, { reason: e.target.value })}
-                  className="mt-0.5 h-8 text-sm"
+                  className="mt-0.5 h-8"
                 />
               </div>
               <div className="flex items-end sm:col-span-1">
@@ -212,7 +212,7 @@ function OverlayEditor({ view, lenderId }: { view: LenderOverlayView; lenderId: 
           value={reason}
           placeholder="Required — recorded in the audit trail"
           onChange={(e) => setReason(e.target.value)}
-          className="h-9 text-sm"
+          className="h-9"
         />
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end">

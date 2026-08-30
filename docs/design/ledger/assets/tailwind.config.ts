@@ -12,7 +12,9 @@ import animate from "tailwindcss-animate";
  *  - `input` is now the CONTROL border at >=3:1; `border` stays the hairline.
  *  - IBM Plex replaces the bare system stack; the variables come from next/font.
  *  - Radius drops to 5px controls / 8px containers.
- *  - A type scale with 13px as the workhorse, and row-height utilities.
+ *  - A type scale with 13px as the workhorse, and row-height utilities. It
+ *    REPLACES the stock ramp (theme level, not extend), so a size above 3xl
+ *    does not exist — same discipline as the weight cap.
  */
 
 /** hsl(var(--x)) so opacity modifiers (bg-warning/10) keep working. */
@@ -44,22 +46,39 @@ export default {
       medium: "500",
       semibold: "600",
     },
+    // fontSize sits at theme level for the SAME reason as fontWeight above, and
+    // was left under `extend` on the first pass — so `text-3xl` and up still
+    // resolved to Tailwind's stock ramp while xs..2xl were retuned, and the scale
+    // jumped from a tracked 26px straight to an untracked 30px. Replacing the
+    // scale means a size not listed here does not exist: `text-4xl` compiles to
+    // nothing, which is the point, and tailwind.config.test.ts pins the set.
+    fontSize: {
+      // The dense scale. `sm` (13px) is the workhorse; `label` is the uppercase eyebrow.
+      label: ["0.65625rem", { lineHeight: "1rem", letterSpacing: "0.09em", fontWeight: "600" }],
+      xs: ["0.71875rem", { lineHeight: "1.05rem" }],
+      sm: ["0.8125rem", { lineHeight: "1.2rem" }],
+      base: ["0.875rem", { lineHeight: "1.3rem" }],
+      // 16px, and it must not drop below it. Mobile Safari zooms the viewport
+      // whenever a focused control computes under 16px and never zooms back out,
+      // so every form control wears `text-field md:text-sm`. The usual guard is
+      // `text-base md:text-sm`, which does NOT work here: `base` is 14px in this
+      // scale. Named rather than borrowed from `lg` so the reason travels with it.
+      field: ["1rem", { lineHeight: "1.25rem" }],
+      lg: ["1rem", { lineHeight: "1.5rem", letterSpacing: "-0.01em" }],
+      xl: ["1.25rem", { lineHeight: "1.6rem", letterSpacing: "-0.018em" }],
+      "2xl": ["1.625rem", { lineHeight: "1.95rem", letterSpacing: "-0.022em" }],
+      // Stock size and line-height (the 1.2 ratio the rest of the scale uses is
+      // already right); what it was missing is the tracking. Six live sites — the
+      // dashboard stat numbers, the marketing hero, and the four DTI/LTV headline
+      // figures — so it is part of the scale, not an escape hatch above it.
+      "3xl": ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.025em" }],
+    },
     extend: {
       fontFamily: {
         // Set by next/font in app/layout.tsx — see assets/fonts.ts.
         sans: ["var(--font-plex-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-plex-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
         serif: ["var(--font-plex-serif)", "Georgia", "serif"],
-      },
-      fontSize: {
-        // The dense scale. `sm` (13px) is the workhorse; `label` is the uppercase eyebrow.
-        label: ["0.65625rem", { lineHeight: "1rem", letterSpacing: "0.09em", fontWeight: "600" }],
-        xs: ["0.71875rem", { lineHeight: "1.05rem" }],
-        sm: ["0.8125rem", { lineHeight: "1.2rem" }],
-        base: ["0.875rem", { lineHeight: "1.3rem" }],
-        lg: ["1rem", { lineHeight: "1.5rem", letterSpacing: "-0.01em" }],
-        xl: ["1.25rem", { lineHeight: "1.6rem", letterSpacing: "-0.018em" }],
-        "2xl": ["1.625rem", { lineHeight: "1.95rem", letterSpacing: "-0.022em" }],
       },
       colors: {
         background: token("background"),
@@ -95,8 +114,14 @@ export default {
       spacing: { row: "var(--row-h)", cell: "var(--row-px)" },
       width: { rail: "var(--rail-w)", nav: "var(--nav-w)", ctx: "var(--ctx-w)" },
       keyframes: {
-        "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
-        "accordion-up": { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
+        "accordion-down": {
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
+        },
+        "accordion-up": {
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",

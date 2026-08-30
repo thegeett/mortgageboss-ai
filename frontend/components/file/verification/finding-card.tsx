@@ -459,7 +459,6 @@ export function FindingCard({
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     rows={2}
-                    className="text-sm"
                     placeholder={FORM_META[form].placeholder}
                   />
                   <div className="flex items-center gap-1.5">

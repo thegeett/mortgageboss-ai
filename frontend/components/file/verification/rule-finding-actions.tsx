@@ -241,7 +241,7 @@ export function RuleFindingActions({
             placeholder={meta.placeholder}
             rows={2}
             className={cn(
-              "w-full rounded border border-border px-2 py-1 text-xs",
+              "w-full rounded border border-input px-2 py-1 text-field md:text-xs",
               "focus:border-primary focus:outline-none",
             )}
           />

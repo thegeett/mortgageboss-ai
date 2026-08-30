@@ -371,7 +371,7 @@ function LineRow({
               if (e.key === "Enter") onSave(item.key, draft);
               if (e.key === "Escape") onCancel();
             }}
-            className="h-8 w-32 text-right text-sm tabular-nums"
+            className="h-8 w-32 text-right tabular-nums"
           />
           <Button
             size="icon"

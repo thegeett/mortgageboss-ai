@@ -151,7 +151,7 @@ export default function ExtractionBenchPage() {
             onChange={(e) => setRoot(e.target.value)}
             placeholder="/path/to/real/documents"
             disabled={running}
-            className="flex-1 rounded-md border border-input px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-muted"
+            className="flex-1 rounded-md border border-input px-3 py-2 text-field text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-muted md:text-sm"
           />
           <button
             type="button"

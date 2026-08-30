@@ -7,7 +7,9 @@
  *   <html className={`${plexSans.variable} ${plexMono.variable} ${plexSerif.variable}`}>
  *
  * Weights are deliberately capped at 600. There is no 700 in this system.
- * Serif is loaded for ONE use: text quoted verbatim from a document.
+ * Serif is loaded for ONE use: text quoted verbatim from a document. Both styles
+ * are loaded: an italic-only face leaves upright `font-serif` with nothing to
+ * bind to, and it falls back to Georgia silently.
  */
 import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Serif } from "next/font/google";
 
@@ -28,7 +30,7 @@ export const plexMono = IBM_Plex_Mono({
 export const plexSerif = IBM_Plex_Serif({
   subsets: ["latin"],
   weight: ["400"],
-  style: ["italic"],
+  style: ["normal", "italic"],
   variable: "--font-plex-serif",
   display: "swap",
 });

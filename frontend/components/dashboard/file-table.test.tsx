@@ -202,4 +202,68 @@ describe("FileTable — grid keyboard navigation (LP-UI-007)", () => {
     // becomes unreachable by keyboard entirely.
     expect(rows().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1);
   });
+
+  it("does not answer keys pressed on the row-actions button", () => {
+    // The handler is bound on the <tr>, so a keydown on the button bubbles to it.
+    // Unhandled, the row's Enter case ran `preventDefault()` + navigate, so the
+    // ONLY keyboard route to the menu — ArrowRight, since the button is
+    // tabIndex={-1} — led to the loan file instead. Delete file was unreachable.
+    const { onSelect } = renderTable({ files: files(3) });
+    fireEvent.keyDown(row(0), { key: "ArrowRight" });
+    const trigger = screen.getAllByRole("button", { name: /^Actions for / })[0];
+    if (!trigger) throw new Error("no row-actions trigger rendered");
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("does not move the roving stop out from under the focused button", () => {
+    renderTable({ files: files(3) });
+    fireEvent.keyDown(row(0), { key: "ArrowRight" });
+    const trigger = screen.getAllByRole("button", { name: /^Actions for / })[0];
+    if (!trigger) throw new Error("no row-actions trigger rendered");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(activeRow()).toBe(row(0));
+  });
+
+  it("ArrowLeft from the button returns focus to its row", () => {
+    // `move()` now early-returns when the index is unchanged, and the row it
+    // returns to is almost always already the active one — so this path focuses
+    // the row directly rather than relying on a state change.
+    renderTable({ files: files(3) });
+    fireEvent.keyDown(row(0), { key: "ArrowRight" });
+    const trigger = screen.getAllByRole("button", { name: /^Actions for / })[0];
+    if (!trigger) throw new Error("no row-actions trigger rendered");
+    fireEvent.keyDown(trigger, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(row(0));
+  });
+
+  it("does not steal focus after a no-op move followed by a refetch", () => {
+    // `move()` used to arm `shouldFocus` before `setActive`. When the target
+    // equalled the current index — ArrowUp on row 0, End on the last row, both
+    // reachable by holding a key — React bailed out, the effect never ran to
+    // clear the flag, and the NEXT `active` change (the `[count]` clamp on a
+    // refetch) pulled focus onto a row. That is the yank the hook exists to
+    // prevent: a processor typing in the search box loses the caret.
+    const props = {
+      isPending: false,
+      isError: false,
+      isFiltered: false,
+      onSelect: vi.fn(),
+      onNewFile: vi.fn(),
+    };
+    const { rerender } = render(<FileTable files={files(6)} {...props} />);
+    fireEvent.keyDown(row(0), { key: "End" }); // real move: lands on the last row
+    fireEvent.keyDown(activeRow(), { key: "End" }); // no-op: already there
+
+    const search = document.createElement("input");
+    document.body.appendChild(search);
+    search.focus();
+    expect(document.activeElement).toBe(search);
+
+    rerender(<FileTable files={files(2)} {...props} isFiltered />);
+    expect(document.activeElement).toBe(search);
+    search.remove();
+  });
 });

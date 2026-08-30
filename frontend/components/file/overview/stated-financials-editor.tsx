@@ -231,7 +231,7 @@ export function StatedFinancialsEditor({
                 id={`${termsId}-${key}`}
                 value={terms[key]}
                 onChange={(e) => setTerms((t) => ({ ...t, [key]: e.target.value }))}
-                className="h-8 text-sm"
+                className="h-8"
               />
             </label>
           ))}

@@ -86,7 +86,7 @@ export function EditableRow({
               id={`${rowId}-${f.key}`}
               value={(values[f.key] as string | null) ?? ""}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              className="h-8 text-sm"
+              className="h-8"
             >
               <option value="">—</option>
               {(f.options ?? []).map((o) => (
@@ -101,7 +101,7 @@ export function EditableRow({
               value={(values[f.key] as string | null) ?? ""}
               inputMode={f.kind === "money" || f.kind === "int" ? "decimal" : "text"}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              className="h-8 text-sm"
+              className="h-8"
             />
           )}
         </label>

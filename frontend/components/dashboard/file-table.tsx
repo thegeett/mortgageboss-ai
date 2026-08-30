@@ -54,13 +54,30 @@ function useRovingRows(count: number, onActivate: (index: number) => void) {
     rowRefs.current[active]?.focus();
   }, [active]);
 
-  const move = useCallback((to: number) => {
-    shouldFocus.current = true;
-    setActive(to);
-  }, []);
+  const move = useCallback(
+    (to: number) => {
+      // Arm the focus steal ONLY when the index actually changes. React bails out
+      // of a same-value setState, so on ArrowUp at row 0 or ArrowDown/End at the
+      // last row — all reachable by holding a key — the `[active]` effect never
+      // ran to clear the flag. It stayed armed until the next unrelated `active`
+      // change, i.e. the `[count]` clamp on a refetch or a filter, which then
+      // pulled focus onto a row: exactly the yank the comment above forbids.
+      if (to === active) return;
+      shouldFocus.current = true;
+      setActive(to);
+    },
+    [active],
+  );
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTableRowElement>, index: number) => {
+      // Bound on the <tr>, so every keydown from inside a cell bubbles here.
+      // Without this check the row-actions button answered Enter by navigating to
+      // the loan file instead of opening its menu — and since that button is
+      // `tabIndex={-1}`, ArrowRight is the ONLY way to reach it, which made
+      // "Delete file" unreachable by keyboard entirely. Arrow/Home/End likewise
+      // moved the roving stop out from under the focused button.
+      if (event.target !== event.currentTarget) return;
       switch (event.key) {
         case "ArrowDown":
           event.preventDefault();
@@ -99,15 +116,16 @@ function useRovingRows(count: number, onActivate: (index: number) => void) {
   );
 
   /** ArrowLeft or Escape inside a cell widget returns focus to its row. */
-  const onCellKeyDown = useCallback(
-    (event: React.KeyboardEvent, index: number) => {
-      if (event.key !== "ArrowLeft" && event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      move(index);
-    },
-    [move],
-  );
+  const onCellKeyDown = useCallback((event: React.KeyboardEvent, index: number) => {
+    if (event.key !== "ArrowLeft" && event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Focuses the row DIRECTLY rather than going through `move`. The row is
+    // almost always already the active one — you arrowed right from it — so a
+    // state-change-driven focus would be a no-op precisely when it is needed.
+    setActive(index);
+    rowRefs.current[index]?.focus();
+  }, []);
 
   return { active, rowRefs, onKeyDown, onCellKeyDown, setActive };
 }

@@ -98,7 +98,9 @@ TableHeader.displayName = "TableHeader";
 const TableBody = React.forwardRef<
   HTMLTableSectionElement,
   React.HTMLAttributes<HTMLTableSectionElement>
->(({ className, ...props }, ref) => <tbody ref={ref} className={cn(className)} {...props} />);
+>(({ className, ...props }, ref) => (
+  <tbody ref={ref} className={cn("[&>tr:last-child>*]:border-b-0", className)} {...props} />
+));
 TableBody.displayName = "TableBody";
 
 const TableFooter = React.forwardRef<

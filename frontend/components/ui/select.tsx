@@ -14,7 +14,7 @@ const Select = React.forwardRef<HTMLSelectElement, React.ComponentProps<"select"
       <select
         ref={ref}
         className={cn(
-          "flex h-7 w-full appearance-none rounded-md border border-input bg-background px-2.5 pr-8 text-sm disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-7 w-full appearance-none rounded-md border border-input bg-background px-2.5 pr-8 text-field disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           // Empty value (the placeholder option) reads as muted, like a placeholder.
           props.value === "" && "text-muted-foreground",
           className,

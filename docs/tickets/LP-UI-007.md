@@ -145,3 +145,119 @@ nothing, so the suite was run against two deliberate regressions:
 - `components/ui/table.tsx` (rewritten)
 - `components/dashboard/file-table.tsx`, `file-table.test.tsx` (+9 tests)
 - `app/(protected)/dashboard/page.tsx`, `loading.tsx` — the `overflow-hidden` trap
+
+## Review pass — two keyboard traps, and a rule that keeps coming undone
+
+A `/code-review` found four defects. Two are in this ticket's roving-tabindex
+grid, one is the third instance of a rule LP-UI-006 wrote down, and one is the
+ledger assets drifting for the third review running.
+
+### Enter on the row menu navigated instead of opening it
+
+`useRovingRows`'s `onKeyDown` is bound on the `<tr>`, and every keydown from
+inside a cell bubbles to it. Nothing checked the target, so the row answered keys
+meant for the row-actions button. Combined with this ticket's own decision to
+give that button `tabIndex={-1}`, **ArrowRight is the only way to reach it** — so
+a keyboard user arrows right onto "Actions for LF-1234", presses Enter, and the
+row's `Enter` case runs `preventDefault()` + `onActivate(index)` and navigates to
+the loan file. Delete-file was unreachable by keyboard entirely. Arrow/Home/End
+on the focused button likewise moved the roving stop out from under it.
+
+`onKeyDown` now early-returns unless `event.target === event.currentTarget`.
+
+### The focus flag stayed armed after a move that never happened
+
+`move()` set `shouldFocus.current = true` before `setActive(to)`. When
+`to === active` — ArrowUp on row 0, ArrowDown or End on the last row, all
+reachable by holding a key — React bails out of the same-value update, the
+`[active]` effect never runs, and the flag stays armed. The next time `active`
+changes for a non-keyboard reason (the `[count]` clamp, on a refetch or a filter)
+the focus effect fires and pulls focus onto a table row.
+
+That is exactly what the comment above the flag says it exists to prevent: "would
+yank the caret out of the search box mid-type". A processor typing in the search
+box lost the caret on the next poll.
+
+`move()` now returns early when the index is unchanged. That guard would have
+broken the ArrowLeft/Escape return path — the row being returned to is almost
+always already the active one, so a state-change-driven focus is a no-op exactly
+when it is needed — so `onCellKeyDown` focuses the row directly instead.
+
+### The iOS zoom rule, broken a third and fourth way
+
+LP-UI-006 added `text-field md:text-sm` to `Input` and `Textarea` and SPEC's
+amendment wrote the rule down. `Select` — the third form control — was missed.
+
+Chasing that turned up two more shapes of the same defect:
+
+- **Raw controls in feature code.** `admin/validation`'s filter `<select>`,
+  `extraction-bench`'s path `<input>`, `document-drawer`'s document-type
+  `<select>` and `rule-finding-actions`' note `<textarea>` are real form controls
+  that never went through the primitives. The last two were also wearing
+  `border-border` (the 1.2:1 decorative hairline) rather than `border-input` (the
+  3:1 control border), which is the one place the new two-border rule was not
+  held.
+- **Callers overriding the primitive from outside.** `cn` puts the caller's
+  className last and tailwind-merge treats every font size as one group, so
+  `<Input className="h-8 text-sm">` silently beat the primitive's own
+  `text-field md:text-sm`. Thirteen of these across seven files — the overview
+  editable rows, the lender admin form, the DTI/LTV/calculator override inputs,
+  the stated-financials editor and the finding-card note box. A caller's
+  className is for geometry; the size belongs to the control.
+
+`components/ui/form-control-zoom.test.ts` now holds all three shapes: every
+control file sets `text-field`, the three primitives carry no unprefixed font
+size, and no `<Input>`/`<Select>`/`<Textarea>` call site anywhere in `app/` or
+`components/` passes one down.
+
+A note on building that test, because the lesson is the point of it. The first
+version terminated an element's attributes at the first `>`, which meant
+`onChange={(e) => …}` ended the match early and it captured no className at all
+— so it **passed the mutation**. It only surfaced because the fix was
+mutation-checked rather than assumed; the corrected matcher then found ten sites
+the review had not reached. A test that cannot fail is the same defect this epic
+has now fixed twice (LP-UI-005's coverage tests, LP-UI-002's `border`/`input`
+assertion), and it nearly shipped a third time.
+
+### The ledger assets, third review running
+
+`assets/lib/status.ts` was behind on the `CalculatorStatus` union — no `unknown`,
+no `binding:*`, i.e. the exact "Binding:dti" a screen reader read aloud — and
+`assets/fonts.ts` still had `plexSerif` italic-only. Both are the fixes the
+*previous* review pass landed. `TICKETS.md` points implementers at these as
+drop-in sources, so copying one forward reintroduces whatever it is behind on.
+
+Copied from the shipped files, and `ledger-assets.test.ts` now compares each
+asset to the file it seeds with whitespace normalised — the assets are
+hand-aligned for reading (globals.css lines its trailing comments up) and the
+shipped files are Biome-formatted, which is a difference worth keeping and the
+only one worth tolerating.
+
+Committing that test required committing the working-tree fixes to
+`assets/tailwind.config.ts` and `assets/components/status-token.tsx` as well:
+their committed versions were still drifted, so the test would have gone red on a
+clean checkout without them.
+
+### Also fixed
+
+`TableBody` lost `[&_tr:last-child]:border-0` in this ticket, leaving a trailing
+hairline under the last row. Restoring the old selector would not have worked —
+`TableRow` moved its hairline from the row to the CELLS when it went
+`border-separate` for the sticky header — so it is now
+`[&>tr:last-child>*]:border-b-0`.
+
+### Verification
+
+`tsc --noEmit` clean, `biome check` clean over 208 files, 520 tests pass,
+`pnpm build` compiles. Every fix mutation-checked:
+
+| mutation | result |
+| --- | --- |
+| drop the event-target check | 2 tests fail |
+| arm `shouldFocus` unconditionally | 1 test fails |
+| revert `Select` to `text-sm` | 2 tests fail |
+| put `text-sm` back on EditableRow | 1 test fails |
+| put an asset back behind its shipped file | 1 test fails |
+
+The stylesheet was compiled and every font-size and border class in the tree
+checked against it, including the new `[&>tr:last-child>*]:border-b-0`.
