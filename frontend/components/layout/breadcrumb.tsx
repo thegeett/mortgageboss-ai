@@ -40,11 +40,15 @@ function FileCrumb({ fileId }: { fileId: string }) {
       <span aria-hidden className="text-muted-foreground">
         /
       </span>
-      {/* Before the file resolves this is the id from the URL, which is real and
+      {/* Before the file RESOLVES this is the id from the URL, which is real and
           already on screen — a skeleton here would flicker a word into a bar and
-          back for a cached query that usually resolves instantly. */}
+          back for a cached query that usually resolves instantly.
+          Once it has resolved, a file with no borrower reads "Unnamed file",
+          the same words FileHeader uses three feet below. Falling back to the id
+          there printed it twice on one line, beside the chip that already
+          carries it, and gave the screen two answers to what the file is called. */}
       <span className="truncate font-semibold text-foreground">
-        {file?.primary_borrower_name ?? fileId}
+        {file ? (file.primary_borrower_name ?? "Unnamed file") : fileId}
       </span>
       {file ? (
         <span className="tabular shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground-2">
