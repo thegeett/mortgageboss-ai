@@ -37,7 +37,8 @@ from __future__ import annotations
 MEASURED_SECONDS_PER_DOCUMENT = 35.6
 
 #: Headroom over the measurement. A soft limit must be loose enough that a healthy run never trips it
-#: (tripping is terminal — see ``terminal_on`` below) and tight enough to catch a genuinely stuck
+#: (tripping is terminal — see ``terminal_on`` in ``app.tasks.verification_rules``) and tight
+#: enough to catch a genuinely stuck
 #: one. 1.7x covers the run-to-run variance seen between LF-AWBB's ~10-minute and 12m27s runs.
 LIMIT_HEADROOM = 1.7
 

@@ -319,9 +319,15 @@ async def run_verification(
             await db.commit()
         return VerificationRunPublic.from_model(last)
 
+    # LP-635 review — the document count and the limit are settled BEFORE the run is committed, so
+    # the row is never visible without the limit it was enqueued under. Two commits left a window,
+    # however brief, in which the watchdog would read `time_limit_seconds IS NULL` and fall back to
+    # re-deriving from the file — the exact question this column exists to stop it asking.
+    documents = await _document_count(db, loan_file.id)
     run = await create_verification_run(
         db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
     )
+    run.time_limit_seconds = rule_engine_limits(documents)[1]
     await db.commit()
 
     # LP-365: the governed snapshot/rules pass runs ALONGSIDE the sweep on the same run. Enqueued on the
@@ -330,11 +336,6 @@ async def run_verification(
     # fingerprint above is keyed on the CROSS-SOURCE inputs; the rule engine reads a SUPERSET (all
     # documents), so a cache-hit could skip a rule run a rule-relevant-only change should have triggered —
     # the cache needs a rule-aware key (its own ticket). Here it simply rides the same trigger as the sweep.
-    documents = await _document_count(db, loan_file.id)
-    # Recorded BEFORE the enqueue and committed with the run, so the watchdog can never read a run
-    # whose limit it does not know (LP-635 review).
-    run.time_limit_seconds = rule_engine_limits(documents)[1]
-    await db.commit()
     if not _enqueue_rule_engine(loan_file.id, run.id, document_count=documents):
         run.status = VerificationStatus.FAILED
         run.completed_at = utcnow()

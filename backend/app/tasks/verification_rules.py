@@ -23,7 +23,7 @@ sets it. The two failure paths:
     does NOT depend on the dying task. Because soft time-limits no longer retry, the watchdog only ever
     bounds a single un-retried attempt, so its "above one hard limit" sizing is correct.
 
-The governed pass gets its OWN, generous time limits (below): the 65s sweep keeps the short global limits
+The governed pass gets its OWN, generous time limits (``app.core.run_limits``): the 65s sweep keeps the short global limits
 (``celery_app.py``), but a ~282s pass must not be killed at the global 120s soft limit — the fourth
 fail-open (LP-377-C: nobody put 282 next to 120). These cover the current realistic file sizes with margin;
 a file large enough to exceed even these needs the engine-level fix (parallelize / gate the per-document AI
@@ -60,13 +60,9 @@ from app.verification.tag_materialization.breaker import AiBackendUnavailable
 logger = structlog.get_logger(__name__)
 
 
-# The governed pass's OWN time limits (LP-377-C, Fix 1). LP-365 measured ~282s on a 30-document file; the
-# runtime is dominated by SEQUENTIAL AI calls (6 materialization groups, each over per-document batches,
-# plus Stage A/B), so it grows with document count. Sized generously above 282s so a realistic file
-# completes; the soft limit raises inside the task for a graceful mark, the hard limit is the SIGKILL
-# ceiling. The stuck-run watchdog (``verification.py``) is sized ABOVE the hard limit so a hard-kill (which
-# cannot commit its own FAILED marker) is still caught.
-# The pass's time limits live in `app.core.run_limits` (LP-635 review). The API watchdog and the
+# The pass's time limits live in `app.core.run_limits` (LP-635 review) — the LP-377-C rationale that
+# used to sit here moved with them, rather than being left behind describing values this module no
+# longer defines. The API watchdog and the
 # deploy CLI both need them, and importing THIS module to reach them pulled Celery and the whole rule
 # engine into the request path — 263 `app.*` modules, which is exactly what the function-local
 # `import run_rule_engine_pass` in `api/verification.py` was arranged to avoid.
@@ -231,7 +227,18 @@ async def _mark_failed(run_id: str) -> None:
         # FAILED is sticky and fail-closed — a governed-engine failure must be VISIBLE on the run.
         run.status = VerificationStatus.FAILED
         run.completed_at = utcnow()
-        run.error_detail = "Rule-engine pass failed after retries"
+        # LP-635 review — NOT "after retries". `on_exhausted` fires from BOTH branches of
+        # `retry_or_terminal`, and `terminal_on` (a soft time-limit, or `AiBackendUnavailable`) is
+        # deliberately never retried — so this string told a processor the opposite of what
+        # happened for exactly the failures this ticket added. It is the run's user-visible
+        # `error_detail`, so it has to be true in both cases.
+        #
+        # It is also generic where the breaker's own message is specific ("the AI backend failed N
+        # calls in a row… re-run once it is reachable"). That text cannot reach here as written:
+        # `on_exhausted` takes no arguments, so the exception is not available. Threading it would
+        # mean widening `Callable[[], None]` across every caller of the shared retry helper —
+        # reported to the author rather than done inside a review.
+        run.error_detail = "Rule-engine pass failed — re-run the verification."
         await db.commit()
 
 

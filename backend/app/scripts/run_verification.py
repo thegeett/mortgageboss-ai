@@ -46,6 +46,7 @@ from app.api.verification import (
 )
 from app.core.database import async_session_maker
 from app.core.logging import get_logger
+from app.core.run_limits import rule_engine_limits
 from app.models.base import utcnow
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
@@ -83,11 +84,10 @@ async def _supersede_stuck_run(db: AsyncSession, loan_file_id: UUID) -> str | No
 
     started = latest.started_at or latest.created_at
     age = utcnow() - started if started is not None else timedelta(0)
-    # LP-635 — derived from the file, exactly as the API watchdog now is, so "stuck" still has ONE
-    # definition. A fixed value here would let this command supersede a large run that the API
-    # (correctly) still considered healthy.
-    # Stored-first, exactly as the API watchdog reads it — two definitions of "stuck" would let this
-    # command supersede a run the UI still (correctly) considers healthy.
+    # LP-635 — stored-first, exactly as the API watchdog reads it, so "stuck" has ONE definition.
+    # Two definitions would let this command supersede a run the UI still (correctly) considers
+    # healthy. (The superseded "derived from the file" wording is gone: it described the behaviour
+    # this column replaced, and it was the first thing a reader hit.)
     hard = await _watchdog_hard_limit(db, latest, loan_file_id)
     stuck_after = hard + _WATCHDOG_SLACK_SECONDS
     if age <= timedelta(seconds=stuck_after):
@@ -132,15 +132,20 @@ async def _run() -> int:
             print("  VERIFY_FORCE=0 — the API's input-fingerprint cache is NOT bypassed here;")
             print("  this script always enqueues, so use the UI if you want cached behaviour.")
 
+        # LP-635 review — COUNTED BEFORE THE RUN IS COMMITTED, so the limit can be stored on it.
+        # This path did not set `time_limit_seconds` at all, so every CLI-started run left it NULL
+        # and the watchdog fell back to re-deriving from the file's CURRENT count — the behaviour
+        # persisting the column exists to stop. The CLI is the path used to investigate the file
+        # that prompted this ticket, so it is the last one that should have been left on it.
+        document_count = await _document_count(db, loan_file.id)
         run = await create_verification_run(
             db, loan_file_id=loan_file.id, trigger=VerificationTrigger.MANUAL
         )
+        run.time_limit_seconds = rule_engine_limits(document_count)[1]
         await db.commit()
         # Captured INSIDE the session: both objects detach when it closes, and a committed
         # attribute can be expired, so reading them later is a lazy-load on a dead session.
         run_id, loan_file_id = run.id, loan_file.id
-        # Counted inside the session, for the same detach reason as the ids above (LP-635).
-        document_count = await _document_count(db, loan_file_id)
 
     # `_enqueue_rule_engine` never raises; a False return means the broker is unreachable, and the
     # caller owns failing the run — a swallowed enqueue would strand it RUNNING forever.
