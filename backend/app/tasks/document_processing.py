@@ -390,6 +390,14 @@ async def _extract_branch(
     # (INFRA_OVERSIZED → a graceful FAILED that LP-471 falls back to Tier-3). Do NOT add a naive page cap: a
     # 069-style multi-document PACKAGE keeps its 1003 liabilities/REO deep in the file, so a cap trades an
     # honest crash for SILENT wrong data. The real fix is the splitter (its own ticket) — LP-473 ADR.
+    #
+    # LP-636 defect 4 DELIBERATELY STOPS HERE. Its byte-aware cap
+    # (``fit_pdf_to_payload_budget``) went to classification and Tier 3 — the two paths where
+    # trimming is already the accepted strategy — and NOT to this one. The ticket had proposed
+    # capping here too; that was wrong, for the reason above: this cap works by dropping pages, so
+    # applying it to a typed extractor would produce exactly the silent partial read the paragraph
+    # above forbids. An honest OVERSIZED failure here is the better outcome, and it is not a dead
+    # end — it falls back to Tier 3, which IS byte-capped, so the document still gets read.
     result = await extractor(content, document.mime_type)
 
     # --- LP-464: a THROTTLED extraction is infrastructure, not a content failure - #

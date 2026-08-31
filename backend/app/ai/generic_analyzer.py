@@ -45,7 +45,7 @@ from app.ai.extraction.parsing import coerce_decimal, coerce_str
 from app.ai.parsing import extract_json_object
 from app.ai.prompt_loader import load_prompt
 from app.core.config import settings
-from app.services.pdf_utils import cap_pdf_pages
+from app.services.pdf_utils import fit_pdf_to_payload_budget
 
 logger = structlog.get_logger(__name__)
 
@@ -191,7 +191,11 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
     # limit LP-462 fixed for classification (a 177-page condo declaration would be rejected). Cap to the first
     # ``tier3_max_pages`` (mortgage-relevant facts cluster in the lead pages). Tier-3-only — typed extractors
     # are NOT capped.
-    payload = await cap_pdf_pages(content, media_type, settings.tier3_max_pages)
+    # LP-636 defect 4 — and then by SIZE, which is what actually rejects a high-DPI scan that is
+    # already inside the page cap.
+    payload, _dropped = await fit_pdf_to_payload_budget(
+        content, media_type, max_pages=settings.tier3_max_pages
+    )
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:

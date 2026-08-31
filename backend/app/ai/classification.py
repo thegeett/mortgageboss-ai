@@ -44,7 +44,7 @@ from app.ai.client import (
 )
 from app.ai.parsing import coerce_confidence, extract_json_object
 from app.core.config import settings
-from app.services.pdf_utils import cap_pdf_pages
+from app.services.pdf_utils import fit_pdf_to_payload_budget
 
 logger = structlog.get_logger(__name__)
 
@@ -175,7 +175,12 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
     # LP-462 — classification identifies the LEAD document and needs only its first pages; sending the whole
     # PDF made a >100-page package exceed the document-block limit (Bedrock → BadRequestError). Trim to the
     # first ``classification_max_pages`` pages (classification-only — extraction still reads the whole doc).
-    payload = await cap_pdf_pages(content, media_type, settings.classification_max_pages)
+    # LP-636 defect 4 — the page cap alone was not enough. LF-ZE9N's 23.8 MB contract was already
+    # INSIDE this 15-page cap (a high-DPI scan), so the cap was a no-op and the call was rejected
+    # on encoded SIZE with HTTP 400. Pages first, then bytes.
+    payload, _dropped = await fit_pdf_to_payload_budget(
+        content, media_type, max_pages=settings.classification_max_pages
+    )
 
     system_prompt = render_classification_prompt()
     try:
