@@ -334,6 +334,28 @@ def equivalent_need_type(needs_type: str | None) -> str | None:
     return _EQUIVALENT_NEED_TYPES.get(slug, slug)
 
 
+def _is_unactionable_alias(needs_type: str | None) -> bool:
+    """A STORED type that no document can ever match, reachable only through an alias (bug-009).
+
+    Satisfaction matches ``needs_type == document_type`` on the row as stored, so a type the catalog
+    does not carry can never be cleared by any upload no matter what the alias map later says —
+    aliasing changes what a NEW proposal is stored as, and does not rewrite a row already on a file.
+
+    ``title_report`` is the case: LP-69 proposes it, the catalog defines ``title_commitment`` and
+    ``preliminary_title_report`` and not that, so the row sits on the list forever.
+
+    This is the second proof of redundancy the merge can use, alongside "the floor minted it". A row
+    that CANNOT be satisfied is not a requirement anyone can act on, so collapsing it into an
+    equivalent row that can be is not taking anything away from a processor.
+    """
+    if not needs_type:
+        return False
+    slug = needs_type.strip().lower()
+    if slug in CATALOG or slug in _UMBRELLA_NEED_CATEGORY or slug in _NEED_ALTERNATIVES:
+        return False  # a document can match it directly — not our case
+    return slug in _NEED_TYPE_ALIASES
+
+
 def canonical_need_type(proposed: str | None) -> str | None:
     """A proposed need type resolved to a CATALOGED document type, or None (LP-623).
 
@@ -549,6 +571,24 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
         # The furthest-along row wins; ties break on age, so the outcome does not depend on row order.
         group.sort(key=lambda n: (_PROGRESS_RANK.get(n.status, 0), -n.created_at.timestamp()))
         keeper = group[-1]
+        # bug-009 REVIEW — the survivor is chosen by PROGRESS, not by whether a document can ever
+        # satisfy it. So when the unmatchable row is the further along one (a processor marked the
+        # `title_report` row received by hand), it becomes the keeper and the clearable
+        # `title_commitment` row is waived — leaving the file with only a need no upload can reach.
+        #
+        # NOT SILENTLY REPAIRED HERE, because the correct fix is a design decision this function
+        # does not currently make: preferring the actionable row loses the progress the processor
+        # recorded, and preserving that progress means the merge would have to MUTATE the keeper,
+        # which it deliberately never does (it only waives). Surfaced instead of guessed.
+        if _is_unactionable_alias(keeper.needs_type) and any(
+            not _is_unactionable_alias(n.needs_type) for n in group
+        ):
+            logger.warning(
+                "needs_merge_kept_an_unsatisfiable_row",
+                loan_file_id=str(loan_file_id),
+                kept_type=keeper.needs_type,  # a document type, not PII
+                kept_status=keeper.status.value,
+            )
         for redundant in group[:-1]:
             # ONLY A ROW THE FLOOR MINTED MAY BE MERGED AWAY. The defect being repaired is the FLOOR
             # creating a second row under a renamed type, so a floor-origin duplicate is provably
@@ -568,7 +608,27 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
             # received need is a fixed point"), applied to the axis that matters here. It is NOT that
             # module's PROPOSED+PENDING test: the floor ships CONFIRMED, so that test would make this
             # repair a no-op against its own motivating case — LF-ABRS's pair is VERIFIED + REJECTED.
-            if redundant.origin is not NeedsItemOrigin.FLOOR:
+            # bug-009 REVIEW — a SECOND provably-redundant case, because the FLOOR test alone
+            # missed the pair this repair was written for. LP-69 creates its proposals with
+            # origin AI_REASONING (`needs_ai.py`), not FLOOR, so the `title_report` row on a live
+            # file was skipped here and the merge did nothing — while a test using a FLOOR-origin
+            # fixture passed.
+            #
+            # A row whose stored type no document can ever match is redundant for a different
+            # reason than the floor's: it is not a requirement a processor can act on, it is an
+            # artifact. Collapsing it into an equivalent row that CAN be satisfied takes nothing
+            # away.
+            #
+            # MANUAL IS STILL NEVER MERGED, whatever its type. The protection this guard exists for
+            # is a processor's own ask — the Wells Fargo statement in the paragraph above — and a
+            # mistyped manual need is something they can see and correct, not something to waive
+            # underneath them.
+            mergeable = redundant.origin is NeedsItemOrigin.FLOOR or (
+                redundant.origin is not NeedsItemOrigin.MANUAL
+                and _is_unactionable_alias(redundant.needs_type)
+                and not _is_unactionable_alias(keeper.needs_type)
+            )
+            if not mergeable:
                 logger.info(
                     "needs_duplicate_merge_skipped",
                     loan_file_id=str(loan_file_id),

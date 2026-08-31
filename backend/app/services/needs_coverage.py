@@ -29,6 +29,7 @@ need's precondition now false, and which document proves it?* — and returns th
 acting on it.
 """
 
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -138,7 +139,29 @@ def _unwrap(raw: Any) -> Any:
     return raw
 
 
-def _normalize_creditor(name: Any) -> list[str]:
+@dataclass(frozen=True)
+class _CreditorName:
+    """A creditor name in the two forms the two matching rules need.
+
+    ``tokens`` is the shared lender normalisation — abbreviation-expanded, corporate suffixes
+    DROPPED. ``chars`` is the old character form of the RAW name, suffixes and all.
+
+    Both are kept because dropping suffixes is right for one rule and fatal to the other.
+    ``bank`` is a corporate suffix, so ``US BANK`` normalises to a single token ``["us"]`` — and a
+    one-token name can satisfy neither the shared rule (which needs two tokens of prefix) nor a
+    six-character floor. Running the truncation branch on ``chars`` instead keeps ``USBANK`` vs
+    ``USBANKHOMEMORTGAGE``, which is the ordinary shape of a credit-report creditor.
+    """
+
+    tokens: list[str]
+    chars: str
+
+    def __bool__(self) -> bool:
+        """Falsy when nothing identifying survived, so callers can drop the row."""
+        return bool(self.tokens or self.chars)
+
+
+def _normalize_creditor(name: Any) -> _CreditorName:
     """A creditor name reduced to comparable tokens, through the LENDER matcher (bug-009).
 
     DELEGATES rather than re-implementing, and that is the fix. This module had its own
@@ -158,13 +181,15 @@ def _normalize_creditor(name: Any) -> list[str]:
     this module's abbreviation gap are the same defect discovered twice, six commits apart, because
     each matcher only learned from the file that broke it.
 
-    ⚠️ ONE INHERITED TOLERANCE, stated rather than discovered later. `_lender_names_agree` accepts a
+    ONE INHERITED TOLERANCE, stated rather than discovered later. `_lender_names_agree` accepts a
     two-token prefix ("First National" against "First National Bank of Chicago"), which is a real
     false-match direction. It is acceptable HERE for two reasons the insurance caller does not have:
     the name must agree AND the whole-dollar payment must be equal, and the outcome is a FLAG a
     processor disposes of (ADR-388), never a close.
     """
-    return _normalise_lender_name(name) if isinstance(name, str) else []
+    if not isinstance(name, str):
+        return _CreditorName([], "")
+    return _CreditorName(_normalise_lender_name(name), re.sub(r"[^A-Z0-9]", "", name.upper()))
 
 
 #: A creditor name shorter than this carries too little signal to prefix-match on. "BP" would
@@ -172,7 +197,7 @@ def _normalize_creditor(name: Any) -> list[str]:
 _MIN_NAME_CHARS = 6
 
 
-def _names_match(stated: list[str], reported: list[str]) -> bool:
+def _names_match(stated: _CreditorName, reported: _CreditorName) -> bool:
     """Do two normalised creditor names refer to the same entity? (bug-009)
 
     TWO rules, and the second is not redundant. `_lender_names_agree` compares WHOLE TOKENS, which is
@@ -188,11 +213,18 @@ def _names_match(stated: list[str], reported: list[str]) -> bool:
     reach is affordable for the reasons in :func:`_normalize_creditor`: the name must agree AND the
     whole-dollar payment must be equal, and the outcome is a flag, not a close.
     """
-    if _lender_names_agree(stated, reported):
+    if _lender_names_agree(stated.tokens, reported.tokens):
         return True
-    # Re-join for the truncation rule. The tokens are already abbreviation-expanded, so this compares
-    # "bankofamerica" against "bankofamer" and not the raw bureau spellings.
-    left, right = "".join(stated), "".join(reported)
+    # THE RAW CHARACTER FORM, not the token join. The tokens have had corporate suffixes dropped,
+    # and `bank` is one of them — so `US BANK` becomes `["us"]`, which is one token (too few for the
+    # shared rule) and two characters (below the floor). Both branches would miss the commonest
+    # creditor shape in a credit report. Matching on `chars` keeps every pair the pre-delegation
+    # rule matched; `test_delegating_kept_every_pair_the_old_rule_matched` pins that.
+    left, right = stated.chars, reported.chars
+    if not left or not right:
+        return False
+    if left == right:
+        return True
     if len(left) < _MIN_NAME_CHARS or len(right) < _MIN_NAME_CHARS:
         return False
     return left.startswith(right) or right.startswith(left)
@@ -242,7 +274,7 @@ async def _newest_credit_report(
     return document, payload
 
 
-def _reported_obligations(payload: dict[str, Any]) -> list[tuple[list[str], int]]:
+def _reported_obligations(payload: dict[str, Any]) -> list[tuple[_CreditorName, int]]:
     """The credit report's tradelines as ``(normalized creditor, whole-dollar payment)``.
 
     Rows are bare scalars (LP-443 capture), not typed ``{value}`` nodes. A row with no payment is
@@ -252,7 +284,7 @@ def _reported_obligations(payload: dict[str, Any]) -> list[tuple[list[str], int]
     rows = payload.get("tradelines")
     if not isinstance(rows, list):
         return []
-    obligations: list[tuple[list[str], int]] = []
+    obligations: list[tuple[_CreditorName, int]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue

@@ -13,8 +13,11 @@ borrower or creditor. A predicate that suppressed all six would be worse than no
 
 from __future__ import annotations
 
+import itertools
+import re
 from decimal import Decimal
 
+import pytest
 from app.models.document import DocumentStatus
 from app.models.needs_item import (
     NeedsItem,
@@ -23,7 +26,12 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.stated_financials import StatedLiability
-from app.services.needs_coverage import flag_covered_needs, keep_need_despite_coverage
+from app.services.needs_coverage import (
+    _names_match,
+    _normalize_creditor,
+    flag_covered_needs,
+    keep_need_despite_coverage,
+)
 from sqlalchemy import select
 from tests.integration import factories
 
@@ -724,3 +732,98 @@ async def test_two_different_creditors_still_do_not_match(db_session) -> None:
     )
 
     assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
+
+
+# --------------------------------------------------------------------------- #
+# bug-009 — delegating to the shared lender matcher must only ADD reach
+# --------------------------------------------------------------------------- #
+
+
+#: The character rule `needs_coverage` used before it delegated. Kept here verbatim as the
+#: baseline: the point of delegating was to gain abbreviation and acronym matching, never to lose
+#: the truncation matching that was already working.
+def _pre_delegation_match(a: str, b: str) -> bool:
+    left, right = (re.sub(r"[^A-Z0-9]", "", n.upper()) for n in (a, b))
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if len(left) < 6 or len(right) < 6:
+        return False
+    return left.startswith(right) or right.startswith(left)
+
+
+#: Real creditor spellings — bureau abbreviations, legal names, and the bank-suffixed forms that
+#: dominate a credit report.
+_CREDITOR_NAMES = (
+    "BANK OF AMERICA",
+    "BANK OF AMER",
+    "US BANK",
+    "US BANK HOME MORTGAGE",
+    "TD BANK",
+    "TD BANK USA",
+    "CHASE BANK",
+    "CHASE BANK USA",
+    "WELLS FARGO BANK",
+    "WELLS FARGO BANK NA",
+    "CITIZENS BANK",
+    "CITIZENS BANK NA",
+    "UNITED WHOLESALE MORTGAGE",
+    "UNITED WHSLE MORT",
+    "UWM",
+    "SYNCB/ROOMS TO GO",
+    "CAPITAL ONE",
+    "CAPITAL ONE AUTO FINANCE",
+    "NAVY FEDERAL CREDIT UNION",
+    "DISCOVER BANK",
+    "DISCOVER",
+    "ALLY",
+    "AMEX",
+    "CHASE",
+    "USAA",
+    "AMERICAN HONDA FINANCE",
+    "AMERICAN HOME MORTGAGE",
+    "TOYOTA MOTOR CREDIT",
+    "TOYOTA FINANCIAL SERVICES",
+)
+
+
+@pytest.mark.parametrize(
+    ("stated", "reported"),
+    [
+        pytest.param(a, b, id=f"{a}|{b}")
+        for a, b in itertools.combinations_with_replacement(_CREDITOR_NAMES, 2)
+        if _pre_delegation_match(a, b)
+    ],
+)
+def test_delegating_kept_every_pair_the_old_rule_matched(stated: str, reported: str) -> None:
+    """The relationship between the two matchers is SUPERSET, not replacement.
+
+    Delegating to `_lender_names_agree` alone silently dropped three of these — `US BANK` vs
+    `US BANK HOME MORTGAGE`, `TD BANK` vs `TD BANK USA`, `CHASE BANK` vs `CHASE BANK USA`. The
+    cause is that ``bank`` is a corporate suffix, so `US BANK` normalises to the single token
+    ``["us"]``: too few tokens for the shared rule, too few characters for the floor. Both branches
+    missed the commonest creditor shape in a credit report.
+
+    Asserted as a PROPERTY over the whole name list rather than as chosen examples, because the
+    three that broke were not the ones anyone thought to write down — the commit that introduced
+    the delegation had a test for the truncation case it knew about and shipped the regression
+    anyway."""
+    assert _names_match(_normalize_creditor(stated), _normalize_creditor(reported)), (
+        f"{stated!r} vs {reported!r} matched before delegation and no longer does"
+    )
+
+
+def test_delegating_added_the_reach_it_was_for() -> None:
+    """The other half: the pairs the old rule could NOT match are exactly why it delegated.
+
+    Without this, the superset test above is satisfied by reverting the delegation entirely."""
+    gained = [
+        ("UNITED WHOLESALE MORTGAGE", "UNITED WHSLE MORT"),  # bureau abbreviation (bug-002)
+        ("United Wholesale Mortgage", "UWM"),  # acronym (bug-005)
+    ]
+    for stated, reported in gained:
+        assert not _pre_delegation_match(stated, reported), "fixture no longer proves the gain"
+        assert _names_match(_normalize_creditor(stated), _normalize_creditor(reported)), (
+            f"{stated!r} vs {reported!r} is the reach delegation was for"
+        )
