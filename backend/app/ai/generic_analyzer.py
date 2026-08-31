@@ -193,9 +193,8 @@ async def analyze_document(content: bytes, media_type: str) -> GenericAnalysis |
     # are NOT capped.
     # LP-636 defect 4 — and then by SIZE, which is what actually rejects a high-DPI scan that is
     # already inside the page cap.
-    payload, _dropped = await fit_pdf_to_payload_budget(
-        content, media_type, max_pages=settings.tier3_max_pages
-    )
+    fit = await fit_pdf_to_payload_budget(content, media_type, max_pages=settings.tier3_max_pages)
+    payload = fit.payload
 
     system_prompt = load_prompt(_PROMPT_PATH)
     try:

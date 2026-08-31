@@ -178,9 +178,10 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
     # LP-636 defect 4 — the page cap alone was not enough. LF-ZE9N's 23.8 MB contract was already
     # INSIDE this 15-page cap (a high-DPI scan), so the cap was a no-op and the call was rejected
     # on encoded SIZE with HTTP 400. Pages first, then bytes.
-    payload, _dropped = await fit_pdf_to_payload_budget(
+    fit = await fit_pdf_to_payload_budget(
         content, media_type, max_pages=settings.classification_max_pages
     )
+    payload = fit.payload
 
     system_prompt = render_classification_prompt()
     try:

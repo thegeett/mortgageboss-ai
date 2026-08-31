@@ -158,10 +158,11 @@ async def test_a_document_within_budget_is_returned_untouched() -> None:
     """The common case must not re-encode: byte-identical out, and nothing reported as dropped."""
     pdf = _make_pdf(["one", "two", "three"])
 
-    payload, dropped = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=50)
+    fit = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=50)
 
-    assert payload == pdf
-    assert dropped is None
+    assert fit.payload == pdf
+    assert fit.pages_dropped == 0
+    assert fit.still_over_budget is False
 
 
 async def test_pages_are_dropped_until_the_payload_fits() -> None:
@@ -171,14 +172,39 @@ async def test_pages_are_dropped_until_the_payload_fits() -> None:
     cap, so the page cap was a no-op and the call died on size with no data at all."""
     pdf = _make_pdf([f"page {i} " + ("filler " * 400) for i in range(16)])
 
-    payload, dropped = await fit_pdf_to_payload_budget(
+    fit = await fit_pdf_to_payload_budget(
         pdf, "application/pdf", max_pages=50, max_bytes=encoded_payload_size(len(pdf)) // 3
     )
 
-    assert dropped is not None and dropped > 0
-    assert len(payload) < len(pdf)
-    kept = await pdf_page_count(payload)
+    assert fit.pages_dropped > 0
+    assert fit.still_over_budget is False
+    assert len(fit.payload) < len(pdf)
+    kept = await pdf_page_count(fit.payload)
     assert kept is not None and 1 <= kept < 16
+
+
+async def test_it_keeps_the_LARGEST_page_count_that_fits_not_merely_a_fitting_one() -> None:
+    """Halving alone would return 8 pages for a document that fits at 15.
+
+    Seven pages discarded to save four local slices — and a slice is PyMuPDF and milliseconds
+    while a dropped page is content the model never sees. Since the point of this function is
+    turning a hard rejection into a PARTIAL read, how partial is the whole quality of the outcome.
+
+    Asserted as a property rather than an exact number: the kept count must fit, and one more page
+    must not."""
+    pdf = _make_pdf([f"page {i} " + ("filler " * 300) for i in range(20)])
+    budget = encoded_payload_size(len(pdf)) * 3 // 4  # forces a trim, but only a small one
+
+    fit = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=50, max_bytes=budget)
+    kept = await pdf_page_count(fit.payload)
+    assert kept is not None
+
+    assert encoded_payload_size(len(fit.payload)) <= budget
+    one_more = await first_n_pages(pdf, kept + 1)
+    assert one_more is not None
+    assert encoded_payload_size(len(one_more)) > budget, (
+        f"kept {kept} pages but {kept + 1} would also have fitted — the search gave away pages"
+    )
 
 
 async def test_the_page_cap_still_applies_before_the_byte_budget() -> None:
@@ -186,10 +212,10 @@ async def test_the_page_cap_still_applies_before_the_byte_budget() -> None:
     it would have fitted the byte budget whole."""
     pdf = _make_pdf([f"page {i}" for i in range(20)])
 
-    payload, dropped = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=5)
+    fit = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=5)
 
-    assert dropped is None  # size never bound
-    assert await pdf_page_count(payload) == 5
+    assert fit.pages_dropped == 0  # size never bound
+    assert await pdf_page_count(fit.payload) == 5
 
 
 async def test_a_non_pdf_is_passed_through_unchanged() -> None:
@@ -197,22 +223,24 @@ async def test_a_non_pdf_is_passed_through_unchanged() -> None:
     being mangled here."""
     blob = b"\xff\xd8\xff" + b"x" * 5000
 
-    payload, dropped = await fit_pdf_to_payload_budget(blob, "image/jpeg", max_pages=5)
+    fit = await fit_pdf_to_payload_budget(blob, "image/jpeg", max_pages=5)
 
-    assert payload == blob
-    assert dropped is None
+    assert fit.payload == blob
+    assert fit.pages_dropped == 0
+    assert fit.still_over_budget is False
 
 
-async def test_a_single_page_over_budget_fails_honestly_rather_than_silently() -> None:
+async def test_a_single_page_over_budget_says_so_rather_than_shrugging() -> None:
     """Page-dropping cannot rescue a document whose FIRST page is already too big.
 
-    It returns what it has and lets the call be rejected as oversized, which is visible. Returning
-    an empty or zero-page PDF would look like a successful read of nothing."""
+    It returns what it has and lets the call be rejected as oversized, which is visible. The
+    distinction that matters is ``still_over_budget``: without it, "could not be trimmed" and
+    "needed no trimming" are the same answer to the caller, and the first is about to fail."""
     pdf = _make_pdf(["only page " + ("filler " * 2000)])
 
-    payload, dropped = await fit_pdf_to_payload_budget(
-        pdf, "application/pdf", max_pages=50, max_bytes=10
-    )
+    fit = await fit_pdf_to_payload_budget(pdf, "application/pdf", max_pages=50, max_bytes=10)
 
-    assert dropped is None
-    assert await pdf_page_count(payload) == 1
+    assert fit.still_over_budget is True
+    assert fit.pages_dropped == 0
+    assert await pdf_page_count(fit.payload) == 1  # never zero — an empty PDF would read as a
+    # successful extraction of nothing

@@ -151,19 +151,47 @@ async def cap_pdf_pages(content: bytes, media_type: str, max_pages: int) -> byte
     return capped if capped is not None else content
 
 
-#: The provider's document-block ceiling is 32 MB **on the encoded request**, and base64 inflates
-#: bytes by 4/3. So the raw budget is ~24 MB before the prompt and JSON envelope are added.
-#: Deliberately under it: the margin covers the system prompt, the instruction block and the
-#: envelope, none of which are known here.
-MAX_DOCUMENT_PAYLOAD_BYTES = 22 * 1024 * 1024
+#: The provider's document ceiling is **32 MB on the REQUEST** — i.e. on the base64-encoded
+#: payload, which is 4/3 the size of the file on disk. Anyone reasoning in raw megabytes is a third
+#: under the number actually being checked, which is how LF-ZE9N's 23.8 MB contract, comfortably
+#: "under 32 MB", was rejected.
+#:
+#: 32 MB encoded / (4/3) = 24 MB raw exactly. The 1 MB held back covers the system prompt and the
+#: JSON envelope, neither of which is known at this layer; a classification system prompt is
+#: single-digit KB, so this is margin, not a guess.
+MAX_DOCUMENT_PAYLOAD_BYTES = 23 * 1024 * 1024
+
+#: The page half of the same ceiling. SIZED FOR A 200K-CONTEXT MODEL: the provider allows 600
+#: pages, dropping to 100 for 200K-context models, and every model in this pipeline is
+#: ``claude-haiku-4-5`` (200K). If any of these paths ever move to a 1M-context model, 100 becomes
+#: needlessly tight — and without this note nobody would know why it was chosen.
+PROVIDER_MAX_PAGES_200K_CONTEXT = 100
+
+
+@dataclass(frozen=True)
+class PayloadFit:
+    """The result of fitting a document to the provider's limits.
+
+    Three states, kept distinct because two of them used to look identical to a caller:
+    nothing needed doing, pages were dropped to fit, or trimming could not get under the limit at
+    all. The last one matters — a document that could NOT be trimmed is about to be rejected, and
+    recording it as "no trimming needed" would hide that.
+    """
+
+    payload: bytes
+    #: Pages removed by the SIZE cap, beyond whatever the page cap already took. 0 when size never
+    #: bound.
+    pages_dropped: int = 0
+    #: True when the document is still over budget after trimming — a single page too large, or an
+    #: unreadable PDF. The call will fail as ``oversized``, honestly.
+    still_over_budget: bool = False
 
 
 def encoded_payload_size(raw_bytes: int) -> int:
     """Bytes on the wire once base64-encoded — ``4 * ceil(n / 3)``.
 
-    The limit that actually rejected LF-ZE9N's 23.8 MB contract applies to the ENCODED payload,
-    which is a third larger than the file on disk. Anyone reasoning in raw megabytes is a third
-    under the number the provider is checking.
+    The limit that rejected LF-ZE9N's contract applies to the ENCODED payload, which is a third
+    larger than the file on disk.
     """
     return 4 * ((raw_bytes + 2) // 3)
 
@@ -174,58 +202,93 @@ async def fit_pdf_to_payload_budget(
     *,
     max_pages: int,
     max_bytes: int = MAX_DOCUMENT_PAYLOAD_BYTES,
-) -> tuple[bytes, int | None]:
-    """Trim a PDF to ``max_pages``, then keep dropping pages until it fits ``max_bytes``.
-
-    Returns ``(payload, pages_dropped_for_size)`` — the second is ``None`` when size never bound
-    (the common case), else the number of pages the SIZE cap removed beyond the page cap, so the
-    caller can record that the document was truncated rather than read whole.
+) -> PayloadFit:
+    """Trim a PDF to ``max_pages``, then to the LARGEST page count that fits ``max_bytes``.
 
     LP-636 defect 4. There was a cap on PAGES and none on BYTES, and bytes are what rejected
     LF-ZE9N's 23.8 MB purchase contract: it was already inside the 15-page classification cap — a
     high-DPI scan — so the page cap was a no-op and the call failed with HTTP 400, producing no
     data at all.
 
-    DROPPING PAGES IS NOT THE BEST ANSWER, ONLY THE SAFE ONE. Re-rendering the pages at a lower
-    DPI would keep all of them, which matters for a contract whose signature is on the last page.
-    That needs image resampling with its own quality/OCR trade-offs; this needs none, reuses the
-    tested slicing path, and turns a hard rejection into a partial read. If a document is over
-    budget on its FIRST page alone nothing here can save it, and it still fails honestly as
-    ``oversized``.
+    KEEPS AS MANY PAGES AS FIT, deliberately. It halves to find some fitting count, then binary
+    searches back UP for the largest one. Halving alone would return 8 pages for a 16-page document
+    that fits at 15 — seven pages discarded to save four local slices. The asymmetry runs the other
+    way: a slice is PyMuPDF and milliseconds, while a dropped page is content the model never sees.
+    Since the whole point here is turning a hard rejection into a partial read, HOW partial is the
+    entire quality of the outcome — and the case this exists for is a contract whose signature sits
+    on the last page.
+
+    DROPPING PAGES IS NOT THE BEST ANSWER, ONLY THE SAFE ONE. Re-rendering at a lower DPI would
+    keep every page; that needs image resampling with its own quality and OCR trade-offs. This
+    reuses the tested slicing path and needs none.
 
     Never raises. A non-PDF, or bytes that will not parse, come back unchanged for the existing
     error path to handle.
     """
     if media_type.lower().strip() != _PDF_MEDIA_TYPE:
-        return content, None
+        return PayloadFit(content)
 
     payload = await cap_pdf_pages(content, media_type, max_pages)
     if encoded_payload_size(len(payload)) <= max_bytes:
-        return payload, None
+        return PayloadFit(payload)
 
     total = await pdf_page_count(payload)
     if total is None or total <= 1:
-        # Unreadable, or a single page already over budget — page-dropping cannot help.
-        return payload, None
+        # Unreadable, or one page already over budget — trimming cannot help. Say so rather than
+        # returning a shrug the caller reads as "fine".
+        logger.warning(
+            "pdf_cannot_be_trimmed_under_payload_budget",
+            pages=total,
+            encoded_bytes=encoded_payload_size(len(payload)),
+            max_bytes=max_bytes,
+        )
+        return PayloadFit(payload, still_over_budget=True)
 
-    # Halve until it fits. Linear descent would issue one re-encode per page on a 50-page scan;
-    # this converges in a handful, and the exact page count is not worth more calls than that.
-    pages = total
-    while pages > 1:
-        pages = max(1, pages // 2)
+    async def _fits(pages: int) -> bytes | None:
         candidate = await first_n_pages(payload, pages)
         if candidate is None:
-            return payload, None
-        if encoded_payload_size(len(candidate)) <= max_bytes:
-            logger.warning(
-                "pdf_truncated_to_fit_payload_budget",
-                pages_kept=pages,
-                pages_total=total,
-                original_bytes=len(content),
-                final_bytes=len(candidate),
-            )
-            return candidate, total - pages
-    return payload, None
+            return None
+        return candidate if encoded_payload_size(len(candidate)) <= max_bytes else None
+
+    # Phase 1 — halve until something fits, remembering the smallest count known NOT to fit.
+    too_big = total
+    best_pages, best = 0, b""
+    probe = total
+    while probe > 1:
+        probe = max(1, probe // 2)
+        candidate = await _fits(probe)
+        if candidate is not None:
+            best_pages, best = probe, candidate
+            break
+        too_big = probe
+
+    if best_pages == 0:
+        logger.warning(
+            "pdf_cannot_be_trimmed_under_payload_budget",
+            pages=total,
+            encoded_bytes=encoded_payload_size(len(payload)),
+            max_bytes=max_bytes,
+        )
+        return PayloadFit(payload, still_over_budget=True)
+
+    # Phase 2 — binary search UP for the largest count that still fits. A handful more slices, and
+    # it recovers most of what phase 1 gave away.
+    while best_pages + 1 < too_big:
+        mid = (best_pages + too_big) // 2
+        candidate = await _fits(mid)
+        if candidate is None:
+            too_big = mid
+        else:
+            best_pages, best = mid, candidate
+
+    logger.warning(
+        "pdf_truncated_to_fit_payload_budget",
+        pages_kept=best_pages,
+        pages_total=total,
+        original_bytes=len(content),
+        final_bytes=len(best),
+    )
+    return PayloadFit(best, pages_dropped=total - best_pages)
 
 
 async def extract_text_from_pdf(content: bytes) -> PdfTextExtractionResult:
