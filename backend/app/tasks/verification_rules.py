@@ -231,10 +231,22 @@ async def _triage_counts(db: AsyncSession, loan_file_id: UUID) -> tuple[int, int
 #: processor — one is "this file is too big for the window", the other is "try again shortly" — and
 #: telling them the same thing makes the message worth ignoring.
 _FAILURE_DETAIL: dict[type[BaseException], str] = {
+    # LP-635 review — NAMES NO CAUSE, because a timeout cannot tell them apart.
+    #
+    # It used to say "this usually means the file has more documents than one run can process". A
+    # small file hitting the LF-ZE9N outage reaches here and is told exactly that: the breaker
+    # counts BATCHES of up to fifteen subjects, so a pass of fewer than five batches can never trip
+    # it, grinds to the soft limit, and the processor reads "too many documents" about a transport
+    # outage. That is the misdiagnosis this ticket was opened to end, written into the field they
+    # read.
+    #
+    # "Re-run it" was the other half: `rule_engine_limits` is deterministic from document count, so
+    # a genuinely oversized file gets the identical budget on the re-run and burns another slot to
+    # fail the same way.
     SoftTimeLimitExceeded: (
-        "Verification ran out of time before it finished. This usually means the file has more "
-        "documents than one run can process — re-run it, and raise it with support if it happens "
-        "again."
+        "Verification ran out of time before it finished. That can mean the file is larger than "
+        "one run's budget, or that the AI backend was slow or unreachable. Re-running is worth one "
+        "attempt; if it times out again, raise it with support rather than repeating it."
     ),
 }
 
@@ -242,13 +254,21 @@ _FAILURE_DETAIL: dict[type[BaseException], str] = {
 def _failure_detail(exc: BaseException | None) -> str:
     """The user-visible reason a run failed.
 
-    `AiBackendUnavailable` is not in the table above BECAUSE it writes its own sentence — it knows
-    how many calls failed, which nothing here does. Deliberately asked of the exception rather than
-    matched by type, so a future failure that can explain itself is not silently flattened into the
+    An exception that can explain itself is ASKED, via a ``user_detail`` attribute, before any type
+    matching happens — so a future self-describing failure is not silently flattened into the
     generic line.
+
+    LP-635 review: this docstring previously claimed exactly that while the code did
+    ``isinstance(exc, AiBackendUnavailable)`` — a type match against one hardcoded class. The next
+    self-describing exception would have been flattened, and the next reader would have trusted the
+    sentence and not wired it. The protocol is now real, so the claim is true.
+
+    ``user_detail`` must be safe to show: it is written verbatim into ``error_detail``, which
+    ``readonly.verifications`` selects UNSCRUBBED.
     """
-    if isinstance(exc, AiBackendUnavailable):
-        return str(exc)
+    detail = getattr(exc, "user_detail", None)
+    if isinstance(detail, str) and detail:
+        return detail
     for kind, detail in _FAILURE_DETAIL.items():
         if isinstance(exc, kind):
             return detail

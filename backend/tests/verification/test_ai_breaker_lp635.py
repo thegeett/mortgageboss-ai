@@ -191,7 +191,7 @@ async def test_the_stage_backstop_lets_this_one_through() -> None:
     from app.services.verification_run import Degradation, _run_stage
 
     async def outage(_snapshot: object) -> object:
-        raise AiBackendUnavailable("backend gone")
+        raise AiBackendUnavailable(consecutive=5)
 
     degradations: list[Degradation] = []
     with pytest.raises(AiBackendUnavailable):
@@ -311,3 +311,36 @@ def test_an_oversized_payload_still_resets_the_counter() -> None:
     breaker.record_failure(oversized)
 
     assert breaker.consecutive == 0, "an oversized payload must not count toward an outage"
+
+
+def test_the_outage_message_cannot_carry_free_text() -> None:
+    """LP-635 review — the safety of what reaches `error_detail` is a property of the TYPE.
+
+    `str(exc)` is written verbatim onto the run, and `readonly.verifications` selects `error_detail`
+    UNSCRUBBED — unlike the JSON columns, it is not passed through `readonly.scrub()`. So whatever
+    this exception carries reaches a processor, a terminal and a transcript.
+
+    The docstring used to promise it "carries no loan-file or borrower detail" and relied on every
+    future raise site honouring that. This asserts the constructor takes no positional message, so
+    the promise cannot be broken by accident."""
+    import inspect
+
+    parameters = inspect.signature(AiBackendUnavailable.__init__).parameters
+    assert list(parameters) == ["self", "consecutive"], (
+        "the constructor grew an argument — if it can take free text, the PII guarantee is a "
+        "convention again rather than a property"
+    )
+    assert parameters["consecutive"].kind is inspect.Parameter.KEYWORD_ONLY
+
+    with pytest.raises(TypeError):
+        AiBackendUnavailable("a borrower's document name")  # type: ignore[call-arg]
+
+
+def test_the_outage_message_says_what_happened_and_what_to_do() -> None:
+    """Composed from the count alone, and still actionable — safety must not cost the sentence its
+    usefulness, since the whole point of threading it through was that "failed after retries" told
+    a processor nothing."""
+    message = str(AiBackendUnavailable(consecutive=5))
+
+    assert "5 calls in a row" in message
+    assert "re-run the verification" in message.lower()

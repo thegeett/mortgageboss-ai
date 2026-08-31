@@ -139,9 +139,7 @@ async def test_the_outage_sentence_is_written_onto_the_run(monkeypatch) -> None:
     cm, _db = _fake_session({_RUN: run})
     monkeypatch.setattr(vr, "task_session", cm)
 
-    await vr._mark_failed(
-        str(_RUN), AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run it.")
-    )
+    await vr._mark_failed(str(_RUN), AiBackendUnavailable(consecutive=5))
 
     assert run.status is VerificationStatus.FAILED
     assert "5 calls in a row" in run.error_detail
@@ -331,9 +329,7 @@ def test_the_backend_outage_reason_reaches_the_run_the_processor_reads() -> None
     from app.tasks.verification_rules import _failure_detail
     from app.verification.tag_materialization.breaker import AiBackendUnavailable
 
-    detail = _failure_detail(
-        AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run.")
-    )
+    detail = _failure_detail(AiBackendUnavailable(consecutive=5))
     assert "5 calls in a row" in detail
     assert "retries" not in detail
 
@@ -343,12 +339,16 @@ def test_a_timeout_and_an_outage_do_not_read_the_same() -> None:
     "try again shortly" — and one string for both is a string worth ignoring."""
     from app.tasks.verification_rules import _failure_detail
     from app.verification.tag_materialization.breaker import AiBackendUnavailable
-    from billiard.exceptions import SoftTimeLimitExceeded
+
+    # LP-635 review — imported from `celery.exceptions`, the way production does. They are the
+    # same object in the pinned Celery, so pinning billiard's passed while keying the wrong
+    # symbol: if Celery ever wrapped its re-export, `_FAILURE_DETAIL` would stop matching what
+    # is actually raised into the task while this test kept passing — the exact
+    # passes-while-the-sentence-goes-nowhere failure this commit is about.
+    from celery.exceptions import SoftTimeLimitExceeded
 
     timeout = _failure_detail(SoftTimeLimitExceeded())
-    outage = _failure_detail(
-        AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run.")
-    )
+    outage = _failure_detail(AiBackendUnavailable(consecutive=5))
     assert timeout != outage
     assert "ran out of time" in timeout
     # Neither may claim retries that `terminal_on` never performs.
@@ -363,3 +363,46 @@ def test_an_unrecognised_failure_still_says_something_useful() -> None:
     for unknown in (RuntimeError("boom"), None):
         detail = _failure_detail(unknown)
         assert "re-run" in detail.lower()
+
+
+def test_the_timeout_message_does_not_diagnose_a_cause_it_cannot_know() -> None:
+    """LP-635 review — a timeout cannot tell "too many documents" from "the backend was down".
+
+    The breaker counts BATCHES of up to fifteen subjects, so a pass of fewer than five batches can
+    never trip it: a small file hitting the LF-ZE9N outage grinds to the soft limit and lands here.
+    The message used to tell that processor the file had too many documents — the misdiagnosis this
+    ticket was opened to end, written into the field they read.
+    """
+    from app.tasks.verification_rules import _failure_detail
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    message = _failure_detail(SoftTimeLimitExceeded())
+
+    assert "more documents than one run can process" not in message
+    assert "backend" in message.lower(), "the other cause must be offered, not just omitted"
+
+
+def test_a_self_describing_exception_is_asked_rather_than_type_matched() -> None:
+    """The protocol the docstring claims, asserted on a type the table has never heard of.
+
+    It previously did `isinstance(exc, AiBackendUnavailable)` while claiming to ask the exception,
+    so the next self-describing failure would have been flattened to the generic line and the next
+    reader would have trusted the sentence."""
+    from app.tasks.verification_rules import _failure_detail
+
+    class _FutureFailure(RuntimeError):
+        user_detail = "The rules index was rebuilt mid-run — re-run the verification."
+
+    assert _failure_detail(_FutureFailure()) == _FutureFailure.user_detail
+
+
+def test_an_exception_with_no_detail_falls_back_rather_than_writing_a_blank() -> None:
+    """A FAILED run with an empty reason is worse than a generic one — the UI shows a failure with
+    nothing to act on. `user_detail` must be a non-empty string to win."""
+    from app.tasks.verification_rules import _failure_detail
+
+    class _Blank(RuntimeError):
+        user_detail = ""
+
+    assert _failure_detail(_Blank()) == _failure_detail(RuntimeError("anything"))
+    assert _failure_detail(_Blank())

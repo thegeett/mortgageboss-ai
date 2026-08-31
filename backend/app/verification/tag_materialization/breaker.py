@@ -79,10 +79,31 @@ CONSECUTIVE_INFRA_FAILURES_TO_TRIP = 5
 class AiBackendUnavailable(RuntimeError):
     """Raised when consecutive infrastructure failures show the AI backend is unreachable.
 
-    Carries no loan-file or borrower detail — it is raised deep in the materialization pass and ends
-    up in task logs and a run's ``error_detail``, both of which are read by people who should not
-    need to see a borrower's data to understand that Bedrock was down.
+    IT COMPOSES ITS OWN MESSAGE FROM A COUNT, and takes no free text — that is the point of the
+    constructor (LP-635 review). ``str(exc)`` is written verbatim into a run's ``error_detail``,
+    which is read by a processor AND exposed UNSCRUBBED by ``readonly.verifications``: unlike the
+    JSON columns, it is selected bare, so whatever this carries reaches a terminal and a transcript.
+
+    The previous version said "carries no loan-file or borrower detail" and relied on every future
+    raise site honouring that. One ``raise AiBackendUnavailable(f"... {document.original_filename}")``
+    would have made it false, and the docstring would still have claimed otherwise. Now the only
+    input is an integer, so the guarantee is a property of the type rather than a promise about how
+    people use it.
     """
+
+    #: The protocol `_failure_detail` asks for (LP-635 review): an exception that can explain
+    #: itself to a processor exposes the sentence here, rather than being matched by type at the
+    #: other end. Safe to show by construction — see the class docstring.
+    user_detail: str
+
+    def __init__(self, *, consecutive: int) -> None:
+        self.consecutive = consecutive
+        super().__init__(
+            f"The AI backend failed {consecutive} calls in a row. Stopping this "
+            "pass rather than spending the rest of the run on calls that cannot land — "
+            "re-run the verification once the backend is reachable."
+        )
+        self.user_detail = str(self)
 
 
 class AiInfraBreaker:
@@ -140,11 +161,7 @@ class AiInfraBreaker:
                 threshold=self._threshold,
                 infra_failures=self.infra_failures,
             )
-            raise AiBackendUnavailable(
-                f"The AI backend failed {self._consecutive} calls in a row. Stopping this "
-                "pass rather than spending the rest of the run on calls that cannot land — "
-                "re-run the verification once the backend is reachable."
-            )
+            raise AiBackendUnavailable(consecutive=self._consecutive)
 
 
 __all__ = [

@@ -36,6 +36,19 @@ def _drive(task: _FakeTask, work, on_exhausted) -> str:
             return "ok"
         except Retry:
             continue  # the worker would re-run with the incremented retry count
+        except (TypeError, AttributeError, NameError):
+            # LP-635 review — a HARNESS bug, not a task outcome, so it must not be reported as one.
+            #
+            # `except Exception` alone swallowed the TypeError from calling a zero-arg
+            # `on_exhausted` with an argument and returned "terminal", which is a legitimate
+            # result — so the suite failed as `assert 0 == 1`, pointing nowhere near a signature
+            # mismatch. The tests caught the breakage; the message cost time it should not have.
+            #
+            # Narrow on purpose: every failure these tests deliberately raise is a RuntimeError or
+            # the fake soft-timeout, so nothing legitimate is caught here. A production worker
+            # rightly catches everything; a harness pretending to be one should still say when the
+            # harness itself is wrong.
+            raise
         except Exception:
             return "terminal"
 

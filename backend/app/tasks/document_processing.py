@@ -787,6 +787,14 @@ def process_document(self: Task, document_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(document_id)),
+        # `_exc` is ignored DELIBERATELY, and the reason is worth recording so nobody "completes"
+        # this the way the run's failure detail was completed (LP-635 review). A backend outage
+        # never reaches here: `_process_document` absorbs every exception except the soft
+        # time-limit, so an unreachable Bedrock already ends as NEEDS_REVIEW with the honest cause
+        # on the document ("extraction incomplete (connection) — re-runnable", LP-462/LP-636).
+        # What DOES reach here is the case this hook was written for — a DB or Redis blip outside
+        # the pipeline's own handling — where "processing error" is the honest answer and the
+        # column is UI-shown and must stay PII-safe.
         on_exhausted=lambda _exc: run_async(_mark_document_failed(document_id)),
         event="process_document_exhausted",
         # LP-625 — A TIME LIMIT IS TERMINAL, NOT TRANSIENT, and this is the half of the bug that the
