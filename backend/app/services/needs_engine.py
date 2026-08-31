@@ -263,12 +263,38 @@ _GOVERNMENT_ID_DOCUMENTS = frozenset(
     }
 )
 
+#: bug-009 REVIEW — the catalog carries TWO interchangeable names for each of these documents, and
+#: the classifier's own indicators describe the same paper:
+#:
+#:   investment_account   "a BROKERAGE or investment account statement showing securities holdings"
+#:   brokerage_statement  "a securities BROKERAGE statement listing stocks, bonds, or funds"
+#:
+#:   retirement_account   "a retirement account statement (401(k), IRA, 403(b))"
+#:   ira_401k             "an IRA or 401(k) retirement-account statement — OVERLAPS the generic
+#:                         retirement_account" (its own indicator says so)
+#:
+#: So aliasing the invented name to ONE of each pair clears the need only when the classifier
+#: happened to pick that label rather than its twin — a coin flip, failing silently in the
+#: direction where a processor chases a document already in the file. That is the LF-ABRS harm
+#: `_NEED_ALTERNATIVES` was created for, so it is the mechanism these want, not an alias.
+_INVESTMENT_ACCOUNT_DOCUMENTS: frozenset[str] = frozenset(
+    {"investment_account", "brokerage_statement"}
+)
+_RETIREMENT_ACCOUNT_DOCUMENTS: frozenset[str] = frozenset({"retirement_account", "ira_401k"})
+#: `pension_statement` is deliberately NOT here: it is INCOME_EMPLOYMENT, an income stream, not an
+#: account balance — a different ask that happens to share the word "retirement".
+
 _NEED_ALTERNATIVES: dict[str, frozenset[str]] = {
     "government_id": _GOVERNMENT_ID_DOCUMENTS,
     # The PRE-LP-623 name for the same need. Every ID need already raised is stored under it, and a
     # stored row cannot be renamed retroactively without touching live files — so the old name keeps
     # working and accepts the same alternatives. New needs are minted as `government_id`.
     "drivers_license": _GOVERNMENT_ID_DOCUMENTS,
+    # The invented names, as heads rather than aliases (see above). Stored under their own slug and
+    # satisfied by either member, so the need clears whichever of the twin labels the classifier
+    # chose.
+    "investment_statement": _INVESTMENT_ACCOUNT_DOCUMENTS,
+    "retirement_statement": _RETIREMENT_ACCOUNT_DOCUMENTS,
 }
 
 
@@ -304,8 +330,6 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
     # upload could ever clear. Each maps to the catalog's own name for the SAME document:
     "credit_authorization": "authorization_to_run_credit",
     "installment_statement": "installment_loan_statement",
-    "investment_statement": "investment_account",
-    "retirement_statement": "retirement_account",
     "property_tax_statement": "property_tax_bill",
 }
 

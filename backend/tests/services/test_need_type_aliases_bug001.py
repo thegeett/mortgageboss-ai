@@ -12,7 +12,9 @@ an extracted `mortgage_statement`, and `verification_of_employment` beside the `
 
 from __future__ import annotations
 
+import pytest
 from app.ai.extraction import EXTRACTORS
+from app.documents.catalog import CATALOG
 from app.services.needs_engine import (
     _NEED_ALTERNATIVES,
     _NEED_TYPE_ALIASES,
@@ -302,8 +304,11 @@ def test_the_six_invented_names_all_resolve_now() -> None:
     assert canonical_need_type("title_report") == "title_commitment"
     assert canonical_need_type("credit_authorization") == "authorization_to_run_credit"
     assert canonical_need_type("installment_statement") == "installment_loan_statement"
-    assert canonical_need_type("investment_statement") == "investment_account"
-    assert canonical_need_type("retirement_statement") == "retirement_account"
+    # REVIEW CHANGE: these two resolve to THEMSELVES, as `_NEED_ALTERNATIVES` heads, rather
+    # than to one twin of an interchangeable pair. Pinning the alias target is what made the
+    # alias look correct while it only cleared the need when the classifier picked that twin.
+    assert canonical_need_type("investment_statement") == "investment_statement"
+    assert canonical_need_type("retirement_statement") == "retirement_statement"
     assert canonical_need_type("property_tax_statement") == "property_tax_bill"
     # The one that was a genuine CATALOG GAP rather than a synonym: the catalog carried
     # `installment_loan_statement` and `student_loan_statement` and nothing for the commonest
@@ -320,3 +325,60 @@ def test_every_liability_need_the_coverage_pass_knows_can_be_satisfied() -> None
 
     unsatisfiable = sorted(t for t in _LIABILITY_DOC_NEEDS if canonical_need_type(t) is None)
     assert not unsatisfiable, f"the coverage pass flags needs nothing can clear: {unsatisfiable}"
+
+
+# --------------------------------------------------------------------------- #
+# bug-009 REVIEW — an invented name whose catalog target has an interchangeable twin
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("head", "members"),
+    [
+        ("investment_statement", ("investment_account", "brokerage_statement")),
+        ("retirement_statement", ("retirement_account", "ira_401k")),
+    ],
+)
+def test_an_invented_name_with_twin_targets_accepts_either(
+    head: str, members: tuple[str, ...]
+) -> None:
+    """Aliasing to ONE of two interchangeable catalog types clears the need only by luck.
+
+    The classifier's own indicators describe the same paper — `investment_account` says "a BROKERAGE
+    or investment account statement" and `brokerage_statement` says "a securities BROKERAGE
+    statement"; `ira_401k` states outright that it "overlaps the generic retirement_account". So an
+    alias to one twin leaves the need open whenever the classifier picked the other, silently, in
+    the direction where a processor chases a document already in the file.
+
+    `_NEED_ALTERNATIVES` is the mechanism for "a need any one of several documents satisfies", and
+    it is what these want. Asserted as membership rather than as an alias target, so reverting to
+    the alias fails here.
+    """
+    from app.services.needs_engine import _NEED_ALTERNATIVES
+
+    assert head in _NEED_ALTERNATIVES, f"{head} should be an alternatives head, not an alias"
+    for member in members:
+        assert member in _NEED_ALTERNATIVES[head], f"{member} cannot satisfy {head}"
+        assert member in CATALOG, f"{member} is not a document the classifier can produce"
+
+
+def test_a_pension_statement_does_not_satisfy_a_retirement_account_need() -> None:
+    """The boundary of the widening above.
+
+    `pension_statement` is INCOME_EMPLOYMENT — an income stream, not an account balance. It shares
+    the word "retirement" and answers a different ask, so letting it clear a retirement-ACCOUNT need
+    would be a false green rather than a tolerance."""
+    from app.services.needs_engine import _NEED_ALTERNATIVES
+
+    assert "pension_statement" not in _NEED_ALTERNATIVES["retirement_statement"]
+
+
+def test_the_invented_names_still_canonicalise_and_are_offered() -> None:
+    """Being an alternatives head must not take them out of either path the fix depends on:
+    `canonical_need_type` has to accept them (or a proposal is stored raw and unclearable), and
+    `satisfiable_need_types` has to still offer them to the model."""
+    from app.services.needs_engine import canonical_need_type, satisfiable_need_types
+
+    for head in ("investment_statement", "retirement_statement"):
+        assert canonical_need_type(head) == head
+        assert head in satisfiable_need_types()
