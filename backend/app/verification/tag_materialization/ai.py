@@ -26,6 +26,7 @@ from app.core.logging import get_logger
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.tag_materialization.breaker import AiInfraBreaker
 from app.verification.tag_materialization.declarations import AiGroup
 from app.verification.tag_materialization.subjects import (
     ContextOptions,
@@ -286,6 +287,7 @@ async def produce_ai_group_tags(
     *,
     reasoner: Reasoner | None = None,
     cache: AiTagCache | None = None,
+    breaker: AiInfraBreaker | None = None,
 ) -> dict[str, dict[str, Tag]]:
     """Materialize ``group``'s tags for its subjects → ``{subject_id: {tag_id: Tag}}``.
 
@@ -344,11 +346,20 @@ async def produce_ai_group_tags(
         }
         try:
             result = await reason_fn(json.dumps(context))
-        except AIClientError:
+        except AIClientError as err:
             logger.warning("ai_group_batch_failed", group=group.key, size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Resolved({}, _REASON_FAILED)
+            # LP-635 — the per-batch tolerance above is unchanged; this only asks whether the NEXT
+            # call could land. `record_failure` raises `AiBackendUnavailable` once enough
+            # INFRASTRUCTURE failures stack up consecutively, ending the pass instead of spending the
+            # rest of the run's clock on calls that cannot reach the backend. A content failure
+            # resets the counter there rather than counting.
+            if breaker is not None:
+                breaker.record_failure(err)
             continue
+        if breaker is not None:
+            breaker.record_success()
         by_index = {j.index: j for j in result.judgments}
         expected = set(range(1, len(batch) + 1))
         if not set(by_index) <= expected:

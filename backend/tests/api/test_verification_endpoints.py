@@ -10,7 +10,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest_asyncio
-from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS
+from app.api.verification import _WATCHDOG_SLACK_SECONDS
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
@@ -134,11 +134,11 @@ async def test_post_run_triggers_pass(client: AsyncClient, db: AsyncSession, mon
     """POST creates a RUNNING run and enqueues the worker (enqueue patched)."""
     enqueued: dict[str, tuple[str, str]] = {}
 
-    def _fake_delay(loan_file_id: str, run_id: str) -> None:
-        enqueued["args"] = (loan_file_id, run_id)
+    def _fake_enqueue(*_a: object, **kw: object) -> None:
+        enqueued["args"] = tuple(kw["args"])  # type: ignore[arg-type]
 
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay", _fake_delay, raising=True
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async", _fake_enqueue, raising=True
     )
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
@@ -158,11 +158,11 @@ async def test_post_run_marks_failed_when_enqueue_fails(
 ) -> None:
     """A failed enqueue (broker down) surfaces as FAILED, not a stranded RUNNING run."""
 
-    def _boom(loan_file_id: str, run_id: str) -> None:
+    def _boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("broker unreachable")
 
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay", _boom, raising=True
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async", _boom, raising=True
     )
 
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
@@ -598,8 +598,8 @@ async def test_verification_is_tenant_scoped(client: AsyncClient, db: AsyncSessi
 
 def _spy_delay(monkeypatch, calls: list) -> None:
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda *a: calls.append(a),
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: calls.append(tuple(kw.get("args", a))),
         raising=True,
     )
 
@@ -690,9 +690,13 @@ def _spy_both_delays(monkeypatch, calls: list) -> None:
         lambda *a: calls.append(("sweep", *a)),
         raising=True,
     )
+    # LP-635 — the governed pass is enqueued with `apply_async`, not `delay`, because its time
+    # limits are now PER RUN (they scale with the file's document count). Recorded in the same
+    # ("rules", loan_file_id, run_id) shape every caller here already asserts on, so the change is
+    # invisible to them; the limits themselves are asserted separately.
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda *a: calls.append(("rules", *a)),
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: calls.append(("rules", *kw.get("args", a))),
         raising=True,
     )
 
@@ -1210,8 +1214,8 @@ async def test_second_run_on_same_file_returns_the_in_flight_run(
     calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: calls.append(tuple(kw["args"])),
         raising=True,
     )
 
@@ -1247,8 +1251,8 @@ async def test_force_does_not_override_the_in_flight_guard(
     calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: calls.append(tuple(kw["args"])),
         raising=True,
     )
 
@@ -1275,8 +1279,8 @@ async def test_a_run_on_another_file_is_unaffected(
     calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda loan_file_id, run_id: calls.append((loan_file_id, run_id)),
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: calls.append(tuple(kw["args"])),
         raising=True,
     )
 
@@ -1302,8 +1306,8 @@ async def test_a_stuck_run_does_not_block_a_new_one(
     permanently un-runnable, which is strictly worse than the double-click it prevents.
     """
     monkeypatch.setattr(
-        "app.tasks.verification_rules.run_rule_engine_pass.delay",
-        lambda loan_file_id, run_id: None,
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *a, **kw: None,
         raising=True,
     )
 
@@ -1316,8 +1320,12 @@ async def test_a_stuck_run_does_not_block_a_new_one(
     )
     stale_run = await db.get(Verification, UUID(first.json()["id"]))
     assert stale_run is not None
-    # Age it past the watchdog rather than sleeping for 25 minutes.
-    stale_run.started_at = utcnow() - timedelta(seconds=_STUCK_RUN_TIMEOUT_SECONDS + 60)
+    # Age it past the watchdog rather than sleeping. The bound is now derived from the file (LP-635);
+    # this file has no documents, so it gets the floor — the same 1500s the fixed constant held.
+    from app.tasks.verification_rules import rule_engine_limits
+
+    _soft, hard = rule_engine_limits(0)
+    stale_run.started_at = utcnow() - timedelta(seconds=hard + _WATCHDOG_SLACK_SECONDS + 60)
     await db.commit()
 
     second = await client.post(

@@ -15,13 +15,18 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS
+from app.api.verification import _WATCHDOG_SLACK_SECONDS
 from app.models.base import utcnow
 from app.models.company import Company
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.scripts.run_verification import _supersede_stuck_run, _truthy
+from app.tasks.verification_rules import rule_engine_limits
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# LP-635 — "stuck" is derived from the file now, not a constant. These fixtures have no documents, so
+# they get the floor: the same 1500s the retired `_STUCK_RUN_TIMEOUT_SECONDS` held.
+_STUCK_AFTER_SECONDS = rule_engine_limits(0)[1] + _WATCHDOG_SLACK_SECONDS
 
 
 async def _loan_file(db: AsyncSession) -> LoanFile:
@@ -72,7 +77,7 @@ async def test_a_run_past_the_api_threshold_is_superseded(db_session: AsyncSessi
     stuck = await _run(
         db_session,
         loan_file,
-        age_seconds=_STUCK_RUN_TIMEOUT_SECONDS + 60,
+        age_seconds=_STUCK_AFTER_SECONDS + 60,
         status=VerificationStatus.RUNNING,
     )
 
@@ -90,7 +95,7 @@ async def test_just_inside_the_threshold_still_belongs_to_the_running_run(
 ) -> None:
     """A run a few seconds short of the threshold is still protected.
 
-    ⚠️ Deliberately NOT asserted at exactly `_STUCK_RUN_TIMEOUT_SECONDS`. The clock advances between
+    Deliberately NOT asserted at exactly the watchdog bound. The clock advances between
     stamping `started_at` and comparing, so an "exactly at the boundary" fixture is really a
     fraction-of-a-second past it — a first version of this test asserted equality and failed for that
     reason. The `<=` that matches the API watchdog is a property of the source, not something a live
@@ -100,7 +105,7 @@ async def test_just_inside_the_threshold_still_belongs_to_the_running_run(
     await _run(
         db_session,
         loan_file,
-        age_seconds=_STUCK_RUN_TIMEOUT_SECONDS - 30,
+        age_seconds=_STUCK_AFTER_SECONDS - 30,
         status=VerificationStatus.RUNNING,
     )
 

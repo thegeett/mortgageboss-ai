@@ -49,6 +49,7 @@ from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRe
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions as _all_transactions
 from app.verification.snapshot.traversal import field_value as _raw
+from app.verification.tag_materialization.breaker import AiInfraBreaker
 
 logger = structlog.get_logger(__name__)
 
@@ -145,6 +146,7 @@ async def produce_stage_a_transaction_tags(
     *,
     reasoner: Reasoner | None = None,
     cache: TransactionTagCache | None = None,
+    breaker: AiInfraBreaker | None = None,
 ) -> Snapshot:
     """Produce Stage-A transaction tags and write them into the snapshot's tags layer.
 
@@ -190,13 +192,20 @@ async def produce_stage_a_transaction_tags(
         context_json = json.dumps(_build_context([txn for _, txn in batch]))
         try:
             result = await reason_fn(context_json)
-        except AIClientError:
+        except AIClientError as err:
             # Fail-closed: the whole batch's AI tags become unknown-with-reason (the
             # passthroughs still succeed). Not cached → retried on the next run.
             logger.warning("stage_a_batch_failed", size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Judged(None, None, _REASON_FAILED)
+            # LP-635 — see the identical guard in `tag_materialization.ai`. Stage A shares the run's
+            # breaker, so an outage that starts here is counted with the ones that follow it rather
+            # than each stage forgiving the backend separately.
+            if breaker is not None:
+                breaker.record_failure(err)
             continue
+        if breaker is not None:
+            breaker.record_success()
 
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens

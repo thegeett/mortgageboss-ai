@@ -96,6 +96,7 @@ from app.verification.snapshot.tag import Tag, TagProducedBy
 from app.verification.snapshot.traversal import source_document_by_subject
 from app.verification.tag_materialization.ai import AiTagCache
 from app.verification.tag_materialization.ai import Reasoner as AiGroupReasoner
+from app.verification.tag_materialization.breaker import AiBackendUnavailable, AiInfraBreaker
 from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
 from app.verification.tag_materialization.producer import materialize_tags
 
@@ -372,6 +373,20 @@ async def _run_stage(
     """
     try:
         return await produce(snapshot)
+    except AiBackendUnavailable:
+        # LP-635 — THE ONE EXCEPTION TO THE BACKSTOP, and it is narrow on purpose.
+        #
+        # This backstop exists so an UNEXPECTED wholesale failure degrades instead of killing the
+        # run: some tags are missing, the rest of the pass still says something true. That trade is
+        # only worth taking when continuing produces a better answer than stopping. A backend that
+        # has refused several calls in a row is the case where it does not — every AI tag after this
+        # point resolves to unknown, every finding built on them reads `couldn't check`, and the run
+        # finishes looking merely thin rather than broken.
+        #
+        # So this one propagates: out of the stage, out of the pass, to `retry_or_terminal`, which
+        # retries it later when the backend may be back. Degrading here would convert a retryable
+        # outage into a permanently poor result that nothing would ever revisit.
+        raise
     except Exception as exc:
         logger.error("verification_stage_failed", stage=stage, error=type(exc).__name__)
         degradations.append(Degradation(stage, f"stage failed: {type(exc).__name__}"))
@@ -874,12 +889,16 @@ async def run_verification(
     degradations.extend(_scan_section_degradations(snapshot))
 
     if produce_tags:
+        # LP-635 — ONE breaker for the whole pass, not one per stage. An outage does not restart at a
+        # stage boundary, so a counter that did would forgive the backend every time the pass moved
+        # on and might never reach its threshold during a real outage.
+        ai_breaker = AiInfraBreaker()
         # 2. Stage A — per-transaction atomic tags.
         await report_phase(run_id, "stage_a", session_factory=reasoners.progress_session)
         snapshot = await _run_stage(
             "stage_a",
             lambda s: produce_stage_a_transaction_tags(
-                s, reasoner=reasoners.stage_a, cache=caches.stage_a
+                s, reasoner=reasoners.stage_a, cache=caches.stage_a, breaker=ai_breaker
             ),
             snapshot,
             degradations,
@@ -918,6 +937,7 @@ async def run_verification(
                 # (LP-391's pending-check groups materialize SEPARATELY, best-effort, so a blocked group
                 # never degrades this run or enters the persisted snapshot.)
                 only_groups=_required_ai_groups(),
+                breaker=ai_breaker,
             ),
             snapshot,
             degradations,

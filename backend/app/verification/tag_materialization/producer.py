@@ -16,6 +16,7 @@ from __future__ import annotations
 from app.verification.snapshot.model import DocumentEntry, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import AiTagCache, Reasoner, produce_ai_group_tags
+from app.verification.tag_materialization.breaker import AiInfraBreaker
 from app.verification.tag_materialization.declarations import (
     ProductionMode,
     load_ai_groups,
@@ -38,6 +39,7 @@ async def materialize_tags(
     ai_cache: AiTagCache | None = None,
     only_subjects: frozenset[str] | None = None,
     only_groups: frozenset[str] | None = None,
+    breaker: AiInfraBreaker | None = None,
 ) -> Snapshot:
     """Materialize every declared tag into the tags layer.
 
@@ -99,6 +101,7 @@ async def materialize_tags(
             allowed_by_tag,
             reasoner=reasoners.get(group.key),
             cache=ai_cache,
+            breaker=breaker,
         )
         _merge(by_subject, produced)
 

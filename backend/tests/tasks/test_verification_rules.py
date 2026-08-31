@@ -132,14 +132,20 @@ def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> Non
     delayed: list[tuple] = []
 
     class _Task:
-        def delay(self, *a):
-            delayed.append(a)
+        def apply_async(self, *a, **kw):
+            delayed.append((kw["args"], kw["soft_time_limit"], kw["time_limit"]))
 
     import app.tasks.verification_rules as vr
 
     monkeypatch.setattr(vr, "run_rule_engine_pass", _Task())
-    assert api._enqueue_rule_engine(_LF, _RUN) is True  # enqueued OK
-    assert delayed == [(str(_LF), str(_RUN))]  # enqueued once, with the run's ids
+    assert api._enqueue_rule_engine(_LF, _RUN, document_count=44) is True  # enqueued OK
+    # LP-635 — enqueued once with the run's ids AND the limits this file's size earns. `delay` cannot
+    # carry per-run limits, which is why the call moved to `apply_async`.
+    soft, hard = vr.rule_engine_limits(44)
+    assert delayed == [((str(_LF), str(_RUN)), soft, hard)]
+    # The point of the change, stated as an assertion rather than left to the reader: a 44-document
+    # file gets more than the old fixed limit, which is what it could not finish under.
+    assert soft > 900
 
 
 def test_enqueue_never_raises_but_reports_failure(monkeypatch) -> None:
@@ -149,9 +155,13 @@ def test_enqueue_never_raises_but_reports_failure(monkeypatch) -> None:
     import app.tasks.verification_rules as vr
     from app.api import verification as api
 
-    boom = SimpleNamespace(delay=lambda *a: (_ for _ in ()).throw(RuntimeError("broker down")))
+    boom = SimpleNamespace(
+        apply_async=lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("broker down"))
+    )
     monkeypatch.setattr(vr, "run_rule_engine_pass", boom)
-    assert api._enqueue_rule_engine(_LF, _RUN) is False  # does not raise, reports the failure
+    assert (
+        api._enqueue_rule_engine(_LF, _RUN, document_count=0) is False
+    )  # does not raise, reports the failure
 
 
 def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
@@ -159,10 +169,11 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     limits that clear the LP-365-measured ~282s with headroom (it no longer runs under the global 120s soft
     limit that killed it), and the watchdog clears the hard limit so a hard-kill is still caught. This FAILS
     on the pre-fix code, where run_rule_engine_pass had no per-task limit and inherited the global 120s."""
-    from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS
+    from app.api.verification import _WATCHDOG_SLACK_SECONDS
     from app.tasks.celery_app import celery_app
     from app.tasks.verification_rules import (
         RULE_ENGINE_HARD_LIMIT_SECONDS,
+        RULE_ENGINE_MAX_HARD_SECONDS,
         RULE_ENGINE_SOFT_LIMIT_SECONDS,
         run_rule_engine_pass,
     )
@@ -176,8 +187,13 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     # 282 finally fits under the limit — and it did NOT under the global 120s (the fourth fail-open).
     assert RULE_ENGINE_SOFT_LIMIT_SECONDS > measured_runtime > global_soft
     assert RULE_ENGINE_HARD_LIMIT_SECONDS > RULE_ENGINE_SOFT_LIMIT_SECONDS
-    # The watchdog must clear the hard limit so a hard-killed pass (which cannot self-mark FAILED) is failed.
-    assert _STUCK_RUN_TIMEOUT_SECONDS > RULE_ENGINE_HARD_LIMIT_SECONDS
+    # The watchdog must clear the hard limit so a hard-killed pass (which cannot self-mark FAILED) is
+    # failed. LP-635 made both sides of that a FUNCTION of the file, so the invariant is now checked
+    # at the widest bound any run can be given rather than against a single pair of constants — a
+    # watchdog that cleared the default hard limit but not the largest one would fail healthy runs on
+    # exactly the big files this ticket exists to make work.
+    assert RULE_ENGINE_MAX_HARD_SECONDS + _WATCHDOG_SLACK_SECONDS > RULE_ENGINE_MAX_HARD_SECONDS
+    assert RULE_ENGINE_MAX_HARD_SECONDS >= RULE_ENGINE_HARD_LIMIT_SECONDS
 
 
 def test_rule_pass_completion_respects_a_concurrently_committed_failed() -> None:
@@ -196,3 +212,68 @@ def test_rule_pass_completion_respects_a_concurrently_committed_failed() -> None
     assert rule_pass_effective_status(VerificationStatus.FAILED) is VerificationStatus.FAILED
     # a healthy run (no FAILED in the DB) completes when the governed pass finishes
     assert rule_pass_effective_status(VerificationStatus.RUNNING) is VerificationStatus.COMPLETED
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — the limit is a function of the file, not a constant
+# --------------------------------------------------------------------------- #
+def test_a_44_document_file_gets_more_than_the_old_fixed_limit() -> None:
+    """THE REPORTED FILE. LF-ZE9N could not verify: 44 documents against a flat 900s, killed twice at
+    exactly fifteen minutes while still doing useful work.
+
+    At the measured 35.6 s/doc it needs ~1,566s. The assertion is against the MEASUREMENT rather than
+    a hardcoded expectation, so if someone re-measures the per-document cost this test still asks the
+    right question — does the file fit? — instead of pinning a number that was only ever a
+    consequence.
+    """
+    from app.tasks.verification_rules import MEASURED_SECONDS_PER_DOCUMENT, rule_engine_limits
+
+    soft, _hard = rule_engine_limits(44)
+    assert soft > 900, "the old fixed limit is what this file could not finish under"
+    assert soft > 44 * MEASURED_SECONDS_PER_DOCUMENT
+
+
+def test_a_small_file_keeps_exactly_the_limits_it_had() -> None:
+    """The floor. This change must not make anything detect a stuck small run more slowly than
+    before — a longer leash on files that never needed one would be a regression bought with the
+    fix."""
+    from app.tasks.verification_rules import rule_engine_limits
+
+    assert rule_engine_limits(0) == (900, 1200)
+    assert rule_engine_limits(5) == (900, 1200)
+
+
+def test_the_budget_is_bounded() -> None:
+    """The ceiling is a REFUSAL, not a budget: past it a file needs a resumable pass, not a longer
+    lease on a worker slot. Without this, one enormous file could hold a prefork slot indefinitely
+    and starve everything queued behind it."""
+    from app.tasks.verification_rules import RULE_ENGINE_MAX_SOFT_SECONDS, rule_engine_limits
+
+    soft, _hard = rule_engine_limits(10_000)
+    assert soft == RULE_ENGINE_MAX_SOFT_SECONDS
+
+
+def test_the_limit_never_shrinks_as_a_file_grows() -> None:
+    """Monotonic. A property rather than examples, because the floor and the ceiling are two places
+    a clamp can inadvertently invert the ordering."""
+    from app.tasks.verification_rules import rule_engine_limits
+
+    seen = [rule_engine_limits(n)[0] for n in range(0, 200, 7)]
+    assert seen == sorted(seen)
+
+
+def test_soft_hard_and_watchdog_stay_ordered_at_every_size() -> None:
+    """THE INVARIANT THE WHOLE CHAIN RESTS ON, checked across the range rather than at one point.
+
+    Each bound has a distinct job: the soft limit lets the task mark its own run FAILED, the hard
+    limit SIGKILLs a task that ignored it, and the watchdog catches a hard-killed task that could not
+    write its own marker. If any two cross, the run is failed by something that cannot explain
+    itself — and before LP-635 these were three unrelated constants that could only be checked by
+    reading them.
+    """
+    from app.api.verification import _WATCHDOG_SLACK_SECONDS
+    from app.tasks.verification_rules import rule_engine_limits
+
+    for documents in (0, 1, 21, 30, 44, 60, 100, 1000):
+        soft, hard = rule_engine_limits(documents)
+        assert soft < hard < hard + _WATCHDOG_SLACK_SECONDS

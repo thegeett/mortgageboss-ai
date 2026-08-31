@@ -86,6 +86,7 @@ from app.services.rule_subject_label import resolve_subject_label
 from app.services.snapshot_findings import list_snapshot_findings
 from app.services.verification_eta import estimated_seconds
 from app.services.verifications import create_verification_run, mark_verification_current
+from app.tasks.verification_rules import rule_engine_limits
 from app.verification.confidence import CONFIDENCE_CUTOFFS
 from app.verification.snapshot.content_id import DOC_PREFIX
 from app.verification.snapshot.documents_section import document_filenames_by_content_id
@@ -112,7 +113,11 @@ _SHOWN_ORIGINS = (FindingOrigin.AI_CROSS_SOURCE, FindingOrigin.DETERMINISTIC_RUL
 # ``RULE_ENGINE_HARD_LIMIT_SECONDS``) cannot commit its own FAILED marker — so detection must NOT depend on
 # the dying task. This timeout is sized ABOVE that hard limit (+ queue/start slack) so a healthy long run is
 # never raced, but a run whose governed pass never finished is reliably failed here.
-_STUCK_RUN_TIMEOUT_SECONDS = 1500
+#: Slack ABOVE the pass's hard limit: queue wait, worker start, and the moment a SIGKILLed task
+#: needs before anyone could have written its FAILED marker. LP-635 turned the timeout itself into a
+#: function of the file (`rule_engine_limits`); this is the constant part that survived, and it is
+#: the same 300s the old fixed 1500s encoded over a 1200s hard limit.
+_WATCHDOG_SLACK_SECONDS = 300
 
 
 async def _latest_run(db: DbSession, loan_file_id: UUID) -> Verification | None:
@@ -143,7 +148,19 @@ async def _reconcile_stuck_run(db: DbSession, loan_file: LoanFile) -> None:
     if latest is None or latest.status is not VerificationStatus.RUNNING:
         return
     started = latest.started_at or latest.created_at
-    if started is None or (utcnow() - started) <= timedelta(seconds=_STUCK_RUN_TIMEOUT_SECONDS):
+    if started is None:
+        return
+    # LP-635 — the watchdog scales with the file, because the pass now does.
+    #
+    # A FIXED 1500s here would have been the new bug: a 44-document run is legitimately given ~49
+    # minutes, and a watchdog that failed it at 25 would kill healthy runs on exactly the files this
+    # ticket exists to make work — while telling the processor they "timed out". Derived from the same
+    # `rule_engine_limits` the enqueue uses, so the two cannot disagree.
+    #
+    # Small files are unchanged: the floor puts them back at 1200s hard + 300s slack = 1500s, the
+    # value this constant held. Nothing detects a stuck small run more slowly than before.
+    _soft, hard = rule_engine_limits(await _document_count(db, loan_file.id))
+    if (utcnow() - started) <= timedelta(seconds=hard + _WATCHDOG_SLACK_SECONDS):
         return
     latest.status = VerificationStatus.FAILED
     latest.completed_at = utcnow()
@@ -170,7 +187,26 @@ async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) 
     return (await db.execute(stmt)).scalars().first()
 
 
-def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> bool:
+async def _document_count(db: DbSession, loan_file_id: UUID) -> int:
+    """Active documents on the file — the input to this run's time limits (LP-635).
+
+    Counted at ENQUEUE, so a run's budget reflects the file as it was when the run started. A
+    document arriving mid-run does not extend the window it is already inside; it is picked up by the
+    next run, which is also the run that would need the extra time.
+    """
+    return (
+        await db.scalar(
+            only_active(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.loan_file_id == loan_file_id),
+                Document,
+            )
+        )
+    ) or 0
+
+
+def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID, *, document_count: int) -> bool:
     """Enqueue the governed snapshot/rules pass (LP-365) ALONGSIDE the sweep, on the same run. Returns
     False on an enqueue failure (broker/worker unavailable) so the caller can mark the run FAILED — the
     task's own fail-closed FAILED only fires if the task RUNS, so an UN-enqueued pass must fail the run
@@ -179,7 +215,20 @@ def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID) -> bool:
     try:
         from app.tasks.verification_rules import run_rule_engine_pass
 
-        run_rule_engine_pass.delay(str(loan_file_id), str(run_id))
+        soft, hard = rule_engine_limits(document_count)
+        # apply_async, not delay: the limits are PER RUN (LP-635). The decorator's values are only
+        # the floor a task gets when something enqueues it without them.
+        run_rule_engine_pass.apply_async(
+            args=(str(loan_file_id), str(run_id)),
+            soft_time_limit=soft,
+            time_limit=hard,
+        )
+        log.info(
+            "rule_engine_enqueued",
+            loan_file_id=str(loan_file_id),
+            documents=document_count,
+            soft_time_limit=soft,
+        )
         return True
     except Exception:
         log.warning("rule_engine_enqueue_failed", loan_file_id=str(loan_file_id))
@@ -262,7 +311,9 @@ async def run_verification(
     # fingerprint above is keyed on the CROSS-SOURCE inputs; the rule engine reads a SUPERSET (all
     # documents), so a cache-hit could skip a rule run a rule-relevant-only change should have triggered —
     # the cache needs a rule-aware key (its own ticket). Here it simply rides the same trigger as the sweep.
-    if not _enqueue_rule_engine(loan_file.id, run.id):
+    if not _enqueue_rule_engine(
+        loan_file.id, run.id, document_count=await _document_count(db, loan_file.id)
+    ):
         run.status = VerificationStatus.FAILED
         run.completed_at = utcnow()
         run.error_detail = (
