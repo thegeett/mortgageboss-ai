@@ -43,11 +43,24 @@ def test_every_simple_presence_need_can_actually_be_satisfied() -> None:
 
 
 def test_each_alias_points_at_a_real_document_type() -> None:
-    """An alias that is itself a typo would move the defect rather than fix it."""
+    """An alias that is itself a typo would move the defect rather than fix it — so every target
+    must be something a processor can actually upload.
+
+    CHECKED AGAINST THE CATALOG, NOT `EXTRACTORS`, for the reason spelled out above: 42 of the 163
+    catalog types have no extractor, and `EXTRACTORS.get(...)` is consulted only AFTER
+    classification, so a Tier-2 type is classified and filed and takes the generic path. Requiring an
+    extractor here would reject `installment_loan_statement` — a real, classifiable document and the
+    correct target for `installment_statement` — for a reason that has nothing to do with whether an
+    upload can clear the need.
+    """
+    from app.documents.catalog import CATALOG
+
     for need_type, document_type in _NEED_TYPE_ALIASES.items():
-        assert document_type in EXTRACTORS, (
-            f"{need_type} aliases {document_type}, which is not a document type"
-        )
+        assert (
+            document_type in CATALOG
+            or document_type in _UMBRELLA_NEED_CATEGORY
+            or document_type in _NEED_ALTERNATIVES
+        ), f"{need_type} aliases {document_type}, which no document can satisfy"
 
 
 def test_the_two_from_the_real_file_are_aliased_to_what_the_processor_uploads() -> None:
@@ -176,20 +189,6 @@ def test_a_government_id_is_not_satisfied_by_any_borrower_info_document() -> Non
 # --------------------------------------------------------------------------- #
 # bug-009 — the title pair
 # --------------------------------------------------------------------------- #
-def test_every_alias_target_is_a_real_document_type() -> None:
-    """The same guard as above, aimed at the ALIAS map. An alias is a promise that the target is
-    something a processor can actually upload; pointing one at a type the catalog does not define
-    would turn every aliased need permanently unclearable — bug-001's defect, laundered through the
-    map that exists to prevent it."""
-    from app.documents.catalog import CATALOG
-    from app.services.needs_engine import _NEED_TYPE_ALIASES
-
-    for source, target in _NEED_TYPE_ALIASES.items():
-        assert target in CATALOG or target in _NEED_ALTERNATIVES, (
-            f"{source} aliases to {target}, which no document can satisfy"
-        )
-
-
 def test_a_proposed_title_report_is_stored_as_the_type_the_catalog_defines() -> None:
     """LP-69 proposes "title_report". The catalog carries `title_commitment` and
     `preliminary_title_report` and not that, so the proposal used to fail canonicalisation and get
@@ -258,3 +257,66 @@ async def test_the_title_row_a_processor_kept_can_be_cleared_by_an_upload(db_ses
     assert matched is not None and matched.id == stuck.id
     assert matched.status is NeedsItemStatus.VERIFIED
     assert clearable.status is NeedsItemStatus.WAIVED
+
+
+# --------------------------------------------------------------------------- #
+# bug-009 — the reasoner is told which types exist, instead of inventing them
+# --------------------------------------------------------------------------- #
+def test_the_reasoning_prompt_lists_only_types_a_document_can_satisfy() -> None:
+    """THE ROOT CAUSE, not another symptom.
+
+    The prompt used to say "use a concise lowercase snake_case need_type when an obvious document
+    type fits" and give four examples. So the model invented plausible names for types that do not
+    exist, and because satisfaction matches `needs_type == document_type`, each became a row on a
+    real file that no upload could ever clear. Six of them were live on staging at once
+    (`title_report`, `credit_card_statement`, `investment_statement`, `retirement_statement`,
+    `property_tax_statement`, `credit_authorization`) across eight open needs — every one found by a
+    person noticing it, one at a time.
+
+    The classifier already had the answer: render the type list FROM the catalog so the prompt and
+    the catalog cannot drift. Aliases patch the rows that exist; this stops the next name being
+    invented.
+    """
+    from app.services.needs_ai import _render_reasoning_prompt
+    from app.services.needs_engine import canonical_need_type, satisfiable_need_types
+
+    rendered = _render_reasoning_prompt()
+    assert "{satisfiable_need_types}" not in rendered, "the placeholder was never filled"
+
+    listed = satisfiable_need_types()
+    assert listed, "the prompt would offer the model no types at all"
+    # Every type offered must resolve, or the prompt is inviting the defect it exists to prevent.
+    unsatisfiable = sorted(t for t in listed if canonical_need_type(t) is None)
+    assert not unsatisfiable, f"the prompt offers types nothing can satisfy: {unsatisfiable}"
+
+    # And the list must actually reach the model.
+    for slug in ("credit_card_statement", "title_commitment", "government_id"):
+        assert f"  {slug}\n" in rendered, f"{slug} is satisfiable but not offered"
+
+
+def test_the_six_invented_names_all_resolve_now() -> None:
+    """The names the model actually produced on staging. Pinned individually rather than as a set,
+    so a regression names the one that broke."""
+    from app.services.needs_engine import canonical_need_type
+
+    assert canonical_need_type("title_report") == "title_commitment"
+    assert canonical_need_type("credit_authorization") == "authorization_to_run_credit"
+    assert canonical_need_type("installment_statement") == "installment_loan_statement"
+    assert canonical_need_type("investment_statement") == "investment_account"
+    assert canonical_need_type("retirement_statement") == "retirement_account"
+    assert canonical_need_type("property_tax_statement") == "property_tax_bill"
+    # The one that was a genuine CATALOG GAP rather than a synonym: the catalog carried
+    # `installment_loan_statement` and `student_loan_statement` and nothing for the commonest
+    # consumer debt of all, so this one was added as a real document type.
+    assert canonical_need_type("credit_card_statement") == "credit_card_statement"
+
+
+def test_every_liability_need_the_coverage_pass_knows_can_be_satisfied() -> None:
+    """`needs_coverage._LIABILITY_DOC_NEEDS` names the need types whose precondition it can check.
+    Two of its keys were types no document could satisfy, which is how they were found — a coverage
+    predicate is worth nothing on a row a processor cannot clear even after acting on it."""
+    from app.services.needs_coverage import _LIABILITY_DOC_NEEDS
+    from app.services.needs_engine import canonical_need_type
+
+    unsatisfiable = sorted(t for t in _LIABILITY_DOC_NEEDS if canonical_need_type(t) is None)
+    assert not unsatisfiable, f"the coverage pass flags needs nothing can clear: {unsatisfiable}"

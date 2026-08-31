@@ -298,6 +298,15 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
     # ID-7's own `requires_documents` group names FIRST, and a group's first member is the thing
     # the file asks for.
     "title_report": "title_commitment",
+    # bug-009 — the rest of the same family, found by auditing every need type actually on staging
+    # against what a document can satisfy rather than waiting for each to be reported. All six were
+    # AI-proposed and all six were open, so eight rows across the environment named a document no
+    # upload could ever clear. Each maps to the catalog's own name for the SAME document:
+    "credit_authorization": "authorization_to_run_credit",
+    "installment_statement": "installment_loan_statement",
+    "investment_statement": "investment_account",
+    "retirement_statement": "retirement_account",
+    "property_tax_statement": "property_tax_bill",
 }
 
 
@@ -312,6 +321,13 @@ _EQUIVALENT_NEED_TYPES: dict[str, str] = {
     # files (LP-623's reasoning, unchanged). This map is what `repair_needs_for_file` groups on, so
     # it is what merges LF-AWBB's existing pair. Preventing a defect does not undo it.
     "title_report": "title_commitment",
+    # The same six, for the same two reasons: the alias above stops the pair forming, this collapses
+    # a pair already on a file.
+    "credit_authorization": "authorization_to_run_credit",
+    "installment_statement": "installment_loan_statement",
+    "investment_statement": "investment_account",
+    "retirement_statement": "retirement_account",
+    "property_tax_statement": "property_tax_bill",
 }
 
 
@@ -332,6 +348,31 @@ def equivalent_need_type(needs_type: str | None) -> str | None:
         return None
     slug = needs_type.strip().lower()
     return _EQUIVALENT_NEED_TYPES.get(slug, slug)
+
+
+def satisfiable_need_types() -> list[str]:
+    """Every need type an uploaded document can actually satisfy, sorted (bug-009).
+
+    THE ROOT CAUSE THE ALIASES ONLY PATCH. The reasoning prompt used to say "use a concise lowercase
+    snake_case need_type when an obvious document type fits" and give four examples, so the model
+    invented plausible names for types that do not exist — `title_report`, `credit_card_statement`,
+    `investment_statement`, `retirement_statement`, `property_tax_statement`, `credit_authorization`.
+    Satisfaction matches ``needs_type == document_type``, so each became a row on a real file that no
+    upload could ever clear, and each was found one at a time by someone noticing it.
+
+    The classifier already solved this: its type list is RENDERED FROM THE CATALOG
+    (`app.ai.classification_prompt`), so the prompt and the catalog cannot drift. This is the same
+    move for the reasoner.
+
+    The four sources are the same four `canonical_need_type` resolves through, in the same order, so
+    a type this function offers is a type that function accepts.
+    """
+    return sorted(
+        set(CATALOG)
+        | set(_UMBRELLA_NEED_CATEGORY)
+        | set(_NEED_ALTERNATIVES)
+        | set(_NEED_TYPE_ALIASES)
+    )
 
 
 def _is_unactionable_alias(needs_type: str | None) -> bool:

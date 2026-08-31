@@ -155,6 +155,7 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "debt_payoff_statement": "a statement or letter showing a debt has been or will be paid off (to exclude it from DTI)",
     "student_loan_statement": "a student-loan servicer statement showing the balance and monthly payment",
     "installment_loan_statement": "an installment-loan (auto/personal) statement showing balance, payment, and remaining term",
+    "credit_card_statement": "a revolving credit-card account statement showing the issuer, account balance, credit limit, and minimum payment due",
     # LP-442 credit additions
     "bankruptcy_filing": "a bankruptcy FILING/petition (chapter, filing date, case number, debtor) — the petition that opens a case, distinct from bankruptcy_discharge (the order closing/discharging it)",
     "unsecured_note": "an unsecured promissory note (maker to payee, principal, rate, payment, maturity) NOT secured by real estate — a personal/business note, distinct from the property-secured subject_property_note/other_property_note",

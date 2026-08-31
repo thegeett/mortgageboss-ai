@@ -201,6 +201,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "debt_payoff_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "student_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "installment_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    # A revolving-account statement. The catalog carried `installment_loan_statement` and
+    # `student_loan_statement` but nothing for the commonest consumer debt of all, so a need asking
+    # for one named a document the classifier could not produce and no upload could ever clear
+    # (bug-009).
+    "credit_card_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     # LP-442 — schema'd credit types.
     "bankruptcy_filing": (Tier.TIER_1, DocumentCategory.CREDIT),
     "unsecured_note": (Tier.TIER_1, DocumentCategory.CREDIT),
