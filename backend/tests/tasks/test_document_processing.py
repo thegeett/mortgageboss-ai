@@ -449,6 +449,40 @@ async def test_a_genuinely_low_reported_confidence_is_still_flagged(
     assert review and review[0]["reason"] == "low_confidence"
 
 
+async def test_a_connection_failure_takes_the_rerunnable_branch_too(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 2: splitting the labels must not narrow the routing.
+
+    This branch used to be gated on ``reasoning == INFRA_RATE_LIMITED``, which caught the whole
+    transient family only because that one constant meant all of it. Now that connection failures
+    have their own label, an equality test would drop them out of the re-runnable branch and record
+    a dead socket as a content coverage gap — advancing the matching need to REJECTED, which is not
+    re-matched, so the successful re-run could never advance it.
+
+    The staging failure was exactly this kind, so this is the case that matters most."""
+    from app.ai.client import INFRA_CONNECTION
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, PayStubExtractionResult.failed(INFRA_CONNECTION))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    # Named honestly — not "throttled", which is what sent the staging diagnosis to the quota.
+    assert doc.processing_error == "extraction incomplete (connection) — re-runnable"
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == INFRA_CONNECTION
+    assert review[0]["infra_failure"] is True
+
+
 async def test_document_name_is_persisted_on_a_normal_classification(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
@@ -977,7 +1011,7 @@ async def test_throttled_extraction_is_not_a_content_failure(
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.NEEDS_REVIEW
-    assert "throttled" in doc.processing_error and "re-runnable" in doc.processing_error
+    assert doc.processing_error == "extraction incomplete (rate_limited) — re-runnable"
     # ⚠️ NO FAILED extraction version — the call never produced content, so none is recorded.
     assert await _current_extraction(db_session, doc.id) is None
     review = [e for e in logs if e["event"] == "document_needs_review"]

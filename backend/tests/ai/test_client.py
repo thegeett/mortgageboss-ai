@@ -140,14 +140,67 @@ def _wrapped(cause: Exception) -> AIClientError:
 
 
 def test_infra_failure_kind_classifies_by_cause() -> None:
+    """LP-636 defect 2: each cause gets its OWN label.
+
+    Every transient cause used to return "rate_limited", because this reused ``_is_transient`` —
+    the right grouping for deciding whether to RETRY, the wrong one for saying what HAPPENED. On
+    staging, 91 connection failures were logged as throttling and the investigation started at the
+    Bedrock quota instead of the transport."""
     from app.ai.client import infra_failure_kind
 
-    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429
-    assert infra_failure_kind(_wrapped(_server_error())) == "rate_limited"  # 5xx is transient
-    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "rate_limited"
+    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429, a real throttle
+    assert infra_failure_kind(_wrapped(_server_error())) == "server_error"  # reached it, it failed
+    # Never reached the service — the distinction the single old label destroyed.
+    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "connection"
+    assert infra_failure_kind(_wrapped(APIConnectionError(request=_REQUEST))) == "connection"
     assert infra_failure_kind(_wrapped(_bad_request())) == "oversized"  # 400 = payload/over-limit
     assert infra_failure_kind(_wrapped(_status_error(AuthenticationError, 401))) == "failed"
     assert infra_failure_kind(AIClientError("no cause")) == "failed"
+
+
+def test_the_split_labels_keep_the_old_rerunnable_grouping() -> None:
+    """Routing must be unchanged by the rename.
+
+    The three transient kinds have to remain re-runnable as a SET. Before the split, callers got
+    that grouping by comparing ``== INFRA_RATE_LIMITED``; if the set and ``_is_transient`` ever
+    drift, a dead socket starts being recorded as a content coverage gap."""
+    from app.ai.client import (
+        INFRA_CONNECTION,
+        INFRA_FAILED,
+        INFRA_OVERSIZED,
+        INFRA_RATE_LIMITED,
+        INFRA_SERVER,
+        is_rerunnable_infra,
+    )
+
+    assert is_rerunnable_infra(INFRA_RATE_LIMITED)
+    assert is_rerunnable_infra(INFRA_CONNECTION)
+    assert is_rerunnable_infra(INFRA_SERVER)
+    # A bad payload and an auth failure are NOT worth re-running — retrying changes nothing.
+    assert not is_rerunnable_infra(INFRA_OVERSIZED)
+    assert not is_rerunnable_infra(INFRA_FAILED)
+    assert not is_rerunnable_infra(None)
+
+
+def test_rerunnable_kinds_match_the_retry_predicate_exactly() -> None:
+    """The set and ``_is_transient`` are two expressions of one decision, so they must agree.
+
+    Pinned against the SDK exceptions themselves rather than against a list of names, so a cause
+    that becomes retryable without becoming re-runnable (or the reverse) fails here."""
+    from app.ai.client import _is_transient, infra_failure_kind, is_rerunnable_infra
+
+    causes = [
+        _rate_limit(),
+        _server_error(),
+        APITimeoutError(request=_REQUEST),
+        APIConnectionError(request=_REQUEST),
+        _bad_request(),
+        _status_error(AuthenticationError, 401),
+    ]
+    for cause in causes:
+        assert is_rerunnable_infra(infra_failure_kind(_wrapped(cause))) == _is_transient(cause), (
+            f"{type(cause).__name__}: re-runnable and transient disagree"
+        )
 
 
 # --------------------------------------------------------------------------- #

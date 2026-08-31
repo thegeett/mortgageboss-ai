@@ -373,30 +373,83 @@ def _is_transient(exc: Exception) -> bool:
 
 
 #: The infrastructure-outcome tags :func:`infra_failure_kind` returns — a call that never completed, by cause.
-INFRA_RATE_LIMITED = "rate_limited"
+#:
+#: LP-636 defect 2 SPLIT THESE. ``INFRA_RATE_LIMITED`` used to mean "any transient cause": 429,
+#: Bedrock throttle codes, 5xx, connection errors and timeouts alike. That is the correct grouping
+#: for the RETRY decision — all of them are worth retrying — and the wrong one for a LABEL, where
+#: the distinction is the entire point. It cost a real diagnosis: 91 connection failures on staging
+#: were recorded as "rate_limited", so the investigation began at the Bedrock quota (10,000 req/min
+#: against ~90 calls) instead of at the transport, where the actual bug was.
+INFRA_RATE_LIMITED = "rate_limited"  #: a genuine 429, or a Bedrock throttle/capacity code
+INFRA_CONNECTION = "connection"  #: never reached the service — connection refused, reset, timeout
+INFRA_SERVER = "server_error"  #: reached it and it failed — 5xx
 INFRA_OVERSIZED = "oversized"
 INFRA_FAILED = "failed"
+
+#: The kinds that mean "the call never completed, for a reason that may not recur" — so the
+#: document is worth re-running and must NOT be recorded as a content failure.
+#:
+#: ROUTING KEYS OFF THIS SET, NOT OFF ANY SINGLE LABEL. That is what makes the split above safe:
+#: before it, callers compared ``== INFRA_RATE_LIMITED`` and got the whole transient family by
+#: accident. Comparing against one member now would silently drop connection and server failures
+#: out of the re-runnable branch — the exact regression this set exists to prevent.
+RERUNNABLE_INFRA_KINDS = frozenset({INFRA_RATE_LIMITED, INFRA_CONNECTION, INFRA_SERVER})
+
+
+def is_rerunnable_infra(kind: str | None) -> bool:
+    """True when an infrastructure outcome means "try this document again".
+
+    Use this rather than an equality test against a single kind; see
+    :data:`RERUNNABLE_INFRA_KINDS`.
+    """
+    return kind in RERUNNABLE_INFRA_KINDS
 
 
 def infra_failure_kind(err: AIClientError) -> str:
     """Classify a caught :class:`AIClientError` by its underlying cause, for observability + routing (LP-462).
 
     ``complete`` raises ``AIClientError(...) from exc``, so the ORIGINAL SDK exception is on ``__cause__``.
-    Returns ``INFRA_RATE_LIMITED`` for a throttle/transient cause (429, Bedrock throttle codes, 5xx,
-    connection/timeout — the same test the retry loop and the bench use), ``INFRA_OVERSIZED`` for an HTTP 400
-    (a payload/bad-request rejection — an over-limit document is the case LP-462 fixes), or ``INFRA_FAILED``
-    for anything else (auth, permission, an exhausted non-throttle, …). This lets a caller record a THROTTLE
-    distinctly from a JUDGMENT: a throttled document persisted as "low confidence" would read as a coverage
-    gap and corrupt every downstream audit. Keeps SDK-exception knowledge in this module, beside
-    ``_is_transient``.
+
+    ============================  ===============================================================
+    ``INFRA_RATE_LIMITED``        a genuine 429, or a Bedrock throttle/capacity code
+    ``INFRA_CONNECTION``          connection refused/reset, or a timeout — never reached the service
+    ``INFRA_SERVER``              5xx — reached it and it failed
+    ``INFRA_OVERSIZED``           HTTP 400, a request-shape rejection (the over-limit document, LP-462)
+    ``INFRA_FAILED``              anything else — auth, permission, an exhausted non-throttle
+    ============================  ===============================================================
+
+    This lets a caller record a THROTTLE distinctly from a JUDGMENT: a throttled document persisted as
+    "low confidence" would read as a coverage gap and corrupt every downstream audit.
+
+    ``INFRA_CONNECTION`` and ``INFRA_SERVER`` are LP-636 defect 2. Every one of these used to return
+    ``INFRA_RATE_LIMITED``, because this function reused ``_is_transient`` — which is the right
+    grouping for deciding whether to RETRY and the wrong one for saying what HAPPENED. 91 connection
+    failures on staging were logged as "rate_limited", and the investigation started at the Bedrock
+    quota rather than at the transport.
+
+    **Retry behaviour is unchanged.** ``_is_transient`` still decides retries and is untouched; the
+    three transient kinds are exactly :data:`RERUNNABLE_INFRA_KINDS`. Route on that set, never on one
+    label. Keeps SDK-exception knowledge in this module, beside ``_is_transient``.
     """
     cause = err.__cause__
-    if isinstance(cause, Exception) and _is_transient(cause):
+    if isinstance(cause, APIStatusError):
+        if cause.status_code == _RATE_LIMIT_STATUS:
+            return INFRA_RATE_LIMITED
+        if cause.status_code >= _SERVER_ERROR_FLOOR:
+            return INFRA_SERVER
+        # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload
+        # (>100 pages / >32 MB). Not transient — the page cap is the fix, not a retry.
+        if cause.status_code == _BAD_REQUEST_STATUS:
+            return INFRA_OVERSIZED
+        # A throttle that arrived as some other status, recognised by its Bedrock error code.
+        return INFRA_RATE_LIMITED if _looks_like_bedrock_throttle(cause) else INFRA_FAILED
+    # APIConnectionError covers APITimeoutError, and TimeoutError is `complete`'s own wait_for
+    # bound. Neither reached the service, so neither is a throttle: this is the distinction the
+    # single old label destroyed.
+    if isinstance(cause, APIConnectionError | TimeoutError):
+        return INFRA_CONNECTION
+    if isinstance(cause, Exception) and _looks_like_bedrock_throttle(cause):
         return INFRA_RATE_LIMITED
-    # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload (>100 pages
-    # / >32 MB). Not transient — the page cap is the fix, not a retry.
-    if isinstance(cause, APIStatusError) and cause.status_code == _BAD_REQUEST_STATUS:
-        return INFRA_OVERSIZED
     return INFRA_FAILED
 
 

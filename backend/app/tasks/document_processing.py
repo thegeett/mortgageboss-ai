@@ -48,7 +48,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
-from app.ai.client import INFRA_RATE_LIMITED
+from app.ai.client import is_rerunnable_infra
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
 from app.ai.extraction.consistency import run_consistency_checks
@@ -401,14 +401,17 @@ async def _extract_branch(
     # so nothing is recorded as content; the document is flagged re-runnable.
     # (109 extractors surface the call's ``failure_reason`` as ``reasoning``, so the
     # throttle marker rides that channel — no per-extractor change.)
-    if result.status == ExtractionStatus.FAILED and result.reasoning == INFRA_RATE_LIMITED:
+    if result.status == ExtractionStatus.FAILED and is_rerunnable_infra(result.reasoning):
         document.status = DocumentStatus.NEEDS_REVIEW
-        document.processing_error = "extraction throttled (rate_limited) — re-runnable"
+        # LP-636 defect 2: name the ACTUAL cause. This read "throttled (rate_limited)" for every
+        # transient failure, including the connection errors that were the real fault on staging —
+        # a message that sent a reader to the Bedrock quota rather than the transport.
+        document.processing_error = f"extraction incomplete ({result.reasoning}) — re-runnable"
         await db.commit()
         logger.info(
             "document_needs_review",
             document_id=str(document.id),
-            reason="rate_limited",
+            reason=result.reasoning,
             infra_failure=True,
         )
         return True  # re-runnable infra — the caller must NOT advance needs (see docstring)
