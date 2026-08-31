@@ -264,7 +264,9 @@ def _failure_detail(exc: BaseException | None) -> str:
     sentence and not wired it. The protocol is now real, so the claim is true.
 
     ``user_detail`` must be safe to show: it is written verbatim into ``error_detail``, which
-    ``readonly.verifications`` selects UNSCRUBBED.
+    ``readonly.verifications`` scrubs for identifier SHAPES ONLY. A digit run is redacted; a
+    borrower's name or address is not — so this protocol still requires what it writes to be
+    composed rather than quoted, and scrubbing is the second line, not the first.
     """
     detail = getattr(exc, "user_detail", None)
     if isinstance(detail, str) and detail:

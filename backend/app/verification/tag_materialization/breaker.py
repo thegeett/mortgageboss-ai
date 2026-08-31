@@ -81,8 +81,12 @@ class AiBackendUnavailable(RuntimeError):
 
     IT COMPOSES ITS OWN MESSAGE FROM A COUNT, and takes no free text — that is the point of the
     constructor (LP-635 review). ``str(exc)`` is written verbatim into a run's ``error_detail``,
-    which is read by a processor AND exposed UNSCRUBBED by ``readonly.verifications``: unlike the
-    JSON columns, it is selected bare, so whatever this carries reaches a terminal and a transcript.
+    which a processor reads and ``readonly.verifications`` exposes.
+
+    That column is now scrubbed, which the sentence here used to say it was not — the review round
+    after this constructor landed closed the field-level hole. The two guards are not redundant:
+    ``scrub`` catches identifier SHAPES only, so an SSN quoted into a message is redacted while a
+    borrower's NAME crosses intact. Taking no free text is what covers the half scrubbing cannot.
 
     The previous version said "carries no loan-file or borrower detail" and relied on every future
     raise site honouring that. One ``raise AiBackendUnavailable(f"... {document.original_filename}")``
