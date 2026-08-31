@@ -483,6 +483,93 @@ async def test_a_connection_failure_takes_the_rerunnable_branch_too(
     assert review[0]["infra_failure"] is True
 
 
+async def test_a_confident_unknown_naming_a_catalog_type_is_flagged_not_completed(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 5, the whole point.
+
+    A high-confidence ``unknown`` routes to Tier 3 and COMPLETES with no flag — right when the
+    model is right, and no answer for a model that is confidently wrong. LF-ZE9N lost four Tier-1
+    types this way, each completed with no typed data and none of them in anyone's queue.
+
+    The document is still READ (Tier 3), and the type is NOT applied — only surfaced."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.90,
+            reasoning="none of the listed types fit",
+            document_name="a driver's license",
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW  # was COMPLETED, silently
+    assert doc.document_type == "unknown"  # the type is SURFACED, never applied
+    assert analyze.call_count == 1  # still read via Tier 3
+    assert extract.call_count == 0  # and no typed extractor guessed at
+
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "unknown_names_catalog_type"
+    assert review[0]["suggested_type"] == "drivers_license"
+
+
+async def test_a_genuinely_unknown_document_still_completes_quietly(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """``misc`` must stay reachable, or this trades one silent failure for a noisy one.
+
+    LP-463's own evidence is the fixture: "wiring instructions from a law firm" was a CORRECT
+    decline — there is no catalog type for it — and declining is the right answer, not a failure.
+    If this test ever starts flagging, the matcher has gone fuzzy."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.95,
+            reasoning="genuinely none of them",
+            document_name="wiring instructions from a law firm",
+        ),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.document_type == "unknown"
+
+
+async def test_a_confident_unknown_with_no_name_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """No name, no evidence, no change — the pre-LP-636 path exactly.
+
+    Every document classified before ``document_name`` was persisted has a null one, so this is
+    also the behaviour on re-processing anything from before that change."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="unknown", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+
+
 async def test_document_name_is_persisted_on_a_normal_classification(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
@@ -516,12 +603,12 @@ async def test_document_name_is_persisted_on_a_normal_classification(
 async def test_document_name_is_persisted_for_a_confident_unknown(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
-    """LP-636 defect 5, the case this exists for.
+    """LP-636 defect 5 step 1 — the name survives on a confident ``unknown``.
 
-    A confident ``unknown`` completes and routes to Tier 3, so it raises no flag at all — and the
-    model's own name for it was the only evidence that a catalog type had been missed. That name
-    now survives, which is what makes the miss measurable. Routing is deliberately NOT changed
-    here: the document still completes via Tier 3, exactly as before."""
+    Uses a name with NO catalog match on purpose. Step 2 now flags a confident ``unknown`` whose
+    name does match (see ``test_a_confident_unknown_naming_a_catalog_type_is_flagged_not_completed``),
+    so a matching name here would be testing that instead. This one holds the original property:
+    the name is persisted, and a genuine decline still completes via Tier 3 untouched."""
     doc = await _setup_document(db_session)
     _patch_storage(monkeypatch)
     _patch_classify(
@@ -530,7 +617,7 @@ async def test_document_name_is_persisted_for_a_confident_unknown(
             document_type="unknown",
             confidence=0.90,
             reasoning="none of the listed types fit",
-            document_name="a driver's license",
+            document_name="wiring instructions from a law firm",
         ),
     )
     analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
@@ -538,10 +625,10 @@ async def test_document_name_is_persisted_for_a_confident_unknown(
     await pipeline._process_document(db_session, str(doc.id))
     await db_session.refresh(doc)
 
-    assert doc.document_name == "a driver's license"
+    assert doc.document_name == "wiring instructions from a law firm"
     assert doc.document_type == "unknown"
-    assert analyze.call_count == 1  # still Tier 3 — this change routes nothing
-    assert doc.status == DocumentStatus.COMPLETED  # and still raises no flag
+    assert analyze.call_count == 1  # still Tier 3
+    assert doc.status == DocumentStatus.COMPLETED  # a genuine decline still completes
 
 
 async def test_document_name_survives_a_rejected_type_mismatch(

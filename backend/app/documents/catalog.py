@@ -336,6 +336,81 @@ def is_cataloged(document_type: str | None) -> bool:
     return bool(document_type) and document_type in CATALOG
 
 
+#: Slugs of one word are NOT matched against a free-text name (LP-636 defect 5). "survey",
+#: "appraisal", "w2" and the like appear inside ordinary prose — "the appraisal is attached", "a
+#: letter about the survey" — so a one-word match is a coin flip. Multi-word slugs are specific
+#: enough that a contiguous phrase match means what it says.
+_MIN_SLUG_WORDS_FOR_NAME_MATCH = 2
+
+
+def _normalize_for_match(text: str) -> str:
+    """Lowercase, drop punctuation, collapse whitespace: ``"a Driver's License"`` → ``"drivers license"``.
+
+    An apostrophe is DELETED, not turned into a space. Replacing it split "driver's" into
+    "driver s" and the driver's-licence case — one of the four this exists for — silently failed
+    to match.
+    """
+    dropped = text.lower().replace("'", "").replace("\u2019", "")
+    return " ".join("".join(c if c.isalnum() else " " for c in dropped).split())
+
+
+def match_catalog_type(free_text: str | None) -> str | None:
+    """The catalog slug that a free-text document NAME names, or ``None``.
+
+    LP-636 defect 5. The classifier emits ``document_name`` — its own words for what the document
+    is — BEFORE it makes the constrained ``document_type`` pick, and LP-463 records that the free
+    name is "a more reliable signal than the constrained pick". When the pick comes back a
+    confident ``unknown``, that name is the only surviving evidence that a catalog type was missed.
+    On LF-ZE9N four Tier-1 types were lost this way — a driver's licence, a closing disclosure, a
+    credit report and an earnest-money receipt — each routed to Tier 3 and COMPLETED with no flag.
+
+    DELIBERATELY CONSERVATIVE, AND DELIBERATELY NOT AUTHORITATIVE. It requires the slug's words to
+    appear as a contiguous phrase, and ignores one-word slugs entirely (see
+    ``_MIN_SLUG_WORDS_FOR_NAME_MATCH``). No fuzzy distance, no stemming: ``misc`` is the correct
+    destination for a genuinely unknown document and must stay reachable, so a near-miss has to
+    fall through rather than be captured.
+
+    The caller uses this to FLAG FOR REVIEW, never to apply the type. Applying a type from a name
+    match would put a wrong schema on a document — the T4→w2 harm LP-463 exists to prevent — and
+    the whole point of that ticket is not applying a label we do not trust. A false positive here
+    therefore costs one review; a false positive in an auto-applied version would cost wrong data.
+
+    Longest match wins, so ``prior_closing_disclosure_final_cd_from_purchase`` is preferred over
+    ``closing_disclosure`` when the name carries both.
+    """
+    if not free_text:
+        return None
+    haystack = _normalize_for_match(free_text)
+    if not haystack:
+        return None
+
+    tokens = haystack.split()
+    best: str | None = None
+    best_words = 0
+    for slug in CATALOG:
+        words = slug.split("_")
+        if len(words) < _MIN_SLUG_WORDS_FOR_NAME_MATCH:
+            continue
+        if len(words) > best_words and _is_ordered_subsequence(words, tokens):
+            best, best_words = slug, len(words)
+    return best
+
+
+def _is_ordered_subsequence(needle: list[str], haystack: list[str]) -> bool:
+    """Every word of ``needle``, in order, somewhere in ``haystack``. Gaps allowed.
+
+    Ordered rather than contiguous because real names interleave: "Earnest Money / EMD Receipt"
+    carries ``earnest_money_receipt`` with "emd" wedged in the middle, and a contiguous test misses
+    it — which it did, on one of the four documents this was written for.
+
+    Order still has to hold, so "a receipt for the earnest money" does NOT match
+    ``earnest_money_receipt``. That is the line between "the name contains these words" and "the
+    name says this thing", and it is the cheapest guard that keeps ``misc`` reachable.
+    """
+    it = iter(haystack)
+    return all(word in it for word in needle)
+
+
 def types_for_category(category: DocumentCategory) -> list[str]:
     """All cataloged type slugs in ``category``, in catalog (insertion) order.
 

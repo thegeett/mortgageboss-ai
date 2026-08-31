@@ -55,7 +55,7 @@ from app.ai.extraction.consistency import run_consistency_checks
 from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
-from app.documents.catalog import get_category, get_tier
+from app.documents.catalog import get_category, get_tier, match_catalog_type
 from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
@@ -222,13 +222,44 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # terminal status. Catalog types are tried first (below); free extraction is
         # the fallback for the flagged / declined tail, never the default.
         review_reason: str | None = None
+        missed_catalog_type: str | None = None
         if type_mismatch:
             review_reason = "type_mismatch"
         elif classification.confidence < _CONFIDENCE_THRESHOLD:
             review_reason = "low_confidence"
+        elif effective_type == "unknown":
+            # LP-636 defect 5 — a CONFIDENT `unknown` whose own name says otherwise.
+            #
+            # A high-confidence `unknown` means "confident it is none of the known types" and
+            # routes to Tier 3, completing with no flag (LP-59). That contract is right when the
+            # model is right, and has no answer for a model that is confidently wrong. On LF-ZE9N
+            # four Tier-1 types went this way — a driver's licence, a closing disclosure, a credit
+            # report and an earnest-money receipt — each completed, each with no typed data, none
+            # of them in anyone's queue.
+            #
+            # The evidence was already in hand and thrown away: `document_name` is emitted BEFORE
+            # the constrained pick and LP-463 calls it "a more reliable signal than the constrained
+            # pick" — "on an `unknown` this names the missing catalog type".
+            #
+            # FLAGGED, NEVER APPLIED. Applying a type from a name match would put a wrong schema on
+            # a document, which is the T4→w2 harm LP-463 exists to prevent, and this is a text
+            # match rather than a judgement. So the document takes exactly the path a flagged
+            # document already takes — read via Tier 3, terminal NEEDS_REVIEW, needs NOT advanced —
+            # and a human applies the type through the LP-44 override. A false positive costs one
+            # review; applying one would cost wrong data.
+            missed_catalog_type = match_catalog_type(classification.document_name)
+            if missed_catalog_type is not None:
+                review_reason = "unknown_names_catalog_type"
 
         if review_reason is not None:
-            logger.info("document_needs_review", document_id=str(document.id), reason=review_reason)
+            logger.info(
+                "document_needs_review",
+                document_id=str(document.id),
+                reason=review_reason,
+                # The catalog SLUG, not the model's prose — a closed vocabulary, so it is safe
+                # here and in the activity detail where `document_name` is not.
+                **({"suggested_type": missed_catalog_type} if missed_catalog_type else {}),
+            )
             await _tier3_analyze(db, document, content, review_reason=review_reason)
             # A flagged document's LABEL is not trusted, so it must NOT auto-advance a need (the pre-LP-463
             # low-confidence gate returned here too). Its untrusted document_type would drive a matching OPEN
