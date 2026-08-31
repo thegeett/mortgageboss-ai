@@ -106,7 +106,11 @@ def test_the_error_says_what_happened_without_naming_the_file() -> None:
         breaker.record_failure(_connection_error())
     message = str(caught.value)
     assert "2 calls in a row" in message
-    assert "retried" in message
+    # It says what to DO. This string reaches a run's `error_detail`, which a processor reads, and an
+    # earlier version told them it would be "retried" — which stopped being true the moment the
+    # breaker became terminal. Prose asserting behaviour is the one claim nothing type-checks.
+    assert "re-run" in message
+    assert "retried" not in message
 
 
 # --------------------------------------------------------------------------- #

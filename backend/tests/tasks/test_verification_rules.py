@@ -141,7 +141,9 @@ def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> Non
     assert api._enqueue_rule_engine(_LF, _RUN, document_count=44) is True  # enqueued OK
     # LP-635 — enqueued once with the run's ids AND the limits this file's size earns. `delay` cannot
     # carry per-run limits, which is why the call moved to `apply_async`.
-    soft, hard = vr.rule_engine_limits(44)
+    from app.core.run_limits import rule_engine_limits
+
+    soft, hard = rule_engine_limits(44)
     assert delayed == [((str(_LF), str(_RUN)), soft, hard)]
     # The point of the change, stated as an assertion rather than left to the reader: a 44-document
     # file gets more than the old fixed limit, which is what it could not finish under.
@@ -170,13 +172,13 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     limit that killed it), and the watchdog clears the hard limit so a hard-kill is still caught. This FAILS
     on the pre-fix code, where run_rule_engine_pass had no per-task limit and inherited the global 120s."""
     from app.api.verification import _WATCHDOG_SLACK_SECONDS
-    from app.tasks.celery_app import celery_app
-    from app.tasks.verification_rules import (
+    from app.core.run_limits import (
         RULE_ENGINE_HARD_LIMIT_SECONDS,
         RULE_ENGINE_MAX_HARD_SECONDS,
         RULE_ENGINE_SOFT_LIMIT_SECONDS,
-        run_rule_engine_pass,
     )
+    from app.tasks.celery_app import celery_app
+    from app.tasks.verification_rules import run_rule_engine_pass
 
     measured_runtime = 282  # LP-365, a 30-document file
     global_soft = celery_app.conf.task_soft_time_limit  # the sweep's short limit (120)
@@ -197,7 +199,7 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     # watchdog and the enqueue drifting apart, which is the failure it claims to guard. Checked at
     # both ends of the range and past the cap, since the floor and the ceiling are where a
     # divergence would actually appear.
-    from app.tasks.verification_rules import rule_engine_limits
+    from app.core.run_limits import rule_engine_limits
 
     for documents in (0, 1, 21, 44, 200, 10_000):
         _soft, hard = rule_engine_limits(documents)
@@ -238,7 +240,7 @@ def test_a_44_document_file_gets_more_than_the_old_fixed_limit() -> None:
     right question — does the file fit? — instead of pinning a number that was only ever a
     consequence.
     """
-    from app.tasks.verification_rules import MEASURED_SECONDS_PER_DOCUMENT, rule_engine_limits
+    from app.core.run_limits import MEASURED_SECONDS_PER_DOCUMENT, rule_engine_limits
 
     soft, _hard = rule_engine_limits(44)
     assert soft > 900, "the old fixed limit is what this file could not finish under"
@@ -249,7 +251,7 @@ def test_a_small_file_keeps_exactly_the_limits_it_had() -> None:
     """The floor. This change must not make anything detect a stuck small run more slowly than
     before — a longer leash on files that never needed one would be a regression bought with the
     fix."""
-    from app.tasks.verification_rules import rule_engine_limits
+    from app.core.run_limits import rule_engine_limits
 
     assert rule_engine_limits(0) == (900, 1200)
     assert rule_engine_limits(5) == (900, 1200)
@@ -259,7 +261,7 @@ def test_the_budget_is_bounded() -> None:
     """The ceiling is a REFUSAL, not a budget: past it a file needs a resumable pass, not a longer
     lease on a worker slot. Without this, one enormous file could hold a prefork slot indefinitely
     and starve everything queued behind it."""
-    from app.tasks.verification_rules import RULE_ENGINE_MAX_SOFT_SECONDS, rule_engine_limits
+    from app.core.run_limits import RULE_ENGINE_MAX_SOFT_SECONDS, rule_engine_limits
 
     soft, _hard = rule_engine_limits(10_000)
     assert soft == RULE_ENGINE_MAX_SOFT_SECONDS
@@ -268,7 +270,7 @@ def test_the_budget_is_bounded() -> None:
 def test_the_limit_never_shrinks_as_a_file_grows() -> None:
     """Monotonic. A property rather than examples, because the floor and the ceiling are two places
     a clamp can inadvertently invert the ordering."""
-    from app.tasks.verification_rules import rule_engine_limits
+    from app.core.run_limits import rule_engine_limits
 
     seen = [rule_engine_limits(n)[0] for n in range(0, 200, 7)]
     assert seen == sorted(seen)
@@ -284,7 +286,7 @@ def test_soft_hard_and_watchdog_stay_ordered_at_every_size() -> None:
     reading them.
     """
     from app.api.verification import _WATCHDOG_SLACK_SECONDS
-    from app.tasks.verification_rules import rule_engine_limits
+    from app.core.run_limits import rule_engine_limits
 
     for documents in (0, 1, 21, 30, 44, 60, 100, 1000):
         soft, hard = rule_engine_limits(documents)

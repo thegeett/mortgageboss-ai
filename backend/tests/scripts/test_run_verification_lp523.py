@@ -16,12 +16,12 @@ from uuid import uuid4
 
 import pytest
 from app.api.verification import _WATCHDOG_SLACK_SECONDS
+from app.core.run_limits import rule_engine_limits
 from app.models.base import utcnow
 from app.models.company import Company
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.scripts.run_verification import _supersede_stuck_run, _truthy
-from app.tasks.verification_rules import rule_engine_limits
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # LP-635 — "stuck" is derived from the file now, not a constant. These fixtures have no documents, so

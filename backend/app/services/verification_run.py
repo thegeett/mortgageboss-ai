@@ -498,6 +498,19 @@ async def _evaluate_pending_checks(
                 ai_cache=materialization_cache,
                 only_subjects=_MATERIALIZED_SUBJECTS,
                 only_groups=pending_groups,
+                # LP-635 review — its OWN breaker, and deliberately not the run's.
+                #
+                # This path had none, so an outage starting here ground through the blocked groups
+                # exactly as the main pass used to. A fresh breaker stops that.
+                #
+                # NOT the shared `ai_breaker`, and NOT re-raised, which is where this diverges from
+                # the other three stages. Pending checks run AFTER the live pass has already
+                # succeeded, and they are best-effort by construction — a throwaway snapshot, no
+                # effect on `run.degraded`. Failing the whole run because a BLOCKED, uncalibrated
+                # rule could not be surfaced would discard a complete set of real findings to
+                # protect a preview. Sharing the run's breaker would also let this path's failures
+                # count against a pass that has already finished its own work.
+                breaker=AiInfraBreaker(),
             )
             if pending_groups
             else snapshot
@@ -510,6 +523,12 @@ async def _evaluate_pending_checks(
             consistency_reasoners=consistency_reasoners or {},
             confidence_floor=confidence_floor,
         )
+    except AiBackendUnavailable:
+        # Named rather than left to the catch-all below, so this reads as a decision instead of an
+        # accident: the outcome (no pending flags, live results untouched) is the same, but the log
+        # line distinguishes "the backend went away" from "this path has a bug".
+        logger.warning("pending_check_surfacing_skipped_backend_unavailable")
+        return []
     except Exception as exc:
         logger.warning("pending_check_surfacing_failed", error=str(exc))
         return []

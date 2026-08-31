@@ -1322,7 +1322,7 @@ async def test_a_stuck_run_does_not_block_a_new_one(
     assert stale_run is not None
     # Age it past the watchdog rather than sleeping. The bound is now derived from the file (LP-635);
     # this file has no documents, so it gets the floor — the same 1500s the fixed constant held.
-    from app.tasks.verification_rules import rule_engine_limits
+    from app.core.run_limits import rule_engine_limits
 
     _soft, hard = rule_engine_limits(0)
     stale_run.started_at = utcnow() - timedelta(seconds=hard + _WATCHDOG_SLACK_SECONDS + 60)

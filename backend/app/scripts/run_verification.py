@@ -42,6 +42,7 @@ from app.api.verification import (
     _WATCHDOG_SLACK_SECONDS,
     _document_count,
     _enqueue_rule_engine,
+    _watchdog_hard_limit,
 )
 from app.core.database import async_session_maker
 from app.core.logging import get_logger
@@ -49,7 +50,6 @@ from app.models.base import utcnow
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.verifications import create_verification_run
-from app.tasks.verification_rules import rule_engine_limits
 
 logger = get_logger(__name__)
 
@@ -86,7 +86,9 @@ async def _supersede_stuck_run(db: AsyncSession, loan_file_id: UUID) -> str | No
     # LP-635 — derived from the file, exactly as the API watchdog now is, so "stuck" still has ONE
     # definition. A fixed value here would let this command supersede a large run that the API
     # (correctly) still considered healthy.
-    _soft, hard = rule_engine_limits(await _document_count(db, loan_file_id))
+    # Stored-first, exactly as the API watchdog reads it — two definitions of "stuck" would let this
+    # command supersede a run the UI still (correctly) considers healthy.
+    hard = await _watchdog_hard_limit(db, latest, loan_file_id)
     stuck_after = hard + _WATCHDOG_SLACK_SECONDS
     if age <= timedelta(seconds=stuck_after):
         remaining = timedelta(seconds=stuck_after) - age

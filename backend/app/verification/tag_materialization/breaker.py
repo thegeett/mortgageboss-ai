@@ -22,20 +22,37 @@ the documents to check.
 So: a run of consecutive INFRASTRUCTURE failures means stop. Not "this batch failed" — that stays
 tolerated — but "the backend is not answering", which no amount of continuing will fix.
 
-**Deliberately transient, not terminal.** Tripping raises, the exception leaves the pass, and
-``retry_or_terminal`` in :mod:`app.tasks.verification_rules` retries it with backoff, because a
-backend outage is the definition of a condition that may not recur. The slot is released in seconds
-instead of held for fifteen minutes, and the retry happens later, when it might work. Before this,
-the failure was slow AND unretryable: the soft limit is terminal by design (retrying a run that ran
-out of clock just runs out of clock again), so an outage borrowed that terminality by arriving
-dressed as a timeout.
+**Terminal, not retried** — and the first cut of this module had that backwards. The reasoning that
+looked right was "an outage may not recur, so retry it"; three counts say otherwise. ``started_at``
+is stamped once at run creation and never per attempt, so a retry runs against a watchdog bound that
+has been ticking since the first attempt — long enough and the watchdog fails a run whose retry is
+still working, while its findings commit anyway. ``TagCaches`` is rebuilt per invocation, so a retry
+re-pays for every call the first attempt already made. And the backoff window is about 35 seconds
+across ``MAX_RETRIES``, which is not a length of time any outage worth tripping this breaker is over
+in.
 
-**Only infrastructure counts.** A malformed response, an off-vocabulary value, a truncation — those
-are content outcomes, they are what the fail-closed path already handles well, and a file that
-produces many of them is a hard file rather than a broken backend. Counting them here would fail runs
-that today complete with honest ``couldn't check`` findings, which is the one regression this module
-must not cause. The set is :data:`~app.ai.client.RERUNNABLE_INFRA_KINDS` — routed off the SET, never
-off one label, for the reason that module documents.
+So it joins ``SoftTimeLimitExceeded`` in ``terminal_on``. The benefit the breaker delivers is
+unchanged by that: the slot is released in under a minute instead of being ground away for the file's
+whole budget, and the run is visibly FAILED and re-runnable once the backend is back. Releasing the
+slot was always the win; the automatic retry was not.
+
+**Nearly everything counts; one thing resets.** Only a PAYLOAD rejection
+(:data:`~app.ai.client.INFRA_OVERSIZED`) clears the counter — that is the backend answering about
+THIS request's shape, and one oversized document says nothing about the next call.
+
+The first cut gated on :data:`~app.ai.client.RERUNNABLE_INFRA_KINDS` instead, on the reasoning that a
+backend which answers is not the one this breaker looks for. That reasoning does not survive a 403:
+``infra_failure_kind`` returns ``INFRA_FAILED`` for auth, permission and AccessDenied, which is
+outside that set — so an expired credential mid-pass RESET the counter on every single call and was
+the one outage shape that could never trip this breaker, while being the least recoverable of them
+all. ADR-387 records out-of-band credentials as a live concern in this environment, so that was the
+likely route, not a hypothetical one.
+
+Content outcomes never reach here to begin with: a malformed response, an off-vocabulary value or a
+truncation is handled by the fail-closed path and does not raise. Only an ``AIClientError`` does. The
+residual risk is narrow and worth stating — a content-shaped failure raised as a causeless
+``AIClientError`` would count, and five in a row would end the pass. That is a visible, re-runnable
+failure rather than a silent one, which is the right side to err on.
 """
 
 from __future__ import annotations
@@ -124,9 +141,9 @@ class AiInfraBreaker:
                 infra_failures=self.infra_failures,
             )
             raise AiBackendUnavailable(
-                f"The AI backend failed {self._consecutive} calls in a row "
-                "(connection, server or throttle). Stopping this pass so it can be retried "
-                "rather than spending the run's remaining time on calls that cannot land."
+                f"The AI backend failed {self._consecutive} calls in a row. Stopping this "
+                "pass rather than spending the rest of the run on calls that cannot land — "
+                "re-run the verification once the backend is reachable."
             )
 
 
