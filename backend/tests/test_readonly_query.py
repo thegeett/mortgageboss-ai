@@ -520,3 +520,44 @@ def test_validate_sql_refuses_everything_else(sql: str) -> None:
 
     with pytest.raises(QueryRefused):
         validate_sql(sql)
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — a run's failure reason is scrubbed like every other free-text column
+# --------------------------------------------------------------------------- #
+def test_a_runs_error_detail_is_scrubbed() -> None:
+    """C7 scrubs `error_detail` on `readonly.communications` and selected the identically-named
+    column BARE on `readonly.verifications`.
+
+    That was defensible while only this repo's own composed strings reached it. LP-635 widened who
+    writes it: `_failure_detail` asks an exception to explain itself through `user_detail` and writes
+    the result verbatim, so the column's safety became a promise about every exception that might
+    ever define that attribute — the shape we removed from `AiBackendUnavailable`'s constructor,
+    reappearing one level up at the protocol.
+    """
+    view = _view_bodies()["verifications"]
+    assert re.search(r"scrub\(\s*error_detail\s*\)", view), (
+        "verifications.error_detail is selected bare; a reason written from an exception would "
+        "reach a transcript unredacted"
+    )
+
+
+def test_scrubbing_does_not_damage_the_reasons_a_processor_reads() -> None:
+    """The other half, and the reason this was close to free: `scrub` redacts identifier SHAPES, so
+    the failure messages LP-635 composes pass through untouched.
+
+    Pinned because a future widening of `scrub` — a rule matching short digit runs, say — would
+    silently start mangling "failed 5 calls in a row" into something a processor cannot act on. This
+    asserts the messages contain nothing scrub-shaped in the first place.
+    """
+    messages = (
+        "The AI backend failed 5 calls in a row. Stopping this pass rather than spending the rest "
+        "of the run on calls that cannot land — re-run the verification once the backend is "
+        "reachable.",
+        "Verification ran out of time before it finished. That can mean the file is larger than "
+        "one run's budget, or that the AI backend was slow or unreachable.",
+        "Rule-engine pass failed — re-run the verification.",
+    )
+    ssn_like = re.compile(r"\b\d{3}[- ]\d{2}[- ]\d{4}\b|\b\d{9,}\b")
+    for message in messages:
+        assert not ssn_like.search(message), f"scrub would redact part of: {message!r}"
