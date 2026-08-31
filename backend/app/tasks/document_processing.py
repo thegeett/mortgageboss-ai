@@ -445,6 +445,21 @@ async def _extract_branch(
         # LP-636 defect 2: name the ACTUAL cause. This read "throttled (rate_limited)" for every
         # transient failure, including the connection errors that were the real fault on staging —
         # a message that sent a reader to the Bedrock quota rather than the transport.
+        #
+        # INTERPOLATING `result.reasoning` IS SAFE **HERE ONLY**, and the difference is the gate on
+        # the line above. `is_rerunnable_infra` is a membership test against a closed set of three
+        # constants, so reaching this line proves `reasoning` is `rate_limited`, `connection` or
+        # `server_error` — never free text.
+        #
+        # Sixty lines below, the FAILED branch forbids exactly this ("DON'T interpolate
+        # `result.reasoning` here … it is the model's free-text reasoning and can quote document
+        # details"), and it is right: there the value is unconstrained. Said out loud because the
+        # two sites otherwise look like a contradiction, and a reader resolving it either way is
+        # wrong — copying this into the other branch leaks, and "fixing" this one loses the cause.
+        #
+        # It matters because `processing_error` is UI-shown AND `readonly.documents` selects it
+        # unscrubbed, so anything free-form here would reach a terminal and a transcript
+        # (LP-635 round 5 found the same shape on `extractions.error_detail`).
         document.processing_error = f"extraction incomplete ({result.reasoning}) — re-runnable"
         await db.commit()
         logger.info(
