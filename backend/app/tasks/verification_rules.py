@@ -51,6 +51,7 @@ from app.services.verification_run import run_verification
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
 from app.tasks.retry import MAX_RETRIES, retry_or_terminal
+from app.verification.tag_materialization.breaker import AiBackendUnavailable
 
 logger = structlog.get_logger(__name__)
 
@@ -143,7 +144,29 @@ def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
         # LP-377-C: a SOFT time-limit is terminal, NOT transient — retrying re-runs the same ~282s+ work
         # and will time out again, and stacked retries (up to 3x the hard limit) would outlast the 1500s
         # stuck-run watchdog and let it fail a run mid-retry. Fail closed once, immediately.
-        terminal_on=(SoftTimeLimitExceeded,),
+        #
+        # LP-635 REVIEW — `AiBackendUnavailable` joins it, for the SAME reason and two more. It was
+        # left transient so Celery would retry it, on the reasoning that the backend might be back;
+        # measured, it is not:
+        #
+        #   * THE WATCHDOG. `started_at` is set once at run creation and never reset per attempt,
+        #     while `_reconcile_stuck_run` measures against a SINGLE-attempt bound (`hard + 300`).
+        #     The comment above says that sizing only holds "because soft time-limits no longer
+        #     retry". A retried run keeps the original clock, so a 44-doc file that works 2200s,
+        #     trips, and retries is failed by the watchdog at 3262s while the retry is still working
+        #     — and `_run`'s FAILED-wins lock then suppresses COMPLETED while the findings commit
+        #     anyway. A FAILED run carrying a full set of fresh findings is worse than either.
+        #   * THE COST. `TagCaches` is `field(default_factory=dict)` — in-memory, rebuilt per
+        #     invocation. A retry re-issues every Stage A / Stage B / materialization call already
+        #     paid for, so an outage near the end of a 591-call pass costs up to 4x a normal run.
+        #   * THE WINDOW. `retry_countdown` is 5s/10s/20s over MAX_RETRIES=3 — about 35 seconds. An
+        #     outage long enough to trip the breaker (5 consecutive failures) is essentially never
+        #     over inside 35 seconds, so all three attempts fail and the run ends FAILED regardless.
+        #
+        # The benefit the breaker actually delivers is unchanged by this: the slot is released in
+        # under a minute instead of grinding for the file's whole budget, and the run is visibly
+        # FAILED and re-runnable by hand. That was always the win; the retry was not.
+        terminal_on=(SoftTimeLimitExceeded, AiBackendUnavailable),
     )
 
 

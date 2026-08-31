@@ -383,9 +383,19 @@ async def _run_stage(
         # point resolves to unknown, every finding built on them reads `couldn't check`, and the run
         # finishes looking merely thin rather than broken.
         #
-        # So this one propagates: out of the stage, out of the pass, to `retry_or_terminal`, which
-        # retries it later when the backend may be back. Degrading here would convert a retryable
-        # outage into a permanently poor result that nothing would ever revisit.
+        # So this one propagates: out of the stage, out of the pass, to `retry_or_terminal`.
+        # Degrading here would convert a retryable outage into a permanently poor result that
+        # nothing would ever revisit.
+        #
+        # IT IS TERMINAL, NOT RETRIED (LP-635 review). `retry_or_terminal` lists it in `terminal_on`
+        # beside `SoftTimeLimitExceeded`, so the run fails once, immediately and visibly. Retrying it
+        # was measured and is worse on three counts — the watchdog clock is not reset per attempt,
+        # the tag caches are rebuilt so every call is paid again, and the backoff window is ~35
+        # seconds against an outage that by definition lasted longer. See the comment at
+        # `terminal_on` for the detail.
+        #
+        # The win is unchanged: the slot is released in under a minute rather than grinding the
+        # file's whole budget, and the run is re-runnable by hand.
         raise
     except Exception as exc:
         logger.error("verification_stage_failed", stage=stage, error=type(exc).__name__)
@@ -917,7 +927,7 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_b",
             lambda s: produce_stage_b_sourcing_tags(
-                s, reasoner=reasoners.stage_b, cache=caches.stage_b
+                s, reasoner=reasoners.stage_b, cache=caches.stage_b, breaker=ai_breaker
             ),
             snapshot,
             degradations,

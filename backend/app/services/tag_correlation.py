@@ -48,6 +48,7 @@ from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRe
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 from app.verification.snapshot.traversal import all_transactions as _all_transactions
 from app.verification.snapshot.traversal import field_value as _val
+from app.verification.tag_materialization.breaker import AiInfraBreaker
 from app.verification.tag_materialization.derived import (
     txn_is_recurring,
     txn_stated_liability_match,
@@ -410,6 +411,7 @@ async def produce_stage_b_sourcing_tags(
     *,
     reasoner: Reasoner | None = None,
     cache: SourcingCache | None = None,
+    breaker: AiInfraBreaker | None = None,
     date_window_days: int = _DATE_WINDOW_DAYS,
     source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
@@ -479,12 +481,22 @@ async def produce_stage_b_sourcing_tags(
             deposits_judged += 1
             try:
                 result = await reason_fn(json.dumps(context))
-            except AIClientError:
+            except AIClientError as err:
                 logger.warning("stage_b_judge_failed", candidates=len(candidates))
+                # LP-635 REVIEW — Stage B was left out of the breaker, and it is the stage with the
+                # most calls: one judgement per money-in deposit. The per-deposit tolerance here is
+                # unchanged (a failure still resolves to `unknown`), but an outage beginning in this
+                # stage used to be invisible to the counter, so the pass ground through the whole of
+                # it — the exact behaviour the breaker was added to stop, still reachable by the
+                # commonest route.
+                if breaker is not None:
+                    breaker.record_failure(err)
                 resolved = _Sourced(
                     "unknown", None, None, _REASON_FAILED, cacheable=False, strength=None
                 )
             else:
+                if breaker is not None:
+                    breaker.record_success()
                 input_tokens += result.input_tokens
                 output_tokens += result.output_tokens
                 invoked_model = result.model

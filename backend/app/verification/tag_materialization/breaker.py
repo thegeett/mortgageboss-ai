@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import structlog
 
-from app.ai.client import AIClientError, infra_failure_kind, is_rerunnable_infra
+from app.ai.client import INFRA_OVERSIZED, AIClientError, infra_failure_kind
 
 logger = structlog.get_logger(__name__)
 
@@ -92,12 +92,26 @@ class AiInfraBreaker:
     def record_failure(self, err: AIClientError) -> None:
         """Count ``err`` if it is an infrastructure outcome, and trip once too many stack up.
 
-        A non-infrastructure failure RESETS the counter rather than being ignored. That is
-        deliberate: it is evidence the backend answered — it returned something that parsed badly, or
-        refused the request's shape — and a backend that answers is not the one this breaker looks
-        for.
+        Only a PAYLOAD rejection resets the counter. That is evidence the backend answered and
+        refused this particular request's shape — one oversized document is not an outage, and the
+        next call may well land.
+
+        EVERYTHING ELSE COUNTS, including ``INFRA_FAILED`` (LP-635 review). It used to reset, on the
+        reasoning that "a backend that answers is not the one this breaker looks for" — but
+        ``INFRA_FAILED`` is what `infra_failure_kind` returns for auth, permission and AccessDenied,
+        and a 403 does answer while being the LEAST recoverable failure there is. ADR-387 records
+        out-of-band credentials as a live concern in this environment, so an expired credential
+        mid-pass is a realistic outage — and it was the one shape that could never trip this
+        breaker, resetting the counter on every single call while the pass ground through the whole
+        budget producing an all-``couldn't check`` run. That is precisely what this module exists to
+        prevent, reachable by the most likely route.
+
+        Only an ``AIClientError`` reaches here, so the residual risk is narrow: if some content-shaped
+        failure is ever raised as a causeless ``AIClientError``, five of them in a row would end the
+        pass. That is a visible, re-runnable failure rather than a silent one, which is the right
+        side to err on.
         """
-        if not is_rerunnable_infra(infra_failure_kind(err)):
+        if infra_failure_kind(err) == INFRA_OVERSIZED:
             self._consecutive = 0
             return
         self._consecutive += 1

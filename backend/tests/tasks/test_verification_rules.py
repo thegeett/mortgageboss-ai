@@ -192,7 +192,19 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     # at the widest bound any run can be given rather than against a single pair of constants — a
     # watchdog that cleared the default hard limit but not the largest one would fail healthy runs on
     # exactly the big files this ticket exists to make work.
-    assert RULE_ENGINE_MAX_HARD_SECONDS + _WATCHDOG_SLACK_SECONDS > RULE_ENGINE_MAX_HARD_SECONDS
+    # LP-635 REVIEW — asserted against `rule_engine_limits` itself, not against the constants.
+    # `MAX_HARD + SLACK > MAX_HARD` only ever caught a non-positive slack; it could not notice the
+    # watchdog and the enqueue drifting apart, which is the failure it claims to guard. Checked at
+    # both ends of the range and past the cap, since the floor and the ceiling are where a
+    # divergence would actually appear.
+    from app.tasks.verification_rules import rule_engine_limits
+
+    for documents in (0, 1, 21, 44, 200, 10_000):
+        _soft, hard = rule_engine_limits(documents)
+        assert hard + _WATCHDOG_SLACK_SECONDS > hard, "the watchdog must clear the hard limit"
+        assert hard <= RULE_ENGINE_MAX_HARD_SECONDS, (
+            f"{documents} documents exceeds the widest bound the watchdog is sized for"
+        )
     assert RULE_ENGINE_MAX_HARD_SECONDS >= RULE_ENGINE_HARD_LIMIT_SECONDS
 
 

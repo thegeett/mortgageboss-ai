@@ -208,3 +208,102 @@ async def test_the_stage_backstop_still_catches_everything_else() -> None:
     result = await _run_stage("materialization", boom, sentinel, degradations)  # type: ignore[arg-type]
     assert result is sentinel
     assert len(degradations) == 1
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 REVIEW — Stage B was outside the breaker
+# --------------------------------------------------------------------------- #
+
+
+def test_stage_b_accepts_a_breaker() -> None:
+    """Stage B judges once per money-in deposit, so it is the stage with the MOST calls — and it
+    was the one left out.
+
+    An outage beginning in Stage B was invisible to the counter, so the pass ground through the
+    whole of it: the exact behaviour the breaker exists to stop, still reachable by the commonest
+    route. Asserted on the signature so the parameter cannot be quietly dropped again.
+    """
+    import inspect
+
+    from app.services.tag_correlation import produce_stage_b_sourcing_tags
+
+    assert "breaker" in inspect.signature(produce_stage_b_sourcing_tags).parameters
+
+
+def test_every_ai_stage_in_the_pass_is_wired_to_the_breaker() -> None:
+    """The property, rather than one stage at a time.
+
+    `stage_a` and `materialization` were wired and `stage_b` was not, which no test noticed because
+    each stage had its own. This reads the call site and asserts that every stage taking a
+    `reasoner` also takes the `breaker` — so adding a fifth AI stage without wiring it fails here.
+
+    `recurrence` is deliberately absent: it is pure and synchronous (`_recurrence_stage`), makes no
+    calls, and has nothing to report.
+    """
+    import re
+    from pathlib import Path
+
+    source = Path("app/services/verification_run.py").read_text()
+    body = source[source.index("if produce_tags:") : source.index("# 4.")]
+
+    reasoner_stages = re.findall(r"reasoner=reasoners\.(\w+)", body)
+    assert reasoner_stages, "no AI stages found — the anchor for this test has moved"
+
+    for call in re.findall(r"lambda s: \w+\([^)]*\)", body, re.S):
+        if "reasoner=reasoners." in call:
+            assert "breaker=ai_breaker" in call, (
+                f"an AI stage runs without the breaker, so an outage during it is invisible:\n{call}"
+            )
+
+
+def test_an_auth_failure_trips_the_breaker_rather_than_resetting_it() -> None:
+    """LP-635 REVIEW — the outage shape that could NEVER trip this breaker.
+
+    `infra_failure_kind` returns INFRA_FAILED for auth, permission and AccessDenied, which is not in
+    RERUNNABLE_INFRA_KINDS — so the old rule reset the counter on every single call. An expired
+    credential or revoked model access mid-pass would grind through the entire budget (now up to
+    3600s, not 900) producing an all-`couldn't check` run: exactly what this module exists to
+    prevent, by the most likely route. ADR-387 records out-of-band credentials as a live concern in
+    this environment.
+    """
+    import httpx
+    from anthropic import AuthenticationError
+    from app.ai.client import AIClientError
+
+    breaker = AiInfraBreaker(threshold=3)
+    request = httpx.Request("POST", "https://x/y")
+    response = httpx.Response(401, request=request, json={"message": "expired"})
+
+    def _auth_error() -> AIClientError:
+        err = AIClientError("auth")
+        err.__cause__ = AuthenticationError("no", response=response, body=None)
+        return err
+
+    with pytest.raises(AiBackendUnavailable):
+        for _ in range(3):
+            breaker.record_failure(_auth_error())
+
+
+def test_an_oversized_payload_still_resets_the_counter() -> None:
+    """The boundary. One document too large for the request is not an outage — the backend answered
+    and refused that call's shape, and the next call may land. Resetting is right there, and it is
+    the only kind that should."""
+    import httpx
+    from anthropic import BadRequestError
+    from app.ai.client import AIClientError
+
+    breaker = AiInfraBreaker(threshold=2)
+    request = httpx.Request("POST", "https://x/y")
+
+    connection = AIClientError("conn")
+    connection.__cause__ = httpx.ConnectError("boom", request=request)
+    breaker.record_failure(connection)
+    assert breaker.consecutive == 1
+
+    oversized = AIClientError("too big")
+    oversized.__cause__ = BadRequestError(
+        "too big", response=httpx.Response(400, request=request, json={}), body=None
+    )
+    breaker.record_failure(oversized)
+
+    assert breaker.consecutive == 0, "an oversized payload must not count toward an outage"
