@@ -339,8 +339,22 @@ def is_cataloged(document_type: str | None) -> bool:
 #: Slugs of one word are NOT matched against a free-text name (LP-636 defect 5). "survey",
 #: "appraisal", "w2" and the like appear inside ordinary prose — "the appraisal is attached", "a
 #: letter about the survey" — so a one-word match is a coin flip. Multi-word slugs are specific
-#: enough that a contiguous phrase match means what it says.
+#: enough that an ordered match means what it says.
 _MIN_SLUG_WORDS_FOR_NAME_MATCH = 2
+
+#: Tokens allowed BETWEEN consecutive slug words. 1, because the case this tolerance exists for —
+#: "Earnest Money / EMD Receipt" → ``earnest_money_receipt`` — has exactly one, while the
+#: false-positive names it must decline have two or more.
+_MAX_GAP_TOKENS = 1
+
+#: The fraction of the name's tokens the matched slug must account for. A genuine name for a
+#: document is mostly the type; a name that MENTIONS one is mostly other words. Measured on both
+#: populations: true names 0.5-0.67, mentions 0.18-0.25. 0.4 sits in the gap with room either side.
+#:
+#: This is the guard that matters most in practice, because of WHERE the feature runs: a confident
+#: ``unknown`` is very often a cover letter, a transmittal, a fax sheet or an email printout —
+#: exactly the documents whose names reference OTHER documents.
+_MIN_SLUG_COVERAGE = 0.4
 
 
 def _normalize_for_match(text: str) -> str:
@@ -364,11 +378,24 @@ def match_catalog_type(free_text: str | None) -> str | None:
     On LF-ZE9N four Tier-1 types were lost this way — a driver's licence, a closing disclosure, a
     credit report and an earnest-money receipt — each routed to Tier 3 and COMPLETED with no flag.
 
-    DELIBERATELY CONSERVATIVE, AND DELIBERATELY NOT AUTHORITATIVE. It requires the slug's words to
-    appear as a contiguous phrase, and ignores one-word slugs entirely (see
-    ``_MIN_SLUG_WORDS_FOR_NAME_MATCH``). No fuzzy distance, no stemming: ``misc`` is the correct
-    destination for a genuinely unknown document and must stay reachable, so a near-miss has to
-    fall through rather than be captured.
+    DELIBERATELY CONSERVATIVE, AND DELIBERATELY NOT AUTHORITATIVE. Three guards, each with a
+    measured reason rather than a taste:
+
+    * the slug's words must appear IN ORDER, with at most :data:`_MAX_GAP_TOKENS` between them;
+    * the slug must account for at least :data:`_MIN_SLUG_COVERAGE` of the name's tokens;
+    * one-word slugs are ignored entirely (:data:`_MIN_SLUG_WORDS_FOR_NAME_MATCH`).
+
+    No fuzzy distance, no stemming. ``misc`` is the correct destination for a genuinely unknown
+    document and must stay reachable, so a near-miss has to fall through rather than be captured.
+
+    THE COVERAGE GUARD IS THE ONE THAT EARNS ITS KEEP, and the reason is where this runs. A
+    confident ``unknown`` is very often a cover letter, a transmittal, a fax sheet or an email
+    printout — precisely the documents whose names reference OTHER documents. "an email asking the
+    borrower to send a bank statement" names a bank statement and is not one. Ordering alone
+    cannot tell those apart; the proportion of the name the type accounts for can.
+
+    Expect this to produce some flags a processor dismisses. That is the accepted cost of the
+    asymmetry below, not a defect — but the rate is worth watching rather than assuming.
 
     The caller uses this to FLAG FOR REVIEW, never to apply the type. Applying a type from a name
     match would put a wrong schema on a document — the T4→w2 harm LP-463 exists to prevent — and
@@ -391,24 +418,46 @@ def match_catalog_type(free_text: str | None) -> str | None:
         words = slug.split("_")
         if len(words) < _MIN_SLUG_WORDS_FOR_NAME_MATCH:
             continue
-        if len(words) > best_words and _is_ordered_subsequence(words, tokens):
-            best, best_words = slug, len(words)
+        if len(words) <= best_words:
+            continue
+        if not _matches_in_order_with_small_gaps(words, tokens):
+            continue
+        # COVERAGE. A genuine name for a document is mostly the type: "a driver's license" is 3
+        # tokens of which 2 are the slug. A name that merely MENTIONS a type is mostly other words:
+        # "an email asking the borrower to send a bank statement" is 9 tokens of which 2 are.
+        # Measured on both populations the gap is clean — true names 0.5-0.67, mentions 0.18-0.25 —
+        # so this is the discriminator, not the ordering rule.
+        if len(words) / len(tokens) < _MIN_SLUG_COVERAGE:
+            continue
+        best, best_words = slug, len(words)
     return best
 
 
-def _is_ordered_subsequence(needle: list[str], haystack: list[str]) -> bool:
-    """Every word of ``needle``, in order, somewhere in ``haystack``. Gaps allowed.
+def _matches_in_order_with_small_gaps(needle: list[str], haystack: list[str]) -> bool:
+    """Every word of ``needle`` present in ``haystack``, in order, with at most
+    :data:`_MAX_GAP_TOKENS` intervening tokens between consecutive matches.
 
-    Ordered rather than contiguous because real names interleave: "Earnest Money / EMD Receipt"
-    carries ``earnest_money_receipt`` with "emd" wedged in the middle, and a contiguous test misses
-    it — which it did, on one of the four documents this was written for.
+    BOUNDED, not free. An unbounded ordered subsequence was the first attempt and it overfits: it
+    was widened to catch "Earnest Money / EMD Receipt" (one token wedged mid-phrase) and in doing
+    so it started matching names where the words are merely scattered — "a closing statement with a
+    separate disclosure page", "a credit memo and a separate report on fees". Those have two to
+    four intervening tokens; the case worth catching has one.
 
-    Order still has to hold, so "a receipt for the earnest money" does NOT match
-    ``earnest_money_receipt``. That is the line between "the name contains these words" and "the
-    name says this thing", and it is the cheapest guard that keeps ``misc`` reachable.
+    So the bound is set from the case it exists for rather than loosened until an example passed.
+    Order still has to hold, so "a receipt for the earnest money" does not match
+    ``earnest_money_receipt`` — that is the line between "the name contains these words" and "the
+    name says this thing".
     """
-    it = iter(haystack)
-    return all(word in it for word in needle)
+    position = -1
+    for word in needle:
+        try:
+            found = haystack.index(word, position + 1)
+        except ValueError:
+            return False
+        if position >= 0 and found - position - 1 > _MAX_GAP_TOKENS:
+            return False
+        position = found
+    return True
 
 
 def types_for_category(category: DocumentCategory) -> list[str]:

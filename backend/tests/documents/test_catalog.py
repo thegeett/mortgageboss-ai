@@ -321,6 +321,43 @@ def test_a_name_that_does_not_say_a_catalog_type_is_not_matched(document_name: s
     assert match_catalog_type(document_name) is None
 
 
+@pytest.mark.parametrize(
+    "document_name",
+    [
+        # CLASS A — the slug's words are present in order but SCATTERED across unrelated phrases.
+        # This class was created by loosening a contiguous match to catch "Earnest Money / EMD
+        # Receipt"; the bounded gap catches that case (one intervening token) while declining
+        # these (two to four).
+        "a closing statement with a separate disclosure page",
+        "a credit memo and a separate report on fees",
+        "a tax summary and a return envelope",
+        "pay history and a stub of the check",
+    ],
+)
+def test_scattered_words_are_not_a_name(document_name: str) -> None:
+    assert match_catalog_type(document_name) is None
+
+
+@pytest.mark.parametrize(
+    "document_name",
+    [
+        # CLASS B — names that MENTION a document type without BEING one. These match under a
+        # contiguous rule too, so ordering cannot separate them; only coverage can.
+        #
+        # This is the class that matters most in practice: a confident `unknown` is very often a
+        # cover letter, a transmittal, a fax sheet or an email printout — exactly the documents
+        # whose names reference other documents.
+        "a letter from the lender about the missing closing disclosure",
+        "an email asking the borrower to send a bank statement",
+        "a cover page listing the credit report and the pay stub",
+        "a fax cover sheet for the purchase agreement",
+        "a note explaining why the tax return is late",
+    ],
+)
+def test_a_name_that_mentions_a_type_without_being_one_is_not_matched(document_name: str) -> None:
+    assert match_catalog_type(document_name) is None
+
+
 def test_the_longest_match_wins() -> None:
     """A name carrying both a specific type and a general one gets the specific one."""
     assert (
