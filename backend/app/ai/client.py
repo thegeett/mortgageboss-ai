@@ -437,12 +437,24 @@ def infra_failure_kind(err: AIClientError) -> str:
             return INFRA_RATE_LIMITED
         if cause.status_code >= _SERVER_ERROR_FLOOR:
             return INFRA_SERVER
-        # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload
-        # (>100 pages / >32 MB). Not transient — the page cap is the fix, not a retry.
+        # THE THROTTLE CHECK COMES BEFORE THE 400 BRANCH, and the order is load-bearing.
+        #
+        # ``_looks_like_bedrock_throttle`` reads the response BODY, and a 400 has one. Testing the
+        # status first meant a 400 carrying a Bedrock throttle code returned OVERSIZED — which is
+        # not re-runnable — while ``_is_transient`` (which falls through 400 to the same body
+        # check) said retry. Retry and routing disagreed, so a throttled call was recorded as a
+        # permanent request-shape problem and the document was stranded instead of retried: the
+        # exact harm this function exists to prevent, arriving by a different door.
+        #
+        # This path is not hypothetical by our own reasoning — ``_looks_like_bedrock_throttle``
+        # exists precisely because throttles are NOT trusted to arrive as 429.
+        if _looks_like_bedrock_throttle(cause):
+            return INFRA_RATE_LIMITED
+        # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit
+        # payload (>100 pages / >32 MB). Not transient — the page cap is the fix, not a retry.
         if cause.status_code == _BAD_REQUEST_STATUS:
             return INFRA_OVERSIZED
-        # A throttle that arrived as some other status, recognised by its Bedrock error code.
-        return INFRA_RATE_LIMITED if _looks_like_bedrock_throttle(cause) else INFRA_FAILED
+        return INFRA_FAILED
     # APIConnectionError covers APITimeoutError, and TimeoutError is `complete`'s own wait_for
     # bound. Neither reached the service, so neither is a throttle: this is the distinction the
     # single old label destroyed.

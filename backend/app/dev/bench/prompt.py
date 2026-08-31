@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from unittest.mock import patch
 
-from app.ai.client import AIClientError, AICompletion, _is_transient
+from app.ai.client import AIClientError, AICompletion, _is_transient, infra_failure_kind
 
 
 @dataclass
@@ -41,6 +41,10 @@ class CallTally:
 
     current_doc_failed: bool = False
     current_doc_throttled: bool = False
+    #: LP-636 — the ACTUAL infrastructure cause of the last failed call (rate_limited /
+    #: connection / server_error / oversized / failed), for the report. Distinct from
+    #: ``current_doc_throttled``, which means "re-runnable" and drives resume/abort.
+    current_doc_infra_kind: str | None = None
     throttled_calls: int = 0
     last_error_type: str | None = None
 
@@ -65,6 +69,13 @@ def _record_failure(err: AIClientError) -> None:
     if cause is not None and isinstance(cause, Exception) and _is_transient(cause):
         tally.current_doc_throttled = True
         tally.throttled_calls += 1
+    # LP-636 defect 2: record WHICH infrastructure cause it was, not merely that it was transient.
+    # ``current_doc_throttled`` above stays as-is because the engine routes resume and abort off
+    # it and its meaning there is "re-runnable", which is correct for the whole transient family.
+    # But the REPORT called all of them "rate_limited", so a bench run investigating throttling
+    # would have shown connection failures and 5xx as throttles — the same mislabel that sent the
+    # staging diagnosis to the Bedrock quota, standing in the tool you would reach for to check.
+    tally.current_doc_infra_kind = infra_failure_kind(err)
 
 
 def _patched_complete(real: Any) -> Any:
