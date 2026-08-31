@@ -574,21 +574,44 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
         # bug-009 REVIEW — the survivor is chosen by PROGRESS, not by whether a document can ever
         # satisfy it. So when the unmatchable row is the further along one (a processor marked the
         # `title_report` row received by hand), it becomes the keeper and the clearable
-        # `title_commitment` row is waived — leaving the file with only a need no upload can reach.
+        # `title_commitment` row is waived — leaving the file with ONLY a need no upload can reach.
+        # Strictly worse than doing nothing.
         #
-        # NOT SILENTLY REPAIRED HERE, because the correct fix is a design decision this function
-        # does not currently make: preferring the actionable row loses the progress the processor
-        # recorded, and preserving that progress means the merge would have to MUTATE the keeper,
-        # which it deliberately never does (it only waives). Surfaced instead of guessed.
+        # The framing that stalls here is "preserve the progress OR prefer the actionable row". It is
+        # a false choice: RENAMING the keeper does both. The alias map is a declaration that these
+        # two types are the same requirement, so rewriting `title_report` -> `title_commitment` on a
+        # row changes nothing about what was asked for — it changes only whether an upload can ever
+        # match it. Progress is kept, and the row becomes satisfiable.
+        #
+        # This does mutate the keeper, which the merge otherwise never does. That convention exists
+        # to stop the merge SILENTLY REVISING a requirement; a rename between declared-equivalent
+        # types is not a revision, and leaving the row unsatisfiable to honour the convention would
+        # protect the rule at the processor's expense.
+        #
+        # NOT FOR A MANUAL KEEPER. There the stored string is what a processor typed, and correcting
+        # their words underneath them is exactly what the MANUAL guard below exists to prevent — so
+        # that case is still only reported.
         if _is_unactionable_alias(keeper.needs_type) and any(
             not _is_unactionable_alias(n.needs_type) for n in group
         ):
-            logger.warning(
-                "needs_merge_kept_an_unsatisfiable_row",
-                loan_file_id=str(loan_file_id),
-                kept_type=keeper.needs_type,  # a document type, not PII
-                kept_status=keeper.status.value,
-            )
+            retyped = canonical_need_type(keeper.needs_type)
+            if retyped and keeper.origin is not NeedsItemOrigin.MANUAL:
+                logger.info(
+                    "needs_merge_retyped_the_keeper",
+                    loan_file_id=str(loan_file_id),
+                    was=keeper.needs_type,  # a document type, not PII
+                    now=retyped,
+                    status=keeper.status.value,
+                )
+                keeper.needs_type = retyped
+                touched += 1
+            else:
+                logger.warning(
+                    "needs_merge_kept_an_unsatisfiable_row",
+                    loan_file_id=str(loan_file_id),
+                    kept_type=keeper.needs_type,  # a document type, not PII
+                    kept_status=keeper.status.value,
+                )
         for redundant in group[:-1]:
             # ONLY A ROW THE FLOOR MINTED MAY BE MERGED AWAY. The defect being repaired is the FLOOR
             # creating a second row under a renamed type, so a floor-origin duplicate is provably

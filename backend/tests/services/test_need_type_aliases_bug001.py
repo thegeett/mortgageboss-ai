@@ -202,3 +202,59 @@ def test_a_proposed_title_report_is_stored_as_the_type_the_catalog_defines() -> 
     from app.services.needs_engine import canonical_need_type
 
     assert canonical_need_type("title_report") == "title_commitment"
+
+
+async def test_the_title_row_a_processor_kept_can_be_cleared_by_an_upload(db_session) -> None:
+    """bug-009 at the layer the defect was actually visible: an upload that does not clear the need.
+
+    Everything else about this fix is tested one layer down — the alias resolves, the merge collapses
+    the pair, the keeper is renamed. None of that is what a processor sees. What they saw is a title
+    need still sitting open with the title commitment already in the file, because satisfaction
+    matches `needs_type == document_type` on the row AS STORED and `title_report` is not a document
+    type.
+
+    So this drives the whole path: the unmatchable row is the further-along one, survives the merge,
+    gets renamed, and THEN the document clears it.
+
+    REJECTED for the keeper, not RECEIVED, and the distinction is the point rather than a fixture
+    detail. RECEIVED is not an OPEN state — a row with a document already attached is deliberately
+    not re-matched, so it could not demonstrate anything about uploads. REJECTED outranks PENDING on
+    `_PROGRESS_RANK` (3 vs 1) AND is still open, which is exactly the shape where the rename decides
+    whether the processor's next upload lands: a title commitment came in, was rejected as illegible,
+    and the replacement is on its way.
+    """
+    from app.models.document import DocumentStatus
+    from app.models.needs_item import NeedsItemOrigin, NeedsItemStatus
+    from app.services.needs_engine import apply_document_to_needs, repair_needs_for_file
+    from tests.integration import factories
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+
+    stuck = await factories.make_needs_item(db_session, loan_file=loan_file)
+    stuck.needs_type = "title_report"
+    stuck.status = NeedsItemStatus.REJECTED
+    stuck.origin = NeedsItemOrigin.AI_REASONING
+    clearable = await factories.make_needs_item(db_session, loan_file=loan_file)
+    clearable.needs_type = "title_commitment"
+    clearable.status = NeedsItemStatus.PENDING
+    clearable.origin = NeedsItemOrigin.FLOOR
+    await db_session.flush()
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    doc = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type="title_commitment",
+        status=DocumentStatus.COMPLETED,
+    )
+    await db_session.flush()
+
+    matched = await apply_document_to_needs(db_session, doc)
+
+    # Before the fix this matched the WAIVED row or nothing at all, and the open need stayed open.
+    assert matched is not None and matched.id == stuck.id
+    assert matched.status is NeedsItemStatus.VERIFIED
+    assert clearable.status is NeedsItemStatus.WAIVED

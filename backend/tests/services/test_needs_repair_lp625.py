@@ -15,7 +15,11 @@ from app.models.needs_item import (
     NeedsItemOrigin,
     NeedsItemStatus,
 )
-from app.services.needs_engine import repair_needs_for_file, transition_need
+from app.services.needs_engine import (
+    canonical_need_type,
+    repair_needs_for_file,
+    transition_need,
+)
 from tests.integration import factories
 
 
@@ -447,25 +451,57 @@ async def test_an_actionable_duplicate_is_not_merged_by_the_new_rule(db_session)
 
 
 async def test_an_unsatisfiable_survivor_is_reported(db_session) -> None:
-    """bug-009 REVIEW — the survivor is picked by PROGRESS, not by satisfiability.
+    """bug-009 REVIEW — the survivor is picked by PROGRESS, not by satisfiability, so the
+    unmatchable row can win.
 
-    When the unmatchable row is the further-along one (a processor marked the `title_report` row
-    received by hand), it becomes the keeper and the clearable `title_commitment` row is waived —
-    leaving the file with only a need no upload can reach. The reverse order of the pair this
-    repair was written for, and strictly worse than doing nothing.
+    A processor marked the `title_report` row received by hand, so it outranks the clearable
+    `title_commitment` row and becomes the keeper. Waiving the clearable one then leaves the file
+    with ONLY a need no upload can reach — the reverse order of the pair this repair was written
+    for, and strictly worse than doing nothing.
 
-    NOT repaired here, deliberately: preferring the actionable row loses the progress the processor
-    recorded, and preserving it means mutating the keeper, which this merge never does. So the case
-    is made VISIBLE and the design decision left to whoever takes it. This test pins the signal, so
-    the situation cannot recur silently.
+    "Keep the progress OR keep the actionable row" is a false choice: RENAMING the keeper does both.
+    The alias map declares the two types to be the same requirement, so the rewrite changes nothing
+    about what was asked for and only changes whether a document can match it.
     """
     _company, loan_file = await _file(db_session)
-    await _need(
+    stuck = await _need(
         db_session,
         loan_file,
         needs_type="title_report",
         status=NeedsItemStatus.RECEIVED,
         origin=NeedsItemOrigin.AI_REASONING,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    clearable = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    # The processor's progress survives...
+    assert stuck.status is NeedsItemStatus.RECEIVED
+    # ...and the row it survives on is now one a document can actually match.
+    assert stuck.needs_type == "title_commitment"
+    assert clearable.status is NeedsItemStatus.WAIVED
+    # The whole point: the file is not left with a need no upload can reach.
+    assert canonical_need_type(stuck.needs_type) == stuck.needs_type
+
+
+async def test_a_manual_keeper_is_reported_and_not_rewritten(db_session) -> None:
+    """The one case the rename must NOT take. A MANUAL row's type is what a processor typed, and
+    correcting their words underneath them is what the MANUAL guard exists to prevent — so it is
+    reported instead, and the signal is pinned here so it cannot go quiet."""
+    _company, loan_file = await _file(db_session)
+    typed_by_hand = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.MANUAL,
         disposition=NeedsItemDisposition.CONFIRMED,
     )
     await _need(
@@ -479,6 +515,7 @@ async def test_an_unsatisfiable_survivor_is_reported(db_session) -> None:
     with structlog.testing.capture_logs() as logs:
         await repair_needs_for_file(db_session, loan_file.id)
 
+    assert typed_by_hand.needs_type == "title_report"
     assert any(e["event"] == "needs_merge_kept_an_unsatisfiable_row" for e in logs), (
         "the merge kept a row no document can satisfy and said nothing"
     )
