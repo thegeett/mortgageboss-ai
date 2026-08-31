@@ -114,7 +114,7 @@ def update_needs_for_document(self: Task, loan_file_id: str, document_id: str) -
     retry_or_terminal(
         self,
         lambda: run_async(_run_needs_update(loan_file_id, document_id)),
-        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        on_exhausted=lambda _exc: run_async(_mark_ai_needs_failed(loan_file_id)),
         event="needs_update_exhausted",
     )
 
@@ -130,6 +130,6 @@ def propose_ai_needs(self: Task, loan_file_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run_propose_ai_needs(loan_file_id)),
-        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        on_exhausted=lambda _exc: run_async(_mark_ai_needs_failed(loan_file_id)),
         event="propose_ai_needs_exhausted",
     )

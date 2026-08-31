@@ -101,7 +101,7 @@ def test_a_timeout_is_terminal_and_is_never_retried() -> None:
         retry_or_terminal(
             _FakeTask(),
             _work,
-            on_exhausted=lambda: called.__setitem__("exhausted", True),
+            on_exhausted=lambda _exc: called.__setitem__("exhausted", True),
             event="test_timeout",
             terminal_on=(SoftTimeLimitExceeded,),
         )

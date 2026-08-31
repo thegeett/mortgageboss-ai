@@ -787,7 +787,7 @@ def process_document(self: Task, document_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(document_id)),
-        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        on_exhausted=lambda _exc: run_async(_mark_document_failed(document_id)),
         event="process_document_exhausted",
         # LP-625 — A TIME LIMIT IS TERMINAL, NOT TRANSIENT, and this is the half of the bug that the
         # raised ceiling above does not fix. `retry_or_terminal`'s own docstring says a task time
@@ -823,7 +823,7 @@ def reprocess_document(self: Task, document_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run_reprocess(document_id)),
-        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        on_exhausted=lambda _exc: run_async(_mark_document_failed(document_id)),
         event="reprocess_document_exhausted",
         # Same reasoning as `process_document`: re-running the same extraction after a timeout takes
         # the same time and meets the same wall.

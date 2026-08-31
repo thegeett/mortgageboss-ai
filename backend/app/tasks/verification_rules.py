@@ -83,7 +83,7 @@ def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(loan_file_id, run_id)),
-        on_exhausted=lambda: run_async(_mark_failed(run_id)),
+        on_exhausted=lambda exc: run_async(_mark_failed(run_id, exc)),
         event="rule_engine_pass_exhausted",
         # LP-377-C: a SOFT time-limit is terminal, NOT transient — retrying re-runs the same ~282s+ work
         # and will time out again, and stacked retries (up to 3x the hard limit) would outlast the 1500s
@@ -219,7 +219,43 @@ async def _triage_counts(db: AsyncSession, loan_file_id: UUID) -> tuple[int, int
     )
 
 
-async def _mark_failed(run_id: str) -> None:
+#: What a processor is told when a run fails, by cause (LP-635).
+#:
+#: This is `error_detail` — the one string from this ticket that a human actually reads, and it was
+#: wrong twice over. It said "after retries" for `terminal_on` failures that are never retried,
+#: because `on_exhausted` fires from both branches of `retry_or_terminal`. And it was generic where
+#: the cause was specific: the breaker composes a sentence naming what happened and what to do, and
+#: nothing could carry it here, because `on_exhausted` took no arguments.
+#:
+#: Both halves mattered. A timed-out run and an unreachable backend need DIFFERENT actions from a
+#: processor — one is "this file is too big for the window", the other is "try again shortly" — and
+#: telling them the same thing makes the message worth ignoring.
+_FAILURE_DETAIL: dict[type[BaseException], str] = {
+    SoftTimeLimitExceeded: (
+        "Verification ran out of time before it finished. This usually means the file has more "
+        "documents than one run can process — re-run it, and raise it with support if it happens "
+        "again."
+    ),
+}
+
+
+def _failure_detail(exc: BaseException | None) -> str:
+    """The user-visible reason a run failed.
+
+    `AiBackendUnavailable` is not in the table above BECAUSE it writes its own sentence — it knows
+    how many calls failed, which nothing here does. Deliberately asked of the exception rather than
+    matched by type, so a future failure that can explain itself is not silently flattened into the
+    generic line.
+    """
+    if isinstance(exc, AiBackendUnavailable):
+        return str(exc)
+    for kind, detail in _FAILURE_DETAIL.items():
+        if isinstance(exc, kind):
+            return detail
+    return "Rule-engine pass failed — re-run the verification."
+
+
+async def _mark_failed(run_id: str, exc: BaseException | None = None) -> None:
     async with task_session() as db:
         run = await db.get(Verification, UUID(run_id))
         if run is None:
@@ -227,18 +263,7 @@ async def _mark_failed(run_id: str) -> None:
         # FAILED is sticky and fail-closed — a governed-engine failure must be VISIBLE on the run.
         run.status = VerificationStatus.FAILED
         run.completed_at = utcnow()
-        # LP-635 review — NOT "after retries". `on_exhausted` fires from BOTH branches of
-        # `retry_or_terminal`, and `terminal_on` (a soft time-limit, or `AiBackendUnavailable`) is
-        # deliberately never retried — so this string told a processor the opposite of what
-        # happened for exactly the failures this ticket added. It is the run's user-visible
-        # `error_detail`, so it has to be true in both cases.
-        #
-        # It is also generic where the breaker's own message is specific ("the AI backend failed N
-        # calls in a row… re-run once it is reachable"). That text cannot reach here as written:
-        # `on_exhausted` takes no arguments, so the exception is not available. Threading it would
-        # mean widening `Callable[[], None]` across every caller of the shared retry helper —
-        # reported to the author rather than done inside a review.
-        run.error_detail = "Rule-engine pass failed — re-run the verification."
+        run.error_detail = _failure_detail(exc)
         await db.commit()
 
 

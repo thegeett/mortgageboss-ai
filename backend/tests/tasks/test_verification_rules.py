@@ -125,6 +125,29 @@ async def test_exhaustion_marks_run_failed(monkeypatch) -> None:
     assert run.completed_at is not None and "Rule-engine pass failed" in run.error_detail
 
 
+async def test_the_outage_sentence_is_written_onto_the_run(monkeypatch) -> None:
+    """The arrival test, at the layer the processor sees. `_failure_detail` being right is not the
+    same as `error_detail` carrying it — the previous version of this file had a passing test for the
+    breaker's wording while `_mark_failed` ignored the exception entirely and wrote a fixed
+    string."""
+    from app.tasks import verification_rules as vr
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    run = SimpleNamespace(
+        id=_RUN, status=VerificationStatus.RUNNING, completed_at=None, error_detail=None
+    )
+    cm, _db = _fake_session({_RUN: run})
+    monkeypatch.setattr(vr, "task_session", cm)
+
+    await vr._mark_failed(
+        str(_RUN), AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run it.")
+    )
+
+    assert run.status is VerificationStatus.FAILED
+    assert "5 calls in a row" in run.error_detail
+    assert "after retries" not in run.error_detail
+
+
 def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> None:
     # The POST handler enqueues BOTH; the governed pass rides the same trigger as the sweep.
     from app.api import verification as api
@@ -291,3 +314,52 @@ def test_soft_hard_and_watchdog_stay_ordered_at_every_size() -> None:
     for documents in (0, 1, 21, 30, 44, 60, 100, 1000):
         soft, hard = rule_engine_limits(documents)
         assert soft < hard < hard + _WATCHDOG_SLACK_SECONDS
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — what a processor is actually told
+# --------------------------------------------------------------------------- #
+def test_the_backend_outage_reason_reaches_the_run_the_processor_reads() -> None:
+    """THE CLAIM I MADE THAT WAS FALSE.
+
+    The breaker composes a careful sentence — how many calls failed, and to re-run once the backend
+    is back — and a test asserted that sentence's wording. That test passed while the sentence went
+    nowhere: `_mark_failed` wrote a fixed string, so `error_detail` said "failed after retries" for a
+    failure that is never retried. Asserting what a message SAYS proves nothing about whether anyone
+    sees it; this asserts it ARRIVES.
+    """
+    from app.tasks.verification_rules import _failure_detail
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    detail = _failure_detail(
+        AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run.")
+    )
+    assert "5 calls in a row" in detail
+    assert "retries" not in detail
+
+
+def test_a_timeout_and_an_outage_do_not_read_the_same() -> None:
+    """They need DIFFERENT actions from a processor — "this file is too big for the window" versus
+    "try again shortly" — and one string for both is a string worth ignoring."""
+    from app.tasks.verification_rules import _failure_detail
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+    from billiard.exceptions import SoftTimeLimitExceeded
+
+    timeout = _failure_detail(SoftTimeLimitExceeded())
+    outage = _failure_detail(
+        AiBackendUnavailable("The AI backend failed 5 calls in a row. Re-run.")
+    )
+    assert timeout != outage
+    assert "ran out of time" in timeout
+    # Neither may claim retries that `terminal_on` never performs.
+    assert "after retries" not in timeout and "after retries" not in outage
+
+
+def test_an_unrecognised_failure_still_says_something_useful() -> None:
+    """The fallback must not be an empty string or a class name — it is what a processor sees for
+    every cause nobody has thought about yet."""
+    from app.tasks.verification_rules import _failure_detail
+
+    for unknown in (RuntimeError("boom"), None):
+        detail = _failure_detail(unknown)
+        assert "re-run" in detail.lower()
