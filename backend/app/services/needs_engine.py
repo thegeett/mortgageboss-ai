@@ -288,6 +288,16 @@ _NEED_ALTERNATIVES: dict[str, frozenset[str]] = {
 _NEED_TYPE_ALIASES: dict[str, str] = {
     "existing_mortgage_statement": "mortgage_statement",
     "verification_of_employment": "voe",
+    # bug-009 — LP-69 proposes "title_report"; the catalog carries `title_commitment` and
+    # `preliminary_title_report` and not that. So the proposal failed canonicalisation, was stored
+    # raw, and could be cleared by no upload — while ID-7 separately raised a `title_commitment`
+    # need for the SAME document. LF-AWBB carried both: one row a processor could satisfy and one
+    # they could not, for one title search.
+    #
+    # Aliased to `title_commitment` rather than `preliminary_title_report` because that is what
+    # ID-7's own `requires_documents` group names FIRST, and a group's first member is the thing
+    # the file asks for.
+    "title_report": "title_commitment",
 }
 
 
@@ -296,6 +306,12 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
 #: already on the list", which is a different question and was answered wrongly.
 _EQUIVALENT_NEED_TYPES: dict[str, str] = {
     "drivers_license": "government_id",
+    # bug-009 — the alias above stops the pair FORMING; this collapses the ones already on a file.
+    # Both are needed and they answer different questions: `_NEED_TYPE_ALIASES` decides what a new
+    # proposal is STORED as, and a stored row cannot be renamed retroactively without touching live
+    # files (LP-623's reasoning, unchanged). This map is what `repair_needs_for_file` groups on, so
+    # it is what merges LF-AWBB's existing pair. Preventing a defect does not undo it.
+    "title_report": "title_commitment",
 }
 
 

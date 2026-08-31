@@ -318,3 +318,34 @@ def test_a_matchable_ai_need_gets_no_such_note() -> None:
     from app.services.needs_ai import _unmatchable_note
 
     assert _unmatchable_note("x", matchable=True) == "x"
+
+
+async def test_the_duplicate_title_need_is_merged(db_session) -> None:
+    """THE SECOND REPORTED PAIR (bug-009). LF-AWBB carried two rows for ONE title search: ID-7 raised
+    `title_commitment` from its `requires_documents` group, and LP-69 separately proposed
+    "title_report" — a type the catalog does not define, so it canonicalised to nothing, stored raw,
+    and no upload could ever clear it. A processor saw one need they could satisfy and one they
+    could not, for the same document.
+
+    Aliasing stops the pair FORMING; this merges the ones already on live files. Both are needed —
+    a stored row's type is not rewritten retroactively.
+    """
+    _company, loan_file = await _file(db_session)
+    stuck = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.PENDING,
+    )
+    real = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.RECEIVED,
+    )
+
+    assert await repair_needs_for_file(db_session, loan_file.id) >= 1
+
+    # The row a document actually reached survives; the unclearable one is merged away.
+    assert real.status is NeedsItemStatus.RECEIVED
+    assert stuck.status is NeedsItemStatus.WAIVED

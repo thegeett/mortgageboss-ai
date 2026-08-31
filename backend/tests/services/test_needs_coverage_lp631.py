@@ -654,3 +654,73 @@ async def test_an_unchanged_note_is_left_alone(db_session) -> None:
     assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0
     await db_session.refresh(need)
     assert need.coverage_note == first
+
+
+# --------------------------------------------------------------------------- #
+# bug-009 — one name matcher, not two
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_bureau_abbreviation_matches_the_spelled_out_holder(db_session) -> None:
+    """LF-AWBB's credit report carries ``UNITED WHSLE MORT``. This module's own matcher handled
+    TRUNCATION and nothing else, so it could never reach the application's spelled-out holder —
+    recorded in bug-002 as an accepted limitation rather than fixed.
+
+    `_normalise_lender_name` already expanded bureau abbreviations, and `_lender_names_agree`
+    already matched acronyms (bug-005, after RE-1 read the borrower's own mortgage as undisclosed).
+    Two matchers over one corpus is how one of them stays wrong; this one now delegates.
+    """
+    company, loan_file = await _file(db_session)
+    need = await _need(db_session, loan_file, needs_type="installment_loan_statement")
+    await _liability(
+        db_session,
+        loan_file,
+        liability_type="Installment",
+        holder="UNITED WHOLESALE MORTGAGE",
+        payment="300",
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "UNITED WHSLE MORT", "monthly_payment": 300}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+    await db_session.refresh(need)
+    assert need.coverage_note is not None
+
+
+async def test_an_acronym_matches_too(db_session) -> None:
+    """The other half inherited from the lender matcher: ``UWM`` against United Wholesale Mortgage."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="installment_loan_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Installment", holder="UWM", payment="300"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "United Wholesale Mortgage", "monthly_payment": 300}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 1
+
+
+async def test_two_different_creditors_still_do_not_match(db_session) -> None:
+    """The tolerance inherited with the shared matcher must not become a licence: a different
+    creditor at the same payment is still not the same debt."""
+    company, loan_file = await _file(db_session)
+    await _need(db_session, loan_file, needs_type="credit_card_statement")
+    await _liability(
+        db_session, loan_file, liability_type="Revolving", holder="CAPITAL ONE", payment="25"
+    )
+    await _credit_report(
+        db_session,
+        loan_file,
+        company,
+        tradelines=[{"creditor_name": "BANK OF AMERICA", "monthly_payment": 25}],
+    )
+
+    assert await flag_covered_needs(db_session, loan_file_id=loan_file.id) == 0

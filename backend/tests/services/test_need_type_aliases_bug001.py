@@ -171,3 +171,34 @@ def test_a_government_id_is_not_satisfied_by_any_borrower_info_document() -> Non
     assert "government_id" not in _UMBRELLA_NEED_CATEGORY
     for not_an_id in ("divorce_decree", "marriage_certificate", "letter_of_explanation"):
         assert not_an_id not in _NEED_ALTERNATIVES["government_id"]
+
+
+# --------------------------------------------------------------------------- #
+# bug-009 — the title pair
+# --------------------------------------------------------------------------- #
+def test_every_alias_target_is_a_real_document_type() -> None:
+    """The same guard as above, aimed at the ALIAS map. An alias is a promise that the target is
+    something a processor can actually upload; pointing one at a type the catalog does not define
+    would turn every aliased need permanently unclearable — bug-001's defect, laundered through the
+    map that exists to prevent it."""
+    from app.documents.catalog import CATALOG
+    from app.services.needs_engine import _NEED_TYPE_ALIASES
+
+    for source, target in _NEED_TYPE_ALIASES.items():
+        assert target in CATALOG or target in _NEED_ALTERNATIVES, (
+            f"{source} aliases to {target}, which no document can satisfy"
+        )
+
+
+def test_a_proposed_title_report_is_stored_as_the_type_the_catalog_defines() -> None:
+    """LP-69 proposes "title_report". The catalog carries `title_commitment` and
+    `preliminary_title_report` and not that, so the proposal used to fail canonicalisation and get
+    stored raw — leaving a need beside ID-7's `title_commitment` for the same title search, and no
+    upload that could clear it.
+
+    `title_commitment` and not `preliminary_title_report` because that is what ID-7's own
+    `requires_documents` group names first.
+    """
+    from app.services.needs_engine import canonical_need_type
+
+    assert canonical_need_type("title_report") == "title_commitment"
