@@ -108,6 +108,19 @@ _SKIP_SUPERSEDED = "superseded_version"
 _SKIP_IN_FLIGHT = "already_processing"
 _SKIP_HUMAN_TYPE = "type_set_by_a_person"
 _SKIP_ALREADY_CLASSIFIED = "already_classified"
+#: Already queued by an earlier press and not yet picked up. `all_documents` overrides it.
+_SKIP_ALREADY_QUEUED = "already_queued"
+#: The broker refused the task, so the document was put back the way it was found.
+_SKIP_ENQUEUE_FAILED = "enqueue_failed"
+
+#: Most documents a single bulk press may queue.
+#:
+#: A foot-gun guard, not a capacity limit. `all_documents` on a large file enqueues one task per
+#: document, each with a 600s soft limit, onto a worker that runs them serially — one press can
+#: occupy the document worker for hours and put every other file's uploads behind it. The largest
+#: real file we have is 44 documents (LF-ZE9N), so this is comfortably above the motivating case
+#: and well below a pathological one.
+_MAX_BULK_REPROCESS = 100
 
 #: What the classifier writes when it cannot name a document (`app/ai/classification.py`): a literal
 #: type rather than a null, so it reaches the catalog lookup and takes the Tier 3 path. LP-636 defect
@@ -125,9 +138,14 @@ def _would_benefit(document: Document) -> bool:
     well". Everything else has a type the classifier was content with, and re-deriving it costs a
     model call to reach the same answer.
 
-    Deliberately not "reprocess anything not COMPLETED": that would include PENDING, which is where
-    this endpoint puts documents it has just queued, so a second bulk call would re-queue the work
-    of the first.
+    Deliberately not "reprocess anything not COMPLETED", which would sweep in PENDING and every
+    other transient state.
+
+    THIS FUNCTION DOES NOT STOP A SECOND PRESS RE-QUEUEING THE FIRST'S WORK, and an earlier version
+    of this docstring claimed it did. Nothing here looks at status except to include NEEDS_REVIEW
+    and FAILED — an untyped or `unknown` document is STILL untyped while it sits at PENDING, so it
+    stayed eligible, and that is the exact cohort the feature exists for. The bulk endpoint carries
+    its own PENDING skip for that; see `_SKIP_ALREADY_QUEUED`.
     """
     return (
         document.document_type is None
@@ -149,16 +167,22 @@ def _enqueue_processing(document_id: UUID) -> None:
         log.warning("document_enqueue_failed", document_id=str(document_id))
 
 
-def _enqueue_full_reprocess(document_id: UUID) -> None:
-    """Fire-and-forget enqueue of the FULL pipeline — classify then extract (LP-637).
+def _enqueue_full_reprocess(document_id: UUID) -> bool:
+    """Enqueue the FULL pipeline — classify then extract (LP-637). ``True`` if it landed.
 
     Deliberately a separate helper from :func:`_enqueue_reprocess`, which enqueues the
     extraction-only task. The two differ by exactly the step this ticket exists to provide, and one
     helper taking a flag would make the call sites read the same.
 
-    Never raises, for the reason the other one does not: the activity log and the stale marker are
-    already committed, so a broker hiccup leaves a document that can be reprocessed again rather
-    than a 500 on a request whose durable half succeeded.
+    Never raises, for the reason the other one does not: a broker hiccup should leave a document
+    that can be reprocessed again rather than a 500 on a request whose durable half succeeded.
+
+    IT REPORTS THE OUTCOME rather than only logging it (LP-637 review), because both callers write
+    the document to PENDING and clear its ``processing_error`` before this runs, and a swallowed
+    failure made that permanent: a FAILED document became a PENDING one with a type and no error,
+    which reads as healthy, is invisible in the UI, and — for the bulk path — falls outside
+    `_would_benefit`, so the default bulk reprocess skips it as `already_classified` forever. The
+    callers use this to put such a document back the way they found it.
     """
     try:
         from app.tasks.document_processing import process_document
@@ -166,6 +190,8 @@ def _enqueue_full_reprocess(document_id: UUID) -> None:
         process_document.delay(str(document_id))
     except Exception:
         log.warning("full_reprocess_enqueue_failed", document_id=str(document_id))
+        return False
+    return True
 
 
 def _enqueue_reprocess(document_id: UUID) -> None:
@@ -313,12 +339,39 @@ async def reprocess_documents(
             skip(_SKIP_SUPERSEDED)
         elif document.status in _PIPELINE_IN_FLIGHT:
             skip(_SKIP_IN_FLIGHT)
+        elif not body.all_documents and document.status is DocumentStatus.PENDING:
+            # ALREADY QUEUED. This is the skip that stops a second press re-queueing the first
+            # press's work, and `_would_benefit` never did: an untyped or `unknown` document is
+            # still untyped while it sits at PENDING, so it stayed eligible — and that is exactly
+            # the cohort this feature exists for. A processor who sees nothing change for a minute
+            # (the worker is serial, the soft limit is 600s) and presses again would otherwise send
+            # every document a second time, and two overlapping pipelines end with one of them
+            # absorbing an IntegrityError into FAILED while the other's extraction is the current
+            # one.
+            #
+            # `all_documents` overrides it, which is what keeps a genuinely stranded PENDING
+            # document reachable in bulk. The per-document endpoint takes PENDING unconditionally,
+            # and that asymmetry is deliberate: there a processor is naming one document, so
+            # "queue this again" is exactly what they asked for.
+            skip(_SKIP_ALREADY_QUEUED)
         elif document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
             skip(_SKIP_HUMAN_TYPE)
         elif not body.all_documents and not _would_benefit(document):
             skip(_SKIP_ALREADY_CLASSIFIED)
         else:
             queued.append(document)
+
+    if len(queued) > _MAX_BULK_REPROCESS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{len(queued)} documents selected, more than the {_MAX_BULK_REPROCESS} a single "
+                "reprocess may queue. Narrow the request, or reprocess documents individually."
+            ),
+        )
+
+    # Remembered before anything is written, so a refused enqueue can be undone.
+    previous = {d.id: (d.status, d.processing_error) for d in queued}
 
     if queued:
         # ONE activity entry for the batch, not one per document. Ten entries saying the same thing
@@ -327,7 +380,9 @@ async def reprocess_documents(
             db,
             loan_file_id=loan_file.id,
             activity_type=ActivityType.DOCUMENT_REPROCESSED,
-            summary=f"{len(queued)} documents sent for reprocessing",
+            summary=(
+                f"{len(queued)} document{'s' if len(queued) != 1 else ''} sent for reprocessing"
+            ),
             actor_user_id=current_user.id,
             detail={
                 "document_ids": [str(d.id) for d in queued],
@@ -337,20 +392,32 @@ async def reprocess_documents(
         )
         # Once for the file, for the same reason the per-document endpoint does it per document.
         await mark_verification_stale(db, loan_file_id=loan_file.id)
+        # Without the rollback below, a broker outage turned a FAILED document into a PENDING one
+        # with a type and no error — which reads as healthy, shows nothing wrong in the UI, and
+        # falls outside `_would_benefit`, so the DEFAULT bulk path then skips it as
+        # `already_classified` for good. At batch scale that is a whole file's diagnostics, gone
+        # silently.
         for document in queued:
             document.status = DocumentStatus.PENDING
             document.processing_error = None
     await db.commit()
 
-    # After the commit, so a broker failure cannot leave the database disagreeing with what was
-    # reported. Each is fire-and-forget and never raises; a document whose enqueue is lost sits at
-    # PENDING and is recoverable by reprocessing again.
+    # After the commit, so a broker failure cannot leave the database claiming work that was never
+    # reported. Anything the broker refuses is put back the way it was found, in a second commit,
+    # and reported as a skip rather than counted as queued.
+    enqueued: list[Document] = []
     for document in queued:
-        _enqueue_full_reprocess(document.id)
+        if _enqueue_full_reprocess(document.id):
+            enqueued.append(document)
+        else:
+            document.status, document.processing_error = previous[document.id]
+            skip(_SKIP_ENQUEUE_FAILED)
+    if len(enqueued) != len(queued):
+        await db.commit()
 
     return BulkReprocessResponse(
-        queued=len(queued),
-        queued_document_ids=[d.id for d in queued],
+        queued=len(enqueued),
+        queued_document_ids=[d.id for d in enqueued],
         skipped=skipped,
     )
 
@@ -532,6 +599,7 @@ async def reprocess_document_from_scratch(
     # behind it, having lost a terminal status it had legitimately earned. That is recoverable the
     # same way any other stranded PENDING is — by reprocessing again — and the alternative is
     # answering `completed` to a request that changed the document's future.
+    previous_state = (document.status, document.processing_error)
     document.status = DocumentStatus.PENDING
     # And clear the previous run's error, as the override endpoint does. `_process_document` only
     # ever WRITES this column — no path through it clears one — so a document that failed, was
@@ -544,7 +612,14 @@ async def reprocess_document_from_scratch(
     document.processing_error = None
     await db.commit()
 
-    _enqueue_full_reprocess(document.id)
+    if not _enqueue_full_reprocess(document.id):
+        # Put it back. The same defect the bulk path had (LP-637 review): with the broker down,
+        # clearing the status and the error before a fire-and-forget enqueue made a FAILED document
+        # look like a healthy PENDING one, and threw away the reason it failed. Nothing durable
+        # changed for the document now — the activity entry and the stale marker stand, which is
+        # the conservative direction — so the response below truthfully shows it unchanged.
+        document.status, document.processing_error = previous_state
+        await db.commit()
 
     return await build_document_response(db, document=document)
 

@@ -22,10 +22,12 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
+from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus
 from app.services.loan_files import create_loan_file
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Minimal valid magic-byte headers.
@@ -1037,4 +1039,227 @@ async def test_bulk_is_tenant_scoped(
     resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(other_token), json={})
 
     assert resp.status_code == 404
+    _mock_full_reprocess.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# LP-637 feature 2 review
+# --------------------------------------------------------------------------- #
+async def test_a_second_bulk_press_does_not_requeue_the_first_presss_work(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """`_would_benefit` claimed to prevent this and could not.
+
+    Nothing in it looks at status except to INCLUDE NEEDS_REVIEW and FAILED, and an `unknown`
+    document is still `unknown` while it sits at PENDING — so the cohort the feature exists for
+    stayed eligible after being queued. A processor who sees nothing change for a minute (serial
+    worker, 600s soft limit) and presses again sent every document twice, and two overlapping
+    pipelines end with one absorbing an IntegrityError into FAILED while the other's extraction is
+    the current one.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, doc["id"], document_type="unknown", status=DocumentStatus.COMPLETED)
+    _mock_full_reprocess.reset_mock()
+
+    first = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+    second = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert first.json()["queued"] == 1
+    assert second.json()["queued"] == 0, "the second press re-queued the first press's work"
+    assert second.json()["skipped"] == {"already_queued": 1}
+    assert _mock_full_reprocess.call_count == 1
+
+
+async def test_all_documents_still_reaches_a_stranded_pending_document(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The escape hatch that keeps the PENDING skip from becoming the trap it replaced.
+
+    A document stranded at PENDING by a lost enqueue must stay reachable in bulk. `all_documents`
+    is where a processor says "I mean everything", so that is what overrides it — the same flag,
+    with the same meaning, rather than a second one.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, doc["id"], document_type="w2", status=DocumentStatus.PENDING)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(
+        _bulk_url(loan_file.display_id), headers=_auth(token), json={"all_documents": True}
+    )
+
+    assert resp.json()["queued"] == 1
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_a_refused_enqueue_puts_the_document_back(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The silent one. Both endpoints write PENDING and clear `processing_error` BEFORE a
+    fire-and-forget enqueue, so with the broker down a FAILED document became a PENDING one with a
+    type and no error: it reads as healthy, shows nothing wrong, and — being typed and not flagged
+    — falls outside `_would_benefit`, so the DEFAULT bulk path would skip it as `already_classified`
+    for good. At batch scale that is a whole file's diagnostics, gone without a sound.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(
+        db_session,
+        doc["id"],
+        document_type="w2",
+        status=DocumentStatus.FAILED,
+        processing_error="extraction failed — fell back to Tier 3 free extraction",
+    )
+    _mock_full_reprocess.side_effect = RuntimeError("broker down")
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 0
+    assert resp.json()["skipped"] == {"enqueue_failed": 1}
+    restored = await db_session.get(Document, UUID(doc["id"]))
+    assert restored is not None
+    await db_session.refresh(restored)
+    assert restored.status is DocumentStatus.FAILED, "a lost enqueue cost the document its status"
+    assert restored.processing_error == "extraction failed — fell back to Tier 3 free extraction", (
+        "the reason it failed was thrown away by an enqueue that never happened"
+    )
+
+
+async def test_a_refused_enqueue_puts_back_a_single_document_too(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The per-document endpoint has the same shape, so it needs the same rollback — fixing only
+    the path the review happened to look at would leave the identical defect one function away."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(
+        db_session,
+        doc["id"],
+        status=DocumentStatus.FAILED,
+        processing_error="processing error",
+    )
+    _mock_full_reprocess.side_effect = RuntimeError("broker down")
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == DocumentStatus.FAILED.value, (
+        "the response claimed a state the document was not left in"
+    )
+    restored = await db_session.get(Document, UUID(doc["id"]))
+    assert restored is not None
+    await db_session.refresh(restored)
+    assert restored.status is DocumentStatus.FAILED
+    assert restored.processing_error == "processing error"
+
+
+async def test_bulk_skips_a_superseded_version(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The filter that had no test, despite the batch being claimed as mutation-checked.
+
+    `list_documents` applies only `only_active` — `deleted_at IS NULL` — not `is_current`, so
+    superseded rows really are in the loop and the branch is load-bearing. Delete it and the suite
+    stayed green while superseded versions got re-classified and the whole file's verification was
+    marked stale, which both the per-document endpoint and replace refuse outright.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(
+        db_session,
+        doc["id"],
+        is_current=False,
+        document_type="unknown",
+        status=DocumentStatus.COMPLETED,
+    )
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(
+        _bulk_url(loan_file.display_id), headers=_auth(token), json={"all_documents": True}
+    )
+
+    assert resp.json()["queued"] == 0
+    assert resp.json()["skipped"] == {"superseded_version": 1}
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_a_one_document_batch_is_not_logged_as_plural(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """ "1 documents sent for reprocessing" lands in the feed a processor reads, and a one-document
+    batch is the common case on a small file. The upload handler in the same file pluralizes."""
+    from app.models.activity_log import ActivityLog
+
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, doc["id"], document_type="unknown", status=DocumentStatus.COMPLETED)
+
+    await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    entries = (
+        await db_session.scalars(
+            select(ActivityLog).where(
+                ActivityLog.loan_file_id == loan_file.id,
+                ActivityLog.activity_type == ActivityType.DOCUMENT_REPROCESSED,
+            )
+        )
+    ).all()
+    assert len(entries) == 1
+    assert entries[0].summary == "1 document sent for reprocessing"
+
+
+async def test_bulk_refuses_a_batch_larger_than_the_cap(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A foot-gun guard on the widened path, not a capacity limit.
+
+    `all_documents` enqueues one task per document, each with a 600s soft limit, onto a worker that
+    runs them serially — one press can hold the document worker for hours and put every other
+    file's uploads behind it. The bounded DEFAULT was argued for in the schema; nothing bounded the
+    escape hatch, and feature 3 is about to put a button on it.
+
+    The cap is patched down rather than uploading 101 files, so this tests the guard and not the
+    fixture.
+    """
+    monkeypatch.setattr(documents_api, "_MAX_BULK_REPROCESS", 1)
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    for _ in range(2):
+        doc = await _upload_one(client, loan_file.display_id, token)
+        await _set(db_session, doc["id"], document_type="unknown", status=DocumentStatus.COMPLETED)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.status_code == 400
+    assert "2 documents selected" in resp.json()["error"]["message"]
     _mock_full_reprocess.assert_not_called()
