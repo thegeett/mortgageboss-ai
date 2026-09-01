@@ -985,6 +985,17 @@ async def test_infra_failure_needs_review_with_distinct_reason(
     # The reason is the infrastructure cause, NOT "low_confidence" — that is the whole point.
     assert review[0]["reason"] == infra
     assert review[0].get("infra_failure") is True
+    # LP-637 — AND IT REACHES THE DOCUMENT. Asserting the log line proves the pipeline KNEW; a
+    # processor reads `processing_error`, and this branch left it empty. LF-ZE9N's last
+    # unidentified document sat as "Processing / uncategorized" with no explanation for exactly
+    # that reason, while the log said "oversized".
+    assert doc.processing_error, f"{infra} left the document with no reason on it"
+    if infra == "oversized":
+        # Re-reading cannot help, so the copy must not promise that it will.
+        assert "too large" in doc.processing_error
+        assert "won't help" in doc.processing_error
+    else:
+        assert "re-reading" in doc.processing_error.lower()
 
 
 # --------------------------------------------------------------------------- #

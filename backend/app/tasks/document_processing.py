@@ -241,6 +241,26 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # stays re-runnable. (Same terminal status; a different, honest cause.)
         if classification.infra_failure is not None:
             document.status = DocumentStatus.NEEDS_REVIEW
+            # SAY WHY, ON THE DOCUMENT (LP-637). This branch knew the cause, logged it, and wrote an
+            # activity entry — and left `processing_error` empty, so the only place a processor
+            # looks said nothing at all. LF-ZE9N's last unidentified document is the worked example:
+            # a 25 MB scan that encodes to 33 MB against a 23 MB budget, correctly refused by the
+            # LP-636 payload cap, and shown as "Processing / uncategorized" with no explanation.
+            # The extraction branches below have always written this column; classification never
+            # did, and reprocess now CLEARS it, so any older text is gone too.
+            #
+            # The two voices are the re-runnable split `infra_failure_kind` already draws, reused
+            # rather than restated: a throttle or a dropped connection is worth another go, and an
+            # oversized payload is not — re-reading the same file produces the same refusal, which
+            # is a promise the UI must not make.
+            document.processing_error = (
+                f"Couldn't read this document ({classification.infra_failure}) — try re-reading it."
+                if is_rerunnable_infra(classification.infra_failure)
+                else (
+                    "This file is too large for the AI to read. Re-reading won't help — split it "
+                    "into smaller files or upload a lower-resolution scan."
+                )
+            )
             await log_activity(
                 db,
                 loan_file_id=document.loan_file_id,

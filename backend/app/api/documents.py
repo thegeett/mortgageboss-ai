@@ -115,6 +115,24 @@ _MAX_BULK_REPROCESS = 100
 #: no flag, and produces no typed data.
 _UNKNOWN_DOCUMENT_TYPE = "unknown"
 
+#: The phrase the pipeline writes onto a document refused for payload size. Matched rather than
+#: re-derived, and shared with the writer so the two cannot drift apart silently — a test pins that.
+_TOO_LARGE_MARKER = "too large for the AI to read"
+
+
+def _refused_for_size(document: Document) -> bool:
+    """Was this document's last run refused because the file is too big to send? (LP-637)
+
+    Read off `processing_error`, which the pipeline now writes for a classification that failed on
+    infrastructure. A string match is a weak signal and better ones exist — a persisted
+    `infra_failure` column would be exact — but that is a migration, and this only ever removes a
+    document from an OPTIONAL bulk default. Getting it wrong costs one skipped document that a
+    processor can still re-read by hand from the drawer; the per-document endpoint does not consult
+    this at all, deliberately, because there a processor is naming one document and is entitled to
+    try anyway.
+    """
+    return _TOO_LARGE_MARKER in (document.processing_error or "")
+
 
 def _would_benefit(document: Document) -> bool:
     """Is this a document a re-classification could plausibly improve? (LP-637)
@@ -133,7 +151,19 @@ def _would_benefit(document: Document) -> bool:
     and FAILED — an untyped or `unknown` document is STILL untyped while it sits at PENDING, so it
     stayed eligible, and that is the exact cohort the feature exists for. The bulk endpoint carries
     its own PENDING skip for that; see `_SKIP_ALREADY_QUEUED`.
+
+    ONE EXCEPTION, and it is a size the model cannot be talked into. A document refused for an
+    OVERSIZED payload will be refused again: the file is what it is, so re-reading spends a
+    classification call to reach the same "no". LF-ZE9N's last unidentified document is exactly
+    this — 15 pages encoding to 33 MB against a 23 MB budget — and without this it would be
+    re-queued on every bulk press forever, always failing, always still uncategorized.
+
+    Every OTHER infrastructure failure stays eligible, because a throttle or a dropped connection
+    is precisely what re-reading is for. The split is `is_rerunnable_infra`'s, reused rather than
+    restated.
     """
+    if _refused_for_size(document):
+        return False
     return (
         document.document_type is None
         or document.document_type == _UNKNOWN_DOCUMENT_TYPE
