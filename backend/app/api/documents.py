@@ -63,6 +63,7 @@ from app.services.documents import (
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
+    PAYLOAD_TOO_LARGE_MARKER,
     process_document,
     reprocess_document,
 )
@@ -99,6 +100,8 @@ _SKIP_ALREADY_CLASSIFIED = "already_classified"
 _SKIP_ALREADY_QUEUED = "already_queued"
 #: The broker refused the task, so the document was put back the way it was found.
 _SKIP_ENQUEUE_FAILED = "enqueue_failed"
+#: The file cannot be sent at any page count, so re-reading it reaches the same refusal.
+_SKIP_TOO_LARGE = "too_large_to_read"
 
 #: Most documents a single bulk press may queue.
 #:
@@ -115,23 +118,26 @@ _MAX_BULK_REPROCESS = 100
 #: no flag, and produces no typed data.
 _UNKNOWN_DOCUMENT_TYPE = "unknown"
 
-#: The phrase the pipeline writes onto a document refused for payload size. Matched rather than
-#: re-derived, and shared with the writer so the two cannot drift apart silently — a test pins that.
-_TOO_LARGE_MARKER = "too large for the AI to read"
-
 
 def _refused_for_size(document: Document) -> bool:
     """Was this document's last run refused because the file is too big to send? (LP-637)
 
-    Read off `processing_error`, which the pipeline now writes for a classification that failed on
-    infrastructure. A string match is a weak signal and better ones exist — a persisted
-    `infra_failure` column would be exact — but that is a migration, and this only ever removes a
-    document from an OPTIONAL bulk default. Getting it wrong costs one skipped document that a
-    processor can still re-read by hand from the drawer; the per-document endpoint does not consult
-    this at all, deliberately, because there a processor is naming one document and is entitled to
-    try anyway.
+    Read off `processing_error`, which the pipeline writes for a classification that failed on
+    infrastructure. A string match is a weak signal and a persisted `infra_failure` column would be
+    exact — but that is a migration, and this only ever removes a document from an OPTIONAL bulk
+    default. Getting it wrong costs one skipped document a processor can still re-read by hand from
+    the drawer; the per-document endpoint does not consult this at all, deliberately, because there
+    a processor is naming one document and is entitled to try anyway.
+
+    That is a different trade from the `type_set_by_human` column, which is worth the migration: an
+    ambiguous signal THERE either blocks a legitimate reprocess or silently overwrites a person's
+    decision, and a forced reprocess destroys the signal outright. Here the worst case is one
+    document missing from an optional list, with the manual route still open.
+
+    The marker is IMPORTED from the writer rather than copied, so the two cannot drift: it is a
+    substring of `PAYLOAD_TOO_LARGE_MESSAGE` by construction.
     """
-    return _TOO_LARGE_MARKER in (document.processing_error or "")
+    return PAYLOAD_TOO_LARGE_MARKER in (document.processing_error or "")
 
 
 def _would_benefit(document: Document) -> bool:
@@ -152,18 +158,11 @@ def _would_benefit(document: Document) -> bool:
     stayed eligible, and that is the exact cohort the feature exists for. The bulk endpoint carries
     its own PENDING skip for that; see `_SKIP_ALREADY_QUEUED`.
 
-    ONE EXCEPTION, and it is a size the model cannot be talked into. A document refused for an
-    OVERSIZED payload will be refused again: the file is what it is, so re-reading spends a
-    classification call to reach the same "no". LF-ZE9N's last unidentified document is exactly
-    this — 15 pages encoding to 33 MB against a 23 MB budget — and without this it would be
-    re-queued on every bulk press forever, always failing, always still uncategorized.
-
-    Every OTHER infrastructure failure stays eligible, because a throttle or a dropped connection
-    is precisely what re-reading is for. The split is `is_rerunnable_infra`'s, reused rather than
-    restated.
+    A document refused for payload SIZE is excluded too, but by the caller rather than here — see
+    `_SKIP_TOO_LARGE` — so that the skip can be REPORTED as what it is. Folded in here it came back
+    to the processor as `already_classified`, which the UI renders "already identified", about a
+    document sitting on screen with no type at all.
     """
-    if _refused_for_size(document):
-        return False
     return (
         document.document_type is None
         or document.document_type == _UNKNOWN_DOCUMENT_TYPE
@@ -379,6 +378,18 @@ async def reprocess_documents(
             skip(_SKIP_ALREADY_QUEUED)
         elif document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
             skip(_SKIP_HUMAN_TYPE)
+        elif not body.all_documents and _refused_for_size(document):
+            # THE FILE IS WHAT IT IS. Re-reading spends a classification call to reach the same
+            # refusal; LF-ZE9N's last unidentified document — 15 pages encoding to 33 MB against a
+            # 23 MB budget — would otherwise be re-queued on every press forever, always failing,
+            # always still uncategorized.
+            #
+            # Reported under its OWN reason rather than folded into `already_classified`, which the
+            # UI renders as "already identified" — a direct contradiction of the untyped document
+            # the processor is looking at, and it buried the one instruction the pipeline actually
+            # produced (split the file, or rescan lower). Every other infrastructure failure stays
+            # eligible: a throttle is precisely what re-reading is for.
+            skip(_SKIP_TOO_LARGE)
         elif not body.all_documents and not _would_benefit(document):
             skip(_SKIP_ALREADY_CLASSIFIED)
         else:

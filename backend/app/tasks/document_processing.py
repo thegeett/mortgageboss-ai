@@ -165,6 +165,55 @@ async def _claim_for_processing(
     return claimed
 
 
+#: The phrase that marks a document refused for payload SIZE, and the sentence built around it.
+#:
+#: Shared, not restated. `app/api/documents.py` reads this marker off `processing_error` to keep
+#: such a document out of the bulk-reprocess default, and an earlier version had the reader holding
+#: its own copy of the phrase with a test pinning the two together. A test that catches drift is
+#: weaker than a structure that cannot drift: the marker is a substring of the message here by
+#: construction, so rewording the sentence cannot silently disable the filter.
+#:
+#: THE COPY ASSERTS PERMANENCE — "re-reading won't help" — and it is now said only when
+#: `fit_pdf_to_payload_budget` actually reports `still_over_budget`, carried out through
+#: `ClassificationResult.payload_over_budget`. An earlier version of this note claimed that basis
+#: while nothing read the flag: the branch keyed on the infra KIND, and the comment recorded a
+#: dependency it did not enforce.
+#:
+#: What remains unguarded is a change to trimming itself. If it ever gains a way to shrink a page —
+#: downscaling a scan, say — a file refused today might fit tomorrow, and two things go wrong
+#: together: this sentence, and the bulk exclusion that keeps such documents from being retried
+#: automatically. No test can detect "trimming got smarter", so this is a pointer for whoever does
+#: it. The per-document reprocess stays available meanwhile, which bounds the cost to "a processor
+#: must ask by hand".
+PAYLOAD_TOO_LARGE_MARKER = "too large for the AI to read"
+PAYLOAD_TOO_LARGE_MESSAGE = (
+    f"This file is {PAYLOAD_TOO_LARGE_MARKER}. Re-reading won't help — split it into smaller "
+    "files or upload a lower-resolution scan."
+)
+
+
+def _classification_failure_message(infra_failure: str, *, payload_over_budget: bool) -> str:
+    """What a processor is told when classification failed on infrastructure (LP-637).
+
+    A named function so the choice can be tested as a PROPERTY over every infra kind rather than
+    over the cases that happened to come to mind. Two versions of this shipped keyed on the wrong
+    thing, both the same mistake — a proxy standing in for a signal that exists:
+
+    * `is_rerunnable_infra`, whose set excludes `INFRA_FAILED`, so auth and permission failures were
+      told their file was too large;
+    * `infra_failure == INFRA_OVERSIZED`, which `infra_failure_kind` returns for EVERY non-throttle
+      HTTP 400 — a corrupt or encrypted PDF, or a misconfigured model id, none of them size
+      problems. A 300 KB unreadable scan was told to be split, and then dropped from bulk forever.
+
+    ``payload_over_budget`` is the actual measurement: the payload did not fit after trimming to the
+    smallest page count, so this file cannot be sent at any size. It is the ONLY thing that earns
+    the permanent voice, and it is what `_refused_for_size` keys the bulk exclusion on.
+    """
+    if payload_over_budget:
+        return PAYLOAD_TOO_LARGE_MESSAGE
+    return f"Couldn't read this document ({infra_failure}) — try re-reading it."
+
+
 async def _process_document(db: AsyncSession, document_id: str) -> None:
     """The core pipeline for one document. Always reaches a terminal status.
 
@@ -253,13 +302,19 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             # rather than restated: a throttle or a dropped connection is worth another go, and an
             # oversized payload is not — re-reading the same file produces the same refusal, which
             # is a promise the UI must not make.
-            document.processing_error = (
-                f"Couldn't read this document ({classification.infra_failure}) — try re-reading it."
-                if is_rerunnable_infra(classification.infra_failure)
-                else (
-                    "This file is too large for the AI to read. Re-reading won't help — split it "
-                    "into smaller files or upload a lower-resolution scan."
-                )
+            # THE PERMANENT VOICE IS FOR OVERSIZED ALONE, and keying it on `is_rerunnable_infra`
+            # was wrong (LP-637 review). That set is {rate_limited, connection, server_error}, so
+            # INFRA_FAILED — which `infra_failure_kind` returns for auth, permission and
+            # AccessDenied — fell into the else branch and told a processor their file was too
+            # large and to go split it. False, actively wasteful advice, and it also excluded the
+            # document from bulk reprocess forever through `_refused_for_size`, when re-reading is
+            # exactly what fixes it once the credential is. ADR-387 records out-of-band credentials
+            # as a live concern here, so this is the likely route rather than a hypothetical one —
+            # the same shape that made an expired credential the one outage the breaker could never
+            # trip (LP-635).
+            document.processing_error = _classification_failure_message(
+                classification.infra_failure,
+                payload_over_budget=classification.payload_over_budget,
             )
             await log_activity(
                 db,

@@ -19,6 +19,7 @@ function doc(status: DocumentStatus): DocumentResponse {
     tier: null,
     summary: null,
     classification_confidence: null,
+    processing_error: null,
     status,
     upload_source: "user_upload",
     uploaded_by_user_id: "u1",

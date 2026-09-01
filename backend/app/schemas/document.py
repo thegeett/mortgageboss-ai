@@ -102,6 +102,18 @@ class DocumentResponse(BaseModel):
     summary: str | None
     classification_confidence: float | None
     status: DocumentStatus
+    #: Why the last run could not finish, in words meant for a processor (LP-637 review).
+    #:
+    #: EXPOSED BECAUSE OTHERWISE IT REACHES NOBODY. The pipeline writes this column and the whole
+    #: point of writing it is that "it is the only place a processor looks" — which was not true:
+    #: no response schema carried it, so the two carefully-worded failure voices were dead text and
+    #: LF-ZE9N's oversized document would still have shown "Processing / uncategorized" with no
+    #: explanation after the fix.
+    #:
+    #: Safe to expose, and that is a property the writers maintain rather than an assumption here:
+    #: `document_processing.py` treats this column as UI-shown and PII-safe by module invariant,
+    #: and refuses to interpolate model free-text into it for exactly that reason.
+    processing_error: str | None
     upload_source: UploadSource
     uploaded_by_user_id: UUID | None
     created_at: datetime

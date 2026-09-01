@@ -20,6 +20,7 @@ const SKIP_REASON_TEXT: Record<string, string> = {
   already_queued: "already queued",
   type_set_by_a_person: "typed by a person",
   already_classified: "already identified",
+  too_large_to_read: "too large to read",
   [ENQUEUE_FAILED]: "could not be queued",
 };
 

@@ -557,6 +557,18 @@ function DrawerBody({
         {summary.standard_name && summary.standard_name !== summary.original_filename && (
           <p className="truncate text-[11px] text-gray-400">File: {summary.original_filename}</p>
         )}
+        {/*
+          WHY THE LAST RUN DID NOT FINISH (LP-637 review). The pipeline has always written this
+          column on the strength of "it is the only place a processor looks", and until now no
+          response schema carried it and nothing rendered it — so LF-ZE9N's oversized document read
+          "Processing / uncategorized" with no explanation, which is the complaint the whole
+          feature was opened for. The text is PII-safe by the writer's own module invariant.
+        */}
+        {summary.processing_error && (
+          <p className="rounded-md border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+            {summary.processing_error}
+          </p>
+        )}
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">

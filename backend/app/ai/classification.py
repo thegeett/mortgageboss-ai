@@ -85,13 +85,29 @@ class ClassificationResult(BaseModel):
     #: judgment — that reads as a coverage gap and corrupts every downstream audit. The document is
     #: re-runnable, not a schema finding.
     infra_failure: str | None = None
+    #: LP-637 review — the payload STILL did not fit after trimming, so this file cannot be sent at
+    #: any page count. Distinct from ``infra_failure == "oversized"``, which `infra_failure_kind`
+    #: returns for EVERY non-throttle HTTP 400: a corrupt or encrypted PDF, or a misconfigured model
+    #: id, all arrive as 400 and are not size problems at all. Only this flag justifies telling a
+    #: processor to split the file, or excluding the document from a bulk re-read forever.
+    payload_over_budget: bool = False
 
     @classmethod
-    def unknown(cls, reason: str, *, infra_failure: str | None = None) -> "ClassificationResult":
+    def unknown(
+        cls,
+        reason: str,
+        *,
+        infra_failure: str | None = None,
+        payload_over_budget: bool = False,
+    ) -> "ClassificationResult":
         """The graceful fallback: an ``unknown`` type at zero confidence (LP-462: with an optional
         infrastructure-outcome tag when the call never completed — throttle / oversize / other AI error)."""
         return cls(
-            document_type="unknown", confidence=0.0, reasoning=reason, infra_failure=infra_failure
+            document_type="unknown",
+            confidence=0.0,
+            reasoning=reason,
+            infra_failure=infra_failure,
+            payload_over_budget=payload_over_budget,
         )
 
 
@@ -203,8 +219,17 @@ async def classify_document(content: bytes, media_type: str) -> ClassificationRe
         # judgment. A throttled document recorded as low-confidence would look like a coverage gap; here it
         # is tagged infrastructure and stays re-runnable. Metadata only — never bytes/content.
         kind = infra_failure_kind(err)
-        logger.warning("classification_ai_failed", infra_failure=kind)
-        return ClassificationResult.unknown("AI call failed", infra_failure=kind)
+        logger.warning(
+            "classification_ai_failed", infra_failure=kind, over_budget=fit.still_over_budget
+        )
+        # `fit.still_over_budget` is carried out rather than discarded (LP-637 review). It is the
+        # only signal that says THE FILE IS TOO BIG; `kind` cannot, because `infra_failure_kind`
+        # returns "oversized" for any non-throttle 400 — including a corrupt PDF and a misconfigured
+        # model id. Telling a processor to split a 300 KB file, and then never re-reading it, is
+        # what keying on `kind` alone produced.
+        return ClassificationResult.unknown(
+            "AI call failed", infra_failure=kind, payload_over_budget=fit.still_over_budget
+        )
 
     parsed = _parse_classification_json(result.text)
     if parsed is None:

@@ -1396,3 +1396,71 @@ async def test_bulk_reports_an_abandoned_document_honestly(
 
     assert resp.json()["queued"] == 1, f"still unreachable: {resp.json()['skipped']}"
     _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_bulk_reports_an_unreadable_file_as_such_not_as_already_identified(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The skip has to name what happened.
+
+    Folded into `_would_benefit`, a size-refused document came back under `already_classified`,
+    which the UI renders "already identified" — said about a document the processor is looking at
+    with no type at all. It also buried the one instruction the pipeline had actually produced:
+    split the file, or rescan it lower.
+    """
+    from app.tasks.document_processing import PAYLOAD_TOO_LARGE_MESSAGE
+
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    too_big = await db_session.get(Document, UUID(doc["id"]))
+    assert too_big is not None
+    too_big.status = DocumentStatus.NEEDS_REVIEW
+    too_big.processing_error = PAYLOAD_TOO_LARGE_MESSAGE
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 0
+    assert resp.json()["skipped"] == {"too_large_to_read": 1}
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_the_reason_a_document_failed_reaches_the_response(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """THE PREMISE OF WRITING IT AT ALL, and it was false.
+
+    The pipeline writes `processing_error` because "that column is the only place a processor
+    looks" — but no response schema carried it and nothing in the frontend referenced it. Two
+    carefully-worded failure voices were dead text, and LF-ZE9N's oversized document would still
+    have read "Processing / uncategorized" with no explanation after the fix that was written for
+    exactly that complaint.
+    """
+    from app.tasks.document_processing import PAYLOAD_TOO_LARGE_MESSAGE
+
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    failed = await db_session.get(Document, UUID(doc["id"]))
+    assert failed is not None
+    failed.status = DocumentStatus.NEEDS_REVIEW
+    failed.processing_error = PAYLOAD_TOO_LARGE_MESSAGE
+    await db_session.commit()
+
+    listed = await client.get(
+        f"/api/v1/loan-files/{loan_file.display_id}/documents", headers=_auth(token)
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["processing_error"] == PAYLOAD_TOO_LARGE_MESSAGE
+
+    detail = await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))
+    assert detail.status_code == 200
+    assert detail.json()["processing_error"] == PAYLOAD_TOO_LARGE_MESSAGE

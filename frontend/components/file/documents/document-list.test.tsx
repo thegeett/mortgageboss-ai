@@ -18,6 +18,7 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     tier: "tier_1",
     summary: null,
     classification_confidence: 0.9,
+    processing_error: null,
     status: "completed",
     upload_source: "user_upload",
     uploaded_by_user_id: "u1",
