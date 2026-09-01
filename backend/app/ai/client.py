@@ -383,7 +383,16 @@ def _is_transient(exc: Exception) -> bool:
 INFRA_RATE_LIMITED = "rate_limited"  #: a genuine 429, or a Bedrock throttle/capacity code
 INFRA_CONNECTION = "connection"  #: never reached the service — connection refused, reset, timeout
 INFRA_SERVER = "server_error"  #: reached it and it failed — 5xx
+#: HTTP 400 — a request-shape rejection. NOT a measurement of the file's size, despite the name:
+#: `infra_failure_kind` returns this for EVERY non-throttle 400, so a corrupt or encrypted PDF and a
+#: misconfigured model or inference-profile id all arrive here. Anything that tells a person their
+#: file is too big, or that treats the failure as permanent, must read an actual size measurement —
+#: `PayloadFit.still_over_budget`, carried on `ClassificationResult.payload_over_budget` — and not
+#: this label. LP-637 shipped copy keyed on it that told the owner of a 300 KB unreadable scan to
+#: split it into smaller files, and then excluded the document from bulk reprocessing for good.
 INFRA_OVERSIZED = "oversized"
+#: Everything else — auth, permission, AccessDenied, an exhausted non-throttle. See the note on
+#: `RERUNNABLE_INFRA_KINDS` before treating this as a lesser case than the others.
 INFRA_FAILED = "failed"
 
 #: The kinds that mean "the call never completed, for a reason that may not recur" — so the
@@ -393,6 +402,25 @@ INFRA_FAILED = "failed"
 #: before it, callers compared ``== INFRA_RATE_LIMITED`` and got the whole transient family by
 #: accident. Comparing against one member now would silently drop connection and server failures
 #: out of the re-runnable branch — the exact regression this set exists to prevent.
+#:
+#: THIS SET IS NOT A PERMANENCE CLASSIFIER, AND USING IT AS ONE HAS PRODUCED THREE DEFECTS.
+#: "Not re-runnable" is not the same as "will never work", because ``INFRA_FAILED`` is what
+#: `infra_failure_kind` returns for AUTH, PERMISSION and AccessDenied — outages that are entirely
+#: recoverable, just not by retrying the same call in the same minute. Each time, the code treated
+#: `not is_rerunnable_infra(...)` as "give up on this document":
+#:
+#: 1. LP-635 — the AI breaker counted only re-runnable kinds, so an expired credential RESET the
+#:    counter on every call and was the one outage that could never trip it, while the pass ground
+#:    through its whole budget producing an all-``couldn't check`` run.
+#: 2. LP-637 — a classification failure message keyed on this set told auth failures their file was
+#:    too large to read, and advised splitting it.
+#: 3. LP-637 — the same message then excluded those documents from bulk reprocessing permanently,
+#:    which is precisely the action that fixes them once the credential is.
+#:
+#: ADR-387 records out-of-band credentials as a live concern in this environment, so this is the
+#: likely shape rather than a hypothetical one. If you are about to branch on this set, ask what
+#: your branch does to a 403 — and if the answer is "the same thing it does to an oversized
+#: payload", the branch is wrong.
 RERUNNABLE_INFRA_KINDS = frozenset({INFRA_RATE_LIMITED, INFRA_CONNECTION, INFRA_SERVER})
 
 
