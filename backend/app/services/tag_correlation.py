@@ -25,6 +25,7 @@ future correlation tag (undisclosed liability, retained REO, …) will follow.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -406,6 +407,66 @@ def produce_recurrence_tags(snapshot: Snapshot) -> Snapshot:
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
+#: How many sourcing judgements may be in flight at once (LP-635).
+#:
+#: The pass was fully sequential, so its wall-clock was the sum of its model latencies. This is the
+#: only thing standing between that and the provider's own pacing — `RateLimiter` already enforces a
+#: minimum interval between acquisitions, so it, not this number, is the real ceiling; this bounds
+#: how many coroutines can be waiting on it, and therefore memory and in-flight token exposure.
+#:
+#: Eight rather than "as many as there are deposits": staging's environment budget is 2,000 RPM
+#: divided across worker slots, a REJECTED request still counts against the Bedrock quota (so pacing
+#: at the ceiling turns one throttle into a self-sustaining one), and `bedrock_rpm_budget` records
+#: that TOKENS per minute — unmeasured — is expected to bind before requests do on document-heavy
+#: work. A modest number takes most of the available win without being the thing that discovers the
+#: TPM ceiling.
+_MAX_CONCURRENT_JUDGMENTS = 8
+
+
+@dataclass(frozen=True)
+class _Planned:
+    """One deposit that needs a sourcing judgement, and everything needed to ask for it.
+
+    Built before any call is made, so the questions are settled as a set — which is what lets them
+    be asked concurrently and still applied in a fixed order.
+    """
+
+    txn: TransactionRecord
+    subject: dict[str, Tag]
+    candidates: list[SourceCandidate]
+    context: dict[str, object]
+    key: str
+    is_money_in: Tag
+
+
+async def _judge_concurrently(
+    contexts: dict[str, dict[str, object]],
+    reason_fn: Reasoner,
+    *,
+    concurrency: int,
+) -> dict[str, SourcingResult | AIClientError]:
+    """Run every outstanding judgement at once, bounded, returning ``{cache key: outcome}``.
+
+    An ``AIClientError`` is RETURNED rather than raised, so one unreachable call cannot cancel the
+    siblings that were about to succeed — the caller decides what each failure means, in deposit
+    order. Any other exception propagates, exactly as it did when these ran in a loop.
+    """
+    if not contexts:
+        return {}
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def judge(
+        key: str, context: dict[str, object]
+    ) -> tuple[str, SourcingResult | AIClientError]:
+        async with semaphore:
+            try:
+                return key, await reason_fn(json.dumps(context))
+            except AIClientError as err:
+                return key, err
+
+    return dict(await asyncio.gather(*(judge(k, c) for k, c in contexts.items())))
+
+
 async def produce_stage_b_sourcing_tags(
     snapshot: Snapshot,
     *,
@@ -415,6 +476,7 @@ async def produce_stage_b_sourcing_tags(
     date_window_days: int = _DATE_WINDOW_DAYS,
     source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
+    concurrency: int = _MAX_CONCURRENT_JUDGMENTS,
 ) -> Snapshot:
     """Produce ``txn.has_identified_source`` for each money-in deposit (candidate-then-judge).
 
@@ -445,6 +507,9 @@ async def produce_stage_b_sourcing_tags(
     # completion's own resolved id. See the matching note in services/tag_production.py.
     invoked_model: str | None = None
 
+    # PHASE 1 — PLAN. Pure: decide what needs judging and build each context. No model call here, so
+    # the set of questions is settled before any of them is asked (LP-635).
+    plan: list[_Planned] = []
     for txn in transactions:
         subject = snapshot.tags.by_subject.get(txn.content_id, {})
         is_money_in = _stage_a_tag(subject, _TAG_IS_MONEY_IN)
@@ -475,13 +540,51 @@ async def produce_stage_b_sourcing_tags(
         # Key the judgment on the EXACT context the judge sees (incl. the deposit's
         # apparent_category), so a changed judge input can never reuse a stale verdict.
         context = _build_judge_context(txn, subject, candidates)
-        key = _cache_key(context)
-        resolved = persistent.get(key)
+        plan.append(
+            _Planned(
+                txn=txn,
+                subject=subject,
+                candidates=candidates,
+                context=context,
+                key=_cache_key(context),
+                is_money_in=is_money_in,
+            )
+        )
+
+    # PHASE 2 — JUDGE, CONCURRENTLY. THE CHANGE THAT MATTERS, and it changes no prompt.
+    #
+    # Every call this stage makes was awaited one after the next, so the pass's wall-clock was the
+    # SUM of its model latencies — 591 calls at a 4.3s mean is 2,542 seconds of waiting, and this is
+    # the stage that makes the most of them (one per money-in deposit; Stage A and the tag groups
+    # both batch fifteen). That sum is what did not fit in the window, and it is why LF-ZE9N could
+    # not be verified.
+    #
+    # Concurrency does not reduce the call count or the token bill. It overlaps the WAITING, which
+    # is the part that was failing. The prompts, the contexts and the resolution logic are
+    # untouched, so a verdict cannot move: this is the same set of questions, asked at the same
+    # time as each other rather than one after another.
+    #
+    # Deduplicated by cache key BEFORE dispatch, which the sequential version got for free by
+    # writing the cache between iterations. Without that, identical contexts already in flight
+    # would each spend a call.
+    outstanding: dict[str, dict[str, object]] = {}
+    for item in plan:
+        if item.key not in persistent and item.key not in outstanding:
+            outstanding[item.key] = item.context
+    judged = await _judge_concurrently(outstanding, reason_fn, concurrency=concurrency)
+    deposits_judged = len(outstanding)
+
+    # PHASE 3 — APPLY, IN THE ORIGINAL ORDER. Deterministic on purpose: the tags, the token totals
+    # and the BREAKER all see the deposits in the same sequence they had before, so "five
+    # consecutive failures" keeps the meaning it was given rather than depending on which coroutine
+    # happened to finish first.
+    for item in plan:
+        txn, subject, candidates = item.txn, item.subject, item.candidates
+        is_money_in = item.is_money_in
+        resolved = persistent.get(item.key)
         if resolved is None:
-            deposits_judged += 1
-            try:
-                result = await reason_fn(json.dumps(context))
-            except AIClientError as err:
+            outcome = judged[item.key]
+            if isinstance(outcome, AIClientError):
                 logger.warning("stage_b_judge_failed", candidates=len(candidates))
                 # LP-635 REVIEW — Stage B was left out of the breaker, and it is the stage with the
                 # most calls: one judgement per money-in deposit. The per-deposit tolerance here is
@@ -490,21 +593,21 @@ async def produce_stage_b_sourcing_tags(
                 # it — the exact behaviour the breaker was added to stop, still reachable by the
                 # commonest route.
                 if breaker is not None:
-                    breaker.record_failure(err)
+                    breaker.record_failure(outcome)
                 resolved = _Sourced(
                     "unknown", None, None, _REASON_FAILED, cacheable=False, strength=None
                 )
             else:
                 if breaker is not None:
                     breaker.record_success()
-                input_tokens += result.input_tokens
-                output_tokens += result.output_tokens
-                invoked_model = result.model
+                input_tokens += outcome.input_tokens
+                output_tokens += outcome.output_tokens
+                invoked_model = outcome.model
                 resolved = _resolve(
-                    result, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
+                    outcome, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
                 )
             if resolved.cacheable:
-                persistent[key] = resolved
+                persistent[item.key] = resolved
 
         confidence = _propagate(resolved.confidence, is_money_in.confidence)
         by_subject[txn.content_id][_TAG_HAS_SOURCE] = _sourcing_tag(

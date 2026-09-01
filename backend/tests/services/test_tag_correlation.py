@@ -558,3 +558,98 @@ async def test_no_strength_tag_on_unknown_money_in() -> None:
     out = await produce_stage_b_sourcing_tags(snap, reasoner=StubJudge())
     assert _require_source_tag(out, deposit).value == "unknown"
     assert _strength_of(out, deposit) is None  # no strength for an unknown source
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — the judgements overlap; the answers do not move
+# --------------------------------------------------------------------------- #
+class _ConcurrencyProbe:
+    """A judge that records how many calls are in flight at once, and answers deterministically."""
+
+    def __init__(self, *, hold: float = 0.01) -> None:
+        self.in_flight = 0
+        self.peak = 0
+        self.calls = 0
+        self._hold = hold
+
+    async def __call__(self, context_json: str) -> SourcingResult:
+        import asyncio
+
+        self.calls += 1
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await asyncio.sleep(self._hold)  # stand in for model latency
+        finally:
+            self.in_flight -= 1
+        return SourcingResult(
+            judgment=SourcingJudgment(value="no", source_index=None, confidence=0.8, reasoning="r"),
+            input_tokens=5,
+            output_tokens=3,
+            model="stub",
+            truncated=False,
+        )
+
+
+async def test_the_judgements_actually_overlap() -> None:
+    """THE FIX, stated as the thing that was wrong: every call was awaited one after the next, so a
+    pass's wall-clock was the SUM of its model latencies. LF-ZE9N's 591 calls at a 4.3s mean is
+    2,542 seconds of waiting, and that sum is what did not fit in the window.
+
+    A peak of one would mean nothing overlapped — which is exactly what this looked like before.
+    """
+    snap = _with_stage_a(
+        _snapshot([("d1", [_txn(f"{100 + i}.00", f"DEPOSIT {i}") for i in range(12)])]),
+        {},
+        default=("in", "vendor"),
+    )
+    probe = _ConcurrencyProbe()
+
+    await produce_stage_b_sourcing_tags(snap, reasoner=probe, concurrency=4)
+
+    assert probe.calls == 12  # every distinct deposit still judged
+    assert probe.peak > 1, "the judgements ran one at a time — nothing was overlapped"
+    assert probe.peak <= 4, "the concurrency bound was not respected"
+
+
+async def test_concurrency_does_not_change_a_single_verdict() -> None:
+    """The property that makes this safe to ship without re-validating the judge: the prompts, the
+    contexts and the resolution logic are untouched, so running the same questions at the same time
+    as each other cannot move an answer. Compared tag-for-tag against the serial path."""
+    deposits = [_txn(f"{200 + i}.00", f"PAYROLL {i}") for i in range(6)]
+    serial = await produce_stage_b_sourcing_tags(
+        _with_stage_a(_snapshot([("d1", deposits)]), {}, default=("in", "vendor")),
+        reasoner=StubJudge(value="no", confidence=0.7),
+        concurrency=1,
+    )
+    parallel = await produce_stage_b_sourcing_tags(
+        _with_stage_a(_snapshot([("d1", deposits)]), {}, default=("in", "vendor")),
+        reasoner=StubJudge(value="no", confidence=0.7),
+        concurrency=8,
+    )
+
+    def sourcing(snap: Snapshot) -> list[tuple[str, str | None, float | None, str | None]]:
+        return [
+            (t.content_id, tag.value, tag.confidence, tag.reasoning)
+            for t in _flatten(snap)
+            if (tag := _source_tag(snap, t)) is not None
+        ]
+
+    assert sourcing(serial) == sourcing(parallel)
+    assert sourcing(serial), "the comparison would be vacuous with no sourcing tags"
+
+
+async def test_identical_deposits_are_judged_once_even_in_flight() -> None:
+    """The sequential version deduplicated for free, by writing the cache between iterations.
+    Dispatching a set has to do it deliberately — otherwise identical contexts already in flight
+    each spend a call, and the change would have INCREASED the call count it exists to survive."""
+    same = [_txn("500.00", "ACME PAYROLL", date="2026-05-05") for _ in range(5)]
+    probe = _ConcurrencyProbe()
+
+    await produce_stage_b_sourcing_tags(
+        _with_stage_a(_snapshot([("d1", same)]), {}, default=("in", "vendor")),
+        reasoner=probe,
+        concurrency=8,
+    )
+
+    assert probe.calls == 1, f"five identical deposits cost {probe.calls} calls"
