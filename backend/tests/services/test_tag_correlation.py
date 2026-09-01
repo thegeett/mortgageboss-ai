@@ -8,21 +8,27 @@ cross-provenance, cache-by-content, and that AI calls scale with deposits (not t
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
+import pytest
+import structlog
+from app.ai.client import INFRA_FAILED, infra_failure_kind
 from app.ai.tag_correlation import AIClientError, SourcingJudgment, SourcingResult
 from app.services.tag_correlation import (
     SourcingCache,
+    _NotAttempted,
     find_source_candidates,
     produce_stage_b_sourcing_tags,
 )
 from app.verification.snapshot.documents_section import build_transactions, transaction_field_sets
 from app.verification.snapshot.model import DocumentEntry, DocumentsSection, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
+from app.verification.tag_materialization.breaker import AiBackendUnavailable, AiInfraBreaker
 
 _WHEN = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
 
@@ -628,7 +634,9 @@ async def test_concurrency_does_not_change_a_single_verdict() -> None:
         concurrency=8,
     )
 
-    def sourcing(snap: Snapshot) -> list[tuple[str, str | None, float | None, str | None]]:
+    # `Tag.value` is a JsonValue, not a `str | None` — annotate what it is, so this file
+    # typechecks if mypy is ever pointed at tests/ as well as app/.
+    def sourcing(snap: Snapshot) -> list[tuple[str, object, float | None, str | None]]:
         return [
             (t.content_id, tag.value, tag.confidence, tag.reasoning)
             for t in _flatten(snap)
@@ -653,3 +661,185 @@ async def test_identical_deposits_are_judged_once_even_in_flight() -> None:
     )
 
     assert probe.calls == 1, f"five identical deposits cost {probe.calls} calls"
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 review — one CALL is one event, and the breaker still ends an outage
+# --------------------------------------------------------------------------- #
+class _CountingJudge:
+    """Records calls, and can fail every one of them or answer non-cacheably."""
+
+    def __init__(self, *, error: bool = False, truncate: bool = False, hold: float = 0.0) -> None:
+        self.calls = 0
+        self.started = 0
+        self.finished = 0
+        self._error = error
+        self._truncate = truncate
+        self._hold = hold
+
+    async def __call__(self, context_json: str) -> SourcingResult:
+        self.calls += 1
+        self.started += 1
+        if self._hold:
+            await asyncio.sleep(self._hold)
+        if self._error:
+            self.finished += 1
+            raise AIClientError("stubbed transport failure")
+        self.finished += 1
+        return SourcingResult(
+            judgment=SourcingJudgment(value="no", source_index=None, confidence=0.8, reasoning="r"),
+            input_tokens=5,
+            output_tokens=3,
+            model="stub",
+            truncated=self._truncate,
+        )
+
+
+async def test_one_failed_call_shared_by_duplicates_is_one_breaker_failure() -> None:
+    """The dedupe made a single call answer for many deposits — so its FAILURE had to stop being
+    replayed once per deposit too.
+
+    Five identical deposits share a cache key by construction (the judge context carries no
+    content_id), and a failed judgment is not cacheable, so ``persistent`` stayed empty and every
+    duplicate re-applied the one error. That is five breaker failures off ONE round trip, against a
+    threshold of five: a single flaky call could end the run, which is precisely the case
+    ``breaker.py`` says "must keep working" and "never reaches two".
+    """
+    same = [_txn("500.00", "ACME PAYROLL", date="2026-05-05") for _ in range(5)]
+    judge = _CountingJudge(error=True)
+    breaker = AiInfraBreaker()
+
+    out = await produce_stage_b_sourcing_tags(
+        _with_stage_a(_snapshot([("d1", same)]), {}, default=("in", "vendor")),
+        reasoner=judge,
+        breaker=breaker,
+    )
+
+    assert judge.calls == 1, "the dedupe should still cost exactly one call"
+    assert breaker.infra_failures == 1, (
+        f"one failed call was counted {breaker.infra_failures} times — the breaker is being fed "
+        "per deposit rather than per call"
+    )
+    assert breaker.consecutive < 5, "a single flaky call must not reach the trip threshold"
+    # Every deposit still gets the failure's answer; only the ACCOUNTING is deduplicated.
+    for txn in _flatten(out):
+        assert _require_source_tag(out, txn).value == "unknown"
+
+
+async def test_a_non_cacheable_answer_is_not_billed_once_per_duplicate() -> None:
+    """The success half of the same replay. A truncated (or malformed, or bad-index) judgment is
+    not cacheable, so duplicates re-entered the branch and re-added the tokens of a call that
+    happened once — reporting five times the cost actually spent."""
+    same = [_txn("500.00", "ACME PAYROLL", date="2026-05-05") for _ in range(5)]
+    judge = _CountingJudge(truncate=True)
+
+    with structlog.testing.capture_logs() as logs:
+        await produce_stage_b_sourcing_tags(
+            _with_stage_a(_snapshot([("d1", same)]), {}, default=("in", "vendor")),
+            reasoner=judge,
+        )
+
+    assert judge.calls == 1
+    done = [entry for entry in logs if entry["event"] == "stage_b_production_done"]
+    assert len(done) == 1
+    assert done[0]["input_tokens"] == 5, "tokens multiplied across deposits sharing one call"
+    assert done[0]["output_tokens"] == 3
+    assert done[0]["deposits_judged"] == 1
+
+
+async def test_the_breaker_stops_dispatch_rather_than_paying_for_the_whole_stage() -> None:
+    """THE REGRESSION CONCURRENCY INTRODUCED. The breaker is fed in the apply loop, which does not
+    begin until every judgement has been dispatched — so on the outage it was written for, Stage B
+    issued ALL of its calls (LF-ZE9N: 591, each exhausting the retry budget with backoff) before
+    the counter saw one. Its stated benefit, releasing the slot in under a minute instead of
+    grinding through the file's whole budget, was gone for the stage that makes the most calls.
+
+    The gate bounds an outage at the threshold plus what is already in flight.
+    """
+    deposits = [_txn(f"{100 + i}.00", f"DEPOSIT {i}", date="2026-05-05") for i in range(30)]
+    judge = _CountingJudge(error=True)
+    breaker = AiInfraBreaker()
+
+    with pytest.raises(AiBackendUnavailable):
+        await produce_stage_b_sourcing_tags(
+            _with_stage_a(_snapshot([("d1", deposits)]), {}, default=("in", "vendor")),
+            reasoner=judge,
+            breaker=breaker,
+            concurrency=2,
+        )
+
+    assert judge.calls <= breaker.threshold + 2, (
+        f"{judge.calls} calls made against a dead backend — the dispatch gate did not close"
+    )
+    assert judge.calls < len(deposits), "the whole stage was dispatched before the breaker acted"
+
+
+async def test_without_a_breaker_no_gate_closes() -> None:
+    """Opt-in on purpose: only a caller holding a breaker can ACT on a closed gate. With none, a
+    closed gate would resolve the remaining deposits to ``unknown`` and let the pass finish — cheap
+    and SILENT, which is the worse of the two ways this stage can fail. The eval harness is that
+    caller."""
+    deposits = [_txn(f"{100 + i}.00", f"DEPOSIT {i}", date="2026-05-05") for i in range(12)]
+    judge = _CountingJudge(error=True)
+
+    await produce_stage_b_sourcing_tags(
+        _with_stage_a(_snapshot([("d1", deposits)]), {}, default=("in", "vendor")),
+        reasoner=judge,
+        concurrency=2,
+    )
+
+    assert judge.calls == len(deposits)
+
+
+async def test_a_bug_propagates_only_after_its_siblings_are_collected() -> None:
+    """Bare ``gather`` propagates the first exception WITHOUT cancelling the rest, so returning on
+    a non-``AIClientError`` would leave model calls running against a caller that has already
+    unwound — billed, unawaited, and surfacing later as "Task exception was never retrieved"."""
+
+    class _BuggyJudge(_CountingJudge):
+        async def __call__(self, context_json: str) -> SourcingResult:
+            self.started += 1
+            if self.started == 1:
+                raise ValueError("a bug in the reasoner, not an outage")
+            await asyncio.sleep(0.02)
+            self.finished += 1
+            return SourcingResult(
+                judgment=SourcingJudgment("no", None, 0.8, "r"),
+                input_tokens=5,
+                output_tokens=3,
+                model="stub",
+                truncated=False,
+            )
+
+    deposits = [_txn(f"{100 + i}.00", f"DEPOSIT {i}", date="2026-05-05") for i in range(6)]
+    judge = _BuggyJudge()
+
+    with pytest.raises(ValueError, match="a bug in the reasoner"):
+        await produce_stage_b_sourcing_tags(
+            _with_stage_a(_snapshot([("d1", deposits)]), {}, default=("in", "vendor")),
+            reasoner=judge,
+            concurrency=3,
+        )
+
+    assert judge.finished == judge.started - 1, (
+        "a sibling was still in flight when the bug propagated — gather did not collect it"
+    )
+
+
+def test_a_not_attempted_judgment_counts_toward_the_breaker() -> None:
+    """The gate is only safe because the judgments it skips still END the pass.
+
+    ``_NotAttempted`` carries no cause, so `infra_failure_kind` classifies it `INFRA_FAILED` — which
+    `record_failure` counts. If it were ever classified as a payload rejection it would RESET the
+    counter instead, and a closed gate would quietly resolve the rest of the file to ``unknown``:
+    the expensive-way-to-learn-nothing run, arrived at cheaply and without a failed run to show for
+    it.
+    """
+    skipped = _NotAttempted("the backend had already stopped answering")
+    assert infra_failure_kind(skipped) == INFRA_FAILED
+
+    breaker = AiInfraBreaker()
+    for _ in range(breaker.threshold - 1):
+        breaker.record_failure(skipped)
+    with pytest.raises(AiBackendUnavailable):
+        breaker.record_failure(skipped)

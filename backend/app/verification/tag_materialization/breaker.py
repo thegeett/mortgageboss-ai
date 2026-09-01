@@ -127,6 +127,17 @@ class AiInfraBreaker:
     def consecutive(self) -> int:
         return self._consecutive
 
+    @property
+    def threshold(self) -> int:
+        """The trip point, readable so a caller can apply the SAME policy where calls are made.
+
+        Stage B dispatches its judgments concurrently, which means every call is issued before this
+        counter sees a single one of them. It closes its own dispatch gate on this number rather
+        than picking one, so there is one answer to "how many failures mean stop" instead of two
+        that can drift apart.
+        """
+        return self._threshold
+
     def record_success(self) -> None:
         """A call landed, so whatever was failing is not failing now."""
         self._consecutive = 0
