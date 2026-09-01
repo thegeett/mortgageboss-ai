@@ -32,6 +32,7 @@ from app.models.document import Document
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
+    DocumentReprocessRequest,
     DocumentResponse,
     DocumentTypeOverrideRequest,
     StalenessResolveRequest,
@@ -70,6 +71,11 @@ flat_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
+#: What the type-override endpoint writes to mean "a person chose this type" (LP-44). Named rather
+#: than spelled 1.0 inline, because it is a PROXY and readers need to see that it is one — the model
+#: can reach the same value through `coerce_confidence`'s clamp.
+_HUMAN_CLASSIFIED_CONFIDENCE = 1.0
+
 
 def _enqueue_processing(document_id: UUID) -> None:
     """Fire-and-forget enqueue of the LP-42 processing task for a stored document.
@@ -82,6 +88,25 @@ def _enqueue_processing(document_id: UUID) -> None:
         process_document.delay(str(document_id))
     except Exception:
         log.warning("document_enqueue_failed", document_id=str(document_id))
+
+
+def _enqueue_full_reprocess(document_id: UUID) -> None:
+    """Fire-and-forget enqueue of the FULL pipeline — classify then extract (LP-637).
+
+    Deliberately a separate helper from :func:`_enqueue_reprocess`, which enqueues the
+    extraction-only task. The two differ by exactly the step this ticket exists to provide, and one
+    helper taking a flag would make the call sites read the same.
+
+    Never raises, for the reason the other one does not: the activity log and the stale marker are
+    already committed, so a broker hiccup leaves a document that can be reprocessed again rather
+    than a 500 on a request whose durable half succeeded.
+    """
+    try:
+        from app.tasks.document_processing import process_document
+
+        process_document.delay(str(document_id))
+    except Exception:
+        log.warning("full_reprocess_enqueue_failed", document_id=str(document_id))
 
 
 def _enqueue_reprocess(document_id: UUID) -> None:
@@ -269,6 +294,67 @@ async def override_document_type(
 
     # Re-extract in the background (fire-and-forget; the override is already saved).
     _enqueue_reprocess(document.id)
+
+    return await build_document_response(db, document=document)
+
+
+@flat_router.post("/{document_id}/reprocess", response_model=DocumentResponse)
+async def reprocess_document_from_scratch(
+    document_id: UUID,
+    body: DocumentReprocessRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> DocumentResponse:
+    """Read a stored document again from scratch — CLASSIFICATION INCLUDED (LP-637).
+
+    THE GAP THIS FILLS. Classification runs once, at upload, and nothing re-runs it. So every
+    improvement to the classifier is invisible to every document already in the system, and the only
+    route to a corrected type is a processor typing it by hand — which cannot help a document that
+    classified as ``unknown``, because nobody knows what it is.
+
+    LF-ZE9N is the worked example: ten documents classified nineteen hours before the LP-636 fixes
+    that would have classified them correctly, still untyped, generating 220 of that file's 256
+    `couldnt_check` findings. The fixes were deployed and could not reach them.
+
+    NOT :func:`app.tasks.document_processing.reprocess_document`, which the type-override endpoint
+    uses and which SKIPS classification by design — correctly, because there a human has already
+    supplied the type. This enqueues the full ``process_document`` pipeline against the stored file.
+
+    A HUMAN-CLASSIFIED DOCUMENT IS REFUSED unless ``force``; see
+    :class:`~app.schemas.document.DocumentReprocessRequest` for why that signal is imperfect and why
+    refusing is the cheaper error. Tenant-scoped (404 for another company's document). The pipeline
+    runs in the background and the document moves through its statuses live in the UI.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+
+    if document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This document's type was set by a person. Reprocessing would replace it with the "
+                "classifier's answer — re-send with force to do that anyway."
+            ),
+        )
+
+    await log_activity(
+        db,
+        loan_file_id=document.loan_file_id,
+        activity_type=ActivityType.DOCUMENT_REPROCESSED,
+        summary="Document sent for reprocessing",
+        actor_user_id=current_user.id,
+        detail={"document_id": str(document.id), "forced": body.force},
+    )
+    # The type may change, so findings computed from the old one are out of date. The override
+    # endpoint marks the run stale for exactly this reason; a re-classification that left a green
+    # verification standing would be a false green.
+    await mark_verification_stale(db, loan_file_id=document.loan_file_id)
+    await db.commit()
+
+    _enqueue_full_reprocess(document.id)
 
     return await build_document_response(db, document=document)
 

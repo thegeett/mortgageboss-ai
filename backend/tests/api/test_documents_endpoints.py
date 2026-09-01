@@ -466,3 +466,136 @@ async def test_unauthenticated_is_401(client: AsyncClient, db_session: AsyncSess
     assert (
         await client.post(_docs_url(loan_file.display_id), files=[_pdf_part()])
     ).status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# LP-637 — reprocess a stored document from scratch, classification included
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def _mock_full_reprocess(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stub the FULL pipeline enqueue (classify + extract), distinct from the LP-39c one."""
+    from app.tasks import document_processing
+
+    delay = MagicMock()
+    monkeypatch.setattr(document_processing.process_document, "delay", delay)
+    return delay
+
+
+def _reprocess_url(doc_id: str) -> str:
+    return f"/api/v1/documents/{doc_id}/reprocess"
+
+
+async def test_reprocess_enqueues_the_full_pipeline_not_the_re_extraction(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """THE WHOLE POINT, and the one assertion that distinguishes this from what already existed.
+
+    `reprocess_document` (the type-override path) SKIPS classification by design. A document that
+    classified as `unknown` cannot be helped by it — nobody knows what type to supply. This must
+    enqueue `process_document`, which classifies again.
+
+    Both mocks are held so the test fails loudly if the wrong one fires, rather than passing because
+    something was enqueued.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    # Uploading enqueues the SAME task, so the mock must be cleared to isolate what reprocess does.
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+    _mock_reprocess.assert_not_called()
+
+
+async def test_reprocess_refuses_a_human_classified_document(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A person chose that type. Replacing it with the classifier's guess and saying nothing is a
+    worse bug than the one being fixed, so the default is refuse."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    # The override endpoint is what marks a type human-set.
+    await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "bank_statement"}
+    )
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 409
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_force_reprocesses_a_human_classified_document(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The refusal is a guard, not a wall — a processor who means it can say so."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "bank_statement"}
+    )
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={"force": True})
+
+    assert resp.status_code == 200
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_reprocess_marks_the_verification_stale(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A re-classified document under findings computed from its OLD type is a false green. The
+    override endpoint marks the run stale for this reason; so must this."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.api import documents as documents_api
+
+    marked = AsyncMock()
+    with patch.object(documents_api, "mark_verification_stale", marked):
+        company, _user, token = await _make_user(db_session, slug="acme")
+        loan_file = await create_loan_file(db_session, company_id=company.id)
+        doc = await _upload_one(client, loan_file.display_id, token)
+
+        resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    marked.assert_awaited_once()
+
+
+async def test_reprocess_is_tenant_scoped(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """Another company's document is a 404, not a 403 — the same shape every other document route
+    uses, so this one cannot become the endpoint that confirms a document exists."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    _other, _u2, other_token = await _make_user(db_session, slug="rival")
+    _mock_full_reprocess.reset_mock()  # the upload above enqueued it once
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(other_token), json={})
+
+    assert resp.status_code == 404
+    _mock_full_reprocess.assert_not_called()

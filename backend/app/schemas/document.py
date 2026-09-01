@@ -27,6 +27,20 @@ class DocumentTypeOverrideRequest(BaseModel):
     document_type: str = Field(min_length=1, max_length=64)
 
 
+class DocumentReprocessRequest(BaseModel):
+    """Re-run the full pipeline on a stored document, classification included (LP-637)."""
+
+    #: Reprocess even when the document looks HUMAN-CLASSIFIED.
+    #:
+    #: The signal is ``classification_confidence == 1.0``, which the type-override endpoint sets and
+    #: means "a person chose this". It is an IMPERFECT proxy and that is stated rather than hidden:
+    #: `coerce_confidence` clamps the model's own answer into [0, 1], so a very confident
+    #: classification can land on 1.0 too. Refusing by default therefore costs a processor one extra
+    #: click on a rare confidently-classified document, while the alternative — replacing someone's
+    #: decision with a model's guess and telling nobody — is the more expensive mistake.
+    force: bool = False
+
+
 class StalenessResolveRequest(BaseModel):
     """Resolve a flagged-stale document (LP-71): waive or accept (replace is its own flow)."""
 

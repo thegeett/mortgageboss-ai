@@ -54,6 +54,10 @@ class ActivityType(StrEnum):
         "document_replaced"  # explicit replace — old historical, new current (LP-71)
     )
     DOCUMENT_STALENESS_RESOLVED = "document_staleness_resolved"  # processor waived/accepted (LP-71)
+    #: LP-637 — a processor asked for the document to be read again from scratch, classification
+    #: included. Distinct from DOCUMENT_TYPE_OVERRIDDEN (a human supplying the type) and from
+    #: DOCUMENT_REPLACED (a new file): the file is unchanged and nobody has decided what it is.
+    DOCUMENT_REPROCESSED = "document_reprocessed"
     FINDING_RESOLVED = "finding_resolved"
     FINDING_UNDONE = "finding_undone"  # processor reversed a resolution — Undo (LP-98)
     VERIFICATION_RUN = "verification_run"
