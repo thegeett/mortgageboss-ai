@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useReprocessDocuments } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
-import { humanize } from "@/lib/format";
+import { describeSkips, partitionSkips } from "@/lib/format-skip-reasons";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,7 +22,11 @@ import { toast } from "sonner";
  * "worth re-reading" in the codebase, and the one on screen would be the one that drifts. The
  * result reports what actually happened instead.
  */
-export function ReprocessAll({ fileId, documentCount }: { fileId: string; documentCount: number }) {
+export function ReprocessAll({
+  fileId,
+  documentCount,
+  isLoading = false,
+}: { fileId: string; documentCount: number; isLoading?: boolean }) {
   const reprocess = useReprocessDocuments(fileId);
 
   function run() {
@@ -31,14 +35,30 @@ export function ReprocessAll({ fileId, documentCount }: { fileId: string; docume
         // SKIPS ARE SURFACED, not swallowed. A bulk action that quietly does less than it was
         // asked leaves a processor watching for ten documents to change when seven were sent —
         // indistinguishable from a slow queue.
-        const skipped = Object.entries(result.skipped)
-          .map(([reason, count]) => `${count} ${humanize(reason).toLowerCase()}`)
-          .join(", ");
+        //
+        // A FAILURE IS NOT A SKIP, and separating them is the whole reason this is not one line
+        // (LP-637 review). `enqueue_failed` means the broker refused and the server put the
+        // document back; every other reason means the server looked and decided. Folded together,
+        // a total outage came back as an INFO toast reading "Nothing to re-read" — which a
+        // processor reads as "your file is fine" — with the failure buried in a list of routine
+        // filters.
+        const { failed, decided } = partitionSkips(result.skipped);
+        const skipped = describeSkips(decided);
+
+        if (failed > 0) {
+          toast.error(`Couldn’t queue ${failed} ${failed === 1 ? "document" : "documents"}`, {
+            description:
+              result.queued > 0
+                ? `${result.queued} started; the rest were left unchanged. Try again shortly.`
+                : "Nothing was started and nothing was changed. Try again shortly.",
+          });
+          return;
+        }
         if (result.queued === 0) {
           toast.info("Nothing to re-read", {
             description: skipped
               ? `Every document was skipped: ${skipped}.`
-              : "Every document already has a type the classifier was confident about.",
+              : "No documents on this file need re-reading.",
           });
           return;
         }
@@ -58,7 +78,10 @@ export function ReprocessAll({ fileId, documentCount }: { fileId: string; docume
     });
   }
 
-  if (documentCount === 0) return null;
+  // Rendered disabled while the list loads rather than hidden. `documentCount` is 0 until the
+  // query resolves, so returning null meant the button appeared afterwards and shifted the page
+  // under a processor who was already reaching for it.
+  if (!isLoading && documentCount === 0) return null;
 
   return (
     <div className="flex items-center justify-end">
@@ -69,7 +92,7 @@ export function ReprocessAll({ fileId, documentCount }: { fileId: string; docume
         // Disabled while pending for the same reason the per-document button is: the server's
         // in-flight check cannot stop a double-click, because a document's status only moves once a
         // worker picks the task up. At batch scale that would double-enqueue the whole file.
-        disabled={reprocess.isPending}
+        disabled={reprocess.isPending || isLoading}
         onClick={run}
         className="gap-1.5"
       >

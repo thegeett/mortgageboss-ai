@@ -48,10 +48,19 @@ function DocumentsWorkspace() {
     }
   }, [docParam, documents, id, router]);
 
+  // THE DRAWER MUST SEE THE REFRESHED DOCUMENT (LP-637 feature 3 review). `selected` is a
+  // snapshot taken when the row was clicked and never re-derived, so invalidating the list updated
+  // the page behind the drawer and nothing inside it: the status badge kept its pre-reprocess
+  // value for as long as the drawer stayed open. A processor pressed Re-read, saw nothing change,
+  // and pressed again — and the second press is accepted, because PENDING is deliberately not an
+  // in-flight status. The atomic claim does not help there: it excludes CONCURRENT runs, and a
+  // serial worker simply runs the duplicate afterwards.
+  const live = selected ? (documents?.find((doc) => doc.id === selected.id) ?? selected) : null;
+
   return (
     <div className="space-y-6">
       <DocumentDropzone fileId={id} />
-      <ReprocessAll fileId={id} documentCount={documents?.length ?? 0} />
+      <ReprocessAll fileId={id} documentCount={documents?.length ?? 0} isLoading={isPending} />
       <DocumentList
         documents={documents}
         isPending={isPending}
@@ -59,7 +68,7 @@ function DocumentsWorkspace() {
         onRetry={() => void refetch()}
         onSelect={setSelected}
       />
-      <DocumentDrawer document={selected} fileId={id} onClose={() => setSelected(null)} />
+      <DocumentDrawer document={live} fileId={id} onClose={() => setSelected(null)} />
     </div>
   );
 }

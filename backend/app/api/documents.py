@@ -582,8 +582,9 @@ async def reprocess_document_from_scratch(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "This document's type looks as though a person set it. Reprocessing would "
-                "replace it with the classifier's answer — re-send with force to do that anyway."
+                "This document's type looks as though a person set it, so it was left "
+                "unchanged. Re-reading it anyway will replace that type with the classifier's "
+                "answer."
             ),
         )
 
@@ -622,13 +623,27 @@ async def reprocess_document_from_scratch(
     await db.commit()
 
     if not _enqueue_full_reprocess(document.id):
-        # Put it back. The same defect the bulk path had (LP-637 review): with the broker down,
-        # clearing the status and the error before a fire-and-forget enqueue made a FAILED document
-        # look like a healthy PENDING one, and threw away the reason it failed. Nothing durable
-        # changed for the document now — the activity entry and the stale marker stand, which is
-        # the conservative direction — so the response below truthfully shows it unchanged.
+        # Put it back. Without this, a broker outage made a FAILED document look like a healthy
+        # PENDING one and threw away the reason it failed.
         document.status, document.processing_error = previous_state
         await db.commit()
+        # AND SAY SO (LP-637 feature 3 review). Returning 200 with the restored document was the
+        # earlier choice, on the principle that a request whose durable half succeeded should not
+        # 500. The rollback above changed that premise: nothing durable happened TO THE DOCUMENT,
+        # so a 200 is a claim that it is being reprocessed when it is not — and the drawer says
+        # "Classifying and extracting in the background…" on the strength of it. Bulk reports this
+        # per document as a skip; a single reprocess has no partial result to report, so the status
+        # code is the only place the truth fits.
+        #
+        # The activity entry and the stale marker stand. They record that a processor ASKED, which
+        # is true, and staleness errs in the recoverable direction.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Couldn't queue this document for reprocessing. Nothing was changed — "
+                "try again shortly."
+            ),
+        )
 
     return await build_document_response(db, document=document)
 

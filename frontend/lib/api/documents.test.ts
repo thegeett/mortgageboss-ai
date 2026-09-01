@@ -1,6 +1,11 @@
 import type { DocumentResponse, DocumentStatus } from "@/lib/types/document";
 import { describe, expect, it } from "vitest";
-import { MAX_STATUS_POLLS, POLL_INTERVAL_MS, documentsRefetchInterval } from "./documents";
+import {
+  MAX_STATUS_POLLS,
+  POLL_INTERVAL_MS,
+  SLOW_POLL_INTERVAL_MS,
+  documentsRefetchInterval,
+} from "./documents";
 
 function doc(status: DocumentStatus): DocumentResponse {
   return {
@@ -49,10 +54,29 @@ describe("documentsRefetchInterval — live polling + backstop", () => {
     expect(documentsRefetchInterval(docs, MAX_STATUS_POLLS)).toBe(POLL_INTERVAL_MS);
   });
 
-  it("STOPS polling a stuck in-progress doc once the backstop is exceeded", () => {
-    // A doc stuck PENDING (no worker / dead pipeline) must not poll forever.
+  it("SLOWS DOWN past the backstop rather than stopping (LP-637 review)", () => {
+    // CHANGED DELIBERATELY, and the original intent is worth restating: a doc stuck PENDING (no
+    // worker, dead pipeline) must not poll forever at full rate.
+    //
+    // Stopping outright was calibrated for one upload settling in a few polls. A bulk reprocess
+    // legitimately runs for tens of minutes — the worker is serial and each document may take its
+    // full 600s soft limit — so the hard stop froze the list mid-batch at "Pending", which is
+    // exactly the "watching for documents to change, indistinguishable from a slow queue" failure
+    // the reprocess toast copy exists to prevent. And because `dataUpdateCount` is cumulative for
+    // the query's lifetime, a processor who had already watched an upload for two minutes got no
+    // live polling for the batch at all.
+    //
+    // The primary stop is unchanged and still does the real work: nothing in progress, no polling
+    // (asserted below). This only governs how often we ask while something genuinely is.
     const docs = [doc("pending")];
-    expect(documentsRefetchInterval(docs, MAX_STATUS_POLLS + 1)).toBe(false);
-    expect(documentsRefetchInterval(docs, 9999)).toBe(false);
+    expect(documentsRefetchInterval(docs, MAX_STATUS_POLLS + 1)).toBe(SLOW_POLL_INTERVAL_MS);
+    expect(documentsRefetchInterval(docs, 9999)).toBe(SLOW_POLL_INTERVAL_MS);
+    expect(SLOW_POLL_INTERVAL_MS).toBeGreaterThan(POLL_INTERVAL_MS);
+  });
+
+  it("still stops entirely once nothing is in progress, however many polls have run", () => {
+    // The positive control for the change above: backing off must not become polling forever for
+    // a file that has settled.
+    expect(documentsRefetchInterval([doc("completed")], 9999)).toBe(false);
   });
 });

@@ -1151,7 +1151,14 @@ async def test_a_refused_enqueue_puts_back_a_single_document_too(
     _mock_full_reprocess: MagicMock,
 ) -> None:
     """The per-document endpoint has the same shape, so it needs the same rollback — fixing only
-    the path the review happened to look at would leave the identical defect one function away."""
+    the path the review happened to look at would leave the identical defect one function away.
+
+    It answers 503 rather than 200, which this test originally pinned the other way. The rollback
+    is what changed the premise: nothing durable happens to the document, so a 200 is a claim that
+    it is being reprocessed when it is not — and the drawer says "Classifying and extracting in the
+    background…" on the strength of that response. Bulk can report this per document as a skip; a
+    single reprocess has no partial result, so the status code is the only place the truth fits.
+    """
     company, _user, token = await _make_user(db_session, slug="acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
     doc = await _upload_one(client, loan_file.display_id, token)
@@ -1165,10 +1172,8 @@ async def test_a_refused_enqueue_puts_back_a_single_document_too(
 
     resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
 
-    assert resp.status_code == 200
-    assert resp.json()["status"] == DocumentStatus.FAILED.value, (
-        "the response claimed a state the document was not left in"
-    )
+    assert resp.status_code == 503, "a 200 here tells the processor work started that did not"
+    assert "Nothing was changed" in resp.json()["error"]["message"]
     restored = await db_session.get(Document, UUID(doc["id"]))
     assert restored is not None
     await db_session.refresh(restored)

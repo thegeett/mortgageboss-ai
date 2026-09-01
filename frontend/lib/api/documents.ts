@@ -26,6 +26,14 @@ export const POLL_INTERVAL_MS = 2500;
 // endpoint forever. Normal processing settles in a few polls (well under this
 // cap); a refresh resumes polling. ~40 × 2.5s ≈ 100s.
 export const MAX_STATUS_POLLS = 40;
+// ...and after it, SLOW DOWN rather than stop (LP-637 feature 3 review). The backstop was
+// calibrated for one upload settling in a few polls; a bulk reprocess legitimately runs for tens
+// of minutes, because the worker is serial and each document may take up to its 600s soft limit.
+// Stopping dead at ~100s froze the list mid-batch at "Pending" — the exact "watching for documents
+// to change, indistinguishable from a slow queue" failure the toast copy exists to prevent. Worse,
+// `dataUpdateCount` is cumulative for the query's lifetime and invalidation does not reset it, so a
+// processor who had already watched an upload for two minutes got no live polling at all.
+export const SLOW_POLL_INTERVAL_MS = 15000;
 
 /**
  * The polling interval for the documents list: keep polling while any document
@@ -37,8 +45,9 @@ export function documentsRefetchInterval(
   fetchCount: number,
 ): number | false {
   if (!documents || !hasInProgressDocuments(documents)) return false;
-  if (fetchCount > MAX_STATUS_POLLS) return false; // stuck doc → stop hammering
-  return POLL_INTERVAL_MS;
+  // The primary stop is the line above — nothing in progress, no polling. Past the budget this
+  // backs off rather than giving up, so long-running work stays visible without hammering.
+  return fetchCount > MAX_STATUS_POLLS ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
 }
 
 /** A 404 (missing or out-of-company) won't change on retry — surface it. */
@@ -193,6 +202,12 @@ export function useReprocessDocument(fileId: string, documentId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
       void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      // The endpoint writes a DOCUMENT_REPROCESSED entry and calls `mark_verification_stale`, so
+      // both of those views are wrong without this — the sibling mutations below invalidate
+      // activity for exactly the same reason (LP-637 review). Leaving verification meant the tab
+      // kept presenting a run the server had just marked out of date.
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
+      void queryClient.invalidateQueries({ queryKey: ["verification", fileId] });
     },
   });
 }
@@ -221,8 +236,16 @@ export function useReprocessDocuments(fileId: string) {
   return useMutation({
     mutationFn: (options?: { allDocuments?: boolean; force?: boolean }) =>
       reprocessDocuments(fileId, options ?? {}),
-    onSuccess: () => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      // One batch entry is still an entry, and the file is marked stale once (LP-637 review).
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
+      void queryClient.invalidateQueries({ queryKey: ["verification", fileId] });
+      // The drawer may be open on a document in the batch. `queued_document_ids` is exactly the
+      // set whose detail is about to change, and was otherwise unused.
+      for (const id of result.queued_document_ids) {
+        void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(id) });
+      }
     },
   });
 }
