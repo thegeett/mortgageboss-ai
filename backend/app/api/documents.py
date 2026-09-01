@@ -28,7 +28,7 @@ from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
@@ -75,6 +75,30 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Docume
 #: than spelled 1.0 inline, because it is a PROXY and readers need to see that it is one — the model
 #: can reach the same value through `coerce_confidence`'s clamp.
 _HUMAN_CLASSIFIED_CONFIDENCE = 1.0
+
+#: Statuses that mean the pipeline is ACTIVELY running on this document right now.
+#:
+#: CLASSIFIED IS ONE OF THEM, and leaving it out would have missed the cohort this ticket exists
+#: for. `_process_document` commits CLASSIFIED and then, for a Tier 3 document, runs the whole
+#: free-extraction call before writing a terminal status — EXTRACTING is only ever set inside
+#: `_extract_branch`, i.e. Tier 1. So for an `unknown` or low-confidence document the longest
+#: in-flight window is spent at CLASSIFIED, and a guard listing only CLASSIFYING and EXTRACTING
+#: would wave a second reprocess straight into it.
+#:
+#: PENDING is deliberately NOT here. A document sits at PENDING when it has been created and its
+#: enqueue has not landed — including the case where the fire-and-forget enqueue never landed at
+#: all, which upload has been able to produce since LP-42. Reprocess is the cure for a document
+#: stranded that way, so treating PENDING as "in flight" would remove the only route out of it.
+#: The body used when a request sends none. A module-level singleton rather than a call in the
+#: argument default (ruff B008): it is only ever READ — `body.force` — so one shared instance is
+#: safe, and constructing it per request would buy nothing.
+_DEFAULT_REPROCESS_REQUEST = DocumentReprocessRequest()
+
+_PIPELINE_IN_FLIGHT = (
+    DocumentStatus.CLASSIFYING,
+    DocumentStatus.CLASSIFIED,
+    DocumentStatus.EXTRACTING,
+)
 
 
 def _enqueue_processing(document_id: UUID) -> None:
@@ -301,9 +325,12 @@ async def override_document_type(
 @flat_router.post("/{document_id}/reprocess", response_model=DocumentResponse)
 async def reprocess_document_from_scratch(
     document_id: UUID,
-    body: DocumentReprocessRequest,
     current_user: CurrentUser,
     db: DbSession,
+    # Defaulted so a body-less POST works. FastAPI makes a Pydantic body parameter REQUIRED
+    # regardless of every field on it having a default, so without this the natural call — a
+    # button that posts nothing — is a 422.
+    body: DocumentReprocessRequest = _DEFAULT_REPROCESS_REQUEST,
 ) -> DocumentResponse:
     """Read a stored document again from scratch — CLASSIFICATION INCLUDED (LP-637).
 
@@ -322,8 +349,9 @@ async def reprocess_document_from_scratch(
 
     A HUMAN-CLASSIFIED DOCUMENT IS REFUSED unless ``force``; see
     :class:`~app.schemas.document.DocumentReprocessRequest` for why that signal is imperfect and why
-    refusing is the cheaper error. Tenant-scoped (404 for another company's document). The pipeline
-    runs in the background and the document moves through its statuses live in the UI.
+    refusing is the cheaper error. Tenant-scoped (404 for another company's document). Refused
+    (409) for a superseded version and for a document the pipeline is already running on. The
+    document returns to PENDING and moves through its statuses as the background pipeline runs.
     """
     document = await get_document_for_company(
         db, document_id=document_id, company_id=current_user.company_id
@@ -331,12 +359,44 @@ async def reprocess_document_from_scratch(
     if document is None:
         raise _NOT_FOUND
 
+    if not document.is_current:
+        # A superseded version is kept for AUDIT, and it cannot affect an answer: the verification
+        # snapshot selects `Document.is_current.is_(True)`, so no finding on this file reads it.
+        # Reprocessing one would re-classify a historical record, spend a full classify+extract on
+        # work that provably changes nothing, and mark the whole file's verification stale — a
+        # "needs re-verification" for a document that is not part of the file's current state. The
+        # replace endpoint below refuses the same thing for the same reason.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the current version of a document can be reprocessed.",
+        )
+
+    if document.status in _PIPELINE_IN_FLIGHT:
+        # The pipeline is already running on this document. Two overlapping `_process_document`
+        # runs both write a current extraction, and `UNIQUE (document_id) WHERE is_current` lets
+        # only one of them: the loser absorbs the IntegrityError into FAILED, so the document ends
+        # up reading FAILED while carrying the winner's perfectly good extraction.
+        #
+        # WHAT THIS DOES NOT DO IS STOP A DOUBLE-CLICK, and an earlier draft of this comment said
+        # it did. No status guard can: the status only moves when a WORKER starts, so two clicks
+        # two seconds apart both read whatever the row said before either was picked up, and both
+        # enqueue. Closing that needs task-level deduplication or a lock — neither is this
+        # endpoint's to add, and the frontend action in feature 3 should disable on submit.
+        #
+        # What it does stop is a reprocess landing on a pipeline that is visibly running, which is
+        # the longer and likelier window. The residual is a confusing status, recoverable by
+        # reprocessing again — not a corrupt one.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is already being processed. Wait for it to finish, then retry.",
+        )
+
     if document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "This document's type was set by a person. Reprocessing would replace it with the "
-                "classifier's answer — re-send with force to do that anyway."
+                "This document's type looks as though a person set it. Reprocessing would "
+                "replace it with the classifier's answer — re-send with force to do that anyway."
             ),
         )
 
@@ -352,6 +412,25 @@ async def reprocess_document_from_scratch(
     # endpoint marks the run stale for exactly this reason; a re-classification that left a green
     # verification standing would be a false green.
     await mark_verification_stale(db, loan_file_id=document.loan_file_id)
+    # Back to PENDING, so the response says what is actually true. Returning the document's OLD
+    # status meant a processor reprocessing a COMPLETED document got `completed` back and saw
+    # nothing change until a worker happened to pick the task up.
+    #
+    # It is NOT free, and an earlier draft claimed it was. `_enqueue_full_reprocess` swallows every
+    # exception, so with the broker down a COMPLETED document is left at PENDING with no task
+    # behind it, having lost a terminal status it had legitimately earned. That is recoverable the
+    # same way any other stranded PENDING is — by reprocessing again — and the alternative is
+    # answering `completed` to a request that changed the document's future.
+    document.status = DocumentStatus.PENDING
+    # And clear the previous run's error, as the override endpoint does. `_process_document` only
+    # ever WRITES this column — no path through it clears one — so a document that failed, was
+    # reprocessed and then succeeded reached COMPLETED still carrying "extraction incomplete
+    # (connection) — re-runnable" from the run that no longer exists. That is the common case here,
+    # not an edge: the documents this endpoint was built for are the ones sitting in NEEDS_REVIEW
+    # with an error on them. `readonly.documents` selects the column unscrubbed, so the stale text
+    # is what someone querying staging reads. (The comment at document_processing.py:460 also calls
+    # it UI-shown; no response schema exposes it today, so that half looks stale.)
+    document.processing_error = None
     await db.commit()
 
     _enqueue_full_reprocess(document.id)

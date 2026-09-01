@@ -67,6 +67,7 @@ from app.services.document_findings import (
     coerce_finding_type,
     create_document_finding,
     record_findings_from_extraction,
+    supersede_open_findings,
 )
 from app.services.extractions import create_extraction_version
 from app.storage import get_storage_backend
@@ -125,9 +126,24 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
     try:
         content = await get_storage_backend().read(document.storage_path)
 
+        # --- Supersede the previous run's findings (LP-637 review) ----------- #
+        # Findings are not versioned the way extractions are, and nothing removed the prior run's.
+        # Harmless while this ran exactly once per document, at upload; the reprocess endpoint
+        # makes it reachable, and BEFORE classification is the only place that covers the case
+        # that matters — a document re-classifying away from Tier 3 never enters the Tier 3
+        # branch, so a cleanup living there would leave its stale findings standing. A no-op on
+        # first upload, where there are none.
+        superseded = await supersede_open_findings(db, document=document)
+
         # --- Classify -------------------------------------------------------- #
         document.status = DocumentStatus.CLASSIFYING
         await db.commit()
+        if superseded:
+            logger.info(
+                "document_findings_superseded",
+                document_id=document_id,
+                superseded=superseded,
+            )
         classification = await classify_document(content, document.mime_type)
 
         # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #

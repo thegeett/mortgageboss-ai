@@ -11,6 +11,7 @@ preserving the stored bytes.
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -21,6 +22,7 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
+from app.models.document import Document, DocumentStatus
 from app.services.loan_files import create_loan_file
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
@@ -599,3 +601,266 @@ async def test_reprocess_is_tenant_scoped(
 
     assert resp.status_code == 404
     _mock_full_reprocess.assert_not_called()
+
+
+async def test_reprocess_refuses_a_superseded_version(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A superseded version is kept for AUDIT and cannot affect an answer.
+
+    `documents_section` selects `Document.is_current.is_(True)`, so no finding on the file reads a
+    replaced version. Reprocessing one would re-classify a historical record, spend a full
+    classify+extract on work that provably changes nothing, and — the part that reaches a person —
+    mark the whole file's verification stale, showing "needs re-verification" for a document that is
+    not part of the file's current state. The replace endpoint refuses the same thing already.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    old = await db_session.get(Document, UUID(doc["id"]))
+    assert old is not None
+    old.is_current = False
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 409
+    assert "current version" in resp.json()["error"]["message"]
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_force_does_not_reach_a_superseded_version(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """`force` exists to override a HUMAN's type decision, which is a judgement a processor is
+    entitled to reverse. It is not a way to reach a version the file no longer uses — those are two
+    unrelated refusals, and sharing one flag between them would make the escape hatch wider than
+    the thing it was opened for."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    old = await db_session.get(Document, UUID(doc["id"]))
+    assert old is not None
+    old.is_current = False
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={"force": True})
+
+    assert resp.status_code == 409
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_reprocess_refuses_a_document_the_pipeline_is_already_running(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """Two overlapping `_process_document` runs both write a current extraction, and
+    `UNIQUE (document_id) WHERE is_current` admits one — the loser absorbs the IntegrityError into
+    FAILED, so the document reads FAILED while carrying the winner's good extraction.
+
+    Before this endpoint existed `process_document` was enqueued exactly once, at upload, so the
+    race was not reachable. Feature 3 puts a button on it.
+
+    This guard covers a reprocess landing on a VISIBLY RUNNING pipeline, which is the longer
+    window. It does not stop a double-click — see
+    `test_two_clicks_before_a_worker_starts_both_enqueue`, which pins that gap.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    running = await db_session.get(Document, UUID(doc["id"]))
+    assert running is not None
+    running.status = DocumentStatus.EXTRACTING
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 409
+    assert "already being processed" in resp.json()["error"]["message"]
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_a_document_stranded_at_pending_can_still_be_reprocessed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """PENDING is deliberately not treated as in-flight, and this is why.
+
+    Both enqueues in this file are fire-and-forget and never raise, so a broker failure leaves a
+    document at PENDING with no task behind it — a state upload has been able to produce since
+    LP-42. Reprocess is the only route out. Guarding PENDING as "already running" would make the
+    stranded document permanently unreachable, which is a worse bug than the double-click it would
+    have prevented.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    stranded = await db_session.get(Document, UUID(doc["id"]))
+    assert stranded is not None
+    stranded.status = DocumentStatus.PENDING
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_reprocess_returns_the_status_it_actually_leaves_the_document_in(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The response is the only thing the processor sees at the moment they click.
+
+    Returning the document's OLD status meant reprocessing a COMPLETED document answered
+    `completed` — nothing appeared to happen until a worker picked the task up, which is precisely
+    what invites the second click the in-flight guard now refuses.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    done = await db_session.get(Document, UUID(doc["id"]))
+    assert done is not None
+    done.status = DocumentStatus.COMPLETED
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == DocumentStatus.PENDING.value
+
+    await db_session.refresh(done)
+    assert done.status is DocumentStatus.PENDING, "the response and the row must not disagree"
+
+
+async def test_reprocess_clears_the_previous_runs_error(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """`_process_document` only ever WRITES `processing_error`; no path through it clears one.
+
+    So a document that failed, was reprocessed and then succeeded reached COMPLETED still carrying
+    the error string from the run that no longer exists. That is the common case for this endpoint
+    rather than an edge — the documents it was built for are the ten sitting in NEEDS_REVIEW with
+    an error on them. The override endpoint clears the column for the same reason.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    stale = await db_session.get(Document, UUID(doc["id"]))
+    assert stale is not None
+    stale.status = DocumentStatus.NEEDS_REVIEW
+    stale.processing_error = "extraction incomplete (connection) — re-runnable"
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    await db_session.refresh(stale)
+    assert stale.processing_error is None, "the previous run's error outlived the run"
+
+
+async def test_reprocess_refuses_a_tier_3_document_mid_analysis(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """CLASSIFIED is the status a Tier 3 document holds for its whole free-extraction call.
+
+    `_process_document` commits CLASSIFIED and only then runs `analyze_document`; EXTRACTING is set
+    inside `_extract_branch`, i.e. Tier 1 only. So an in-flight guard listing CLASSIFYING and
+    EXTRACTING alone leaves the LONGEST window open, on exactly the `unknown` / low-confidence
+    cohort this feature was built for.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    mid = await db_session.get(Document, UUID(doc["id"]))
+    assert mid is not None
+    mid.status = DocumentStatus.CLASSIFIED
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 409
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_reprocess_accepts_a_request_with_no_body(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """FastAPI makes a Pydantic body parameter REQUIRED even when every field on it has a default,
+    so the natural call — the feature-3 button, posting nothing — was a 422. Every other test in
+    this group passes `json={}` and would never have noticed."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token))
+
+    assert resp.status_code == 200
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_two_clicks_before_a_worker_starts_both_enqueue(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """PINS THE GAP RATHER THAN CLAIMING IT IS CLOSED. No status guard can stop a double-click:
+    the status only moves when a WORKER starts, so both clicks read the row as it was before
+    either was picked up.
+
+    An earlier draft of the in-flight guard's comment said it refused "the second click". It does
+    not, and a comment saying otherwise is worse than no comment — closing this needs task-level
+    deduplication or a lock, and the feature-3 action should disable on submit. This test exists so
+    that stays visible instead of being assumed.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    _mock_full_reprocess.reset_mock()
+
+    first = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+    second = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert first.status_code == 200
+    assert second.status_code == 200, (
+        "if this is now a 409 the gap has been closed — good; update the guard's comment, the "
+        "ticket and this test rather than leaving three places claiming the opposite"
+    )
+    assert _mock_full_reprocess.call_count == 2

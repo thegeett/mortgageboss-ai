@@ -1722,3 +1722,119 @@ async def test_clean_w2_raises_no_consistency_finding(
     await pipeline._process_document(db_session, str(doc.id))
     findings = await _findings_for(db_session, doc.loan_file_id)
     assert [f for f in findings if f.finding_type == DocumentFindingType.CONSISTENCY] == []
+
+
+# --------------------------------------------------------------------------- #
+# LP-637 review — findings are not versioned, so a re-run must supersede them
+# --------------------------------------------------------------------------- #
+async def test_reprocessing_supersedes_the_previous_runs_findings(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`create_document_finding` adds unconditionally and nothing removed the prior run's rows.
+
+    Harmless while `process_document` ran exactly once per document, at upload. LP-637's reprocess
+    endpoint makes it reachable: run the Tier 3 path twice and the `key_finding` rows DOUBLE, in the
+    same queue the ticket exists to shrink.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    after_first = await _findings_for(db_session, doc.loan_file_id)
+    assert after_first, "the fixture must actually produce a finding, or this proves nothing"
+
+    await pipeline._process_document(db_session, str(doc.id))
+    after_second = await _findings_for(db_session, doc.loan_file_id)
+
+    assert len(after_second) == len(after_first), (
+        f"reprocessing doubled the findings: {len(after_first)} became {len(after_second)}"
+    )
+
+
+async def test_a_reclassification_away_from_tier_3_does_not_strand_its_findings(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE CASE THAT DECIDES WHERE THE CLEANUP LIVES, and the one that matters most.
+
+    This is the SUCCESS path of the whole feature: an `unknown` document reprocesses and the
+    improved classifier gives it a real Tier 1 type. That run never enters the Tier 3 branch — so a
+    cleanup written inside that branch would never fire, and the document would keep OPEN Tier 3
+    `key_finding` rows while no longer being a Tier 3 document, still surfaced through
+    `/document-findings` and still reachable as `NeedsItem.source_finding`.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    await pipeline._process_document(db_session, str(doc.id))
+    assert await _findings_for(db_session, doc.loan_file_id), "no Tier 3 finding to strand"
+
+    # The improved classifier now recognises it, and a registered extractor takes over.
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_type == "pay_stub"
+    assert not await _findings_for(db_session, doc.loan_file_id), (
+        "Tier 3 findings outlived the Tier 3 classification that produced them"
+    )
+
+
+async def test_a_triaged_finding_survives_a_reprocess(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reprocess is not entitled to erase a decision a person made.
+
+    Nothing writes REVIEWED or DISMISSED today — the lifecycle is Phase 3 work and the API only
+    lists — so this changes nothing now. It is here so the cleanup is already correct when that
+    lands, rather than quietly deleting triaged rows the first day it can.
+    """
+    from app.models.document_finding import DocumentFinding, DocumentFindingStatus
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    await pipeline._process_document(db_session, str(doc.id))
+
+    existing = (
+        await db_session.scalars(
+            select(DocumentFinding).where(DocumentFinding.document_id == doc.id)
+        )
+    ).all()
+    assert existing
+    for finding in existing:
+        finding.status = DocumentFindingStatus.DISMISSED
+    await db_session.commit()
+
+    await pipeline._process_document(db_session, str(doc.id))
+
+    survivors = (
+        await db_session.scalars(
+            select(DocumentFinding).where(
+                DocumentFinding.document_id == doc.id,
+                DocumentFinding.status == DocumentFindingStatus.DISMISSED,
+                DocumentFinding.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    assert len(survivors) == len(existing), "a processor's triage was erased by a reprocess"
