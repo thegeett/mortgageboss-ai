@@ -156,6 +156,77 @@ export function useOverrideDocumentType(fileId: string, documentId: string) {
   });
 }
 
+// --- Reprocess: read the document again from scratch (LP-637) ---------------- //
+
+/** What a bulk reprocess did. `skipped` maps a reason to how many were passed over. */
+export interface BulkReprocessResult {
+  queued: number;
+  queued_document_ids: string[];
+  skipped: Record<string, number>;
+}
+
+export async function reprocessDocument(
+  documentId: string,
+  force = false,
+): Promise<DocumentResponse> {
+  const res = await apiClient.post<DocumentResponse>(
+    `${API_V1}/documents/${documentId}/reprocess`,
+    { force },
+  );
+  return res.data;
+}
+
+/**
+ * Re-run the FULL pipeline on one document — classification included (LP-637).
+ *
+ * Not the type override: that supplies a type and skips classification, which cannot help a
+ * document nobody can name. This is for the ones the classifier got wrong or could not read, and
+ * for every document processed before a classifier fix landed.
+ *
+ * Invalidates the list and this document's detail so the status moves visibly; the server sets it
+ * back to PENDING, so live polling shows the pipeline running rather than nothing changing.
+ */
+export function useReprocessDocument(fileId: string, documentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (force?: boolean) => reprocessDocument(documentId, force ?? false),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+    },
+  });
+}
+
+export async function reprocessDocuments(
+  fileId: string,
+  options: { allDocuments?: boolean; force?: boolean } = {},
+): Promise<BulkReprocessResult> {
+  const res = await apiClient.post<BulkReprocessResult>(
+    `${API_V1}/loan-files/${fileId}/documents/reprocess`,
+    { all_documents: options.allDocuments ?? false, force: options.force ?? false },
+  );
+  return res.data;
+}
+
+/**
+ * Reprocess a file's documents in one call (LP-637).
+ *
+ * The default set is bounded server-side to the documents a re-read could plausibly improve, so
+ * this is not "spend the whole file's model budget". The result reports what was SKIPPED and why —
+ * surface it, because a bulk action that quietly does less than asked leaves a processor waiting
+ * for documents that were never sent.
+ */
+export function useReprocessDocuments(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (options?: { allDocuments?: boolean; force?: boolean }) =>
+      reprocessDocuments(fileId, options ?? {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+    },
+  });
+}
+
 // --- Versioning + staleness (LP-71) ----------------------------------------- //
 
 const activityQueryKey = (fileId: string) => ["loan-file-activity", fileId] as const;

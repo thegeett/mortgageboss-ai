@@ -3,6 +3,7 @@
 import { DocumentDrawer } from "@/components/file/documents/document-drawer";
 import { DocumentDropzone } from "@/components/file/documents/document-dropzone";
 import { DocumentList } from "@/components/file/documents/document-list";
+import { ReprocessAll } from "@/components/file/documents/reprocess-all";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -50,6 +51,7 @@ function DocumentsWorkspace() {
   return (
     <div className="space-y-6">
       <DocumentDropzone fileId={id} />
+      <ReprocessAll fileId={id} documentCount={documents?.length ?? 0} />
       <DocumentList
         documents={documents}
         isPending={isPending}

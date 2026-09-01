@@ -19,6 +19,7 @@ import {
   useDocumentVersions,
   useOverrideDocumentType,
   useReplaceDocument,
+  useReprocessDocument,
   useResolveStaleness,
 } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
@@ -79,6 +80,56 @@ function fmtDate(iso: string): string {
  * authoritative type here; saving PATCHes the document and the server re-runs
  * extraction for the corrected type (relabel-only for types we don't extract).
  */
+/**
+ * Read this document again from scratch — classification included (LP-637).
+ *
+ * The sibling of "Correct type" and the answer to a different question. Correcting the type is for
+ * when a processor KNOWS what a document is; this is for when nobody does, or when the classifier
+ * has since improved. Classification runs once at upload, so every document processed before a
+ * classifier fix keeps the answer it was given — LF-ZE9N had ten of them generating 220 findings.
+ */
+function ReprocessButton({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
+  const reprocess = useReprocessDocument(fileId, summary.id);
+
+  function run(force: boolean) {
+    reprocess.mutate(force, {
+      onSuccess: () =>
+        toast.success("Reading this document again", {
+          description: "Classifying and extracting in the background…",
+        }),
+      onError: (error) =>
+        toast.error("Couldn’t reprocess this document", { description: getErrorMessage(error) }),
+    });
+  }
+
+  return (
+    <div className="mt-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        // DISABLED WHILE PENDING, and that is load-bearing rather than polish: the server's
+        // in-flight refusal cannot stop a double-click, because a document's status only moves
+        // once a WORKER picks the task up. Two clicks a second apart both pass the check.
+        disabled={reprocess.isPending}
+        onClick={() => run(false)}
+        className="w-full gap-1.5"
+      >
+        {reprocess.isPending ? (
+          <Spinner className="h-3.5 w-3.5" />
+        ) : (
+          <RefreshCw className="h-3.5 w-3.5" />
+        )}
+        Re-read this document
+      </Button>
+      <p className="mt-1.5 text-[11px] text-gray-400">
+        Runs classification again, so the type may change. Use this when the type is wrong or
+        unknown — not when you already know what it is.
+      </p>
+    </div>
+  );
+}
+
 function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
   const override = useOverrideDocumentType(fileId, summary.id);
   const [selected, setSelected] = useState(summary.document_type ?? "");
@@ -148,6 +199,7 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
           ? "Saving re-runs extraction for this type."
           : "This type is recorded only — no data is extracted."}
       </p>
+      <ReprocessButton summary={summary} fileId={fileId} />
     </section>
   );
 }
