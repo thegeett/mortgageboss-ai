@@ -36,6 +36,12 @@ class NameRule:
 
 # Per-type naming rules (the well-known Tier-1 types). Anything not here falls back to
 # a humanized-type label + the upload date. Only non-PII fields are used.
+#
+# THESE LABELS ARE FILENAME COMPONENTS, not display names, and the distinction is easy to lose
+# (LP-638 review). They are joined into `{Type}_{Identifier}_{Date}`, so they must carry no spaces
+# and no separators — which is why `voe` is "VOE" here while the type picker calls the same type
+# "Verification of employment (VOE)". The two are allowed to differ and should not be merged; see
+# `_TYPE_LABEL_OVERRIDES` in `app/api/documents.py`, and the test that pins the property.
 NAME_RULES: dict[str, NameRule] = {
     "pay_stub": NameRule("Pay-Stub", ("employer_name",), "pay_date"),
     "w2": NameRule("W-2", ("employer_name",), "tax_year"),

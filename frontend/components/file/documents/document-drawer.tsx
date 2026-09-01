@@ -56,6 +56,7 @@ import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
 import { GenericAnalysisView } from "./generic-analysis-view";
 import { ReprocessDocumentButton } from "./reprocess-document";
+import { TypeOverride } from "./type-override";
 
 /** Non-production only — matches the LP-40 dev endpoint's gating. */
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -77,106 +78,6 @@ function fmtDate(iso: string): string {
   }
 }
 
-/**
- * Manual document-type override (LP-44) — the human-correction half of the loop.
- * When the AI is unsure (`needs_review`) or simply wrong, the processor sets the
- * authoritative type here; saving PATCHes the document and the server re-runs
- * extraction for the corrected type (relabel-only for types we don't extract).
- */
-function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
-  const override = useOverrideDocumentType(fileId, summary.id);
-  const [selected, setSelected] = useState(summary.document_type ?? "");
-  const needsReview = summary.status === "needs_review";
-  const { data: catalog, isPending: typesPending } = useDocumentTypes();
-
-  // LP-638 — THE CATALOG, not a hardcoded list. The eight options this replaces were written when
-  // the catalog had three document types; it has 164, so a processor could not correct a document
-  // to `closing_disclosure` at all — which is exactly what LF-ZE9N's stuck document needed.
-  //
-  // The current type is kept selectable even if the catalog no longer lists it, so a document
-  // carrying a retired slug still shows what it is rather than reading as blank.
-  const options = useMemo(() => {
-    const fromCatalog = (catalog ?? []).map((type) => ({
-      value: type.value,
-      label: type.label,
-      group: humanize(type.category),
-    }));
-    const current = summary.document_type;
-    if (current && !fromCatalog.some((o) => o.value === current)) {
-      return [{ value: current, label: humanize(current), group: "Current" }, ...fromCatalog];
-    }
-    return fromCatalog;
-  }, [catalog, summary.document_type]);
-
-  const changed = selected !== "" && selected !== summary.document_type;
-  // LP-638 — READ FROM THE CATALOG, not from a local set. The frontend's own answer was three
-  // types (`pay_stub`, `w2`, `bank_statement`) written in Phase 1 while the backend registry grew
-  // to 121 — so correcting a document to `closing_disclosure` said "recorded only — no data is
-  // extracted" while the pipeline extracted it. A sentence about what the system will do, wrong.
-  const reExtracts = (catalog ?? []).find((type) => type.value === selected)?.extracts ?? false;
-
-  function handleSave() {
-    override.mutate(selected, {
-      onSuccess: () =>
-        toast.success(`Type set to ${humanize(selected)}`, {
-          description: reExtracts
-            ? "Re-extracting in the background…"
-            : "Relabeled — this type isn’t extracted.",
-        }),
-      onError: (error) =>
-        toast.error("Couldn’t update the type", { description: getErrorMessage(error) }),
-    });
-  }
-
-  return (
-    <section className="mt-6">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        <PencilLine className="h-3.5 w-3.5" />
-        Correct type
-      </h3>
-      {needsReview && (
-        <p className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          The AI wasn’t confident about this classification — confirm or correct the type below.
-        </p>
-      )}
-      <div className="mt-3 flex items-center gap-2">
-        <div className="flex-1">
-          <SearchableSelect
-            id={`doc-type-${summary.id}`}
-            options={options}
-            value={selected || null}
-            onChange={setSelected}
-            disabled={override.isPending || typesPending}
-            placeholder={typesPending ? "Loading types…" : "Search document types…"}
-            emptyMessage="No document type matches"
-          />
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          onClick={handleSave}
-          disabled={!changed || override.isPending}
-          className="gap-1.5"
-        >
-          {override.isPending && <Spinner className="h-3.5 w-3.5" />}
-          Apply
-        </Button>
-      </div>
-      <p className="mt-1.5 text-[11px] text-gray-400">
-        {reExtracts
-          ? "Saving re-runs extraction for this type."
-          : "This type is recorded only — no data is extracted."}
-      </p>
-      <ReprocessDocumentButton summary={summary} fileId={fileId} />
-    </section>
-  );
-}
-
-/**
- * Explicit replace (Model C, LP-71) — the processor deliberately supersedes THIS
- * document with a new upload (old → historical, new → current, both kept). A hidden
- * file input + a button; reused in the staleness warning and the footer.
- */
 function ReplaceButton({
   summary,
   fileId,
@@ -501,10 +402,27 @@ export function DocumentDrawer({
   onClose: () => void;
 }) {
   const open = summary !== null;
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
-      <SheetContent>
-        {summary && <DrawerBody summary={summary} fileId={fileId} onClose={onClose} />}
+      <SheetContent
+        // ESCAPE BELONGS TO THE INNERMOST THING THAT IS OPEN. Radix dismisses the Sheet from a
+        // capture-phase listener on `document`, which runs before any handler inside it — so with
+        // the type picker open, Escape closed the whole drawer and lost the correction in
+        // progress, and no amount of stopping the event lower down could prevent it (LP-638
+        // review). The child says when it is open; this stands down while it is.
+        onEscapeKeyDown={(event) => {
+          if (typePickerOpen) event.preventDefault();
+        }}
+      >
+        {summary && (
+          <DrawerBody
+            summary={summary}
+            fileId={fileId}
+            onClose={onClose}
+            onTypePickerOpenChange={setTypePickerOpen}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -514,10 +432,12 @@ function DrawerBody({
   summary,
   fileId,
   onClose,
+  onTypePickerOpenChange,
 }: {
   summary: DocumentResponse;
   fileId: string;
   onClose: () => void;
+  onTypePickerOpenChange: (open: boolean) => void;
 }) {
   const { data: detail, isPending, isError, refetch } = useDocumentDetail(summary.id);
   const del = useDeleteDocument(fileId);
@@ -600,7 +520,11 @@ function DrawerBody({
         <StalenessWarning summary={summary} fileId={fileId} />
 
         {/* Manual type override (LP-44) */}
-        <TypeOverride summary={summary} fileId={fileId} />
+        <TypeOverride
+          summary={summary}
+          fileId={fileId}
+          onPickerOpenChange={onTypePickerOpenChange}
+        />
 
         {/* Tier-aware detail (LP-72) — Tier 1 fields / Tier 2 summary / Tier 3 findings. */}
         <TierDetail

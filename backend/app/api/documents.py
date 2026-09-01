@@ -83,23 +83,50 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Docume
 
 #: Slugs whose humanised form reads badly or wrongly. Everything else is derived, so this stays
 #: short by construction rather than becoming a second catalog.
+#:
+#: NOT THE SAME THING AS ``naming.NAME_RULES[...].label``, though they overlap and look like
+#: duplication (LP-638 review). These are DISPLAY names for a picker — spaces, slashes and
+#: parentheses are fine, because "Verification of employment (VOE)" is what a processor is looking
+#: for. Those are FILENAME components, assembled into ``{Type}_{Identifier}_{Date}``, so they must
+#: stay free of spaces and separators: the same type is "VOE" there and reads correctly in both
+#: places. ``w2`` → "W-2" agreeing in both is a coincidence of that slug being punctuation-only.
+#:
+#: So do not "fix" one to match the other. `tests/documents/test_label_vocabularies.py` pins the
+#: property that keeps them separate.
 _TYPE_LABEL_OVERRIDES: dict[str, str] = {
     "w2": "W-2",
-    "1099": "1099",
     "form_1098": "Form 1098",
     "form_4506c": "Form 4506-C",
     "k1_statement": "K-1 statement",
     "voe": "Verification of employment (VOE)",
-    "vod": "Verification of deposit (VOD)",
-    "hud1": "HUD-1 settlement statement",
+    "verification_of_deposit": "Verification of deposit (VOD)",
     "ira_401k": "IRA / 401(k) statement",
-    "form_1003": "Form 1003 (loan application)",
+    "uniform_residential_loan_application": "Uniform residential loan application (1003)",
 }
+
+#: Words that are acronyms, not words, and that `capitalize` would flatten. Applied per WORD, so
+#: this covers every slug containing one instead of needing an entry per slug — which is what keeps
+#: the override map above from growing into the second catalog this ticket exists to abolish.
+_LABEL_ACRONYMS = frozenset(
+    {"aus", "cd", "cpa", "ead", "emd", "hoa", "id", "ira", "loe", "ltr", "ssa", "voe", "vod"}
+)
 
 
 def _type_label(slug: str) -> str:
-    """A human label for a catalog slug — the override, or the slug with underscores opened up."""
-    return _TYPE_LABEL_OVERRIDES.get(slug, slug.replace("_", " ").capitalize())
+    """A human label for a catalog slug — the override, else derived word by word.
+
+    `capitalize()` alone lowercased everything after the first letter, so a processor picked from
+    "Hoa statement", "Aus findings" and "E consent disclosure" (LP-638 review). Deriving per word
+    with an acronym set fixes a dozen-plus labels without one entry each.
+    """
+    if slug in _TYPE_LABEL_OVERRIDES:
+        return _TYPE_LABEL_OVERRIDES[slug]
+    words = [word.upper() if word in _LABEL_ACRONYMS else word for word in slug.split("_") if word]
+    if not words:
+        return slug
+    first = words[0]
+    rest = words[1:]
+    return " ".join([first if first.isupper() else first.capitalize(), *rest])
 
 
 #: What the type-override endpoint writes to mean "a person chose this type" (LP-44). Named rather
@@ -587,7 +614,9 @@ async def override_document_type(
         # anything the picker can offer, this accepts.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"{new_type!r} is not a known document type.",
+            # No repr: this reaches a processor through the error envelope, and
+            # "'tax_return_1040' is not a known document type" reads better without Python quoting.
+            detail=f"{new_type} is not a known document type.",
         )
     document.document_type = new_type
     # Catalog-driven (LP-58): re-derive both tier and category from the new type.
