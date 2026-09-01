@@ -24,9 +24,10 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
+from app.ai.extraction import EXTRACTORS
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
-from app.documents.catalog import get_category, get_tier
+from app.documents.catalog import CATALOG, get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import (
     PIPELINE_IN_FLIGHT_STATUSES,
@@ -41,6 +42,7 @@ from app.schemas.document import (
     DocumentDetailResponse,
     DocumentReprocessRequest,
     DocumentResponse,
+    DocumentTypeOption,
     DocumentTypeOverrideRequest,
     StalenessResolveRequest,
 )
@@ -78,6 +80,27 @@ nested_router = APIRouter(prefix="/loan-files/{file_identifier}/documents", tags
 flat_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+#: Slugs whose humanised form reads badly or wrongly. Everything else is derived, so this stays
+#: short by construction rather than becoming a second catalog.
+_TYPE_LABEL_OVERRIDES: dict[str, str] = {
+    "w2": "W-2",
+    "1099": "1099",
+    "form_1098": "Form 1098",
+    "form_4506c": "Form 4506-C",
+    "k1_statement": "K-1 statement",
+    "voe": "Verification of employment (VOE)",
+    "vod": "Verification of deposit (VOD)",
+    "hud1": "HUD-1 settlement statement",
+    "ira_401k": "IRA / 401(k) statement",
+    "form_1003": "Form 1003 (loan application)",
+}
+
+
+def _type_label(slug: str) -> str:
+    """A human label for a catalog slug — the override, or the slug with underscores opened up."""
+    return _TYPE_LABEL_OVERRIDES.get(slug, slug.replace("_", " ").capitalize())
+
 
 #: What the type-override endpoint writes to mean "a person chose this type" (LP-44). Named rather
 #: than spelled 1.0 inline, because it is a PROXY and readers need to see that it is one — the model
@@ -456,6 +479,37 @@ async def reprocess_documents(
     )
 
 
+@flat_router.get("/types/catalog", response_model=list[DocumentTypeOption])
+async def list_document_types(_current_user: CurrentUser) -> list[DocumentTypeOption]:
+    """Every document type a processor may correct a document to (LP-638).
+
+    THE CATALOG, NOT A COPY OF IT. The control this feeds offered eight hardcoded options written
+    when the catalog had three types. It now has 164 — so `closing_disclosure`,
+    `purchase_agreement`, `mortgage_statement` and 150-odd others could not be chosen at all, and a
+    misclassified document had no manual remedy. Two of the eight were not catalog types either, so
+    picking them set a document to a string with no tier, no category and no extractor.
+
+    Serving it from `CATALOG` is what stops that recurring: a type added to the catalog is
+    selectable the same day, and a list that cannot drift cannot go stale again.
+
+    Sorted by label within category so the picker groups the way a processor thinks. Reference data
+    with no loan content — authenticated, but not company-scoped, because it is the same for
+    everyone.
+    """
+    return sorted(
+        (
+            DocumentTypeOption(
+                value=slug,
+                label=_type_label(slug),
+                category=category.value,
+                extracts=slug in EXTRACTORS,
+            )
+            for slug, (_tier, category) in CATALOG.items()
+        ),
+        key=lambda option: (option.category, option.label),
+    )
+
+
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def retrieve(
     document_id: UUID, current_user: CurrentUser, db: DbSession
@@ -520,6 +574,21 @@ async def override_document_type(
         )
 
     new_type = body.document_type.strip()
+    if new_type not in CATALOG:
+        # LP-638 — THE HOLE THAT PRODUCED THE PROBLEM THIS FIXES. This endpoint accepted any string,
+        # and the control feeding it offered `tax_return_1040` and `other`, neither a catalog type.
+        # Choosing one set a document to a slug with no tier, no category and no extractor — and
+        # because satisfaction matches `needs_type == document_type` exactly, a document corrected
+        # to `tax_return_1040` could never satisfy a `tax_return` need. Correcting the type made the
+        # file quietly worse, which is the opposite of what the control is for.
+        #
+        # Rejecting here rather than only fixing the dropdown: the list was one caller, and the next
+        # one would have had the same freedom. `list_document_types` serves the same CATALOG, so
+        # anything the picker can offer, this accepts.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{new_type!r} is not a known document type.",
+        )
     document.document_type = new_type
     # Catalog-driven (LP-58): re-derive both tier and category from the new type.
     document.tier = get_tier(new_type)

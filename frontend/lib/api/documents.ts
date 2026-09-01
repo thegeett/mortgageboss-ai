@@ -165,6 +165,42 @@ export function useOverrideDocumentType(fileId: string, documentId: string) {
   });
 }
 
+// --- The document-type catalog (LP-638) -------------------------------------- //
+
+export interface DocumentTypeOption {
+  value: string;
+  label: string;
+  category: string;
+  /** Does choosing this type re-run extraction? Served by the backend — see the hook's note. */
+  extracts: boolean;
+}
+
+const documentTypesQueryKey = ["document-types"] as const;
+
+export async function fetchDocumentTypes(): Promise<DocumentTypeOption[]> {
+  const res = await apiClient.get<DocumentTypeOption[]>(`${API_V1}/documents/types/catalog`);
+  return res.data;
+}
+
+/**
+ * Every type a document can be corrected to (LP-638).
+ *
+ * FETCHED, NOT HARDCODED. The list this replaces was eight options written when the catalog had
+ * three document types; it now has 164, so `closing_disclosure` and 150-odd others could not be
+ * chosen at all — and two of the eight were not catalog types, so picking them set a document to a
+ * string with no tier, no category and no extractor.
+ *
+ * Reference data that changes only on deploy, so it is cached for the session rather than refetched
+ * every time a drawer opens.
+ */
+export function useDocumentTypes() {
+  return useQuery({
+    queryKey: documentTypesQueryKey,
+    queryFn: fetchDocumentTypes,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 // --- Reprocess: read the document again from scratch (LP-637) ---------------- //
 
 /** What a bulk reprocess did. `skipped` maps a reason to how many were passed over. */

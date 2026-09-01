@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Sheet,
   SheetContent,
@@ -16,6 +17,7 @@ import {
   useDeleteDocument,
   useDevTextLayer,
   useDocumentDetail,
+  useDocumentTypes,
   useDocumentVersions,
   useOverrideDocumentType,
   useReplaceDocument,
@@ -25,12 +27,10 @@ import {
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { humanize } from "@/lib/format";
 import {
-  OVERRIDE_TYPE_OPTIONS,
   formatConfidence,
   formatFileSize,
   isTerminalStatus,
   packageReadyBadge,
-  typeReExtracts,
   validateUploadFile,
   versionLabel,
 } from "@/lib/loan-files/documents";
@@ -87,23 +87,39 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
   const override = useOverrideDocumentType(fileId, summary.id);
   const [selected, setSelected] = useState(summary.document_type ?? "");
   const needsReview = summary.status === "needs_review";
+  const { data: catalog, isPending: typesPending } = useDocumentTypes();
 
-  // Keep the current type selectable even when it isn't one of the standard options.
+  // LP-638 — THE CATALOG, not a hardcoded list. The eight options this replaces were written when
+  // the catalog had three document types; it has 164, so a processor could not correct a document
+  // to `closing_disclosure` at all — which is exactly what LF-ZE9N's stuck document needed.
+  //
+  // The current type is kept selectable even if the catalog no longer lists it, so a document
+  // carrying a retired slug still shows what it is rather than reading as blank.
   const options = useMemo(() => {
+    const fromCatalog = (catalog ?? []).map((type) => ({
+      value: type.value,
+      label: type.label,
+      group: humanize(type.category),
+    }));
     const current = summary.document_type;
-    if (current && !OVERRIDE_TYPE_OPTIONS.some((o) => o.value === current)) {
-      return [{ value: current, label: humanize(current) }, ...OVERRIDE_TYPE_OPTIONS];
+    if (current && !fromCatalog.some((o) => o.value === current)) {
+      return [{ value: current, label: humanize(current), group: "Current" }, ...fromCatalog];
     }
-    return OVERRIDE_TYPE_OPTIONS;
-  }, [summary.document_type]);
+    return fromCatalog;
+  }, [catalog, summary.document_type]);
 
   const changed = selected !== "" && selected !== summary.document_type;
+  // LP-638 — READ FROM THE CATALOG, not from a local set. The frontend's own answer was three
+  // types (`pay_stub`, `w2`, `bank_statement`) written in Phase 1 while the backend registry grew
+  // to 121 — so correcting a document to `closing_disclosure` said "recorded only — no data is
+  // extracted" while the pipeline extracted it. A sentence about what the system will do, wrong.
+  const reExtracts = (catalog ?? []).find((type) => type.value === selected)?.extracts ?? false;
 
   function handleSave() {
     override.mutate(selected, {
       onSuccess: () =>
         toast.success(`Type set to ${humanize(selected)}`, {
-          description: typeReExtracts(selected)
+          description: reExtracts
             ? "Re-extracting in the background…"
             : "Relabeled — this type isn’t extracted.",
         }),
@@ -124,18 +140,17 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
         </p>
       )}
       <div className="mt-3 flex items-center gap-2">
-        <select
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          disabled={override.isPending}
-          className="h-9 flex-1 rounded-md border border-gray-200 bg-white px-2.5 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex-1">
+          <SearchableSelect
+            id={`doc-type-${summary.id}`}
+            options={options}
+            value={selected || null}
+            onChange={setSelected}
+            disabled={override.isPending || typesPending}
+            placeholder={typesPending ? "Loading types…" : "Search document types…"}
+            emptyMessage="No document type matches"
+          />
+        </div>
         <Button
           type="button"
           size="sm"
@@ -148,7 +163,7 @@ function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: 
         </Button>
       </div>
       <p className="mt-1.5 text-[11px] text-gray-400">
-        {typeReExtracts(selected)
+        {reExtracts
           ? "Saving re-runs extraction for this type."
           : "This type is recorded only — no data is extracted."}
       </p>

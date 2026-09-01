@@ -1464,3 +1464,80 @@ async def test_the_reason_a_document_failed_reaches_the_response(
     detail = await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))
     assert detail.status_code == 200
     assert detail.json()["processing_error"] == PAYLOAD_TOO_LARGE_MESSAGE
+
+
+# --------------------------------------------------------------------------- #
+# LP-638 — the type-correction control offers the catalog, and only the catalog
+# --------------------------------------------------------------------------- #
+async def test_the_type_list_is_the_whole_catalog(client: AsyncClient, db_session) -> None:
+    """THE REPORTED PROBLEM. The control offered eight hardcoded options written when the catalog
+    had three types. It now has 164, so a processor could not correct a document to
+    `closing_disclosure` at all — which is exactly what LF-ZE9N needed and could not do."""
+    from app.documents.catalog import CATALOG
+
+    _company, _user, token = await _make_user(db_session, slug="acme")
+
+    resp = await client.get("/api/v1/documents/types/catalog", headers=_auth(token))
+
+    assert resp.status_code == 200
+    values = {option["value"] for option in resp.json()}
+    assert values == set(CATALOG), "the list and the catalog have drifted"
+    for needed in ("closing_disclosure", "purchase_agreement", "mortgage_statement"):
+        assert needed in values
+
+
+async def test_every_offered_type_is_one_the_override_accepts(
+    client: AsyncClient, db_session
+) -> None:
+    """The two halves must agree. A picker offering a type the PATCH rejects would be the same
+    defect wearing the other face — and both now read the same CATALOG, so this is a guard against
+    someone giving one of them its own list again."""
+    from app.documents.catalog import CATALOG
+
+    _company, _user, token = await _make_user(db_session, slug="acme")
+    resp = await client.get("/api/v1/documents/types/catalog", headers=_auth(token))
+
+    for option in resp.json():
+        assert option["value"] in CATALOG
+        assert option["label"], f"{option['value']} has no label to show"
+
+
+async def test_the_override_refuses_a_type_the_catalog_does_not_know(
+    client: AsyncClient, db_session, _mock_reprocess: MagicMock
+) -> None:
+    """THE HOLE THAT CAUSED THE ORIGINAL DAMAGE. The old dropdown offered `tax_return_1040` and
+    `other`, neither a catalog type, and this endpoint accepted them. The document got no tier, no
+    category and no extractor — and since satisfaction matches `needs_type == document_type`
+    exactly, a document corrected to `tax_return_1040` could never satisfy a `tax_return` need.
+    Correcting the type made the file quietly worse."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "tax_return_1040"}
+    )
+
+    assert resp.status_code == 422
+    _mock_reprocess.assert_not_called()
+
+
+async def test_a_real_catalog_type_still_applies(
+    client: AsyncClient, db_session, _mock_reprocess: MagicMock
+) -> None:
+    """The positive control. A validation that rejected everything would pass the test above."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]),
+        headers=_auth(token),
+        json={"document_type": "closing_disclosure"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_type"] == "closing_disclosure"
+    # Tier and category are re-derived from the catalog, which is what the invalid types could not do.
+    assert body["category"] == "disclosures"

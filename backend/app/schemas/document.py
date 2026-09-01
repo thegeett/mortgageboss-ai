@@ -72,6 +72,28 @@ class BulkReprocessResponse(BaseModel):
     skipped: dict[str, int]
 
 
+class DocumentTypeOption(BaseModel):
+    """One selectable document type for the manual-correction control (LP-638).
+
+    Served from the catalog rather than hardcoded in the frontend. The list it replaces was eight
+    entries written when there were three document types; the catalog now has 164, so a processor
+    could not correct a document to `closing_disclosure`, `purchase_agreement` or `mortgage_statement`
+    at all — and two of the eight (`tax_return_1040`, `other`) were not catalog types, so choosing
+    them set a document to a string nothing recognises.
+    """
+
+    value: str
+    label: str
+    category: str
+    #: Does choosing this type re-run structured extraction, or only relabel the document?
+    #:
+    #: Served rather than inferred, because the frontend's own answer was a three-item set
+    #: (`pay_stub`, `w2`, `bank_statement`) written in Phase 1 while the registry grew to 121. So
+    #: correcting a document to `closing_disclosure` told a processor "recorded only — no data is
+    #: extracted" while the pipeline extracted it. The registry is the only thing that knows.
+    extracts: bool
+
+
 class StalenessResolveRequest(BaseModel):
     """Resolve a flagged-stale document (LP-71): waive or accept (replace is its own flow)."""
 
