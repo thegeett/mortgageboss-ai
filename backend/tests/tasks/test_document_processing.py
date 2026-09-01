@@ -967,6 +967,72 @@ async def test_low_confidence_or_unknown_needs_review(
 # encrypted PDF, or a misconfigured model id, arrives under that name while being nothing to do with
 # size. The old table read the kind as the measurement and asserted the file was too large — the
 # same assumption the production branch was making, so the test agreed with the defect.
+async def test_a_confident_unknown_logs_why_it_could_not_be_matched(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-639 — AT THE LAYER THE QUESTION IS ASKED. The explanation being correct is not the same as
+    the pipeline emitting it, and this branch is the only place a confident `unknown` passes through.
+
+    The name here is the shape that caused the investigation: it DOES name a catalog type, and the
+    coverage rule turns it away. Before this line the log said nothing, so "the matcher is too
+    strict" and "the model recognised nothing" were indistinguishable after the fact.
+    """
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.85,
+            reasoning="not a known type",
+            document_name="a Closing Disclosure for the subject property",
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+
+    explained = [e for e in logs if e["event"] == "classification_unknown_explained"]
+    assert len(explained) == 1, "a confident unknown left no explanation behind"
+    entry = explained[0]
+    assert entry["near_miss"] == "closing_disclosure"
+    assert entry["rejected_by"] == "coverage"
+    assert entry["name_present"] is True
+    # AND THE NAME ITSELF IS NOT IN IT. The reason this was never logged is that it can quote
+    # borrower details; a diagnostic that leaks what it exists to describe is worse than none.
+    rendered = repr(entry)
+    for word in ("Closing", "Disclosure", "subject", "property"):
+        assert word not in rendered, f"{word!r} leaked into the log line"
+
+
+async def test_an_unknown_with_no_name_is_logged_as_such(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The other branch of the diagnosis: the model produced nothing to match. That is a prompt
+    problem rather than a matcher problem, and the log has to tell them apart."""
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown", confidence=0.9, reasoning="no idea", document_name=None
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+
+    entry = next(e for e in logs if e["event"] == "classification_unknown_explained")
+    assert entry["name_present"] is False
+    assert entry["near_miss"] is None
+
+
 @pytest.mark.parametrize(
     ("infra", "over_budget", "permanent"),
     [
