@@ -44,7 +44,7 @@ from uuid import UUID
 import structlog
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
@@ -57,7 +57,7 @@ from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier, match_catalog_type
 from app.models.activity_log import ActivityType
-from app.models.document import Document, DocumentStatus, Tier
+from app.models.document import _PIPELINE_IN_FLIGHT, Document, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
 from app.models.extraction import ConfidenceSource, ExtractionStatus
 from app.models.helpers import only_active
@@ -107,6 +107,31 @@ def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
         logger.warning("needs_update_enqueue_failed", document_id=str(document_id))
 
 
+async def _claim_for_processing(db: AsyncSession, document_id: UUID) -> bool:
+    """Take exclusive ownership of a document's pipeline run, atomically (LP-637).
+
+    One conditional UPDATE: move to ``CLASSIFYING``, but ONLY from a status that is not already
+    in flight. Whoever the database lets through owns the run; every other task gets ``False`` and
+    returns without touching the document.
+
+    ``_PIPELINE_IN_FLIGHT`` is the same set the API refuses on, imported rather than restated — two
+    definitions of "already running" would drift, and the API's is the one a processor is shown.
+
+    Returns ``False`` for a document that no longer exists, which is correct: there is nothing to
+    claim, and the caller's own missing-document branch has already run.
+    """
+    result = await db.execute(
+        update(Document)
+        .where(Document.id == document_id, Document.status.not_in(_PIPELINE_IN_FLIGHT))
+        .values(status=DocumentStatus.CLASSIFYING)
+        .returning(Document.id)
+    )
+    claimed = result.scalar_one_or_none() is not None
+    # Committed immediately: the claim only excludes a second worker once it is VISIBLE to one.
+    await db.commit()
+    return claimed
+
+
 async def _process_document(db: AsyncSession, document_id: str) -> None:
     """The core pipeline for one document. Always reaches a terminal status.
 
@@ -123,6 +148,28 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         logger.info("process_document_missing", document_id=document_id)
         return
 
+    # --- Claim the document, or leave it to the worker that already has it --- #
+    #
+    # LP-637 — THE RACE THE STATUS GUARDS COULD NOT CLOSE. The API refuses a reprocess for a
+    # document already in flight, but a status only moves when a WORKER starts: two clicks seconds
+    # apart both read the row as it was before either was picked up, and both enqueue. Bulk
+    # multiplies that by the batch. Two overlapping runs both write a current extraction, and
+    # `UNIQUE (document_id) WHERE is_current` admits one — the loser absorbs the IntegrityError
+    # into FAILED, so the document reads FAILED while carrying the winner's good extraction.
+    #
+    # Closed HERE rather than at the enqueue, because this is the only place that can be
+    # authoritative: the claim is a conditional UPDATE, so the database decides the winner and a
+    # duplicate task simply finds nothing to do. Enqueue-side deduplication cannot, whatever it
+    # keys on — the tasks are already in the queue by the time anyone could compare them.
+    #
+    # A DATABASE CLAIM RATHER THAN THE REDIS LOCK used for needs (`loan_file_needs_lock`): that
+    # lock takes a timeout, and this pipeline is bounded by `DOCUMENT_SOFT_LIMIT_SECONDS`, so any
+    # timeout short enough to release a crashed worker promptly is short enough to expire under a
+    # slow document and let a second worker in — the exact failure it was added to prevent.
+    if not await _claim_for_processing(db, document.id):
+        logger.info("process_document_already_claimed", document_id=document_id)
+        return
+
     try:
         content = await get_storage_backend().read(document.storage_path)
 
@@ -136,7 +183,8 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         superseded = await supersede_open_findings(db, document=document)
 
         # --- Classify -------------------------------------------------------- #
-        document.status = DocumentStatus.CLASSIFYING
+        # The status is already CLASSIFYING — `_claim_for_processing` set it, which is what makes
+        # the claim visible to a second worker. Committing here still settles the superseding above.
         await db.commit()
         if superseded:
             logger.info(

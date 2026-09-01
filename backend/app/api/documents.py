@@ -28,7 +28,7 @@ from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.document import Document, DocumentStatus
+from app.models.document import _PIPELINE_IN_FLIGHT, Document, DocumentStatus
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     BulkReprocessRequest,
@@ -78,24 +78,6 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Docume
 #: can reach the same value through `coerce_confidence`'s clamp.
 _HUMAN_CLASSIFIED_CONFIDENCE = 1.0
 
-#: Statuses that mean the pipeline is ACTIVELY running on this document right now.
-#:
-#: CLASSIFIED IS ONE OF THEM, and leaving it out would have missed the cohort this ticket exists
-#: for. `_process_document` commits CLASSIFIED and then, for a Tier 3 document, runs the whole
-#: free-extraction call before writing a terminal status — EXTRACTING is only ever set inside
-#: `_extract_branch`, i.e. Tier 1. So for an `unknown` or low-confidence document the longest
-#: in-flight window is spent at CLASSIFIED, and a guard listing only CLASSIFYING and EXTRACTING
-#: would wave a second reprocess straight into it.
-#:
-#: PENDING is deliberately NOT here. A document sits at PENDING when it has been created and its
-#: enqueue has not landed — including the case where the fire-and-forget enqueue never landed at
-#: all, which upload has been able to produce since LP-42. Reprocess is the cure for a document
-#: stranded that way, so treating PENDING as "in flight" would remove the only route out of it.
-_PIPELINE_IN_FLIGHT = (
-    DocumentStatus.CLASSIFYING,
-    DocumentStatus.CLASSIFIED,
-    DocumentStatus.EXTRACTING,
-)
 
 #: The bodies used when a request sends none. Module-level singletons rather than calls in the
 #: argument defaults (ruff B008): they are only ever READ, so one shared instance each is safe.
