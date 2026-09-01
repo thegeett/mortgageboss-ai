@@ -41,6 +41,37 @@ class DocumentReprocessRequest(BaseModel):
     force: bool = False
 
 
+class BulkReprocessRequest(BaseModel):
+    """Reprocess a loan file's documents in one call (LP-637)."""
+
+    #: Reprocess EVERY current document, not only the ones that look like they would benefit.
+    #:
+    #: The default is bounded on purpose. A 44-document file is 44 classifications and 44
+    #: re-extractions, and the documents this feature exists for are a minority of any file — the
+    #: untyped, the `unknown`, and the ones sitting in review. Spending the whole file's model
+    #: budget to re-derive answers that are already correct is the easy way to make a useful tool
+    #: something nobody is allowed to press.
+    all_documents: bool = False
+
+    #: Include documents whose type a person set. Same meaning, and same imperfect signal, as the
+    #: per-document endpoint's ``force`` — see :class:`DocumentReprocessRequest`.
+    force: bool = False
+
+
+class BulkReprocessResponse(BaseModel):
+    """What a bulk reprocess actually did (LP-637).
+
+    REPORTS THE SKIPS, and that is most of the point. A bulk action that silently does less than it
+    was asked leaves a processor waiting for ten documents to change when only seven were sent —
+    with no way to tell that from a slow queue. Each skip carries the reason it was skipped.
+    """
+
+    queued: int
+    queued_document_ids: list[UUID]
+    #: reason -> how many, e.g. ``{"already_processing": 2, "type_set_by_a_person": 1}``.
+    skipped: dict[str, int]
+
+
 class StalenessResolveRequest(BaseModel):
     """Resolve a flagged-stale document (LP-71): waive or accept (replace is its own flow)."""
 

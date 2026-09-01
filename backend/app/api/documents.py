@@ -31,6 +31,8 @@ from app.models.activity_log import ActivityType
 from app.models.document import Document, DocumentStatus
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
+    BulkReprocessRequest,
+    BulkReprocessResponse,
     DocumentDetailResponse,
     DocumentReprocessRequest,
     DocumentResponse,
@@ -89,16 +91,49 @@ _HUMAN_CLASSIFIED_CONFIDENCE = 1.0
 #: enqueue has not landed — including the case where the fire-and-forget enqueue never landed at
 #: all, which upload has been able to produce since LP-42. Reprocess is the cure for a document
 #: stranded that way, so treating PENDING as "in flight" would remove the only route out of it.
-#: The body used when a request sends none. A module-level singleton rather than a call in the
-#: argument default (ruff B008): it is only ever READ — `body.force` — so one shared instance is
-#: safe, and constructing it per request would buy nothing.
-_DEFAULT_REPROCESS_REQUEST = DocumentReprocessRequest()
-
 _PIPELINE_IN_FLIGHT = (
     DocumentStatus.CLASSIFYING,
     DocumentStatus.CLASSIFIED,
     DocumentStatus.EXTRACTING,
 )
+
+#: The bodies used when a request sends none. Module-level singletons rather than calls in the
+#: argument defaults (ruff B008): they are only ever READ, so one shared instance each is safe.
+_DEFAULT_REPROCESS_REQUEST = DocumentReprocessRequest()
+_DEFAULT_BULK_REQUEST = BulkReprocessRequest()
+
+#: Why a document was passed over by a bulk reprocess. Reported back per document, so a processor
+#: can tell "I skipped this and here is why" from "the queue is slow".
+_SKIP_SUPERSEDED = "superseded_version"
+_SKIP_IN_FLIGHT = "already_processing"
+_SKIP_HUMAN_TYPE = "type_set_by_a_person"
+_SKIP_ALREADY_CLASSIFIED = "already_classified"
+
+#: What the classifier writes when it cannot name a document (`app/ai/classification.py`): a literal
+#: type rather than a null, so it reaches the catalog lookup and takes the Tier 3 path. LP-636 defect
+#: 5 is the shape that makes this worth re-reading — a CONFIDENT `unknown` completes cleanly, raises
+#: no flag, and produces no typed data.
+_UNKNOWN_DOCUMENT_TYPE = "unknown"
+
+
+def _would_benefit(document: Document) -> bool:
+    """Is this a document a re-classification could plausibly improve? (LP-637)
+
+    The bounded default for bulk. A document is worth re-reading when nothing knows what it is
+    (no type, or the literal ``unknown`` that LP-636 defect 5 produces), or when the pipeline
+    already flagged it — NEEDS_REVIEW and FAILED are the two states that say "this did not go
+    well". Everything else has a type the classifier was content with, and re-deriving it costs a
+    model call to reach the same answer.
+
+    Deliberately not "reprocess anything not COMPLETED": that would include PENDING, which is where
+    this endpoint puts documents it has just queued, so a second bulk call would re-queue the work
+    of the first.
+    """
+    return (
+        document.document_type is None
+        or document.document_type == _UNKNOWN_DOCUMENT_TYPE
+        or document.status in (DocumentStatus.NEEDS_REVIEW, DocumentStatus.FAILED)
+    )
 
 
 def _enqueue_processing(document_id: UUID) -> None:
@@ -242,6 +277,82 @@ async def list_(loan_file: ScopedLoanFile, db: DbSession) -> list[DocumentRespon
     """List the file's active documents, newest first (+ versioning/staleness/fitness)."""
     documents = await list_documents(db, loan_file_id=loan_file.id)
     return await build_document_responses(db, documents)
+
+
+@nested_router.post("/reprocess", response_model=BulkReprocessResponse)
+async def reprocess_documents(
+    loan_file: ScopedLoanFile,
+    current_user: CurrentUser,
+    db: DbSession,
+    body: BulkReprocessRequest = _DEFAULT_BULK_REQUEST,
+) -> BulkReprocessResponse:
+    """Reprocess a file's documents in one call — classification included (LP-637).
+
+    THE PER-DOCUMENT ENDPOINT'S REFUSALS BECOME FILTERS HERE, and that difference is the design. A
+    single reprocess is a processor pointing at one document, so telling them "no, and why" is the
+    right answer. A bulk reprocess is a processor pointing at a file: failing all ten because one
+    is mid-pipeline would make the button useless exactly when a file is busy, which is when it is
+    most likely to be pressed. Each document is judged on its own and the skips are REPORTED, so
+    doing less than asked is visible rather than silent.
+
+    LF-ZE9N is why this exists rather than ten clicks: ten unidentifiable documents, and every
+    future improvement to the classifier will leave its own cohort behind in the same way.
+
+    The default set is bounded — see :func:`_would_benefit`. ``all_documents`` widens it to every
+    current document on the file.
+    """
+    documents = await list_documents(db, loan_file_id=loan_file.id)
+    skipped: dict[str, int] = {}
+    queued: list[Document] = []
+
+    def skip(reason: str) -> None:
+        skipped[reason] = skipped.get(reason, 0) + 1
+
+    for document in documents:
+        if not document.is_current:
+            skip(_SKIP_SUPERSEDED)
+        elif document.status in _PIPELINE_IN_FLIGHT:
+            skip(_SKIP_IN_FLIGHT)
+        elif document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
+            skip(_SKIP_HUMAN_TYPE)
+        elif not body.all_documents and not _would_benefit(document):
+            skip(_SKIP_ALREADY_CLASSIFIED)
+        else:
+            queued.append(document)
+
+    if queued:
+        # ONE activity entry for the batch, not one per document. Ten entries saying the same thing
+        # at the same second buries the file's actual history, which is what the feed is for.
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.DOCUMENT_REPROCESSED,
+            summary=f"{len(queued)} documents sent for reprocessing",
+            actor_user_id=current_user.id,
+            detail={
+                "document_ids": [str(d.id) for d in queued],
+                "forced": body.force,
+                "all_documents": body.all_documents,
+            },
+        )
+        # Once for the file, for the same reason the per-document endpoint does it per document.
+        await mark_verification_stale(db, loan_file_id=loan_file.id)
+        for document in queued:
+            document.status = DocumentStatus.PENDING
+            document.processing_error = None
+    await db.commit()
+
+    # After the commit, so a broker failure cannot leave the database disagreeing with what was
+    # reported. Each is fire-and-forget and never raises; a document whose enqueue is lost sits at
+    # PENDING and is recoverable by reprocessing again.
+    for document in queued:
+        _enqueue_full_reprocess(document.id)
+
+    return BulkReprocessResponse(
+        queued=len(queued),
+        queued_document_ids=[d.id for d in queued],
+        skipped=skipped,
+    )
 
 
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)

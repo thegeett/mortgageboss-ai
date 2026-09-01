@@ -864,3 +864,177 @@ async def test_two_clicks_before_a_worker_starts_both_enqueue(
         "ticket and this test rather than leaving three places claiming the opposite"
     )
     assert _mock_full_reprocess.call_count == 2
+
+
+# --------------------------------------------------------------------------- #
+# LP-637 feature 2 — bulk reprocess
+# --------------------------------------------------------------------------- #
+def _bulk_url(ident: str) -> str:
+    return f"/api/v1/loan-files/{ident}/documents/reprocess"
+
+
+async def _set(db_session: AsyncSession, doc_id: str, **fields) -> None:
+    from uuid import UUID as _UUID
+
+    from app.models.document import Document as _Doc
+
+    document = await db_session.get(_Doc, _UUID(doc_id))
+    assert document is not None
+    for key, value in fields.items():
+        setattr(document, key, value)
+    await db_session.commit()
+
+
+async def test_bulk_skips_rather_than_failing_the_batch(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """THE DESIGN DIFFERENCE FROM THE PER-DOCUMENT ENDPOINT, and the reason it is a separate route.
+
+    A single reprocess is a processor pointing at one document, so a 409 is the right answer. A bulk
+    reprocess is a processor pointing at a FILE: failing all of it because one document is
+    mid-pipeline would make the button useless exactly when a file is busy — which is when it is
+    most likely to be pressed.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    wanted = await _upload_one(client, loan_file.display_id, token)
+    busy = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, wanted["id"], document_type=None, status=DocumentStatus.NEEDS_REVIEW)
+    await _set(db_session, busy["id"], document_type=None, status=DocumentStatus.CLASSIFIED)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queued"] == 1
+    assert body["queued_document_ids"] == [wanted["id"]]
+    assert body["skipped"] == {"already_processing": 1}
+    _mock_full_reprocess.assert_called_once_with(wanted["id"])
+
+
+async def test_bulk_default_leaves_healthy_documents_alone(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A 44-document file is 44 classifications and 44 re-extractions. Spending that to re-derive
+    answers already correct is how a useful tool becomes one nobody is allowed to press."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    healthy = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, healthy["id"], document_type="w2", status=DocumentStatus.COMPLETED)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 0
+    assert resp.json()["skipped"] == {"already_classified": 1}
+    _mock_full_reprocess.assert_not_called()
+
+
+async def test_bulk_all_documents_widens_the_set(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    healthy = await _upload_one(client, loan_file.display_id, token)
+    await _set(db_session, healthy["id"], document_type="w2", status=DocumentStatus.COMPLETED)
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(
+        _bulk_url(loan_file.display_id), headers=_auth(token), json={"all_documents": True}
+    )
+
+    assert resp.json()["queued"] == 1
+    _mock_full_reprocess.assert_called_once_with(healthy["id"])
+
+
+async def test_bulk_picks_up_the_unknown_cohort_this_exists_for(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """LF-ZE9N's four `unknown` documents are COMPLETED with no flag — LP-636 defect 5. If the
+    default set were "not completed" they would be the ones it missed, which would leave the
+    feature unable to reach half the cohort that motivated it."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    unknown_doc = await _upload_one(client, loan_file.display_id, token)
+    await _set(
+        db_session, unknown_doc["id"], document_type="unknown", status=DocumentStatus.COMPLETED
+    )
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 1
+    _mock_full_reprocess.assert_called_once_with(unknown_doc["id"])
+
+
+async def test_bulk_leaves_a_human_set_type_alone_unless_forced(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "bank_statement"}
+    )
+    await _set(db_session, doc["id"], status=DocumentStatus.NEEDS_REVIEW)
+    _mock_full_reprocess.reset_mock()
+
+    skipped = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+    assert skipped.json()["skipped"] == {"type_set_by_a_person": 1}
+    _mock_full_reprocess.assert_not_called()
+
+    forced = await client.post(
+        _bulk_url(loan_file.display_id), headers=_auth(token), json={"force": True}
+    )
+    assert forced.json()["queued"] == 1
+
+
+async def test_bulk_accepts_no_body(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """A body-less POST must not be a 422 — the feature-3 button sends none, and every test above
+    passing `json={}` would never have noticed. The same defect was found on the per-document
+    endpoint in review."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token))
+
+    assert resp.status_code == 200
+
+
+async def test_bulk_is_tenant_scoped(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    await _upload_one(client, loan_file.display_id, token)
+    _other, _u2, other_token = await _make_user(db_session, slug="rival")
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(other_token), json={})
+
+    assert resp.status_code == 404
+    _mock_full_reprocess.assert_not_called()
