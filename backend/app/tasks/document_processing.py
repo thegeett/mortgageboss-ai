@@ -39,12 +39,13 @@ worker async session (``task_session``).
 (ids, status, classified type, confidence, tokens/cost).
 """
 
+from datetime import timedelta
 from uuid import UUID
 
 import structlog
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
@@ -57,7 +58,14 @@ from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
 from app.documents.catalog import get_category, get_tier, match_catalog_type
 from app.models.activity_log import ActivityType
-from app.models.document import _PIPELINE_IN_FLIGHT, Document, DocumentStatus, Tier
+from app.models.base import utcnow
+from app.models.document import (
+    PIPELINE_IN_FLIGHT_STATUSES,
+    PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS,
+    Document,
+    DocumentStatus,
+    Tier,
+)
 from app.models.document_finding import DocumentFindingType
 from app.models.extraction import ConfidenceSource, ExtractionStatus
 from app.models.helpers import only_active
@@ -107,23 +115,48 @@ def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
         logger.warning("needs_update_enqueue_failed", document_id=str(document_id))
 
 
-async def _claim_for_processing(db: AsyncSession, document_id: UUID) -> bool:
+async def _claim_for_processing(
+    db: AsyncSession, document_id: UUID, *, into: DocumentStatus = DocumentStatus.CLASSIFYING
+) -> bool:
     """Take exclusive ownership of a document's pipeline run, atomically (LP-637).
 
     One conditional UPDATE: move to ``CLASSIFYING``, but ONLY from a status that is not already
     in flight. Whoever the database lets through owns the run; every other task gets ``False`` and
     returns without touching the document.
 
-    ``_PIPELINE_IN_FLIGHT`` is the same set the API refuses on, imported rather than restated — two
+    ``PIPELINE_IN_FLIGHT_STATUSES`` is the same set the API refuses on, imported rather than
+    restated — two
     definitions of "already running" would drift, and the API's is the one a processor is shown.
 
     Returns ``False`` for a document that no longer exists, which is correct: there is nothing to
     claim, and the caller's own missing-document branch has already run.
+
+    AN IN-FLIGHT STATUS ALONE DOES NOT BLOCK THE CLAIM, and it must not. A worker killed mid-run —
+    an OOM, a deploy, or LP-630's nightly 22:00 shutdown of staging's services — leaves the status
+    set with nobody behind it. On status alone that document was stuck for good: refused by the
+    reprocess endpoint, skipped by bulk, and unclaimable by any later task. So the claim also
+    succeeds when the row has not been written for longer than a live worker could possibly go
+    without writing it (:data:`PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS`), which is the same
+    judgement :func:`is_pipeline_in_flight` makes for the API.
+
+    THERE IS NO RETRY ESCAPE HATCH, and a draft of this function had one. The reasoning for it was
+    that a retry of the task holding the claim would find its own status set and give up — but a
+    retry can only ever be scheduled by a failure BEFORE the claim is taken. Everything after it is
+    inside the pipeline's `try`, which absorbs every exception into a terminal status, and the one
+    it re-raises (`SoftTimeLimitExceeded`) is in `terminal_on` and is never retried. So a retrying
+    task has never owned anything, and letting it claim unconditionally only let it steal a live
+    run from a duplicate that had legitimately won — reintroducing the double-run this exists to
+    prevent, through its own fix.
     """
+    abandoned_before = utcnow() - timedelta(seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS)
+    claimable = or_(
+        Document.status.not_in(PIPELINE_IN_FLIGHT_STATUSES),
+        Document.updated_at < abandoned_before,
+    )
     result = await db.execute(
         update(Document)
-        .where(Document.id == document_id, Document.status.not_in(_PIPELINE_IN_FLIGHT))
-        .values(status=DocumentStatus.CLASSIFYING)
+        .where(Document.id == document_id, claimable)
+        .values(status=into)
         .returning(Document.id)
     )
     claimed = result.scalar_one_or_none() is not None
@@ -162,10 +195,13 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
     # duplicate task simply finds nothing to do. Enqueue-side deduplication cannot, whatever it
     # keys on — the tasks are already in the queue by the time anyone could compare them.
     #
-    # A DATABASE CLAIM RATHER THAN THE REDIS LOCK used for needs (`loan_file_needs_lock`): that
-    # lock takes a timeout, and this pipeline is bounded by `DOCUMENT_SOFT_LIMIT_SECONDS`, so any
-    # timeout short enough to release a crashed worker promptly is short enough to expire under a
-    # slow document and let a second worker in — the exact failure it was added to prevent.
+    # A DATABASE CLAIM RATHER THAN THE REDIS LOCK used for needs (`loan_file_needs_lock`). Note the
+    # claim DOES expire — see `PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS` — so the difference is not
+    # "no timeout"; an earlier version of this comment rejected timeouts while the code already used
+    # one. The difference is that the expiry lives on the row the work is about, so the API's
+    # refusal, the bulk skip and this claim all read one fact, and a claim cannot outlive the row or
+    # be lost to a cache eviction. The timeout objection was also overstated: a window derived from
+    # the SIGKILL ceiling cannot expire under a live run, because past that ceiling there is none.
     if not await _claim_for_processing(db, document.id):
         logger.info("process_document_already_claimed", document_id=document_id)
         return
@@ -816,6 +852,20 @@ async def _run_reprocess(document_id: str) -> None:
         if document is None:
             logger.info("reprocess_document_missing", document_id=document_id)
             return
+        # THE CLAIM COVERS THIS PATH TOO (LP-637 review), and its first version did not. A claim
+        # only exclusive against itself is not exclusive: the LP-44 type-override enqueues THIS
+        # task, which writes a current extraction and a terminal status of its own. Run alongside a
+        # claimed `_process_document` it produced the same collision the claim was added to stop —
+        # `UNIQUE (document_id) WHERE is_current` admits one and the loser lands in FAILED — and
+        # worse, its terminal write RELEASED the other run's claim mid-flight, letting a third task
+        # in behind it.
+        #
+        # Claimed into EXTRACTING rather than CLASSIFYING, because that is what this path does: it
+        # skips classification by design.
+        if not await _claim_for_processing(db, document.id, into=DocumentStatus.EXTRACTING):
+            logger.info("reprocess_document_already_claimed", document_id=document_id)
+            return
+        await db.refresh(document)
         await reprocess_document_extraction(db, document)
 
 

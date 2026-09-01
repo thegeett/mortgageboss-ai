@@ -26,6 +26,7 @@ Like borrowers and properties, a document is an **owned child** of its loan file
 company-scoped **transitively** through the loan file (ADR-052).
 """
 
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -33,7 +34,7 @@ from uuid import UUID
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
 from app.models.enums import str_enum
 from app.models.types import SHORT_STRING, LongStr, MediumStr
 
@@ -144,11 +145,46 @@ class StalenessResolution(StrEnum):
 #: enqueue has not landed — including the case where the fire-and-forget enqueue never landed at
 #: all, which upload has been able to produce since LP-42. Reprocess is the cure for a document
 #: stranded that way, so treating PENDING as "in flight" would remove the only route out of it.
-_PIPELINE_IN_FLIGHT = (
+PIPELINE_IN_FLIGHT_STATUSES = (
     DocumentStatus.CLASSIFYING,
     DocumentStatus.CLASSIFIED,
     DocumentStatus.EXTRACTING,
 )
+
+#: After this long without a write, a document in an in-flight status is presumed ABANDONED.
+#:
+#: A worker cannot still be alive on one document past ``DOCUMENT_HARD_LIMIT_SECONDS`` — that is
+#: the SIGKILL ceiling — and the pipeline writes the row at each status change, so the longest gap
+#: between writes by a LIVE worker is bounded by it. Anything older has no worker behind it. The
+#: The margin is not decoration. ``updated_at`` is stamped app-side by the WORKER and compared
+#: against the API host's own clock, with no database clock involved on either side — so the margin
+#: is the tolerance for cross-host clock skew as much as for commit latency. Too small a margin and
+#: an API host running ahead reads a live extraction as abandoned, overwrites the row to PENDING and
+#: enqueues a second full pipeline: the duplicate run, arriving through the fix for it.
+#:
+#: THIS IS WHAT MAKES THE CLAIM SAFE TO TAKE. Without it a worker killed mid-run left the document
+#: in flight forever: refused by the reprocess endpoint, skipped by bulk, unclaimable by any later
+#: task — no route back through the product at all. That is not hypothetical here, it is scheduled:
+#: LP-630 stops staging's services every night at 22:00 Eastern, killing whatever is mid-pipeline.
+#:
+#: Kept here rather than derived from ``DOCUMENT_HARD_LIMIT_SECONDS`` because that constant lives in
+#: the task module, which imports THIS one. The relationship between them is asserted by a test
+#: rather than described by this comment, so it cannot quietly stop being true.
+PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS = 900
+
+
+def is_pipeline_in_flight(document: "Document", *, now: datetime | None = None) -> bool:
+    """Is a worker actually running this document's pipeline right now?
+
+    A status alone is not the answer, and treating it as one is what strands a document whose
+    worker was killed. This is the single definition the reprocess endpoint's refusal, the bulk
+    skip and the pipeline's own claim all consult, so "already running" cannot come to mean three
+    different things.
+    """
+    if document.status not in PIPELINE_IN_FLIGHT_STATUSES:
+        return False
+    since = (now or utcnow()) - document.updated_at
+    return since < timedelta(seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS)
 
 
 class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):

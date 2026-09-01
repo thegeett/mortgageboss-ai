@@ -28,7 +28,12 @@ from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.document import _PIPELINE_IN_FLIGHT, Document, DocumentStatus
+from app.models.document import (
+    PIPELINE_IN_FLIGHT_STATUSES,
+    Document,
+    DocumentStatus,
+    is_pipeline_in_flight,
+)
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     BulkReprocessRequest,
@@ -133,6 +138,12 @@ def _would_benefit(document: Document) -> bool:
         document.document_type is None
         or document.document_type == _UNKNOWN_DOCUMENT_TYPE
         or document.status in (DocumentStatus.NEEDS_REVIEW, DocumentStatus.FAILED)
+        # An in-flight status that reached this far is an ABANDONED one — the caller checks
+        # `is_pipeline_in_flight` first, and that is time-aware. Without this line a document
+        # stranded mid-pipeline WITH a type fell through to "the classifier was content with it"
+        # and was reported to the processor as `already_classified`: the default bulk press still
+        # could not recover it, and said so in words that described a different situation.
+        or document.status in PIPELINE_IN_FLIGHT_STATUSES
     )
 
 
@@ -319,7 +330,7 @@ async def reprocess_documents(
     for document in documents:
         if not document.is_current:
             skip(_SKIP_SUPERSEDED)
-        elif document.status in _PIPELINE_IN_FLIGHT:
+        elif is_pipeline_in_flight(document):
             skip(_SKIP_IN_FLIGHT)
         elif not body.all_documents and document.status is DocumentStatus.PENDING:
             # ALREADY QUEUED. This is the skip that stops a second press re-queueing the first
@@ -456,6 +467,17 @@ async def override_document_type(
     if document is None:
         raise _NOT_FOUND
 
+    if is_pipeline_in_flight(document):
+        # THE CLAIM IS ONLY EXCLUSIVE AGAINST ITSELF unless every path that writes an extraction
+        # respects it (LP-637 review). This endpoint enqueues `reprocess_document`, which now takes
+        # the claim in its own task — so a type override during a live pipeline would simply be
+        # dropped by that claim, silently, and the processor would see their correction do nothing.
+        # Refusing here says so instead.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is already being processed. Wait for it to finish, then retry.",
+        )
+
     new_type = body.document_type.strip()
     document.document_type = new_type
     # Catalog-driven (LP-58): re-derive both tier and category from the new type.
@@ -531,8 +553,13 @@ async def reprocess_document_from_scratch(
             detail="Only the current version of a document can be reprocessed.",
         )
 
-    if document.status in _PIPELINE_IN_FLIGHT:
-        # The pipeline is already running on this document. Two overlapping `_process_document`
+    if is_pipeline_in_flight(document):
+        # The pipeline is already running on this document — a status in the in-flight set AND a
+        # row written recently enough that a worker can still be behind it. The time half is not
+        # decoration: on status alone, a worker killed mid-run left the document refused here
+        # forever, with no route back through the product at all.
+        #
+        # Two overlapping `_process_document`
         # runs both write a current extraction, and `UNIQUE (document_id) WHERE is_current` lets
         # only one of them: the loser absorbs the IntegrityError into FAILED, so the document ends
         # up reading FAILED while carrying the winner's perfectly good extraction.

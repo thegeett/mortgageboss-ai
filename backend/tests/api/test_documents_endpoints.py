@@ -9,6 +9,7 @@ preserving the stored bytes.
 """
 
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -23,7 +24,12 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
 from app.models.activity_log import ActivityType
-from app.models.document import Document, DocumentStatus
+from app.models.base import utcnow
+from app.models.document import (
+    PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS,
+    Document,
+    DocumentStatus,
+)
 from app.services.loan_files import create_loan_file
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
@@ -1263,3 +1269,125 @@ async def test_bulk_refuses_a_batch_larger_than_the_cap(
     assert resp.status_code == 400
     assert "2 documents selected" in resp.json()["error"]["message"]
     _mock_full_reprocess.assert_not_called()
+
+
+async def test_reprocess_accepts_a_document_abandoned_mid_pipeline(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The API half of the same fix, and the half that decides whether it matters.
+
+    Reclaiming inside the pipeline is useless on its own: a stuck document is only re-enqueued
+    because a processor asks, and on status alone this endpoint refused. So a worker killed
+    mid-run — an OOM, a deploy, or LP-630's nightly 22:00 shutdown of staging — left a document
+    with no route back through the product at all.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    abandoned = await db_session.get(Document, UUID(doc["id"]))
+    assert abandoned is not None
+    abandoned.status = DocumentStatus.CLASSIFYING
+    await db_session.commit()
+
+    # Still refused while a worker could plausibly be behind it.
+    live = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+    assert live.status_code == 409, "a live run must still be protected"
+
+    abandoned.updated_at = utcnow() - timedelta(
+        seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS + 60
+    )
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_reprocess_url(doc["id"]), headers=_auth(token), json={})
+
+    assert resp.status_code == 200, "an abandoned document was unreachable through the product"
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_bulk_picks_up_a_document_abandoned_mid_pipeline(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """Bulk skipped it as `already_processing` for the same reason, which is the shape that hides
+    it — a skip reported as "someone is on it" when nobody is."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    abandoned = await db_session.get(Document, UUID(doc["id"]))
+    assert abandoned is not None
+    abandoned.status = DocumentStatus.CLASSIFYING
+    abandoned.document_type = "unknown"
+    abandoned.updated_at = utcnow() - timedelta(
+        seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS + 60
+    )
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 1, f"still skipped: {resp.json()['skipped']}"
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
+
+
+async def test_the_type_override_refuses_a_document_mid_pipeline(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """The claim is only exclusive against itself unless every path that writes an extraction
+    respects it. This endpoint enqueues `reprocess_document`, which now takes the claim in its own
+    task — so an override during a live pipeline would be dropped by that claim SILENTLY, and the
+    processor would watch their correction do nothing. Refusing says so."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    running = await db_session.get(Document, UUID(doc["id"]))
+    assert running is not None
+    running.status = DocumentStatus.CLASSIFIED
+    await db_session.commit()
+    _mock_reprocess.reset_mock()
+
+    resp = await client.patch(
+        f"/api/v1/documents/{doc['id']}",
+        headers=_auth(token),
+        json={"document_type": "w2"},
+    )
+
+    assert resp.status_code == 409
+    _mock_reprocess.assert_not_called()
+
+
+async def test_bulk_reports_an_abandoned_document_honestly(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    _mock_reprocess: MagicMock,
+    _mock_full_reprocess: MagicMock,
+) -> None:
+    """An abandoned document WITH a type fell past the in-flight skip into `_would_benefit`, which
+    saw a typed, unflagged document and reported `already_classified` — the default bulk press
+    could still not recover it, and described a stranded document as one the classifier was happy
+    with."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    abandoned = await db_session.get(Document, UUID(doc["id"]))
+    assert abandoned is not None
+    abandoned.status = DocumentStatus.EXTRACTING
+    abandoned.document_type = "w2"  # a real type: `_would_benefit` would otherwise say no
+    abandoned.updated_at = utcnow() - timedelta(
+        seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS + 60
+    )
+    await db_session.commit()
+    _mock_full_reprocess.reset_mock()
+
+    resp = await client.post(_bulk_url(loan_file.display_id), headers=_auth(token), json={})
+
+    assert resp.json()["queued"] == 1, f"still unreachable: {resp.json()['skipped']}"
+    _mock_full_reprocess.assert_called_once_with(doc["id"])
