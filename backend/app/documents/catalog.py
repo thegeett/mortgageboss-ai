@@ -34,6 +34,7 @@ classification prompt is built from these slugs (see
 classifier can return is a type the catalog knows, and vice versa.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.models.document import DocumentCategory, Tier
@@ -348,6 +349,8 @@ def is_cataloged(document_type: str | None) -> bool:
 #: letter about the survey" — so a one-word match is a coin flip. Multi-word slugs are specific
 #: enough that an ordered match means what it says.
 _MIN_SLUG_WORDS_FOR_NAME_MATCH = 2
+#: An upper bound for the explanation's band searches — no catalog slug is near this long.
+_MAX_SLUG_WORDS = 32
 
 #: Tokens allowed BETWEEN consecutive slug words. 1, because the case this tolerance exists for —
 #: "Earnest Money / EMD Receipt" → ``earnest_money_receipt`` — has exactly one, while the
@@ -440,10 +443,20 @@ def match_catalog_type(free_text: str | None) -> str | None:
     return best
 
 
-#: Why a catalog type that the name ORDERED correctly was still rejected (LP-639). A closed
-#: vocabulary — safe to log, unlike the name itself.
+#: Why nothing matched (LP-639). A closed vocabulary — safe to log, unlike the name itself.
+#:
+#: ONE REASON PER GUARD, because a single "it did not match" cannot be acted on. `match_catalog_type`
+#: applies three, and the first version of this modelled two — so a one-word catalog type named
+#: EXACTLY ("Appraisal") reported the same thing as a name with no catalog words in it at all.
 REJECTED_BY_COVERAGE = "coverage"
 REJECTED_BY_ORDER = "order"
+REJECTED_BY_MIN_WORDS = "min_words"
+#: No catalog slug's words appear in the name at all — a model problem, not a matcher one.
+NO_CATALOG_WORDS = "no_catalog_words"
+#: A name was produced but normalised away to nothing (punctuation, or a script the normaliser
+#: strips). Its own state, because sharing ``None`` with a successful match made a log query
+#: counting matches silently include it.
+UNUSABLE_NAME = "unusable_name"
 
 
 @dataclass(frozen=True)
@@ -451,68 +464,125 @@ class CatalogMatchExplanation:
     """Why :func:`match_catalog_type` answered the way it did — WITHOUT the name (LP-639).
 
     THE PROBLEM THIS EXISTS FOR. When the classifier returns a confident ``unknown``, the only
-    surviving evidence is the model's own ``document_name`` — and that is free text that can quote a
-    borrower's details, so it is never logged or stored. So a document that classifies as ``unknown``
-    is currently unexplainable: nobody can tell whether the model described it correctly and this
-    matcher failed, or the model had no idea what it was looking at. Those need opposite fixes, and
-    on LF-ZE9N the question had to be answered by inference from a flag that turned out to mean
-    nothing.
+    surviving evidence is the model's own ``document_name`` — free text that can quote a borrower's
+    details, so it is never logged or stored. A confident ``unknown`` therefore has no account of
+    itself, and diagnosing one means inferring. On LF-ZE9N the inference was wrong twice.
 
-    Every field here is a COUNT, a BOOLEAN, or a catalog SLUG — closed vocabularies. The name never
-    appears, in any form, including as a length that could distinguish two candidate documents.
+    Every field is a COUNT, a RATIO, a BOOLEAN or a catalog SLUG — closed vocabularies and numbers.
+    The name's content never appears.
     """
 
     #: Did the model produce a name at all? False means the evidence never existed.
     name_present: bool
-    #: How many words it ran to. The coverage rule is a ratio against this, so it is the single most
-    #: useful number for telling "the matcher is too strict" from "the model said nothing useful".
+    #: How many words it ran to, after normalisation.
     name_words: int
     #: The type it matched, if any.
     matched: str | None
-    #: The type it ALMOST matched — words present and in order — when nothing matched outright.
+    #: The type it came closest to, when nothing matched.
     near_miss: str | None
-    #: Which guard rejected ``near_miss``. See the REJECTED_BY_* constants.
+    #: What fraction of the name ``near_miss`` accounts for, rounded to two places.
+    #:
+    #: THE FIELD THAT MAKES ``coverage`` ACTIONABLE, and its absence made the first version
+    #: misleading. ``rejected_by=coverage`` was documented as meaning "the model named a real type
+    #: and the matcher turned it away, so loosen the matcher" — but it is equally what the guard
+    #: produces when working correctly: "an email asking the borrower to send a bank statement" is
+    #: the case the coverage rule was measured to reject, and it yielded a byte-identical
+    #: explanation to LF-ZE9N's genuine Closing Disclosure. The ratio is what separates them, and
+    #: `match_catalog_type` already documents the populations: true names 0.5-0.67, mentions
+    #: 0.18-0.25. Without it, acting on the field as written would loosen the guard against exactly
+    #: the names it exists to exclude.
+    near_miss_coverage: float | None
+    #: Which guard stopped the match. See the constants above; ``None`` only when something matched.
     rejected_by: str | None
+
+
+def _longest_slug_where(
+    tokens: list[str],
+    predicate: Callable[[list[str], list[str]], bool],
+    *,
+    min_words: int,
+    max_words: int,
+) -> str | None:
+    """The longest catalog slug within the word-count band that satisfies ``predicate``."""
+    best: str | None = None
+    best_words = 0
+    for slug in CATALOG:
+        words = slug.split("_")
+        if not (min_words <= len(words) <= max_words) or len(words) <= best_words:
+            continue
+        if predicate(words, tokens):
+            best, best_words = slug, len(words)
+    return best
 
 
 def explain_catalog_match(free_text: str | None) -> CatalogMatchExplanation:
     """Run the same match as :func:`match_catalog_type`, and report why it landed (LP-639).
 
-    Deliberately a SECOND pass over the same rules rather than a rewrite of the matcher to return
-    both: the matcher is the thing that decides whether a processor sees a flag, and threading a
-    diagnostic through it would put observability code on the path that makes the decision. The
-    duplication is bounded — the guards are two — and a test asserts the two functions agree on
-    every catalog slug, so they cannot drift into disagreeing about what matched.
+    Deliberately a SECOND pass rather than a rewrite of the matcher to return both: the matcher is
+    what decides whether a processor sees a flag, and threading a diagnostic through it would put
+    observability on that path. The caller keeps calling `match_catalog_type` for the decision, and
+    this for the log — a rationale that was stated once while the pipeline had quietly started
+    taking its decision from here instead.
 
-    The near-miss is what makes this worth logging. "Nothing matched" cannot distinguish a name that
-    named no type from a name that named one and failed a guard; ``near_miss`` plus ``rejected_by``
-    says which, and names the guard to loosen if the answer is the second.
+    The near miss is what makes it worth logging. "Nothing matched" cannot tell a name that named no
+    type from a name that named one and failed a guard. This names the slug, the guard, and the
+    coverage ratio — which is the number that says whether the guard was wrong or right.
     """
     if not free_text:
-        return CatalogMatchExplanation(False, 0, None, None, None)
+        return CatalogMatchExplanation(False, 0, None, None, None, None)
     haystack = _normalize_for_match(free_text)
     if not haystack:
-        return CatalogMatchExplanation(True, 0, None, None, None)
+        return CatalogMatchExplanation(True, 0, None, None, None, UNUSABLE_NAME)
 
     tokens = haystack.split()
     matched = match_catalog_type(free_text)
     if matched is not None:
-        return CatalogMatchExplanation(True, len(tokens), matched, None, None)
+        return CatalogMatchExplanation(True, len(tokens), matched, None, None, None)
 
-    # Nothing matched. Find the longest slug the name at least ORDERED correctly, so the log can say
-    # which guard stood in the way rather than only that none passed.
-    near: str | None = None
-    near_words = 0
-    for slug in CATALOG:
-        words = slug.split("_")
-        if len(words) < _MIN_SLUG_WORDS_FOR_NAME_MATCH or len(words) <= near_words:
-            continue
-        if _matches_in_order_with_small_gaps(words, tokens):
-            near, near_words = slug, len(words)
-    if near is None:
-        return CatalogMatchExplanation(True, len(tokens), None, None, REJECTED_BY_ORDER)
-    # It ordered correctly and still did not match, so coverage is what turned it away.
-    return CatalogMatchExplanation(True, len(tokens), None, near, REJECTED_BY_COVERAGE)
+    def _cover(slug: str) -> float:
+        return round(len(slug.split("_")) / len(tokens), 2)
+
+    # Ordered, long enough to be considered — so coverage is the only guard left that can have
+    # stopped it. This is the case worth acting on, and `near_miss_coverage` says whether to.
+    ordered = _longest_slug_where(
+        tokens,
+        _matches_in_order_with_small_gaps,
+        min_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH,
+        max_words=_MAX_SLUG_WORDS,
+    )
+    if ordered is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, ordered, _cover(ordered), REJECTED_BY_COVERAGE
+        )
+
+    # Ordered but TOO SHORT to be considered at all — the third guard, which the first version of
+    # this did not model. `explain_catalog_match("Appraisal")` reported "the model named nothing",
+    # about a name that named a catalog type exactly.
+    short = _longest_slug_where(
+        tokens,
+        _matches_in_order_with_small_gaps,
+        min_words=1,
+        max_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH - 1,
+    )
+    if short is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, short, _cover(short), REJECTED_BY_MIN_WORDS
+        )
+
+    # Every word present, but not in that order — a genuine near miss on the ordering guard, which
+    # was previously indistinguishable from a name containing no catalog words whatsoever.
+    def _all_present(words: list[str], haystack_tokens: list[str]) -> bool:
+        return all(word in haystack_tokens for word in words)
+
+    unordered = _longest_slug_where(
+        tokens, _all_present, min_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH, max_words=_MAX_SLUG_WORDS
+    )
+    if unordered is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, unordered, _cover(unordered), REJECTED_BY_ORDER
+        )
+
+    return CatalogMatchExplanation(True, len(tokens), None, None, None, NO_CATALOG_WORDS)
 
 
 def _matches_in_order_with_small_gaps(needle: list[str], haystack: list[str]) -> bool:

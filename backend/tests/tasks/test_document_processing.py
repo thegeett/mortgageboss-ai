@@ -967,6 +967,61 @@ async def test_low_confidence_or_unknown_needs_review(
 # encrypted PDF, or a misconfigured model id, arrives under that name while being nothing to do with
 # size. The old table read the kind as the measurement and asserted the file was too large — the
 # same assumption the production branch was making, so the test agreed with the defect.
+@pytest.mark.parametrize(
+    ("infra", "over_budget", "permanent"),
+    [
+        ("rate_limited", False, False),
+        ("failed", False, False),
+        ("oversized", False, False),  # a 400 that is not a size problem
+        ("oversized", True, True),  # the file really cannot be sent
+    ],
+)
+async def test_infra_failure_needs_review_with_distinct_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    infra: str,
+    over_budget: bool,
+    permanent: bool,
+) -> None:
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult.unknown(
+            "AI call failed", infra_failure=infra, payload_over_budget=over_budget
+        ),
+    )
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert extract.call_count == 0
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert len(review) == 1
+    # The reason is the infrastructure cause, NOT "low_confidence" — that is the whole point.
+    assert review[0]["reason"] == infra
+    assert review[0].get("infra_failure") is True
+    # LP-637 — AND IT REACHES THE DOCUMENT. Asserting the log line proves the pipeline KNEW; a
+    # processor reads `processing_error`, and this branch left it empty. LF-ZE9N's last
+    # unidentified document sat as "Processing / uncategorized" with no explanation for exactly
+    # that reason, while the log said "oversized".
+    assert doc.processing_error, f"{infra} left the document with no reason on it"
+    if permanent:
+        # Re-reading cannot help, so the copy must not promise that it will.
+        assert "too large" in doc.processing_error
+        assert "won't help" in doc.processing_error
+    else:
+        # And it must not blame a file that is not the problem. A processor told to split a 300 KB
+        # corrupt scan does the work and gets nowhere.
+        assert "too large" not in doc.processing_error
+        assert "re-reading" in doc.processing_error.lower()
+
+
 async def test_a_confident_unknown_logs_why_it_could_not_be_matched(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
@@ -1031,61 +1086,6 @@ async def test_an_unknown_with_no_name_is_logged_as_such(
     entry = next(e for e in logs if e["event"] == "classification_unknown_explained")
     assert entry["name_present"] is False
     assert entry["near_miss"] is None
-
-
-@pytest.mark.parametrize(
-    ("infra", "over_budget", "permanent"),
-    [
-        ("rate_limited", False, False),
-        ("failed", False, False),
-        ("oversized", False, False),  # a 400 that is not a size problem
-        ("oversized", True, True),  # the file really cannot be sent
-    ],
-)
-async def test_infra_failure_needs_review_with_distinct_reason(
-    monkeypatch: pytest.MonkeyPatch,
-    db_session: AsyncSession,
-    infra: str,
-    over_budget: bool,
-    permanent: bool,
-) -> None:
-    import structlog
-
-    doc = await _setup_document(db_session)
-    _patch_storage(monkeypatch)
-    _patch_classify(
-        monkeypatch,
-        ClassificationResult.unknown(
-            "AI call failed", infra_failure=infra, payload_over_budget=over_budget
-        ),
-    )
-    extract = _patch_extract(monkeypatch, _paystub_success())
-
-    with structlog.testing.capture_logs() as logs:
-        await pipeline._process_document(db_session, str(doc.id))
-    await db_session.refresh(doc)
-
-    assert doc.status == DocumentStatus.NEEDS_REVIEW
-    assert extract.call_count == 0
-    review = [e for e in logs if e["event"] == "document_needs_review"]
-    assert len(review) == 1
-    # The reason is the infrastructure cause, NOT "low_confidence" — that is the whole point.
-    assert review[0]["reason"] == infra
-    assert review[0].get("infra_failure") is True
-    # LP-637 — AND IT REACHES THE DOCUMENT. Asserting the log line proves the pipeline KNEW; a
-    # processor reads `processing_error`, and this branch left it empty. LF-ZE9N's last
-    # unidentified document sat as "Processing / uncategorized" with no explanation for exactly
-    # that reason, while the log said "oversized".
-    assert doc.processing_error, f"{infra} left the document with no reason on it"
-    if permanent:
-        # Re-reading cannot help, so the copy must not promise that it will.
-        assert "too large" in doc.processing_error
-        assert "won't help" in doc.processing_error
-    else:
-        # And it must not blame a file that is not the problem. A processor told to split a 300 KB
-        # corrupt scan does the work and gets nowhere.
-        assert "too large" not in doc.processing_error
-        assert "re-reading" in doc.processing_error.lower()
 
 
 # --------------------------------------------------------------------------- #
