@@ -16,9 +16,13 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.services.rule_findings import consolidate_unidentified_documents
+from app.verification.rule_engine.applicability import (
+    resolve_applicabilities,
+    undetermined_by_document_type,
+)
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.result import RuleEvaluation, Verdict
-from app.verification.rules.specs import load_rule_spec
+from app.verification.rules.specs import DOC_TYPE_TAG, TagCondition, load_rule_spec
 from app.verification.snapshot.model import DocumentEntry, DocumentsSection, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
@@ -151,3 +155,42 @@ def test_the_consolidated_finding_never_claims_a_validated_threshold() -> None:
     assert out[0].priya_validated is False
     assert out[0].threshold_used is None
     assert out[0].load_bearing_tags == ()
+
+
+# --------------------------------------------------------------------------- #
+# The attribution walks the SAME precedence as resolve_applicabilities
+# --------------------------------------------------------------------------- #
+def _cond(tag: str, value: str, op: str = "eq") -> TagCondition:
+    return TagCondition(tag=tag, op=op, value=value)
+
+
+def test_a_later_scope_false_predicate_beats_an_earlier_unknown_document_type() -> None:
+    # LP-640 review — `resolve_applicabilities` evaluates EVERY predicate before answering, because
+    # scope-false beats data-missing WHEREVER it appears, including after the undetermined one. The
+    # attribution has to walk the same way: returning on the FIRST undetermined predicate answers
+    # "consolidatable" for a subject the resolver calls not_applicable, folding an out-of-scope subject
+    # into "identify these files". Both callers happen to pre-gate on the verdict today, which hides it.
+    conditions = [
+        _cond(DOC_TYPE_TAG, "title_commitment"),  # unknown → undetermined, and FIRST
+        _cond("txn.is_money_in", "yes"),  # definitely false → the subject is OUT OF SCOPE
+    ]
+    subject_tags = {DOC_TYPE_TAG: _tag("unknown"), "txn.is_money_in": _tag("no")}
+
+    assert resolve_applicabilities(conditions, subject_tags) == (
+        Verdict.NOT_APPLICABLE,
+        # the resolver's own answer — nothing here is waiting on an identification
+        "the rule does not apply to this subject (txn.is_money_in eq 'yes' is false)",
+    )
+    assert undetermined_by_document_type(conditions, subject_tags) is False
+
+
+def test_the_document_type_is_the_cause_only_when_it_abstains_first() -> None:
+    # The precedence itself, both directions: the FIRST undetermined predicate is the reported cause,
+    # exactly as `resolve_applicabilities` reports ITS reason, so an AS-1-shaped abstention on another
+    # fact keeps its own finding even when the rule also declares a document type.
+    doc_first = [_cond(DOC_TYPE_TAG, "title_commitment"), _cond("txn.is_money_in", "yes")]
+    fact_first = [_cond("txn.is_money_in", "yes"), _cond(DOC_TYPE_TAG, "title_commitment")]
+    both_undetermined = {DOC_TYPE_TAG: _tag("unknown")}  # txn.is_money_in is ABSENT
+
+    assert undetermined_by_document_type(doc_first, both_undetermined) is True
+    assert undetermined_by_document_type(fact_first, both_undetermined) is False

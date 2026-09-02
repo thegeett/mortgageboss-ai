@@ -53,6 +53,7 @@ from app.services.needs_engine import (
 from app.services.needs_from_findings import seed_needs_from_findings
 from app.services.needs_prose import compose_needs
 from app.services.rule_findings import (
+    UNIDENTIFIED_DOCUMENTS_RULE_ID,
     ReconcileRunResult,
     reconcile_evaluation_findings,
     repair_retired_finding_text,
@@ -576,6 +577,14 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
             )
         if degraded[enumeration]:
             eligible.discard(rule_id)
+    # LP-640 — the CONSOLIDATED unidentified-document row (a synthetic id, not an active rule) retires
+    # under the same test as the per_document rules it stands in for: only on a run that could
+    # actually SEE the documents. It is not detected on two opposite kinds of run — the documents got
+    # typed (retire, correctly) and the documents section failed to build, where nothing enumerated so
+    # nothing could be attributed. Eligible only on the healthy one; retiring on the degraded one
+    # would turn "3 documents could not be identified" green on a run that never looked at a document.
+    if enumerate_subjects("per_document", snapshot):
+        eligible.add(UNIDENTIFIED_DOCUMENTS_RULE_ID)
     return frozenset(eligible)
 
 
@@ -674,6 +683,29 @@ def _collapse_uniform_passes(
 
     collapsed: list[RuleEvaluation] = []
     for rule_id, group in by_rule.items():
+        # LP-640 — AN UNIDENTIFIED-DOCUMENT ABSTENTION BELONGS TO THE CONSOLIDATED ROW, NOT TO THIS
+        # COLLAPSE. Both mechanisms answer "N subjects, one sentence", and this one runs first, so
+        # without this the per-rule collapse wins and LP-640 never sees the rows: RE-1 is
+        # `per_document` with a `document.document_type` predicate AND declares
+        # `collapse_uniform: {unresolved: true}`, so N unidentified documents give it N uniform
+        # couldnt_checks with byte-identical reasoning, which collapse into one loan-level row. The
+        # `RuleEvaluation` built below never sets `unidentified_document` (the bug-007 drop-by-omission
+        # its own comment warns about), so that row reaches `consolidate_unidentified_documents`
+        # looking like an ordinary abstention and keeps a SEPARATE queue item asking the same
+        # "identify these files" question the consolidated row asks — while the consolidated row's
+        # blocked-check count silently omits every check this rule was waiting to run.
+        #
+        # Carrying the flag through the collapse instead would be WRONG: the collapsed row's
+        # `subject_id` is `LOAN_SUBJECT`, and `consolidate_unidentified_documents` reads `subject_id`
+        # as a document content id — so "loan" would be counted and listed as one of the unidentified
+        # documents. These pass through whole; LP-640 then collapses them across ALL rules, which is
+        # the strictly better row.
+        blocked_on_identity = [r for r in group if r.unidentified_document]
+        if blocked_on_identity:
+            collapsed.extend(blocked_on_identity)
+            group = [r for r in group if not r.unidentified_document]
+            if not group:
+                continue
         try:
             spec = load_rule_spec(rule_id)
         except RuleSpecNotFound:

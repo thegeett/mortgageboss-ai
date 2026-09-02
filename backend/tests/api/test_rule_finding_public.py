@@ -105,3 +105,24 @@ def test_category_comes_from_the_rule_spec_not_the_legacy_enum() -> None:
     for rule_id, expected in cases.items():
         pub = _public(_finding(rule_id, EvaluationOutcome.NEEDS_REVIEW))
         assert pub.category == expected, f"{rule_id} → {pub.category!r}, expected {expected!r}"
+
+
+# --------------------------------------------------------------------------- #
+# A rule id with NO SPEC FILE — the read path must render it, not 500
+# --------------------------------------------------------------------------- #
+def test_a_finding_whose_rule_has_no_spec_still_renders() -> None:
+    # LP-640 review — `_rule_spec` promised None for "a retired/legacy rule_id with no spec file" and
+    # did not deliver it: `load_rule_spec` raises RuleSpecNotFound, which is NOT an OSError/KeyError/
+    # ValueError, so the exception went straight through `from_model` and 500'd the whole
+    # verification-status response for the file. LP-640's consolidated `UNIDENTIFIED-DOCUMENTS` row
+    # carries no spec BY DESIGN, which made that reachable on any file with an unidentified document.
+    finding = _finding("UNIDENTIFIED-DOCUMENTS", EvaluationOutcome.COULDNT_CHECK)
+    finding.category = FindingCategory.DOCUMENTATION
+    pub = _public(finding)
+
+    assert pub.rule_id == "UNIDENTIFIED-DOCUMENTS"
+    assert pub.rule_name is None  # the UI falls back to the id
+    assert pub.guideline is None
+    assert pub.category == FindingCategory.DOCUMENTATION.value  # its STORED category, not a spec's
+    assert pub.ratification_pending is False
+    assert pub.missing_documents == []

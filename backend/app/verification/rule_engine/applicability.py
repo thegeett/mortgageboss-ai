@@ -124,14 +124,23 @@ def undetermined_by_document_type(
     would tell a processor to do the wrong thing. So this re-walks the predicates rather than asking
     the cheaper question "does this rule mention a document type at all".
     """
+    # THE SAME WALK, NOT A SHORTER ONE. `resolve_applicabilities` evaluates EVERY predicate before it
+    # answers, because scope-false beats data-missing wherever it appears — including AFTER the
+    # undetermined one. Returning on the first undetermined predicate would answer True for a subject
+    # `resolve_applicabilities` calls not_applicable (predicates ordered [document_type unknown,
+    # txn.is_money_in definitely false]) and fold an out-of-scope subject into "identify these files".
+    # Today both callers pre-gate on the verdict already being couldnt_check, which hides that; the
+    # function has to be right on its own, since its whole purpose is to re-derive that precedence.
+    cause: str | None = None  # the tag_id of the FIRST undetermined predicate — the reason reported
     for applic in applics:
         terminal = resolve_applicability(applic, subject_tags, loan_tags)
         if terminal is None:
             continue
         if terminal[0] is Verdict.NOT_APPLICABLE:
             return False  # scope-false wins outright — there is no abstention to consolidate
-        return applic.tag_id == DOC_TYPE_TAG  # the FIRST undetermined predicate is the cause
-    return False
+        if cause is None:
+            cause = applic.tag_id
+    return cause == DOC_TYPE_TAG
 
 
 # The subject_id a missing-document couldnt_check is keyed under — a STABLE identity per (rule, type),
