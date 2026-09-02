@@ -11,7 +11,7 @@ identical, ACTIVE_RULE_IDS unchanged) is the existing verification tests staying
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.verification.snapshot import documents_section as ds
@@ -75,7 +75,9 @@ def _registered(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _rows(document_content_id: str = "docABC") -> tuple[ListRow, ...]:
-    drafts = build_list_rows(_EXTRACTED, "demo_stmt")
+    drafts = build_list_rows(
+        _EXTRACTED, "demo_stmt", loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0")
+    )
     return finalize_lists(drafts, document_content_id=document_content_id)["activity"]
 
 
@@ -141,7 +143,11 @@ def test_stable_row_id_is_stable_distinct_and_guard_safe(_registered: None) -> N
 def test_row_id_is_none_when_not_declared(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = ListSpec(name="plain", fields=("a",), stable_row_id=False)
     monkeypatch.setitem(ds._LIST_SPECS, "plain_doc", (spec,))
-    drafts = build_list_rows({"plain": [{"a": "x"}]}, "plain_doc")
+    drafts = build_list_rows(
+        {"plain": [{"a": "x"}]},
+        "plain_doc",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
     rows = finalize_lists(drafts, document_content_id="docX")["plain"]
     assert rows[0].row_id is None  # aggregate-only list → no per-row id
 
@@ -150,7 +156,9 @@ def test_all_absent_row_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = ListSpec(name="rows", fields=("a", "b"))
     monkeypatch.setitem(ds._LIST_SPECS, "d", (spec,))
     extracted = {"rows": [{"a": None, "b": None}, {"a": "kept"}]}
-    drafts = build_list_rows(extracted, "d")
+    drafts = build_list_rows(
+        extracted, "d", loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0")
+    )
     rows = finalize_lists(drafts, document_content_id="docX")["rows"]
     assert (
         len(rows) == 1 and rows[0].fields["a"].value == "kept"
@@ -164,8 +172,19 @@ def test_only_wired_types_get_lists() -> None:
     # LP-443 wires generic lists for the batch (bank_statement + the generated list-bearing types);
     # a document type with NO wired list still gets {} (additive — nothing changes for it).
     assert "bank_statement" in ds._LIST_SPECS  # the first wired list
-    assert build_list_rows({"transactions": [{"date": "x"}]}, "w2") == {}  # no wired list → {}
-    assert "transactions" in build_list_rows({"transactions": [{"date": "x"}]}, "bank_statement")
+    assert (
+        build_list_rows(
+            {"transactions": [{"date": "x"}]},
+            "w2",
+            loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+        )
+        == {}
+    )  # no wired list → {}
+    assert "transactions" in build_list_rows(
+        {"transactions": [{"date": "x"}]},
+        "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
 
 
 def test_legacy_transactions_still_populate_and_coexist_with_lists(_registered: None) -> None:
@@ -178,6 +197,7 @@ def test_legacy_transactions_still_populate_and_coexist_with_lists(_registered: 
             ]
         },
         "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
     )
     txns = build_transactions(field_sets, document_content_id="docT")
     entry = DocumentEntry(

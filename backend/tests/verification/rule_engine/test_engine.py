@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.verification.rule_engine.engine import evaluate_as1_rule
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
@@ -56,7 +56,11 @@ def _snapshot(
         {"date": "2026-05-05", "amount": amt, "description": "DEP", "transaction_type": tt}
         for (amt, _mi, _src, tt) in deposits
     ]
-    field_sets = transaction_field_sets({"transactions": raw}, "bank_statement")
+    field_sets = transaction_field_sets(
+        {"transactions": raw},
+        "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
     txns = build_transactions(field_sets, document_content_id=_DOC)
     assert txns is not None
 

@@ -2993,8 +2993,12 @@ def _credit_tradeline_monthly_payment_total(
     total = Decimal(0)
     seen = False
     for row in rows:
+        # bug-010 — a row field can be a `PiiField` where its list declares one (`ListSpec.pii`), and
+        # a masked field holds a display, not a value. `monthly_payment` is never declared sensitive —
+        # an amount is not an identifier — so the narrow is a type guard, not a behaviour change: it
+        # cannot skip a payment that exists.
         field = row.fields.get("monthly_payment")
-        if field is not None and field.is_present and field.value is not None:
+        if isinstance(field, Field) and field.is_present and field.value is not None:
             try:
                 total += Decimal(str(field.value))
                 seen = True

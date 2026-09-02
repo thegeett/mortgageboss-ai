@@ -168,7 +168,20 @@ class TransactionRecord(BaseModel):
     # statement shows one. ADDITIVE with a default, the LP-421 precedent, so SNAPSHOT_VERSION is not
     # bumped and existing fixtures still validate. Deliberately NOT part of the content id — see
     # `_IDENTITY_EXCLUDED_TXN_FIELDS` in documents_section.
-    originator_id: Field | None = None
+    #
+    # bug-010 — A `PiiField` NOW, AND THE UNION IS A READ SHIM, NOT A CHOICE. A PPD ID is a bare
+    # 10-digit run, which is exactly what the LP-209 at-rest guard refuses; carrying it as a plain
+    # `Field.value` cost staging EVERY snapshot for a week (36 rows, none newer than 2026-08-25).
+    # It is written as a `PiiField` from bug-010 on — masked display plus the per-file match hash,
+    # which is all this field was ever for (equality across statements, never display).
+    #
+    # `Field` stays in the union to READ what is already stored. Six persisted staging snapshots
+    # carry the old `Field` shape — all six ABSENT (`{"value": null, …, "absent": true}`), because a
+    # PRESENT one could never have persisted: the guard refused every snapshot that held one. That
+    # shape is still incompatible: `PiiField` forbids extras, so `value` alone rejects it, and
+    # `load_snapshot` validates strictly — narrowing would make those six unloadable for the sake of
+    # a value none of them holds. Nothing writes the `Field` arm any more.
+    originator_id: SnapshotField | None = None
 
 
 class ScheduleCRecord(BaseModel):
@@ -239,7 +252,16 @@ class ListRow(BaseModel):
 
     model_config = {"frozen": True}
 
-    fields: dict[str, Field]
+    # bug-010 — `SnapshotField`, matching `DocumentEntry.fields`, so a declared row field can be
+    # routed through `PiiField` (see `ListSpec.pii`). A list row is where the at-rest guard's known
+    # blind spot lives: `_PII_FIELDS` is consulted only for a document's FLAT keys, so a sensitive
+    # value inside a row had no route at all and reached the guard raw.
+    #
+    # CHANGING A ROW FIELD'S SHAPE MOVES ITS `row_id`, which is derived from the whole row. That is
+    # inert for a list nothing ENUMERATES and destructive for one that is enumerated — a moved
+    # subject id retires every finding on the old key and mints it again, stranding a processor's
+    # sign-off. `stable_row_id` marks which lists are at risk; see `ListSpec.pii`.
+    fields: dict[str, SnapshotField]
     row_id: str | None = None
 
 

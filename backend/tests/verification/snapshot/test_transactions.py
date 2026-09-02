@@ -10,7 +10,7 @@ from absent); non-bank doc → absent; and a lossless JSON round-trip (persist g
 """
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.verification.snapshot.documents_section import (
@@ -40,7 +40,9 @@ def _txns(
 ) -> tuple[TransactionRecord, ...] | None:
     """Reshape + build transactions for a document (LP-312 two-step API)."""
     return build_transactions(
-        transaction_field_sets(extracted, document_type),
+        transaction_field_sets(
+            extracted, document_type, loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0")
+        ),
         document_content_id=document_content_id,
     )
 

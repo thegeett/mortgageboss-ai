@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.ai.tag_production import AIClientError, StageAResult, TagJudgment, TransactionJudgment
 from app.services.tag_production import (
@@ -92,7 +92,11 @@ def _txn(**kw: Any) -> dict[str, Any]:
 
 
 def _snapshot(raw_txns: list[dict[str, Any]], *, doc_id: str = "docstmt0000000000") -> Snapshot:
-    field_sets = transaction_field_sets({"transactions": raw_txns}, "bank_statement")
+    field_sets = transaction_field_sets(
+        {"transactions": raw_txns},
+        "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
     txns = build_transactions(field_sets, document_content_id=doc_id)
     entry = DocumentEntry(content_id=doc_id, document_type="bank_statement", transactions=txns)
     return Snapshot(

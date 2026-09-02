@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.verification.rule_engine.engine import evaluate_as1_rule
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
@@ -86,6 +86,7 @@ def _evaluate(
                 ]
             },
             "bank_statement",
+            loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
         ),
         document_content_id=_DOC,
     )
@@ -176,6 +177,7 @@ def test_unparseable_income_is_couldnt_check() -> None:
         transaction_field_sets(
             {"transactions": [{"date": "2026-05-05", "amount": "1", "description": "D"}]},
             "bank_statement",
+            loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
         ),
         document_content_id=_DOC,
     )

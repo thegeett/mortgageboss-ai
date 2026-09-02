@@ -85,7 +85,11 @@ def test_content_fingerprint_is_stable() -> None:
 
 
 def _sets(txns: list[dict[str, Any]]) -> list[TransactionFieldSet]:
-    fs = transaction_field_sets({"transactions": txns}, "bank_statement")
+    fs = transaction_field_sets(
+        {"transactions": txns},
+        "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
     assert fs is not None
     return fs
 

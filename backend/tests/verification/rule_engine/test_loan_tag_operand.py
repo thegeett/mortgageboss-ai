@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.verification.rule_engine.deterministic import (
@@ -65,6 +65,7 @@ def _deposit_snapshot(
                 ]
             },
             "bank_statement",
+            loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
         ),
         document_content_id=_DOC,
     )

@@ -11,12 +11,17 @@ that downgrades SUCCEEDED→PARTIAL when the model drops rows it declared. Nothi
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
 from app.ai.extraction.appraisal import _parse_appraisal_json
 from app.ai.extraction.bank_statement import _parse_bank_statement_json
 from app.models.extraction import ExtractionStatus
 from app.verification.snapshot import documents_section as ds
 from app.verification.snapshot.fields import FieldSource
+
+# bug-010 — the per-file salt a masked row field is hashed with. Fixed, so a rebuilt row is
+# byte-identical run to run.
+_LF = UUID("00000000-0000-0000-0000-00000000f1e0")
 
 _BANK_JSON = json.dumps(
     {
@@ -62,7 +67,9 @@ def _bank_extracted() -> dict:
 # --------------------------------------------------------------------------- #
 def test_bank_statement_transactions_land_in_generic_lists() -> None:
     extracted = _bank_extracted()
-    drafts = ds.build_list_rows(extracted, "bank_statement")
+    drafts = ds.build_list_rows(
+        extracted, "bank_statement", loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0")
+    )
     rows = ds.finalize_lists(drafts, document_content_id="docBANK")["transactions"]
     assert len(rows) == 2  # both rows captured — the hole is closed
     r0 = rows[0].fields
@@ -87,7 +94,9 @@ def test_bare_row_field_confidence_is_none() -> None:
 # --------------------------------------------------------------------------- #
 def test_legacy_transactions_coexist_unchanged() -> None:
     extracted = _bank_extracted()
-    field_sets = ds.transaction_field_sets(extracted, "bank_statement")
+    field_sets = ds.transaction_field_sets(
+        extracted, "bank_statement", loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0")
+    )
     assert field_sets is not None and len(field_sets) == 2
     txns = ds.build_transactions(field_sets, document_content_id="docBANK")
     assert txns is not None and len(txns) == 2
@@ -165,13 +174,16 @@ def test_reserved_source_field_is_never_surfaced() -> None:
     # key). The snapshot must NEVER surface it as a data Field, regardless of the ListSpec declaration —
     # else every such list carries a junk `source` Field holding the provenance value.
     spec = ds.ListSpec(name="probe", fields=("amount", "source"))
-    fields = ds._list_row_fields({"amount": "100.00", "source": "junk-or-provenance"}, spec)
+    fields = ds._list_row_fields(
+        {"amount": "100.00", "source": "junk-or-provenance"}, spec, loan_file_id=_LF
+    )
     assert "amount" in fields and fields["amount"].value == "100.00"
     assert "source" not in fields  # reserved key skipped
     # And on a real source-bearing shipping list (security_positions), no `source` Field surfaces.
     real = ds._list_row_fields(
         {"description": "VANGUARD 500", "market_value": "1000", "source": "x"},
         ds._SECURITY_POSITIONS_LIST,
+        loan_file_id=_LF,
     )
     assert "source" not in real and real["description"].value == "VANGUARD 500"
 
@@ -197,7 +209,11 @@ def test_list_row_pii_has_a_redact_backstop() -> None:
     assert unguarded == set(), f"list-row PII fields with no redact backstop: {unguarded}"
 
     # End to end: a leaked full account number is scrubbed; a genuinely-masked value survives.
-    leaked = ds._list_row_fields({"account_number_masked": "4111111111111111"}, ds._TRADELINES_LIST)
-    masked = ds._list_row_fields({"account_number_masked": "****1111"}, ds._TRADELINES_LIST)
+    leaked = ds._list_row_fields(
+        {"account_number_masked": "4111111111111111"}, ds._TRADELINES_LIST, loan_file_id=_LF
+    )
+    masked = ds._list_row_fields(
+        {"account_number_masked": "****1111"}, ds._TRADELINES_LIST, loan_file_id=_LF
+    )
     assert leaked["account_number_masked"].value == "[redacted]"  # a masking miss is scrubbed
     assert masked["account_number_masked"].value == "****1111"  # a real mask is preserved
