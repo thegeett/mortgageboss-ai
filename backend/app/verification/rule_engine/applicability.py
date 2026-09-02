@@ -104,6 +104,36 @@ def resolve_applicabilities(
     return undetermined
 
 
+def undetermined_by_document_type(
+    applics: Sequence[TagCondition],
+    subject_tags: Mapping[str, Tag],
+    loan_tags: Mapping[str, Tag] | None = None,
+) -> bool:
+    """LP-640 — was this subject's ``couldnt_check`` caused by an UNIDENTIFIED DOCUMENT?
+
+    True only when :func:`resolve_applicabilities` would abstain AND the predicate it abstained on is
+    the document-type one — i.e. the rule cannot tell whether it applies because nobody knows what the
+    document IS. That is the one abstention cause whose remedy is identical across every rule that
+    reports it ("identify this file"), which is what makes it safe to consolidate into a single
+    processor-facing finding.
+
+    ⚠️ ATTRIBUTED, NOT ASSUMED. A rule's scope is often a conjunction (LP-517), and only ONE of its
+    predicates is the undetermined one — the same precedence :func:`resolve_applicabilities` uses. A
+    rule that abstains on ``txn.is_money_in`` while also declaring a document-type predicate is NOT
+    consolidatable: its remedy is a different fact, and folding it into "identify these documents"
+    would tell a processor to do the wrong thing. So this re-walks the predicates rather than asking
+    the cheaper question "does this rule mention a document type at all".
+    """
+    for applic in applics:
+        terminal = resolve_applicability(applic, subject_tags, loan_tags)
+        if terminal is None:
+            continue
+        if terminal[0] is Verdict.NOT_APPLICABLE:
+            return False  # scope-false wins outright — there is no abstention to consolidate
+        return applic.tag_id == DOC_TYPE_TAG  # the FIRST undetermined predicate is the cause
+    return False
+
+
 # The subject_id a missing-document couldnt_check is keyed under — a STABLE identity per (rule, type),
 # so cross-run reconciliation carries it forward / retires it when the document appears.
 def missing_document_subject_id(applic: TagCondition) -> str:
@@ -152,4 +182,5 @@ __all__ = [
     "missing_document_subject_id",
     "resolve_applicabilities",
     "resolve_applicability",
+    "undetermined_by_document_type",
 ]

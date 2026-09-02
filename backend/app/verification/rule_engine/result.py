@@ -132,3 +132,14 @@ class RuleEvaluation:
     # Set ONLY by an evaluator that knows the answer for THIS subject; the read path falls back to the
     # spec-derived list when it is empty, so every rule that was already right stays unchanged.
     requested_documents: tuple[str, ...] = ()
+    # LP-640 — this abstention is "we do not know what that document IS", not "we looked and the fact is
+    # missing". Set only on a COULDNT_CHECK whose applicability abstained on the DOCUMENT-TYPE predicate
+    # (see `undetermined_by_document_type`).
+    #
+    # WHY A FLAG RATHER THAN READING THE MESSAGE. Every rule needing a typed field from an unidentified
+    # document abstains on it, so ONE unidentified file cost 22 queue rows on LF-ZE9N and three of them
+    # cost 66 of 148. They are one task to a processor ("identify these files"), and the persistence
+    # layer collapses them into one finding — but only a structured cause can tell them apart from an
+    # abstention that happens to mention a document. The verdict itself is unchanged: every one of these
+    # is still COULDNT_CHECK, so no blocked rule can ever read as satisfied (the LP-391 silence trap).
+    unidentified_document: bool = False

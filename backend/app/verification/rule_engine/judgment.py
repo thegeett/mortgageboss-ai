@@ -36,6 +36,7 @@ from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
     missing_document_subject_id,
     resolve_applicabilities,
+    undetermined_by_document_type,
 )
 from app.verification.rule_engine.deterministic import (
     _loan_tags,
@@ -120,6 +121,7 @@ def _result(
     ratification_pending: bool = True,
     how_to_fix: str | None = None,
     derivation: str | None = None,
+    unidentified_document: bool = False,
 ) -> RuleEvaluation:
     """A ratification-pending RuleEvaluation carrying the structural tags inline (provenance).
 
@@ -154,6 +156,8 @@ def _result(
             if spec.judgment is not None and verdict in (Verdict.FIRED, Verdict.NEEDS_REVIEW)
             else None
         ),
+        # LP-640 — only the applicability path passes True; every other judgment outcome leaves it False.
+        unidentified_document=unidentified_document,
     )
 
 
@@ -600,13 +604,27 @@ async def _evaluate_one_subject(
     #    nothing (no gate, no AI, no tag). §8: out-of-scope → not_applicable; an absent/"unknown"
     #    predicate → couldnt_check — the two must never collapse.
     if jud.applicability is not None:
-        terminal = resolve_applicabilities(
-            _as_conditions(jud.applicability), subject_tags, loan_tags
-        )
+        conditions = _as_conditions(jud.applicability)
+        terminal = resolve_applicabilities(conditions, subject_tags, loan_tags)
         if terminal is not None:
             verdict, reason = terminal
             return JudgmentEvaluation(
-                None, _result(spec, subject_id, verdict, reason, jud.reasoned_over, subject_tags)
+                None,
+                _result(
+                    spec,
+                    subject_id,
+                    verdict,
+                    reason,
+                    jud.reasoned_over,
+                    subject_tags,
+                    # LP-640 — same attribution as the deterministic path: only a DOCUMENT-TYPE
+                    # abstention consolidates. A judgment rule reaches here before any AI call, so a
+                    # consolidated subject costs no model spend either.
+                    unidentified_document=(
+                        verdict is Verdict.COULDNT_CHECK
+                        and undetermined_by_document_type(conditions, subject_tags, loan_tags)
+                    ),
+                ),
             )
 
     # 0.5 Declared MATERIALITY floor (LP-518) — still BEFORE the gate and the AI call, so a deposit too
