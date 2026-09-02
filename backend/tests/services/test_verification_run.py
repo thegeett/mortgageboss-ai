@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from app.ai.client import AIClientError
 from app.models import Company, EvaluationOutcome
 from app.services.loan_files import create_loan_file
+from app.services.rule_findings import UNIDENTIFIED_DOCUMENTS_RULE_ID
 from app.services.verification_run import (
     Reasoners,
     TagCaches,
@@ -465,6 +466,19 @@ def test_retire_eligible_excludes_as1_when_the_documents_section_is_degraded() -
     eligible = _retire_eligible_rules(degraded)
     assert "AS-1" not in eligible  # not retire-eligible on a degraded documents section
     assert "OC-2" in eligible
+
+
+def test_retire_eligible_excludes_the_consolidated_row_on_a_degraded_documents_section() -> None:
+    # LP-640 review — the consolidated unidentified-document row is not detected on two OPPOSITE runs:
+    # the documents finally got typed (retire, correctly) and the documents section failed to build, so
+    # nothing enumerated and nothing could be attributed. Retiring on the second turns "3 documents
+    # could not be identified" GREEN on a run that never looked at a document — the false-closed this
+    # whole gate exists to prevent. It rides with the per_document rules it stands in for.
+    healthy = _snapshot(_TXNS, uuid4())
+    assert UNIDENTIFIED_DOCUMENTS_RULE_ID in _retire_eligible_rules(healthy)
+
+    degraded = healthy.model_copy(update={"documents": DocumentsSection.failed("build failed")})
+    assert UNIDENTIFIED_DOCUMENTS_RULE_ID not in _retire_eligible_rules(degraded)
 
 
 def _doc_snapshot(entries: list[DocumentEntry]) -> Snapshot:

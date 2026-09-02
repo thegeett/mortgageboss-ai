@@ -35,7 +35,18 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.finding_event import FindingEvent, FindingEventType
+from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
+
+# LP-640 — the identity of the consolidated unidentified-document finding. NOT a rule id: no spec
+# file carries it, so the read path must TOLERATE a spec-less id — `schemas.verification._rule_spec`
+# returns None for one (it had to be taught to catch `RuleSpecError` to do so; it claimed the
+# tolerance and did not have it) and the UI falls back to the id itself. Deliberately not shaped like
+# `XX-9` so nobody reads it as a rule that someone forgot to write.
+#
+# PUBLIC because the caller has to name it: retirement is gated per rule, and this row's eligibility
+# is the caller's answer about the DOCUMENT domain's health (see `reconcile_evaluation_findings`).
+UNIDENTIFIED_DOCUMENTS_RULE_ID = "UNIDENTIFIED-DOCUMENTS"
 
 _SOURCE_STRENGTH_TAG = "txn.source_strength"
 _HAS_SOURCE_TAG = "txn.has_identified_source"
@@ -147,6 +158,68 @@ def _resolving_tags(result: RuleEvaluation) -> list[dict[str, object]]:
 
 # The validated (result, outcome, severity, message) tuples ready to persist (not_applicable skipped).
 _Persistable = tuple[RuleEvaluation, EvaluationOutcome, FindingStatus, str]
+
+
+def consolidate_unidentified_documents(results: list[RuleEvaluation]) -> list[RuleEvaluation]:
+    """LP-640 — collapse every "we do not know what that document is" abstention into ONE finding.
+
+    A rule that needs a typed field from an unidentified document abstains on it. Every such rule
+    abstains on the SAME document, so on LF-ZE9N three unidentified files produced **66 of the 148
+    items in the processor's queue** — 22 rules x 3 documents, each row asking the identical question
+    and each carrying the identical remedy. To a processor that is one task: identify these files.
+
+    Returns the results with those abstentions replaced by a single loan-level evaluation naming the
+    documents and the number of blocked checks. Everything else passes through untouched, in order.
+
+    ⚠️ THE VERDICT IS UNCHANGED — this collapses the QUEUE, never the conclusion. The consolidated
+    evaluation is still ``COULDNT_CHECK``, so the file still reads as "these checks did not run". The
+    trap on the other side is the one ``pending_checks`` (LP-391) already names: *a BLOCKED rule runs
+    NOTHING, so a file that qualifies for it produces SILENCE, which reads as "checked, nothing found"
+    when it is really "didn't look"*. Dropping these rows outright would recreate exactly that — IN-8
+    would show nothing while the VOE sat unread in an unidentified PDF. One honest blocking row is the
+    whole point; zero rows would be a regression, not an improvement.
+
+    STABLE IDENTITY. ``(UNIDENTIFIED_DOCUMENTS_RULE_ID, "loan")`` is one row per loan file under the
+    findings uniqueness index, so cross-run reconciliation carries it forward while documents stay
+    unidentified and retires it to ``no_longer_applies`` the moment the last one is typed — the same
+    lifecycle every other finding gets, with no special-casing in the reconciler.
+    """
+    blocked = [r for r in results if r.unidentified_document]
+    if not blocked:
+        return results
+
+    # Distinct documents, order-preserving — the subject of a per-document rule IS its content_id.
+    document_ids = tuple(dict.fromkeys(r.subject_id for r in blocked))
+    count = len(document_ids)
+    noun = "document" if count == 1 else "documents"
+    consolidated = RuleEvaluation(
+        rule_id=UNIDENTIFIED_DOCUMENTS_RULE_ID,
+        subject_id=LOAN_SUBJECT,
+        verdict=Verdict.COULDNT_CHECK,
+        verdict_confidence=None,
+        load_bearing_tags=(),
+        threshold_used=None,
+        # Not a threshold rule at all; there is nothing for Priya to have validated, and claiming
+        # otherwise would put a false badge on the one finding a processor is most likely to read.
+        priya_validated=False,
+        gated_pending_signoff=False,
+        reasoning=(
+            f"{count} {noun} in this file could not be identified, "
+            f"so {len(blocked)} checks that need one could not run."
+        ),
+        how_to_fix=(
+            f"Identify {'it' if count == 1 else 'each one'} — set the document type, "
+            "or re-upload a clearer copy."
+        ),
+        # LP-617 — link the actual documents, so the row a processor opens lists the files to fix
+        # rather than making them hunt. This is why the consolidated row can be loan-level and still
+        # be actionable.
+        source_content_ids=document_ids,
+    )
+
+    out: list[RuleEvaluation] = [r for r in results if not r.unidentified_document]
+    out.append(consolidated)
+    return out
 
 
 def _persistable(results: list[RuleEvaluation]) -> list[_Persistable]:
@@ -294,7 +367,9 @@ async def persist_evaluation_findings(
     """
     doc_id_map = document_id_by_content_id or {}
     outcomes: list[tuple[Finding, EvaluationOutcome]] = []
-    for result, outcome, severity, message in _persistable(results):
+    for result, outcome, severity, message in _persistable(
+        consolidate_unidentified_documents(results)
+    ):
         finding = _build_finding(
             loan_file_id=loan_file_id,
             verification_id=verification_id,
@@ -302,7 +377,14 @@ async def persist_evaluation_findings(
             outcome=outcome,
             severity=severity,
             message=message,
-            category=category,
+            # LP-640 — the consolidated row is about DOCUMENTS wherever it is written. This path takes
+            # one category for the whole batch, so without this it files under the caller's default
+            # (ASSETS) while the reconciler files the identical row under DOCUMENTATION.
+            category=(
+                FindingCategory.DOCUMENTATION
+                if result.rule_id == UNIDENTIFIED_DOCUMENTS_RULE_ID
+                else category
+            ),
             document_id_by_content_id=doc_id_map,
         )
         db.add(finding)
@@ -401,13 +483,44 @@ async def reconcile_evaluation_findings(
     "the subject is gone", and retiring on it would flip real open findings to green (false-closed).
     """
     doc_id_map = document_id_by_content_id or {}
-    retire_eligible = (
-        retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
-    )
-    persistable = _persistable(results)  # validate all BEFORE any write (empty-reasoning refusal)
+    # LP-640 — consolidate BEFORE validation/matching, so the suppressed per-rule abstentions are
+    # simply "not detected this run" and the reconciler retires their prior findings through the
+    # ordinary immortality path (visible, labeled `no_longer_applies`) with no special case here.
+    persistable = _persistable(
+        consolidate_unidentified_documents(results)
+    )  # validate all BEFORE any write (empty-reasoning refusal)
     this_by_identity: dict[tuple[str, str], _Persistable] = {
         (result.rule_id, result.subject_id): (result, outcome, severity, message)
         for result, outcome, severity, message in persistable
+    }
+
+    # LP-640 — the consolidated finding must live the SAME lifecycle as every other one, and three
+    # collaborators here are keyed by rule id, so its synthetic id has to join all three.
+    #
+    # Each of the three fails differently if skipped, so none is redundant:
+    #   * `evaluated_rule_ids` gates `_load_prior_findings` — omitted, the prior row is never loaded,
+    #     so every run MINTS a new one and the second collides on `uq_findings_loan_file_rule_subject`.
+    #     UNCONDITIONAL: the run that must RETIRE the row is precisely the run that consolidates
+    #     nothing (the processor typed the last document), and it has to be LOADED to be retired.
+    #   * `retire_eligible` gates the retire loop — but NOT unconditionally, which is the one place
+    #     this row must not differ from a per-document rule. "Nothing consolidated" has two causes and
+    #     they are opposites: the documents got typed (retire), or the DOCUMENTS SECTION FAILED TO
+    #     BUILD, so every per-document rule saw zero subjects and nothing could be attributed
+    #     (do not retire). `_retire_eligible_rules` excludes every per_document rule on exactly that
+    #     run for exactly that reason; retiring this row there would turn "3 documents could not be
+    #     identified" green on a run that never looked at a document — the false-closed the whole
+    #     `retire_eligible_rule_ids` mechanism exists to prevent. So the CALLER decides, the same way
+    #     it decides for the rules this row stands in for; the no-argument default (every evaluated
+    #     rule is eligible) keeps the id in, unchanged.
+    #   * `category_by_rule` — omitted, it files under the ASSETS fallback AND trips LP-595's
+    #     `finding_category_unresolved` warning, which exists to catch exactly this kind of misfiling.
+    evaluated_rule_ids = evaluated_rule_ids | {UNIDENTIFIED_DOCUMENTS_RULE_ID}
+    retire_eligible = (
+        retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
+    )
+    category_by_rule = {
+        **category_by_rule,
+        UNIDENTIFIED_DOCUMENTS_RULE_ID: FindingCategory.DOCUMENTATION,
     }
 
     prior = await _load_prior_findings(db, loan_file_id, evaluated_rule_ids)
@@ -602,7 +715,9 @@ async def repair_retired_finding_text(db: AsyncSession, loan_file_id: UUID) -> i
 
 
 __all__ = [
+    "UNIDENTIFIED_DOCUMENTS_RULE_ID",
     "ReconcileRunResult",
+    "consolidate_unidentified_documents",
     "outcome_for_verdict",
     "persist_evaluation_findings",
     "reconcile_evaluation_findings",
