@@ -739,3 +739,58 @@ instead of being retrofitted.
 **Week 9** — 036, 037.
 
 Epic G when its phase lands.
+
+---
+
+## Epic H — Narrow widths, added after the epic
+
+### LP-UI-047 — Below `md`, degrade honestly
+**Size** M · **Depends on** 037 · **Mockup** none — this is a behaviour ticket, not a screen
+
+ADR-394 committed to 1280+ designed and 1024–1280 supported, and explicitly claimed
+no phone layout. That was the right call and it is not the same as *rendering
+badly*: the goal here is that a phone gets an honest, degraded, readable app rather
+than something that looks broken. **No new mobile workflow is being added.** Nobody
+is expected to review documents on a phone.
+
+Four things are wrong at ~390px. The first three were read out of the source; the
+fourth needs measuring before it is fixed or dismissed.
+
+**1. The reviewer renders three columns at every width.** `reviewer-shell.tsx`
+is `<div className="flex h-full min-h-0 w-full">` with no breakpoint anywhere —
+document list, page canvas and fields pane sit side by side with percentage widths
+and two drag dividers. At 390px that is three ~130px columns. Below `lg` it should
+be one column: the fields pane is the readable half and the canvas belongs above or
+behind it. The dividers and the persisted split are desktop affordances and should
+not render when there is nothing to split.
+
+**2. `verification-stats.tsx:57` is `grid grid-cols-5` at base** — five stat tiles
+at ~70px each on a phone, each carrying a number and an uppercase label.
+
+**3. `add-need-dialog.tsx:114` is `grid grid-cols-2` at base** — two form fields
+side by side inside a dialog, on the narrowest surface in the app.
+
+**4. No table owns a horizontal scroller.** `ownsScroll` in `components/ui/table.tsx`
+is `stickyFirstColumn || containerClassName !== undefined`, and **no call site passes
+either** — so every table renders `overflow-visible`. SPEC says wide content scrolls
+inside its own container so the page body never scrolls sideways. ADR-394 measured
+zero horizontal overflow at 1280 and 1024, where the column ladder has dropped four
+of the pipeline's nine columns; at 390px it drops five, leaving File, Borrower,
+Stage and Attention, and Attention carries a prose sentence. **Whether that
+overflows at 390 is not known — measure it before fixing or dismissing it.** Four
+tables are in scope: pipeline, documents, reconciliation ledger, admin lenders.
+
+Applying AMENDMENTS A36: every requirement above appears as a checkbox below, and
+the last one requires observation rather than arithmetic.
+
+- [ ] Below `lg` the reviewer is a single column; dividers and the split control are
+      not rendered, and the persisted split is untouched for when it returns
+- [ ] The verification stats strip and the add-need dialog are single-column at base
+      and unchanged at `md` and above
+- [ ] Every table either owns an `overflow-x` container or is measured not to need
+      one, with the number recorded on the ticket
+- [ ] **Observed at 390px on a real browser, not inferred**: no route scrolls the
+      page body sideways, and the shell, pipeline, file overview, documents,
+      verification and needs screens are each read and reported on
+- [ ] Nothing above `md` changes — the desktop layout is the product and this ticket
+      must not move it
