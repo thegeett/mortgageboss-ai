@@ -355,8 +355,9 @@ def _liability_context(
       name (a tradeline field no declaration reads) is still passed through under its own name rather
       than dropped, so nothing is hidden from a reasoner.
     * **The universal PII backstop.** Values go through :func:`_scrub_list_value`, like every other
-      list-derived context. A ``ListRow.fields`` value is a plain ``Field``, never a ``PiiField``, and
-      ``ListSpec.redact`` covers only the fields a spec NAMED — so an account number a bureau prints
+      list-derived context. A ``ListRow.fields`` value is USUALLY a plain ``Field`` — bug-010 added
+      ``ListSpec.pii``, so a DECLARED row field arrives already masked — and neither that nor
+      ``ListSpec.redact`` covers a field a spec did not name, so an account number a bureau prints
       inside ``creditor_name`` would otherwise reach the model unscrubbed.
 
     ⚠️ ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has

@@ -536,9 +536,10 @@ def _txn_pii_field(value: Any, name: str, *, loan_file_id: UUID) -> SnapshotFiel
     scalar = _scalar(value)
     if scalar is None:
         return Field.missing()
-    return PiiField.from_raw(
-        scalar, kind=_TXN_PII_FIELDS[name], loan_file_id=loan_file_id, source=_EXTRACTED
-    )
+    kind, pre_masked = _TXN_PII_FIELDS[name]
+    if pre_masked:
+        return PiiField.pre_masked(scalar, kind=kind, source=_EXTRACTED)
+    return PiiField.from_raw(scalar, kind=kind, loan_file_id=loan_file_id, source=_EXTRACTED)
 
 
 # bug-010 — THE SENSITIVE FIELDS OF A TRANSACTION ROW, declared ONCE and read by both paths that
@@ -547,18 +548,28 @@ def _txn_pii_field(value: Any, name: str, *, loan_file_id: UUID) -> SnapshotFiel
 # reaches the at-rest guard raw — which is how this shipped: the refusals name the generic path and
 # the legacy path carried the same value beside it.
 #
-# NOT in ``_PII_FIELDS``. That registry is consulted only for a document's FLAT keys, and it is
-# global: adding a name there would route it in every list too, moving the ``row_id``s of
-# ``tradelines`` — whose rows LP-480 enumerates as finding subjects. Re-keying those retires and
-# re-mints every per-liability finding and strands a processor's sign-off, the cost
-# ``_IDENTITY_EXCLUDED_TXN_FIELDS`` exists to avoid. Sensitivity is declared per list instead.
-_TXN_PII_FIELDS: dict[str, PiiKind] = {
+# NOT in ``_PII_FIELDS``, and the reason is simpler than the first write-up claimed. That registry is
+# read at ONE site — ``build_document_fields``, over a document's FLAT keys — so a name added to it
+# would not route here at all: not in a list row, not in a transaction row, no effect on either. The
+# first cut said a global entry "would route it in every list too, moving the row_ids of tradelines",
+# which is false in both halves and was the stated justification for building this second registry.
+# The true justification is the reverse: ``_PII_FIELDS`` CANNOT reach a row, which is exactly the gap
+# LP-443 recorded and deferred.
+#
+# Declaring per list is still right, for a reason that survives: masking changes a field's serialized
+# shape, which moves the ``row_id`` of every row in that list, and which lists can afford that is a
+# per-list fact (see ``ListSpec.pii``).
+_TXN_PII_FIELDS: dict[str, tuple[PiiKind, bool]] = {
     # The ACH originator ("PPD ID: 4760039224") — a bare 10-digit run, indistinguishable to a
     # shape-based guard from an account number, and it refused every staging snapshot for a week
     # (36 rows, none newer than 2026-08-25). Masking loses nothing it was captured for: bug-001
     # wanted it to tell two debts owed to ONE institution apart, and ``match_hash`` is per-file
     # salted, so equal originators still compare equal within a file while the raw never lands.
-    "originator_id": PiiKind.ACCOUNT,
+    # `False` = the extractor stores it RAW, so it is masked + hashed here rather than trusted as
+    # already-masked. The same (kind, pre_masked) shape `_PII_FIELDS` carries, because the list-row
+    # PII LP-443 deferred is mostly the PRE-masked kind (`account_number_masked` and friends) and a
+    # route that could not express it would not be the route that gap needs.
+    "originator_id": (PiiKind.ACCOUNT, False),
 }
 
 
@@ -844,10 +855,21 @@ class ListSpec:
     stranding any sign-off a processor had made.
 
     Today only ``tradelines`` is enumerated (``all_list_rows`` is called with that name at all four
-    production sites: ``enumerators.py`` 355 / 538, ``derived.py`` 2977 / 2990), which is exactly why
-    a name in the global ``_PII_FIELDS`` registry would be wrong — it would route in EVERY list and
-    move those ids. **Adding an enumerator over a list that declares ``pii`` re-keys every finding on
-    it once, at the deploy that adds it.** ``stable_row_id`` marks the lists where that applies.
+    production sites: ``enumerators.py`` 355 / 538, ``derived.py`` 2977 / 2990). **Adding an
+    enumerator over a list that declares ``pii`` re-keys every finding on it.** ``stable_row_id``
+    marks the lists where that applies.
+
+    AND THE RE-KEY IS NOT A ONE-OFF. A masked field serializes its ``match_hash``, which is an HMAC
+    under the application encryption key — so a row id now depends on that secret, not on extracted
+    content alone. It moves again on an ``encryption_key`` rotation (ADR-051) and on a
+    ``_HASH_VERSION`` bump, and identical data yields different ids in differently-keyed
+    environments, which was not previously possible. Inert while nothing enumerates a ``pii`` list;
+    load-bearing the moment one does, and the reason to weigh ``pii`` and ``stable_row_id`` together
+    rather than each on its own.
+
+    This registry exists because ``_PII_FIELDS`` cannot reach a row at all — it is read only by
+    ``build_document_fields``, over a document's flat keys. Not, as the first write-up claimed,
+    because a global entry would leak into every list; it would have no effect on any list.
     """
 
     name: str
@@ -855,7 +877,22 @@ class ListSpec:
     derived: tuple[DerivedSpec, ...] = ()
     redact: frozenset[str] = frozenset()
     stable_row_id: bool = False
-    pii: Mapping[str, PiiKind] = field(default_factory=dict)
+    pii: Mapping[str, tuple[PiiKind, bool]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """A ``pii`` name that is not a field of this list is a silent no-op — refuse it (bug-010).
+
+        ``_LIST_SPECS`` is emitted by the LP-438 generator from ``schema_specs/*.json``, so a
+        regeneration that renames a field would leave this registry naming a key that no longer
+        exists: masking would stop, the raw value would land in the row again, and the at-rest guard
+        would resume refusing every snapshot on the file — the failure bug-010 fixed, reintroduced
+        with no signal. Raised at IMPORT, the way a rule spec refuses an unknown key.
+        """
+        declared = set(self.fields) | {d.field for d in self.derived}
+        if unknown := set(self.pii) - declared:
+            raise ValueError(
+                f"ListSpec {self.name!r} declares pii for undeclared field(s) {sorted(unknown)}"
+            )
 
 
 # LP-443 — the FIRST wired generic list: bank_statement's transactions. This proves the capture
@@ -890,8 +927,8 @@ _TRANSACTIONS_LIST = ListSpec(
     #
     # This moved every transactions ``row_id``, which is inert TODAY because nothing enumerates this
     # list — no finding's subject is a transactions row. It is not inert for a future enumerator over
-    # it: see ``ListSpec.pii``. The declaration of ``stable_row_id`` above anticipates exactly that
-    # enumerator, so this note sits beside it rather than in a ticket.
+    # it, and the ids now also move with the encryption key: see ``ListSpec.pii``. The declaration of
+    # ``stable_row_id`` above anticipates exactly that enumerator, so this note sits beside it.
     pii=_TXN_PII_FIELDS,
 )
 
@@ -1735,9 +1772,16 @@ def _list_row_fields(
 ) -> dict[str, SnapshotField]:
     """One raw extraction row → its ``{name: Field|PiiField}`` map (declared + derived + redacted).
 
-    A name in ``spec.pii`` is routed through ``PiiField.from_raw`` (bug-010) rather than landing as
-    a plain ``Field.value``. Applied AFTER ``redact``, so a field that is both scrubbed and masked
-    ends masked rather than silently reverting to the scrubbed plain value.
+    A name in ``spec.pii`` is routed through ``PiiField`` (bug-010) rather than landing as a plain
+    ``Field.value`` — ``pre_masked`` selecting the same two constructors ``build_document_fields``
+    picks between for a flat field.
+
+    ROUTED FROM THE RAW VALUE, AND ``redact`` DOES NOT RUN ON IT. The first cut redacted first and
+    masked second, which is silently destructive on the very combination this mechanism exists to
+    replace: ``_TRADELINES_LIST`` already declares ``redact={"account_number_masked"}`` as LP-443's
+    backstop, so declaring the same name in ``pii`` would have hashed the string ``"[redacted]"`` —
+    giving every leaked account on the file the SAME match_hash, and making two unrelated accounts
+    compare equal. A masked field needs no scrub: the mask is strictly stronger.
     """
     # ``source`` is the RESERVED per-row provenance key (the bare-row bridge stores {page,snippet} under
     # it), never a data field — yet 27 specs mistakenly declared a ``source`` field ("provenance wrapper")
@@ -1749,16 +1793,28 @@ def _list_row_fields(
     }
     for dspec in spec.derived:
         plain[dspec.field] = _derive_field(row, dspec)
-    for name in spec.redact:
-        if name in plain:
-            plain[name] = _redact_field(plain[name])
-    fields: dict[str, SnapshotField] = dict(plain)
-    for name, kind in spec.pii.items():
-        current = plain.get(name)
-        if current is None or current.absent or current.value is None:
-            continue  # absent stays absent — a masked display would fabricate a value
-        fields[name] = PiiField.from_raw(
-            current.value, kind=kind, loan_file_id=loan_file_id, source=current.source or _EXTRACTED
+
+    fields: dict[str, SnapshotField] = {}
+    for name, fld in plain.items():
+        routing = spec.pii.get(name)
+        if routing is None:
+            fields[name] = _redact_field(fld) if name in spec.redact else fld
+            continue
+        if fld.absent or fld.value is None:
+            fields[name] = fld  # absent stays absent — a masked display would fabricate a value
+            continue
+        kind, pre_masked = routing
+        source = fld.source or _EXTRACTED
+        fields[name] = (
+            PiiField.pre_masked(fld.value, kind=kind, source=source, confidence=fld.confidence)
+            if pre_masked
+            else PiiField.from_raw(
+                fld.value,
+                kind=kind,
+                loan_file_id=loan_file_id,
+                source=source,
+                confidence=fld.confidence,
+            )
         )
     return fields
 

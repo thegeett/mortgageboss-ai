@@ -179,8 +179,14 @@ def test_no_finding_subject_is_a_transactions_row_id() -> None:
     import re
     from pathlib import Path
 
+    # Anchored on `__file__`, not the process CWD: `Path("app")` yields nothing when pytest is
+    # invoked from the repo root, and the vacuity guard below then fails for a reason that has
+    # nothing to do with what this pins. The convention the other scanning tests use.
+    app = Path(__file__).resolve().parents[3] / "app"
+    assert app.is_dir(), f"expected the app package at {app}"
+
     called_with = set()
-    for path in Path("app").rglob("*.py"):
+    for path in app.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         for m in re.finditer(r"all_list_rows\(\s*[\w.]+,\s*([^,)\n]+)", text):
             called_with.add(m.group(1).strip())

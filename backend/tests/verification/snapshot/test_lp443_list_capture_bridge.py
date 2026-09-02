@@ -217,3 +217,92 @@ def test_list_row_pii_has_a_redact_backstop() -> None:
     )
     assert leaked["account_number_masked"].value == "[redacted]"  # a masking miss is scrubbed
     assert masked["account_number_masked"].value == "****1111"  # a real mask is preserved
+
+
+# --------------------------------------------------------------------------- #
+# bug-010 — the per-list PII route (`ListSpec.pii`), the step LP-443 deferred
+# --------------------------------------------------------------------------- #
+
+
+def test_pii_routing_beats_redact_and_hashes_the_raw_value() -> None:
+    """THE ORDER IS THE WHOLE POINT, and the first cut had it backwards.
+
+    `ListSpec.pii` exists to replace the `redact` backstop, so the two WILL be declared on the same
+    field — `_TRADELINES_LIST` already carries `redact={"account_number_masked"}`. Redacting first
+    and masking second hashes the string "[redacted]", which gives every leaked account on the file
+    the SAME match_hash and makes two unrelated accounts compare equal. Masking runs from the raw
+    value; a masked field needs no scrub, because the mask is strictly stronger.
+    """
+    from app.verification.snapshot.pii import PiiKind
+
+    spec = ds.ListSpec(
+        name="probe",
+        fields=("account_number_masked",),
+        redact=frozenset({"account_number_masked"}),
+        pii={"account_number_masked": (PiiKind.ACCOUNT, False)},
+    )
+    one = ds._list_row_fields({"account_number_masked": "4111111111111111"}, spec, loan_file_id=_LF)
+    two = ds._list_row_fields({"account_number_masked": "5500000000000004"}, spec, loan_file_id=_LF)
+
+    first = one["account_number_masked"]
+    assert first.display == "****1111", "the last four of the REAL number, not of '[redacted]'"
+    assert first.match_hash is not None
+    assert first.match_hash != two["account_number_masked"].match_hash, (
+        "two unrelated accounts must never compare equal — the failure hashing '[redacted]' causes"
+    )
+
+
+def test_a_pre_masked_row_field_keeps_its_last_four() -> None:
+    """The list-row PII LP-443 deferred is mostly the PRE-masked kind, so the route has to express
+    it. Through `from_raw` a stored "****1111" masks to "****" — the last four the extractor
+    deliberately exposed is destroyed — and still hashes, so every account ending 1111 compares
+    equal. `pre_masked=True` keeps the display and carries no hash."""
+    from app.verification.snapshot.pii import PiiKind
+
+    spec = ds.ListSpec(
+        name="probe",
+        fields=("account_number_masked",),
+        pii={"account_number_masked": (PiiKind.ACCOUNT, True)},
+    )
+    field = ds._list_row_fields({"account_number_masked": "****1111"}, spec, loan_file_id=_LF)[
+        "account_number_masked"
+    ]
+
+    assert field.display == "****1111"
+    assert field.match_hash is None, "only the masked form was ever captured — not matchable"
+
+
+def test_an_absent_row_field_is_not_given_a_mask() -> None:
+    """A masked display on a field the extractor never read would fabricate a value."""
+    from app.verification.snapshot.pii import PiiKind
+
+    spec = ds.ListSpec(
+        name="probe",
+        fields=("account_number_masked",),
+        pii={"account_number_masked": (PiiKind.ACCOUNT, False)},
+    )
+    field = ds._list_row_fields({}, spec, loan_file_id=_LF)["account_number_masked"]
+    assert not field.is_present and field.absent
+
+
+def test_a_pii_name_that_is_not_a_field_is_refused_at_import() -> None:
+    """bug-010 — `_LIST_SPECS` is emitted by the LP-438 generator from `schema_specs/*.json`, so a
+    regeneration that renames a field would leave the registry naming a key that no longer exists.
+    Masking would silently stop, the raw value would land in the row again, and the at-rest guard
+    would resume refusing every snapshot on the file — the exact failure bug-010 fixed, reintroduced
+    with no signal. It fails loudly instead, at load."""
+    import pytest
+    from app.verification.snapshot.pii import PiiKind
+
+    with pytest.raises(ValueError, match="undeclared field"):
+        ds.ListSpec(
+            name="probe", fields=("amount",), pii={"renamed_away": (PiiKind.ACCOUNT, False)}
+        )
+
+    # A derived field is a legitimate target, and must not be refused.
+    ds.ListSpec(
+        name="probe",
+        fields=("transaction_type",),
+        derived=(ds.DerivedSpec(field="direction", from_field="transaction_type", mapping={}),),
+        pii={"direction": (PiiKind.ACCOUNT, False)},
+    )

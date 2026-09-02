@@ -180,7 +180,13 @@ class TransactionRecord(BaseModel):
     # PRESENT one could never have persisted: the guard refused every snapshot that held one. That
     # shape is still incompatible: `PiiField` forbids extras, so `value` alone rejects it, and
     # `load_snapshot` validates strictly — narrowing would make those six unloadable for the sake of
-    # a value none of them holds. Nothing writes the `Field` arm any more.
+    # a value none of them holds.
+    #
+    # AND THE `Field` ARM IS STILL WRITTEN, every run. `_txn_pii_field` returns `Field.missing()` for
+    # a row with no originator — the common case, since most lines are not ACH — so the union is not
+    # a legacy-read shim that a later cleanup can narrow away. Narrowing it on the belief that
+    # "nothing writes it" would make `load_snapshot` reject essentially every snapshot, not just the
+    # six old rows.
     originator_id: SnapshotField | None = None
 
 
