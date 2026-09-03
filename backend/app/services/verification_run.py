@@ -275,6 +275,36 @@ _RULE_CATEGORY: dict[str, FindingCategory] = {
 }
 
 
+def finding_category_map() -> dict[str, FindingCategory]:
+    """Every rule that can produce a finding, mapped to the category it files under.
+
+    LP-595 — RESOLVED per rule (per-rule override, then family), not the nine-entry map that left the
+    other sixty-nine falling through to ASSETS.
+
+    bug-011 review — AND OVER EVERY RULE THAT CAN PRODUCE ONE, not just the active list. The blocked
+    candidates reach the findings table through the pending-checks path while being absent from
+    `ACTIVE_RULE_IDS`, so all six fell through to the ASSETS default and tripped LP-595's own
+    `finding_category_unresolved` warning — PC-5 and CO-5 are property, CR-5 is credit. That was
+    invisible while the second run crashed on the unique index; now that the row carries forward it is
+    filed wrong permanently, and LP-598's category refresh cannot correct it because
+    `category_by_rule.get("PC-5")` is None, so the refresh writes nothing.
+
+    A FUNCTION RATHER THAN AN INLINE COMPREHENSION so the population is testable. The first test
+    written for this asserted that `category_for_rule` resolves each blocked rule — which it always
+    did — and passed with the widening reverted. The thing that can be wrong is which rules go INTO
+    the map.
+    """
+    # Local, for the same reason `_pending_check_ai_groups` uses one: pending_checks imports from the
+    # registry, and a module-level import here closes the cycle.
+    from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
+
+    return {
+        rule_id: category
+        for rule_id in set(ACTIVE_RULE_IDS) | set(blocked_candidate_rule_ids())
+        if (category := category_for_rule(rule_id)) is not None
+    }
+
+
 def category_for_rule(rule_id: str) -> FindingCategory | None:
     """The category a rule's findings are filed under, or None if the rule is unclassified.
 
@@ -895,11 +925,15 @@ async def _persist(
         evaluated_rule_ids=frozenset(ACTIVE_RULE_IDS),
         # LP-595 — RESOLVED for every active rule (per-rule override, then family), not the nine-entry
         # map that left the other sixty-nine falling through to ASSETS.
-        category_by_rule={
-            rule_id: category
-            for rule_id in ACTIVE_RULE_IDS
-            if (category := category_for_rule(rule_id)) is not None
-        },
+        #
+        # bug-011 review — AND FOR EVERY RULE THAT CAN PRODUCE A FINDING, not just the active ones.
+        # The blocked candidates reach this table through the pending-checks path while being absent
+        # from `ACTIVE_RULE_IDS`, so all six fell through to the ASSETS default and tripped LP-595's
+        # own `finding_category_unresolved` warning: PC-5 and CO-5 are property, CR-5 is credit.
+        # Harmless only while the second run crashed; now that the row carries forward it is filed
+        # wrong permanently, and LP-598's "the category is refreshed too" cannot correct it either —
+        # `category_by_rule.get("PC-5")` is None, so the refresh writes nothing.
+        category_by_rule=finding_category_map(),
         retire_eligible_rule_ids=retire_eligible_rule_ids,
     )
 

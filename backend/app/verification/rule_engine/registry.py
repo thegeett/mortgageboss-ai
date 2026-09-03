@@ -490,9 +490,16 @@ _LP551_ACTIVATED: tuple[str, ...] = ("FR-5",)
 #   2. `reconcile_evaluation_findings` loads a file's prior findings for ACTIVE rules only, so an inert
 #      rule's row is invisible on the SECOND run and collides on uq_findings_loan_file_rule_subject.
 #
-# The second is UNFIXED and sits on the path that writes every finding, so it was not something to patch
-# under incident pressure. Reinstate AS-13 once that fix lands with its own tests — and it will still
-# need a real run before its bar's `validated` flips, which is what the hold always said.
+# The second is FIXED (bug-011, 2026-09-02): the reconciler's LOAD set is now derived from the run's own
+# results, so any rule that produces a finding has its prior row loaded whether or not it is active.
+# It sat unfixed for a while because it is on the path that writes every finding and was not something
+# to patch under incident pressure — then PC-5, another held rule, hit exactly this collision on
+# LF-ZE9N and restarted a thirteen-minute pass four times.
+#
+# So the blocker this hold names is gone. AS-13 is NOT reinstated here regardless: that is a rule
+# ACTIVATION decision, and it still needs a real run before its bar's `validated` flips, which is what
+# the hold always said. Recorded so the next reader weighs the remaining reason rather than one that
+# has already been dealt with.
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 # LP-573 — DT-8, the refinanced-lien double count. DETERMINISTIC and it can never `fire`: a mortgage

@@ -498,10 +498,13 @@ async def reconcile_evaluation_findings(
     # collaborators here are keyed by rule id, so its synthetic id has to join all three.
     #
     # Each of the three fails differently if skipped, so none is redundant:
-    #   * `evaluated_rule_ids` gates `_load_prior_findings` — omitted, the prior row is never loaded,
-    #     so every run MINTS a new one and the second collides on `uq_findings_loan_file_rule_subject`.
-    #     UNCONDITIONAL: the run that must RETIRE the row is precisely the run that consolidates
-    #     nothing (the processor typed the last document), and it has to be LOADED to be retired.
+    #   * `evaluated_rule_ids` FEEDS the load set — and since bug-011 it is `load_rule_ids` that gates
+    #     `_load_prior_findings`. This widening is still load-bearing and must not be deleted as
+    #     redundant with it: the run that must RETIRE this row is precisely the run that consolidates
+    #     NOTHING, so its id is absent from `persistable` and the results-derived half cannot supply
+    #     it. Omitted, the prior row is never loaded, so every run MINTS a new one and the second
+    #     collides on `uq_findings_loan_file_rule_subject` — which is the bug-011 failure reached by
+    #     a second route. UNCONDITIONAL, for that reason.
     #   * `retire_eligible` gates the retire loop — but NOT unconditionally, which is the one place
     #     this row must not differ from a per-document rule. "Nothing consolidated" has two causes and
     #     they are opposites: the documents got typed (retire), or the DOCUMENTS SECTION FAILED TO
