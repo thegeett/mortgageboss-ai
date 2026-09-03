@@ -169,7 +169,7 @@ ecr_repository_names = {
 # from git (`staging-<short sha>`), builds those exact bytes, and rewrites this
 # line. Editing it by hand re-opens the failure it closes: a tag bumped without a
 # build, or a build without a bump, both of which produced CannotPullContainerError.
-image_tag = "staging-b9665de"
+image_tag = "staging-c8ea6e8"
 
 # Branches the deploy stage will ship FROM. Read by scripts/deploy, not by any
 # module. Several worktrees on this machine sit on different branches and
