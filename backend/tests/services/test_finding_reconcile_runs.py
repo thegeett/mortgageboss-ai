@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from app.models import (
     Company,
     EvaluationOutcome,
+    Finding,
     FindingCategory,
     FindingEvent,
     FindingEventType,
@@ -450,3 +451,103 @@ async def test_a_retired_finding_stops_reading_as_a_concern(db_session: AsyncSes
     ).all()
     superseded = [e.detail.get("superseded_message") for e in events if e.detail]
     assert original in superseded, "the prior wording must survive in the event history"
+
+
+# --------------------------------------------------------------------------- #
+# bug-011 — a rule that produces findings without being ACTIVE
+# --------------------------------------------------------------------------- #
+_HELD_RULE = "PC-5"
+
+
+def _held_result(subject: str = "loan", *, reasoning: str = "pending automation") -> RuleEvaluation:
+    """A result from a rule the caller does NOT list as evaluated.
+
+    PC-5 is BUILT AND HELD, so it is absent from `ACTIVE_RULE_IDS`, and it still reaches this table
+    through LP-391's pending-checks path as a PENDING_AUTOMATION flag.
+    """
+    return RuleEvaluation(
+        rule_id=_HELD_RULE,
+        subject_id=subject,
+        verdict=Verdict.PENDING_AUTOMATION,
+        verdict_confidence=None,
+        load_bearing_tags=(),
+        threshold_used=None,
+        priya_validated=False,
+        gated_pending_signoff=True,
+        reasoning=reasoning,
+        how_to_fix=None,
+    )
+
+
+async def test_a_held_rule_can_be_reconciled_twice(db_session: AsyncSession) -> None:
+    """THE REPORTED FAILURE. The first run MINTS the flag; the second must CARRY IT FORWARD.
+
+    Before this, the prior row was never loaded — `evaluated_rule_ids` is the ACTIVE list and a held
+    rule is not on it — so the second run minted a duplicate and
+    `uq_findings_loan_file_rule_subject` refused it. That IntegrityError failed the persist step of a
+    pass that had just spent thirteen minutes of model calls, and the retry restarted the whole pass:
+    four attempts, four times the AI spend, and a progress bar the processor watched fall from step
+    three back to step two.
+    """
+    lf_id = await _loan_file_id(db_session)
+
+    first = await _reconcile(db_session, lf_id, [_held_result()])
+    assert len(first.minted) == 1
+
+    second = await _reconcile(db_session, lf_id, [_held_result(reasoning="still pending")])
+
+    # Carried forward onto the SAME row, not minted again — which is what the unique index refused.
+    assert len(second.minted) == 0
+    rows = (
+        (
+            await db_session.execute(
+                select(Finding).where(Finding.loan_file_id == lf_id, Finding.rule_id == _HELD_RULE)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, "the held rule minted a second row instead of updating its own"
+
+
+async def test_a_held_rule_is_never_retired_by_a_run_that_did_not_produce_it(
+    db_session: AsyncSession,
+) -> None:
+    """THE REGRESSION THE FIX MUST NOT CAUSE — and the protection is STRUCTURAL, not a guard.
+
+    `_evaluate_pending_checks` is best-effort and isolated: it swallows every exception and returns
+    `[]`. So a run where that path failed for its own reasons produces no PC-5 result, and if that
+    could retire the existing flag it would turn a real one green — the false-closed that
+    `retire_eligible_rule_ids` exists to prevent, reached from the other direction.
+
+    WHAT ACTUALLY PREVENTS IT is that the load set is derived from THIS RUN'S RESULTS. A rule absent
+    from the results is never loaded, so it never enters `prior_by_identity`, so the retire loop
+    never sees it — whatever the retire gate says. Verified rather than assumed: this test still
+    passes with `if prior_finding.rule_id not in retire_eligible` disabled entirely, while the
+    pre-existing `test_degraded_run_does_not_retire_findings_it_could_not_reevaluate` fails. Two
+    independent protections, and this one is the load's own shape.
+
+    Stated because an earlier version of this docstring claimed the test guarded against widening
+    `retire_eligible` alongside the load. It does not — widening it with the run's own result ids
+    cannot reach a rule that produced no result — and a docstring naming the wrong mechanism is how
+    the next person removes the right one.
+    """
+    lf_id = await _loan_file_id(db_session)
+    await _reconcile(db_session, lf_id, [_held_result()])
+
+    # A later run produces NOTHING for the held rule — exactly what a failed pending-checks pass looks
+    # like from here.
+    await _reconcile(db_session, lf_id, [_as1("txn_1", Verdict.SATISFIED)])
+
+    row = (
+        (
+            await db_session.execute(
+                select(Finding).where(Finding.loan_file_id == lf_id, Finding.rule_id == _HELD_RULE)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.evaluation_outcome is not EvaluationOutcome.NO_LONGER_APPLIES, (
+        "a run that never looked at the held rule retired its flag — a false green"
+    )

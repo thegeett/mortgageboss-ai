@@ -518,12 +518,34 @@ async def reconcile_evaluation_findings(
     retire_eligible = (
         retire_eligible_rule_ids if retire_eligible_rule_ids is not None else evaluated_rule_ids
     )
+
+    # bug-011 — LOAD BROADLY, RETIRE NARROWLY. One argument was serving two questions that are not the
+    # same question, and the difference is what broke LF-ZE9N.
+    #
+    # A rule can reach this table without being in the caller's evaluated set. PC-5 is BUILT AND HELD,
+    # so it is not in ACTIVE_RULE_IDS, and it still writes a PENDING_AUTOMATION flag through LP-391's
+    # pending-checks path. Its prior row was therefore never LOADED, the reconciler saw no match, minted
+    # a second finding, and `uq_findings_loan_file_rule_subject` refused it — failing the persist step of
+    # a pass that had just spent thirteen minutes of model calls, four times over, because the retry
+    # restarts the whole pass.
+    #
+    # So the LOAD set takes every rule this run actually produced a result for. That is the set that can
+    # collide, by construction: a result is what gets minted.
+    #
+    # RETIREMENT DOES NOT WIDEN WITH IT, and that asymmetry is the point rather than an oversight.
+    # Retire-eligibility means "this rule's subject domain was healthily enumerated, so a prior finding
+    # this run did not re-detect is genuinely gone". A rule that merely APPEARED in the results says
+    # nothing of the kind — and `_evaluate_pending_checks` is best-effort and isolated, swallowing every
+    # exception and returning `[]`, so a run where that path failed for its own reasons would retire
+    # every pending flag it had previously raised. That is the false-closed `retire_eligible_rule_ids`
+    # exists to prevent, reached from the other direction.
+    load_rule_ids = evaluated_rule_ids | {result.rule_id for result, *_ in persistable}
     category_by_rule = {
         **category_by_rule,
         UNIDENTIFIED_DOCUMENTS_RULE_ID: FindingCategory.DOCUMENTATION,
     }
 
-    prior = await _load_prior_findings(db, loan_file_id, evaluated_rule_ids)
+    prior = await _load_prior_findings(db, loan_file_id, load_rule_ids)
     prior_by_identity = {(f.rule_id, str(f.subject_key)): f for f in prior}
 
     res = ReconcileRunResult()
