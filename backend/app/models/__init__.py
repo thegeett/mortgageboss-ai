@@ -35,6 +35,7 @@ from app.models.document_finding import (
     DocumentFindingStatus,
     DocumentFindingType,
 )
+from app.models.dti_custom_line import DtiCustomLine
 from app.models.dti_override import DtiOverride
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
@@ -106,6 +107,7 @@ __all__ = [
     "DocumentFindingStatus",
     "DocumentFindingType",
     "DocumentStatus",
+    "DtiCustomLine",
     "DtiOverride",
     "EncryptedString",
     "EvaluationOutcome",

@@ -25,7 +25,7 @@ file (the caller resolves it within the company first); no PII (no SSNs) is read
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -37,6 +37,7 @@ from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document
+from app.models.dti_custom_line import DtiCustomLine
 from app.models.dti_override import DtiOverride
 from app.models.extraction import Extraction
 from app.models.helpers import only_active
@@ -49,10 +50,13 @@ from app.models.stated_financials import (
 )
 from app.schemas.dti import (
     DtiCalculation,
+    DtiCustomLineInput,
     DtiFindingsStatus,
     DtiLimit,
     DtiLineItem,
     DtiOverrideInput,
+    DtiUngateLine,
+    DtiUngatePreview,
     UnverifiedInput,
 )
 from app.services.activity_log import log_activity
@@ -485,6 +489,44 @@ async def _extracted_hoa_monthly(
 # --------------------------------------------------------------------------- #
 
 
+#: LP-643 — the key prefix a processor-added line is given. Namespaced so it can never collide with
+#: a calculator key, and so a reader can tell at a glance which lines the engine produced.
+CUSTOM_LINE_PREFIX = "custom."
+
+
+async def _custom_lines(db: AsyncSession, loan_file_id: UUID) -> dict[str, list[_AutoLine]]:
+    """Processor-added lines, as `_AutoLine`s so they travel the same path as everything else.
+
+    LP-643 — ROUTED THROUGH `_to_items` LIKE EVERY OTHER LINE, which is the whole reason to shape them
+    this way. LP-621 records what happens otherwise: a figure appended straight to `*_lines` landed
+    "in the headline but not the breakdown, so the itemized list stopped summing to the number beside
+    it", the snapshot published a headline its own breakdown could not reproduce, and the line could
+    not be overridden. A custom line gets itemisation, override support and snapshot presence for
+    free by being an `_AutoLine`.
+
+    `source="manual"` so the display can say where it came from — a figure with no document behind it
+    should not read like an extracted one.
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(DtiCustomLine).where(DtiCustomLine.loan_file_id == loan_file_id),
+                DtiCustomLine,
+            ).order_by(DtiCustomLine.created_at)
+        )
+    ).all()
+    grouped: dict[str, list[_AutoLine]] = {"income": [], "housing": [], "debt": []}
+    for row in rows:
+        # A row whose section is not one of the three is DROPPED rather than defaulted. The API
+        # validates the section on the way in, so this is unreachable today; defaulting it into
+        # `debt` would silently move a processor's income line to the other side of the ratio.
+        if row.section in grouped:
+            grouped[row.section].append(
+                _AutoLine(f"{CUSTOM_LINE_PREFIX}{row.id}", row.label, row.value, "manual")
+            )
+    return grouped
+
+
 async def _active_overrides(db: AsyncSession, loan_file_id: UUID) -> dict[str, Decimal]:
     stmt = only_active(
         select(DtiOverride).where(DtiOverride.loan_file_id == loan_file_id), DtiOverride
@@ -544,6 +586,7 @@ async def build_dti_calculation(
     *,
     loan_file: LoanFile,
     confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+    extra_overrides: Mapping[str, Decimal] | None = None,
 ) -> DtiCalculation:
     """Assemble the full, transparent DTI calculation for one loan file.
 
@@ -556,6 +599,23 @@ async def build_dti_calculation(
     housing_auto = await _auto_housing_lines(db, loan_file, confidence_cutoff)
     debt_auto = await _auto_debt_lines(db, loan_file.id)
     overrides = await _active_overrides(db, loan_file.id)
+    # LP-643 — HYPOTHETICAL OVERRIDES, applied in memory and never persisted. The ungate popup has to
+    # show the ratio a processor would get, and the only honest way to produce it is to run THIS
+    # function with the overrides Apply would write: a preview computed a second way can diverge from
+    # what Apply delivers, and a consent screen showing a number the action does not produce is worse
+    # than showing none. Layered ON TOP of the stored overrides, so a line a processor already
+    # corrected keeps their figure unless the preview is explicitly zeroing it.
+    if extra_overrides:
+        overrides = {**overrides, **extra_overrides}
+
+    # LP-643 — a processor's own lines, merged into the section each declares before anything else
+    # runs. Merged HERE rather than appended to the result so they are inside every downstream
+    # behaviour: the rental treatment nets against a housing total that includes them, the gate reads
+    # the same items, and the snapshot breakdown reconciles with the headline.
+    custom = await _custom_lines(db, loan_file.id)
+    income_auto = [*income_auto, *custom["income"]]
+    housing_auto = [*housing_auto, *custom["housing"]]
+    debt_auto = [*debt_auto, *custom["debt"]]
 
     income_items, income_lines = _to_items(income_auto, overrides)
     housing_items, housing_lines = _to_items(housing_auto, overrides)
@@ -826,6 +886,223 @@ async def _auto_amount_for(db: AsyncSession, loan_file: LoanFile, field_key: str
         if item.key == field_key:
             return item.auto_amount
     raise UnknownDtiFieldError(field_key)
+
+
+async def add_dti_custom_line(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    data: DtiCustomLineInput,
+    actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+) -> DtiCalculation:
+    """Add a processor's own line to the DTI, audited; then recompute (LP-643).
+
+    The audit records the LABEL as well as the amount. An override's log entry can name the field
+    because the calculator produced it; a custom line names nothing unless the entry carries what the
+    processor typed.
+    """
+    row = DtiCustomLine(
+        loan_file_id=loan_file.id,
+        section=data.section,
+        label=data.label.strip(),
+        value=data.amount,
+        note=data.note,
+    )
+    db.add(row)
+    await db.flush()
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.DTI_LINE_ADDED,
+        summary=f"DTI line added to {data.section}: {row.label}",
+        actor_user_id=actor_user_id,
+        detail={
+            "line_id": str(row.id),
+            "section": data.section,
+            "label": row.label,
+            "amount": _money_str(data.amount),
+            "note": data.note,
+        },
+    )
+    return await build_dti_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
+
+
+async def remove_dti_custom_line(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    line_id: UUID,
+    actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+) -> DtiCalculation:
+    """Remove a line the processor added, audited; then recompute (LP-643).
+
+    ONLY A LINE THEY ADDED. An engine line is not removable here and deliberately has no endpoint: a
+    credit-report liability that should not count is an EXCLUSION, which the calculator already
+    renders as a struck-through line with its reason. A vanished row cannot be argued with and the
+    itemisation would stop reconciling with the source data.
+
+    Soft delete, so removing one leaves the trail — the same discipline as clearing an override.
+    """
+    row = await db.scalar(
+        only_active(
+            select(DtiCustomLine).where(
+                DtiCustomLine.id == line_id,
+                DtiCustomLine.loan_file_id == loan_file.id,  # scoping: not another file's line
+            ),
+            DtiCustomLine,
+        )
+    )
+    if row is None:
+        raise UnknownDtiFieldError(str(line_id))
+    row.deleted_at = utcnow()
+    await db.flush()
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.DTI_LINE_REMOVED,
+        summary=f"DTI line removed from {row.section}: {row.label}",
+        actor_user_id=actor_user_id,
+        detail={
+            "line_id": str(row.id),
+            "section": row.section,
+            "label": row.label,
+            "amount": _money_str(row.value),
+        },
+    )
+    return await build_dti_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
+
+
+def _zeroable_gated_lines(calc: DtiCalculation) -> list[DtiLineItem]:
+    """The gated lines an ungate could answer with a zero (LP-643).
+
+    NOT EVERY GATE IS ZERO-SHAPED, and that is the whole reason this is a function rather than a
+    filter on `unknown`. A housing input marked unknown has a numeric answer a processor may know —
+    a property genuinely exempt from tax, a policy already paid. The RENTAL gate does not: zeroing
+    the subject's missing gross rent asserts the property rents for nothing, which computes a net of
+    minus its whole PITIA and carries the payment as an obligation. That is not "ungated", it is a
+    different wrong answer. The occupancy gate has no number in it at all.
+
+    So this returns only the unknown LINE ITEMS, and the calculation-level `gate_reason` is reported
+    separately as unresolved.
+    """
+    return [item for item in calc.housing_items if item.unknown]
+
+
+def _ungate_assertion(item: DtiLineItem) -> str:
+    """What zeroing one line ASSERTS, in a processor's terms rather than the engine's.
+
+    "Property taxes will be $0.00" states the mechanism. "The DTI will be computed as if this
+    property has no tax liability" states the claim — which is the half a processor can judge as true
+    or false, and therefore the half worth showing them.
+    """
+    return (
+        f"{item.label} will be recorded as $0.00/month — the DTI will be computed as if this file "
+        f"has no {item.label.lower()} obligation."
+    )
+
+
+async def preview_dti_ungate(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+) -> DtiUngatePreview:
+    """What an ungate WOULD do, itemised, without persisting anything (LP-643).
+
+    THE PREVIEW RUNS THE REAL CALCULATOR. It applies the same zero overrides Apply would, in memory,
+    and reports the ratios that come back — because a preview computed a second way can diverge from
+    what Apply produces, and a consent screen showing a number the action does not deliver is worse
+    than showing none.
+    """
+    current = await build_dti_calculation(
+        db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
+    )
+    zeroable = _zeroable_gated_lines(current)
+
+    unresolved: list[str] = []
+    if current.gate_reason and not zeroable:
+        unresolved.append(current.gate_reason)
+    elif current.gate_reason and zeroable:
+        # Both kinds present: the housing lines move, the calculation-level reason may not.
+        unresolved.append(current.gate_reason)
+
+    after = current
+    if zeroable:
+        after = await build_dti_calculation(
+            db,
+            loan_file=loan_file,
+            confidence_cutoff=confidence_cutoff,
+            extra_overrides={item.key: Decimal(0) for item in zeroable},
+        )
+    return DtiUngatePreview(
+        lines=[
+            DtiUngateLine(key=item.key, label=item.label, assertion=_ungate_assertion(item))
+            for item in zeroable
+        ],
+        unresolved=unresolved,
+        front_end_before=current.front_end_dti,
+        back_end_before=current.back_end_dti,
+        front_end_after=after.front_end_dti,
+        back_end_after=after.back_end_dti,
+    )
+
+
+async def apply_dti_ungate(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    note: str | None,
+    actor_user_id: UUID,
+    confidence_cutoff: float = DEFAULT_CONFIDENCE_CUTOFF,
+) -> DtiCalculation:
+    """Zero every gated housing line, behind the caller's confirmation, audited (LP-643).
+
+    IMPLEMENTED AS ORDINARY OVERRIDES, not a file-level "ungated" flag, and the difference is what a
+    processor can do afterwards. Overrides give this per-line display, the existing per-line UNDO
+    (`DELETE .../overrides/{field_key}`), and a breakdown that still reconciles with the headline. A
+    boolean would record WHICH values were asserted nowhere, could not be undone one at a time, and
+    would reintroduce the LP-621 defect where the itemised list stops summing to the number beside it.
+
+    ONE AUDIT ENTRY, not N. The decision a processor made was a single decision about a set; logging
+    five unrelated overrides would lose that it was one act taken with one warning in front of them.
+    """
+    current = await build_dti_calculation(
+        db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
+    )
+    zeroable = _zeroable_gated_lines(current)
+    for item in zeroable:
+        existing = await _get_override_row(db, loan_file.id, item.key)
+        if existing is not None:
+            existing.value = Decimal(0)
+            existing.note = note
+            existing.actor_user_id = actor_user_id
+            existing.deleted_at = None
+        else:
+            db.add(
+                DtiOverride(
+                    loan_file_id=loan_file.id,
+                    field_key=item.key,
+                    value=Decimal(0),
+                    note=note,
+                    actor_user_id=actor_user_id,
+                )
+            )
+    await db.flush()
+    if zeroable:
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.DTI_UNGATED,
+            summary=f"DTI ungated: {len(zeroable)} gated input(s) recorded as $0.00",
+            actor_user_id=actor_user_id,
+            detail={
+                "lines": [{"key": i.key, "label": i.label} for i in zeroable],
+                "note": note,
+            },
+        )
+    return await build_dti_calculation(db, loan_file=loan_file, confidence_cutoff=confidence_cutoff)
 
 
 async def set_dti_override(
