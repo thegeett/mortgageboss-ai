@@ -624,3 +624,107 @@ async def test_an_undateable_year_abstains_only_when_the_ordering_changes_the_an
     assert not await _file("agree-short", (200, 2025), (200, None)), (
         "no return shows a full rented year, whichever is most recent"
     )
+
+
+# --------------------------------------------------------------------------- #
+# LP-642 step 3 — the subject's gross rent, across the sources the guide permits
+# --------------------------------------------------------------------------- #
+
+
+async def _rent_schedule(db_session, loan_file, *, opinion, doc_type="comparable_rent_schedule"):
+    """A current Form 1007 / 1025 extraction stating an opinion of monthly market rent."""
+    from app.models.document import DocumentStatus
+
+    company = await db_session.get(Company, loan_file.company_id)
+    assert company is not None
+    document = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type=doc_type,
+        status=DocumentStatus.COMPLETED,
+    )
+    await factories.make_extraction(
+        db_session,
+        document=document,
+        data={
+            "form_type": {"value": "1007" if doc_type == "comparable_rent_schedule" else "1025"},
+            "opinion_of_monthly_market_rent": {"value": str(opinion)}
+            if opinion is not None
+            else {"value": None},
+        },
+    )
+    await db_session.flush()
+
+
+async def test_a_rent_schedule_alone_computes_the_ratio(db_session) -> None:
+    """THE FILE THIS WAS BUILT FOR. LF-ZE9N is an investment PURCHASE: the borrower does not own the
+    subject yet, so the MISMO owned-property schedule has no row for it and never will — the export
+    does not repeat the subject there. The old lookup read only that row, found nothing, and gated.
+
+    With the mandatory document on the file, the ratio computes."""
+    loan_file = await _investment_file(db_session, "schedule-only", gross_rent=None)
+    await _rent_schedule(db_session, loan_file, opinion="8000")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert not calc.gated, calc.gate_reason
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $8,000.00" in (rental.derivation or "")
+
+
+async def test_the_LESSER_wins_where_the_two_sources_disagree(db_session) -> None:
+    """B3-3.8-02, and it is the guide's own answer rather than a convention we chose:
+
+        "If the current market rents do not reasonably support the gross rents reported on the lease
+         agreement, the lender must: determine if additional documentation is necessary … provide a
+         written analysis explaining the discrepancy … OR USE THE LESSER AMOUNT."
+
+    An `or`, so the lesser is a route the lender may simply take. The written-analysis branch needs a
+    processor's document attached to the file, which a calculator cannot supply — so this implements
+    the conservative half of a rule the guide states in full.
+    """
+    loan_file = await _investment_file(db_session, "disagree", gross_rent="8000")
+    await _rent_schedule(db_session, loan_file, opinion="6000")  # appraiser says less
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $6,000.00" in (rental.derivation or ""), "the lesser of the two"
+
+
+async def test_the_lesser_wins_in_the_other_direction_too(db_session) -> None:
+    """The control the test above needs: `min`, not "the appraiser always wins". Reversing which
+    source is lower must reverse which is used, or the rule is a preference wearing a rule's name."""
+    loan_file = await _investment_file(db_session, "disagree-other", gross_rent="5000")
+    await _rent_schedule(db_session, loan_file, opinion="9000")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $5,000.00" in (rental.derivation or "")
+
+
+async def test_a_1025_is_read_the_same_as_a_1007(db_session) -> None:
+    """Both forms answer the same question and share an extractor; the lookup must accept either, or
+    a two-to-four-unit file is gated for holding exactly the document the guide required of it."""
+    loan_file = await _investment_file(db_session, "form-1025", gross_rent=None)
+    await _rent_schedule(
+        db_session, loan_file, opinion="8000", doc_type="small_residential_income_appraisal"
+    )
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert not calc.gated, calc.gate_reason
+
+
+async def test_a_blank_opinion_does_not_ungate_the_file(db_session) -> None:
+    """A form on the file is not a rent on the file. The extractor is told to return null rather than
+    guess at a blank opinion line, and a null must not read as a rent of zero — that would compute a
+    net of -PITIA and carry the whole payment as an obligation, which is a different wrong answer
+    rather than an answer."""
+    loan_file = await _investment_file(db_session, "blank-opinion", gross_rent=None)
+    await _rent_schedule(db_session, loan_file, opinion=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert calc.gated and "Form 1007" in (calc.gate_reason or "")

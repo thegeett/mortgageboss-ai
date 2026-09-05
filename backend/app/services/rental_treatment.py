@@ -206,6 +206,10 @@ async def subject_rental_treatment(
 #: `_management_experience_established`).
 _FULL_YEAR_RENTAL_DAYS = 365
 
+#: The two document types carrying an appraiser's opinion of market rent — Form 1007 (one unit) and
+#: Form 1025 (two-to-four). Both are read by one extractor and both answer the same question.
+_RENT_SCHEDULE_DOC_TYPES = ("comparable_rent_schedule", "small_residential_income_appraisal")
+
 
 async def _management_experience_established(db: AsyncSession, loan_file_id: UUID) -> bool:
     """Has the borrower 12 months of property-management experience? (bug-012)
@@ -364,7 +368,50 @@ async def _subject_occupancy(
     return occupancy, None
 
 
-async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+async def _rent_schedule_market_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+    """The appraiser's opinion of monthly market rent, from a Form 1007 / 1025 (LP-642 step 3).
+
+    THE MANDATORY SOURCE. B3-3.8-02 (09/02/2026): "The lender must obtain the following: a
+    Single-Family Comparable Rent Schedule (Form 1007) or Small Residential Income Property Appraisal
+    Report (Form 1025), as applicable" — required where the subject's rental income is used to
+    qualify, not merely acceptable.
+
+    Reads `opinion_of_monthly_market_rent` and nothing else. `total_gross_monthly_income` is a 1025's
+    all-units total and is NOT interchangeable with it on a multi-unit form; the extractor keeps them
+    apart and so does this.
+
+    A NON-POSITIVE OPINION IS NOT A RENT. Zero or negative means the field was misread, not that the
+    property rents for nothing — the same absent-is-not-zero discipline the housing inputs use.
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(Extraction)
+                .join(Document, Extraction.document_id == Document.id)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.document_type.in_(_RENT_SCHEDULE_DOC_TYPES),
+                    Extraction.is_current.is_(True),
+                ),
+                Document,
+            ).order_by(Document.created_at.desc())
+        )
+    ).all()
+    for extraction in rows:
+        node = (extraction.extracted_data or {}).get("opinion_of_monthly_market_rent")
+        raw = node.get("value") if isinstance(node, dict) else None
+        if raw is None:
+            continue
+        try:
+            rent = Decimal(str(raw))
+        except (ArithmeticError, ValueError):
+            continue
+        if rent > 0:
+            return rent
+    return None
+
+
+async def _stated_subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
     """GROSS monthly rent for the SUBJECT row of the real-estate-owned schedule.
 
     Gross only. `rental_income_net` is deliberately not consulted — see the module note: the factor
@@ -384,6 +431,37 @@ async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal |
     if len(rows) != 1:
         return None  # no subject row, or a contradictory schedule — neither states a rent
     return rows[0].rental_income_gross
+
+
+async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+    """The subject's gross monthly rent, across the sources the guide permits (LP-642 step 3).
+
+    THE LOOKUP USED TO BE ONE PLACE, AND IT WAS THE WRONG ONE. It read only the MISMO owned-property
+    schedule's subject row — and MISMO does not repeat the subject there. `mismo/parser.py` says so
+    outright: a file where nothing is marked subject means "the schedule lists other properties", NOT
+    "this loan has no subject property". So on every MISMO-imported investment file it found nothing,
+    and the DTI gated for want of a rent no export was ever going to put in that field. LF-ZE9N is the
+    file that surfaced it.
+
+    WHERE THE TWO SOURCES DISAGREE, THE LESSER WINS, and that is the guide's own answer rather than a
+    convention. B3-3.8-02: "If the current market rents do not reasonably support the gross rents
+    reported on the lease agreement, the lender must: determine if additional documentation is
+    necessary … provide a written analysis explaining the discrepancy … **or use the lesser amount.**"
+
+    An `or`, so taking the lesser is a route the lender may simply take — no judgement call, no
+    stalled file. The other branch needs a processor's written analysis attached to the file, which is
+    a condition/audit feature and not something a calculator can supply, so it is deliberately not
+    implemented here: the conservative half of a rule the guide states in full.
+
+    THE LEASE PATH IS NOT HERE YET. B3-3.8-02 requires the form AND, where a lease transfers to the
+    borrower, the lease — and lease ELIGIBILITY (interested party, the 45-day rule, evidence the terms
+    took effect) is step 4, which is blocked on three questions the guide is silent about. Reading a
+    lease's rent before those are settled would use a source we cannot yet establish is permitted.
+    """
+    market = await _rent_schedule_market_rent(db, loan_file_id)
+    stated = await _stated_subject_gross_rent(db, loan_file_id)
+    candidates = [rent for rent in (market, stated) if rent is not None and rent > 0]
+    return min(candidates) if candidates else None
 
 
 async def borrower_present_housing(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
