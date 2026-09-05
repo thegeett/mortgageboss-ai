@@ -30,10 +30,12 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from time import perf_counter
 
 import structlog
 
 from app.ai.cost import estimate_cost
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_production import (
     APPARENT_CATEGORY_VALUES,
     IS_MONEY_IN_VALUES,
@@ -147,15 +149,21 @@ async def produce_stage_a_transaction_tags(
     reasoner: Reasoner | None = None,
     cache: TransactionTagCache | None = None,
     breaker: AiInfraBreaker | None = None,
+    metrics: StageMetrics | None = None,
 ) -> Snapshot:
     """Produce Stage-A transaction tags and write them into the snapshot's tags layer.
 
     Returns a NEW frozen snapshot with ``tags`` populated (the raw layer untouched). ``cache``
     (optional, mutated in place) reuses AI judgments across runs by content fingerprint — only
     successful judgments are stored, so a failed/truncated transaction retries next run.
+
+    ``metrics`` (LP-644 §1, optional, mutated in place) records call count, tokens and latency.
+    Instrumentation only — nothing here reads it back, so a caller passing None gets byte-identical
+    behaviour.
     """
     reason_fn = reasoner if reasoner is not None else reason_stage_a_transactions
     persistent = cache if cache is not None else {}
+    stage_started = perf_counter()
 
     transactions = _all_transactions(snapshot)
     if not transactions:
@@ -190,6 +198,7 @@ async def produce_stage_a_transaction_tags(
 
     for batch in _chunks(representatives, _BATCH_SIZE):
         context_json = json.dumps(_build_context([txn for _, txn in batch]))
+        call_started = perf_counter()
         try:
             result = await reason_fn(context_json)
         except AIClientError as err:
@@ -210,6 +219,12 @@ async def produce_stage_a_transaction_tags(
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
         invoked_model = result.model
+        if metrics is not None:
+            metrics.record_call(
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                seconds=perf_counter() - call_started,
+            )
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must
         # echo those. A returned index OUTSIDE that set (e.g. a 0-based echo) means the model
@@ -245,6 +260,11 @@ async def produce_stage_a_transaction_tags(
             if entry.is_money_in is not None and entry.apparent_category is not None:
                 persistent[fp] = entry
 
+    # LP-644 §1 — set BEFORE the log line, so the stage's own wall time (fingerprinting and tag
+    # building included, not just the calls) is what gets reported and what the run subtracts.
+    if metrics is not None:
+        metrics.wall_seconds = perf_counter() - stage_started
+
     if input_tokens or output_tokens:
         # invoked_model is set whenever a batch succeeded, and tokens are only accumulated
         # on success — so the fallback is unreachable, and resolves rather than guessing.
@@ -259,6 +279,8 @@ async def produce_stage_a_transaction_tags(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             ),
+            # LP-644 §1 — the measured stand-ins for the ticket's projected 12 calls at a 4.3s mean.
+            **(metrics.as_log_fields() if metrics is not None else {}),
         )
 
     by_subject = {

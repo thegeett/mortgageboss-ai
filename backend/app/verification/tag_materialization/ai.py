@@ -17,10 +17,12 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 
 from app.ai.client import AIClientError, complete
 from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
+from app.ai.stage_metrics import StageMetrics
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.verification.snapshot.content_id import content_fingerprint
@@ -288,6 +290,7 @@ async def produce_ai_group_tags(
     reasoner: Reasoner | None = None,
     cache: AiTagCache | None = None,
     breaker: AiInfraBreaker | None = None,
+    metrics: StageMetrics | None = None,
 ) -> dict[str, dict[str, Tag]]:
     """Materialize ``group``'s tags for its subjects → ``{subject_id: {tag_id: Tag}}``.
 
@@ -344,6 +347,7 @@ async def produce_ai_group_tags(
         context = {
             "subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]
         }
+        call_started = perf_counter()
         try:
             result = await reason_fn(json.dumps(context))
         except AIClientError as err:
@@ -360,6 +364,16 @@ async def produce_ai_group_tags(
             continue
         if breaker is not None:
             breaker.record_success()
+        # LP-644 §1 — one accumulator shared across all 23 groups, so the stage's totals come out
+        # whole rather than per-group. This is the stage the ticket calls "doubly sequential" and
+        # the least-known fact in it, so its measured call count is the one to compare against the
+        # projected 26.
+        if metrics is not None:
+            metrics.record_call(
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                seconds=perf_counter() - call_started,
+            )
         by_index = {j.index: j for j in result.judgments}
         expected = set(range(1, len(batch) + 1))
         if not set(by_index) <= expected:

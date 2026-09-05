@@ -13,6 +13,10 @@ proven separately). Returns a NEW frozen snapshot; the raw layer is never touche
 
 from __future__ import annotations
 
+from time import perf_counter
+
+from app.ai.stage_metrics import StageMetrics
+from app.core.logging import get_logger
 from app.verification.snapshot.model import DocumentEntry, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import AiTagCache, Reasoner, produce_ai_group_tags
@@ -25,6 +29,8 @@ from app.verification.tag_materialization.declarations import (
 from app.verification.tag_materialization.derived import produce_derived_tags
 from app.verification.tag_materialization.parsed import produce_parsed_tag
 from app.verification.tag_materialization.subjects import subject_type
+
+logger = get_logger(__name__)
 
 
 def _merge(into: dict[str, dict[str, Tag]], produced: dict[str, dict[str, Tag]]) -> None:
@@ -40,13 +46,20 @@ async def materialize_tags(
     only_subjects: frozenset[str] | None = None,
     only_groups: frozenset[str] | None = None,
     breaker: AiInfraBreaker | None = None,
+    metrics: StageMetrics | None = None,
 ) -> Snapshot:
     """Materialize every declared tag into the tags layer.
 
     ``only_subjects`` scopes parsed/derived/ai to a subject set; ``only_groups`` further scopes the AI
     pass to specific groups (a caller that needs only some AI families avoids running — and, without a
     stub, calling the real model for — the rest).
+
+    ``metrics`` (LP-644 §1, optional, mutated in place) accumulates the AI pass's calls, tokens and
+    latency across every group, and the wall time of the WHOLE materialization — parsed and derived
+    included. Those two phases make no AI calls, so counting them here is what stops §2's projected
+    saving from being read as larger than the stage can actually give back.
     """
+    stage_started = perf_counter()
     reasoners = ai_reasoners or {}
     declarations = load_declarations()
     ai_groups = load_ai_groups()
@@ -102,6 +115,7 @@ async def materialize_tags(
             reasoner=reasoners.get(group.key),
             cache=ai_cache,
             breaker=breaker,
+            metrics=metrics,
         )
         _merge(by_subject, produced)
 
@@ -118,6 +132,25 @@ async def materialize_tags(
     for decl in declarations.values():
         if decl.mode is ProductionMode.DERIVED and in_scope(decl.subject):
             _merge(by_subject, produce_derived_tags(decl, working))
+
+    # LP-644 §1 — the stage has no `*_production_done` line of its own (Stage A and B do), so this
+    # is where materialization becomes visible at all. `groups` is the outer sequential loop §2
+    # would parallelise; `ai_calls` is the inner one. Both counts are needed to size that change:
+    # 23 groups making 26 calls and 23 groups making 200 are the same table row and very different
+    # work.
+    if metrics is not None:
+        metrics.wall_seconds = perf_counter() - stage_started
+        logger.info(
+            "materialization_production_done",
+            groups=sum(
+                1
+                for g in ai_groups.values()
+                if in_scope(g.subject) and (only_groups is None or g.key in only_groups)
+            ),
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            **metrics.as_log_fields(),
+        )
 
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 

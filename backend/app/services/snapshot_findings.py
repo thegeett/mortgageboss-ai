@@ -14,6 +14,7 @@ which trains a processor to stop dismissing things, and is worse than a drifting
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy import select
@@ -27,6 +28,7 @@ from app.ai.snapshot_cross_source import (
     snapshot_payload,
     text_rejection,
 )
+from app.ai.stage_metrics import StageMetrics
 from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.models.snapshot_finding import SnapshotFinding, SnapshotFindingScan
@@ -73,6 +75,7 @@ async def refresh_snapshot_findings(
     loan_file_id: UUID,
     snapshot: Snapshot,
     reasoner: Reasoner | None = None,
+    metrics: StageMetrics | None = None,
 ) -> list[SnapshotFinding]:
     """Bring this file's snapshot findings up to date. Flush-only; the caller owns the transaction.
 
@@ -102,7 +105,22 @@ async def refresh_snapshot_findings(
     run = reasoner or reason_over_snapshot
     # LP-604 — the acceptable addresses, derived from the SAME payload the model is handed, so a
     # finding citing a place that is not in the file is dropped rather than stored as evidence.
+    #
+    # LP-644 §1 — timed HERE rather than around the caller's whole block, because the early return
+    # above is a genuine cache hit: on an unchanged file this stage makes no call at all, and timing
+    # it from outside would report that as a fast call rather than as no call.
+    #
+    # ⚠️ TOKENS ARE NOT AVAILABLE HERE and are deliberately left at zero. This `Reasoner` returns
+    # drafts, not a result carrying counts (unlike every other stage's), so recording them would mean
+    # changing that contract and every stub implementing it — more churn than §1's "an hour or so, no
+    # behaviour change" budget allows. The consequence is narrow and worth stating: this stage's
+    # `tokens_per_minute` reads 0, and the run's token totals exclude it. Its latency and call count,
+    # which is what §1 needs from a ~1-call stage, are exact.
+    call_started = perf_counter()
     drafts = await run(snapshot_payload(snapshot), snapshot_paths(snapshot))
+    if metrics is not None:
+        metrics.record_call(input_tokens=0, output_tokens=0, seconds=perf_counter() - call_started)
+        metrics.wall_seconds = perf_counter() - call_started
 
     # DE-DUPLICATE BEFORE INSERTING. `finding_key` deliberately ignores the wording, so two drafts
     # describing the same pairing in different words collide — ordinary model output. Both would miss

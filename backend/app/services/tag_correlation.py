@@ -32,11 +32,13 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from time import perf_counter
 
 import structlog
 
 from app.ai.cost import estimate_cost
 from app.ai.extraction.parsing import coerce_decimal
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_correlation import (
     HAS_IDENTIFIED_SOURCE_VALUES,
     AIClientError,
@@ -464,6 +466,7 @@ async def _judge_concurrently(
     *,
     concurrency: int,
     stop_after_failures: int | None = None,
+    metrics: StageMetrics | None = None,
 ) -> dict[str, SourcingResult | AIClientError]:
     """Run every outstanding judgement at once, bounded, returning ``{cache key: outcome}``.
 
@@ -515,6 +518,10 @@ async def _judge_concurrently(
         async with semaphore:
             if gate_closed:
                 return key, _NotAttempted(_NOT_ATTEMPTED_DETAIL)
+            # LP-644 §1 — timed INSIDE the semaphore, so a coroutine's wait for a slot is not
+            # charged to the model. Under concurrency the queueing time can dwarf the call, and
+            # billing it here would inflate the per-call mean that §2's and §5's sizing rests on.
+            call_started = perf_counter()
             try:
                 result = await reason_fn(json.dumps(context))
             except AIClientError as err:
@@ -526,6 +533,12 @@ async def _judge_concurrently(
                 gate_closed = True  # a bug, not an outage — stop spending on a discarded result
                 raise
             consecutive_failures = 0
+            if metrics is not None:
+                metrics.record_call(
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    seconds=perf_counter() - call_started,
+                )
             return key, result
 
     collected = await asyncio.gather(
@@ -550,6 +563,7 @@ async def produce_stage_b_sourcing_tags(
     source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
     concurrency: int = _MAX_CONCURRENT_JUDGMENTS,
+    metrics: StageMetrics | None = None,
 ) -> Snapshot:
     """Produce ``txn.has_identified_source`` for each money-in deposit (candidate-then-judge).
 
@@ -557,7 +571,12 @@ async def produce_stage_b_sourcing_tags(
     layer in place. Returns a new frozen snapshot; the raw layer is untouched. ``cache`` (optional,
     mutated in place) reuses judgments across runs by (deposit + candidate-set) content — only
     successful judgments are stored, so a failed/truncated deposit retries next run.
+
+    ``metrics`` (LP-644 §1, optional, mutated in place) records call count, tokens and latency.
+    This is the stage LP-644 believes makes ~551 of the run's 591 calls — a figure it derives as a
+    REMAINDER and explicitly flags as the first thing to check once measurement lands.
     """
+    stage_started = perf_counter()
     if snapshot.tags.absent:
         # Stage A never ran / failed — there is no is_money_in to consume; leave it absent.
         return snapshot
@@ -653,6 +672,7 @@ async def produce_stage_b_sourcing_tags(
         reason_fn,
         concurrency=concurrency,
         stop_after_failures=None if breaker is None else breaker.threshold,
+        metrics=metrics,
     )
 
     # PHASE 3 — APPLY, IN THE ORIGINAL ORDER. Deterministic on purpose: the tags, the token totals
@@ -732,6 +752,11 @@ async def produce_stage_b_sourcing_tags(
                 produced_by=TagProducedBy.DERIVED,
             )
 
+    # LP-644 §1 — before the log line, so the reported wall time covers the whole stage (candidate
+    # matching and tag building included), not only the concurrent dispatch.
+    if metrics is not None:
+        metrics.wall_seconds = perf_counter() - stage_started
+
     if input_tokens or output_tokens:
         logger.info(
             "stage_b_production_done",
@@ -745,6 +770,10 @@ async def produce_stage_b_sourcing_tags(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             ),
+            # LP-644 §1 — the stage running at concurrency 8, so `ai_latency_seconds` (cumulative)
+            # and `ai_wall_seconds` diverge here by roughly the concurrency factor. That gap is the
+            # measurement, not an inconsistency.
+            **(metrics.as_log_fields() if metrics is not None else {}),
         )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 

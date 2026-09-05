@@ -31,12 +31,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.stage_metrics import RunMetrics
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory, FindingResolutionStatus
@@ -963,6 +965,12 @@ async def run_verification(
     caches = caches or TagCaches()
     reasoners = reasoners or Reasoners()
     degradations: list[Degradation] = []
+    # LP-644 §1 — run-scoped and threaded exactly like `caches`: each stage records into its own
+    # accumulator and the summary below reads them all. Started here rather than at the first stage
+    # so the snapshot build — which makes no AI calls and is a named suspect for the non-AI
+    # remainder — is inside the measured window.
+    metrics = RunMetrics()
+    run_started = perf_counter()
 
     # 1. RAW snapshot (+ calculators-as-tags, built inside build_snapshot; each section degrades on
     #    its own — LP-318/builder). Calculators read stated financials, not Stage-A/B tags, so they
@@ -993,7 +1001,11 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_a",
             lambda s: produce_stage_a_transaction_tags(
-                s, reasoner=reasoners.stage_a, cache=caches.stage_a, breaker=ai_breaker
+                s,
+                reasoner=reasoners.stage_a,
+                cache=caches.stage_a,
+                breaker=ai_breaker,
+                metrics=metrics.stage_a,
             ),
             snapshot,
             degradations,
@@ -1012,7 +1024,11 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_b",
             lambda s: produce_stage_b_sourcing_tags(
-                s, reasoner=reasoners.stage_b, cache=caches.stage_b, breaker=ai_breaker
+                s,
+                reasoner=reasoners.stage_b,
+                cache=caches.stage_b,
+                breaker=ai_breaker,
+                metrics=metrics.stage_b,
             ),
             snapshot,
             degradations,
@@ -1033,6 +1049,7 @@ async def run_verification(
                 # never degrades this run or enters the persisted snapshot.)
                 only_groups=_required_ai_groups(),
                 breaker=ai_breaker,
+                metrics=metrics.materialization,
             ),
             snapshot,
             degradations,
@@ -1236,6 +1253,7 @@ async def run_verification(
                 loan_file_id=snapshot.loan_file_id,
                 snapshot=snapshot,
                 reasoner=reasoners.snapshot_findings,
+                metrics=metrics.cross_source,
             )
             # LP-592 — record the OPEN count on this run. It cannot be derived later: snapshot
             # findings are keyed by loan file and persist across runs by design, so nothing
@@ -1256,11 +1274,18 @@ async def run_verification(
     # finished is exactly what a hung run looks like.
     await clear_progress(run_id, session_factory=reasoners.progress_session)
 
+    # LP-644 §1 — THE ROW THE WHOLE TICKET TURNS ON. Its projections put AI waiting at ~464s of a
+    # 946s run and conclude "~49% is the ceiling for everything in this ticket". Every number behind
+    # that is a call count times a 4.3s mean taken from a FAILING run, so `ai_wall_pct` here is what
+    # decides whether §2-§5 are worth building at all — and `non_ai_seconds` is what they can never
+    # touch, however fast the model gets.
     logger.info(
         "verification_run_done",
         run_id=str(run_id),
         findings=len(findings),
         degradations=len(degradations),
+        run_wall_seconds=round(perf_counter() - run_started, 1),
+        **metrics.as_log_fields(perf_counter() - run_started),
     )
     return VerificationRun(
         run_id=run_id,
