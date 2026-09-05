@@ -54,6 +54,7 @@ async def materialize_tags(
     """
     reasoners = ai_reasoners or {}
     timing = StageTiming()  # LP-644 §1 — this stage had no timing and no logging at all
+    groups_run = 0
     declarations = load_declarations()
     ai_groups = load_ai_groups()
 
@@ -108,11 +109,9 @@ async def materialize_tags(
             reasoner=reasoners.get(group.key),
             cache=ai_cache,
             breaker=breaker,
+            timing=timing,  # LP-644 §1 — counted where a call is issued, not per group here
         )
-        # LP-644 §1 — one GROUP, which may be one model call or none if the cache answered it.
-        # Counted at the group because that is the unit this loop dispatches; the per-call split
-        # lives inside `produce_ai_group_tags`.
-        timing.record_call()
+        groups_run += 1
         _merge(by_subject, produced)
 
     # 3. derived — deterministic recipes, run LAST against the snapshot carrying the parsed + AI tags so
@@ -137,6 +136,10 @@ async def materialize_tags(
     logger.info(
         "tag_materialization_done",
         **timing.as_log_fields(),
+        # DISTINCT FROM `calls`, which now counts model dispatches like every other stage. A group
+        # whose subjects were all cached runs without issuing one, so these two diverge on exactly
+        # the re-run where the difference matters.
+        ai_groups=groups_run,
         subjects_in_scope=len(by_subject),
     )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})

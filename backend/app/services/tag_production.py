@@ -191,6 +191,12 @@ async def produce_stage_a_transaction_tags(
     invoked_model: str | None = None
 
     for batch in _chunks(representatives, _BATCH_SIZE):
+        # LP-644 §1 review — AT THE ISSUE POINT, not on the success path. `StageTiming.calls` is
+        # documented as counting failed calls too, because a failure costs the same wall clock and
+        # the baseline this replaces was measured on a FAILING run — but the first version recorded
+        # after the tokens accumulated, which only happens on success. A comment describing a
+        # distinction the code does not make; the run it most needed to measure counted zero.
+        timing.record_call(subjects=len(batch))
         context_json = json.dumps(_build_context([txn for _, txn in batch]))
         try:
             result = await reason_fn(context_json)
@@ -211,7 +217,6 @@ async def produce_stage_a_transaction_tags(
 
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
-        timing.record_call(subjects=len(batch))
         invoked_model = result.model
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must
@@ -248,7 +253,13 @@ async def produce_stage_a_transaction_tags(
             if entry.is_money_in is not None and entry.apparent_category is not None:
                 persistent[fp] = entry
 
-    if input_tokens or output_tokens:
+    # LP-644 §1 review — LOGGED WHENEVER A CALL WAS ISSUED, not only when one succeeded.
+    #
+    # The guard used to be `if input_tokens or output_tokens`, so a stage whose every call FAILED
+    # logged nothing at all. That is precisely the run the 4.3s baseline was measured on, and the
+    # run whose wall clock this instrumentation most needs to describe — a stage can spend its whole
+    # budget on retries and, under the old guard, report that it never ran.
+    if timing.calls:
         # invoked_model is set whenever a batch succeeded, and tokens are only accumulated
         # on success — so the fallback is unreachable, and resolves rather than guessing.
         logger.info(
@@ -258,10 +269,16 @@ async def produce_stage_a_transaction_tags(
             unique=len(representatives),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_estimate=estimate_cost(
-                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+            # None when every call failed: there is no model to attribute a cost to, and a $0
+            # estimate would read as a free stage rather than an unsuccessful one.
+            cost_estimate=(
+                estimate_cost(
+                    model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+                if invoked_model is not None
+                else None
             ),
         )
 

@@ -365,3 +365,38 @@ async def test_stage_a_reports_its_elapsed_time_and_call_count() -> None:
     assert entry["subjects"] >= entry["calls"], (
         "subjects cannot be fewer than the calls that carried them"
     )
+
+
+async def test_a_stage_whose_every_call_failed_still_reports_its_timing() -> None:
+    """LP-644 §1 review — two defects met here, and the second was found by the first's test.
+
+    `calls` is documented as counting failures, because a failed call costs the same wall clock as a
+    successful one. The first version recorded after the token totals accumulated, which only happens
+    on success — a comment describing a distinction the code did not make.
+
+    Fixing that exposed the larger one: the completion line was gated on `if input_tokens or
+    output_tokens`, so a stage whose every call failed logged NOTHING. That is exactly the run the
+    4.3s baseline was measured on, and the run whose wall clock this instrumentation most needs to
+    describe. A stage could spend its entire budget on retries and report that it never ran.
+
+    Cost is None rather than 0 here: there is no model to attribute one to, and a $0 estimate reads
+    as a free stage rather than an unsuccessful one.
+    """
+    import structlog
+    from app.ai.client import AIClientError
+
+    async def _always_fails(_context: str) -> object:
+        raise AIClientError("backend down")
+
+    snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
+    with structlog.testing.capture_logs() as logs:
+        await produce_stage_a_transaction_tags(snap, reasoner=_always_fails)
+
+    done = [line for line in logs if line.get("event") == "stage_a_production_done"]
+    assert done, "a stage that issued calls and failed them all reported nothing at all"
+    entry = done[0]
+    assert entry["calls"] >= 1, "the failed call was not counted"
+    assert entry["input_tokens"] == 0 and entry["output_tokens"] == 0
+    assert entry["cost_estimate"] is None, (
+        "a $0 cost reads as a free stage; there is no model to attribute one to"
+    )

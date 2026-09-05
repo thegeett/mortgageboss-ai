@@ -23,6 +23,7 @@ from app.ai.client import AIClientError, complete
 from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.stage_timing import StageTiming
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
@@ -288,6 +289,7 @@ async def produce_ai_group_tags(
     reasoner: Reasoner | None = None,
     cache: AiTagCache | None = None,
     breaker: AiInfraBreaker | None = None,
+    timing: StageTiming | None = None,
 ) -> dict[str, dict[str, Tag]]:
     """Materialize ``group``'s tags for its subjects → ``{subject_id: {tag_id: Tag}}``.
 
@@ -344,6 +346,20 @@ async def produce_ai_group_tags(
         context = {
             "subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]
         }
+        # LP-644 §1 review — COUNTED HERE, WHERE A CALL IS ISSUED, and before the try rather than
+        # after it.
+        #
+        # The producer used to count one per GROUP after this function returned. A group every one of
+        # whose subjects is cached dispatches NOTHING — `representatives` is empty and this loop does
+        # not run — so a re-run of an unchanged file reported a full call count having made almost no
+        # calls. LP-644's projections are a call count times a mean latency, so that overstates AI
+        # time in exactly the case where caching does most of the work: measurement built to replace
+        # a stale estimate, reading high where it mattered most.
+        #
+        # BEFORE the `try` because a FAILED call costs the same wall clock as a successful one, and
+        # the 4.3s baseline this replaces was taken on a run full of them.
+        if timing is not None:
+            timing.record_call(subjects=len(batch))
         try:
             result = await reason_fn(json.dumps(context))
         except AIClientError as err:

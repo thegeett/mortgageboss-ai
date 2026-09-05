@@ -43,7 +43,6 @@ from app.ai.tag_correlation import (
     SourcingResult,
     reason_stage_b_sourcing,
 )
-from app.core.config import resolve_model, settings
 from app.core.stage_timing import StageTiming
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
@@ -465,6 +464,7 @@ async def _judge_concurrently(
     *,
     concurrency: int,
     stop_after_failures: int | None = None,
+    timing: StageTiming | None = None,
 ) -> dict[str, SourcingResult | AIClientError]:
     """Run every outstanding judgement at once, bounded, returning ``{cache key: outcome}``.
 
@@ -516,6 +516,13 @@ async def _judge_concurrently(
         async with semaphore:
             if gate_closed:
                 return key, _NotAttempted(_NOT_ATTEMPTED_DETAIL)
+            # LP-644 §1 review — HERE, past both gate checks, is where a call is actually issued.
+            # The first version counted in the APPLY loop on the success path, which misses two
+            # cases in opposite directions: a failed call costs wall clock and went uncounted, and
+            # a `_NotAttempted` from the closed breaker gate never reaches the model at all. Past
+            # the gate and before the try counts exactly the calls that were made.
+            if timing is not None:
+                timing.record_call()
             try:
                 result = await reason_fn(json.dumps(context))
             except AIClientError as err:
@@ -655,6 +662,7 @@ async def produce_stage_b_sourcing_tags(
         reason_fn,
         concurrency=concurrency,
         stop_after_failures=None if breaker is None else breaker.threshold,
+        timing=timing,  # LP-644 §1 — counted at dispatch, inside
     )
 
     # PHASE 3 — APPLY, IN THE ORIGINAL ORDER. Deterministic on purpose: the tags, the token totals
@@ -705,12 +713,6 @@ async def produce_stage_b_sourcing_tags(
                     breaker.record_success()
                 input_tokens += outcome.input_tokens
                 output_tokens += outcome.output_tokens
-                # LP-644 §1 — ONE CALL PER DEPOSIT TODAY, so `calls` and `subjects` match here and
-                # the pair looks redundant. §5 batches fifteen deposits per call: that is the change
-                # this measurement exists to evaluate, and the moment it lands only one of the two
-                # moves. Recorded in the apply loop because that is where a dispatched call is known
-                # to have returned an outcome.
-                timing.record_call()
                 invoked_model = outcome.model
                 resolved = _resolve(
                     outcome, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
@@ -740,19 +742,24 @@ async def produce_stage_b_sourcing_tags(
                 produced_by=TagProducedBy.DERIVED,
             )
 
-    if input_tokens or output_tokens:
+    # LP-644 §1 review — see the twin in `tag_production`: a stage whose every call failed used to
+    # log nothing, which is the run this measurement most needs.
+    if timing.calls:
         logger.info(
             "stage_b_production_done",
             **timing.as_log_fields(),  # LP-644 §1
             deposits_judged=deposits_judged,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_estimate=estimate_cost(
-                # Unreachable fallback: tokens only accumulate on a successful judgment,
-                # which is exactly when invoked_model is set.
-                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+            # None when every judgment failed — a $0 estimate would read as a free stage.
+            cost_estimate=(
+                estimate_cost(
+                    model=invoked_model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+                if invoked_model is not None
+                else None
             ),
         )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
