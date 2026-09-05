@@ -56,3 +56,63 @@ async def test_uploading_the_form_clears_the_need_it_was_asked_for(
         assert matched.status is not NeedsItemStatus.PENDING, (
             f"{slug} matched but left the need pending"
         )
+
+
+async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
+    db_session: AsyncSession,
+) -> None:
+    """THE LINK THE TWO TESTS ABOVE LEAVE OPEN, and it is the one a typo travels through.
+
+    The first asserts a hardcoded pair of slugs is in the catalog. The second builds the need by
+    setting `needs_type` directly. Neither runs `seed_floor_needs`, so neither sees what the SEEDER
+    actually emits — and a slug misspelled there produces exactly the defect this file exists to
+    prevent: a need on a processor's list that no upload can clear. Verified by mutation: renaming the
+    seeder's slug to `comparable_rent_schedule_typo` leaves both of the above green.
+
+    So this drives the real path end to end — seed, then upload, then assert it closed — and reads
+    the type off the seeded row rather than from a constant, because a constant is the thing that
+    agrees with itself.
+    """
+    from app.models.property import OccupancyType
+    from app.services.needs_engine import seed_floor_needs
+
+    company = await factories.make_company(db_session, slug="acme-seeded")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    prop.financed_unit_count = 1
+    await db_session.flush()
+
+    await seed_floor_needs(db_session, loan_file)
+    await db_session.flush()
+
+    seeded = [n for n in await _needs_on(db_session, loan_file) if n.needs_type in _FORMS]
+    assert len(seeded) == 1, "an investment subject seeds exactly one rent-schedule need"
+    slug = seeded[0].needs_type
+    assert slug in CATALOG, f"the seeder emitted {slug!r}, which no document can be classified as"
+
+    document = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type=slug,
+        status=DocumentStatus.COMPLETED,
+    )
+    await db_session.flush()
+
+    matched = await apply_document_to_needs(db_session, document)
+    assert matched is not None and matched.id == seeded[0].id, (
+        f"uploading a {slug} did not clear the need the seeder asked for"
+    )
+
+
+async def _needs_on(db: AsyncSession, loan_file):
+    from app.models.helpers import only_active
+    from app.models.needs_item import NeedsItem
+    from sqlalchemy import select
+
+    return (
+        await db.scalars(
+            only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id), NeedsItem)
+        )
+    ).all()
