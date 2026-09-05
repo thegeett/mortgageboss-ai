@@ -284,3 +284,50 @@ async def test_an_override_the_processor_already_set_survives_the_preview(db_ses
     assert HOUSING_INSURANCE not in {line.key for line in preview.lines}, (
         "an already-corrected line is not unknown, so it is not something the ungate would zero"
     )
+
+
+async def test_the_consent_does_not_list_an_input_as_both_fixed_and_unresolved(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 review — a file gated BOTH ways, which is the case the preview's if/elif was reaching
+    for and then handled identically in both arms.
+
+    `gate_reason` is a JOIN of two independently-produced halves: the fail-closed housing reason and
+    calculation-level reasons like the rental gate. Reporting the joined string put "Property taxes
+    is unknown" in the unresolved list while the line directly above it promised to record property
+    taxes as $0.00 — the same input, in one dialog, in opposite roles. A consent screen that
+    contradicts itself is worse than one that says less, because the processor cannot tell which half
+    to believe and this is the screen where they accept the assertion personally.
+
+    The zeroable lines ARE the housing gate — both are `housing_items` where `unknown` — so an ungate
+    resolves that half in full and what survives is everything else.
+    """
+    from app.models.property import OccupancyType
+
+    loan_file, _ = await _file(db_session, "gated-both-ways")
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    # An investment subject with no rent schedule gates the calculation on TOP of the housing
+    # unknowns every bare file has.
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    current = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert current.housing_gate_reason and current.other_gate_reasons, (
+        "the fixture must be gated BOTH ways or this asserts nothing"
+    )
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+    fixed = {line.label for line in preview.lines}
+    assert fixed, "the fixture must have zeroable lines or this asserts nothing"
+
+    for label in fixed:
+        for reason in preview.unresolved:
+            assert label not in reason, (
+                f"{label!r} is listed as a line the ungate will set to $0.00 AND named in an "
+                f"unresolved reason: {reason!r}"
+            )
+
+    assert preview.unresolved, (
+        "the rental gate survives an ungate and must still be reported — dropping it would trade a "
+        "contradiction for a silence"
+    )

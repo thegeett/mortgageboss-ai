@@ -769,15 +769,15 @@ async def build_dti_calculation(
     # bug-001 — name what the file DOES state for a gated input, so the gate reads as caution rather
     # than as a system that cannot see its own documents.
     unverified = await _unverified_housing_inputs(db, loan_file.id, gated_labels)
-    reasons: list[str] = []
-    if gated_labels:
-        reasons.append(
-            "calculation gated (fail-closed): "
-            + "; ".join(f"{label} is unknown" for label in gated_labels)
-            + ("  " + " ".join(u.sentence for u in unverified) if unverified else "")
-        )
-    if rental.gate_reason:
-        reasons.append(rental.gate_reason)
+    housing_gate_reason = (
+        "calculation gated (fail-closed): "
+        + "; ".join(f"{label} is unknown" for label in gated_labels)
+        + ("  " + " ".join(u.sentence for u in unverified) if unverified else "")
+        if gated_labels
+        else None
+    )
+    other_gate_reasons = (rental.gate_reason,) if rental.gate_reason else ()
+    reasons = [r for r in (housing_gate_reason, *other_gate_reasons) if r]
     gate_reason = "  ".join(reasons) if reasons else None
 
     lender_slug = await _lender_slug(db, loan_file)
@@ -792,6 +792,8 @@ async def build_dti_calculation(
         back_end_dti=result.back_end_pct,
         gated=gated,
         gate_reason=gate_reason,
+        housing_gate_reason=housing_gate_reason,
+        other_gate_reasons=other_gate_reasons,
         unverified_inputs=unverified,
         gross_monthly_income=result.gross_monthly_income,
         housing_payment=result.housing_payment,
@@ -1021,12 +1023,20 @@ async def preview_dti_ungate(
     )
     zeroable = _zeroable_gated_lines(current)
 
-    unresolved: list[str] = []
-    if current.gate_reason and not zeroable:
-        unresolved.append(current.gate_reason)
-    elif current.gate_reason and zeroable:
-        # Both kinds present: the housing lines move, the calculation-level reason may not.
-        unresolved.append(current.gate_reason)
+    # REPORT WHAT THE UNGATE WILL NOT FIX, which is not the same as what is gated now.
+    #
+    # This was an if/elif appending `current.gate_reason` in both arms — the same thing twice, which
+    # is the shape a branch takes when its author knows the two cases differ and the handling has not
+    # caught up. They do differ, and reading the JOINED reason is what hid it: on a file gated both
+    # ways the string carries the housing half AND the rental half, so the consent screen listed
+    # "Property taxes is unknown" as unresolved while the line above it promised to set property
+    # taxes to $0.00. The same input, in both halves of one dialog, in opposite roles.
+    #
+    # The zeroable lines ARE the housing gate — both are `housing_items` where `unknown` — so an
+    # ungate always resolves that half in full. What survives is everything else.
+    unresolved = list(current.other_gate_reasons)
+    if current.housing_gate_reason and not zeroable:
+        unresolved.insert(0, current.housing_gate_reason)
 
     after = current
     if zeroable:

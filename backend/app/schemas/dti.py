@@ -100,6 +100,16 @@ class DtiCalculation(BaseModel):
     # already did this; the display path used to collapse the absent input to 0 and show a confident ratio.
     gated: bool = False
     gate_reason: str | None = None
+    #: LP-643 review — THE SAME REASONS, UNJOINED, because the ungate has to tell them apart.
+    #:
+    #: `gate_reason` is a join of two independently-produced halves: the fail-closed HOUSING reason
+    #: (a required input is unknown) and calculation-level reasons like the rental gate. The ungate
+    #: resolves the first and cannot resolve the second, so a consent screen reporting the joined
+    #: string listed the very inputs it was about to fix as "unresolved" — the same two labels in
+    #: both halves of one dialog. Carried structurally for the reason `unverified_inputs` above is:
+    #: a string that folds two facts together cannot be un-folded by its reader.
+    housing_gate_reason: str | None = None
+    other_gate_reasons: tuple[str, ...] = ()
     #: bug-001 — a figure the FILE STATES for a gated input, which is not acceptable verification.
     #:
     #: A real submission gated on "Property taxes is unknown" while two documents in it stated the
