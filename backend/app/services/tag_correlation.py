@@ -44,6 +44,7 @@ from app.ai.tag_correlation import (
     reason_stage_b_sourcing,
 )
 from app.core.config import resolve_model, settings
+from app.core.stage_timing import StageTiming
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
@@ -575,6 +576,7 @@ async def produce_stage_b_sourcing_tags(
 
     by_subject = {cid: dict(tags) for cid, tags in snapshot.tags.by_subject.items()}
     input_tokens = output_tokens = deposits_judged = 0
+    timing = StageTiming()  # LP-644 §1 — starts the clock for this stage
     # Pricing must be keyed on the model that ACTUALLY ran — under Bedrock the inference-
     # profile id, not the tier value read from settings. SourcingResult.model carries the
     # completion's own resolved id. See the matching note in services/tag_production.py.
@@ -703,6 +705,12 @@ async def produce_stage_b_sourcing_tags(
                     breaker.record_success()
                 input_tokens += outcome.input_tokens
                 output_tokens += outcome.output_tokens
+                # LP-644 §1 — ONE CALL PER DEPOSIT TODAY, so `calls` and `subjects` match here and
+                # the pair looks redundant. §5 batches fifteen deposits per call: that is the change
+                # this measurement exists to evaluate, and the moment it lands only one of the two
+                # moves. Recorded in the apply loop because that is where a dispatched call is known
+                # to have returned an outcome.
+                timing.record_call()
                 invoked_model = outcome.model
                 resolved = _resolve(
                     outcome, candidates, _stage_a_value(subject, _TAG_APPARENT_CATEGORY)
@@ -735,6 +743,7 @@ async def produce_stage_b_sourcing_tags(
     if input_tokens or output_tokens:
         logger.info(
             "stage_b_production_done",
+            **timing.as_log_fields(),  # LP-644 §1
             deposits_judged=deposits_judged,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

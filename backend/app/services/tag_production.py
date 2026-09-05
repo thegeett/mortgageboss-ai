@@ -43,6 +43,7 @@ from app.ai.tag_production import (
     reason_stage_a_transactions,
 )
 from app.core.config import resolve_model, settings
+from app.core.stage_timing import StageTiming
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
@@ -181,6 +182,7 @@ async def produce_stage_a_transaction_tags(
 
     resolved: TransactionTagCache = dict(persistent)
     input_tokens = output_tokens = 0
+    timing = StageTiming()  # LP-644 §1 — starts the clock for this stage
     # Pricing must be keyed on the model that ACTUALLY ran. Under Bedrock that is the
     # cross-region inference-profile id, not the tier value this module asks for, so
     # reading the tier setting here would price the call against the wrong key the moment
@@ -209,6 +211,7 @@ async def produce_stage_a_transaction_tags(
 
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
+        timing.record_call(subjects=len(batch))
         invoked_model = result.model
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must
@@ -250,6 +253,7 @@ async def produce_stage_a_transaction_tags(
         # on success — so the fallback is unreachable, and resolves rather than guessing.
         logger.info(
             "stage_a_production_done",
+            **timing.as_log_fields(),  # LP-644 §1
             transactions=len(transactions),
             unique=len(representatives),
             input_tokens=input_tokens,

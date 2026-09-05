@@ -42,6 +42,7 @@ from app.ai.client import AIClientError
 from app.ai.cost import estimate_cost
 from app.ai.cross_source import CrossSourceRawFinding, CrossSourceResult, reason_cross_source
 from app.core.logging import get_logger
+from app.core.stage_timing import StageTiming
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.document import Document
@@ -121,6 +122,7 @@ async def run_cross_source(
     no longer detected (a completed processor action — the applied data change, the audit trail,
     and Undo depend on the record; ADR-061).
     """
+    timing = StageTiming()  # LP-644 §1 — the whole pass, AI and persistence together
     # Resolve the reasoner at call time so the worker-task path (which calls without an
     # explicit reason_fn) can be stubbed in the real-stack integration test (LP-89).
     reasoner = reason_fn if reason_fn is not None else reason_cross_source
@@ -214,6 +216,7 @@ async def run_cross_source(
     await db.flush()
     logger.info(
         "cross_source_pass_done",
+        **timing.as_log_fields(),  # LP-644 §1
         loan_file_id=str(loan_file.id),
         findings=red + yellow,  # counts only — never the findings' content (PII)
         red=red,

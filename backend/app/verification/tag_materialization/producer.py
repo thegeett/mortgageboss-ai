@@ -13,6 +13,9 @@ proven separately). Returns a NEW frozen snapshot; the raw layer is never touche
 
 from __future__ import annotations
 
+import structlog
+
+from app.core.stage_timing import StageTiming
 from app.verification.snapshot.model import DocumentEntry, Snapshot, TagsSection
 from app.verification.snapshot.tag import Tag
 from app.verification.tag_materialization.ai import AiTagCache, Reasoner, produce_ai_group_tags
@@ -25,6 +28,8 @@ from app.verification.tag_materialization.declarations import (
 from app.verification.tag_materialization.derived import produce_derived_tags
 from app.verification.tag_materialization.parsed import produce_parsed_tag
 from app.verification.tag_materialization.subjects import subject_type
+
+logger = structlog.get_logger(__name__)
 
 
 def _merge(into: dict[str, dict[str, Tag]], produced: dict[str, dict[str, Tag]]) -> None:
@@ -48,6 +53,7 @@ async def materialize_tags(
     stub, calling the real model for — the rest).
     """
     reasoners = ai_reasoners or {}
+    timing = StageTiming()  # LP-644 §1 — this stage had no timing and no logging at all
     declarations = load_declarations()
     ai_groups = load_ai_groups()
 
@@ -103,6 +109,10 @@ async def materialize_tags(
             cache=ai_cache,
             breaker=breaker,
         )
+        # LP-644 §1 — one GROUP, which may be one model call or none if the cache answered it.
+        # Counted at the group because that is the unit this loop dispatches; the per-call split
+        # lives inside `produce_ai_group_tags`.
+        timing.record_call()
         _merge(by_subject, produced)
 
     # 3. derived — deterministic recipes, run LAST against the snapshot carrying the parsed + AI tags so
@@ -119,6 +129,16 @@ async def materialize_tags(
         if decl.mode is ProductionMode.DERIVED and in_scope(decl.subject):
             _merge(by_subject, produce_derived_tags(decl, working))
 
+    # LP-644 §1 — THE STAGE THE BASELINE HAD NO NUMBER FOR. Every other stage logs its tokens and
+    # cost; this one logged nothing, so its share of a run's wall clock was inferred rather than
+    # measured. Logged unconditionally, including when no AI group ran: a materialization that
+    # spends its time in the parsed and derived passes is a real answer, and one the projections
+    # cannot currently distinguish from a fast stage.
+    logger.info(
+        "tag_materialization_done",
+        **timing.as_log_fields(),
+        subjects_in_scope=len(by_subject),
+    )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 

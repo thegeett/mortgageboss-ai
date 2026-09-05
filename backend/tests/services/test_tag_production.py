@@ -338,3 +338,30 @@ async def test_returned_but_malformed_tag_uses_the_accurate_reason() -> None:
     cat = tags["txn.apparent_category"]
     assert cat.value == "unknown"
     assert cat.reasoning == "tag value missing or malformed in structuring response"
+
+
+async def test_stage_a_reports_its_elapsed_time_and_call_count() -> None:
+    """LP-644 §1 — the completion line has to CARRY the timing, not merely have it available.
+
+    The helper is unit-tested separately; this is the other half, and the half that has been wrong
+    before in this repo: a value computed correctly and written somewhere nobody reads. Every
+    projection in LP-644 is a call count times a stale mean, so a `stage_a_production_done` line
+    without these fields leaves the ticket exactly as evidence-free as it was while looking
+    instrumented.
+    """
+    import structlog
+
+    snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
+    with structlog.testing.capture_logs() as logs:
+        await produce_stage_a_transaction_tags(snap, reasoner=StubReasoner())
+
+    done = [line for line in logs if line.get("event") == "stage_a_production_done"]
+    assert done, "the stage did not log its completion at all"
+    entry = done[0]
+    assert {"elapsed_seconds", "calls", "subjects"} <= set(entry), (
+        f"the completion line is missing timing fields: {sorted(entry)}"
+    )
+    assert entry["calls"] >= 1, "a stage that issued a model call reported zero calls"
+    assert entry["subjects"] >= entry["calls"], (
+        "subjects cannot be fewer than the calls that carried them"
+    )

@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.stage_timing import StageTiming
 from app.models.finding import Finding, FindingCategory, FindingResolutionStatus
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
@@ -960,6 +961,7 @@ async def run_verification(
     already-tagged snapshot (reproducibility / a frozen trace). Always completes; what degraded is
     recorded on the result.
     """
+    timing = StageTiming()  # LP-644 §1 — the whole run, for the non-AI remainder
     caches = caches or TagCaches()
     reasoners = reasoners or Reasoners()
     degradations: list[Degradation] = []
@@ -1256,9 +1258,21 @@ async def run_verification(
     # finished is exactly what a hung run looks like.
     await clear_progress(run_id, session_factory=reasoners.progress_session)
 
+    # LP-644 §1 — THE RUN'S TOTAL, so the per-stage lines above can be subtracted from something.
+    #
+    # The split between AI and non-AI time is the number that decides whether the rest of LP-644 is
+    # worth doing, and it had the least evidence behind it: every projection was a call count times
+    # a 4.3s mean that predates every fix since and was taken on a FAILING run. The stages log their
+    # own elapsed seconds now; this logs the whole, and the REMAINDER is the non-AI cost.
+    #
+    # Deliberately not computed here. Summing the stages would require this function to know which
+    # ones ran on this file — a scoped re-run skips some — and a subtraction that silently assumes a
+    # full run would report a remainder that is really a missing stage. The parts are all in the log
+    # under one run_id; the arithmetic belongs to whoever reads them, who can see which are present.
     logger.info(
         "verification_run_done",
         run_id=str(run_id),
+        elapsed_seconds=timing.elapsed_seconds,
         findings=len(findings),
         degradations=len(degradations),
     )
