@@ -36,7 +36,7 @@
     {
       "name": "opinion_of_monthly_market_rent",
       "type": "Decimal",
-      "why": "THE FIGURE THE DTI CONSUMES \u2014 the appraiser's opinion, never an average of the comparables",
+      "why": "THE FIGURE THE DTI CONSUMES. The appraiser's opinion of monthly market rent for the SUBJECT AS A WHOLE. Printed differently on the two forms and labelled 'Opinion of Monthly Market Rent' on NEITHER: on a 1007 it is the foot-of-page sentence 'I (WE) ESTIMATE THE MONTHLY MARKET RENT OF THE SUBJECT AS OF ___ TO BE $ ___'; on a 1025 there is no property-level opinion line at all \u2014 'Opinion Of Market Rent' is a per-UNIT column heading, and the property-level figure is the printed 'Total Gross Monthly Rent'. Taking a single unit's row on a four-unit subject would qualify the loan on a quarter of its rent.",
       "rules": [],
       "reason_class": "rule",
       "rule_floor": true,
@@ -48,7 +48,7 @@
     {
       "name": "total_gross_monthly_income",
       "type": "Decimal",
-      "why": "1025 only: total across all units; null on a 1007",
+      "why": "1025 only: the form's 'Total Estimated Monthly Income' \u2014 Total Gross Monthly Rent PLUS 'Other Monthly Income (itemize)' (parking, laundry, storage). NOT the qualifying rent and NOT interchangeable with the opinion: substituting it would put non-rent income into a qualifying ratio. Captured so a reader can see what other income the appraiser recorded. Null on a 1007.",
       "rules": [],
       "reason_class": "processor",
       "rule_floor": false,
@@ -330,11 +330,16 @@
     {
       "name": "averaged_comparable_rent",
       "reason": "COMPUTED, and computing it would invite the model to substitute it for the opinion \u2014 the exact failure the prompt forbids. An appraiser's opinion is a judgement, not the mean of the rows above it."
+    },
+    {
+      "name": "per_unit_opinion_of_market_rent",
+      "reason": "A 1025's 'Opinion Of Market Rent' column is per UNIT and has no single-field home: rows 1-4 are captured in `unit_rents` and the property-level figure is the form's printed 'Total Gross Monthly Rent', which is what `opinion_of_monthly_market_rent` holds. A scalar for the per-unit opinion would invite exactly the substitution the prompt forbids."
     }
   ],
   "encoding_variations": [
-    "Freddie Mac equivalents: Form 1000 (single-family) and Form 72 (2-4 unit) carry the same content under different numbers.",
-    "A tenanted subject shows both an ACTUAL rent and a market-rent opinion; only the opinion qualifies income."
+    "Joint branding: 'Freddie Mac Form 1000' IS the Fannie 1007, and 'Freddie Mac Form 72' IS the 1025. A model reading the Freddie number off the header has no way to know which Fannie form it holds unless told, so the prompt maps both.",
+    "The two forms state the property-level market rent in structurally different places \u2014 a sentence on the 1007, a printed total on the 1025 \u2014 and neither prints the words 'Opinion of Monthly Market Rent' as a line label.",
+    "A tenanted subject shows an ACTUAL rent alongside the market opinion; only the opinion qualifies income. On a 1025 that is 'Total Actual Monthly Rent'; on a 1007 it is 'Monthly Rental If Currently Rented' in the subject column."
   ],
   "open_questions": [
     {
@@ -345,7 +350,8 @@
     }
   ],
   "notes": [
-    "LP-642 step 2. Written from the guide and the form layout; NO real 1007 or 1025 was available, so accuracy is starter-grade and needs validating against real forms.",
+    "LP-642 step 2/3. Field names checked against the real blank forms \u2014 Freddie Mac Form 1000 / Fannie Mae Form 1007 (8/88) and Fannie Mae Form 1025 / Freddie Mac Form 72 (03/2005).",
+    "BLANK forms, so this is the PRINTED field vocabulary, not what an appraiser writes into the boxes. Accuracy against completed forms is still unvalidated.",
     "B3-3.8-02 (09/02/2026) makes one of these mandatory where rental income qualifies the loan."
   ]
 }
