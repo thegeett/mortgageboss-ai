@@ -472,3 +472,128 @@ async def test_the_preview_never_shows_a_confident_ratio_for_a_file_that_stays_g
         "a file the ungate fully resolves must show the ratio it will get — nulling every preview "
         "would trade a false number for no number"
     )
+
+
+async def test_a_supplied_gross_rent_does_not_route_around_the_experience_requirement(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 review — the shape where a UI affordance walks past a guideline.
+
+    `rental.gross_subject` lets a processor supply the figure no document states. A large enough one
+    produces a POSITIVE net rental, and SEL-2026-08 only allows a positive net into qualifying income
+    where the borrower has 12 months of property-management experience (bug-012). Nothing in the
+    override path knows about that requirement, and nothing asserted the interaction.
+
+    It holds — the experience check runs on the COMPUTED net, after the gross is resolved, so it
+    cannot be reached around by changing where the gross came from. Pinned rather than reasoned
+    about, because the entire purpose of an affordance is to give a processor a way past a refusal,
+    and this is the refusal that has to survive one.
+
+    ASSERTED AT `subject_rental_treatment`, which is where BOTH live: the override enters there and
+    the experience gate closes there. Driving it through the DTI would need a full PITIA and a
+    present-housing figure to get a rental line at all — more fixture, no more coverage of the
+    interaction, and the intermediate values are exactly what would be asserted anyway.
+
+    Both directions, because a check that always refuses is not a check.
+    """
+    from app.services.rental_treatment import subject_rental_treatment
+    from tests.services.test_dti_rental_integration_lp621 import _tax_return_with
+    from tests.services.test_rental_treatment_lp621 import _present_housing
+
+    async def _investment_file(slug: str):
+        loan_file, company = await _file(db_session, slug)
+        prop = await factories.make_property(db_session, loan_file=loan_file)
+        prop.occupancy_type = OccupancyType.INVESTMENT
+        await _present_housing(db_session, loan_file, "2500.00")
+        await db_session.flush()
+        return loan_file, company
+
+    # NO tax return on the file, so nothing can establish experience.
+    loan_file, _ = await _investment_file("override-no-experience")
+    treatment = await subject_rental_treatment(
+        db_session,
+        loan_file=loan_file,
+        subject_pitia=Decimal("1500.00"),
+        # 75% of 9000 is 6750, well above the PITIA — an unambiguously positive net.
+        gross_rent_override=Decimal("9000.00"),
+    )
+
+    assert treatment.applies and treatment.gate_reason is None, (
+        "the supplied gross must clear the rent half of the gate, or this asserts nothing"
+    )
+    assert treatment.net_monthly is not None and treatment.net_monthly > 0, (
+        "the fixture must produce a POSITIVE net or the experience rule is not engaged"
+    )
+    assert not treatment.experience_established, (
+        "a processor-supplied gross rent established 12 months of property-management experience — "
+        "the affordance walked past SEL-2026-08"
+    )
+    assert "experience is not established" in treatment.derivation
+
+    # THE OTHER DIRECTION: with a full-year Schedule E, the same override reaches income.
+    loan_file2, _ = await _investment_file("override-with-experience")
+    await _tax_return_with(db_session, loan_file2, days=365, tax_year=2025)
+    treatment2 = await subject_rental_treatment(
+        db_session,
+        loan_file=loan_file2,
+        subject_pitia=Decimal("1500.00"),
+        gross_rent_override=Decimal("9000.00"),
+    )
+
+    assert treatment2.experience_established, (
+        "with a full-year Schedule E the experience IS established, so the same supplied rent must "
+        "reach qualifying income — a check that refuses in both cases is not a check"
+    )
+    assert "added to income" in treatment2.derivation
+
+
+async def test_an_ungate_resolves_every_gate_it_reports(db_session: AsyncSession) -> None:
+    """LP-643 review — the invariant that makes the after-ratio case unreachable, now pinned.
+
+    The earlier guard asserted the preview never shows a confident ratio for a file that STAYS gated.
+    The revision made that case unreachable: `gated` has exactly two producers, zeroable lines and
+    `other_gate_reasons`, and an ungate now answers both — zeros for the housing unknowns, a waiver
+    for the rental treatment. So the "after" half was repointed at the BEFORE ratios, correctly,
+    because no fixture can reach the other one any more.
+
+    That leaves the GUARANTEE doing the work, and nothing was asserting it. Measured: with the
+    invariant holding, `gate_display_ratios(after)` can be deleted outright and every test still
+    passes — it is defence with nothing behind it. The moment a third gate shape appears that neither
+    a zero nor the waiver resolves, `after` is gated again, the raw ratio computes on fail-closed
+    zeros, and LP-375 returns to the consent screen with no test in its way.
+
+    So this asserts the invariant itself rather than its consequence: after an ungate, the file is
+    not gated. It fails when that stops being true, which is the only moment the deleted check would
+    have mattered.
+    """
+    from app.models import StatedIncomeItem
+
+    loan_file, company = await _file(db_session, "ungate-resolves-all")
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    loan_file.loan_amount = Decimal("300000.00")
+    loan_file.note_rate_percent = Decimal("7.000")
+    loan_file.amortization_months = 360
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    # BOTH gate producers at once: housing unknowns AND the rental gate a zero cannot answer.
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    before = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert before.gated and before.housing_gate_reason and before.other_gate_reasons, (
+        "the fixture must be gated by BOTH producers or this asserts nothing"
+    )
+
+    actor = await _actor(db_session, company)
+    after = await apply_dti_ungate(
+        db_session, loan_file=loan_file, note="taxes exempt, treatment waived", actor_user_id=actor
+    )
+
+    assert not after.gated, (
+        "an ungate left the file gated, which is the case the preview's after-ratios were guarded "
+        f"against and can no longer be tested for: {after.gate_reason}"
+    )
