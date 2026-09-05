@@ -15,8 +15,9 @@ from decimal import Decimal
 
 from app.models import Company
 from app.models.property import OccupancyType
-from app.schemas.dti import DtiCustomLineInput
+from app.schemas.dti import DtiCustomLineInput, DtiOverrideInput
 from app.services.dti import (
+    RENTAL_NET,
     add_dti_custom_line,
     apply_dti_ungate,
     build_dti_calculation,
@@ -238,14 +239,20 @@ async def test_the_ungate_writes_ordinary_overrides_so_undo_already_exists(db_se
     assert restored.gated, "clearing the override puts the gate back — undo, with no new mechanism"
 
 
-async def test_a_gate_a_zero_cannot_answer_is_reported_not_zeroed(db_session) -> None:
-    """THE SHARPEST HALF OF THE DESIGN. Zeroing the subject's missing GROSS RENT asserts the property
-    rents for nothing, which computes a net of minus its whole PITIA and carries the payment as an
-    obligation — not "ungated", a different wrong answer, and in the opposite direction from the
-    housing case.
+async def test_the_rental_gate_is_WAIVED_not_zeroed(db_session) -> None:
+    """THE REVISION, AND WHY IT IS NOT A CLIMBDOWN. The first version REFUSED this gate, because
+    zeroing the subject's missing gross rent asserts the property rents for nothing — the treatment
+    then computes 75% x 0 - PITIA and carries the whole payment as an obligation, which does not
+    unblock a file, it makes the ratio worse on a claim nobody made.
 
-    A processor who clicks Ungate and finds the file still gated, with nothing saying which part did
-    not move, has been told less than before they clicked. So it is named in `unresolved`.
+    That reasoning still holds. What it got wrong was the conclusion: a processor was left with three
+    shut doors — no gross-rent line to override, no net-rental line while gated, and a button that
+    declined — on a file they understood perfectly well. Measured on staging, LF-ZE9N and LF-AYK4 are
+    both exactly this shape.
+
+    So the ungate WAIVES the treatment instead. That is a real state rather than an invented number:
+    the subject's PITIA stays in housing as an ordinary payment, exactly as on a home the borrower
+    lives in, and NO RENT IS CLAIMED in either direction.
     """
     loan_file, company = await _file(db_session, "ungate-rental")
     actor = await _actor(db_session, company)
@@ -253,14 +260,77 @@ async def test_a_gate_a_zero_cannot_answer_is_reported_not_zeroed(db_session) ->
     prop.occupancy_type = OccupancyType.INVESTMENT
     await db_session.flush()
 
+    before = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert before.gated, "the fixture must be gated on the rental treatment or this asserts nothing"
+
     preview = await preview_dti_ungate(db_session, loan_file=loan_file)
-    assert preview.unresolved, "the rental gate has no zero-shaped answer and must be named"
-    assert any("rent" in reason.lower() for reason in preview.unresolved)
+    waiver = next(line for line in preview.lines if "rental treatment" in line.label.lower())
+    assert "no rent will be assumed" in waiver.assertion
+    assert not preview.unresolved, "the waiver answers it — nothing is left to warn about"
 
     applied = await apply_dti_ungate(
-        db_session, loan_file=loan_file, note=None, actor_user_id=actor
+        db_session, loan_file=loan_file, note="no schedule yet", actor_user_id=actor
     )
-    assert applied.gated, "and the file stays gated, because that gate was not answered"
+    assert not applied.gated, "the file computes, which is the point"
+    assert not [i for i in applied.income_items if i.key == RENTAL_NET], "no rent was invented"
+    assert not [i for i in applied.debt_items if i.key == RENTAL_NET], "and none was charged"
+    # The subject's PITIA is ORDINARY HOUSING again — not excluded in favour of a rental netting
+    # that no longer applies.
+    assert any(not i.excluded for i in applied.housing_items)
+
+
+async def test_a_processor_can_supply_the_gross_rent_they_know(db_session) -> None:
+    """THE OTHER DOOR, and the one the gate's own message implied existed. It says a rent schedule or
+    a lease "establishes" the figure, which reads as "upload a document" — but gross rent is an INPUT
+    to the treatment, upstream of the lines, so it was not a key anything could override. Every other
+    fail-closed input in this calculator has always taken a processor's figure; this one never got
+    the door.
+
+    Supplying it CLEARS the gate, and unlike an added row that is right: a gate says a required input
+    is unknown, and this supplies exactly that input.
+    """
+    from app.services.dti import RENTAL_GROSS
+
+    loan_file, company = await _file(db_session, "gross-rent-supplied")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    calc = await set_dti_override(
+        db_session,
+        loan_file=loan_file,
+        field_key=RENTAL_GROSS,
+        data=DtiOverrideInput(amount=Decimal("2200.00"), note="lease seen, tenant in place"),
+        actor_user_id=actor,
+    )
+
+    # The RENTAL half is answered. This bare fixture is also housing-gated (no tax bill, no
+    # binder), which is a different gate with its own door — asserting `not calc.gated` here would
+    # be asserting something this override does not claim to do.
+    # The treatment needs THREE inputs — gross rent, the borrower's own housing, the subject's
+    # PITIA — and this bare fixture supplies none of the others. So the assertion is that the rent is
+    # no longer among what is missing, which is exactly what this override claims to do and no more.
+    reason = " ".join(calc.other_gate_reasons)
+    assert "rent" not in reason.lower(), f"the supplied rent is still reported missing: {reason}"
+
+
+async def test_the_waiver_is_undone_by_the_override_clear_that_already_exists(db_session) -> None:
+    """Stored as an override so undo needs no second mechanism — the same argument as the zeros."""
+    from app.services.dti import RENTAL_WAIVED, clear_dti_override
+
+    loan_file, company = await _file(db_session, "waiver-undo")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    await apply_dti_ungate(db_session, loan_file=loan_file, note=None, actor_user_id=actor)
+    restored = await clear_dti_override(
+        db_session, loan_file=loan_file, field_key=RENTAL_WAIVED, actor_user_id=actor
+    )
+
+    assert restored.gated, "clearing it restores Fannie's treatment, and the gate with it"
 
 
 async def test_an_override_the_processor_already_set_survives_the_preview(db_session) -> None:
@@ -327,10 +397,14 @@ async def test_the_consent_does_not_list_an_input_as_both_fixed_and_unresolved(
                 f"unresolved reason: {reason!r}"
             )
 
-    assert preview.unresolved, (
-        "the rental gate survives an ungate and must still be reported — dropping it would trade a "
-        "contradiction for a silence"
-    )
+    # REVISED: the waiver ANSWERS the rental gate, so nothing survives for the dialog to warn
+    # about. What must not come back is the CONTRADICTION — the same input named as both fixed and
+    # unresolved — so the assertion is that the two lists never overlap, which holds whether or not
+    # anything is left over.
+    fixed = {line.label for line in preview.lines}
+    assert not any(
+        any(label.lower() in reason.lower() for label in fixed) for reason in preview.unresolved
+    ), "an input promised as fixed must never also be listed as unresolved"
 
 
 async def test_the_preview_never_shows_a_confident_ratio_for_a_file_that_stays_gated(
@@ -369,10 +443,14 @@ async def test_the_preview_never_shows_a_confident_ratio_for_a_file_that_stays_g
     preview = await preview_dti_ungate(db_session, loan_file=loan_file)
 
     assert preview.lines, "the fixture must have zeroable lines or this asserts nothing"
-    assert preview.unresolved, "and must stay gated afterwards, or there is nothing to guard"
-    assert preview.front_end_after is None and preview.back_end_after is None, (
-        "the dialog would show a confident ratio for a file it also says stays gated — "
-        f"front={preview.front_end_after}, back={preview.back_end_after}"
+    # REVISED — the "after" half of this guard lost its case when the rental gate became WAIVABLE:
+    # an ungate now resolves every gate it reports, so nothing stays gated afterwards and there is no
+    # still-gated ratio left to leak. The protection is kept and repointed at the BEFORE ratios,
+    # which are the same claim about the same file: it IS gated right now, its ratio still COMPUTES
+    # (unknown lines carry a fail-closed 0), and the dialog must not open by showing that number.
+    assert preview.front_end_before is None and preview.back_end_before is None, (
+        "the dialog opened by showing a confident ratio for a file that is gated — "
+        f"front={preview.front_end_before}, back={preview.back_end_before}"
     )
 
     # THE OTHER DIRECTION: gating the display must not blank a ratio the ungate genuinely delivers.

@@ -62,7 +62,7 @@ from app.schemas.dti import (
 from app.services.activity_log import log_activity
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.mi import compute_loan_mi
-from app.services.rental_treatment import subject_rental_treatment
+from app.services.rental_treatment import RentalTreatment, subject_rental_treatment
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 from app.verification.dti import (
     BACK_END_FORMULA,
@@ -493,6 +493,50 @@ async def _extracted_hoa_monthly(
 #: a calculator key, and so a reader can tell at a glance which lines the engine produced.
 CUSTOM_LINE_PREFIX = "custom."
 
+#: LP-643 (revised) — the marker that WAIVES Fannie's rental treatment for the subject.
+#:
+#: WHY THE UNGATE COULD NOT ANSWER THE RENTAL GATE BY ZEROING, and what it does instead. Zeroing the
+#: subject's missing GROSS RENT asserts the property rents for nothing: the treatment then computes
+#: 75% x 0 - PITIA and carries the whole payment as a monthly obligation. That does not unblock a
+#: file, it makes the ratio WORSE on a claim nobody made — so the first version refused, and a
+#: processor holding the number was left with three shut doors (no gross-rent line to override, no
+#: net-rental line while gated, and a button that declined).
+#:
+#: WAIVING IS A REAL STATE, NOT AN INVENTED NUMBER. It says "do not apply the rental treatment to
+#: this subject" — so the subject's PITIA stays in housing as an ordinary payment, exactly as it does
+#: for a primary residence, and the borrower's own housing is not substituted. That is the treatment
+#: this calculator applied to every file before LP-621, it asserts no rent, and it leaves a processor
+#: a computed ratio they can correct with `Add a line`.
+#:
+#: STORED AS AN OVERRIDE so it inherits persistence, the audit trail, per-file scoping, and UNDO —
+#: clearing it restores the treatment through the endpoint that already exists. The VALUE is unused
+#: and written as 0; presence is the whole signal. A marker in a money column is not lovely, and the
+#: alternative was a second mechanism for a thing overrides already do.
+RENTAL_WAIVED = "rental.treatment_waived"
+
+#: LP-643 (revised) — the subject's GROSS monthly rent, supplied by a processor.
+#:
+#: THE DOOR THAT WAS MISSING. The gate's own message says a rent schedule or a lease establishes this
+#: figure, which reads as "upload a document" — but a processor who KNOWS the rent had no way to say
+#: so. Gross rent is an INPUT to the rental treatment, upstream of the lines, so it was not a key
+#: anything could override, and the net-rental line it feeds does not exist while the treatment is
+#: gated. Every other fail-closed input in this calculator has always accepted a processor's figure;
+#: this one never got the door.
+#:
+#: IT CLEARS THE GATE, and unlike an added row that is correct: a gate says a required input is
+#: unknown, and this supplies exactly that input. The distinction LP-643 draws is between answering
+#: the question and adding something unrelated beside it.
+#:
+#: IT IS NOT A FORM 1007. B3-3.8-02 makes the form mandatory where rental income qualifies the loan,
+#: so supplying the figure unblocks the RATIO and must not retire the document requirement — the
+#: rent-schedule need is seeded on investment occupancy (LP-642) and stays there. A processor gets a
+#: number to work with; the file still needs its paperwork.
+RENTAL_GROSS = "rental.gross_subject"
+
+#: Waived: the treatment does not apply, so the subject's PITIA stays in housing as an ordinary
+#: payment and nothing is netted. `applies=False` is the same answer a primary residence gives.
+_NO_RENTAL_TREATMENT = RentalTreatment(applies=False)
+
 
 async def _custom_lines(db: AsyncSession, loan_file_id: UUID) -> dict[str, list[_AutoLine]]:
     """Processor-added lines, as `_AutoLine`s so they travel the same path as everything else.
@@ -634,8 +678,17 @@ async def build_dti_calculation(
     # has corrected the PITIA this nets against, and netting against the pre-override number would
     # quietly ignore their correction.
     housing_total = sum((line.amount for line in housing_lines), Decimal(0))
-    rental = await subject_rental_treatment(
-        db, loan_file=loan_file, subject_pitia=housing_total or None
+    rental = (
+        _NO_RENTAL_TREATMENT
+        if RENTAL_WAIVED in overrides
+        else await subject_rental_treatment(
+            db,
+            loan_file=loan_file,
+            subject_pitia=housing_total or None,
+            # A processor's own figure for the subject's gross rent, where they have one. Passed in
+            # rather than read inside the treatment so the override machinery stays in one place.
+            gross_rent_override=overrides.get(RENTAL_GROSS),
+        )
     )
     if rental.applies and rental.net_monthly is not None:
         # `present_housing` is set together with `net_monthly` — a treatment that could not establish
@@ -885,6 +938,13 @@ async def _auto_amount_for(db: AsyncSession, loan_file: LoanFile, field_key: str
     hand-maintained list of the extra keys — is the drift this just demonstrated.
     """
     calculation = await build_dti_calculation(db, loan_file=loan_file)
+    # LP-643 (revised) — TWO KEYS THAT ARE NOT LINES. `rental.gross_subject` is an INPUT to the rental
+    # treatment and `rental.treatment_waived` is a marker, so neither appears in the item lists the
+    # loop below searches — and without this they would be rejected as unknown fields by the very
+    # endpoint a processor needs to reach them through. Their prior value is None: there is no auto
+    # figure to report, which is the whole reason a processor is supplying one.
+    if field_key in (RENTAL_GROSS, RENTAL_WAIVED):
+        return None
     for item in (*calculation.income_items, *calculation.housing_items, *calculation.debt_items):
         if item.key == field_key:
             return item.auto_amount
@@ -1039,13 +1099,24 @@ async def preview_dti_ungate(
     if current.housing_gate_reason and not zeroable:
         unresolved.insert(0, current.housing_gate_reason)
 
+    # LP-643 (revised) — THE RENTAL GATE IS WAIVED, NOT ZEROED, and that is what turns this dialog
+    # from a dead end into an action. Zeroing the missing gross rent asserts the property rents for
+    # nothing; waiving says the rental treatment does not apply, so the subject's PITIA stays in
+    # housing as an ordinary payment and a processor can correct the rest with `Add a line`. No rent
+    # is claimed either way, and the file computes.
+    waives_rental = bool(current.other_gate_reasons)
+    extra: dict[str, Decimal] = {item.key: Decimal(0) for item in zeroable}
+    if waives_rental:
+        extra[RENTAL_WAIVED] = Decimal(0)
+        unresolved = []  # the waiver answers it — nothing survives for the dialog to warn about
+
     after = current
-    if zeroable:
+    if extra:
         after = await build_dti_calculation(
             db,
             loan_file=loan_file,
             confidence_cutoff=confidence_cutoff,
-            extra_overrides={item.key: Decimal(0) for item in zeroable},
+            extra_overrides=extra,
         )
     # THE RATIOS GO THROUGH THE DISPLAY GATE, like every other endpoint that shows one.
     #
@@ -1066,7 +1137,22 @@ async def preview_dti_ungate(
         lines=[
             DtiUngateLine(key=item.key, label=item.label, assertion=_ungate_assertion(item))
             for item in zeroable
-        ],
+        ]
+        + (
+            [
+                DtiUngateLine(
+                    key=RENTAL_WAIVED,
+                    label="Rental treatment for the subject",
+                    assertion=(
+                        "Fannie's rental treatment will not be applied — the subject's full payment "
+                        "will count as housing, as it would on a home the borrower lives in, and no "
+                        "rent will be assumed. Add a line to record the rent if you know it."
+                    ),
+                )
+            ]
+            if waives_rental
+            else []
+        ),
         unresolved=unresolved,
         front_end_before=shown_before.front_end_dti,
         back_end_before=shown_before.back_end_dti,
@@ -1098,8 +1184,10 @@ async def apply_dti_ungate(
         db, loan_file=loan_file, confidence_cutoff=confidence_cutoff
     )
     zeroable = _zeroable_gated_lines(current)
-    for item in zeroable:
-        existing = await _get_override_row(db, loan_file.id, item.key)
+    # The waiver rides with the zeros: one confirmation, one act. See `RENTAL_WAIVED`.
+    keys = [item.key for item in zeroable] + ([RENTAL_WAIVED] if current.other_gate_reasons else [])
+    for key in keys:
+        existing = await _get_override_row(db, loan_file.id, key)
         if existing is not None:
             existing.value = Decimal(0)
             existing.note = note
@@ -1109,22 +1197,22 @@ async def apply_dti_ungate(
             db.add(
                 DtiOverride(
                     loan_file_id=loan_file.id,
-                    field_key=item.key,
+                    field_key=key,
                     value=Decimal(0),
                     note=note,
                     actor_user_id=actor_user_id,
                 )
             )
     await db.flush()
-    if zeroable:
+    if keys:
         await log_activity(
             db,
             loan_file_id=loan_file.id,
             activity_type=ActivityType.DTI_UNGATED,
-            summary=f"DTI ungated: {len(zeroable)} gated input(s) recorded as $0.00",
+            summary=f"DTI ungated: {len(keys)} gated input(s) resolved by the processor",
             actor_user_id=actor_user_id,
             detail={
-                "lines": [{"key": i.key, "label": i.label} for i in zeroable],
+                "keys": keys,
                 "note": note,
             },
         )

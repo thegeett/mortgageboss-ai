@@ -50,11 +50,11 @@ export function DtiUngateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Lock className="h-4 w-4 text-warning" />
-            Record these inputs as $0.00?
+            Compute this DTI anyway?
           </DialogTitle>
           <DialogDescription>
-            The DTI is gated because these inputs could not be established. Recording them as zero
-            computes the ratio as if they do not exist.
+            The DTI is gated because these inputs could not be established. Here is exactly what
+            will be assumed in order to compute it.
           </DialogDescription>
         </DialogHeader>
 
@@ -168,7 +168,7 @@ export function DtiUngateDialog({
               })
             }
           >
-            {apply.isPending ? "Applying…" : "Record as $0.00"}
+            {apply.isPending ? "Applying…" : "Compute anyway"}
           </Button>
         </DialogFooter>
       </DialogContent>

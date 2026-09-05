@@ -79,7 +79,7 @@ describe("the ungate dialog", () => {
 
     // Disabled rather than applying an empty change and leaving them to wonder if it worked.
     expect(
-      (screen.getByRole("button", { name: /record as \$0\.00/i }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: /compute anyway/i }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 
@@ -87,7 +87,7 @@ describe("the ungate dialog", () => {
     open(PREVIEW);
 
     fireEvent.change(screen.getByLabelText(/why/i), { target: { value: "tax-exempt, confirmed" } });
-    fireEvent.click(screen.getByRole("button", { name: /record as \$0\.00/i }));
+    fireEvent.click(screen.getByRole("button", { name: /compute anyway/i }));
 
     expect(applyMutate).toHaveBeenCalledWith("tax-exempt, confirmed", expect.anything());
   });

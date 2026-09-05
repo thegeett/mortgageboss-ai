@@ -112,7 +112,11 @@ _NOT_APPLICABLE = RentalTreatment(applies=False)
 
 
 async def subject_rental_treatment(
-    db: AsyncSession, *, loan_file: LoanFile, subject_pitia: Decimal | None
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    subject_pitia: Decimal | None,
+    gross_rent_override: Decimal | None = None,
 ) -> RentalTreatment:
     """Fannie's net-rental figure for the subject, or the reason it cannot be computed.
 
@@ -132,7 +136,16 @@ async def subject_rental_treatment(
         return _NOT_APPLICABLE
 
     missing: list[str] = []
-    gross = await _subject_gross_rent(db, loan_file.id)
+    # LP-643 (revised) — A PROCESSOR'S FIGURE WINS, and it is the only source that skips the
+    # lesser-of rule. That rule exists to reconcile two DOCUMENTED sources that disagree; an override
+    # is not a third document, it is a person saying which number is right after looking at the file.
+    # Taking the lesser of their figure and a stale schedule row would quietly ignore the correction,
+    # which is the defect LP-569 fixed for every other line.
+    gross = (
+        gross_rent_override
+        if gross_rent_override is not None and gross_rent_override > 0
+        else await _subject_gross_rent(db, loan_file.id)
+    )
     if gross is None or gross <= 0:
         # LP-642/LP-643 — NAME THE DOCUMENT TO GET, NOT THE FIELD THAT CAME BACK EMPTY.
         #
