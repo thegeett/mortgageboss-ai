@@ -480,3 +480,47 @@ async def test_no_tax_return_is_not_established_rather_than_denied(db_session) -
     rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
     assert rental.excluded
     assert "not established" in (rental.derivation or "")
+
+
+async def test_a_return_whose_year_cannot_be_read_is_not_superseded_by_an_older_one(
+    db_session,
+) -> None:
+    """bug-012 step 2 review — the undateable return sorts NEWEST, and the first version had it
+    backwards.
+
+    Keying "most recent" on the tax year is right: a 2023 return uploaded today has not become the
+    borrower's current picture. But an unparseable year was ranked -1, which does not mean "unknown",
+    it means OLDEST — so the newest return lost to every dateable return behind it. Measured on this
+    exact fixture, that returned experience ESTABLISHED from a stale 2023 return showing a full year,
+    while the borrower's own most recent return showed 200 days.
+
+    That is the OVER-qualifying direction. Every other unbuilt route in this check under-qualifies on
+    purpose, which is safe and visible; this one silently qualified a file its own newest document
+    contradicts, which is neither.
+
+    Both directions asserted, because the first version passed the second half.
+    """
+    from app.services.rental_treatment import _management_experience_established
+
+    company = await factories.make_company(db_session, slug="undateable")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=2023)
+    # Uploaded after, and the year will not parse — the current picture, undateable.
+    await _tax_return_with(db_session, loan_file, days=200, tax_year="20?5")
+
+    assert not await _management_experience_established(db_session, loan_file.id), (
+        "an undateable newest return was superseded by an older one, and the file qualified on a "
+        "picture its own most recent return contradicts"
+    )
+
+    # THE OTHER DIRECTION: sorting it newest must not turn into ignoring it. An undateable return
+    # that DOES show a full year still establishes experience on its own evidence.
+    company2 = await factories.make_company(db_session, slug="undateable-ok")
+    loan_file2 = await factories.make_loan_file(db_session, company=company2)
+    await _tax_return_with(db_session, loan_file2, days=200, tax_year=2023)
+    await _tax_return_with(db_session, loan_file2, days=365, tax_year="20?5")
+
+    assert await _management_experience_established(db_session, loan_file2.id), (
+        "an undateable return showing a full rented year established nothing — sorting it newest "
+        "must consult it, not skip it"
+    )

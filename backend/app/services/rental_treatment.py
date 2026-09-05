@@ -231,9 +231,14 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
     about disposal, which the guide does not give.
 
     THE MOST RECENT RETURN, keyed on the TAX YEAR rather than on upload order: a borrower who uploads
-    2024 after 2025 has not made 2024 their most recent return. Ties and missing years fall back to
-    upload order, so a return whose year could not be read still participates rather than being
-    silently dropped.
+    2024 after 2025 has not made 2024 their most recent return. A return whose year cannot be read
+    sorts NEWEST rather than oldest, so it is consulted rather than superseded by an older one — see
+    `_UNDATEABLE_SORTS_NEWEST` for the measurement that changed it.
+
+    ONE RETURN, WHICHEVER IS MOST RECENT — so "a rental since sold still counts" holds only while the
+    sale post-dates that return. A property sold during the most recent tax year appears there with
+    partial days, or not at all, and reads as not-established. That is route 4 (two years of returns),
+    which is not composed, so it is the same acknowledged gap rather than a separate defect.
     """
     rows = (
         await db.scalars(
@@ -252,13 +257,24 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
     if not rows:
         return False
 
+    #: AN UNDATEABLE RETURN SORTS NEWEST, NOT OLDEST (review of the first version, which used -1).
+    #: Measured: an old 2023 return showing 365 days beside a newer return showing 200 whose tax year
+    #: would not parse returned experience ESTABLISHED — the undateable newest return lost to the
+    #: stale one, and the file qualified on a picture its own most recent return contradicts. That is
+    #: the over-qualifying direction, which is the one thing this check exists to avoid. Sorting it
+    #: newest means an undateable return is CONSULTED rather than skipped: it can still establish
+    #: experience on its own evidence, and it can no longer be silently superseded by an older one.
+    #: `max` keeps the first maximal element and the rows arrive newest-upload-first, so several
+    #: undateable returns resolve to the newest upload.
+    _UNDATEABLE_SORTS_NEWEST = 9999
+
     def _year(extraction: Extraction) -> int:
         node = (extraction.extracted_data or {}).get("tax_year")
         raw = node.get("value") if isinstance(node, dict) else None
         try:
             return int(raw)  # type: ignore[arg-type]
         except (TypeError, ValueError):
-            return -1
+            return _UNDATEABLE_SORTS_NEWEST
 
     most_recent = max(rows, key=_year)
     schedule_e = (most_recent.extracted_data or {}).get("schedule_e")

@@ -44,8 +44,13 @@ Capture these buckets:
      properties — a LIST, one entry per property: {address, rents_received,
        total_expenses, net_income, fair_rental_days}
        fair_rental_days is Schedule E LINE 2, "Fair Rental Days" — a COUNT OF DAYS
-       (0-366), not an amount. A full year reads 365. Null if the line is blank or
-       not present; never infer it from the rents.
+       (0-366), not an amount. A full year reads 365 (366 in a leap year). Null if
+       the line is blank or not present; never infer it from the rents.
+       LINE 2 CARRIES TWO DAY COUNTS SIDE BY SIDE: "Fair Rental Days" and "Personal
+       Use Days". Read the FAIR RENTAL column only. Personal Use Days is also a
+       0-366 count, so it satisfies every rule above while being the wrong number —
+       a property lived in and never rented reads 0 fair / 365 personal. If the two
+       columns cannot be told apart, return null rather than guessing which is which.
      total_net_rental_income (number)
      depreciation            (number)
 
