@@ -331,3 +331,66 @@ async def test_the_consent_does_not_list_an_input_as_both_fixed_and_unresolved(
         "the rental gate survives an ungate and must still be reported — dropping it would trade a "
         "contradiction for a silence"
     )
+
+
+async def test_the_preview_never_shows_a_confident_ratio_for_a_file_that_stays_gated(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 UI review — the preview was the only DTI read returning RAW ratios.
+
+    The other three endpoints apply `gate_display_ratios` at the API boundary; `GET /dti/ungate` did
+    not. On a file that stays gated after an ungate the raw ratio still computes, because the unknown
+    housing lines carry a fail-closed 0 — so the dialog rendered "Front-end: gated → 19.96%" directly
+    above "This will still be gated afterwards". A confident number resting on a fabricated zero, on
+    the one screen where a processor accepts an assertion personally: the LP-375 failure arriving
+    through the preview.
+
+    The investment subject is the fixture because its gate CANNOT be answered by a zero — zeroing the
+    missing gross rent asserts the property rents for nothing — so it is guaranteed to survive the
+    ungate and is exactly the case the ratio must not be shown for.
+    """
+    from app.models import StatedIncomeItem
+    from app.models.property import OccupancyType
+
+    loan_file, _ = await _file(db_session, "preview-stays-gated")
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    loan_file.loan_amount = Decimal("300000.00")
+    loan_file.note_rate_percent = Decimal("7.000")
+    loan_file.amortization_months = 360
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+
+    assert preview.lines, "the fixture must have zeroable lines or this asserts nothing"
+    assert preview.unresolved, "and must stay gated afterwards, or there is nothing to guard"
+    assert preview.front_end_after is None and preview.back_end_after is None, (
+        "the dialog would show a confident ratio for a file it also says stays gated — "
+        f"front={preview.front_end_after}, back={preview.back_end_after}"
+    )
+
+    # THE OTHER DIRECTION: gating the display must not blank a ratio the ungate genuinely delivers.
+    ok_file, _ = await _file(db_session, "preview-ungates-clean")
+    ok_borrower = await factories.make_borrower(db_session, loan_file=ok_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=ok_borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    ok_file.loan_amount = Decimal("300000.00")
+    ok_file.note_rate_percent = Decimal("7.000")
+    ok_file.amortization_months = 360
+    await db_session.flush()
+
+    clean = await preview_dti_ungate(db_session, loan_file=ok_file)
+    assert clean.lines and not clean.unresolved, "this file must ungate completely"
+    assert clean.front_end_after is not None, (
+        "a file the ungate fully resolves must show the ratio it will get — nulling every preview "
+        "would trade a false number for no number"
+    )

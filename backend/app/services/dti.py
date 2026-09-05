@@ -554,6 +554,7 @@ def _to_items(
             DtiLineItem(
                 key=auto.key,
                 label=auto.label,
+                removable=auto.key.startswith(CUSTOM_LINE_PREFIX),
                 auto_amount=auto.auto,
                 override_amount=override,
                 amount=effective,
@@ -1046,16 +1047,31 @@ async def preview_dti_ungate(
             confidence_cutoff=confidence_cutoff,
             extra_overrides={item.key: Decimal(0) for item in zeroable},
         )
+    # THE RATIOS GO THROUGH THE DISPLAY GATE, like every other endpoint that shows one.
+    #
+    # This was the ONLY one of the four DTI reads that returned `build_dti_calculation`'s raw ratios:
+    # the other three apply `gate_display_ratios` at the API boundary. On a file that stays gated
+    # after an ungate -- an investment subject with no rent schedule, say -- the raw ratio still
+    # COMPUTES, because the unknown lines carry a fail-closed 0. Measured, this dialog rendered
+    # "Front-end: gated -> 19.96%" directly above "This will still be gated afterwards": a confident
+    # number resting on a fabricated zero, on the one screen where a processor accepts an assertion
+    # personally. That is the LP-375 failure, arriving through the preview.
+    #
+    # It also made the component's `?? "still gated"` fallback dead in the case it was written for
+    # and live in one it was not: a null ratio here means "no income" too (see `gate_display_ratios`),
+    # so a file with no income read as gated. Nulling server-side leaves ONE producer of the claim.
+    shown_before = gate_display_ratios(current)
+    shown_after = gate_display_ratios(after)
     return DtiUngatePreview(
         lines=[
             DtiUngateLine(key=item.key, label=item.label, assertion=_ungate_assertion(item))
             for item in zeroable
         ],
         unresolved=unresolved,
-        front_end_before=current.front_end_dti,
-        back_end_before=current.back_end_dti,
-        front_end_after=after.front_end_dti,
-        back_end_after=after.back_end_dti,
+        front_end_before=shown_before.front_end_dti,
+        back_end_before=shown_before.back_end_dti,
+        front_end_after=shown_after.front_end_dti,
+        back_end_after=shown_after.back_end_dti,
     )
 
 

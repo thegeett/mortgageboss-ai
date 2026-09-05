@@ -314,3 +314,93 @@ describe("bug-001 — using a stated estimate", () => {
     expect(screen.queryByRole("button", { name: /figure \(\$/ })).toBeNull();
   });
 });
+
+describe("LP-643 review — the remove control", () => {
+  afterEach(cleanup);
+
+  /** The trash icon used to render on `item.key.startsWith("custom.")`, with the server's prefix
+   *  retyped in this component. It now renders on `item.removable`, which the server decides — and
+   *  NOTHING covered either version, so this is the first test that touches the control at all. */
+  it("offers removal on a processor-added line and not on an engine line", () => {
+    useDtiMock.mockReturnValue({
+      data: {
+        ...CALC,
+        debt_items: [
+          {
+            key: "debt.1",
+            label: "Installment",
+            auto_amount: "2000.00",
+            override_amount: null,
+            amount: "2000.00",
+            source: "stated",
+            overridden: false,
+            removable: false,
+          },
+          {
+            key: "custom.6f1c9b3e-0000-4000-8000-000000000001",
+            label: "Child support",
+            auto_amount: "450.00",
+            override_amount: null,
+            amount: "450.00",
+            source: "manual",
+            overridden: false,
+            removable: true,
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+
+    expect(screen.getByLabelText("Remove Child support")).toBeTruthy();
+    expect(screen.queryByLabelText("Remove Installment")).toBeNull();
+  });
+
+  /** And it must send the ID, not the namespaced key — the endpoint takes a UUID. */
+  it("removes by id rather than by the namespaced key", () => {
+    const id = "6f1c9b3e-0000-4000-8000-000000000001";
+    useDtiMock.mockReturnValue({
+      data: {
+        ...CALC,
+        debt_items: [
+          {
+            key: `custom.${id}`,
+            label: "Child support",
+            auto_amount: "450.00",
+            override_amount: null,
+            amount: "450.00",
+            source: "manual",
+            overridden: false,
+            removable: true,
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+    fireEvent.click(screen.getByLabelText("Remove Child support"));
+
+    expect(removeMutate).toHaveBeenCalledWith(id);
+  });
+
+  /** LP-643 (c) — THE WHOLE-MODULE MOCK IS THIS REPO'S PATTERN (22 files use it), so the fix is not
+   *  to fork the style. The hazard is real though: the module is replaced wholly, so a hook added to
+   *  it throws at IMPORT here, and nothing fails until someone happens to touch this component.
+   *  This turns that into an explicit failure naming the missing hook. */
+  it("stubs every hook the api module exports", async () => {
+    const real = await vi.importActual<Record<string, unknown>>("@/lib/api/dti");
+    const stubbed = await import("@/lib/api/dti");
+    // HOOKS ONLY, and the narrowing is the point. A first version asserted over EVERY export and
+    // failed on `fetchDti`, `dtiQueryKey` and the raw mutators — none of which a component calls, so
+    // none of which can throw here. A guard that refuses more than its reason justifies gets deleted
+    // by the next person who hits it. The reason is that a HOOK missing from the mock throws when
+    // the component renders; that is the class, and it is exactly the `use` prefix.
+    const missing = Object.keys(real).filter(
+      (name) => name.startsWith("use") && !(name in stubbed),
+    );
+
+    expect(missing).toEqual([]);
+  });
+});

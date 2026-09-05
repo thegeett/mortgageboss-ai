@@ -22,6 +22,9 @@ export interface DtiLineItem {
    * qualify). Distinct from `unknown`: the amount is real and known, it simply stops existing.
    * Render struck-through WITH the reason — never hide the row, or the processor cannot tell a
    * debt was considered at all. */
+  /** LP-643 review: whether a processor can REMOVE this line — the server's answer, not a prefix
+   * test retyped here. Only processor-added lines are removable. */
+  removable?: boolean;
   excluded?: boolean;
   excluded_reason?: string | null;
 }

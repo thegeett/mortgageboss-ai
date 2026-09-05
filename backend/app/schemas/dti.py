@@ -33,6 +33,14 @@ class DtiLineItem(BaseModel):
     # not survive closing (a refinanced mortgage, a departing residence, a debt cleared to
     # qualify). Distinct from ``unknown``: the amount is known, it just stops existing. The
     # display must render it struck-through with the reason, never omit the row.
+    #: LP-643 review — WHETHER A PROCESSOR CAN REMOVE THIS LINE, decided by the server that enforces
+    #: it. The UI gated its trash icon on `key.startsWith("custom.")`, with the prefix retyped in the
+    #: frontend: one constant, two producers, and drift in either direction is a bug a processor sees
+    #: — removal silently missing from lines that have it, or offered on engine lines where the API
+    #: then 404s in their face. The key is the right SIGNAL (it survives an override, where `source`
+    #: does not — an overridden custom line reports `source="override"`), so this carries the answer
+    #: rather than the raw material for it.
+    removable: bool = False
     excluded: bool = False
     excluded_reason: str | None = None
     # LP-621 review — the arithmetic behind a COMPUTED line, carried with it. The net rental figure is

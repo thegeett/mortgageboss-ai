@@ -319,10 +319,20 @@ function BreakdownSection({
   );
 }
 
-/** LP-643 — the key prefix the server gives a processor-added line. Only these are REMOVABLE: an
- *  engine line that should not count is an EXCLUSION, which already renders struck through with its
- *  reason. A vanished row cannot be argued with, and the API has no route to delete one. */
-const CUSTOM_LINE_PREFIX = "custom.";
+/** LP-643 review — the processor-added line's ID, from a key the SERVER decided is removable.
+ *
+ *  This file used to retype the server's `custom.` prefix and test for it. One constant, two
+ *  producers: change it server-side and the trash icon silently disappears from removable lines, or
+ *  appears on engine lines where the API then 404s in the processor's face. `item.removable` is the
+ *  server's own answer now, and the id needs no shared literal — it is whatever follows the first
+ *  separator in the namespaced key.
+ *
+ *  Only custom lines are removable at all: an engine line that should not count is an EXCLUSION,
+ *  which already renders struck through with its reason. A vanished row cannot be argued with, and
+ *  the API has no route to delete one. */
+function customLineId(key: string): string {
+  return key.slice(key.indexOf(".") + 1);
+}
 
 function LineRow({
   item,
@@ -337,7 +347,7 @@ function LineRow({
   onUseEstimate,
 }: { item: DtiLineItem; fileId?: string } & RowControls) {
   const editing = editingKey === item.key;
-  const custom = item.key.startsWith(CUSTOM_LINE_PREFIX);
+  const custom = item.removable;
   // LP-627 (corrected) — EVERY offer for this line, not the first.
   //
   // The backend emits one per SOURCE and, since LP-627, property taxes can have two: the application's
@@ -479,7 +489,7 @@ function RemoveCustomLine({ fileId, item }: { fileId: string; item: DtiLineItem 
       className="h-7 w-7 text-gray-400 hover:text-danger"
       aria-label={`Remove ${item.label}`}
       disabled={remove.isPending}
-      onClick={() => remove.mutate(item.key.slice(CUSTOM_LINE_PREFIX.length))}
+      onClick={() => remove.mutate(customLineId(item.key))}
     >
       <Trash2 className="h-3.5 w-3.5" />
     </Button>
