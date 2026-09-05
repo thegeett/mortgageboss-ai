@@ -7,7 +7,12 @@
  * the audited override appears there too.
  */
 import { apiClient } from "@/lib/api/client";
-import type { DtiCalculation, DtiOverrideInput } from "@/lib/types/dti";
+import type {
+  DtiCalculation,
+  DtiCustomLineInput,
+  DtiOverrideInput,
+  DtiUngatePreview,
+} from "@/lib/types/dti";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
@@ -77,6 +82,101 @@ export function useClearDtiOverride(identifier: string) {
     onSuccess: (data) => {
       queryClient.setQueryData(dtiQueryKey(identifier), data);
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+    },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* LP-643 — processor-added lines, and the ungate                             */
+/* -------------------------------------------------------------------------- */
+
+export async function addDtiLine(
+  identifier: string,
+  input: DtiCustomLineInput,
+): Promise<DtiCalculation> {
+  const res = await apiClient.post<DtiCalculation>(
+    `${API_V1}/loan-files/${identifier}/dti/lines`,
+    input,
+  );
+  return res.data;
+}
+
+export async function removeDtiLine(identifier: string, lineId: string): Promise<DtiCalculation> {
+  const res = await apiClient.delete<DtiCalculation>(
+    `${API_V1}/loan-files/${identifier}/dti/lines/${lineId}`,
+  );
+  return res.data;
+}
+
+export async function fetchDtiUngatePreview(identifier: string): Promise<DtiUngatePreview> {
+  const res = await apiClient.get<DtiUngatePreview>(
+    `${API_V1}/loan-files/${identifier}/dti/ungate`,
+  );
+  return res.data;
+}
+
+export async function applyDtiUngate(
+  identifier: string,
+  note: string | null,
+): Promise<DtiCalculation> {
+  const res = await apiClient.post<DtiCalculation>(
+    `${API_V1}/loan-files/${identifier}/dti/ungate`,
+    { amount: 0, note },
+  );
+  return res.data;
+}
+
+/** Add a processor's own line → prime the cache with the recompute. */
+export function useAddDtiLine(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DtiCustomLineInput) => addDtiLine(identifier, input),
+    onSuccess: (data) => {
+      queryClient.setQueryData(dtiQueryKey(identifier), data);
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+    },
+  });
+}
+
+/** Remove a line the processor added (never an engine line — the API has no such route). */
+export function useRemoveDtiLine(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (lineId: string) => removeDtiLine(identifier, lineId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(dtiQueryKey(identifier), data);
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+    },
+  });
+}
+
+/**
+ * The ungate preview — fetched ONLY when the dialog opens (`enabled`).
+ *
+ * It is the popup's entire content and it is deliberately not cached alongside the calculation: it
+ * is a statement about what an action WOULD do, computed against the file as it stands right now.
+ * Serving a stale one would show a processor a consequence that has since changed, on the screen
+ * where they accept it personally.
+ */
+export function useDtiUngatePreview(identifier: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["dti-ungate-preview", identifier],
+    queryFn: () => fetchDtiUngatePreview(identifier),
+    enabled: Boolean(identifier) && enabled,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/** Apply the ungate → prime the cache with the recompute. */
+export function useApplyDtiUngate(identifier: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (note: string | null) => applyDtiUngate(identifier, note),
+    onSuccess: (data) => {
+      queryClient.setQueryData(dtiQueryKey(identifier), data);
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+      void queryClient.invalidateQueries({ queryKey: ["dti-ungate-preview", identifier] });
     },
   });
 }

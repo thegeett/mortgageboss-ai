@@ -12,6 +12,8 @@
  * shows the work.
  */
 
+import { DtiAddLine } from "@/components/file/dti/dti-add-line";
+import { DtiUngateDialog } from "@/components/file/dti/dti-ungate-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,11 +21,27 @@ import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useClearDtiOverride, useDti, useSetDtiOverride } from "@/lib/api/dti";
+import { useClearDtiOverride, useDti, useRemoveDtiLine, useSetDtiOverride } from "@/lib/api/dti";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
-import type { DtiCalculation, DtiLimit, DtiLineItem, UnverifiedInput } from "@/lib/types/dti";
+import type {
+  DtiCalculation,
+  DtiCustomLineInput,
+  DtiLimit,
+  DtiLineItem,
+  UnverifiedInput,
+} from "@/lib/types/dti";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calculator, Check, Info, Lock, Pencil, RotateCcw, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Calculator,
+  Check,
+  Info,
+  Lock,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 
 export function DtiCalculator({ fileId }: { fileId: string }) {
@@ -104,7 +122,7 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   return (
     <div className="space-y-6">
       {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
-      {data.gated && <GatedBanner reason={data.gate_reason} />}
+      {data.gated && <GatedBanner reason={data.gate_reason} fileId={fileId} />}
 
       <HeroRatios data={data} />
 
@@ -113,12 +131,16 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
         items={data.income_items}
         subtotal={data.gross_monthly_income}
         emptyHint="No income on file yet — add stated income or override below."
+        fileId={fileId}
+        section="income"
         {...rowProps}
       />
       <BreakdownSection
         title="Housing payment (PITI + MI + HOA)"
         items={data.housing_items}
         subtotal={data.housing_payment}
+        fileId={fileId}
+        section="housing"
         {...rowProps}
       />
       <BreakdownSection
@@ -126,6 +148,8 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
         items={data.debt_items}
         subtotal={data.monthly_debts}
         emptyHint="No other monthly debts on file."
+        fileId={fileId}
+        section="debt"
         {...rowProps}
       />
 
@@ -255,12 +279,18 @@ function BreakdownSection({
   items,
   subtotal,
   emptyHint,
+  fileId,
+  section,
   ...controls
 }: {
   title: string;
   items: DtiLineItem[];
   subtotal: string;
   emptyHint?: string;
+  // LP-643 — present means this section accepts processor-added lines. Passed rather than derived
+  // from the title, which is display text and would silently stop matching if it were reworded.
+  fileId?: string;
+  section?: DtiCustomLineInput["section"];
 } & RowControls) {
   return (
     <section>
@@ -269,7 +299,12 @@ function BreakdownSection({
         {items.length === 0 && emptyHint ? (
           <p className="px-3 py-2.5 text-sm text-gray-400">{emptyHint}</p>
         ) : (
-          items.map((item) => <LineRow key={item.key} item={item} {...controls} />)
+          items.map((item) => <LineRow key={item.key} item={item} fileId={fileId} {...controls} />)
+        )}
+        {fileId && section && (
+          <div className="border-t border-gray-200 px-3 pb-2">
+            <DtiAddLine fileId={fileId} section={section} />
+          </div>
         )}
         <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50/60 px-3 py-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -284,8 +319,14 @@ function BreakdownSection({
   );
 }
 
+/** LP-643 — the key prefix the server gives a processor-added line. Only these are REMOVABLE: an
+ *  engine line that should not count is an EXCLUSION, which already renders struck through with its
+ *  reason. A vanished row cannot be argued with, and the API has no route to delete one. */
+const CUSTOM_LINE_PREFIX = "custom.";
+
 function LineRow({
   item,
+  fileId,
   editingKey,
   onEdit,
   onCancel,
@@ -294,8 +335,9 @@ function LineRow({
   disabled,
   unverified,
   onUseEstimate,
-}: { item: DtiLineItem } & RowControls) {
+}: { item: DtiLineItem; fileId?: string } & RowControls) {
   const editing = editingKey === item.key;
+  const custom = item.key.startsWith(CUSTOM_LINE_PREFIX);
   // LP-627 (corrected) — EVERY offer for this line, not the first.
   //
   // The backend emits one per SOURCE and, since LP-627, property taxes can have two: the application's
@@ -418,9 +460,29 @@ function LineRow({
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
           )}
+          {custom && fileId && <RemoveCustomLine fileId={fileId} item={item} />}
         </div>
       )}
     </div>
+  );
+}
+
+/** LP-643 — remove a line the PROCESSOR added. Rendered only for those: an engine line that should
+ *  not count is an EXCLUSION, not a deletion — it already renders struck through with its reason,
+ *  and the API has no route to delete one. A vanished row cannot be argued with. */
+function RemoveCustomLine({ fileId, item }: { fileId: string; item: DtiLineItem }) {
+  const remove = useRemoveDtiLine(fileId);
+  return (
+    <Button
+      size="icon"
+      variant="ghost"
+      className="h-7 w-7 text-gray-400 hover:text-danger"
+      aria-label={`Remove ${item.label}`}
+      disabled={remove.isPending}
+      onClick={() => remove.mutate(item.key.slice(CUSTOM_LINE_PREFIX.length))}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
@@ -430,7 +492,10 @@ function LineRow({
 
 /** LP-375: the DTI is FAIL-CLOSED — a required housing input is unknown, so no confident ratio is shown
  * (a $0 there would read confidently too-low). The display agrees with the engine's gate. */
-function GatedBanner({ reason }: { reason?: string | null }) {
+function GatedBanner({ reason, fileId }: { reason?: string | null; fileId: string }) {
+  // LP-643 — the ungate sits ON the banner, because that is where the problem is stated. Its dialog
+  // is an itemised consent rather than a confirmation; everything it shows comes from the server.
+  const [ungating, setUngating] = useState(false);
   return (
     <div
       role="alert"
@@ -444,6 +509,17 @@ function GatedBanner({ reason }: { reason?: string | null }) {
             "a required housing input is unknown"}
           . It's shown as gated rather than a confident ratio resting on a missing value.
         </span>
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setUngating(true)}
+          >
+            Record unknown inputs as $0.00…
+          </Button>
+          <DtiUngateDialog fileId={fileId} open={ungating} onOpenChange={setUngating} />
+        </div>
       </div>
     </div>
   );

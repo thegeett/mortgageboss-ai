@@ -7,10 +7,21 @@ const setMutate = vi.fn();
 const clearMutate = vi.fn();
 const useDtiMock = vi.fn();
 
+const addMutate = vi.fn();
+const removeMutate = vi.fn();
+const ungateMutate = vi.fn();
+const useUngatePreviewMock = vi.fn(() => ({ data: undefined, isPending: false }));
+
 vi.mock("@/lib/api/dti", () => ({
   useDti: () => useDtiMock(),
   useSetDtiOverride: () => ({ mutate: setMutate, isPending: false }),
   useClearDtiOverride: () => ({ mutate: clearMutate, isPending: false }),
+  // LP-643 — the module is mocked WHOLE, so every hook the component reaches for has to be here or
+  // it throws at import. Stubbed rather than exercised: these are covered by their own tests below.
+  useAddDtiLine: () => ({ mutate: addMutate, isPending: false }),
+  useRemoveDtiLine: () => ({ mutate: removeMutate, isPending: false }),
+  useDtiUngatePreview: () => useUngatePreviewMock(),
+  useApplyDtiUngate: () => ({ mutate: ungateMutate, isPending: false }),
 }));
 
 import { DtiCalculator } from "./dti-calculator";
