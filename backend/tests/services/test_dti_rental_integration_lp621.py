@@ -342,3 +342,33 @@ async def test_the_derivation_says_which_treatment_was_applied(db_session) -> No
     assert "not established" in derivation, "not established — never 'the borrower has none'"
     assert "SEL-2026-08" in derivation
     assert "offsets the subject's PITIA" in derivation
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 review — the exclusion reason a processor reads
+# --------------------------------------------------------------------------- #
+def test_the_rental_exclusion_reason_does_not_point_anywhere() -> None:
+    """A DIRECTION WORD IN THIS SENTENCE IS A CLAIM ABOUT THE SCREEN, and the screen disagreed.
+
+    An earlier draft ended "— and that offset is the PITIA exclusion above". True of `dti.py`, where
+    the housing exclusion is a few lines up. False where it is read: `dti-calculator.tsx` renders
+    "Gross monthly income" FIRST and "Housing payment" SECOND, so an exclusion reason sitting on an
+    income line and pointing "above" sends a processor away from the thing it describes.
+
+    Pinned as a property rather than a wording check. The reason has to name what it means, because
+    this file cannot know where the frontend will put either section — and the next person to reorder
+    those two sections should not silently falsify a sentence in the backend.
+    """
+    import inspect
+
+    from app.services import dti
+
+    source = inspect.getsource(dti)
+    start = source.index("not added to qualifying income: 12 months")
+    reason = source[start : start + 600]
+    for direction in (" above", " below", " to the right", " to the left"):
+        assert direction not in reason.split('")')[0], (
+            f"the rental exclusion reason says{direction!r}, which is a claim about layout that this "
+            "module cannot make"
+        )
+    assert "housing payment" in reason, "it should name the section it means instead"

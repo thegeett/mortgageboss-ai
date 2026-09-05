@@ -630,6 +630,12 @@ async def build_dti_calculation(
         # applied, by the exclusion above: the subject's PITIA is out of the housing total whether or
         # not the net reaches income. So "offset only" is exactly this line contributing nothing.
         #
+        # NO DIRECTIONAL WORD IN THE COPY. An earlier draft ended "— and that offset is the PITIA
+        # exclusion above", which is true of this SOURCE FILE and false on the screen: the DTI panel
+        # renders Gross monthly income FIRST and Housing payment second, so an exclusion reason on an
+        # income line pointing "above" sends a processor away from the thing it is describing. The
+        # sentence now names the housing payment instead of gesturing at a position.
+        #
         # SHOWN, NOT DROPPED — the LP-568 principle this function already applies to the housing side
         # a few lines up. A processor must see that a positive rental was computed and why it did not
         # reach the ratio; a figure that silently vanishes cannot be argued with, and this one is
@@ -671,8 +677,8 @@ async def build_dti_calculation(
                             "excluded_reason": (
                                 "not added to qualifying income: 12 months of property-management "
                                 "experience is not established on this file, so the rent may only "
-                                "offset the subject's PITIA (Fannie Mae SEL-2026-08) — and that "
-                                "offset is the PITIA exclusion above"
+                                "offset the subject's PITIA (Fannie Mae SEL-2026-08) — the offset "
+                                "is applied by excluding that PITIA from the housing payment"
                             ),
                         }
                     )
