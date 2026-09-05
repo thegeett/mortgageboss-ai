@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from app.documents.catalog import CATALOG
-from app.models.document import DocumentStatus
+from app.models.document import DocumentCategory, DocumentStatus
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.services.needs_engine import (
@@ -92,10 +92,22 @@ async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
     await seed_floor_needs(db_session, loan_file)
     await db_session.flush()
 
-    seeded = [n for n in await _needs_on(db_session, loan_file) if n.needs_type in _FORMS]
-    assert len(seeded) == 1, "an investment subject seeds exactly one rent-schedule need"
+    # SELECTED BY CATEGORY, NOT BY `_FORMS` — the review's point, and it is about the DIAGNOSIS.
+    # Filtering on the constant made the CATALOG assertion below unfailable (every `_FORMS` member is
+    # asserted into CATALOG by the first test) and pushed the mutation onto `len(seeded) == 1`, which
+    # then blamed the BRANCH — "seeds exactly one rent-schedule need" — when the real fault was a slug
+    # no upload can clear. The verdict was right and the story was wrong, and the story is what the
+    # next person acts on.
+    seeded = [
+        n for n in await _needs_on(db_session, loan_file) if n.category is DocumentCategory.PROPERTY
+    ]
+    assert len(seeded) == 1, (
+        "an investment purchase seeds one PROPERTY need — the rent schedule — but got "
+        f"{[n.needs_type for n in seeded]}"
+    )
     slug = seeded[0].needs_type
     assert slug in CATALOG, f"the seeder emitted {slug!r}, which no document can be classified as"
+    assert slug in _FORMS, f"the seeder emitted {slug!r}, which is not a rent schedule"
 
     document = await factories.make_document(
         db_session,
