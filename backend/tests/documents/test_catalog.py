@@ -197,9 +197,11 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
     assert unresolved == set(), (
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
-    assert (
-        len(spec_types) == 121
-    )  # 114 + LP-467 (cert_of_liability_insurance, service_invoice) + LP-472 (passport spec 121)
+    # 114 + LP-467 (cert_of_liability_insurance, service_invoice) + LP-472 (passport, 121)
+    # + LP-642 step 2 (comparable_rent_schedule 122, small_residential_income_appraisal 123) — the
+    # Form 1007 / 1025 rent schedules, which B3-3.8-02 makes mandatory where rental income qualifies
+    # the loan and which had no spec, no extractor and no catalog type until LP-642.
+    assert len(spec_types) == 123
 
 
 def test_the_four_merges_and_the_split_resolve() -> None:

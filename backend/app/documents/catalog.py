@@ -152,15 +152,12 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # without could be neither requested nor filed — `activation_bars.yaml` recorded that as a
     # limitation and SEL-2026-08 turned it into a blocker.
     #
-    # TIER 2, NOT TIER 1, DELIBERATELY. Tier 2 is classified + categorised + summarised, with no
-    # structured extraction — which is what a type needs to be REQUESTABLE and FILEABLE. Reading the
-    # market rent off the form is a separate step with its own accuracy question (LP-642), and
-    # cataloguing at Tier 1 would claim an extractor that does not exist.
-    "comparable_rent_schedule": (Tier.TIER_2, DocumentCategory.PROPERTY),  # Form 1007, one-unit
-    "small_residential_income_appraisal": (
-        Tier.TIER_2,
-        DocumentCategory.PROPERTY,
-    ),  # Form 1025, 2-4
+    # TIER 1 AS OF LP-642 STEP 2. Step 1 catalogued these at Tier 2 — classified, categorised and
+    # fileable, with no structured extraction — precisely because no extractor existed and Tier 1
+    # would have claimed one that did not. `extract_comparable_rent_schedule` now reads both forms,
+    # so the tier moves with the fact rather than ahead of it.
+    "comparable_rent_schedule": (Tier.TIER_1, DocumentCategory.PROPERTY),  # Form 1007, one-unit
+    "small_residential_income_appraisal": (Tier.TIER_1, DocumentCategory.PROPERTY),  # Form 1025
     "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1

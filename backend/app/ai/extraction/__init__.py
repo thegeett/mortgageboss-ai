@@ -53,6 +53,7 @@ from app.ai.extraction.certificate_of_liability_insurance import (
 )
 from app.ai.extraction.child_support_income import extract_child_support_income
 from app.ai.extraction.closing_disclosure import extract_closing_disclosure
+from app.ai.extraction.comparable_rent_schedule import extract_comparable_rent_schedule
 from app.ai.extraction.compensation_statement import extract_compensation_statement
 from app.ai.extraction.condo_questionnaire import extract_condo_questionnaire
 from app.ai.extraction.court_order_documents import extract_court_order_documents
@@ -214,6 +215,13 @@ EXTRACTORS: dict[str, Extractor] = {
     "homeowners_insurance": extract_homeowners_insurance,
     "mortgage_statement": extract_mortgage_statement,
     "property_tax_bill": extract_property_tax_bill,
+    # LP-642 step 2 — ONE EXTRACTOR, BOTH FORMS. A 1007 (one unit) and a 1025 (two-to-four)
+    # answer the same question in the same shape, so they share a module and a prompt;
+    # `form_type` records which was read. Registering both is what makes each Tier 1: the
+    # registry is what routes a document to an extractor, and step 1 catalogued them at
+    # Tier 2 precisely because no extractor existed yet.
+    "comparable_rent_schedule": extract_comparable_rent_schedule,
+    "small_residential_income_appraisal": extract_comparable_rent_schedule,
     "hoa_statement": extract_hoa_statement,
     # LP-63 — Tier 1 borrower-info / legal cluster. (letter_of_explanation is the
     # general-LOE extractor from LP-60, reused — registered above.)

@@ -1,0 +1,351 @@
+{
+  "document_type": "comparable_rent_schedule",
+  "slug": "comparable-rent-schedule",
+  "tier": 1,
+  "rules_served": [
+    "DT-* (the DTI's rental treatment, LP-642 step 3)"
+  ],
+  "summary_hint": "Single-Family Comparable Rent Schedule (Fannie Form 1007 / Freddie 1000) \u2014 the appraiser's opinion of monthly market rent for a one-unit property, with the comparable rentals supporting it.",
+  "existing_extractor": "comparable_rent_schedule",
+  "catalog_coverage": "full",
+  "typed_core": [
+    {
+      "name": "form_type",
+      "type": "str",
+      "why": "the form itself states 1007 or 1025; the unit count is a separate field and must not be used to infer it",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "property_address",
+      "type": "str",
+      "why": "matches the schedule's subject to the loan's subject (LP-642 step 3)",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "opinion_of_monthly_market_rent",
+      "type": "Decimal",
+      "why": "THE FIGURE THE DTI CONSUMES \u2014 the appraiser's opinion, never an average of the comparables",
+      "rules": [],
+      "reason_class": "rule",
+      "rule_floor": true,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "total_gross_monthly_income",
+      "type": "Decimal",
+      "why": "1025 only: total across all units; null on a 1007",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "unit_count",
+      "type": "int",
+      "why": "1 on a 1007, 2-4 on a 1025; decides which form is required (B3-3.8-02)",
+      "rules": [],
+      "reason_class": "rule",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "effective_date",
+      "type": "date",
+      "why": "B3-3.8-01 ages the form against the note date",
+      "rules": [],
+      "reason_class": "rule",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "appraiser_name",
+      "type": "str",
+      "why": "processor \u2014 who signed the opinion",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "appraiser_license_number",
+      "type": "str",
+      "why": "processor \u2014 licence for verification",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "appraisal_company",
+      "type": "str",
+      "why": "processor",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "borrower_name",
+      "type": "str",
+      "why": "processor \u2014 ties the form to the file",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    },
+    {
+      "name": "lender_or_client",
+      "type": "str",
+      "why": "processor",
+      "rules": [],
+      "reason_class": "processor",
+      "rule_floor": false,
+      "degraded_from": null,
+      "pii": null,
+      "exists_today": true,
+      "prompt_hint": null
+    }
+  ],
+  "nested_lists": [
+    {
+      "name": "comparable_rentals",
+      "shape": "flat_row",
+      "shape_reason": "the grid is the EVIDENCE behind the opinion and genuinely repeats (3+ comparables). Values are kept VERBATIM as strings \u2014 a rent written '$1,850/mo' and an adjustment '-100' are what the appraiser wrote, and the DTI consumes the opinion rather than the grid, so normalising here would lose fidelity for no gain.",
+      "expected_item_count": "3+",
+      "rules": [],
+      "exists_today": true,
+      "plumbing_sites": 5,
+      "fields": [
+        {
+          "name": "comparable_label",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "address",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "proximity_to_subject",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "monthly_rent",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "date_of_lease",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "unit_breakdown",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "adjustments",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "adjusted_monthly_rent",
+          "type": "str",
+          "why": "processor \u2014 verbatim from the grid",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        }
+      ]
+    },
+    {
+      "name": "unit_rents",
+      "shape": "flat_row",
+      "shape_reason": "a 1025 breaks rent down per unit and a 1007 does not; empty on a 1007. ACTUAL and MARKET rent are distinct columns and are kept in separate fields \u2014 merging them would lose the difference between what a tenant pays and what the market supports.",
+      "expected_item_count": "0-4",
+      "rules": [],
+      "exists_today": true,
+      "plumbing_sites": 5,
+      "fields": [
+        {
+          "name": "unit_label",
+          "type": "str",
+          "why": "processor \u2014 verbatim per unit",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "bedrooms",
+          "type": "str",
+          "why": "processor \u2014 verbatim per unit",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "actual_rent",
+          "type": "str",
+          "why": "processor \u2014 verbatim per unit",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "market_rent",
+          "type": "str",
+          "why": "processor \u2014 verbatim per unit",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        },
+        {
+          "name": "lease_status",
+          "type": "str",
+          "why": "processor \u2014 verbatim per unit",
+          "rules": [],
+          "reason_class": "processor",
+          "rule_floor": false,
+          "degraded_from": null,
+          "pii": null,
+          "exists_today": true,
+          "prompt_hint": null
+        }
+      ]
+    }
+  ],
+  "rejected": [
+    {
+      "name": "comparable_photographs",
+      "reason": "images, not data; the catch-all keeps any caption text"
+    },
+    {
+      "name": "averaged_comparable_rent",
+      "reason": "COMPUTED, and computing it would invite the model to substitute it for the opinion \u2014 the exact failure the prompt forbids. An appraiser's opinion is a judgement, not the mean of the rows above it."
+    }
+  ],
+  "encoding_variations": [
+    "Freddie Mac equivalents: Form 1000 (single-family) and Form 72 (2-4 unit) carry the same content under different numbers.",
+    "A tenanted subject shows both an ACTUAL rent and a market-rent opinion; only the opinion qualifies income."
+  ],
+  "open_questions": [
+    {
+      "id": "urar-rent-addendum",
+      "question": "Should a 1004 URAR carrying a rent addendum map to this type or stay separate?",
+      "blocks_implementation": false,
+      "why_not_blocking": "No real URAR-with-addendum was available. The extractor reads a 1007/1025 and the prompt tells it to null every field on anything else, so a URAR is refused rather than mis-mapped \u2014 safe until one is seen."
+    }
+  ],
+  "notes": [
+    "LP-642 step 2. Written from the guide and the form layout; NO real 1007 or 1025 was available, so accuracy is starter-grade and needs validating against real forms.",
+    "B3-3.8-02 (09/02/2026) makes one of these mandatory where rental income qualifies the loan."
+  ]
+}
