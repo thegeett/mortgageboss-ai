@@ -12,10 +12,17 @@ by design, so it is asserted here rather than assumed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.documents.catalog import CATALOG
 from app.models.document import DocumentStatus
-from app.models.needs_item import NeedsItemStatus
-from app.services.needs_engine import apply_document_to_needs, canonical_need_type
+from app.models.loan_file import LoanFile
+from app.models.needs_item import NeedsItem, NeedsItemStatus
+from app.services.needs_engine import (
+    apply_document_to_needs,
+    canonical_need_type,
+    seed_floor_needs,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration import factories
 
@@ -74,7 +81,6 @@ async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
     agrees with itself.
     """
     from app.models.property import OccupancyType
-    from app.services.needs_engine import seed_floor_needs
 
     company = await factories.make_company(db_session, slug="acme-seeded")
     loan_file = await factories.make_loan_file(db_session, company=company)
@@ -106,9 +112,8 @@ async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
     )
 
 
-async def _needs_on(db: AsyncSession, loan_file):
+async def _needs_on(db: AsyncSession, loan_file: LoanFile) -> Sequence[NeedsItem]:
     from app.models.helpers import only_active
-    from app.models.needs_item import NeedsItem
     from sqlalchemy import select
 
     return (
@@ -116,3 +121,67 @@ async def _needs_on(db: AsyncSession, loan_file):
             only_active(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id), NeedsItem)
         )
     ).all()
+
+
+async def test_every_need_the_floor_seeds_is_one_some_document_can_clear(
+    db_session: AsyncSession,
+) -> None:
+    """THE CLASS, not the third instance of it.
+
+    Three findings in this ticket have now sat one layer from where the check was pointed, and the
+    last two were the same defect in the same direction: a seeded `needs_type` no upload can match.
+    That defect is not about rent schedules. It is about the floor seeder emitting a slug, and every
+    guard written so far names the slug it was written for — so the next one gets found the way the
+    last three were, by someone noticing.
+
+    So this asserts the property over EVERY need the seeder emits, selected by nothing: no constant,
+    no filter, no list of types to remember to extend. `canonical_need_type` is the repo's own answer
+    to "can a document reach this", and it is deliberately wider than the catalog — it resolves the
+    umbrella types, the alternative heads, and the bug-001 aliases (`existing_mortgage_statement` ->
+    `mortgage_statement`), all legitimately matchable, none of them in `CATALOG`. It returns None for
+    a slug nothing can reach, which is the whole assertion.
+
+    BOTH LOAN PURPOSES, and that is not thoroughness for its own sake. A first version of this test
+    seeded one investment purchase and claimed in this docstring that it caught a `payoff_statement`
+    typo. It did not — renaming that slug left it GREEN, because the payoff need is seeded only on
+    the refinance branch, which that file never took. A reachability test covers exactly the branches
+    its fixtures fire, so the fixtures are the coverage, and each branch below asserts the need it
+    exists to seed actually appeared rather than trusting that it did.
+    """
+    from app.models.loan_file import LoanPurpose
+    from app.models.property import OccupancyType
+
+    # Each purpose, with a need only that branch seeds — the proof the branch fired.
+    branches = (
+        (LoanPurpose.PURCHASE, "purchase_agreement"),
+        (LoanPurpose.REFINANCE, "payoff_statement"),
+    )
+
+    for purpose, branch_need in branches:
+        company = await factories.make_company(db_session, slug=f"acme-floor-{purpose.value[:6]}")
+        loan_file = await factories.make_loan_file(db_session, company=company)
+        loan_file.loan_purpose = purpose
+        prop = await factories.make_property(db_session, loan_file=loan_file)
+        # An investment subject, so the LP-642 rent-schedule branch is in scope on both purposes.
+        prop.occupancy_type = OccupancyType.INVESTMENT
+        prop.financed_unit_count = 1
+        await db_session.flush()
+
+        await seed_floor_needs(db_session, loan_file)
+        await db_session.flush()
+
+        seeded = await _needs_on(db_session, loan_file)
+        types = {n.needs_type for n in seeded}
+        assert branch_need in types, (
+            f"the {purpose.value} branch did not fire — this iteration would assert over needs it "
+            f"was not written to cover: {sorted(t for t in types if t)}"
+        )
+        assert _FORMS[0] in types, "the investment rent-schedule branch did not fire"
+
+        unreachable = sorted(
+            {n.needs_type or "<empty>" for n in seeded if canonical_need_type(n.needs_type) is None}
+        )
+        assert not unreachable, (
+            f"on a {purpose.value}, the floor seeds needs no document can ever clear — a processor "
+            f"uploads the right paper and the line stays on their list: {unreachable}"
+        )
