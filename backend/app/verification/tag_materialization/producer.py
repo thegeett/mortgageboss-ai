@@ -126,8 +126,23 @@ async def materialize_tags(
     # ⚠️ THE BOUNDS MULTIPLY. Each group may itself have `ai._MAX_CONCURRENT_BATCHES` (8) in flight,
     # so N groups here means up to N x 8 concurrent calls. That is why this bound is 4 and not 8: a
     # worst case of 32 already exceeds Stage B's 8, and §4 — not this ticket — is where a bound gets
-    # raised, on measured TPM rather than on arithmetic. Most groups have one batch, so the realistic
-    # figure is near 4; the cap exists for the file where it is not.
+    # raised, on measured TPM rather than on arithmetic.
+    #
+    # AND THE WORST CASE IS NOT RARE, so do not read 4 as the working figure. The live pass runs 20
+    # groups (`_required_ai_groups`), and the batch counts are not all 1: `txn_stage_a` enumerates
+    # EVERY transaction, which on the document-heavy file this ticket is sized against is hundreds —
+    # far past the 8-batch bound on its own; `id_address`, `id_name` and `income_docs` declare
+    # `applies_to: all`, so they enumerate every document (44 on that file = 3 batches each); and the
+    # four liability groups run 1-2. A realistic peak is a dozen concurrent calls and the 32 cap is
+    # reachable, so this stage — not Stage B — is what sets the run's ceiling on requests in flight.
+    #
+    # ⚠️ THE SHARED BREAKER NO LONGER SEES A SERIAL SEQUENCE. Each group's apply loop is atomic (it
+    # contains no await), so a group's own batches still reach `AiInfraBreaker` in input order — but
+    # the GROUPS reach it in completion order, so "5 consecutive failures" is now counted over an
+    # interleaving that depends on which group finished first. A mix of failing and succeeding groups
+    # can therefore trip the breaker on a file where the serial order would not have, and vice versa.
+    # The breaker's own docstring still claims "a pass materializes its groups sequentially in one
+    # event-loop task" as the reason it needs no synchronisation; that sentence is now stale.
     #
     # No dispatch gate is passed here: `produce_ai_group_tags` never raises `AIClientError` (it
     # resolves per batch, fail-closed) and its own inner dispatch already carries the gate. What it

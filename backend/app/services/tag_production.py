@@ -220,6 +220,9 @@ async def produce_stage_a_transaction_tags(
         # The gate is the breaker's OWN threshold, handed down rather than chosen again here: not a
         # second policy about when to give up, the same one applied where the calls are made.
         stop_after_failures=None if breaker is None else breaker.threshold,
+        # The breaker's failure POLICY as well as its number: an oversized payload resets its
+        # counter, so it must not close this gate either (LP-644 §2 review).
+        counts_as_failure=None if breaker is None else breaker.counts_toward_trip,
     )
 
     # APPLY, IN THE ORIGINAL ORDER — deterministic on purpose. The cache, the token totals, the

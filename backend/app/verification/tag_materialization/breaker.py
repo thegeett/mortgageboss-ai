@@ -113,9 +113,20 @@ class AiBackendUnavailable(RuntimeError):
 class AiInfraBreaker:
     """Counts consecutive AI infrastructure failures across ONE pass.
 
-    Not thread-safe and does not need to be: a pass materializes its groups sequentially in one
-    event-loop task, which is the same reason its runtime is the sum of its AI calls and why this
-    ticket exists at all.
+    Not thread-safe, and LP-644 §2 changed why that is still fine. The original reason — "a pass
+    materializes its groups sequentially in one event-loop task" — is no longer true: §2 runs up to
+    four groups concurrently, precisely because that serial runtime was the thing worth fixing. What
+    keeps the mutations safe is narrower and worth stating exactly, because it is easy to break:
+    every caller feeds this breaker from an APPLY LOOP CONTAINING NO ``await``, so each loop runs to
+    completion without yielding and no two interleave. Put an ``await`` inside one and this class
+    needs a lock.
+
+    ⚠️ SAFE IS NOT THE SAME AS UNCHANGED. A group's own batches still reach this counter in input
+    order, but the GROUPS now arrive in completion order, so "five consecutive failures" is counted
+    over an interleaving that depends on which group finished first. A mix of failing and succeeding
+    groups can trip the breaker where the serial order would not have, and vice versa. That is a
+    real behavioural difference from the serial pass, it is confined to WHEN an already-degraded run
+    gives up, and no verdict on a healthy run depends on it.
     """
 
     def __init__(self, *, threshold: int = CONSECUTIVE_INFRA_FAILURES_TO_TRIP) -> None:
@@ -142,6 +153,24 @@ class AiInfraBreaker:
         """A call landed, so whatever was failing is not failing now."""
         self._consecutive = 0
 
+    def counts_toward_trip(self, err: AIClientError) -> bool:
+        """Whether ``err`` advances the consecutive counter, or resets it.
+
+        THE POLICY, EXPOSED SO A DISPATCH GATE CAN APPLY THE SAME ONE (LP-644 §2 review). A caller
+        that stops dispatching after ``threshold`` failures is answering the same question this
+        class answers, and it used to answer it differently: `dispatch_bounded` counted EVERY
+        ``AIClientError``, so five consecutive oversized payloads — which reset the counter here,
+        because "one oversized document is not an outage" — closed the gate anyway. Every remaining
+        batch in that group was then resolved unknown-with-reason WITHOUT a call being made, without
+        this breaker tripping, and without a log line, where serially those subjects would have been
+        judged normally. That is a verdict moving on a content problem, which is the one thing
+        LP-644 §0 promises concurrency cannot do.
+
+        Reading the threshold from here while inventing a different failure test was the gap: the
+        gate borrowed the number and not the policy. Both now come from this method.
+        """
+        return infra_failure_kind(err) != INFRA_OVERSIZED
+
     def record_failure(self, err: AIClientError) -> None:
         """Count ``err`` if it is an infrastructure outcome, and trip once too many stack up.
 
@@ -164,7 +193,7 @@ class AiInfraBreaker:
         pass. That is a visible, re-runnable failure rather than a silent one, which is the right
         side to err on.
         """
-        if infra_failure_kind(err) == INFRA_OVERSIZED:
+        if not self.counts_toward_trip(err):
             self._consecutive = 0
             return
         self._consecutive += 1

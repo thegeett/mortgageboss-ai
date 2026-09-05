@@ -363,6 +363,9 @@ async def produce_ai_group_tags(
         [partial(reason_fn, context) for context in contexts],
         concurrency=_MAX_CONCURRENT_BATCHES,
         stop_after_failures=None if breaker is None else breaker.threshold,
+        # The breaker's failure POLICY as well as its number: an oversized payload resets its
+        # counter, so it must not close this gate either (LP-644 §2 review).
+        counts_as_failure=None if breaker is None else breaker.counts_toward_trip,
     )
 
     # APPLY, IN THE ORIGINAL ORDER, so `resolved`, the group cache and the breaker see the batches in

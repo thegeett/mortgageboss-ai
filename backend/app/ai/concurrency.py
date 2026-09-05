@@ -20,6 +20,16 @@ THE THREE DETAILS LP-635 PAID FOR, carried over rather than rediscovered:
    The gate closes after ``stop_after_failures`` consecutive failures and the remaining calls are
    never made. Calls already in flight are allowed to finish, so the bound on what an outage costs
    is the threshold plus one semaphore's worth — not the stage.
+
+   ⚠️ THAT BOUND IS PER DISPATCH, AND DISPATCHES NEST. Each ``dispatch_bounded`` keeps its OWN
+   ``consecutive_failures``, so a caller that nests one inside another (materialization: N groups
+   outside, N batches inside) pays the bound once PER INNER DISPATCH, not once per stage. With the
+   materialization bounds (4 groups x 8 batches, threshold 5) a total outage costs up to ~48 failed
+   calls before the shared `AiInfraBreaker` aborts the pass, against 5 when the same work was
+   serial — wall time is unaffected (the calls overlap), but every one of them is a request against
+   the provider quota, retried ``ai_max_retries`` times. Bounding that is a whole-stage budget
+   question and belongs with LP-644 §4, where the bounds themselves get set on measured TPM;
+   recorded here so the number is not rediscovered from a throttling incident.
 2. **An outcome is applied once per CALL, not once per subject sharing it.** This module returns one
    outcome per planned call; de-duplication of subjects onto calls is the caller's job and must
    happen BEFORE planning, or a shared judgement is counted twice.
@@ -44,15 +54,12 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Generic, TypeVar
 
 from app.ai.client import AIClientError
 
-R = TypeVar("R")
-
 
 @dataclass(frozen=True)
-class CallOutcome(Generic[R]):
+class CallOutcome[R]:
     """One dispatched call's result, in the caller's original order.
 
     Exactly one of ``result`` / ``error`` is set when ``attempted``; both are ``None`` when the
@@ -73,11 +80,12 @@ class CallOutcome(Generic[R]):
         return not self.attempted
 
 
-async def dispatch_bounded(
+async def dispatch_bounded[R](
     calls: Sequence[Callable[[], Awaitable[R]]],
     *,
     concurrency: int,
     stop_after_failures: int | None = None,
+    counts_as_failure: Callable[[AIClientError], bool] | None = None,
 ) -> list[CallOutcome[R]]:
     """Run ``calls`` concurrently under a bound, returning outcomes IN INPUT ORDER.
 
@@ -88,6 +96,14 @@ async def dispatch_bounded(
     gate. With no gate the pass runs to completion and the caller resolves the failures its own way
     — cheaper than grinding, and silent, which is the worse half of the two failures a stage can
     have.
+
+    ``counts_as_failure`` decides which errors ADVANCE that count, and a caller passing
+    ``stop_after_failures`` should pass this too (LP-644 §2 review). Borrowing a breaker's threshold
+    while applying a different failure test is a gate that agrees on the number and disagrees on the
+    policy: `AiInfraBreaker` RESETS on an oversized payload — one oversized document is not an
+    outage — so counting those here closed the gate on a content problem, and every remaining call
+    was skipped and resolved unknown-with-reason without ever being made. Defaults to counting every
+    ``AIClientError``, which is right for a caller with no breaker to disagree with.
     """
     if not calls:
         return []
@@ -112,7 +128,12 @@ async def dispatch_bounded(
             try:
                 result = await calls[index]()
             except AIClientError as err:
-                consecutive_failures += 1
+                # The caller's policy, not a second one invented here — see `counts_as_failure`.
+                # A non-counting error RESETS the run, mirroring what the breaker does with it.
+                if counts_as_failure is None or counts_as_failure(err):
+                    consecutive_failures += 1
+                else:
+                    consecutive_failures = 0
                 if stop_after_failures is not None and consecutive_failures >= stop_after_failures:
                     gate_closed = True
                 return index, CallOutcome(None, err, perf_counter() - started, attempted=True)
