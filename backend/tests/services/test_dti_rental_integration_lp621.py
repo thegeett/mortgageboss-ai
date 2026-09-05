@@ -99,9 +99,12 @@ async def test_the_borrowers_own_housing_replaces_the_subject_pitia(db_session) 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
     assert calc.housing_payment == Decimal("2500.00")
-    assert calc.gross_monthly_income == Decimal("29655.55")  # 24,333.33 + 5,322.22
-    # Front-end = 2,500 / 29,655.55. With the subject PITIA left in it read 677.78/29,655.55.
-    assert calc.front_end_dti == Decimal("8.43")
+    # bug-012 — the $5,322.22 net NO LONGER reaches income. SEL-2026-08 conditions that on 12 months
+    # of property-management experience, which no file can establish yet, so the rent may only offset
+    # the subject's PITIA — and that offset is the exclusion this test is about. The housing
+    # substitution, which is what LP-621 wrote this for, is unchanged.
+    assert calc.gross_monthly_income == Decimal("24333.33")
+    assert calc.front_end_dti == Decimal("10.27")  # 2,500 / 24,333.33
 
 
 async def test_the_subject_pitia_lines_are_shown_excluded_not_dropped(db_session) -> None:
@@ -123,22 +126,41 @@ async def test_the_subject_pitia_lines_are_shown_excluded_not_dropped(db_session
 
 async def test_the_rental_line_is_in_the_breakdown_and_sums_to_the_headline(db_session) -> None:
     """The transparency guarantee the module docstring calls "the feature": the itemized lines a
-    processor reads must add up to the number beside them."""
+    processor reads must add up to the number beside them.
+
+    bug-012 — AND AN EXCLUDED LINE IS PART OF THAT GUARANTEE, not an exception to it. The positive
+    net is shown with its arithmetic and marked excluded, so the visible lines still reconcile with
+    the headline; a figure this large that simply disappeared could not be argued with.
+    """
     loan_file = await _investment_file(db_session, "breakdown")
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
     rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
-    assert rental.amount == Decimal("5322.22")
+    assert rental.amount == Decimal("5322.22"), (
+        "the arithmetic is unchanged — its TREATMENT changed"
+    )
     # The arithmetic behind it travels WITH it (LP-621 promised this and computed it into a local).
     assert "75% of $8,000.00" in (rental.derivation or "")
-    assert sum(i.amount for i in calc.income_items) == calc.gross_monthly_income
+    assert rental.excluded and "SEL-2026-08" in (rental.excluded_reason or "")
+    assert (
+        sum(i.amount for i in calc.income_items if not i.excluded) == calc.gross_monthly_income
+    ), "what is COUNTED still sums to the headline"
 
 
-async def test_the_rental_line_can_be_overridden(db_session) -> None:
-    """A figure this large that a processor cannot correct is worse than no figure. It routes through
-    the same `_to_items` override path as every other line, so it gets this for free — which is the
-    argument for putting it there rather than appending a bare engine line."""
+async def test_an_override_corrects_the_figure_but_cannot_restore_it_to_income(db_session) -> None:
+    """bug-012 — THE OVERRIDE STILL WORKS, AND IT NO LONGER RE-INCLUDES.
+
+    `_to_items` treats an override as DISPUTING an exclusion and re-includes the line (LP-569), which
+    is right where the exclusion is a claim about the file a processor can correct. The SEL-2026-08
+    restriction is not that kind of claim: an override changes an AMOUNT, and no amount establishes 12
+    months of property-management experience. So the exclusion is applied structurally, after
+    `_to_items` — the same treatment the occupancy exclusion gets, for the same reason. Without it a
+    processor correcting the rent would silently put the figure back into qualifying income.
+
+    A processor who HAS verified the experience needs a way to say so. That is bug-012 step 2, and it
+    is a different assertion from correcting a number.
+    """
     from app.schemas.dti import DtiOverrideInput
     from app.services.dti import set_dti_override
 
@@ -156,8 +178,9 @@ async def test_the_rental_line_can_be_overridden(db_session) -> None:
     )
 
     rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
-    assert rental.overridden and rental.amount == Decimal("4000.00")
-    assert calc.gross_monthly_income == Decimal("28333.33")  # 24,333.33 + 4,000
+    assert rental.overridden and rental.amount == Decimal("4000.00"), "the correction is honoured"
+    assert rental.excluded, "and it still cannot reach qualifying income"
+    assert calc.gross_monthly_income == Decimal("24333.33"), "the override did not re-include it"
 
 
 async def test_a_shortfall_becomes_an_obligation_and_still_replaces_housing(db_session) -> None:
@@ -248,3 +271,74 @@ async def test_a_primary_residence_is_untouched(db_session) -> None:
     assert calc.housing_payment == Decimal("677.78")
     assert not calc.gated
     assert not any(i.key == HOUSING_PRESENT for i in calc.housing_items)
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 — SEL-2026-08: positive rental income needs 12 months of experience
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_positive_net_does_not_inflate_qualifying_income(db_session) -> None:
+    """THE DEFECT, IN THE DIRECTION THAT MATTERS. Before this, a positive net went straight into
+    qualifying income for every borrower:
+
+        positive = rental.net_monthly > 0
+        if positive:
+            income_items = [*income_items, *rental_items]
+
+    SEL-2026-08 (02 September 2026) permits that only where the borrower has 12 months of
+    property-management experience; without it the rent may only OFFSET the subject's PITIA. So a
+    first-time landlord had their income inflated and their DTI understated — we over-qualified,
+    which is the one direction this codebase refuses everywhere else.
+    """
+    loan_file = await _investment_file(db_session, "no-experience")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.amount == Decimal("5322.22"), "computed, and shown"
+    assert rental.excluded, "but not counted"
+    assert calc.gross_monthly_income == Decimal("24333.33"), "income is the stated income alone"
+
+
+async def test_the_offset_is_real_even_though_the_income_line_is_not(db_session) -> None:
+    """ "Offset the PITIA" is not a thing this code does separately — it is what the housing exclusion
+    ALREADY achieves. The subject's PITIA is out of the housing total whether or not the net reaches
+    income, so a capped positive net still gets the borrower the full benefit the guide allows. This
+    pins that the cap did not silently take the offset away with it."""
+    loan_file = await _investment_file(db_session, "offset-still-applies")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    subject_lines = [i for i in calc.housing_items if i.key != HOUSING_PRESENT]
+    assert subject_lines and all(i.excluded for i in subject_lines), "the PITIA is still offset"
+    assert calc.housing_payment == Decimal("2500.00"), "housing is the borrower's OWN cost"
+
+
+async def test_a_shortfall_is_untouched_by_the_experience_rule(db_session) -> None:
+    """The restriction is on ADDING income. A shortfall is an obligation under both regimes, and
+    capping it would understate the ratio — the same over-qualifying direction, arrived at from the
+    other side."""
+    loan_file = await _investment_file(db_session, "shortfall-unaffected", gross_rent="400.00")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    shortfall = next(i for i in calc.debt_items if i.key == RENTAL_NET)
+    assert not shortfall.excluded, "an obligation is still counted"
+    assert shortfall.amount > 0
+
+
+async def test_the_derivation_says_which_treatment_was_applied(db_session) -> None:
+    """A capped figure and a genuinely small one look identical on the line. The derivation is the
+    only thing that tells a processor which they are reading, and it must name the rule rather than
+    assert a fact about the borrower — we did not establish that they LACK experience, only that the
+    file does not establish they have it."""
+    loan_file = await _investment_file(db_session, "derivation-says-why")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    derivation = rental.derivation or ""
+    assert "not established" in derivation, "not established — never 'the borrower has none'"
+    assert "SEL-2026-08" in derivation
+    assert "offsets the subject's PITIA" in derivation

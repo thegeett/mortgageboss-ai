@@ -60,6 +60,24 @@ class RentalTreatment:
     net_monthly: Decimal | None = None
     gate_reason: str | None = None
     derivation: str | None = None
+    #: bug-012 — whether the borrower has the 12 months of property-management experience that
+    #: SEL-2026-08 (02 September 2026) makes the condition for ADDING positive rental income to
+    #: qualifying income. Without it the guide permits the income only to OFFSET the subject's PITIA:
+    #:
+    #:   "Lenders may only use positive rental income for qualifying income if the borrower(s) has at
+    #:    least 12 months of property management experience. The lender may only use qualifying rental
+    #:    income to offset the PITIA when the borrower(s) has no prior property management experience,
+    #:    or less than 12 months of experience."
+    #:
+    #: ALWAYS FALSE TODAY, and false means NOT ESTABLISHED — not "the borrower has none". The four
+    #: permitted routes are unreachable: Fair Rental Days is not on `ScheduleEProperty`, Form 8825 has
+    #: no extractor, and the lease-supplementing-a-1040 and two-years-of-returns compositions do not
+    #: exist. So the honest state for every borrower is "we cannot tell", and the guide's treatment for
+    #: a borrower we cannot tell about is the same as for one with no experience: offset only.
+    #:
+    #: Kept as a field rather than decided at the call site so the wiring is in place for the real
+    #: test (bug-012 step 2), and so the derivation can say WHICH treatment was applied.
+    experience_established: bool = False
     #: The borrower's OWN monthly housing cost — what belongs on the housing side, because they do not
     #: occupy the subject. Set only alongside `net_monthly`: the caller substitutes the two together or
     #: neither, since adding the net to income while leaving the subject's PITIA in housing counts that
@@ -121,18 +139,27 @@ async def subject_rental_treatment(
     assert own_housing is not None  # guarded above (a missing figure lands in `missing`)
     qualifying = (gross * QUALIFYING_FACTOR).quantize(_CENTS, rounding=ROUND_HALF_UP)
     net = (qualifying - subject_pitia).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    # bug-012 — see `experience_established`. No route to establishing it exists yet, so this is the
+    # constant the field documents rather than a check that can pass.
+    experience_established = False
+    if net > 0 and not experience_established:
+        outcome = (
+            f"${net:,.2f}, which offsets the subject's PITIA but is NOT added to qualifying "
+            "income: 12 months of property-management experience is not established on this file "
+            "(Fannie Mae SEL-2026-08)."
+        )
+    elif net > 0:
+        outcome = f"${net:,.2f} added to income."
+    else:
+        outcome = f"${abs(net):,.2f} carried as a monthly obligation."
     return RentalTreatment(
         applies=True,
         net_monthly=net,
         present_housing=own_housing,
+        experience_established=experience_established,
         derivation=(
             f"75% of ${gross:,.2f} gross rent is ${qualifying:,.2f}, less the subject's "
-            f"${subject_pitia:,.2f} PITIA — "
-            + (
-                f"${net:,.2f} added to income."
-                if net > 0
-                else f"${abs(net):,.2f} carried as a monthly obligation."
-            )
+            f"${subject_pitia:,.2f} PITIA — " + outcome
         ),
     )
 

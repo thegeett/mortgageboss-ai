@@ -624,6 +624,19 @@ async def build_dti_calculation(
         # that a processor cannot correct is worse than no figure. Routing it through `_to_items` buys
         # all three at once.
         positive = rental.net_monthly > 0
+        # bug-012 — A POSITIVE NET IS NOT AUTOMATICALLY INCOME ANY MORE. SEL-2026-08 (02 September
+        # 2026) conditions that on 12 months of property-management experience; without it the guide
+        # permits the rental income only to OFFSET the subject's PITIA. That offset is ALREADY
+        # applied, by the exclusion above: the subject's PITIA is out of the housing total whether or
+        # not the net reaches income. So "offset only" is exactly this line contributing nothing.
+        #
+        # SHOWN, NOT DROPPED — the LP-568 principle this function already applies to the housing side
+        # a few lines up. A processor must see that a positive rental was computed and why it did not
+        # reach the ratio; a figure that silently vanishes cannot be argued with, and this one is
+        # large enough to change a qualification. `excluded_reason` is how this file says that.
+        #
+        # A NEGATIVE NET IS UNAFFECTED: a shortfall is an obligation under both regimes.
+        offset_only = positive and not rental.experience_established
         rental_items, rental_lines = _to_items(
             [
                 _AutoLine(
@@ -638,7 +651,35 @@ async def build_dti_calculation(
             ],
             overrides,
         )
-        if positive:
+        if offset_only:
+            # STRUCTURAL, so applied AFTER `_to_items` — the same distinction the housing exclusion
+            # above turns on, and for the same reason. `_to_items` treats an override as DISPUTING an
+            # exclusion and re-includes the line (LP-569), which is right where the exclusion is a
+            # claim about the file a processor can correct. This one is not: an override changes an
+            # AMOUNT, and no amount establishes 12 months of property-management experience. Routed
+            # through `excluded_reason` instead, a processor correcting the rent would silently put
+            # the figure back into qualifying income and undo the restriction.
+            #
+            # A processor who HAS verified the experience needs a way to say so — that is a separate
+            # affordance, and it is bug-012 step 2, not an amount override.
+            income_items = [
+                *income_items,
+                *(
+                    item.model_copy(
+                        update={
+                            "excluded": True,
+                            "excluded_reason": (
+                                "not added to qualifying income: 12 months of property-management "
+                                "experience is not established on this file, so the rent may only "
+                                "offset the subject's PITIA (Fannie Mae SEL-2026-08) — and that "
+                                "offset is the PITIA exclusion above"
+                            ),
+                        }
+                    )
+                    for item in rental_items
+                ),
+            ]
+        elif positive:
             income_items = [*income_items, *rental_items]
             income_lines = [*income_lines, *rental_lines]
         else:
