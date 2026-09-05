@@ -669,13 +669,25 @@ IN-14:
   # replaced rather than edited around.
   # LP-495b — ACTIVATED. Both load-bearing tags derived over scenario fixtures: occupancy.rental_support
   # 1.0000 over 4 cases (full adequate/inadequate/n-a spread) and income.continuance_3yr 1.0000 over 5.
-  # THE 75% FACTOR IS NOW CALIBRATED, not "pending Priya": B3-3.8-01 (page dated 10/08/2025), verified
-  # verbatim, requires gross monthly rent x 75% with the remaining 25% absorbed by vacancy and
-  # maintenance. A researched, cited threshold is calibrated (ADR-361 discipline).
+  # THE 75% FACTOR IS NOW CALIBRATED, not "pending Priya": a researched, cited threshold is calibrated
+  # (ADR-361 discipline).
+  #
+  # LP-641 — RE-VERIFIED, AND THE CALIBRATION IS RE-EARNED RATHER THAN CARRIED FORWARD. This entry is
+  # the RECORD OF WHY the number is trusted, so a renumber-and-move-on would have left it reading as
+  # verified while pointing at a topic that no longer holds the factor. Read again against the live
+  # page: B3-3.8-02, Rental Income from the Subject Property (09/02/2026), verbatim — "the lender must
+  # multiply monthly gross rent by 75% for the net rental income amount, then subtract the PITIA of the
+  # subject property from the net rental income."
+  #
+  # ONE CLAIM WITHDRAWN. The old entry also asserted verbatim that "the remaining 25% [is] absorbed by
+  # vacancy and maintenance". That sentence is in NEITHER restructured topic — B3-3.8-01 and B3-3.8-02
+  # were checked separately — so it is no longer claimed. The 75% is cited; the 25% is its complement
+  # and its rationale is not currently citable.
   # NO RENTAL DOCUMENT REACHES ANY LOAN FILE TODAY — 21 leases sit in the raw corpus and none is
   # attached — so IN-14 will abstain on live files until one is. Form 1007 and 1025, the market-rent
-  # sources B3-3.8-01 names, have NO catalog type and NO extractor, so that path is unmodellable rather
-  # than merely absent.
+  # sources B3-3.8-02 names, have NO catalog type and NO extractor, so that path is unmodellable rather
+  # than merely absent — and SEL-2026-08 makes those forms MANDATORY where rental income qualifies, so
+  # what was a gap is now a blocker (LP-642).
   # LP-495b review — IN-14 SHARES income.continuance_3yr WITH IN-13, so LP-427's 5/6 = 0.833 measurement holds it
   # too, and it is recorded here for the same reason it is recorded there: the number existed and the field
   # was null. The other load-bearing tag occupancy.rental_support is UNMEASURED (self-consistent at 1.0 over
@@ -715,12 +727,18 @@ IN-14:
     written and stopped being true when LP-418 declared the `occupancy_rental` AI group without updating this
     entry; that stale line is what LP-495b's own ticket inherited its premise from. Both load-bearing tags
     were derived over scenario fixtures — occupancy.rental_support 1.0000 over 4 cases (a full
-    adequate/inadequate/n-a spread) and income.continuance_3yr 1.0000 over 5 — and the 75%/25% factor is now
-    CALIBRATED rather than "pending Priya": B3-3.8-01 (page dated 10/08/2025) verified verbatim, a researched
-    and cited threshold (ADR-361 discipline). WHAT THIS RULE CANNOT DO TODAY, stated rather than discovered
-    later: no rental document is attached to any loan file, so IN-14 abstains on every live file; and Form
-    1007 / 1025, the market-rent sources B3-3.8-01 names, have no catalog type and no extractor, so that path
-    is unmodellable rather than merely absent — only the lease path can ever be represented.
+    adequate/inadequate/n-a spread) and income.continuance_3yr 1.0000 over 5 — and the 75% factor is now
+    CALIBRATED rather than "pending Priya": a researched and cited threshold (ADR-361 discipline).
+    LP-641 — RE-VERIFIED against the restructured guide rather than renumbered: B3-3.8-02, Rental Income
+    from the Subject Property (09/02/2026), verbatim — "the lender must multiply monthly gross rent by 75%
+    for the net rental income amount, then subtract the PITIA of the subject property from the net rental
+    income." The old entry's companion claim, that the remaining 25% is "absorbed by vacancy and
+    maintenance", is in neither restructured topic and is withdrawn: the factor is cited, its rationale is
+    not currently citable. WHAT THIS RULE CANNOT DO TODAY, stated rather than discovered later: no rental
+    document is attached to any loan file, so IN-14 abstains on every live file; and Form 1007 / 1025, which
+    B3-3.8-02 names and SEL-2026-08 makes MANDATORY where rental income qualifies, have no catalog type and
+    no extractor, so that path is unmodellable rather than merely absent — only the lease path can ever be
+    represented (LP-642).
 
 # ===================== no-ai-dependency (no AI gate — activation is a wiring/deterministic call) ====
 AS-3:
@@ -2040,7 +2058,8 @@ DT-6:
     needs_review.
     ⚠️ THE CATALOG'S "or net rental" PATH IS UNAVAILABLE AND IS NOT FAKED: the snapshot models
     ScheduleEPropertyRecord but there are ZERO property rows across the 15 real tax returns, so
-    B3-3.8-01's 75% factor is not used.
+    B3-3.8-02's 75% factor is not used. (And it would not apply to a Schedule E figure even with rows:
+    the guide computes that path as a cash-flow analysis, not a 75% haircut — LP-641.)
 LO-2:
   status: no-ai-dependency
   ships: auto

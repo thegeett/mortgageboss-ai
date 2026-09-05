@@ -8,9 +8,10 @@ investment refinance that is wrong in BOTH directions at once:
     arrives. LF-ABRS charges the borrower $5,067.13 for a property tenants pay for.
   * TOO LOW  — the borrower lives somewhere, and that housing cost appears nowhere in the file.
 
-Fannie B3-3.1-08 / B3-6-06 compute it as ``(gross monthly rent x 75%) - full PITIA``: a positive result
-is added to gross monthly income, a negative one is carried as a monthly obligation. The 25% absorbs
-vacancy and maintenance. The borrower's OWN housing expense is what belongs on the housing side,
+Fannie B3-3.8-02 / B3-6-06 compute it as ``(gross monthly rent x 75%) - full PITIA``: the guide calls
+the result ADJUSTED NET RENTAL INCOME. A positive result was added to gross monthly income and a
+negative one carried as a monthly obligation — bug-012 conditions the positive half on 12 months of
+property-management experience. The borrower's OWN housing expense is what belongs on the housing side,
 because they do not occupy the subject.
 
 WHAT THIS MODULE DOES, AND DELIBERATELY DOES NOT DO. It computes that treatment when the inputs exist
@@ -40,9 +41,28 @@ from app.models.stated_financials import StatedHousingExpense, StatedOwnedProper
 
 _CENTS = Decimal("0.01")
 
-#: Fannie B3-3.8-01, verbatim: "the lender must calculate the rental income by multiplying the gross
-#: monthly rent(s) by 75%". The remaining 25% is absorbed by vacancy and ongoing maintenance. Cited
-#: rather than chosen — ADR-361 forbids inventing a threshold, and this one has a primary.
+#: Fannie Mae Selling Guide **B3-3.8-02**, Rental Income from the Subject Property (page dated
+#: 09/02/2026), verbatim: "the lender must multiply monthly gross rent by 75% for the net rental
+#: income amount, then subtract the PITIA of the subject property from the net rental income."
+#: Cited rather than chosen — ADR-361 forbids inventing a threshold, and this one has a primary.
+#:
+#: LP-641 — RE-VERIFIED, NOT RENUMBERED. SEL-2026-08 moved this material out of B3-3.8-01 (which now
+#: holds general rental-income information) and the wording changed with it, so the quotation above is
+#: read from the new topic rather than carried across with the number swapped.
+#:
+#: TWO THINGS THAT CHANGED, AND ARE NOT SILENTLY CARRIED FORWARD:
+#:
+#:   * The old page explained the factor — "the remaining 25% … absorbed by vacancy losses and ongoing
+#:     maintenance expenses". That sentence could not be located in the restructured topic. The FACTOR
+#:     is still cited; the EXPLANATION is no longer claimed as verbatim. Stated as "could not locate"
+#:     rather than "the guide dropped it": one read of a page is weaker evidence of absence than of
+#:     presence.
+#:   * The factor is PATH-SPECIFIC. It applies to a gross rent documented by a lease (and to the gross
+#:     a Form 1007 / 1025 supports). It does NOT apply to the Schedule E path, which the guide computes
+#:     as a cash-flow analysis — adding back depreciation, interest, HOA dues, taxes and insurance.
+#:     `_subject_gross_rent` reads only the MISMO owned-property schedule today, so no Schedule E figure
+#:     can reach this constant; LP-642 proposes widening exactly that lookup, and 75% applied to a
+#:     Schedule E figure would be wrong arithmetic. Written down before the lookup widens, not after.
 QUALIFYING_FACTOR = Decimal("0.75")
 
 

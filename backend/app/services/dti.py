@@ -564,8 +564,9 @@ async def build_dti_calculation(
     # LP-621 — FANNIE'S RENTAL TREATMENT FOR AN INVESTMENT SUBJECT. Until now the subject's PITI was
     # the housing expense whoever lived there, which on an investment refinance is wrong in BOTH
     # directions: the full payment in the numerator with no credit for rent that arrives, and the
-    # borrower's own housing cost missing entirely. B3-3.1-08 nets (gross x 75%) against the PITIA and
-    # puts the borrower's OWN cost on the housing side.
+    # borrower's own housing cost missing entirely. B3-3.8-02 nets (gross x 75%) against the PITIA and
+    # puts the borrower's OWN cost on the housing side. (LP-641 — was cited as B3-3.1-08, which
+    # SEL-2026-08 superseded twice over; the netting lives at B3-3.8-02, page dated 09/02/2026.)
     #
     # Computed AFTER the housing lines, because the treatment needs the PITIA they sum to.
     # POST-OVERRIDE (`housing_lines`, not `housing_auto`): a processor who corrected the tax figure

@@ -37,7 +37,7 @@
 #
 # ⚠️ THE "OR NET RENTAL" PATH IN THE CATALOG IS UNAVAILABLE AND IS NOT FAKED. The snapshot models
 # `ScheduleEPropertyRecord` (address, rents, expenses, net) but there are ZERO property rows across the 15
-# real tax returns in the corpus (LP-495a Phase A), so B3-3.8-01's 75%-of-gross-rent factor is NOT used
+# real tax returns in the corpus (LP-495a Phase A), so B3-3.8-02's 75%-of-gross-rent factor is NOT used
 # and is not cited here. Recorded so the next reader does not go looking for it.
 
 rule_id: DT-6

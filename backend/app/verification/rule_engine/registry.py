@@ -335,6 +335,9 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # Both rules' RESEARCH landed in LP-495b: IN-13 now carries the per-type continuance table (it applied
 # one blanket 3-year test across every income type) and IN-14's 75%/25% factor is calibrated from the
 # verified primary instead of "pending Priya". Their stale B3-3.1-08 / B3-3.1-09 citations are corrected.
+# (LP-641 — and went stale AGAIN: SEL-2026-08 split that material into B3-3.8-01 / B3-3.8-02 on
+# 09/02/2026. The sentence above records what LP-495b did and is left as written; the current
+# citations live on the specs themselves. Third renumbering of this material in a year.)
 # LP-495b review — IN-13 AND IN-14 CARRY A DECLARED BELOW-BAR MEASUREMENT. Their shared income.continuance_3yr
 # scored 5/6 = 0.833 against Priya's labels (LP-427), under the 0.9 its sibling tag was validated at.
 # LP-495b activated them with `measured_accuracy` left null, which bypassed the ratify-pending guard that
