@@ -13,6 +13,7 @@ failing a run it was only ever meant to speed up.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -20,11 +21,17 @@ from app.ai.tag_production import TagJudgment
 from app.models.company import Company
 from app.models.loan_file import LoanFile
 from app.models.tag_cache import TagCacheEntry, TagCacheKind
-from app.services.tag_cache_store import load_tag_caches, save_tag_caches
+from app.services import tag_cache_store
+from app.services.tag_cache_store import (
+    _INSERT_CHUNK_ROWS,
+    load_tag_caches,
+    save_tag_caches,
+)
 from app.services.tag_correlation import SourceStrength, _Sourced
 from app.services.tag_production import _Judged
 from app.services.verification_run import TagCaches
 from app.verification.tag_materialization.ai import AiTagJudgment, _Resolved
+from app.verification.tag_materialization.declarations import load_ai_groups
 from sqlalchemy import func, select
 
 pytestmark = pytest.mark.anyio
@@ -198,3 +205,119 @@ async def test_an_unknown_cache_kind_is_ignored_not_fatal(db_session) -> None:
 async def test_an_empty_cache_writes_nothing(db_session) -> None:
     lf = await _loan_file(db_session)
     assert await save_tag_caches(db_session, lf.id, TagCaches()) == 0
+
+
+async def test_a_failed_save_leaves_the_session_usable(db_session) -> None:
+    """LP-644 §3 review — the module's central promise, made true rather than stated.
+
+    "A cache must never fail a run" was only true for NON-DB errors, and every error this write can
+    raise is a DB one. A failed statement ABORTS the transaction, so swallowing it left the caller
+    to hit `InFailedSQLTransactionError` on its very next statement — and
+    `tasks/verification_rules._run` goes on to lock the run row, flush, count findings and COMMIT.
+    The verification would fail, discarding a complete set of correct findings, to record a cache
+    whose only purpose is to make the NEXT run cheaper.
+
+    The trigger here is an ordinary one: the loan file is gone (the FK is ON DELETE CASCADE), which
+    is reachable whenever a file is deleted while its run is in flight.
+    """
+    caches = TagCaches()
+    caches.stage_a["fp1"] = _judged()
+
+    assert await save_tag_caches(db_session, uuid4(), caches) == 0, (
+        "a save that cannot land must report failure rather than raise"
+    )
+
+    # THE POINT: the caller's session is still usable, so the verification still commits.
+    await db_session.execute(select(func.count()).select_from(TagCacheEntry))
+    await db_session.flush()
+
+
+async def test_a_failed_load_leaves_the_session_usable(db_session, monkeypatch) -> None:
+    """The same guarantee on the read side, where the blast radius is larger.
+
+    The load runs BEFORE `run_verification`, so a poisoned session here fails the whole pass rather
+    than its tail. The realistic trigger is deploying this code ahead of its migration: the table is
+    absent, the load degrades to an empty cache exactly as designed, and then every verification on
+    the box fails for a reason that has nothing to do with verification.
+
+    Pointing the mapped table at a name that does not exist reproduces that without DDL — real
+    schema changes take an AccessExclusiveLock that deadlocks against the suite's own teardown.
+    """
+    monkeypatch.setattr(TagCacheEntry.__table__, "name", "tag_cache_entries_absent")
+
+    caches = await load_tag_caches(db_session, uuid4())
+    assert not caches.stage_a and not caches.stage_b, "a missing table degrades to an empty cache"
+
+    monkeypatch.undo()
+    # THE POINT: the caller runs the ENTIRE verification on this session afterwards.
+    await db_session.execute(select(func.count()).select_from(TagCacheEntry))
+    await db_session.flush()
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 review — the key has to carry the QUESTION, not just the subject
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_edited_prompt_invalidates_what_it_was_asked_with(db_session, monkeypatch) -> None:
+    """A fingerprint hashes the SUBJECT and knows nothing about the prompt asked about it.
+
+    In memory that was unobservable — the cache died with the run, so an edited prompt took effect
+    on the next one. Persisted, it would be permanent: every already-cached subject served the old
+    model's answer for as long as its content is unchanged. The producer version in the key is what
+    makes an edit cost one run at full price instead of forever.
+    """
+    lf = await _loan_file(db_session)
+    caches = TagCaches()
+    caches.stage_a["fp-a"] = _judged()
+    await save_tag_caches(db_session, lf.id, caches)
+    assert (await load_tag_caches(db_session, lf.id)).stage_a["fp-a"].is_money_in is not None
+
+    monkeypatch.setattr(
+        tag_cache_store, "STAGE_A_TRANSACTION_SYSTEM_PROMPT", "a materially different prompt"
+    )
+
+    restored = await load_tag_caches(db_session, lf.id)
+
+    assert restored.stage_a == {}, "the old answer is not served to the new question"
+
+
+async def test_a_group_that_gains_a_tag_is_re_asked_not_frozen(db_session, monkeypatch) -> None:
+    """The worst version of the same defect, and the reason `tag_ids` is in the group's digest.
+
+    `produce_ai_group_tags` skips a subject whose fingerprint is cached, so a tag ADDED to a group
+    would never be asked for — and `_build_tag` renders the missing short as `unknown` with "tag
+    value missing or malformed", an honest-looking abstention that no re-run could ever clear.
+    """
+    lf = await _loan_file(db_session)
+    caches = TagCaches()
+    caches.materialization.setdefault("id_address", {})["fp-m"] = _resolved()
+    await save_tag_caches(db_session, lf.id, caches)
+    assert "fp-m" in (await load_tag_caches(db_session, lf.id)).materialization["id_address"]
+
+    group = load_ai_groups()["id_address"]
+    widened = dict(load_ai_groups())
+    widened["id_address"] = replace(group, tag_ids=(*group.tag_ids, "address.newly_declared"))
+    monkeypatch.setattr(tag_cache_store, "load_ai_groups", lambda: widened)
+
+    restored = await load_tag_caches(db_session, lf.id)
+
+    assert restored.materialization == {}, "a widened group asks again rather than serving a hole"
+
+
+async def test_a_cache_larger_than_one_statement_still_saves(db_session) -> None:
+    """The insert is chunked because a statement's parameter count is a 16-bit protocol field.
+
+    Each row binds eight parameters, so one statement tops out at 4,095 rows while the per-kind cap
+    allows 6,000 — reachable on exactly the document-heavy files this cache exists for. Unchunked,
+    the save raised, was swallowed, and the biggest files in the system silently never cached.
+    """
+    lf = await _loan_file(db_session)
+    caches = TagCaches()
+    for i in range(_INSERT_CHUNK_ROWS + 250):
+        caches.stage_a[f"fp-{i}"] = _judged()
+
+    assert await save_tag_caches(db_session, lf.id, caches) == _INSERT_CHUNK_ROWS + 250
+
+    restored = await load_tag_caches(db_session, lf.id)
+    assert len(restored.stage_a) == _INSERT_CHUNK_ROWS + 250

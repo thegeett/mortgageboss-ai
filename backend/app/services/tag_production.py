@@ -234,6 +234,14 @@ async def produce_stage_a_transaction_tags(
             # — unknown-with-reason, uncached, retried next run — but the breaker is NOT fed: no
             # call was made, so there is no failure to count, and counting one would let a single
             # outage close the breaker twice as fast as its threshold says.
+            #
+            # LOGGED, because not feeding the breaker means this can be the ONLY trace it leaves.
+            # The gate counts failures in COMPLETION order and the breaker in INPUT order, so a
+            # degraded-but-working backend can close the gate on five failures that the breaker
+            # sees interleaved with successes and never trips on. Then the tail of the stage is
+            # resolved unknown without a call, and — before this line — without a word anywhere.
+            # Silence is the worse half of the two failures a stage can have (LP-635).
+            logger.warning("stage_a_batch_not_attempted", size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Judged(None, None, _REASON_FAILED)
             continue

@@ -147,6 +147,14 @@ async def _run(loan_file_id: str, run_id: str) -> None:
         # has no bearing on this one's findings. `save_tag_caches` swallows its own errors for the
         # same reason — failing a verification that produced correct findings, in order to record a
         # cache, would be a grotesque trade.
+        #
+        # FLUSHED FIRST, which is bug-006's lesson applied to a second savepoint. The save runs
+        # inside `begin_nested()` so a DB failure cannot abort the outer transaction; but rolling
+        # back to a savepoint expires whatever was dirty when it was taken, so anything
+        # `run_verification` left unflushed must be settled BEFORE it rather than left inside the
+        # window the rollback would discard. That is the exact shape bug-006 fixed for the triage
+        # counts — a savepoint added to protect the commit being the one thing that could destroy it.
+        await db.flush()
         await save_tag_caches(db, loan_file.id, caches)
         # LP-377-C Fix 2: the governed pass is the completion authority. Re-read status under a ROW LOCK
         # (the LP-377 BUG-1 pattern, moved here from the sweep) and mark COMPLETED only if a concurrent

@@ -7,8 +7,15 @@ Adds ``tag_cache_entries``. Additive only: one new table, nothing existing is to
 type changes across `validation_verdicts`, `needs_items` and `verifications` — pre-existing drift
 between the models and this database, none of it related to this ticket. Shipping the generated file
 would have DROPPED A TABLE as a side effect of adding a cache. Everything but the `create_table` and
-its indexes was removed by hand; the drift is real and belongs in its own ticket, where it can be
-reviewed as the schema change it is rather than smuggled in as a footnote.
+its indexes was removed by hand.
+
+⚠️ THE DRIFT IS STILL THERE, AND IT RE-ARMS ON EVERY AUTOGENERATE. Verified against a database
+migrated to head from scratch: `--autogenerate` still emits 22 operations, four of them destructive —
+`drop_table('finding_prose')` (the table EXISTS in the database and no model claims it),
+`drop_index('ix_documents_full_text_fts')` and two `stated_housing_expenses` index drops. Whoever
+writes the next migration inherits the same loaded gun and has to notice it by hand, exactly as this
+one did. It needs its own ticket, where it can be reviewed as the schema change it is rather than
+smuggled in as a footnote — do not fix it here.
 
 Revision ID: a1c8734a7978
 Revises: c8b1e47da920

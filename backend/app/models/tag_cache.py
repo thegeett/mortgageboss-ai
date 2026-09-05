@@ -78,9 +78,18 @@ class TagCacheEntry(Base, UUIDMixin, TimestampMixin):
     #: three stages store three different shapes, each owned by the module that produces it, and a
     #: shape change must not need a migration for what is only ever a cache.
     value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    #: Bumped every time a run stores this entry, so a busy file's live entries stay young while its
-    #: dead ones age. Not currently read by eviction (which uses created_at) — see the store's
-    #: eviction note for why, and what would have to change to use this instead.
+    #: Bumped every time a run STORES this entry — which is every run, for every entry, because the
+    #: loader pulls the whole file's rows into the cache and the saver writes the whole cache back.
+    #:
+    #: ⚠️ SO IT IS NOT A LIVENESS SIGNAL, and the first version of this comment claimed it was ("a
+    #: busy file's live entries stay young while its dead ones age"). Measured: a fingerprint whose
+    #: content has changed — never looked up by any producer again — still reaches `hit_count=3`
+    #: after three runs, exactly like an entry hit every time. What this counts is runs SURVIVED.
+    #:
+    #: A future exact-eviction policy therefore cannot be built on this column as it stands; it needs
+    #: the producers to report the keys they actually READ, and those reads happen in the await-free
+    #: hot loops `tag_cache_store` must not reach into. Left in place because the column is harmless
+    #: and dropping it would cost a migration, but it buys nothing until that plumbing exists.
     hit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 

@@ -374,6 +374,13 @@ async def produce_ai_group_tags(
         if outcome.not_attempted:
             # The gate closed before this batch was asked: same fail-closed resolution as a failure,
             # but the breaker is NOT fed — no call was made, so there is no failure to count.
+            #
+            # LOGGED, for the reason the breaker is not fed. The gate counts failures in COMPLETION
+            # order while the breaker counts them in INPUT order, so a degraded backend can close
+            # this gate on five failures the breaker sees interleaved with successes and never trips
+            # on — and the rest of the group is then resolved unknown without a call being made.
+            # Without this line that outcome has no trace at all.
+            logger.warning("ai_group_batch_not_attempted", group=group.key, size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Resolved({}, _REASON_FAILED)
             continue
