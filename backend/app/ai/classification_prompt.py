@@ -110,6 +110,11 @@ DOCUMENT_TYPE_INDICATORS: dict[str, str] = {
     "statement_of_account": "a generic account statement giving the account holder, balance, monthly payment, and current status — a catch-all account statement (may be an asset or a liability account; prefer a more specific type when the account kind is clear)",
     # --- Property ---
     "purchase_agreement": "a signed real-estate purchase and sale contract; buyer/seller, property address, price, and contingencies",
+    # LP-642 — the two subject-property rent schedules. Described by what is PRINTED ON THEM (the form
+    # number and the comparables grid), because a classifier reading "market rent" alone would pull in
+    # leases and rental-income letters, and asking a borrower for the wrong form is a wasted round-trip.
+    "comparable_rent_schedule": "Fannie Mae Form 1007 / Freddie 1000, 'Single-Family Comparable Rent Schedule'; an appraiser's grid of comparable rentals for a ONE-unit property with an opinion of monthly market rent",
+    "small_residential_income_appraisal": "Fannie Mae Form 1025 / Freddie 72, 'Small Residential Income Property Appraisal Report'; an appraisal of a TWO- to FOUR-unit property with per-unit rents and an operating-income statement",
     "homeowners_insurance": "a homeowner's hazard insurance policy or declarations page; coverage amounts, premium, and the insured property",
     "mortgage_statement": "a monthly mortgage billing statement for an existing loan — 'Amount Due by [date]', a running principal/escrow balance, and payment history. NOT a TRID loan_estimate or closing_disclosure (no APR, no TIP, no A-J cost tables)",
     "form_1098": "an IRS Form 1098 'Mortgage Interest Statement' — the ANNUAL TAX form a mortgage servicer/lender furnishes for a calendar year, reporting mortgage interest received (Box 1), outstanding principal (Box 2), points, and often real-estate taxes in the free-text Box 10. It prints 'Form 1098', 'Mortgage Interest Statement', 'Copy B For Payer/Borrower', and OMB No. 1545-1380. NOT form_1099 (a different IRS return — reports income, not mortgage interest), NOT mortgage_statement (a MONTHLY servicer bill with an 'amount due by' date — a 1098 is an ANNUAL 'keep for your records' tax form), and NOT property_tax_bill (a taxing authority's bill — a 1098 mentions taxes only as free text in Box 10)",

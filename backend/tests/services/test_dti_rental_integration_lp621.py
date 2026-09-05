@@ -204,7 +204,7 @@ async def test_a_gated_treatment_leaves_the_housing_side_alone(db_session) -> No
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
-    assert calc.gated and "GROSS monthly rent" in (calc.gate_reason or "")
+    assert calc.gated and "Form 1007" in (calc.gate_reason or "")
     assert calc.housing_payment == Decimal("677.78")
     assert not any(i.key == RENTAL_NET for i in (*calc.income_items, *calc.debt_items))
 
@@ -226,7 +226,7 @@ async def test_the_gate_reaches_the_snapshot_the_rules_read(db_session) -> None:
 
     assert entry is not None
     assert entry.gated, "the rules must not receive a ratio the calculator gated"
-    assert "GROSS monthly rent" in (entry.gate_reason or "")
+    assert "Form 1007" in (entry.gate_reason or "")
     assert entry.value["back_end_dti"] is None
 
 

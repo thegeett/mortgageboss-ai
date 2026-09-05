@@ -133,9 +133,21 @@ async def subject_rental_treatment(
     missing: list[str] = []
     gross = await _subject_gross_rent(db, loan_file.id)
     if gross is None or gross <= 0:
+        # LP-642/LP-643 — NAME THE DOCUMENT TO GET, NOT THE FIELD THAT CAME BACK EMPTY.
+        #
+        # This read "the application states no GROSS monthly rent for the subject", which sent a
+        # processor to the 1003 to look for a number that was never going to be there: MISMO does not
+        # repeat the subject in the owned-property schedule, which is the only place this looks. So the
+        # sentence described OUR LOOKUP rather than the file's problem, and did it in a warning banner
+        # that reads as authoritative.
+        #
+        # A gate reason is written by whichever code could not proceed, so it naturally describes the
+        # lookup that failed. What a processor needs is the document to go and get. Those are different
+        # sentences and the second is the useful one.
         missing.append(
-            "the application states no GROSS monthly rent for the subject (a net figure cannot be "
-            "run through the 75% vacancy factor)"
+            "no document on the file states what the subject will rent for — a comparable rent "
+            "schedule (Form 1007 for one unit, Form 1025 for two-to-four) or a lease for the subject "
+            "establishes it, and a net figure cannot substitute for gross"
         )
     own_housing = await borrower_present_housing(db, loan_file.id)
     if own_housing is None:

@@ -145,6 +145,22 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # ===================================================================== #
     # Property
     # ===================================================================== #
+    # LP-642 — the SUBJECT-PROPERTY RENT SCHEDULES. Fannie B3-3.8-02 (09/02/2026) makes one of these
+    # MANDATORY where rental income is used to qualify: "a Single-Family Comparable Rent Schedule
+    # (Form 1007) or Small Residential Income Property Appraisal Report (Form 1025), as applicable".
+    # Until now neither existed as a type, so the one document a rental purchase cannot qualify
+    # without could be neither requested nor filed — `activation_bars.yaml` recorded that as a
+    # limitation and SEL-2026-08 turned it into a blocker.
+    #
+    # TIER 2, NOT TIER 1, DELIBERATELY. Tier 2 is classified + categorised + summarised, with no
+    # structured extraction — which is what a type needs to be REQUESTABLE and FILEABLE. Reading the
+    # market rent off the form is a separate step with its own accuracy question (LP-642), and
+    # cataloguing at Tier 1 would claim an extractor that does not exist.
+    "comparable_rent_schedule": (Tier.TIER_2, DocumentCategory.PROPERTY),  # Form 1007, one-unit
+    "small_residential_income_appraisal": (
+        Tier.TIER_2,
+        DocumentCategory.PROPERTY,
+    ),  # Form 1025, 2-4
     "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1

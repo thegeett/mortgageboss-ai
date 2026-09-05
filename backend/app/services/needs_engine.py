@@ -44,6 +44,7 @@ from app.models.needs_item import (
     NeedsItemOrigin,
     NeedsItemStatus,
 )
+from app.models.property import OccupancyType, Property
 from app.models.stated_financials import StatedAsset, StatedIncomeItem
 from app.services.needs_items import create_needs_item
 
@@ -911,6 +912,22 @@ _PER_BORROWER_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = [
 _PER_FILE_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = []
 
 
+async def _subject_property(db: AsyncSession, loan_file_id: UUID) -> Property | None:
+    """The file's subject property row, or None (LP-642).
+
+    Returns None on the ambiguous case too — more than one active row — rather than picking. A file
+    cannot hold two today (`uq_properties_loan_file_id` is a plain UNIQUE on `loan_file_id`), so this
+    is a guard against that constraint being relaxed, not a live path; `rental_treatment` makes the
+    same distinction and says the same thing about it.
+    """
+    rows = (
+        await db.scalars(
+            only_active(select(Property).where(Property.loan_file_id == loan_file_id), Property)
+        )
+    ).all()
+    return rows[0] if len(rows) == 1 else None
+
+
 async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsItem]:
     """Seed the THIN deterministic floor of near-certain needs.
 
@@ -1054,6 +1071,44 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
             )
         )
         specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY, refi_src))
+    # LP-642 — AN INVESTMENT SUBJECT NEEDS A RENT SCHEDULE, and until now nothing asked for one.
+    #
+    # Fannie B3-3.8-02 (09/02/2026) makes Form 1007 (one unit) or Form 1025 (two-to-four) MANDATORY
+    # where the subject's rental income is used to qualify. LF-ZE9N is the shape this is for: an
+    # investment purchase whose DTI gates because no document on the file states what the subject will
+    # rent for — and the processor was shown a blanked ratio with nothing to send the borrower.
+    #
+    # THE UNIT COUNT PICKS THE FORM, and an ABSENT count does not silently pick 1007. Asking for the
+    # wrong form is a wasted round-trip with the borrower, so an unknown count asks for neither and the
+    # gate keeps saying why — honest, and recoverable once the count is known.
+    if (subject := await _subject_property(db, loan_file.id)) is not None and (
+        subject.occupancy_type is OccupancyType.INVESTMENT
+    ):
+        units = subject.financed_unit_count
+        form = (
+            ("comparable_rent_schedule", "Comparable rent schedule (Form 1007)")
+            if units == 1
+            else ("small_residential_income_appraisal", "Rent schedule (Form 1025)")
+            if units is not None and 2 <= units <= 4
+            else None
+        )
+        if form is not None:
+            specs.append(
+                (
+                    form[0],
+                    form[1],
+                    DocumentCategory.PROPERTY,
+                    [
+                        {
+                            "kind": "mismo_field",
+                            "label": (
+                                "The subject is an investment property, so its market rent must be "
+                                f"documented to qualify the loan ({units}-unit)"
+                            ),
+                        }
+                    ],
+                )
+            )
     if await _has_stated_assets(db, loan_file.id):
         specs.append(
             (
