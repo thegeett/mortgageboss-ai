@@ -376,9 +376,17 @@ async def _rent_schedule_market_rent(db: AsyncSession, loan_file_id: UUID) -> De
     Report (Form 1025), as applicable" — required where the subject's rental income is used to
     qualify, not merely acceptable.
 
-    Reads `opinion_of_monthly_market_rent` and nothing else. `total_gross_monthly_income` is a 1025's
-    all-units total and is NOT interchangeable with it on a multi-unit form; the extractor keeps them
-    apart and so does this.
+    Reads `opinion_of_monthly_market_rent` and nothing else, and the review checked that against the
+    real forms rather than against the field names. It holds, for a sharper reason than "they are
+    different fields": on a 1025 `total_gross_monthly_income` is the form's "Total Estimated Monthly
+    Income", which is the rent total PLUS "Other Monthly Income (itemize)" — parking, laundry,
+    storage. Substituting it would put non-rent income into a qualifying ratio.
+
+    THE PROPERTY-LEVEL FIGURE IS THE ONE THING THIS DEPENDS ON. A 1025 states an opinion PER UNIT and
+    prints "Total Gross Monthly Rent" as the property total, so a per-unit figure arriving in
+    `opinion_of_monthly_market_rent` would qualify a four-unit subject on a quarter of its rent. The
+    extraction prompt names that neighbour and the others explicitly; nothing downstream can detect
+    it, because one unit's rent is a perfectly plausible whole-property rent.
 
     A NON-POSITIVE OPINION IS NOT A RENT. Zero or negative means the field was misread, not that the
     property rents for nothing — the same absent-is-not-zero discipline the housing inputs use.

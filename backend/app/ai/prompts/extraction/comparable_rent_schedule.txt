@@ -4,16 +4,39 @@ Appraisal Report, TWO to FOUR units). Both are appraiser-prepared. Return ONLY a
 
 THE ONE FIGURE THAT MATTERS: opinion_of_monthly_market_rent
 
-This is the APPRAISER'S OPINION of the subject property's monthly market rent — the conclusion, not
-the evidence. On a 1007 it is the "Opinion of Monthly Market Rent" line near the reconciliation. On a
-1025 it is the appraiser's reconciled market rent for the subject.
+This is the APPRAISER'S OPINION of the SUBJECT PROPERTY AS A WHOLE — the conclusion, not the
+evidence, and the whole property, not one part of it. The two forms print it in different places and
+NEITHER prints the words "Opinion of Monthly Market Rent" as a line label:
 
+  * On a 1007 it is the sentence at the foot of the form, in capitals:
+      "I (WE) ESTIMATE THE MONTHLY MARKET RENT OF THE SUBJECT AS OF ______ TO BE $ ______"
+    Take the dollar figure from that sentence. The line above it, "Final Reconciliation of Market
+    Rent", is a COMMENTS line and usually holds prose, not the number.
+  * On a 1025 there is NO single opinion line. The Subject Rent Schedule states an opinion PER UNIT
+    under the column heading "Opinion Of Market Rent", and the property-level figure is the printed
+    total: "Total Gross Monthly Rent". THAT total is this field.
+
+Every prohibition below names a figure that is really printed on these forms, sits near the one we
+want, and would pass for it:
+
+  * NEVER take a single unit's "Opinion Of Market Rent" from a 1025. It is one row of up to four,
+    and using it reports a quarter of the property's rent as the whole.
+  * NEVER take "Total Estimated Monthly Income" from a 1025. That is Total Gross Monthly Rent PLUS
+    "Other Monthly Income (itemize)" — parking, laundry, storage — and is a larger number that is
+    not rent.
+  * NEVER take "Total Actual Monthly Rent" or "Total Actual Monthly Income" from a 1025. Those are
+    what tenants pay today, not the market opinion.
+  * NEVER take "Indicated Monthly Market Rent" from the 1007 grid. It is a per-COMPARABLE row, it
+    is a market rent, and it is monthly — it is the closest thing on the form to what we want and it
+    is about a different property.
+  * NEVER take "Adjusted Monthly Rent" or "Monthly Rental If Currently Rented" from the grid. The
+    first is a comparable's rent after adjustment; the second is an actual rent, and the SUBJECT
+    column carries one whenever the property is tenanted.
   * NEVER average the comparable rentals to produce it. An opinion is a judgement the appraiser
-    signed; the mean of the grid is a different number that nobody stated.
-  * NEVER copy a comparable's rent into it.
-  * NEVER copy the subject's CURRENT or ACTUAL rent into it — a tenanted property shows both, and
-    the actual rent is what a tenant pays today while the opinion is what the market supports.
-  * If the opinion line is blank, illegible, or you cannot tell which number it is, return null.
+    signed; the mean of the grid is a number nobody stated.
+  * NEVER report an ANNUAL figure here. This field is monthly. If the only figure you can find is
+    annual, return null rather than dividing — a computed number is not a stated one.
+  * If the figure is blank, illegible, or you cannot tell which number it is, return null.
 
 A qualifying mortgage ratio is computed from this figure. A plausible guess is worse than a null:
 null shows a processor what to go and check, and a wrong number is invisible.
@@ -21,11 +44,18 @@ null shows a processor what to go and check, and a wrong number is invisible.
 FIELDS
 
   form_type                       "1007" or "1025" — read from the form itself, not inferred
-                                  from the unit count
+                                  from the unit count. Both forms are jointly branded and print the
+                                  Freddie number alongside the Fannie one: "Freddie Mac Form 1000"
+                                  IS the 1007, and "Freddie Mac Form 72" IS the 1025. Report the
+                                  Fannie number in both cases.
   property_address                the SUBJECT property's address
   opinion_of_monthly_market_rent  see above — a number, no currency symbol
-  total_gross_monthly_income      1025 only: total gross monthly income across all units. Null on a
-                                  1007. On a one-unit form do not duplicate the opinion here.
+  total_gross_monthly_income      1025 only: the form's "Total Estimated Monthly Income" — Total
+                                  Gross Monthly Rent PLUS "Other Monthly Income (itemize)". This is
+                                  NOT the qualifying rent and is NOT interchangeable with the
+                                  opinion above; it is captured so a reader can see what other
+                                  income the appraiser recorded. Null on a 1007, and null if the
+                                  form states no other monthly income.
   unit_count                      1 on a 1007; 2, 3 or 4 on a 1025
   effective_date                  the effective date of the appraisal/opinion (YYYY-MM-DD)
   appraiser_name                  the signing appraiser

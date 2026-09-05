@@ -22,8 +22,27 @@ NULL rather than a total or an average of the comparables — an appraiser's opi
 not the arithmetic mean of the rows above it, and inventing one would put a fabricated rent into a
 qualifying ratio.
 
+**WHAT THE FORMS ACTUALLY PRINT** (LP-642 step 2/3 review, checked against Freddie Mac Form 1000 /
+Fannie Mae Form 1007 (8/88) and Fannie Mae Form 1025 / Freddie Mac Form 72 (03/2005)). The first
+version of the prompt asked for an "Opinion of Monthly Market Rent" line, which NEITHER form prints:
+
+* the 1007 states it in a sentence — "I (WE) ESTIMATE THE MONTHLY MARKET RENT OF THE SUBJECT AS OF
+  ______ TO BE $ ______" — and prints "Indicated Monthly Market Rent" as a per-COMPARABLE row, which
+  is the closest lexical match on the page and is about a different property;
+* the 1025 has no property-level opinion at all. "Opinion Of Market Rent" is a COLUMN heading over
+  per-unit rows, and the property-level figure is the printed "Total Gross Monthly Rent".
+
+So on a 1025 a unit's opinion is one row of up to four, and reporting it would put a quarter of the
+property's rent into a qualifying ratio. The prompt now names each of those neighbours rather than
+describing the one we want and hoping the rest are excluded by implication.
+
+``total_gross_monthly_income`` maps to the form's "Total Estimated Monthly Income" — Total Gross
+Monthly Rent PLUS "Other Monthly Income (itemize)" — so it is deliberately NOT interchangeable with
+the opinion and must never be substituted for it: parking and laundry are not rent.
+
 Starter accuracy, like every extractor here — **refine with the domain expert** as real forms flow
-through. No samples were available when this was written.
+through. Two blank forms were read for the field names above; no COMPLETED form was available, so
+what an appraiser actually writes into these boxes is still unverified.
 """
 
 import json
