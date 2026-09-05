@@ -47,6 +47,7 @@ async def materialize_tags(
     only_groups: frozenset[str] | None = None,
     breaker: AiInfraBreaker | None = None,
     metrics: StageMetrics | None = None,
+    pass_name: str = "materialization",
 ) -> Snapshot:
     """Materialize every declared tag into the tags layer.
 
@@ -57,7 +58,9 @@ async def materialize_tags(
     ``metrics`` (LP-644 §1, optional, mutated in place) accumulates the AI pass's calls, tokens and
     latency across every group, and the wall time of the WHOLE materialization — parsed and derived
     included. Those two phases make no AI calls, so counting them here is what stops §2's projected
-    saving from being read as larger than the stage can actually give back.
+    saving from being read as larger than the stage can actually give back. ``pass_name`` names the
+    caller in that log line: LP-391's pending-check pass materializes a DIFFERENT group set on a
+    throwaway snapshot, and two identically-named lines per run would be unreadable.
     """
     stage_started = perf_counter()
     reasoners = ai_reasoners or {}
@@ -98,11 +101,17 @@ async def materialize_tags(
                 by_subject.setdefault(subject_id, {})[decl.tag_id] = tag
 
     # 2. ai — one bounded structuring pass per AI group (co-locating its tags on one subject).
+    # LP-644 §1 review — counted HERE, by the loop that actually runs them, rather than recomputed
+    # from the same predicate at the log line. The two copies were equivalent by De Morgan today, so
+    # nothing was wrong; but `groups` is the number sizing §2's outer parallelisation, and a second
+    # copy of a scoping rule is the kind that drifts silently the next time the scoping changes.
+    groups_run = 0
     for group in ai_groups.values():
         if not in_scope(group.subject) or (
             only_groups is not None and group.key not in only_groups
         ):
             continue
+        groups_run += 1
         allowed_by_tag = {
             tag_id: declarations[tag_id].allowed_values
             for tag_id in group.tag_ids
@@ -142,11 +151,8 @@ async def materialize_tags(
         metrics.wall_seconds = perf_counter() - stage_started
         logger.info(
             "materialization_production_done",
-            groups=sum(
-                1
-                for g in ai_groups.values()
-                if in_scope(g.subject) and (only_groups is None or g.key in only_groups)
-            ),
+            pass_name=pass_name,
+            groups=groups_run,
             input_tokens=metrics.input_tokens,
             output_tokens=metrics.output_tokens,
             **metrics.as_log_fields(),

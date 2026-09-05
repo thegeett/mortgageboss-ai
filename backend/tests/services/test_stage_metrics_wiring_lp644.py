@@ -111,9 +111,7 @@ async def test_a_cache_hit_records_no_call() -> None:
 
     second = _Reasoner()
     metrics = StageMetrics()
-    await produce_stage_a_transaction_tags(
-        snapshot, reasoner=second, cache=cache, metrics=metrics
-    )
+    await produce_stage_a_transaction_tags(snapshot, reasoner=second, cache=cache, metrics=metrics)
 
     assert second.calls == 0
     assert metrics.calls == 0

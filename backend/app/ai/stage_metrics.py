@@ -92,17 +92,38 @@ class StageMetrics:
 class RunMetrics:
     """Every AI stage's metrics for one run, threaded like :class:`TagCaches`.
 
-    The four stages are the four places that make AI calls (LP-644's table). The ``rules`` stage is
-    deterministic by ADR — AI for perception only — so it has no row here and nothing to win.
+    SIX ROWS, NOT LP-644's FOUR — and the two extra ones are the reason §1 exists. The ticket's table
+    says "four places make AI calls" and adds "the `rules` stage is deterministic (ADR: AI for
+    perception only), so there is nothing to win there". The ADR governs what a rule may DECIDE from,
+    not whether it calls a model: ``judgment.py`` and ``consistency.py`` await
+    ``reason_rule_judgment`` ONCE PER SUBJECT for 19 judgment rules and 5 consistency ones — AS-12 and
+    FR-5 are ``per_deposit``, eight more are ``per_document``, so on the 44-document file the ticket
+    sizes everything from, the rules pass can make as many calls as Stage B does. Left unmeasured,
+    every one of those seconds lands in ``non_ai_seconds`` — the field that decides whether §2-§5 get
+    built — and a run that made real model calls printed ``ai_calls=0``.
+
+      * ``rules`` — the live rule pass (judgment + consistency).
+      * ``pending_checks`` — LP-391's blocked-rule pass: ON by default, and it materializes the
+        blocked groups' AI tags on a throwaway snapshot before evaluating them. Best-effort and
+        discarded, but the run waits for it, so it is run time like any other.
     """
 
     stage_a: StageMetrics = field(default_factory=StageMetrics)
     stage_b: StageMetrics = field(default_factory=StageMetrics)
     materialization: StageMetrics = field(default_factory=StageMetrics)
     cross_source: StageMetrics = field(default_factory=StageMetrics)
+    rules: StageMetrics = field(default_factory=StageMetrics)
+    pending_checks: StageMetrics = field(default_factory=StageMetrics)
 
     def _stages(self) -> tuple[StageMetrics, ...]:
-        return (self.stage_a, self.stage_b, self.materialization, self.cross_source)
+        return (
+            self.stage_a,
+            self.stage_b,
+            self.materialization,
+            self.cross_source,
+            self.rules,
+            self.pending_checks,
+        )
 
     @property
     def ai_calls(self) -> int:
@@ -119,7 +140,12 @@ class RunMetrics:
         return sum(s.wall_seconds for s in self._stages())
 
     def non_ai_seconds(self, run_wall_seconds: float) -> float:
-        """The run's remainder: snapshot build, the rule engine, and DB work.
+        """The run's remainder: snapshot build, the rule engine's own work, and DB work.
+
+        NOT "everything that is not AI" — only what no stage above timed. Every stage that makes
+        model calls has to have a row here, or its waiting is silently reported as this. That is why
+        ``rules`` and ``pending_checks`` are rows: without them this number absorbed the judgment and
+        consistency calls and read as though the model were idle.
 
         THE NUMBER THE WHOLE TICKET TURNS ON. LP-644 estimates AI waiting at ~464s of a 946s run and
         concludes "~49% is the ceiling for everything in this ticket". If the remainder is much
@@ -147,6 +173,10 @@ class RunMetrics:
             "stage_b_wall_seconds": round(self.stage_b.wall_seconds, 1),
             "materialization_wall_seconds": round(self.materialization.wall_seconds, 1),
             "cross_source_wall_seconds": round(self.cross_source.wall_seconds, 1),
+            "rules_wall_seconds": round(self.rules.wall_seconds, 1),
+            "rules_ai_calls": self.rules.calls,
+            "pending_checks_wall_seconds": round(self.pending_checks.wall_seconds, 1),
+            "pending_checks_ai_calls": self.pending_checks.calls,
         }
 
 

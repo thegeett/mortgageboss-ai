@@ -119,8 +119,12 @@ async def refresh_snapshot_findings(
     call_started = perf_counter()
     drafts = await run(snapshot_payload(snapshot), snapshot_paths(snapshot))
     if metrics is not None:
-        metrics.record_call(input_tokens=0, output_tokens=0, seconds=perf_counter() - call_started)
-        metrics.wall_seconds = perf_counter() - call_started
+        # ONE elapsed reading for both: two `perf_counter()` calls made `wall_seconds` differ from
+        # `latency_seconds` for what is the same single call, which reads as a measurement rather
+        # than as the rounding it is.
+        elapsed = perf_counter() - call_started
+        metrics.record_call(input_tokens=0, output_tokens=0, seconds=elapsed)
+        metrics.wall_seconds = elapsed
 
     # DE-DUPLICATE BEFORE INSERTING. `finding_key` deliberately ignores the wording, so two drafts
     # describing the same pairing in different words collide — ordinary model output. Both would miss
