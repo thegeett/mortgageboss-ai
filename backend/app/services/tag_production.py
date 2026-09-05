@@ -30,16 +30,17 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from time import perf_counter
 
 import structlog
 
+from app.ai.concurrency import dispatch_bounded
 from app.ai.cost import estimate_cost
 from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_production import (
     APPARENT_CATEGORY_VALUES,
     IS_MONEY_IN_VALUES,
-    AIClientError,
     StageAResult,
     TagJudgment,
     reason_stage_a_transactions,
@@ -61,6 +62,13 @@ Reasoner = Callable[[str], Awaitable[StageAResult]]
 # The largest batch sent to one AI call. Kept small so a long statement can't degrade the
 # model's attention over its tail (§3D bounded batches). Within the ticket's 15-20 bound.
 _BATCH_SIZE = 15
+
+#: LP-644 §2 — how many of this stage's batches may be in flight at once. EIGHT, matching Stage B's
+#: `_MAX_CONCURRENT_JUDGMENTS` rather than picking a second number: the two stages draw on the same
+#: environment budget, they never overlap (Stage A completes before Stage B starts), and LP-644 §4
+#: is where the bound gets raised — for both at once, on measured TPM rather than on arithmetic.
+#: A stage inventing its own bound is how the ceiling stops being knowable.
+_MAX_CONCURRENT_BATCHES = 8
 
 # Tag ids (the vocabulary keys these tags are stored under in the tags layer).
 _TAG_AMOUNT = "txn.amount"
@@ -196,12 +204,37 @@ async def produce_stage_a_transaction_tags(
     # carries the completion's own resolved id — the authoritative answer.
     invoked_model: str | None = None
 
-    for batch in _chunks(representatives, _BATCH_SIZE):
-        context_json = json.dumps(_build_context([txn for _, txn in batch]))
-        call_started = perf_counter()
-        try:
-            result = await reason_fn(context_json)
-        except AIClientError as err:
+    # LP-644 §2 — PLAN → DISPATCH → APPLY. The batches are settled as a set first, which is what
+    # lets them be asked concurrently and still applied in a fixed order below. The prompt, the
+    # context and the resolution logic are untouched, so a verdict cannot move (LP-644 §0); a test
+    # pins the serial and concurrent paths tag-for-tag.
+    batches = _chunks(representatives, _BATCH_SIZE)
+    # Contexts are built EAGERLY, before anything is dispatched, and bound with `partial` rather than
+    # captured in a lambda. A closure over the loop variable would hand every call the LAST batch's
+    # context — the classic way this refactor breaks silently, because the calls all succeed and
+    # every tag is simply attributed to the wrong transaction. `partial` makes that unexpressible.
+    contexts = [json.dumps(_build_context([txn for _, txn in batch])) for batch in batches]
+    outcomes = await dispatch_bounded(
+        [partial(reason_fn, context) for context in contexts],
+        concurrency=_MAX_CONCURRENT_BATCHES,
+        # The gate is the breaker's OWN threshold, handed down rather than chosen again here: not a
+        # second policy about when to give up, the same one applied where the calls are made.
+        stop_after_failures=None if breaker is None else breaker.threshold,
+    )
+
+    # APPLY, IN THE ORIGINAL ORDER — deterministic on purpose. The cache, the token totals, the
+    # model attribution and the BREAKER all see the batches in the sequence they had when this loop
+    # was serial, so "consecutive failures" keeps the meaning it was given.
+    for batch, outcome in zip(batches, outcomes, strict=True):
+        if outcome.not_attempted:
+            # The gate closed before this batch was asked. Same fail-closed resolution as a failure
+            # — unknown-with-reason, uncached, retried next run — but the breaker is NOT fed: no
+            # call was made, so there is no failure to count, and counting one would let a single
+            # outage close the breaker twice as fast as its threshold says.
+            for fp, _ in batch:
+                resolved[fp] = _Judged(None, None, _REASON_FAILED)
+            continue
+        if outcome.error is not None:
             # Fail-closed: the whole batch's AI tags become unknown-with-reason (the
             # passthroughs still succeed). Not cached → retried on the next run.
             logger.warning("stage_a_batch_failed", size=len(batch))
@@ -211,8 +244,10 @@ async def produce_stage_a_transaction_tags(
             # breaker, so an outage that starts here is counted with the ones that follow it rather
             # than each stage forgiving the backend separately.
             if breaker is not None:
-                breaker.record_failure(err)
+                breaker.record_failure(outcome.error)
             continue
+        result = outcome.result
+        assert result is not None  # attempted, no error → a result (CallOutcome's contract)
         if breaker is not None:
             breaker.record_success()
 
@@ -223,7 +258,7 @@ async def produce_stage_a_transaction_tags(
             metrics.record_call(
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
-                seconds=perf_counter() - call_started,
+                seconds=outcome.seconds,
             )
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must

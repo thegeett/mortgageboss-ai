@@ -13,8 +13,10 @@ proven separately). Returns a NEW frozen snapshot; the raw layer is never touche
 
 from __future__ import annotations
 
+from functools import partial
 from time import perf_counter
 
+from app.ai.concurrency import dispatch_bounded
 from app.ai.stage_metrics import StageMetrics
 from app.core.logging import get_logger
 from app.verification.snapshot.model import DocumentEntry, Snapshot, TagsSection
@@ -31,6 +33,11 @@ from app.verification.tag_materialization.parsed import produce_parsed_tag
 from app.verification.tag_materialization.subjects import subject_type
 
 logger = get_logger(__name__)
+
+#: LP-644 §2 — AI GROUPS in flight at once (the outer level). FOUR, not eight: this multiplies with
+#: `ai._MAX_CONCURRENT_BATCHES`, so four groups of eight batches is already 32 concurrent calls —
+#: four times Stage B's bound. §4 is where any of these get raised, together and on measured TPM.
+_MAX_CONCURRENT_GROUPS = 4
 
 
 def _merge(into: dict[str, dict[str, Tag]], produced: dict[str, dict[str, Tag]]) -> None:
@@ -105,28 +112,56 @@ async def materialize_tags(
     # from the same predicate at the log line. The two copies were equivalent by De Morgan today, so
     # nothing was wrong; but `groups` is the number sizing §2's outer parallelisation, and a second
     # copy of a scoping rule is the kind that drifts silently the next time the scoping changes.
-    groups_run = 0
-    for group in ai_groups.values():
-        if not in_scope(group.subject) or (
-            only_groups is not None and group.key not in only_groups
-        ):
-            continue
-        groups_run += 1
-        allowed_by_tag = {
-            tag_id: declarations[tag_id].allowed_values
-            for tag_id in group.tag_ids
-            if tag_id in declarations
-        }
-        produced = await produce_ai_group_tags(
-            snapshot,
-            group,
-            allowed_by_tag,
-            reasoner=reasoners.get(group.key),
-            cache=ai_cache,
-            breaker=breaker,
-            metrics=metrics,
-        )
-        _merge(by_subject, produced)
+    scoped = [
+        group
+        for group in ai_groups.values()
+        if in_scope(group.subject) and (only_groups is None or group.key in only_groups)
+    ]
+    groups_run = len(scoped)
+
+    # LP-644 §2, the OUTER of the two levels and the bigger win. The ticket calls this stage "doubly
+    # sequential" and names it the least-known fact in it: 23 groups awaited in turn, each awaiting
+    # its own batches in turn, nothing overlapping anything.
+    #
+    # ⚠️ THE BOUNDS MULTIPLY. Each group may itself have `ai._MAX_CONCURRENT_BATCHES` (8) in flight,
+    # so N groups here means up to N x 8 concurrent calls. That is why this bound is 4 and not 8: a
+    # worst case of 32 already exceeds Stage B's 8, and §4 — not this ticket — is where a bound gets
+    # raised, on measured TPM rather than on arithmetic. Most groups have one batch, so the realistic
+    # figure is near 4; the cap exists for the file where it is not.
+    #
+    # No dispatch gate is passed here: `produce_ai_group_tags` never raises `AIClientError` (it
+    # resolves per batch, fail-closed) and its own inner dispatch already carries the gate. What it
+    # CAN raise is `AiBackendUnavailable` from the breaker, which is not an `AIClientError` — so
+    # `dispatch_bounded` closes its gate and re-raises it after collecting siblings, which is exactly
+    # the abort the breaker exists to cause.
+    outcomes = await dispatch_bounded(
+        [
+            partial(
+                produce_ai_group_tags,
+                snapshot,
+                group,
+                {
+                    tag_id: declarations[tag_id].allowed_values
+                    for tag_id in group.tag_ids
+                    if tag_id in declarations
+                },
+                reasoner=reasoners.get(group.key),
+                cache=ai_cache,
+                breaker=breaker,
+                metrics=metrics,
+            )
+            for group in scoped
+        ],
+        concurrency=_MAX_CONCURRENT_GROUPS,
+    )
+
+    # MERGE IN DECLARATION ORDER. Groups co-locate tags on subjects and two groups can write the same
+    # subject, so a later group's tags overwrite an earlier one's on collision — `_merge` is
+    # last-writer-wins per tag id. Merging in completion order would make that outcome depend on
+    # which coroutine finished first; merging in the original order keeps it exactly as it was.
+    for outcome in outcomes:
+        if outcome.result is not None:
+            _merge(by_subject, outcome.result)
 
     # 3. derived — deterministic recipes, run LAST against the snapshot carrying the parsed + AI tags so
     #    a recipe that aggregates them sees them (the LP-333 data-flow fix). ``working`` is a transient

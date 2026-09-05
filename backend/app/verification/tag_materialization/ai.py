@@ -17,10 +17,11 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from time import perf_counter
+from functools import partial
 from typing import Any
 
-from app.ai.client import AIClientError, complete
+from app.ai.client import complete
+from app.ai.concurrency import dispatch_bounded
 from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
 from app.ai.stage_metrics import StageMetrics
 from app.core.config import settings
@@ -42,6 +43,11 @@ _MAX_TOKENS = 8192
 _BATCH_SIZE = (
     15  # §3D bounded batches — a long file can't degrade the model's attention over its tail
 )
+
+#: LP-644 §2 — batches of ONE group in flight at once (the inner level). Eight, matching Stage A and
+#: Stage B rather than inventing a third number; §4 raises them together on measured TPM. Note this
+#: multiplies with the producer's OUTER group bound, which is why that one is deliberately smaller.
+_MAX_CONCURRENT_BATCHES = 8
 
 _REASON_FAILED = "tag production failed"
 _REASON_TRUNCATED = "structuring response truncated"
@@ -343,14 +349,32 @@ async def produce_ai_group_tags(
     resolved: dict[str, _Resolved] = dict(group_cache)
     shorts = tuple(_short(t) for t in group.tag_ids)
 
-    for batch in _chunks(representatives, _BATCH_SIZE):
-        context = {
-            "subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]
-        }
-        call_started = perf_counter()
-        try:
-            result = await reason_fn(json.dumps(context))
-        except AIClientError as err:
+    # LP-644 §2, the INNER of the two levels — this group's batches, asked concurrently. The outer
+    # level (across groups) is in `producer.py`. Contexts are built eagerly and bound with `partial`
+    # so no closure can capture the loop variable and send every call the last batch's subjects.
+    batches = _chunks(representatives, _BATCH_SIZE)
+    contexts = [
+        json.dumps(
+            {"subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]}
+        )
+        for batch in batches
+    ]
+    outcomes = await dispatch_bounded(
+        [partial(reason_fn, context) for context in contexts],
+        concurrency=_MAX_CONCURRENT_BATCHES,
+        stop_after_failures=None if breaker is None else breaker.threshold,
+    )
+
+    # APPLY, IN THE ORIGINAL ORDER, so `resolved`, the group cache and the breaker see the batches in
+    # the sequence they had when this loop was serial.
+    for batch, outcome in zip(batches, outcomes, strict=True):
+        if outcome.not_attempted:
+            # The gate closed before this batch was asked: same fail-closed resolution as a failure,
+            # but the breaker is NOT fed — no call was made, so there is no failure to count.
+            for fp, _ in batch:
+                resolved[fp] = _Resolved({}, _REASON_FAILED)
+            continue
+        if outcome.error is not None:
             logger.warning("ai_group_batch_failed", group=group.key, size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Resolved({}, _REASON_FAILED)
@@ -360,8 +384,10 @@ async def produce_ai_group_tags(
             # rest of the run's clock on calls that cannot reach the backend. A content failure
             # resets the counter there rather than counting.
             if breaker is not None:
-                breaker.record_failure(err)
+                breaker.record_failure(outcome.error)
             continue
+        result = outcome.result
+        assert result is not None  # attempted, no error → a result (CallOutcome's contract)
         if breaker is not None:
             breaker.record_success()
         # LP-644 §1 — one accumulator shared across all 23 groups, so the stage's totals come out
@@ -372,7 +398,7 @@ async def produce_ai_group_tags(
             metrics.record_call(
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
-                seconds=perf_counter() - call_started,
+                seconds=outcome.seconds,
             )
         by_index = {j.index: j for j in result.judgments}
         expected = set(range(1, len(batch) + 1))
