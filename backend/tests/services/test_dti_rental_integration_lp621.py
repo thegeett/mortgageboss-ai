@@ -584,3 +584,43 @@ async def test_a_LONE_undateable_return_is_still_used(db_session) -> None:
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
     assert not next(i for i in calc.income_items if i.key == RENTAL_NET).excluded
+
+
+async def test_an_undateable_year_abstains_only_when_the_ordering_changes_the_answer(
+    db_session,
+) -> None:
+    """bug-012 review round 2 — abstaining is right, and it was firing wider than its own reason.
+
+    The reason for abstaining is that the file cannot say which return is most recent, and the
+    guide's test names that return specifically. That reason bites only when the candidates DISAGREE.
+    Where every return on the file shows a property rented a full year, the test passes on whichever
+    of them is most recent, so nothing had to be ordered — and the previous version still refused,
+    under-qualifying a borrower whose every return qualifies because one would not OCR a four-digit
+    year.
+
+    Three shapes, and the middle one is the only place the ordering is load-bearing:
+
+        both show a full year   -> established   (ordering irrelevant)
+        they disagree           -> abstain       (ordering decides; the file cannot supply it)
+        neither shows one       -> not established (ordering irrelevant, and the answer is no)
+    """
+    from app.services.rental_treatment import _management_experience_established
+
+    async def _file(slug: str, first: tuple[int, object], second: tuple[int, object]) -> bool:
+        company = await factories.make_company(db_session, slug=slug)
+        loan_file = await factories.make_loan_file(db_session, company=company)
+        await _tax_return_with(db_session, loan_file, days=first[0], tax_year=first[1])
+        await _tax_return_with(db_session, loan_file, days=second[0], tax_year=second[1])
+        return await _management_experience_established(db_session, loan_file.id)
+
+    assert await _file("agree-full", (365, 2025), (365, None)), (
+        "every return on the file shows a full rented year, so the guide's test passes on whichever "
+        "one is most recent — abstaining here refuses a file that needed no ordering"
+    )
+    assert not await _file("disagree", (200, 2025), (365, None)), (
+        "the answer depends on which return is most recent and the file cannot say — the only "
+        "honest outcome is not-established"
+    )
+    assert not await _file("agree-short", (200, 2025), (200, None)), (
+        "no return shows a full rented year, whichever is most recent"
+    )

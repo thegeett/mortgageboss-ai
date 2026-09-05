@@ -278,6 +278,9 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
     # check is built to fail in.
     #
     # A SINGLE undateable return is not this case: it is trivially the most recent, so it is used.
+    # NEITHER IS A FILE WHOSE RETURNS AGREE — see the unanimity check below. "We cannot identify the
+    # most recent return" only decides the outcome when the candidates give different answers; where
+    # they all give the same one, no ordering had to be identified to reach it.
 
     def _year(extraction: Extraction) -> int | None:
         """The return's tax year, or None when it cannot be read — NOT a sentinel year."""
@@ -288,24 +291,37 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
         except (TypeError, ValueError):
             return None
 
-    if len(rows) > 1 and any(_year(row) is None for row in rows):
-        return False  # cannot order them, so cannot identify the return the guide asks about
-    most_recent = rows[0] if len(rows) == 1 else max(rows, key=lambda r: _year(r) or 0)
-    schedule_e = (most_recent.extracted_data or {}).get("schedule_e")
-    if not isinstance(schedule_e, dict):
+    def _shows_full_year(extraction: Extraction) -> bool:
+        """Does this return's Schedule E carry any property rented a full year?"""
+        schedule_e = (extraction.extracted_data or {}).get("schedule_e")
+        if not isinstance(schedule_e, dict):
+            return False
+        for prop in schedule_e.get("properties") or ():
+            if not isinstance(prop, dict):
+                continue
+            node = prop.get("fair_rental_days")
+            raw = node.get("value") if isinstance(node, dict) else None
+            try:
+                days = int(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue  # unreadable is not zero — it is one property that cannot answer
+            if days >= _FULL_YEAR_RENTAL_DAYS:
+                return True
         return False
-    for prop in schedule_e.get("properties") or ():
-        if not isinstance(prop, dict):
-            continue
-        node = prop.get("fair_rental_days")
-        raw = node.get("value") if isinstance(node, dict) else None
-        try:
-            days = int(raw)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            continue  # unreadable is not zero — it is one property that cannot answer
-        if days >= _FULL_YEAR_RENTAL_DAYS:
-            return True
-    return False
+
+    if len(rows) > 1 and any(_year(row) is None for row in rows):
+        # ABSTAIN ONLY WHERE THE ORDERING CHANGES THE ANSWER, which is a narrower case than "an
+        # undateable year is present". Abstaining outright also refused files where every return on
+        # the borrower's file shows a full rented year: whichever of them is most recent, the guide's
+        # test passes, so no ordering had to be invented — and a borrower with nothing but qualifying
+        # returns was under-qualified because one of them would not OCR a four-digit year.
+        #
+        # Unanimity is the whole condition, and it reads in both directions: all full-year -> the
+        # answer is established whichever return is most recent; none -> not established, same either
+        # way; MIXED -> the ordering decides, the file cannot supply it, and this abstains.
+        return all(_shows_full_year(row) for row in rows)
+    most_recent = rows[0] if len(rows) == 1 else max(rows, key=lambda r: _year(r) or 0)
+    return _shows_full_year(most_recent)
 
 
 async def _subject_occupancy(
