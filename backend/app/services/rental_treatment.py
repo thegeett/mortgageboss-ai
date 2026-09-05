@@ -34,6 +34,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.document import Document
+from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import OccupancyType, Property
@@ -89,14 +91,13 @@ class RentalTreatment:
     #:    income to offset the PITIA when the borrower(s) has no prior property management experience,
     #:    or less than 12 months of experience."
     #:
-    #: ALWAYS FALSE TODAY, and false means NOT ESTABLISHED — not "the borrower has none". The four
-    #: permitted routes are unreachable: Fair Rental Days is not on `ScheduleEProperty`, Form 8825 has
-    #: no extractor, and the lease-supplementing-a-1040 and two-years-of-returns compositions do not
-    #: exist. So the honest state for every borrower is "we cannot tell", and the guide's treatment for
-    #: a borrower we cannot tell about is the same as for one with no experience: offset only.
-    #:
-    #: Kept as a field rather than decided at the call site so the wiring is in place for the real
-    #: test (bug-012 step 2), and so the derivation can say WHICH treatment was applied.
+    #: FALSE MEANS NOT ESTABLISHED — never "the borrower has none". One of the guide's four routes is
+    #: implemented (the most recent 1040's Schedule E showing Fair Rental Days of 365); Form 8825 has
+    #: no extractor, and the lease-supplementing-a-1040 and two-years-of-returns compositions are not
+    #: built. A borrower who qualifies only through those reads as not-established and is treated as
+    #: inexperienced — under-qualified, which is the safe direction, and visible because the derivation
+    #: says "not established" rather than asserting a fact about them. See
+    #: `_management_experience_established` for the routes and why the gap is stated rather than hidden.
     experience_established: bool = False
     #: The borrower's OWN monthly housing cost — what belongs on the housing side, because they do not
     #: occupy the subject. Set only alongside `net_monthly`: the caller substitutes the two together or
@@ -171,9 +172,7 @@ async def subject_rental_treatment(
     assert own_housing is not None  # guarded above (a missing figure lands in `missing`)
     qualifying = (gross * QUALIFYING_FACTOR).quantize(_CENTS, rounding=ROUND_HALF_UP)
     net = (qualifying - subject_pitia).quantize(_CENTS, rounding=ROUND_HALF_UP)
-    # bug-012 — see `experience_established`. No route to establishing it exists yet, so this is the
-    # constant the field documents rather than a check that can pass.
-    experience_established = False
+    experience_established = await _management_experience_established(db, loan_file.id)
     if net > 0 and not experience_established:
         outcome = (
             f"${net:,.2f}, which offsets the subject's PITIA but is NOT added to qualifying "
@@ -194,6 +193,89 @@ async def subject_rental_treatment(
             f"${subject_pitia:,.2f} PITIA — " + outcome
         ),
     )
+
+
+#: Fannie B3-3.8-01 (09/02/2026), verbatim: experience is evidenced by "the borrower's most recent
+#: signed federal income tax return, including Schedules 1 and E … reflecting rental income received
+#: for any property with Fair Rental Days of 365".
+#:
+#: `>=`, NOT `== 365`. A leap year is 366 days and a property rented throughout it reports 366, which
+#: an equality test would read as failing the 365-day bar it exceeds. The guide states the number, not
+#: the comparison; taking it as a floor is the reading that does not punish a borrower for the
+#: calendar. Anything below it is a shortfall the guide answers with routes we do not implement (see
+#: `_management_experience_established`).
+_FULL_YEAR_RENTAL_DAYS = 365
+
+
+async def _management_experience_established(db: AsyncSession, loan_file_id: UUID) -> bool:
+    """Has the borrower 12 months of property-management experience? (bug-012)
+
+    THE ONE ROUTE OF FOUR THAT IS BUILDABLE TODAY, and the gap is deliberate rather than hidden. The
+    guide accepts any of:
+
+      1. the most recent 1040 with Schedules 1 and E showing Fair Rental Days of 365   <- THIS ONE
+      2. a business return with Form 8825                                              -- no extractor
+      3. a 12-month lease supplementing a 1040 that shows fewer than 365 days          -- not composed
+      4. two years of returns showing the property in service for the full year        -- not composed
+
+    So a borrower who qualifies ONLY through 2-4 reads as not-established and is treated as
+    inexperienced: their rental income offsets the PITIA and is not added to income. That
+    UNDER-qualifies them, which is the safe direction and a visible one — the derivation says the
+    experience is "not established", not that they lack it, so a processor reading the line can tell
+    the difference between a borrower who failed the test and one the test could not see.
+
+    ANY PROPERTY, NOT THE SUBJECT AND NOT ONE STILL OWNED. The guide's words are "for any property",
+    so the experience attaches to the BORROWER — a rental since sold still counts, which is the
+    sensible reading (selling a property does not un-acquire the skill of having managed one) and the
+    one the wording supports. Recorded as resting on those two words rather than on an explicit rule
+    about disposal, which the guide does not give.
+
+    THE MOST RECENT RETURN, keyed on the TAX YEAR rather than on upload order: a borrower who uploads
+    2024 after 2025 has not made 2024 their most recent return. Ties and missing years fall back to
+    upload order, so a return whose year could not be read still participates rather than being
+    silently dropped.
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(Extraction)
+                .join(Document, Extraction.document_id == Document.id)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.document_type == "tax_return",
+                    Extraction.is_current.is_(True),
+                ),
+                Document,
+            ).order_by(Document.created_at.desc())
+        )
+    ).all()
+    if not rows:
+        return False
+
+    def _year(extraction: Extraction) -> int:
+        node = (extraction.extracted_data or {}).get("tax_year")
+        raw = node.get("value") if isinstance(node, dict) else None
+        try:
+            return int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return -1
+
+    most_recent = max(rows, key=_year)
+    schedule_e = (most_recent.extracted_data or {}).get("schedule_e")
+    if not isinstance(schedule_e, dict):
+        return False
+    for prop in schedule_e.get("properties") or ():
+        if not isinstance(prop, dict):
+            continue
+        node = prop.get("fair_rental_days")
+        raw = node.get("value") if isinstance(node, dict) else None
+        try:
+            days = int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue  # unreadable is not zero — it is one property that cannot answer
+        if days >= _FULL_YEAR_RENTAL_DAYS:
+            return True
+    return False
 
 
 async def _subject_occupancy(

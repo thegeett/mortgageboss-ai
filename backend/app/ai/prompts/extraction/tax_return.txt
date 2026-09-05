@@ -42,7 +42,10 @@ Capture these buckets:
 
 3. schedule_e — present-or-null (rental / supplemental income):
      properties — a LIST, one entry per property: {address, rents_received,
-       total_expenses, net_income}
+       total_expenses, net_income, fair_rental_days}
+       fair_rental_days is Schedule E LINE 2, "Fair Rental Days" — a COUNT OF DAYS
+       (0-366), not an amount. A full year reads 365. Null if the line is blank or
+       not present; never infer it from the rents.
      total_net_rental_income (number)
      depreciation            (number)
 

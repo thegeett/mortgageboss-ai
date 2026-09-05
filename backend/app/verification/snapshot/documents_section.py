@@ -783,8 +783,15 @@ def build_schedule_e(
                 rents_received=_typed_field(prop.get("rents_received")),
                 total_expenses=_typed_field(prop.get("total_expenses")),
                 net_income=_typed_field(prop.get("net_income")),
+                fair_rental_days=_typed_field(prop.get("fair_rental_days")),  # bug-012
             )
-            if not _all_absent(rec.address, rec.rents_received, rec.total_expenses, rec.net_income):
+            if not _all_absent(
+                rec.address,
+                rec.rents_received,
+                rec.total_expenses,
+                rec.net_income,
+                rec.fair_rental_days,
+            ):
                 properties.append(rec)
     total = _typed_field(raw.get("total_net_rental_income"))
     depreciation = _typed_field(raw.get("depreciation"))

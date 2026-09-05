@@ -94,6 +94,16 @@ class ScheduleEProperty(BaseModel):
     rents_received: TypedField[Decimal] = Field(default_factory=TypedField)
     total_expenses: TypedField[Decimal] = Field(default_factory=TypedField)
     net_income: TypedField[Decimal] = Field(default_factory=TypedField)
+    # bug-012 — Schedule E line 2, "Fair Rental Days". The COUNT OF DAYS the property was rented at
+    # a fair rental price, which Fannie B3-3.8-01 (09/02/2026) makes the primary evidence of the 12
+    # months of property-management experience that positive rental income now depends on:
+    #
+    #   "the borrower's most recent signed federal income tax return, including Schedules 1 and E …
+    #    reflecting rental income received for any property with Fair Rental Days of 365"
+    #
+    # An INTEGER count, not an amount — the one field on this schedule that is neither dollars nor an
+    # address, and the reason a return could not previously establish experience at all.
+    fair_rental_days: TypedField[int] = Field(default_factory=TypedField)
 
 
 class ScheduleE(BaseModel):
@@ -250,6 +260,7 @@ _SCHEDULE_E_PROPERTY_SPEC: CoreSpec = (
     ("rents_received", coerce_decimal),
     ("total_expenses", coerce_decimal),
     ("net_income", coerce_decimal),
+    ("fair_rental_days", coerce_int),  # bug-012 — Schedule E line 2
 )
 _SCHEDULE_E_SPEC: CoreSpec = (
     ("total_net_rental_income", coerce_decimal),

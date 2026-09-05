@@ -372,3 +372,111 @@ def test_the_rental_exclusion_reason_does_not_point_anywhere() -> None:
             "module cannot make"
         )
     assert "housing payment" in reason, "it should name the section it means instead"
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 step 2 — experience established from Schedule E's Fair Rental Days
+# --------------------------------------------------------------------------- #
+
+
+async def _tax_return_with(db_session, loan_file, *, days, tax_year=2025):
+    """A current tax-return extraction whose Schedule E reports `days` fair rental days."""
+    from app.models.document import DocumentStatus
+
+    company = await db_session.get(Company, loan_file.company_id)
+    assert company is not None
+    document = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type="tax_return",
+        status=DocumentStatus.COMPLETED,
+    )
+    await factories.make_extraction(
+        db_session,
+        document=document,
+        data={
+            "tax_year": {"value": tax_year},
+            "schedule_e": {
+                "properties": [
+                    {
+                        "address": {"value": "9 Rental Way"},
+                        "rents_received": {"value": "24000"},
+                        "fair_rental_days": {"value": days},
+                    }
+                ]
+            },
+        },
+    )
+    await db_session.flush()
+
+
+async def test_a_full_year_of_fair_rental_days_puts_the_rental_into_income(db_session) -> None:
+    """THE POINT OF STEP 2. Step 1 capped EVERY positive net out of income, because nothing could
+    establish experience for anyone — safe, but a blanket under-qualification of a whole loan
+    category, and 12 months of landlord experience is common rather than exceptional.
+
+    Fannie B3-3.8-01: a borrower whose most recent Schedule E shows Fair Rental Days of 365 HAS the
+    experience, and their positive rental income is qualifying income again.
+    """
+    loan_file = await _investment_file(db_session, "experienced")
+    await _tax_return_with(db_session, loan_file, days=365)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert not rental.excluded, "365 fair rental days establishes the 12 months"
+    assert calc.gross_monthly_income == Decimal("29655.55"), "24,333.33 + the 5,322.22 net"
+
+
+async def test_a_partial_year_leaves_the_rental_out_of_income(db_session) -> None:
+    """The negative control the test above needs. A property rented for part of the year does not
+    establish 12 months, so the offset-only treatment stands — and this is what proves the test
+    above is measuring the days rather than the presence of a return."""
+    loan_file = await _investment_file(db_session, "partial-year")
+    await _tax_return_with(db_session, loan_file, days=200)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded and "not established" in (rental.excluded_reason or "")
+    assert calc.gross_monthly_income == Decimal("24333.33")
+
+
+async def test_a_leap_year_366_still_counts(db_session) -> None:
+    """`>= 365`, not `== 365`. A property rented through a leap year reports 366, and an equality
+    test would read that as failing the bar it exceeds. The guide states the number, not the
+    comparison."""
+    loan_file = await _investment_file(db_session, "leap-year")
+    await _tax_return_with(db_session, loan_file, days=366, tax_year=2024)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert not next(i for i in calc.income_items if i.key == RENTAL_NET).excluded
+
+
+async def test_the_MOST_RECENT_return_decides_not_the_last_uploaded(db_session) -> None:
+    """The guide says the MOST RECENT return. A borrower who uploads an older return afterwards has
+    not made it their most recent one, so the check keys on the TAX YEAR rather than upload order —
+    otherwise a 2024 return uploaded today would override the 2025 one that supersedes it."""
+    loan_file = await _investment_file(db_session, "upload-order")
+    await _tax_return_with(db_session, loan_file, days=200, tax_year=2025)  # the current picture
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=2023)  # uploaded LATER, older
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded, "2025 is the most recent return and it shows a partial year"
+
+
+async def test_no_tax_return_is_not_established_rather_than_denied(db_session) -> None:
+    """A file with no return cannot answer the question, and the treatment is the same as a failed
+    test — but the WORDING is not, because we did not determine that the borrower lacks experience.
+    That distinction is what lets a processor tell a missing document from a real shortfall."""
+    loan_file = await _investment_file(db_session, "no-return")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded
+    assert "not established" in (rental.derivation or "")

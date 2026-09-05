@@ -222,6 +222,12 @@ class ScheduleEPropertyRecord(BaseModel):
     rents_received: Field  # the rental signal (IN-13)
     total_expenses: Field
     net_income: Field
+    # bug-012 — Schedule E line 2. The days the property was rented at a fair rental price, which is
+    # the primary evidence of the 12 months of property-management experience Fannie B3-3.8-01
+    # (09/02/2026) requires before positive rental income may be ADDED to qualifying income.
+    # ADDITIVE with a default (the LP-421 precedent), so SNAPSHOT_VERSION is not bumped and the
+    # committed v4 golden fixture still validates.
+    fair_rental_days: Field = PydField(default_factory=Field.missing)
 
 
 class ScheduleERecord(BaseModel):
