@@ -396,7 +396,9 @@ async def _tax_return_with(db_session, loan_file, *, days, tax_year=2025):
         db_session,
         document=document,
         data={
-            "tax_year": {"value": tax_year},
+            # `None` renders a present-but-unreadable year, which is what an OCR miss looks like —
+            # distinct from the key being absent.
+            "tax_year": {"value": tax_year} if tax_year is not None else {"value": "  "},
             "schedule_e": {
                 "properties": [
                     {
@@ -498,7 +500,7 @@ async def test_a_return_whose_year_cannot_be_read_is_not_superseded_by_an_older_
     purpose, which is safe and visible; this one silently qualified a file its own newest document
     contradicts, which is neither.
 
-    Both directions asserted, because the first version passed the second half.
+    BOTH DIRECTIONS ABSTAIN, and the second half is a correction — see the comment beside it.
     """
     from app.services.rental_treatment import _management_experience_established
 
@@ -513,14 +515,72 @@ async def test_a_return_whose_year_cannot_be_read_is_not_superseded_by_an_older_
         "picture its own most recent return contradicts"
     )
 
-    # THE OTHER DIRECTION: sorting it newest must not turn into ignoring it. An undateable return
-    # that DOES show a full year still establishes experience on its own evidence.
+    # THE OTHER DIRECTION, AND IT ABSTAINS TOO — which is a correction to this test's first version.
+    #
+    # That version asserted the mirror case ESTABLISHES: an undateable return showing 365 beside an
+    # older dateable one showing 200, on the reasoning that sorting it newest must consult it rather
+    # than skip it. But "it is newest" is exactly what the file does not say. The only thing making it
+    # look newest is UPLOAD ORDER — and this whole check keys on tax year precisely because upload
+    # order does not determine recency: a borrower can upload an old return today. Upload order cannot
+    # be too weak to order returns in one direction and strong enough in the other.
+    #
+    # So it over-qualifies from the opposite side, and the cost of abstaining is the safe one: a
+    # borrower whose genuinely-newest return will not OCR is under-qualified, visibly, and a clean
+    # copy of the return fixes it.
     company2 = await factories.make_company(db_session, slug="undateable-ok")
     loan_file2 = await factories.make_loan_file(db_session, company=company2)
     await _tax_return_with(db_session, loan_file2, days=200, tax_year=2023)
     await _tax_return_with(db_session, loan_file2, days=365, tax_year="20?5")
 
-    assert await _management_experience_established(db_session, loan_file2.id), (
-        "an undateable return showing a full rented year established nothing — sorting it newest "
-        "must consult it, not skip it"
+    assert not await _management_experience_established(db_session, loan_file2.id), (
+        "an undateable return showing a full year qualified the file, but nothing establishes it is "
+        "the most recent one — the guide's test is about THE most recent return"
     )
+
+
+async def test_an_undateable_return_beside_a_dateable_one_abstains(db_session) -> None:
+    """BOTH SENTINELS OVER-QUALIFY, IN OPPOSITE SHAPES — which is why this abstains instead.
+
+    The first version sorted an undateable return OLDEST, so a stale 2023 return showing 365 days
+    beat a newer unreadable one showing 200 and qualified the file. The proposed fix sorted it
+    NEWEST, which closes that and opens the mirror: an undateable return showing 365 then beats a
+    genuinely newer 2025 return showing 200.
+
+        sentinel   undateable=200d, 2025=365d   undateable=365d, 2025=200d
+        oldest     ESTABLISHED  (wrong)          not established
+        newest     not established               ESTABLISHED  (wrong)
+
+    Both answer a question the file does not: which return is most recent. The guide's test is about
+    THE most recent return, so where that cannot be identified the test cannot run — and not
+    established is the outcome every other unbuilt route already takes.
+
+    THE SECOND SHAPE IS THE ONE A SENTINEL FIX MISSES, so it is asserted first.
+    """
+    loan_file = await _investment_file(db_session, "undateable-365")
+    await _tax_return_with(db_session, loan_file, days=200, tax_year=2025)
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=None)  # year unreadable
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert next(i for i in calc.income_items if i.key == RENTAL_NET).excluded, (
+        "an undateable 365 must not beat a dateable newer return showing a partial year"
+    )
+
+    other = await _investment_file(db_session, "undateable-200")
+    await _tax_return_with(db_session, other, days=365, tax_year=2023)
+    await _tax_return_with(db_session, other, days=200, tax_year=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=other)
+    assert next(i for i in calc.income_items if i.key == RENTAL_NET).excluded, (
+        "and a stale dateable 365 must not qualify a file whose undateable return shows 200"
+    )
+
+
+async def test_a_LONE_undateable_return_is_still_used(db_session) -> None:
+    """Abstaining is about ORDERING, not about readability. One return is trivially the most recent
+    whatever its year says, so refusing to read it would discard the only evidence on the file and
+    under-qualify a borrower for an OCR miss on a field the test does not depend on."""
+    loan_file = await _investment_file(db_session, "lone-undateable")
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert not next(i for i in calc.income_items if i.key == RENTAL_NET).excluded

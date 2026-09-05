@@ -232,8 +232,8 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
 
     THE MOST RECENT RETURN, keyed on the TAX YEAR rather than on upload order: a borrower who uploads
     2024 after 2025 has not made 2024 their most recent return. A return whose year cannot be read
-    sorts NEWEST rather than oldest, so it is consulted rather than superseded by an older one — see
-    `_UNDATEABLE_SORTS_NEWEST` for the measurement that changed it.
+    among others makes the ordering undeterminable, so
+    the check ABSTAINS rather than guessing — see the block above the ordering for the measurement.
 
     ONE RETURN, WHICHEVER IS MOST RECENT — so "a rental since sold still counts" holds only while the
     sale post-dates that return. A property sold during the most recent tax year appears there with
@@ -257,26 +257,40 @@ async def _management_experience_established(db: AsyncSession, loan_file_id: UUI
     if not rows:
         return False
 
-    #: AN UNDATEABLE RETURN SORTS NEWEST, NOT OLDEST (review of the first version, which used -1).
-    #: Measured: an old 2023 return showing 365 days beside a newer return showing 200 whose tax year
-    #: would not parse returned experience ESTABLISHED — the undateable newest return lost to the
-    #: stale one, and the file qualified on a picture its own most recent return contradicts. That is
-    #: the over-qualifying direction, which is the one thing this check exists to avoid. Sorting it
-    #: newest means an undateable return is CONSULTED rather than skipped: it can still establish
-    #: experience on its own evidence, and it can no longer be silently superseded by an older one.
-    #: `max` keeps the first maximal element and the rows arrive newest-upload-first, so several
-    #: undateable returns resolve to the newest upload.
-    _UNDATEABLE_SORTS_NEWEST = 9999
+    # A SENTINEL CANNOT BE RIGHT IN BOTH DIRECTIONS, so this abstains rather than picking one.
+    #
+    # The first version sorted an undateable return OLDEST (-1). Review measured that it then lost to
+    # every dateable return behind it, so a 2023 return showing 365 days could qualify a file whose
+    # own newest return shows 200 — over-qualifying, the one direction this check exists to prevent.
+    #
+    # The proposed fix sorted it NEWEST. That closes the measured case and opens its mirror: an
+    # undateable return showing 365 then beats a genuinely newer 2025 return showing 200, and
+    # over-qualifies from the other side. Measured, both sentinels, both shapes:
+    #
+    #     sentinel   undateable=200d, 2025=365d   undateable=365d, 2025=200d
+    #     oldest     ESTABLISHED  (wrong)          not established
+    #     newest     not established               ESTABLISHED  (wrong)
+    #
+    # Neither is safe, because both answer a question the FILE does not: which return is most recent.
+    # The guide's test is specifically about the most recent return, so where we cannot identify it we
+    # cannot run the test — and the honest outcome is the one every other unbuilt route already takes,
+    # NOT ESTABLISHED. That under-qualifies, says so in the reason, and is the direction this whole
+    # check is built to fail in.
+    #
+    # A SINGLE undateable return is not this case: it is trivially the most recent, so it is used.
 
-    def _year(extraction: Extraction) -> int:
+    def _year(extraction: Extraction) -> int | None:
+        """The return's tax year, or None when it cannot be read — NOT a sentinel year."""
         node = (extraction.extracted_data or {}).get("tax_year")
         raw = node.get("value") if isinstance(node, dict) else None
         try:
             return int(raw)  # type: ignore[arg-type]
         except (TypeError, ValueError):
-            return _UNDATEABLE_SORTS_NEWEST
+            return None
 
-    most_recent = max(rows, key=_year)
+    if len(rows) > 1 and any(_year(row) is None for row in rows):
+        return False  # cannot order them, so cannot identify the return the guide asks about
+    most_recent = rows[0] if len(rows) == 1 else max(rows, key=lambda r: _year(r) or 0)
     schedule_e = (most_recent.extracted_data or {}).get("schedule_e")
     if not isinstance(schedule_e, dict):
         return False
