@@ -31,15 +31,18 @@ _APP = Path(__file__).resolve().parents[3] / "app"
 #:   B3-3.8-03  ...: Short-Term Rental                  — a separate treatment (LP-642, unscoped)
 _SUPERSEDED = "B3-3.1-08"
 
-#: Files whose mention of the superseded number is DELIBERATE — narrative about what moved, not a
-#: citation of a fact. Each is a record that would be falsified by rewriting it.
-_NARRATIVE_ALLOWED = {
-    # LP-495b's record of correcting the citation that has since gone stale again. Left as written;
-    # a forward pointer sits beside it.
-    "verification/rule_engine/registry.py",
-    # LP-641's own note naming what the citation used to say.
-    "services/dti.py",
-}
+#: NO FILE-LEVEL EXEMPTION, and there was one until this was measured (LP-641 review).
+#:
+#: Two files were exempted by name — `registry.py` and `dti.py` — on the grounds that each carries a
+#: deliberate historical mention. Measuring them says otherwise: `_live_citations` already returns
+#: ZERO for both, because the skip pattern below matches the words those narrative lines are written
+#: in. The exemption was doing nothing except reserving a hole in the two files most likely to
+#: discuss citations, where a genuinely stale one could then be added and pass.
+#:
+#: A first attempt replaced the names with an allowance of 1 each. That was worse: an allowance of 1
+#: against a real count of 0 hands out exactly the free slot it was meant to close, and a mutation —
+#: adding a live B3-3.1-08 citation to `dti.py` — passed clean. Counting is only safe when the count
+#: is MEASURED, and once measured the honest count is zero, which is no exemption at all.
 
 
 def _live_citations(text: str) -> list[str]:
@@ -62,8 +65,6 @@ def test_no_live_citation_names_the_superseded_topic() -> None:
     offenders: dict[str, list[str]] = {}
     for path in sorted(_APP.rglob("*.py")) + sorted(_APP.rglob("*.yaml")):
         rel = str(path.relative_to(_APP))
-        if rel in _NARRATIVE_ALLOWED:
-            continue
         if lines := _live_citations(path.read_text(encoding="utf-8")):
             offenders[rel] = lines
 

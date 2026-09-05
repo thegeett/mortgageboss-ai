@@ -55,9 +55,12 @@ reference_values:
     where rental income is used to qualify, not merely acceptable; neither exists as a document type in
     this system, so that path cannot be represented today and the lease path is the only available one
     (LP-642).
-    NOT CARRIED FORWARD: the 10/08/2025 page's explanation that the remaining 25% is "absorbed by
-    vacancy losses and ongoing maintenance expenses" is in neither restructured topic, so it is no
-    longer quoted here. The factor is cited; the explanation is not.
+    NOT CARRIED FORWARD: this repo's prior calibration entries quoted the remaining 25% as "absorbed
+    by vacancy losses and ongoing maintenance expenses". That sentence is in neither restructured
+    topic — checked separately by two readers — so it is no longer quoted here. Attributed to the
+    prior entries rather than to a dated page: the pre-SEL text is not reachable at any of the three
+    live URL aliases, all of which now serve 09/02/2026, so what page carried it cannot be confirmed.
+    The factor is cited; the explanation is not.
 subject_enumeration: per_borrower
 subject_key_fields:
   - borrower
