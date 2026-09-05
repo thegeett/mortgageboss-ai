@@ -84,6 +84,13 @@ async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
 
     company = await factories.make_company(db_session, slug="acme-seeded")
     loan_file = await factories.make_loan_file(db_session, company=company)
+    # NO LOAN PURPOSE, STATED RATHER THAN INHERITED. The category filter below expects exactly one
+    # PROPERTY need, and that is only true while NEITHER purpose branch fires: measured, a purchase
+    # also seeds `purchase_agreement` and a refinance seeds `existing_mortgage_statement` plus
+    # `payoff_statement`, all three PROPERTY. The factory happens to leave the purpose unset, so the
+    # count of one was resting on a default this test does not own — pinned here so the expectation
+    # is a property of the fixture rather than an accident of `make_loan_file`.
+    loan_file.loan_purpose = None
     prop = await factories.make_property(db_session, loan_file=loan_file)
     prop.occupancy_type = OccupancyType.INVESTMENT
     prop.financed_unit_count = 1
@@ -102,7 +109,7 @@ async def test_what_the_SEEDER_emits_is_a_type_a_document_can_carry(
         n for n in await _needs_on(db_session, loan_file) if n.category is DocumentCategory.PROPERTY
     ]
     assert len(seeded) == 1, (
-        "an investment purchase seeds one PROPERTY need — the rent schedule — but got "
+        "a purposeless investment subject seeds one PROPERTY need — the rent schedule — but got "
         f"{[n.needs_type for n in seeded]}"
     )
     slug = seeded[0].needs_type
