@@ -73,6 +73,7 @@ from app.models.stated_financials import (
     StatedLiability,
 )
 from app.models.tag import RuleTag, Tag, TagDependency
+from app.models.tag_cache import TagCacheEntry, TagCacheKind
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -155,6 +156,8 @@ __all__ = [
     "StatedIncomeItem",
     "StatedLiability",
     "Tag",
+    "TagCacheEntry",
+    "TagCacheKind",
     "TagDependency",
     "Tier",
     "TimestampMixin",

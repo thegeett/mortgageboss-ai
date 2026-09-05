@@ -786,3 +786,56 @@ __all__ = [
     "find_source_candidates",
     "produce_stage_b_sourcing_tags",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this stage's cache
+# --------------------------------------------------------------------------- #
+# Owned here for the same reason Stage A's is owned there: `_Sourced` and `SourceStrength` are this
+# module's shapes.
+
+
+def dump_stage_b_entry(entry: _Sourced) -> dict[str, object]:
+    """One Stage-B sourcing verdict as JSON."""
+    return {
+        "value": entry.value,
+        "source_content_id": entry.source_content_id,
+        "confidence": entry.confidence,
+        "reasoning": entry.reasoning,
+        "strength": entry.strength.value if entry.strength is not None else None,
+    }
+
+
+def load_stage_b_entry(raw: dict[str, object]) -> _Sourced | None:
+    """A Stage-B verdict from JSON, or None if the row cannot be trusted.
+
+    ⚠️ `cacheable` is NOT round-tripped, and that is deliberate rather than an omission. It is the
+    flag that decided whether this entry was allowed to persist at all, so every row that exists was
+    written with ``cacheable=True`` and is reconstructed that way. Storing it would create a row that
+    says "do not reuse me" — a value that can only ever be wrong, since an uncacheable verdict should
+    never have reached the table.
+
+    A value outside the judged vocabulary is rejected rather than repaired: it can only come from a
+    shape change or corruption, and re-asking costs one call.
+    """
+    value = raw.get("value")
+    if not isinstance(value, str) or value not in HAS_IDENTIFIED_SOURCE_VALUES:
+        return None
+    raw_strength = raw.get("strength")
+    strength: SourceStrength | None = None
+    if isinstance(raw_strength, str):
+        try:
+            strength = SourceStrength(raw_strength)
+        except ValueError:
+            return None  # an unknown strength is a shape change, not something to guess at
+    source_content_id = raw.get("source_content_id")
+    confidence = raw.get("confidence")
+    reasoning = raw.get("reasoning")
+    return _Sourced(
+        value=value,
+        source_content_id=source_content_id if isinstance(source_content_id, str) else None,
+        confidence=confidence if isinstance(confidence, int | float) else None,
+        reasoning=reasoning if isinstance(reasoning, str) else None,
+        cacheable=True,
+        strength=strength,
+    )

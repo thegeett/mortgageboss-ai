@@ -51,6 +51,7 @@ from app.models.finding import (
 )
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus
+from app.services.tag_cache_store import load_tag_caches, save_tag_caches
 from app.services.verification_run import run_verification
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
@@ -100,9 +101,14 @@ def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
         #     trips, and retries is failed by the watchdog at 3262s while the retry is still working
         #     — and `_run`'s FAILED-wins lock then suppresses COMPLETED while the findings commit
         #     anyway. A FAILED run carrying a full set of fresh findings is worse than either.
-        #   * THE COST. `TagCaches` is `field(default_factory=dict)` — in-memory, rebuilt per
-        #     invocation. A retry re-issues every Stage A / Stage B / materialization call already
-        #     paid for, so an outage near the end of a 591-call pass costs up to 4x a normal run.
+        #   * THE COST. A retry re-issued every Stage A / Stage B / materialization call already paid
+        #     for, so an outage near the end of a 591-call pass cost up to 4x a normal run.
+        #     LP-644 §3 REDUCES THIS BUT DOES NOT REMOVE IT: the caches now persist, so a retry
+        #     re-reads what the failed attempt had already stored rather than re-asking for it. What
+        #     it cannot recover is the work in flight when the breaker tripped — and the caches are
+        #     saved AFTER `run_verification` returns, so an attempt that raises saves nothing at all.
+        #     A failing attempt still pays full price; only a LATER attempt is cheaper. The other two
+        #     reasons below are untouched by §3 and are each sufficient on their own.
         #   * THE WINDOW. `retry_countdown` is 5s/10s/20s over MAX_RETRIES=3 — about 35 seconds. An
         #     outage long enough to trip the breaker (5 consecutive failures) is essentially never
         #     over inside 35 seconds, so all three attempts fail and the run ends FAILED regardless.
@@ -121,6 +127,13 @@ async def _run(loan_file_id: str, run_id: str) -> None:
         if loan_file is None or run is None:
             logger.warning("rule_engine_pass_missing_target", run_id=run_id)
             return
+        # LP-644 §3 — the caches are loaded HERE, not inside `run_verification`, and saved after it
+        # returns. That placement is a correctness constraint, not tidiness: since LP-644 §2 the
+        # materialization cache is written by concurrent groups and is safe only because every write
+        # happens in an apply loop with no `await` in it (the same property the breaker's lock-free
+        # counting depends on). A database round-trip inside one of those loops would yield, let
+        # another group interleave, and break both. Outside the run, neither can happen.
+        caches = await load_tag_caches(db, loan_file.id)
         # reasoners omitted → run_verification uses the REAL model (a real run must never use a stub).
         await run_verification(
             db,
@@ -128,7 +141,13 @@ async def _run(loan_file_id: str, run_id: str) -> None:
             loan_file_id=loan_file.id,
             company_id=loan_file.company_id,
             verification_id=run.id,
+            caches=caches,
         )
+        # Best-effort, and deliberately AFTER the run: this makes the NEXT verification cheaper and
+        # has no bearing on this one's findings. `save_tag_caches` swallows its own errors for the
+        # same reason — failing a verification that produced correct findings, in order to record a
+        # cache, would be a grotesque trade.
+        await save_tag_caches(db, loan_file.id, caches)
         # LP-377-C Fix 2: the governed pass is the completion authority. Re-read status under a ROW LOCK
         # (the LP-377 BUG-1 pattern, moved here from the sweep) and mark COMPLETED only if a concurrent
         # FAILED (a sweep failure) has not been committed — the lock is held to commit, so a FAILED that

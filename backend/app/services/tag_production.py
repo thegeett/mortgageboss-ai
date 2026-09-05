@@ -461,3 +461,74 @@ __all__ = [
     "TransactionTagCache",
     "produce_stage_a_transaction_tags",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this stage's cache
+# --------------------------------------------------------------------------- #
+# The SHAPE is owned here, by the module that produces it, rather than by the store: `_Judged` and
+# `TagJudgment` are this stage's business, and a store reaching into them would have to be edited
+# every time either changes. The store handles the row; these handle the value.
+#
+# Round-tripping is what makes persistence safe to add, so it is pinned by a test rather than
+# asserted: a value that does not survive dump→load is a wrong answer served from cache, which is
+# strictly worse than no cache at all.
+
+
+def _dump_judgment(judgment: TagJudgment | None) -> dict[str, object] | None:
+    if judgment is None:
+        return None
+    return {
+        "value": judgment.value,
+        "confidence": judgment.confidence,
+        "reasoning": judgment.reasoning,
+    }
+
+
+def _load_judgment(raw: object) -> TagJudgment | None:
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("value")
+    if not isinstance(value, str):
+        return None
+    confidence = raw.get("confidence")
+    reasoning = raw.get("reasoning")
+    return TagJudgment(
+        value=value,
+        confidence=confidence if isinstance(confidence, int | float) else None,
+        reasoning=reasoning if isinstance(reasoning, str) else None,
+    )
+
+
+def dump_stage_a_entry(entry: _Judged) -> dict[str, object]:
+    """One Stage-A cache value as JSON."""
+    return {
+        "is_money_in": _dump_judgment(entry.is_money_in),
+        "apparent_category": _dump_judgment(entry.apparent_category),
+        "counterparty": _dump_judgment(entry.counterparty),
+        "reason": entry.reason,
+    }
+
+
+def load_stage_a_entry(raw: dict[str, object]) -> _Judged | None:
+    """A Stage-A cache value from JSON, or None if the row cannot be trusted.
+
+    DEFENSIVE ON PURPOSE, and it returns None rather than raising. A cache is an optimisation: a row
+    written by an older shape, or corrupted, must cost a re-ask and nothing more. Raising here would
+    let a stale cache row fail a verification, which is the one outcome a cache must never cause.
+
+    ⚠️ Only a COMPLETE judgment is accepted, matching the in-memory rule at the write site: Stage A
+    caches an entry only when both AI tags resolved, so a partial retries next run. Accepting a
+    partial here would freeze a degraded answer into the file permanently.
+    """
+    is_money_in = _load_judgment(raw.get("is_money_in"))
+    apparent_category = _load_judgment(raw.get("apparent_category"))
+    if is_money_in is None or apparent_category is None:
+        return None
+    reason = raw.get("reason")
+    return _Judged(
+        is_money_in=is_money_in,
+        apparent_category=apparent_category,
+        reason=reason if isinstance(reason, str) else _REASON_MALFORMED,
+        counterparty=_load_judgment(raw.get("counterparty")),
+    )

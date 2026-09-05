@@ -484,3 +484,57 @@ __all__ = [
     "produce_ai_group_tags",
     "reason_ai_group",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this producer's cache
+# --------------------------------------------------------------------------- #
+
+
+def dump_ai_group_entry(entry: _Resolved) -> dict[str, object]:
+    """One AI-group cache value as JSON (a per-tag judgment map + the absent-reason)."""
+    return {
+        "tags": {
+            short: (
+                None
+                if judgment is None
+                else {
+                    "value": judgment.value,
+                    "confidence": judgment.confidence,
+                    "reasoning": judgment.reasoning,
+                }
+            )
+            for short, judgment in entry.tags.items()
+        },
+        "reason": entry.reason,
+    }
+
+
+def load_ai_group_entry(raw: dict[str, object]) -> _Resolved | None:
+    """An AI-group cache value from JSON, or None if the row cannot be trusted.
+
+    ⚠️ Rejects any entry carrying a None judgment, matching the in-memory write rule: this producer
+    caches only when EVERY tag in the group resolved (``if all(entry.tags.get(s) is not None ...)``).
+    A row with a hole is either a shape change or a partial that should never have been stored, and
+    serving it would pin an "unknown" onto a subject forever — the tag layer's worst failure, because
+    it looks like an honest abstention rather than a stale cache.
+    """
+    tags_raw = raw.get("tags")
+    if not isinstance(tags_raw, dict) or not tags_raw:
+        return None
+    tags: dict[str, AiTagJudgment | None] = {}
+    for short, judgment_raw in tags_raw.items():
+        if not isinstance(judgment_raw, dict):
+            return None
+        value = judgment_raw.get("value")
+        if not isinstance(value, str):
+            return None
+        confidence = judgment_raw.get("confidence")
+        reasoning = judgment_raw.get("reasoning")
+        tags[str(short)] = AiTagJudgment(
+            value=value,
+            confidence=confidence if isinstance(confidence, int | float) else None,
+            reasoning=reasoning if isinstance(reasoning, str) else None,
+        )
+    reason = raw.get("reason")
+    return _Resolved(tags=tags, reason=reason if isinstance(reason, str) else _REASON_MALFORMED)
