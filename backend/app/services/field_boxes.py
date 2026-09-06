@@ -61,8 +61,16 @@ buys coverage by giving that up: `1500` can be found inside `21,500.00`, and a
 value matched without its quoted context can land on a different occurrence of the
 same figure. So every match is boundary-checked, the loosest tier is refused when
 it is ambiguous, and :class:`MatchKind` travels with the result — a box found by
-its quoted text and a box found by its bare value are different claims and the
-screen is entitled to say which it has.
+its quoted text and a box found by its bare value are different claims.
+
+NOTHING READS `MatchKind` YET, and the sentence that used to end this paragraph
+said the screen was "entitled to say which it has". It is not, today:
+`FieldBoxPublic` has no such field, the boxes response does not carry it, and the
+frontend never mentions it, so a bare-value guess and a verbatim match render
+identically to a processor. The distinction is computed and correct and it stops
+at the service boundary. Surfacing it is a UI change with its own decision to make
+about how a weaker box should look, and it is recorded on LP-706 rather than left
+as a promise the code does not keep (LP-706/709 review).
 """
 
 from __future__ import annotations
@@ -163,6 +171,43 @@ class BoxLookup:
 _FOLD_AWAY = re.compile("[\\s,. $\\u00a3\\u20ac%()\\[\\]\\-\\u2013\\u2014/:;'\"`*_\\u00a0]+")
 
 
+#: A run of digits with the separators a number may carry inside it.
+_NUMERIC_RUN = re.compile(r"\d[\d.,\s\u00a0]*\d|\d")
+
+#: The decimal separator: the LAST `.` or `,` with one or two digits after it.
+#: Three digits after a separator is a thousands group, not a fraction.
+_DECIMAL_TAIL = re.compile(r"[.,](\d{1,2})$")
+
+#: Stands in for a decimal point while the rest of the fold runs. A NUL cannot
+#: occur in a PDF text layer, so it survives `_FOLD_AWAY` colliding with nothing.
+_DECIMAL_MARK = "\x00"
+
+
+def _canonical_number(run: str) -> str:
+    """A number in a form that compares by MAGNITUDE rather than by formatting.
+
+    THE FOLD DELETED EVERY SEPARATOR, which made it blind to magnitude:
+    `fold("1,500.00") == fold("150,000") == "150000"`, so a field worth 1,500.00
+    drew a confident NORMALISED box over a page's $150,000 — a figure a hundred
+    times larger, and the word-boundary rule cannot catch it because both sides are
+    whole words. Separators are CONTENT in a number, and formatting only between
+    equivalent renderings of the same number.
+
+    What tells those apart is positional rather than per-character: the decimal
+    separator is the last `.` or `,` with one or two digits after it, and every
+    other `.`, `,` or space is grouping. That reads `15,000.00`, `15 000,00` and
+    `15000.00` as one number while keeping `150,000` distinct from `1,500.00`.
+
+    Trailing fraction zeros go, so `1500.0`, `1500.00` and `1500` still agree —
+    the same figure to different precision is the difference the fold is for.
+    """
+    compact = re.sub(r"[\s\u00a0]", "", run)
+    tail = _DECIMAL_TAIL.search(compact)
+    whole = compact[: tail.start()] if tail else compact
+    fraction = tail.group(1).rstrip("0") if tail else ""
+    return re.sub(r"[.,]", "", whole) + (_DECIMAL_MARK + fraction if fraction else "")
+
+
 def fold(text: str) -> str:
     """A comparable form of ``text``: lowercase, unaccented, formatting removed.
 
@@ -174,7 +219,10 @@ def fold(text: str) -> str:
     """
     decomposed = unicodedata.normalize("NFKD", text)
     without_marks = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return _FOLD_AWAY.sub("", without_marks).casefold()
+    # Numbers are canonicalised BEFORE the blanket removal, or their separators go
+    # the way of the punctuation and the magnitude goes with them.
+    numbers_kept = _NUMERIC_RUN.sub(lambda m: _canonical_number(m.group(0)), without_marks)
+    return _FOLD_AWAY.sub("", numbers_kept).casefold()
 
 
 @dataclass(frozen=True)
@@ -247,9 +295,59 @@ def _runs(index: _PageIndex, needle: str) -> list[tuple[int, int]]:
     while at != -1 and len(found) <= MAX_MATCHES:
         end = at + len(needle)
         if at in index.word_start and end in index.word_end:
-            found.append((index.owner[at], index.owner[end - 1] + 1))
+            run = (index.owner[at], index.owner[end - 1] + 1)
+            if _visually_contiguous(index, run):
+                found.append(run)
         at = index.text.find(needle, at + 1)
     return found
+
+
+#: How far apart two words on one line may sit, as a multiple of their line
+#: height, and still read as one run. A single space measures ~0.2 on this
+#: corpus's fonts; a table's column gap ~2.4. Set between them, clear of both.
+MAX_WORD_GAP_RATIO = 1.0
+
+#: How far DOWN the next word may be and still be a wrapped continuation.
+MAX_LINE_DROP_RATIO = 2.0
+
+
+def _visually_contiguous(index: _PageIndex, run: tuple[int, int]) -> bool:
+    """Whether the words in `run` sit together on the page, or only in the fold.
+
+    THE CHECK THE FOLD DESTROYED. `index.text` is the page's words concatenated
+    with NOTHING between them, so a needle can span two words the page kept far
+    apart and still begin and end on word boundaries. A pay stub showing ``40`` and
+    ``00`` in adjacent table CELLS matched a needle of ``4000`` — a figure not on
+    the page at all, boxed across two unrelated cells and reported unambiguous
+    because the spurious run was the only occurrence.
+
+    The word-boundary rule is necessary and not sufficient: a real match is always
+    a whole run of the page's words, and a whole run of the page's words is not
+    always something the page says.
+
+    A wrap HAS A SHAPE — next line, back towards the margin — so it is allowed and
+    bounded, rather than waved through. An earlier version of this guard simply
+    skipped every pair that did not share a line, which left a run crossing any
+    line with no distance bound at all: two words at opposite corners joined into
+    one box spanning most of the page.
+    """
+    first, last = run
+    for left, right in zip(
+        index.rects[first : last - 1], index.rects[first + 1 : last], strict=True
+    ):
+        height = max(float(left.y1 - left.y0), 1.0)
+        if min(left.y1, right.y1) - max(left.y0, right.y0) > 0:
+            # Same line: about a space apart, and in reading order — a negative gap
+            # means the pair is not left-to-right and is not a run.
+            if not 0 <= float(right.x0 - left.x1) <= height * MAX_WORD_GAP_RATIO:
+                return False
+            continue
+        drop = float(right.y0 - left.y0)
+        if not 0 < drop <= height * MAX_LINE_DROP_RATIO:
+            return False
+        if float(right.x0) > float(left.x1):
+            return False
+    return True
 
 
 def _union(rects: tuple[pymupdf.Rect, ...]) -> pymupdf.Rect:
@@ -303,66 +401,97 @@ def _folded(
 _EMPTY = BoxLookup(boxes=(), cited_page_exists=True, found_elsewhere=False)
 
 
-def _search_page(
-    doc: pymupdf.Document, page_index: int, request: BoxRequest
-) -> tuple[tuple[FieldBox, ...], MatchKind | None]:
-    """Locate one field on one page, best tier first."""
+def _tier_on_page(
+    doc: pymupdf.Document,
+    page_index: int,
+    request: BoxRequest,
+    tier: MatchKind,
+    indexes: dict[int, _PageIndex],
+) -> tuple[FieldBox, ...]:
+    """Locate one field on one page using ONE tier.
+
+    Split per tier so the document walk can be tier-major — see `_lookup_in`.
+    `indexes` caches the folded page index for the whole document: it was rebuilt
+    per (field, page), so a twelve-page document with thirty fields that miss the
+    exact tier extracted and folded the same twelve pages 360 times, in the
+    request path. The single `open()` above is justified on exactly this argument.
+    """
     page = doc[page_index]
     page_number = page_index + 1
 
-    found = _exact(page, request.snippet, page_number)
-    if found:
-        return found, MatchKind.EXACT
+    if tier is MatchKind.EXACT:
+        return _exact(page, request.snippet, page_number)
 
-    index = _index_page(page)
-    folded_snippet = fold(request.snippet)
-    found = _folded(index, page, folded_snippet, page_number)
-    if found:
-        return found, MatchKind.NORMALISED
+    if page_index not in indexes:
+        indexes[page_index] = _index_page(page)
+    index = indexes[page_index]
 
-    # TIER 3, AND IT IS HELD TO A STRICTER RULE (LP-709). The quoted text could not
-    # be confirmed anywhere on this page, so all we have is the answer. A figure
-    # that appears twice — the same amount as a subtotal and a total — gives no way
-    # to tell which one the model read, and drawing both invites a processor to
-    # verify against whichever they look at first. One occurrence, or none.
+    if tier is MatchKind.NORMALISED:
+        return _folded(index, page, fold(request.snippet), page_number)
+
+    # TIER 3, HELD TO A STRICTER RULE (LP-709). The quoted text could not be
+    # confirmed anywhere, so all we have is the answer. A figure appearing twice —
+    # the same amount as a subtotal and a total — gives no way to tell which the
+    # model read. The count is applied by the caller, across the whole document.
     folded_value = fold(request.value)
-    if not folded_value or folded_value == folded_snippet:
-        return (), None
-    by_value = _folded(index, page, folded_value, page_number)
-    if len(by_value) == 1:
-        return by_value, MatchKind.VALUE
-    return (), None
+    if not folded_value or folded_value == fold(request.snippet):
+        return ()
+    return _folded(index, page, folded_value, page_number)
 
 
-def _lookup_in(doc: pymupdf.Document, request: BoxRequest) -> BoxLookup:
+def _lookup_in(
+    doc: pymupdf.Document, request: BoxRequest, indexes: dict[int, _PageIndex]
+) -> BoxLookup:
+    """Locate one field across the document, STRONGEST TIER FIRST.
+
+    TIER-MAJOR, NOT PAGE-MAJOR, and the difference decides correctness. Trying all
+    three tiers on the cited page and then all three on each other page lets a bare
+    VALUE guess on page 1 beat a verbatim EXACT match on page 3 — which MOVES a box
+    that was correct before this change, against the guarantee that running the
+    exact tier first means none can. That guarantee only ever held within a page.
+
+    Within a tier the cited page is tried first, so a citation that holds still
+    beats an identical match elsewhere.
+    """
     if not request.snippet.strip() and not request.value.strip():
         return _EMPTY
     try:
-        index = request.cited_page - 1
-        cited_exists = 0 <= index < doc.page_count
-        if cited_exists:
-            found, kind = _search_page(doc, index, request)
-            if found:
+        cited = request.cited_page - 1
+        cited_exists = 0 <= cited < doc.page_count
+        order = ([cited] if cited_exists else []) + [n for n in range(doc.page_count) if n != cited]
+
+        for tier in (MatchKind.EXACT, MatchKind.NORMALISED, MatchKind.VALUE):
+            if tier is MatchKind.VALUE:
+                # THE AMBIGUITY RULE IS DOCUMENT-WIDE, because the search is. Held
+                # per page it could not see the case it exists for: the same figure
+                # once on page 1 and once on page 2 is exactly as unresolvable as
+                # twice on one page, and page-local counting called it unambiguous.
+                # It bites hardest on the ~4% of fields citing a page that does not
+                # exist, which always fall through to the whole-document walk.
+                hits = [
+                    (n, boxes)
+                    for n in order
+                    if (boxes := _tier_on_page(doc, n, request, tier, indexes))
+                ]
+                if sum(len(boxes) for _, boxes in hits) != 1:
+                    continue
+                page_index, boxes = hits[0]
                 return BoxLookup(
-                    boxes=found,
-                    cited_page_exists=True,
-                    found_elsewhere=False,
-                    match_kind=kind,
-                )
-        # Either the citation names a page that does not exist, or the text is not
-        # on the page it named. Both are worth showing the processor SOMETHING —
-        # but flagged, never silently.
-        for other in range(doc.page_count):
-            if other == index:
-                continue
-            found, kind = _search_page(doc, other, request)
-            if found:
-                return BoxLookup(
-                    boxes=found,
+                    boxes=boxes,
                     cited_page_exists=cited_exists,
-                    found_elsewhere=True,
-                    match_kind=kind,
+                    found_elsewhere=page_index != cited,
+                    match_kind=tier,
                 )
+
+            for n in order:
+                found = _tier_on_page(doc, n, request, tier, indexes)
+                if found:
+                    return BoxLookup(
+                        boxes=found,
+                        cited_page_exists=cited_exists,
+                        found_elsewhere=n != cited,
+                        match_kind=tier,
+                    )
         return BoxLookup(boxes=(), cited_page_exists=cited_exists, found_elsewhere=False)
     except Exception:
         # Never logs the snippet or the value — both are verbatim borrower text.
@@ -378,7 +507,9 @@ def _lookup_many_sync(content: bytes, requests: dict[str, BoxRequest]) -> dict[s
     except Exception:
         return dict.fromkeys(requests, _EMPTY)
     try:
-        return {key: _lookup_in(doc, request) for key, request in requests.items()}
+        # ONE INDEX PER PAGE for the whole document, not per (field, page).
+        indexes: dict[int, _PageIndex] = {}
+        return {key: _lookup_in(doc, request, indexes) for key, request in requests.items()}
     finally:
         doc.close()  # type: ignore[no-untyped-call]
 

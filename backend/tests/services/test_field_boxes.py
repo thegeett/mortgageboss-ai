@@ -13,6 +13,8 @@ from app.services.field_boxes import (
     MAX_MATCHES,
     BoxRequest,
     MatchKind,
+    _index_page,
+    _runs,
     find_all_field_boxes,
     find_field_boxes,
     fold,
@@ -157,7 +159,16 @@ class TestManyFieldsAtOnce:
     async def test_a_document_that_will_not_open_answers_every_field(self) -> None:
         # A screen whose job is to show a page must not 500 because one file is
         # unreadable — every field gets an empty answer instead.
-        found = await find_all_field_boxes(b"not a pdf", {"a": ("x", 1), "b": ("y", 2)})
+        found = await find_all_field_boxes(
+            b"not a pdf",
+            {
+                # BoxRequest, not the tuple this took before LP-706. It passed
+                # either way because the document fails to open before a request is
+                # touched — and CI runs mypy over app/ only, so nothing flagged it.
+                "a": BoxRequest(snippet="x", value="", cited_page=1),
+                "b": BoxRequest(snippet="y", value="", cited_page=2),
+            },
+        )
         assert set(found) == {"a", "b"}
         assert all(lookup.boxes == () for lookup in found.values())
 
@@ -323,9 +334,9 @@ class TestFold:
     @pytest.mark.parametrize(
         ("written", "expected"),
         [
-            ("Gross Total 15,000.00", "grosstotal1500000"),
-            ("15 000,00", "1500000"),
-            ("$15,000.00", "1500000"),
+            ("Gross Total 15,000.00", "grosstotal15000"),
+            ("15 000,00", "15000"),
+            ("$15,000.00", "15000"),
             ("  spaced  out  ", "spacedout"),
             ("Caf\u00e9", "cafe"),
             ("\ufb01nal", "final"),  # the ligature a PDF text layer really holds
@@ -346,3 +357,184 @@ class TestFold:
         # pass every assertion above.
         assert fold("15,000.00") != fold("16,000.00")
         assert fold("Gross") != fold("Net")
+
+
+class TestTheFoldJoinsWordsThePageKeptApart:
+    """The word-boundary rule is necessary and not sufficient (LP-706/709 review).
+
+    `index.text` is the page's words concatenated with NOTHING between them, so a
+    needle can span two words the page kept far apart and still begin and end on
+    word boundaries. It is true that a real match is always a whole run of the
+    page's words; it is false that a whole run of the page's words is always
+    something the page says.
+
+    A pay stub showing ``40`` and ``00`` in adjacent table CELLS matched a needle
+    of ``4000`` — a figure not on the page at all, boxed confidently across two
+    unrelated cells, and reported as a VALUE match with no ambiguity detected
+    because the spurious run was the only occurrence.
+    """
+
+    @staticmethod
+    def _page(text: str) -> pymupdf.Page:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), text, fontsize=11)
+        return doc[0]
+
+    @pytest.mark.parametrize(
+        ("text", "needle"),
+        [
+            ("40" + " " * 12 + "00", "4000"),
+            ("15" + " " * 20 + "000", "15000"),
+        ],
+    )
+    def test_two_table_cells_do_not_concatenate_into_a_value(self, text: str, needle: str) -> None:
+        assert _runs(_index_page(self._page(text)), fold(needle)) == []
+
+    @staticmethod
+    def _two(a: str, ax: float, ay: float, b: str, bx: float, by: float) -> pymupdf.Page:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((ax, ay), a, fontsize=11)
+        page.insert_text((bx, by), b, fontsize=11)
+        return doc[0]
+
+    @pytest.mark.parametrize(
+        ("placement", "a", "ax", "ay", "b", "bx", "by"),
+        [
+            # Rejected by the reading-order check: the continuation is to the RIGHT.
+            ("opposite corners of the page", "40", 72.0, 100.0, "00", 500.0, 700.0),
+            ("next line but far to the right", "40", 72.0, 100.0, "00", 500.0, 118.0),
+            # THE CASE ONLY THE DROP BOUND CAN REJECT — down AND to the left, which
+            # is the shape of a genuine wrap in every respect except distance. The
+            # two above pass the drop check on their x-ordering alone, so without
+            # this one the bound could be deleted with every test still green.
+            ("far down the page, back at the margin", "40", 500.0, 100.0, "00", 72.0, 700.0),
+        ],
+    )
+    def test_a_run_crossing_a_line_is_bounded_too(
+        self, placement: str, a: str, ax: float, ay: float, b: str, bx: float, by: float
+    ) -> None:
+        # A first version of this guard skipped every pair not sharing a line, so a
+        # run crossing ANY line had no distance bound: two words at opposite corners
+        # joined into one box spanning most of the page.
+        page = self._two(a, ax, ay, b, bx, by)
+        assert _runs(_index_page(page), fold("4000")) == [], placement
+
+    def test_a_genuine_wrap_is_still_found(self) -> None:
+        # The control, and the reason the cross-line case cannot simply be refused:
+        # a wrap goes to the NEXT line and back towards the margin.
+        page = self._two("15", 520.0, 100.0, "000,00", 72.0, 118.0)
+        assert _runs(_index_page(page), fold("15000.00")) != []
+
+    @pytest.mark.parametrize(
+        ("text", "needle"),
+        [
+            # A number split by a thin space is one run and must still be found —
+            # this is the case the fold exists for.
+            ("15 000,00", "15000"),
+            # A snippet legitimately spans words.
+            ("Gross Pay 4,200.00", "grosspay"),
+            # And a single word is untouched.
+            ("15,000.00", "15000"),
+        ],
+    )
+    def test_a_real_run_is_still_found(self, text: str, needle: str) -> None:
+        # The control. A guard that rejected every multi-word run would pass the
+        # two tests above and quietly delete the tier's entire gain.
+        assert _runs(_index_page(self._page(text)), fold(needle)) != []
+
+
+class TestTheFoldComparesMagnitude:
+    """Separators are CONTENT in a number, formatting only between renderings of one.
+
+    The fold deleted every `.` `,` and `-`, so `fold("1,500.00")` and
+    `fold("150,000")` were both `"150000"`. A field worth 1,500.00 drew a confident
+    NORMALISED box over a page's $150,000 — the precise failure LP-709 exists to
+    prevent, reached by a different route, and one the word-boundary rule cannot
+    catch because both sides are whole words.
+    """
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("15,000.00", "15000.00"),  # grouping only
+            ("15 000,00", "15,000.00"),  # European against US
+            ("1500.0", "1500.00"),  # trailing precision
+            ("1500", "1500.00"),
+        ],
+    )
+    def test_the_same_figure_folds_the_same(self, a: str, b: str) -> None:
+        assert fold(a) == fold(b)
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("1,500.00", "150,000"),  # a hundred times apart
+            ("1500.0", "15,000"),  # ten times apart
+            ("15,000.00", "150000.0"),
+        ],
+    )
+    def test_different_figures_do_not(self, a: str, b: str) -> None:
+        assert fold(a) != fold(b)
+
+    async def test_no_box_is_drawn_over_a_figure_a_hundred_times_larger(self) -> None:
+        # At the layer the bug would have been seen.
+        pdf = _pdf(["Purchase price $150,000"])
+        found = await find_field_boxes(pdf, snippet="1,500.00", value="1500.00", cited_page=1)
+        assert found.boxes == ()
+
+
+class TestTierBeatsPage:
+    """The strongest tier wins across the DOCUMENT, not within a page.
+
+    Trying all three tiers on the cited page and then all three on every other page
+    let a bare VALUE guess on page 1 beat a verbatim EXACT match on page 3 — moving
+    a box that was correct before LP-706, against the guarantee that running the
+    exact tier first means none can move.
+    """
+
+    async def test_an_exact_match_later_beats_a_value_guess_earlier(self) -> None:
+        pdf = _pdf(["Deposit 9706.69", "nothing", "Gross monthly income 9,706.69"])
+        found = await find_field_boxes(
+            pdf, snippet="Gross monthly income 9,706.69", value="9706.69", cited_page=2
+        )
+        assert found.match_kind is MatchKind.EXACT
+        assert {b.page for b in found.boxes} == {3}
+
+    async def test_the_cited_page_still_wins_within_a_tier(self) -> None:
+        # The control: tier-major must not stop a good citation beating an
+        # identical match elsewhere.
+        pdf = _pdf(["Gross Pay 4,200.00", "Gross Pay 4,200.00"])
+        found = await find_field_boxes(
+            pdf, snippet="Gross Pay 4,200.00", value="4200.00", cited_page=2
+        )
+        assert {b.page for b in found.boxes} == {2}
+        assert found.found_elsewhere is False
+
+
+class TestAmbiguityIsCountedAcrossTheDocument:
+    """One occurrence, or none — over the whole document, because the search is.
+
+    The rule was applied per page while the walk was document-wide, so the case it
+    exists for was invisible: the same figure once on page 1 and once on page 2 is
+    exactly as unresolvable as twice on one page, and page-local counting called it
+    unambiguous and drew a confident box.
+    """
+
+    async def test_the_same_value_on_two_pages_yields_no_box(self) -> None:
+        pdf = _pdf(["Prior balance 9,706.69", "Payoff 9,706.69"])
+        found = await find_field_boxes(
+            pdf, snippet="text that is not there", value="9706.69", cited_page=1
+        )
+        assert found.boxes == ()
+        assert found.match_kind is None
+
+    async def test_a_single_occurrence_still_yields_one(self) -> None:
+        # The control. Counting document-wide must not refuse the unambiguous case.
+        pdf = _pdf(["Prior balance 1,234.56", "nothing here"])
+        found = await find_field_boxes(
+            pdf, snippet="text that is not there", value="1234.56", cited_page=1
+        )
+        assert found.match_kind is MatchKind.VALUE
+        assert {b.page for b in found.boxes} == {1}
