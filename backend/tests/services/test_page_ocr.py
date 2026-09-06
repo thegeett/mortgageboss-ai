@@ -12,12 +12,14 @@ import pymupdf
 import pytest
 from app.services.page_ocr import (
     MAX_DPI,
+    MAX_OCR_PAGES_PER_REQUEST,
     MIN_DPI,
     NATIVE_WORD_THRESHOLD,
     TARGET_EDGE_PX,
     dpi_for,
     has_native_words,
     ocr_available,
+    ocr_words,
     words_for,
 )
 
@@ -235,3 +237,139 @@ class TestItDegradesRatherThanCrashing:
         monkeypatch.setattr(pymupdf.Page, "get_textpage_ocr", _boom, raising=False)
         page = _scanned_page()
         assert words_for(page) == []
+
+
+class TestTheRectanglesAreWhereTheWordsActuallyARE:
+    """Bounded, non-degenerate and in point space — and still possibly wrong.
+
+    THE ASSERTION THE SUITE WAS MISSING. Every existing check on these rectangles
+    is a BOUND: inside the page, non-zero area, small enough not to be pixels. All
+    three hold for a rectangle at the origin, so collapsing every OCR word to
+    (0, 0) — a box drawn in the top-left corner for every field on every scanned
+    page — passed the entire suite. Verified by making exactly that change.
+
+    A position needs a positional assertion, and the only ground truth available is
+    a page whose words have KNOWN rectangles: OCR a page that also has a text
+    layer and the two must agree.
+    """
+
+    @staticmethod
+    def _known_page() -> pymupdf.Page:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        # Distinct words at spread-out positions, so a rectangle cannot land near
+        # the right place by accident.
+        page.insert_text((72, 100), "Alpha", fontsize=14)
+        page.insert_text((400, 300), "Bravo", fontsize=14)
+        page.insert_text((72, 700), "Charlie", fontsize=14)
+        return doc[0]
+
+    def test_each_ocr_rectangle_lands_on_its_own_word(self) -> None:
+        page = self._known_page()
+        native = {w[4]: w[:4] for w in page.get_text("words")}
+        assert len(native) == 3, "the fixture must have three distinct native words"
+
+        recognised = {w[4]: w[:4] for w in ocr_words(page)}
+        for word, (nx0, ny0, _nx1, _ny1) in native.items():
+            assert word in recognised, f"OCR did not read {word!r}"
+            ox0, oy0, _ox1, _oy1 = recognised[word]
+            # Measured agreement on this fixture is ~1pt across and ~5pt down (the
+            # glyph box against the text baseline). 20pt is loose enough to survive
+            # a font or Tesseract version change and far tighter than the ~300pt an
+            # origin collapse or an axis swap would produce.
+            assert abs(ox0 - nx0) < 20, f"{word}: x is {ox0:.0f}, the word is at {nx0:.0f}"
+            assert abs(oy0 - ny0) < 20, f"{word}: y is {oy0:.0f}, the word is at {ny0:.0f}"
+
+    def test_the_words_are_not_all_in_one_place(self) -> None:
+        # The cheap control, in case a future fixture loses its spread: three words
+        # at three corners must produce three distinct rectangles.
+        corners = {(round(w[0]), round(w[1])) for w in ocr_words(self._known_page())}
+        assert len(corners) == 3
+
+
+class TestAPageWithNothingToProtect:
+    """OCR is refused only where there are exact rectangles to lose.
+
+    The rule required OCR to reach `NATIVE_WORD_THRESHOLD` before it could be
+    used at all — including on a page with NO words of its own, where there was no
+    exact geometry at stake. A scan whose only legible text is a three-word header
+    therefore returned nothing, guarding rectangles that did not exist.
+
+    The guard was scoped by its symptom (a word count) rather than by what it
+    guards, which is the shape that makes a guard refuse the case it was written
+    for.
+    """
+
+    def test_a_page_with_no_words_takes_whatever_ocr_finds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        page = _page([])  # nothing at all
+        assert page.get_text("words") == []
+        few = [(1.0, 2.0, 3.0, 4.0, "Total"), (5.0, 6.0, 7.0, 8.0, "1,234.00")]
+        assert len(few) < NATIVE_WORD_THRESHOLD
+        monkeypatch.setattr("app.services.page_ocr.ocr_words", lambda _page: few)
+        assert words_for(page) == few
+
+    def test_a_page_WITH_words_still_refuses_a_thin_reading(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The control, and the case the threshold exists for: where exact
+        # rectangles DO exist, a slightly luckier reading of the same page must not
+        # replace them.
+        page = _page(["15 000,00"])
+        native = [
+            (float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4]))
+            for w in page.get_text("words")
+        ]
+        assert 0 < len(native) < NATIVE_WORD_THRESHOLD
+        monkeypatch.setattr(
+            "app.services.page_ocr.ocr_words",
+            lambda _page: [(1.0, 2.0, 3.0, 4.0, "15"), (5.0, 6.0, 7.0, 8.0, "000,00")],
+        )
+        assert words_for(page) == native
+
+
+class TestTheRequestHasAnOcrBudget:
+    """OCR runs inside the request, and the client gives up at 30 seconds.
+
+    Measured at ~0.74s for a dense letter page here and ~0.98s elsewhere, so a
+    30-page scanned bank statement is 22-30s of one thread — the processor sees no
+    boxes at all, and nothing is cached across requests, so the next viewer pays it
+    again. Nothing bounded it.
+    """
+
+    def test_the_budget_stops_further_pages_being_ocrd(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"n": 0}
+
+        def _counted(_page: object) -> list[tuple[float, float, float, float, str]]:
+            calls["n"] += 1
+            return [(1.0, 2.0, 3.0, 4.0, "word")]
+
+        monkeypatch.setattr("app.services.page_ocr.ocr_words", _counted)
+        budget = [2]
+        blank = _page([])
+        for _ in range(5):
+            words_for(blank, budget)
+        assert calls["n"] == 2, "OCR ran past the budget"
+
+    def test_a_page_with_a_text_layer_costs_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The control, and the reason the budget is spent where the raster happens
+        # rather than per page visited: a typed page never reaches OCR, so it must
+        # not consume a page of the allowance.
+        monkeypatch.setattr(
+            "app.services.page_ocr.ocr_words", lambda _p: [(1.0, 2.0, 3.0, 4.0, "x")]
+        )
+        budget = [1]
+        typed = _page(["Alpha Bravo Charlie Delta Echo Foxtrot"])
+        assert has_native_words(typed)
+        for _ in range(3):
+            words_for(typed, budget)
+        assert budget[0] == 1
+
+    def test_the_cap_clears_the_worst_document_in_the_corpus(self) -> None:
+        # 12 is chosen from the corpus, not picked: the most pages any stored
+        # document needs OCR'd is 9. This pins the relationship so a later
+        # reduction has to argue with the measurement.
+        assert MAX_OCR_PAGES_PER_REQUEST >= 9

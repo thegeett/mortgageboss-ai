@@ -71,6 +71,22 @@ MAX_DPI = 300
 #: same threshold decides the split reported in LP-708 (34 of 288 pages).
 NATIVE_WORD_THRESHOLD = 5
 
+#: How many pages one request may OCR before it stops trying.
+#:
+#: OCR RUNS INSIDE THE REQUEST and the client gives up at 30 s
+#: (`frontend/lib/api/client.ts`). Measured here at ~0.74 s for a dense letter
+#: page and ~0.98 s on the reviewer's own machine, so a 30-page scanned bank
+#: statement is 22-30 s of one thread — the processor sees no boxes at all, and
+#: nothing is cached across requests, so the next viewer pays it again.
+#:
+#: 12 is chosen from the corpus rather than picked: the most pages any stored
+#: document needs OCR'd is 9, the 95th percentile is 1, and the median is 0. So
+#: the cap costs nothing on anything here while bounding the worst case at about
+#: nine seconds. A document past it keeps boxes for the pages that were read and
+#: loses them for the rest, which is the same partial state a scan already
+#: produces — never an error, and never a wrong box.
+MAX_OCR_PAGES_PER_REQUEST = 12
+
 
 def dpi_for(page_rect: pymupdf.Rect) -> int:
     """The dpi that rasters this page to about `TARGET_EDGE_PX` on its long edge."""
@@ -110,26 +126,30 @@ def has_native_words(page: pymupdf.Page) -> bool:
     return len(page.get_text("words")) >= NATIVE_WORD_THRESHOLD  # type: ignore[no-untyped-call]
 
 
-def words_for(page: pymupdf.Page) -> list[tuple[float, float, float, float, str]]:
+def words_for(
+    page: pymupdf.Page, budget: list[int] | None = None
+) -> list[tuple[float, float, float, float, str]]:
     """A page's words: its own where it has them, OCR'd where it does not.
 
-    NATIVE WORDS ARE NEVER DISCARDED, and getting that wrong is what this
-    docstring is for. The first version returned OCR whenever the native count was
-    under the threshold — so a legitimate page holding three words was rasterised
-    and re-read, throwing away three EXACT rectangles for however many estimates
-    Tesseract produced. It broke a test immediately, which is the only reason it
-    was not shipped.
+    A REAL TEXT LAYER IS NEVER DISCARDED — and that is narrower than "native words
+    are never discarded", which is what this said and is not what it can do. A
+    page carrying one or two stray words is a SCAN with a stamp on it, and giving
+    up two exact rectangles to read the other four hundred is the right trade; a
+    page carrying `NATIVE_WORD_THRESHOLD` or more has a text layer, and no amount
+    of OCR gets to replace it. The threshold decides which of those a page is, and
+    the honest statement of the rule is about the layer rather than the words.
 
-    The threshold decides whether a page looks like a scan. It does not get to
-    decide that a page's own text is worthless.
+    The first version returned OCR whenever the native count was under the
+    threshold, without asking whether OCR had found anything — so a legitimate
+    sparse page was rasterised and re-read for however many estimates Tesseract
+    produced. It broke a test immediately, which is the only reason it did not
+    ship.
 
-    SO OCR HAS TO CLEAR THE SAME BAR IT WAS CALLED IN TO FILL, not merely beat the
-    native count. "More words wins" was the first rule and it is wrong in a way a
-    test caught: on a genuine two-word page, OCR finding three would displace two
-    EXACT rectangles with three estimates. Requiring `NATIVE_WORD_THRESHOLD` words
-    of its own says the honest thing — if OCR cannot find a text layer either, the
-    page has no text layer, and the few exact positions it does have are the best
-    answer available.
+    BELOW THE THRESHOLD, OCR ONLY HAS TO BEAT WHAT WAS THERE. Requiring it to
+    reach `NATIVE_WORD_THRESHOLD` as well looked symmetrical and refused its output
+    in the case the ticket exists for: a page with NO text layer where Tesseract
+    read three words returned nothing at all, on the reasoning that three
+    estimates should not displace exact rectangles — of which there were none.
 
     A page where Tesseract is unavailable, or returns nothing, therefore keeps
     whatever it had.
@@ -138,10 +158,30 @@ def words_for(page: pymupdf.Page) -> list[tuple[float, float, float, float, str]
         (float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4]))
         for w in page.get_text("words")  # type: ignore[no-untyped-call]
     ]
-    if len(native) >= NATIVE_WORD_THRESHOLD:
+    # THROUGH `has_native_words`, not a second copy of its condition. Inlined, the
+    # rule existed twice — and the tests assert against the function, so a change
+    # made here would have left them green while the behaviour moved.
+    if has_native_words(page):
         return native
+    # THE BUDGET IS SPENT HERE, where the raster is about to happen — not counted
+    # per page visited, since a page with a text layer costs nothing. A mutable
+    # one-element list rather than a counter object: the caller owns it for the
+    # length of one request and there is nothing else to carry.
+    if budget is not None:
+        if budget[0] <= 0:
+            return native
+        budget[0] -= 1
     recognised = ocr_words(page)
-    if len(recognised) >= NATIVE_WORD_THRESHOLD and len(recognised) > len(native):
+    # NOTHING TO PROTECT, so nothing to weigh. A page with no words of its own has
+    # no exact rectangles at stake, and requiring OCR to clear the threshold there
+    # refused its output in the case this ticket exists for — zero native and three
+    # recognised returned NOTHING, guarding geometry that did not exist. The guard
+    # was scoped by the symptom (a word count) rather than by what it guards.
+    if not native:
+        return recognised
+    # There ARE exact rectangles here. Give them up only for something that looks
+    # like a text layer rather than a slightly luckier reading of the same page.
+    if len(recognised) >= NATIVE_WORD_THRESHOLD:
         return recognised
     return native
 

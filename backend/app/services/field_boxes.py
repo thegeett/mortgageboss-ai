@@ -84,7 +84,7 @@ from enum import StrEnum
 import pymupdf
 import structlog
 
-from app.services.page_ocr import words_for
+from app.services.page_ocr import MAX_OCR_PAGES_PER_REQUEST, words_for
 
 logger = structlog.get_logger(__name__)
 
@@ -248,23 +248,33 @@ class _PageIndex:
     rects: tuple[pymupdf.Rect, ...]
 
 
-def _page_words(page: pymupdf.Page) -> list[tuple[float, float, float, float, str]]:
+def _page_words(
+    page: pymupdf.Page, budget: list[int] | None = None
+) -> list[tuple[float, float, float, float, str]]:
     """This page's words with their rectangles — native if it has any, OCR if not.
 
     THE ONE PLACE THE THREE DOCUMENT KINDS DIFFER (LP-708). A typed page carries
     its own word list, exact and free. A scanned page carries nothing and is OCR'd.
-    An image document is a scan by another name and takes the same path. Everything
-    above this line — folding, matching, the boundary guard, the union rectangle —
-    is identical for all three and does not know which it is looking at.
+    AN IMAGE DOCUMENT NEVER GETS HERE, though this said it "is a scan by another
+    name and takes the same path". The boxes endpoint gates on
+    `TEXT_SEARCHABLE_TYPES`, which is `{"application/pdf"}` — so a photographed
+    pay stub, which LP-704 taught the reviewer to DISPLAY, returns an empty boxes
+    response and never reaches this module. It is the case a reader of this comment
+    would most reasonably assume is covered, and it is the one that is not
+    (LP-708 review).
+
+    Everything above this line — folding, matching, the boundary guard, the union
+    rectangle — is identical for a typed and a scanned page and does not know which
+    it is looking at.
 
     NATIVE TEXT IS AUTHORITATIVE and is never re-derived: positions encoded in a
     PDF are the source of record, while OCR estimates them. The check is per PAGE,
     because six of 101 stored documents are mixed.
     """
-    return words_for(page)
+    return words_for(page, budget)
 
 
-def _index_page(page: pymupdf.Page) -> _PageIndex:
+def _index_page(page: pymupdf.Page, budget: list[int] | None = None) -> _PageIndex:
     """Fold a page's word list into a searchable index. Empty for a page with no text."""
     text_parts: list[str] = []
     owner: list[int] = []
@@ -425,6 +435,7 @@ def _tier_on_page(
     request: BoxRequest,
     tier: MatchKind,
     indexes: dict[int, _PageIndex],
+    budget: list[int] | None = None,
 ) -> tuple[FieldBox, ...]:
     """Locate one field on one page using ONE tier.
 
@@ -441,7 +452,7 @@ def _tier_on_page(
         return _exact(page, request.snippet, page_number)
 
     if page_index not in indexes:
-        indexes[page_index] = _index_page(page)
+        indexes[page_index] = _index_page(page, budget)
     index = indexes[page_index]
 
     if tier is MatchKind.NORMALISED:
@@ -458,7 +469,10 @@ def _tier_on_page(
 
 
 def _lookup_in(
-    doc: pymupdf.Document, request: BoxRequest, indexes: dict[int, _PageIndex]
+    doc: pymupdf.Document,
+    request: BoxRequest,
+    indexes: dict[int, _PageIndex],
+    budget: list[int] | None = None,
 ) -> BoxLookup:
     """Locate one field across the document, STRONGEST TIER FIRST.
 
@@ -489,7 +503,7 @@ def _lookup_in(
                 hits = [
                     (n, boxes)
                     for n in order
-                    if (boxes := _tier_on_page(doc, n, request, tier, indexes))
+                    if (boxes := _tier_on_page(doc, n, request, tier, indexes, budget))
                 ]
                 if sum(len(boxes) for _, boxes in hits) != 1:
                     continue
@@ -502,7 +516,7 @@ def _lookup_in(
                 )
 
             for n in order:
-                found = _tier_on_page(doc, n, request, tier, indexes)
+                found = _tier_on_page(doc, n, request, tier, indexes, budget)
                 if found:
                     return BoxLookup(
                         boxes=found,
@@ -527,7 +541,10 @@ def _lookup_many_sync(content: bytes, requests: dict[str, BoxRequest]) -> dict[s
     try:
         # ONE INDEX PER PAGE for the whole document, not per (field, page).
         indexes: dict[int, _PageIndex] = {}
-        return {key: _lookup_in(doc, request, indexes) for key, request in requests.items()}
+        # ONE BUDGET FOR THE WHOLE REQUEST, alongside the one index per page. OCR
+        # runs in the request path and the client gives up at 30s.
+        budget = [MAX_OCR_PAGES_PER_REQUEST]
+        return {key: _lookup_in(doc, request, indexes, budget) for key, request in requests.items()}
     finally:
         doc.close()  # type: ignore[no-untyped-call]
 
