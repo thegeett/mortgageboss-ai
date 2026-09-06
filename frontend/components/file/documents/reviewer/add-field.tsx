@@ -24,13 +24,28 @@ export function AddField({
   fields,
   onAdd,
   busy = false,
+  onOpenChange,
 }: {
   /** Field names this document type declares and the extraction does not carry. */
   fields: readonly string[];
   onAdd: (fieldKey: string, value: string) => void;
   busy?: boolean;
+  /** Told when the form opens or closes, so the page can stand the shortcuts down. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // THE FORM HAS TO CLAIM THE KEYBOARD. `VerdictEditor` is protected because
+  // opening it sets `editing`, which `shortcutsEnabled` reads; this form set
+  // nothing, so the global keydown listener stayed live over it. `isTypingTarget`
+  // covers the select and the input and not the Add BUTTON — the residual
+  // `shortcutsEnabled`'s own docstring names — so Tab to Add and press Enter and
+  // `actionFor` returned `accept`, recording a verdict on whatever row was
+  // selected while `PREVENT_DEFAULT` stopped the browser activating the button.
+  // The form was unsubmittable by keyboard AND mis-fired a verdict.
+  const setOpenAndReport = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
   const [fieldKey, setFieldKey] = useState("");
   const [value, setValue] = useState("");
 
@@ -47,7 +62,7 @@ export function AddField({
         size="sm"
         variant="ghost"
         className="mt-2 h-8 w-full justify-start text-xs text-muted-foreground"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpenAndReport(true)}
       >
         <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
         Add a field the extraction missed
@@ -61,7 +76,7 @@ export function AddField({
     onAdd(fieldKey, value.trim());
     setFieldKey("");
     setValue("");
-    setOpen(false);
+    setOpenAndReport(false);
   };
 
   return (
@@ -70,7 +85,7 @@ export function AddField({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.stopPropagation();
-          setOpen(false);
+          setOpenAndReport(false);
         }
       }}
     >
@@ -120,14 +135,15 @@ export function AddField({
           size="sm"
           variant="ghost"
           className="h-8"
-          onClick={() => setOpen(false)}
+          onClick={() => setOpenAndReport(false)}
         >
           Cancel
         </Button>
       </div>
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-        The checks will read this the way they read an extracted value, and the file will show that
-        you supplied it. It can be undone.
+        The rule checks will read this the way they read an extracted value, and the file will show
+        that you supplied it. The DTI and LTV calculators still read the model&rsquo;s figures. It
+        can be undone.
       </p>
     </div>
   );

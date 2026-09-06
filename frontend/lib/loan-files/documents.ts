@@ -715,6 +715,38 @@ export function formatSource(source: SourceLocation | null): string | null {
  * a LIST to the queue, which drops lists: it could never be stopped on, and
  * `isFullyReviewed` ignored it.
  */
+/**
+ * A processor's overrides, keyed by field, as `extractionFields` wants them.
+ *
+ * ONE DEFINITION, for the third time. The pane computed this and the review PAGE
+ * did not, so an added field was drawn on screen and absent from `rowKeys`, the
+ * queue, the labels map and `editableFieldKey` — the arrows and Tab stepped past
+ * it, `selected` could never name it, and E/R could not open its editor. The one
+ * value on the document a human is personally answerable for was the one row the
+ * keyboard could not reach.
+ *
+ * `sensitiveKeysOf` exists because those same two call sites drifted over
+ * `sensitiveKeys`. That it has happened again with a second argument is the
+ * argument for the page passing its fields DOWN rather than the pane recomputing
+ * them — recorded on LP-701, still open.
+ */
+export function correctionsOf(
+  scrutiny:
+    | Record<string, { verdict?: string | null; corrected_value?: string | null }>
+    | undefined,
+): Map<string, { value: string | null; removed: boolean }> {
+  return new Map(
+    Object.entries(scrutiny ?? {})
+      .filter(
+        ([, s]) => s?.verdict === "corrected" || s?.verdict === "added" || s?.verdict === "removed",
+      )
+      .map(([key, s]) => [
+        key,
+        { value: s.corrected_value ?? null, removed: s.verdict === "removed" },
+      ]),
+  );
+}
+
 export function sensitiveKeysOf(
   scrutiny: Record<string, { sensitive?: boolean }> | undefined,
 ): Set<string> {

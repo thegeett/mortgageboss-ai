@@ -34,6 +34,7 @@ from app.models.field_review import FieldReview, FieldVerdict
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
 from app.services.verifications import mark_verification_stale
+from app.verification.snapshot.persistence import refuses_at_rest
 
 
 class FieldReviewError(Exception):
@@ -124,6 +125,22 @@ async def record_review(
         raise FieldReviewError("a rejected verdict needs a reason")
     if verdict is FieldVerdict.REMOVED and not (note or "").strip():
         raise FieldReviewError("a removed verdict needs a reason")
+    # REFUSED AT THE DOOR, not at the end of the next run. A hand-typed value lands
+    # in `Field.value` with no extractor between it and the snapshot, and the
+    # persist guard aborts the WHOLE loan file's snapshot for a 9+ digit run — so a
+    # processor typing the parcel number off a title commitment (ten digits, on a
+    # field `_PII_FIELDS` does not route; nineteen offerable fields share that
+    # shape) would silently stop every subsequent verification run from persisting
+    # anything, with nothing on screen connecting the two.
+    #
+    # The rule comes FROM the persist guard rather than being restated here, so a
+    # value cannot be accepted at the door and refused at the end.
+    if corrected_value is not None and (reason := refuses_at_rest(corrected_value)) is not None:
+        raise FieldReviewError(
+            f"that value contains {reason}, which cannot be stored in a verification "
+            "snapshot. If the field genuinely holds an identifier, it needs routing "
+            "through the documents section's PII map before it can be supplied here."
+        )
     if verdict not in _VALUE_BEARING and corrected_value is not None:
         # Silently dropping it would leave a value in the row that nothing reads and
         # that a later change might start reading.
@@ -144,6 +161,19 @@ async def record_review(
             raise FieldReviewError(f"{field_key!r} was extracted — correct it rather than add it")
     if verdict is FieldVerdict.REMOVED and existing is None:
         raise FieldReviewError(f"{field_key!r} has no extracted value to remove")
+    # THE THIRD SIDE OF THE SAME GUARD. REMOVED requires an extracted value and
+    # ADDED requires none; CORRECTED required neither, so any key in
+    # `extracted_data` could be corrected regardless of its SHAPE. Correcting a
+    # nested list — `earnings_lines` — was accepted, and the snapshot then emitted
+    # a scalar `Field` for that key while `_list_row_fields` still built the nested
+    # list from the extraction: the flat and nested views of one key disagreeing.
+    # The reviewer gates its editor on `kind === "scalar"`, so this is reachable
+    # only through the API, which is exactly the door a guard is for.
+    if verdict is FieldVerdict.CORRECTED and existing is None:
+        raise FieldReviewError(
+            f"{field_key!r} has no single extracted value to correct — a list or a "
+            "nested block is corrected by fixing the document and re-reading it"
+        )
 
     previous = await _live_review(db, extraction_id=extraction.id, field_key=field_key)
     if previous is not None:
@@ -157,9 +187,21 @@ async def record_review(
         field_key=field_key,
         verdict=verdict,
         corrected_value=corrected_value if verdict in _VALUE_BEARING else None,
-        # What the model said, captured now. Null for ADDED, where there was nothing
-        # to replace — and the check above is what guarantees that is true.
-        replaced_value=None if verdict is FieldVerdict.ADDED else existing,
+        # ONLY WHERE SOMETHING WAS ACTUALLY OVERRULED — a correction or a removal.
+        #
+        # `None if verdict is ADDED else existing` also wrote it for ACCEPTED and
+        # REJECTED, which overrule nothing. Pressing Enter to accept `employee_ssn`
+        # on a W-2 therefore copied the raw SSN out of `extracted_data` into this
+        # column: the commonest keystroke in the reviewer, creating a second at-rest
+        # copy of a raw identifier in a table that otherwise holds one only when a
+        # person typed it. The docstring on the column said "(CORRECTED and
+        # REMOVED)" all along; the code did not.
+        #
+        # Derived from `changes_the_snapshot` rather than restated, so a fourth
+        # verdict cannot join one list and not the other.
+        replaced_value=(
+            existing if verdict.changes_the_snapshot and verdict is not FieldVerdict.ADDED else None
+        ),
         note=note,
         reviewed_by_user_id=actor_user_id,
     )

@@ -63,6 +63,27 @@ _RAW_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _LONG_DIGITS = re.compile(r"\b\d{9,}\b(?!\.\d)")
 
 
+def refuses_at_rest(text: str) -> str | None:
+    """Why this value could not be persisted in a snapshot, or None if it can.
+
+    EXPORTED so a value can be refused where a PERSON types it, rather than at the
+    end of the next verification run. LP-703 opened a hand-typed path into
+    `Field.value`, and a processor typing the parcel number off a title commitment
+    — a ten-digit run, on a field `_PII_FIELDS` does not route — aborted the whole
+    loan file's snapshot write from then on. Nineteen offerable fields across five
+    document types have that shape. One person, one field, one keystroke, and every
+    subsequent run persisted nothing.
+
+    The same two patterns the persist guard applies, so the two cannot disagree
+    about what is refusable: restating them here is how a value gets accepted at
+    the door and rejected at the end.
+    """
+    if _RAW_SSN.search(text):
+        return "a dashed SSN pattern"
+    found = _LONG_DIGITS.search(text)
+    return f"a {len(found.group(0))}-digit run" if found is not None else None
+
+
 class SnapshotAlreadyPersisted(Exception):
     """Raised when a snapshot already exists for this run_id (write-once)."""
 

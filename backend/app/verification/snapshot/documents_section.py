@@ -414,6 +414,34 @@ def _scalar(value: Any) -> str | int | float | bool | None:
     return None  # nested structures (e.g. bank-statement transactions) not surfaced here
 
 
+#: A money figure as a person types it: an optional currency mark, thousands
+#: groups, optional decimals. Deliberately narrow — it must not match a name that
+#: happens to contain a comma.
+_MONEY_TYPED = re.compile(r"^\s*[$£€]?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*$")
+
+
+def _numeric_if_money(text: str) -> str:
+    """A typed money value in the form the rule engine can parse.
+
+    THE HEADLINE FEATURE FAILED ON THE OBVIOUS KEYSTROKE. The reviewer renders
+    `gross_pay` as `$15,000.00`, so "4,200.00" is what a processor types back — and
+    the engine parses with `Decimal(str(field.value))`, which raises on a comma.
+    The exception is caught, the tag abstains, and the DTI is computed from the
+    model's figure exactly as before, while the row shows a "Verified" mark. The
+    one visible hint was `displayValue` printing `4,200.00` without its `$`,
+    because `Number()` had returned NaN.
+
+    Normalised HERE rather than on the way in, because `corrected_value` is
+    documented as the value "as they typed it" and an audit trail should hold what
+    the person actually entered. The snapshot is where it has to be a number.
+
+    Narrow on purpose: a value only loses its separators if the whole string is
+    money-shaped, so "Smith, John" is untouched.
+    """
+    matched = _MONEY_TYPED.match(text)
+    return matched.group(1).replace(",", "") if matched else text
+
+
 @dataclass(frozen=True)
 class FieldOverride:
     """What a processor decided should reach the rule engine for one field (LP-703).
@@ -470,8 +498,16 @@ def build_document_fields(
             # behind — which is the difference between "we do not know" and "we
             # checked and it was empty".
             continue
+        # THE CATCH-ALL IS SKIPPED WHATEVER THE ROUTE. `added_keys` filters it, but
+        # for a key already in `extracted` the override branch ran BEFORE the
+        # `key == _CATCH_ALL_KEY` test below — so a correction recorded against
+        # `additional_sections` emitted a scalar `Field` holding a typed string,
+        # with no row on screen (both `_field_scrutiny` and `extractionFields` skip
+        # the catch-all) and therefore no Undo.
+        if key == _CATCH_ALL_KEY:
+            continue
         if override is not None and override.value is not None:
-            value: Any = override.value
+            value: Any = _numeric_if_money(override.value)
             source = _CORRECTED
             # NO CONFIDENCE. `confidence` is the MODEL's self-rating of its own
             # reading; a person's value has never had one, and a fabricated 1.0 here

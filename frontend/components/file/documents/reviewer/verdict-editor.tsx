@@ -25,6 +25,15 @@ import { useEffect, useRef, useState } from "react";
  * place for the next person to try again. "Not on this document" TAKES THE FIELD
  * OUT of the snapshot the rule engine reads. Both are undoable.
  *
+ * WHICH CHECKS, and it matters. The overlay is read by ONE consumer — the
+ * verification snapshot's documents section — so a correction reaches the rule
+ * engine and nothing else. The DTI, LTV, MI and reserves calculators read
+ * `extraction.extracted_data` directly (`_current_extracted_data` in
+ * `services/dti.py`), so a corrected property tax or insurance premium still
+ * reaches PITI as the model's figure. The copy names the rule checks rather than
+ * "the checks" because a processor reads the second as everything on the
+ * Verification screen, and half of that screen is the calculators (LP-703 review).
+ *
  * The copy says "the checks no longer read it" and stops there deliberately. It
  * would read better to promise the rule then reports `couldnt_check`, and that IS
  * the intended degrade — but it runs through tag materialisation, and whether
@@ -140,8 +149,8 @@ export function VerdictEditor({
         in what they do to the rules and nothing else on screen would say so. */}
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
         &ldquo;Can&rsquo;t verify&rdquo; keeps the extracted value and records that you
-        couldn&rsquo;t check it. &ldquo;Not on this document&rdquo; takes the field out, so the
-        checks no longer read it. Both can be undone.
+        couldn&rsquo;t check it. &ldquo;Not on this document&rdquo; takes the field out, so the rule
+        checks no longer read it — the DTI and LTV calculators still do. Both can be undone.
       </p>
     </div>
   );

@@ -349,3 +349,59 @@ class TestWhatTheModelSaidIsRemembered:
             corrected_value="2026-01-31",
         )
         assert review.replaced_value is None
+
+
+class TestACorrectionTypedTheWayTheScreenShowsIt:
+    """The headline behaviour, on the keystroke a processor actually makes.
+
+    The reviewer renders `gross_pay` as `$15,000.00`. Typing "4,200.00" back is
+    the natural correction — and the engine parses with `Decimal(str(value))`,
+    which raises on a comma. The exception is caught, the tag abstains, and the DTI
+    is computed from the model's figure exactly as before, while the row carries a
+    "Verified" mark. The feature failed silently on its own display format.
+    """
+
+    @pytest.mark.parametrize(
+        ("typed", "reaches_the_engine_as"),
+        [
+            ("4,200.00", "4200.00"),
+            ("$4,200.00", "4200.00"),
+            ("1,234,567.89", "1234567.89"),
+            ("4200.00", "4200.00"),
+        ],
+    )
+    def test_a_money_correction_arrives_parseable(
+        self, typed: str, reaches_the_engine_as: str
+    ) -> None:
+        from decimal import Decimal
+
+        from app.verification.snapshot.documents_section import (
+            FieldOverride,
+            build_document_fields,
+        )
+
+        fields = build_document_fields(
+            {"gross_pay": {"value": "1.00"}},
+            document_type="pay_stub",
+            loan_file_id=uuid4(),
+            overrides={"gross_pay": FieldOverride(value=typed, removed=False)},
+        )
+        assert fields["gross_pay"].value == reaches_the_engine_as
+        Decimal(str(fields["gross_pay"].value))  # the parse that used to raise
+
+    @pytest.mark.parametrize("typed", ["Smith, John", "ACME, Inc", "2026-01-02"])
+    def test_a_value_that_is_not_money_is_left_alone(self, typed: str) -> None:
+        # The control. A normaliser that stripped every comma would pass the tests
+        # above and quietly rewrite a borrower's name.
+        from app.verification.snapshot.documents_section import (
+            FieldOverride,
+            build_document_fields,
+        )
+
+        fields = build_document_fields(
+            {"employer_name": {"value": "x"}},
+            document_type="pay_stub",
+            loan_file_id=uuid4(),
+            overrides={"employer_name": FieldOverride(value=typed, removed=False)},
+        )
+        assert fields["employer_name"].value == typed

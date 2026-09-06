@@ -29,7 +29,12 @@ import { useFieldBoxes } from "@/lib/api/field-boxes";
 import { useRecordFieldReview, useRevertFieldReview } from "@/lib/api/field-reviews";
 import { usePageImage } from "@/lib/api/page-image";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
-import { currentDocuments, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
+import {
+  correctionsOf,
+  currentDocuments,
+  extractionFields,
+  sensitiveKeysOf,
+} from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { notifyPartial } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -100,6 +105,10 @@ function Reviewer() {
       extractionFields(
         detail?.current_extraction?.extracted_data ?? {},
         sensitiveKeysOf(detail?.field_scrutiny),
+        // AND THE CORRECTIONS, which the pane already passed and this did not — so
+        // an added field was drawn and unreachable: no row key, no queue entry, no
+        // label, and `editableFieldKey` could never name it.
+        correctionsOf(detail?.field_scrutiny),
       ),
     [detail],
   );
@@ -134,6 +143,12 @@ function Reviewer() {
   // zoomed in to read small print is still reading small print on the next page.
   const [zoom, setZoom] = useState<number>(FIT);
   const [editing, setEditing] = useState<string | null>(null);
+  // The add form claims the keyboard the same way the verdict editor does. Without
+  // this the global listener stayed live over an open form, and Enter on its Add
+  // button recorded an "accepted" verdict on whatever row was selected — while
+  // `PREVENT_DEFAULT` stopped the browser activating the button, so the addition
+  // did not happen. Unsubmittable by keyboard, and wrong in the other direction.
+  const [adding, setAdding] = useState(false);
 
   const documentIndex = current.findIndex((doc) => doc.id === documentId);
   const goToDocument = useCallback(
@@ -258,7 +273,7 @@ function Reviewer() {
     },
     // The sheet and the verdict editor each own the keyboard while they are open;
     // leaving the global listener live behind either one acts on keys aimed at it.
-    shortcutsEnabled({ helpOpen, editing }),
+    shortcutsEnabled({ helpOpen, editing, adding }),
   );
 
   return (
@@ -374,6 +389,7 @@ function Reviewer() {
               recordReview.mutate({ fieldKey, verdict: "removed", note: reason });
               setEditing(null);
             }}
+            onAddOpenChange={setAdding}
             onAdd={(fieldKey, value) => {
               recordReview.mutate({ fieldKey, verdict: "added", correctedValue: value });
             }}

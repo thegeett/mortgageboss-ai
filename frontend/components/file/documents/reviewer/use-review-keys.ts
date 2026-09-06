@@ -143,11 +143,14 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 export function shortcutsEnabled({
   helpOpen,
   editing,
+  adding = false,
 }: {
   helpOpen: boolean;
   editing: string | null;
+  /** The add-field form is open. Its Add button is not a typing target either. */
+  adding?: boolean;
 }): boolean {
-  return !helpOpen && editing === null;
+  return !helpOpen && editing === null && !adding;
 }
 
 /** Which action a key event asks for, or null. Pure, so the table is testable. */

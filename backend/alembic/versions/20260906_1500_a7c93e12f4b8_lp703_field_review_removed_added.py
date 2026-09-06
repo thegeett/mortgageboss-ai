@@ -90,6 +90,11 @@ def downgrade() -> None:
     instead would leave rows the new constraint still rejects; they are removed
     outright, and the activity log keeps the trail either way.
     """
-    op.execute("DELETE FROM field_reviews WHERE verdict IN ('removed', 'added')")
+    # DERIVED, not restated. Written out, this was a third list of "which verdicts
+    # are new" beside `_NEW_VALUES` and `_OLD_VALUES` — and the one that silently
+    # does the wrong thing if a fourth verdict is added later, by leaving rows the
+    # narrowed CHECK then refuses and failing the downgrade halfway.
+    retired = ", ".join(f"'{value}'" for value in _NEW_VALUES if value not in _OLD_VALUES)
+    op.execute(f"DELETE FROM field_reviews WHERE verdict IN ({retired})")
     _swap_check(_OLD_VALUES)
     op.drop_column("field_reviews", "replaced_value")

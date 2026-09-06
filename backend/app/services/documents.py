@@ -33,7 +33,7 @@ from app.documents.staleness import evaluate_staleness, package_fitness, package
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
-from app.models.field_review import FieldReview
+from app.models.field_review import FieldReview, FieldVerdict
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
@@ -302,11 +302,15 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
         ),
         generic_analysis=document.generic_analysis,
         field_scrutiny=_field_scrutiny(document, extraction, reviews),
-        addable_fields=_addable_fields(document, extraction),
+        addable_fields=_addable_fields(document, extraction, reviews),
     )
 
 
-def _addable_fields(document: Document, extraction: Extraction | None) -> list[str]:
+def _addable_fields(
+    document: Document,
+    extraction: Extraction | None,
+    reviews: dict[str, FieldReview],
+) -> list[str]:
     """Field names a processor may ADD to this document (LP-703).
 
     The document type's declared keys, minus the ones the extraction already
@@ -320,7 +324,13 @@ def _addable_fields(document: Document, extraction: Extraction | None) -> list[s
     """
     data = extraction.extracted_data if extraction is not None else None
     already = set(data) if isinstance(data, dict) else set()
-    return sorted(fields_for(document.document_type) - already)
+    # AND THE ONES A PROCESSOR HAS ALREADY SUPPLIED. An added field deliberately
+    # never enters `extracted_data`, so subtracting only the extraction's keys left
+    # it in the "Add a field the extraction missed" picker for ever — listed as
+    # missing while a populated row for it sat in the list above, and picking it
+    # again silently replaced the earlier review instead of being refused.
+    supplied = {key for key, review in reviews.items() if review.verdict is FieldVerdict.ADDED}
+    return sorted(fields_for(document.document_type) - already - supplied)
 
 
 def _field_scrutiny(

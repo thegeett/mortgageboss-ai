@@ -250,6 +250,16 @@ describe("shortcutsEnabled", () => {
     expect(shortcutsEnabled({ helpOpen: false, editing: "gross_pay" })).toBe(false);
   });
 
+  it("stands down while the ADD FORM is open", () => {
+    // The editor is protected because opening it sets `editing`. The add form set
+    // nothing, so the global listener stayed live over it — and `isTypingTarget`
+    // covers its select and input but not its Add BUTTON, which is the residual
+    // this predicate exists for. Enter on Add recorded an "accepted" verdict on
+    // whatever row was selected, while PREVENT_DEFAULT stopped the browser
+    // activating the button, so the addition did not happen.
+    expect(shortcutsEnabled({ helpOpen: false, editing: null, adding: true })).toBe(false);
+  });
+
   it("stands down while the shortcut sheet is open", () => {
     expect(shortcutsEnabled({ helpOpen: true, editing: null })).toBe(false);
   });

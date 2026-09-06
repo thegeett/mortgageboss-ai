@@ -11,7 +11,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDocumentDetail } from "@/lib/api/documents";
 import { tierInputFor } from "@/lib/confidence";
-import { EMPTY_VALUE, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
+import {
+  EMPTY_VALUE,
+  correctionsOf,
+  extractionFields,
+  sensitiveKeysOf,
+} from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +46,7 @@ export function ReviewerFields({
   onReject,
   onRemove,
   onAdd,
+  onAddOpenChange,
   onUndo,
   addableFields,
   onCancelEdit,
@@ -65,6 +71,8 @@ export function ReviewerFields({
   onRemove?: (fieldKey: string, reason: string) => void;
   /** Supply a field the extraction missed (LP-703). */
   onAdd?: (fieldKey: string, value: string) => void;
+  /** Told when the add form opens, so the page can stand the shortcuts down. */
+  onAddOpenChange?: (open: boolean) => void;
   /** Withdraw whatever verdict is on this field, putting the model's value back. */
   onUndo?: (fieldKey: string) => void;
   /** Field names this document type declares and the extraction does not carry. */
@@ -112,13 +120,8 @@ export function ReviewerFields({
   // "Verified" mark beside it, so someone who had just typed 4,200 went on reading
   // 15,000 — and once corrections started reaching the rule engine, that was the
   // screen and the checks disagreeing about the same field.
-  const corrections = new Map(
-    Object.entries(scrutiny)
-      .filter(
-        ([, s]) => s.verdict === "corrected" || s.verdict === "added" || s.verdict === "removed",
-      )
-      .map(([key, s]) => [key, { value: s.corrected_value, removed: s.verdict === "removed" }]),
-  );
+  const corrections = correctionsOf(scrutiny);
+
   const fields = extractionFields(
     data.current_extraction?.extracted_data ?? {},
     sensitiveKeys,
@@ -256,7 +259,14 @@ export function ReviewerFields({
           </ul>
         )}
 
-        {onAdd ? <AddField fields={addableFields ?? []} onAdd={onAdd} busy={busy} /> : null}
+        {onAdd ? (
+          <AddField
+            fields={addableFields ?? []}
+            onAdd={onAdd}
+            busy={busy}
+            onOpenChange={onAddOpenChange}
+          />
+        ) : null}
       </div>
     </TooltipProvider>
   );

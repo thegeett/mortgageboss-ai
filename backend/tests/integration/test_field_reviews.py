@@ -352,3 +352,110 @@ class TestReExtraction:
             await db.scalars(select(FieldReview).where(FieldReview.extraction_id == extraction.id))
         ).all()
         assert list(remaining) == []
+
+
+class TestReplacedValueIsOnlyCapturedWhereSomethingWasOverruled:
+    """`replaced_value` holds what the model said when a processor OVERRULED it.
+
+    It was written for ACCEPTED and REJECTED too, which overrule nothing. That
+    made the commonest keystroke in the reviewer — Enter to accept a field — copy
+    the extracted value into a second at-rest row, and on a W-2 the field is
+    `employee_ssn`. A table that held a raw identifier only when a person typed one
+    started holding one every time a person agreed with the model.
+    """
+
+    @pytest.mark.parametrize(
+        ("verdict", "captured"),
+        [
+            (FieldVerdict.ACCEPTED, False),
+            (FieldVerdict.REJECTED, False),
+            (FieldVerdict.CORRECTED, True),
+            (FieldVerdict.REMOVED, True),
+        ],
+    )
+    async def test_only_a_correction_or_removal_captures_it(
+        self, db: AsyncSession, verdict: FieldVerdict, captured: bool
+    ) -> None:
+        document, extraction = await _subject(db)
+        review = await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="gross_pay",
+            verdict=verdict,
+            corrected_value="4250.00" if verdict is FieldVerdict.CORRECTED else None,
+            note="a reason" if verdict in (FieldVerdict.REJECTED, FieldVerdict.REMOVED) else None,
+        )
+        assert (review.replaced_value is not None) is captured
+
+    async def test_accepting_does_not_copy_an_identifier_at_rest(self, db: AsyncSession) -> None:
+        # The case that gives it teeth. `_subject`'s data is a pay stub; this uses a
+        # field whose value IS an identifier, which is what made the leak matter.
+        company = await factories.make_company(db)
+        loan_file = await factories.make_loan_file(db, company=company)
+        document = await factories.make_document(db, loan_file=loan_file, company=company)
+        extraction = await factories.make_extraction(
+            db, document=document, data={"employee_ssn": {"value": "123-45-6789"}}
+        )
+        await db.flush()
+
+        review = await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="employee_ssn",
+            verdict=FieldVerdict.ACCEPTED,
+        )
+        assert review.replaced_value is None
+
+
+class TestAValueThatCouldNotBePersisted:
+    """A hand-typed value is refused HERE, not at the end of the next run.
+
+    LP-703 opened a path into `Field.value` with no extractor between it and the
+    snapshot, and the persist guard aborts the WHOLE loan file's snapshot write for
+    a 9+ digit run. So a processor typing the ten-digit parcel number off a title
+    commitment — one of nineteen offerable fields with that shape, none routed
+    through `_PII_FIELDS` — would silently stop every subsequent verification run
+    on that file from persisting anything, with nothing connecting the two.
+
+    One person, one field, one keystroke. Refusing at the door turns an
+    unrecoverable-without-investigation failure into a visible, correctable one.
+    """
+
+    async def test_a_long_digit_run_is_refused(self, db: AsyncSession) -> None:
+        document, extraction = await _subject(db)
+        with pytest.raises(FieldReviewError, match="10-digit run"):
+            await record_review(
+                db,
+                document=document,
+                extraction=extraction,
+                field_key="gross_pay",
+                verdict=FieldVerdict.CORRECTED,
+                corrected_value="4123456789",
+            )
+
+    async def test_a_dashed_ssn_is_refused(self, db: AsyncSession) -> None:
+        document, extraction = await _subject(db)
+        with pytest.raises(FieldReviewError, match="SSN"):
+            await record_review(
+                db,
+                document=document,
+                extraction=extraction,
+                field_key="gross_pay",
+                verdict=FieldVerdict.CORRECTED,
+                corrected_value="123-45-6789",
+            )
+
+    async def test_an_ordinary_correction_still_goes_through(self, db: AsyncSession) -> None:
+        # The control. A guard that refused everything would pass both tests above.
+        document, extraction = await _subject(db)
+        review = await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key="gross_pay",
+            verdict=FieldVerdict.CORRECTED,
+            corrected_value="4250.00",
+        )
+        assert review.corrected_value == "4250.00"
