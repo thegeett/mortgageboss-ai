@@ -11,6 +11,7 @@
  */
 
 import { Button } from "@/components/ui/button";
+import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { humanize } from "@/lib/format";
 import type { Tone } from "@/lib/status";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
@@ -66,11 +67,16 @@ function TabStrip({
   active: TabId;
   onPick: (id: TabId) => void;
 }) {
+  const drag = useDragScroll<HTMLDivElement>();
+
   return (
     <div
+      ref={drag.ref}
       role="tablist"
       aria-label="Verification outcomes"
-      className="flex gap-1 overflow-x-auto border-b border-border"
+      // The TOKEN, not `border-gray-200`: LP-UI-004 moved this tree off ad-hoc
+      // greys and `a11y`/token guards keep it there. The drag class is bedrock's.
+      className={cn("flex gap-1 overflow-x-auto border-b border-border", drag.className)}
     >
       {tabs.map((tab) => {
         const isActive = tab.id === active;

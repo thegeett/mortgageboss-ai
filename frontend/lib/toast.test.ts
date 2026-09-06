@@ -184,3 +184,38 @@ describe("TOASTER_CLASSNAMES", () => {
     expect(all).not.toMatch(/\b(red|green|amber|blue|slate|gray|grey)-\d/);
   });
 });
+
+describe("an error that offers a way past it", () => {
+  /**
+   * The loss this exists to prevent, found merging the branches.
+   *
+   * LP-637 offered "Re-read anyway" on a 409 by handing sonner an `action`.
+   * Routing that call through `notifyError` dropped it in silence: the property
+   * arrived through a conditional spread, which carries no excess-property check,
+   * so nothing failed to compile and the button just stopped appearing.
+   */
+  it("passes the retry through as the toast's action", () => {
+    const onRetry = vi.fn();
+    notifyError({
+      title: "Couldn't reprocess",
+      whatToDo: "It looks human-set.",
+      retry: { label: "Re-read anyway", onRetry },
+    });
+    const [, options] = error.mock.calls.at(-1) ?? [];
+    expect(options?.action).toBeDefined();
+    (options?.action as { onClick: () => void }).onClick();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the retry, and falls back to a plain label", () => {
+    notifyError({ title: "x", whatToDo: "y", retry: { onRetry: () => {} } });
+    const [, options] = error.mock.calls.at(-1) ?? [];
+    expect((options?.action as { label: string }).label).toBe("Try again");
+  });
+
+  it("offers nothing when there is no way past", () => {
+    notifyError({ title: "x", whatToDo: "y" });
+    const [, options] = error.mock.calls.at(-1) ?? [];
+    expect(options?.action).toBeUndefined();
+  });
+});

@@ -31,12 +31,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.stage_metrics import RunMetrics, StageMetrics
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.finding import Finding, FindingCategory, FindingResolutionStatus
@@ -53,6 +55,7 @@ from app.services.needs_engine import (
 from app.services.needs_from_findings import seed_needs_from_findings
 from app.services.needs_prose import compose_needs
 from app.services.rule_findings import (
+    UNIDENTIFIED_DOCUMENTS_RULE_ID,
     ReconcileRunResult,
     reconcile_evaluation_findings,
     repair_retired_finding_text,
@@ -96,6 +99,7 @@ from app.verification.snapshot.tag import Tag, TagProducedBy
 from app.verification.snapshot.traversal import source_document_by_subject
 from app.verification.tag_materialization.ai import AiTagCache
 from app.verification.tag_materialization.ai import Reasoner as AiGroupReasoner
+from app.verification.tag_materialization.breaker import AiBackendUnavailable, AiInfraBreaker
 from app.verification.tag_materialization.declarations import ProductionMode, load_declarations
 from app.verification.tag_materialization.producer import materialize_tags
 
@@ -273,6 +277,36 @@ _RULE_CATEGORY: dict[str, FindingCategory] = {
 }
 
 
+def finding_category_map() -> dict[str, FindingCategory]:
+    """Every rule that can produce a finding, mapped to the category it files under.
+
+    LP-595 — RESOLVED per rule (per-rule override, then family), not the nine-entry map that left the
+    other sixty-nine falling through to ASSETS.
+
+    bug-011 review — AND OVER EVERY RULE THAT CAN PRODUCE ONE, not just the active list. The blocked
+    candidates reach the findings table through the pending-checks path while being absent from
+    `ACTIVE_RULE_IDS`, so all six fell through to the ASSETS default and tripped LP-595's own
+    `finding_category_unresolved` warning — PC-5 and CO-5 are property, CR-5 is credit. That was
+    invisible while the second run crashed on the unique index; now that the row carries forward it is
+    filed wrong permanently, and LP-598's category refresh cannot correct it because
+    `category_by_rule.get("PC-5")` is None, so the refresh writes nothing.
+
+    A FUNCTION RATHER THAN AN INLINE COMPREHENSION so the population is testable. The first test
+    written for this asserted that `category_for_rule` resolves each blocked rule — which it always
+    did — and passed with the widening reverted. The thing that can be wrong is which rules go INTO
+    the map.
+    """
+    # Local, for the same reason `_pending_check_ai_groups` uses one: pending_checks imports from the
+    # registry, and a module-level import here closes the cycle.
+    from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
+
+    return {
+        rule_id: category
+        for rule_id in set(ACTIVE_RULE_IDS) | set(blocked_candidate_rule_ids())
+        if (category := category_for_rule(rule_id)) is not None
+    }
+
+
 def category_for_rule(rule_id: str) -> FindingCategory | None:
     """The category a rule's findings are filed under, or None if the rule is unclassified.
 
@@ -372,6 +406,30 @@ async def _run_stage(
     """
     try:
         return await produce(snapshot)
+    except AiBackendUnavailable:
+        # LP-635 — THE ONE EXCEPTION TO THE BACKSTOP, and it is narrow on purpose.
+        #
+        # This backstop exists so an UNEXPECTED wholesale failure degrades instead of killing the
+        # run: some tags are missing, the rest of the pass still says something true. That trade is
+        # only worth taking when continuing produces a better answer than stopping. A backend that
+        # has refused several calls in a row is the case where it does not — every AI tag after this
+        # point resolves to unknown, every finding built on them reads `couldn't check`, and the run
+        # finishes looking merely thin rather than broken.
+        #
+        # So this one propagates: out of the stage, out of the pass, to `retry_or_terminal`.
+        # Degrading here would convert a retryable outage into a permanently poor result that
+        # nothing would ever revisit.
+        #
+        # IT IS TERMINAL, NOT RETRIED (LP-635 review). `retry_or_terminal` lists it in `terminal_on`
+        # beside `SoftTimeLimitExceeded`, so the run fails once, immediately and visibly. Retrying it
+        # was measured and is worse on three counts — the watchdog clock is not reset per attempt,
+        # the tag caches are rebuilt so every call is paid again, and the backoff window is ~35
+        # seconds against an outage that by definition lasted longer. See the comment at
+        # `terminal_on` for the detail.
+        #
+        # The win is unchanged: the slot is released in under a minute rather than grinding the
+        # file's whole budget, and the run is re-runnable by hand.
+        raise
     except Exception as exc:
         logger.error("verification_stage_failed", stage=stage, error=type(exc).__name__)
         degradations.append(Degradation(stage, f"stage failed: {type(exc).__name__}"))
@@ -424,6 +482,7 @@ async def _evaluate_rules(
     oc2_reasoner: Oc2Reasoner | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
+    metrics: StageMetrics | None = None,
 ) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Run every rule over the tagged snapshot — deterministic (AS-1), judgment (OC-2), and
     cross-source consistency (ID-2 exact / ID-4 fuzzy, LP-326).
@@ -444,6 +503,9 @@ async def _evaluate_rules(
         judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
         consistency_reasoners=consistency_reasoners or {},
         confidence_floor=confidence_floor,
+        # LP-644 §1 review — 19 judgment rules and 5 consistency ones call the model here, one call
+        # per subject (AS-12 and FR-5 per DEPOSIT). Unmeasured, all of it read as `non_ai_seconds`.
+        metrics=metrics,
     )
 
 
@@ -454,6 +516,7 @@ async def _evaluate_pending_checks(
     materialization_cache: AiTagCache | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
+    metrics: StageMetrics | None = None,
 ) -> list[RuleEvaluation]:
     """LP-391 — evaluate the BLOCKED candidate rules and surface a manual-review flag where each is
     applicable-with-data. Returns only ``PENDING_AUTOMATION`` evaluations (never an uncalibrated verdict);
@@ -473,6 +536,23 @@ async def _evaluate_pending_checks(
                 ai_cache=materialization_cache,
                 only_subjects=_MATERIALIZED_SUBJECTS,
                 only_groups=pending_groups,
+                # LP-635 review — its OWN breaker, and deliberately not the run's.
+                #
+                # This path had none, so an outage starting here ground through the blocked groups
+                # exactly as the main pass used to. A fresh breaker stops that.
+                #
+                # NOT the shared `ai_breaker`, and NOT re-raised, which is where this diverges from
+                # the other three stages. Pending checks run AFTER the live pass has already
+                # succeeded, and they are best-effort by construction — a throwaway snapshot, no
+                # effect on `run.degraded`. Failing the whole run because a BLOCKED, uncalibrated
+                # rule could not be surfaced would discard a complete set of real findings to
+                # protect a preview. Sharing the run's breaker would also let this path's failures
+                # count against a pass that has already finished its own work.
+                breaker=AiInfraBreaker(),
+                # LP-644 §1 review — ON by default, and it materializes the blocked groups' AI tags
+                # every run. Discarded output, but the run waits for the calls, so they are measured.
+                metrics=metrics,
+                pass_name="pending_checks",
             )
             if pending_groups
             else snapshot
@@ -484,7 +564,14 @@ async def _evaluate_pending_checks(
             pending_snapshot,
             consistency_reasoners=consistency_reasoners or {},
             confidence_floor=confidence_floor,
+            metrics=metrics,
         )
+    except AiBackendUnavailable:
+        # Named rather than left to the catch-all below, so this reads as a decision instead of an
+        # accident: the outcome (no pending flags, live results untouched) is the same, but the log
+        # line distinguishes "the backend went away" from "this path has a bug".
+        logger.warning("pending_check_surfacing_skipped_backend_unavailable")
+        return []
     except Exception as exc:
         logger.warning("pending_check_surfacing_failed", error=str(exc))
         return []
@@ -532,6 +619,14 @@ def _retire_eligible_rules(snapshot: Snapshot) -> frozenset[str]:
             )
         if degraded[enumeration]:
             eligible.discard(rule_id)
+    # LP-640 — the CONSOLIDATED unidentified-document row (a synthetic id, not an active rule) retires
+    # under the same test as the per_document rules it stands in for: only on a run that could
+    # actually SEE the documents. It is not detected on two opposite kinds of run — the documents got
+    # typed (retire, correctly) and the documents section failed to build, where nothing enumerated so
+    # nothing could be attributed. Eligible only on the healthy one; retiring on the degraded one
+    # would turn "3 documents could not be identified" green on a run that never looked at a document.
+    if enumerate_subjects("per_document", snapshot):
+        eligible.add(UNIDENTIFIED_DOCUMENTS_RULE_ID)
     return frozenset(eligible)
 
 
@@ -630,6 +725,29 @@ def _collapse_uniform_passes(
 
     collapsed: list[RuleEvaluation] = []
     for rule_id, group in by_rule.items():
+        # LP-640 — AN UNIDENTIFIED-DOCUMENT ABSTENTION BELONGS TO THE CONSOLIDATED ROW, NOT TO THIS
+        # COLLAPSE. Both mechanisms answer "N subjects, one sentence", and this one runs first, so
+        # without this the per-rule collapse wins and LP-640 never sees the rows: RE-1 is
+        # `per_document` with a `document.document_type` predicate AND declares
+        # `collapse_uniform: {unresolved: true}`, so N unidentified documents give it N uniform
+        # couldnt_checks with byte-identical reasoning, which collapse into one loan-level row. The
+        # `RuleEvaluation` built below never sets `unidentified_document` (the bug-007 drop-by-omission
+        # its own comment warns about), so that row reaches `consolidate_unidentified_documents`
+        # looking like an ordinary abstention and keeps a SEPARATE queue item asking the same
+        # "identify these files" question the consolidated row asks — while the consolidated row's
+        # blocked-check count silently omits every check this rule was waiting to run.
+        #
+        # Carrying the flag through the collapse instead would be WRONG: the collapsed row's
+        # `subject_id` is `LOAN_SUBJECT`, and `consolidate_unidentified_documents` reads `subject_id`
+        # as a document content id — so "loan" would be counted and listed as one of the unidentified
+        # documents. These pass through whole; LP-640 then collapses them across ALL rules, which is
+        # the strictly better row.
+        blocked_on_identity = [r for r in group if r.unidentified_document]
+        if blocked_on_identity:
+            collapsed.extend(blocked_on_identity)
+            group = [r for r in group if not r.unidentified_document]
+            if not group:
+                continue
         try:
             spec = load_rule_spec(rule_id)
         except RuleSpecNotFound:
@@ -819,11 +937,15 @@ async def _persist(
         evaluated_rule_ids=frozenset(ACTIVE_RULE_IDS),
         # LP-595 — RESOLVED for every active rule (per-rule override, then family), not the nine-entry
         # map that left the other sixty-nine falling through to ASSETS.
-        category_by_rule={
-            rule_id: category
-            for rule_id in ACTIVE_RULE_IDS
-            if (category := category_for_rule(rule_id)) is not None
-        },
+        #
+        # bug-011 review — AND FOR EVERY RULE THAT CAN PRODUCE A FINDING, not just the active ones.
+        # The blocked candidates reach this table through the pending-checks path while being absent
+        # from `ACTIVE_RULE_IDS`, so all six fell through to the ASSETS default and tripped LP-595's
+        # own `finding_category_unresolved` warning: PC-5 and CO-5 are property, CR-5 is credit.
+        # Harmless only while the second run crashed; now that the row carries forward it is filed
+        # wrong permanently, and LP-598's "the category is refreshed too" cannot correct it either —
+        # `category_by_rule.get("PC-5")` is None, so the refresh writes nothing.
+        category_by_rule=finding_category_map(),
         retire_eligible_rule_ids=retire_eligible_rule_ids,
     )
 
@@ -853,6 +975,12 @@ async def run_verification(
     caches = caches or TagCaches()
     reasoners = reasoners or Reasoners()
     degradations: list[Degradation] = []
+    # LP-644 §1 — run-scoped and threaded exactly like `caches`: each stage records into its own
+    # accumulator and the summary below reads them all. Started here rather than at the first stage
+    # so the snapshot build — which makes no AI calls and is a named suspect for the non-AI
+    # remainder — is inside the measured window.
+    metrics = RunMetrics()
+    run_started = perf_counter()
 
     # 1. RAW snapshot (+ calculators-as-tags, built inside build_snapshot; each section degrades on
     #    its own — LP-318/builder). Calculators read stated financials, not Stage-A/B tags, so they
@@ -874,12 +1002,20 @@ async def run_verification(
     degradations.extend(_scan_section_degradations(snapshot))
 
     if produce_tags:
+        # LP-635 — ONE breaker for the whole pass, not one per stage. An outage does not restart at a
+        # stage boundary, so a counter that did would forgive the backend every time the pass moved
+        # on and might never reach its threshold during a real outage.
+        ai_breaker = AiInfraBreaker()
         # 2. Stage A — per-transaction atomic tags.
         await report_phase(run_id, "stage_a", session_factory=reasoners.progress_session)
         snapshot = await _run_stage(
             "stage_a",
             lambda s: produce_stage_a_transaction_tags(
-                s, reasoner=reasoners.stage_a, cache=caches.stage_a
+                s,
+                reasoner=reasoners.stage_a,
+                cache=caches.stage_a,
+                breaker=ai_breaker,
+                metrics=metrics.stage_a,
             ),
             snapshot,
             degradations,
@@ -898,7 +1034,11 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_b",
             lambda s: produce_stage_b_sourcing_tags(
-                s, reasoner=reasoners.stage_b, cache=caches.stage_b
+                s,
+                reasoner=reasoners.stage_b,
+                cache=caches.stage_b,
+                breaker=ai_breaker,
+                metrics=metrics.stage_b,
             ),
             snapshot,
             degradations,
@@ -918,6 +1058,8 @@ async def run_verification(
                 # (LP-391's pending-check groups materialize SEPARATELY, best-effort, so a blocked group
                 # never degrades this run or enters the persisted snapshot.)
                 only_groups=_required_ai_groups(),
+                breaker=ai_breaker,
+                metrics=metrics.materialization,
             ),
             snapshot,
             degradations,
@@ -930,12 +1072,21 @@ async def run_verification(
     # 6. Rules — the fail-closed gate + deterministic + judgment rules. Any rule_judgment tag a
     #    judgment rule produced is written back into the tags layer (not discarded). 7. Findings.
     await report_phase(run_id, "rules", session_factory=reasoners.progress_session)
+    # LP-644 §1 review — TIMED, because this pass calls the model. The ticket's table treats the rule
+    # engine as deterministic and leaves it out; `judgment.py` awaits one call per SUBJECT for 19
+    # judgment rules (AS-12 and FR-5 per deposit, eight more per document) and `consistency.py` for 5
+    # more. Whatever that costs was previously reported as `non_ai_seconds`, the number §2-§5 are
+    # sized against. The wall covers the deterministic rules too — they are part of the same pass and
+    # cannot be subtracted from it, which is the same honesty materialization's wall keeps.
+    rules_started = perf_counter()
     results, judgment_tags = await _evaluate_rules(
         snapshot,
         oc2_reasoner=reasoners.oc2,
         consistency_reasoners=reasoners.consistency,
         confidence_floor=confidence_floor,
+        metrics=metrics.rules,
     )
+    metrics.rules.wall_seconds = perf_counter() - rules_started
     snapshot = _merge_judgment_tags(snapshot, judgment_tags)
     # 6b. LP-391 — pending-check surfacing (ADDITIVE, a DISJOINT rule set): a blocked-but-applicable rule
     #     emits a manual-review flag to Tab 1 instead of silence. Never ships an uncalibrated verdict; the
@@ -943,13 +1094,16 @@ async def run_verification(
     #     it materializes the BLOCKED rules' uncalibrated AI groups every run — real extra cost a
     #     cost-sensitive deployment can turn off; ON by default (the honest-surfacing behavior).
     if settings.pending_checks_enabled:
+        pending_started = perf_counter()
         results = results + await _evaluate_pending_checks(
             snapshot,
             materialization_reasoners=reasoners.materialization,
             materialization_cache=caches.materialization,
             consistency_reasoners=reasoners.consistency,
             confidence_floor=confidence_floor,
+            metrics=metrics.pending_checks,
         )
+        metrics.pending_checks.wall_seconds = perf_counter() - pending_started
     # LP-617 — resolve each finding's snapshot content ids back to real document ids, so a finding can
     # point a processor AT the documents it is about instead of naming their categories. Built here,
     # next to its one consumer, rather than threaded from the snapshot build minutes earlier. Mirrors
@@ -1071,7 +1225,9 @@ async def run_verification(
                 # the ones retired before it existed, which is every one on every file already run.
                 await repair_retired_finding_text(db, loan_file_id)
                 # LP-634 — the Need List's own prose, after the passes that settle WHICH needs
-                # exist. Rewrites `reasoning` and nothing else.
+                # exist. Writes `explanation` and nothing else: `reasoning` is this pass's own INPUT,
+                # and feeding its output back in was the first cut's defect. It contains its own
+                # failures in a savepoint (bug-008), so it cannot take this one down with it.
                 await compose_needs(db, loan_file_id=loan_file_id)
     except Exception as exc:
         logger.warning("verification_needs_sync_failed", error=type(exc).__name__, detail=str(exc))
@@ -1119,6 +1275,7 @@ async def run_verification(
                 loan_file_id=snapshot.loan_file_id,
                 snapshot=snapshot,
                 reasoner=reasoners.snapshot_findings,
+                metrics=metrics.cross_source,
             )
             # LP-592 — record the OPEN count on this run. It cannot be derived later: snapshot
             # findings are keyed by loan file and persist across runs by design, so nothing
@@ -1139,11 +1296,21 @@ async def run_verification(
     # finished is exactly what a hung run looks like.
     await clear_progress(run_id, session_factory=reasoners.progress_session)
 
+    # LP-644 §1 — THE ROW THE WHOLE TICKET TURNS ON. Its projections put AI waiting at ~464s of a
+    # 946s run and conclude "~49% is the ceiling for everything in this ticket". Every number behind
+    # that is a call count times a 4.3s mean taken from a FAILING run, so `ai_wall_pct` here is what
+    # decides whether §2-§5 are worth building at all — and `non_ai_seconds` is what they can never
+    # touch, however fast the model gets.
+    # ONE clock read, not two: the printed total and the split must be the same number, or
+    # `ai_wall_seconds + non_ai_seconds` fails to reconcile with `run_wall_seconds` in the log.
+    run_wall_seconds = perf_counter() - run_started
     logger.info(
         "verification_run_done",
         run_id=str(run_id),
         findings=len(findings),
         degradations=len(degradations),
+        run_wall_seconds=round(run_wall_seconds, 1),
+        **metrics.as_log_fields(run_wall_seconds),
     )
     return VerificationRun(
         run_id=run_id,

@@ -19,8 +19,11 @@ import { FileCheck2, Info, Sparkles } from "lucide-react";
 export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
   const state = resolveStatus(NEEDS_STATUS, need.status);
   const proposed = isProposed(need);
-  const isAi = need.origin === "ai_reasoning" || need.origin === "suggestion";
   const showPriority = need.priority !== "standard";
+  // Whether the REASONING below is the AI's. Read straight off the origin, which is
+  // where it has always come from — the merge dropped this line with the source
+  // block it sat beside, and the two uses below outlived it.
+  const isAi = need.origin === "ai_reasoning" || need.origin === "suggestion";
 
   return (
     <li

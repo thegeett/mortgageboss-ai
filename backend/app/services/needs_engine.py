@@ -44,6 +44,7 @@ from app.models.needs_item import (
     NeedsItemOrigin,
     NeedsItemStatus,
 )
+from app.models.property import OccupancyType, Property
 from app.models.stated_financials import StatedAsset, StatedIncomeItem
 from app.services.needs_items import create_needs_item
 
@@ -180,7 +181,8 @@ async def record_need_correction(
 # Satisfaction-matching (deterministic, type-level)
 # --------------------------------------------------------------------------- #
 
-# A need awaiting a document is in one of these (the orthogonal REQUESTED counts).
+# A need awaiting a document is in one of these (the orthogonal REQUESTED counts). Public because
+# the prose pass (LP-634) scopes to the same set: what "open" means is one decision, not two.
 #
 # LP-623 — REJECTED IS OPEN. It was not, and that stranded a need beside the document that satisfies
 # it: LF-ABRS carried two W-2s, one COMPLETED and one NEEDS_REVIEW, and whichever was processed first
@@ -190,7 +192,7 @@ async def record_need_correction(
 #
 # `_VALID_TRANSITIONS` has always permitted REJECTED -> RECEIVED ("a rejected need can re-receive").
 # Only the matcher's own query disagreed.
-_OPEN_STATES = (
+OPEN_STATES = (
     NeedsItemStatus.PENDING,
     NeedsItemStatus.REQUESTED,
     NeedsItemStatus.REJECTED,
@@ -262,12 +264,38 @@ _GOVERNMENT_ID_DOCUMENTS = frozenset(
     }
 )
 
+#: bug-009 REVIEW — the catalog carries TWO interchangeable names for each of these documents, and
+#: the classifier's own indicators describe the same paper:
+#:
+#:   investment_account   "a BROKERAGE or investment account statement showing securities holdings"
+#:   brokerage_statement  "a securities BROKERAGE statement listing stocks, bonds, or funds"
+#:
+#:   retirement_account   "a retirement account statement (401(k), IRA, 403(b))"
+#:   ira_401k             "an IRA or 401(k) retirement-account statement — OVERLAPS the generic
+#:                         retirement_account" (its own indicator says so)
+#:
+#: So aliasing the invented name to ONE of each pair clears the need only when the classifier
+#: happened to pick that label rather than its twin — a coin flip, failing silently in the
+#: direction where a processor chases a document already in the file. That is the LF-ABRS harm
+#: `_NEED_ALTERNATIVES` was created for, so it is the mechanism these want, not an alias.
+_INVESTMENT_ACCOUNT_DOCUMENTS: frozenset[str] = frozenset(
+    {"investment_account", "brokerage_statement"}
+)
+_RETIREMENT_ACCOUNT_DOCUMENTS: frozenset[str] = frozenset({"retirement_account", "ira_401k"})
+#: `pension_statement` is deliberately NOT here: it is INCOME_EMPLOYMENT, an income stream, not an
+#: account balance — a different ask that happens to share the word "retirement".
+
 _NEED_ALTERNATIVES: dict[str, frozenset[str]] = {
     "government_id": _GOVERNMENT_ID_DOCUMENTS,
     # The PRE-LP-623 name for the same need. Every ID need already raised is stored under it, and a
     # stored row cannot be renamed retroactively without touching live files — so the old name keeps
     # working and accepts the same alternatives. New needs are minted as `government_id`.
     "drivers_license": _GOVERNMENT_ID_DOCUMENTS,
+    # The invented names, as heads rather than aliases (see above). Stored under their own slug and
+    # satisfied by either member, so the need clears whichever of the twin labels the classifier
+    # chose.
+    "investment_statement": _INVESTMENT_ACCOUNT_DOCUMENTS,
+    "retirement_statement": _RETIREMENT_ACCOUNT_DOCUMENTS,
 }
 
 
@@ -287,6 +315,23 @@ _NEED_ALTERNATIVES: dict[str, frozenset[str]] = {
 _NEED_TYPE_ALIASES: dict[str, str] = {
     "existing_mortgage_statement": "mortgage_statement",
     "verification_of_employment": "voe",
+    # bug-009 — LP-69 proposes "title_report"; the catalog carries `title_commitment` and
+    # `preliminary_title_report` and not that. So the proposal failed canonicalisation, was stored
+    # raw, and could be cleared by no upload — while ID-7 separately raised a `title_commitment`
+    # need for the SAME document. LF-AWBB carried both: one row a processor could satisfy and one
+    # they could not, for one title search.
+    #
+    # Aliased to `title_commitment` rather than `preliminary_title_report` because that is what
+    # ID-7's own `requires_documents` group names FIRST, and a group's first member is the thing
+    # the file asks for.
+    "title_report": "title_commitment",
+    # bug-009 — the rest of the same family, found by auditing every need type actually on staging
+    # against what a document can satisfy rather than waiting for each to be reported. All six were
+    # AI-proposed and all six were open, so eight rows across the environment named a document no
+    # upload could ever clear. Each maps to the catalog's own name for the SAME document:
+    "credit_authorization": "authorization_to_run_credit",
+    "installment_statement": "installment_loan_statement",
+    "property_tax_statement": "property_tax_bill",
 }
 
 
@@ -295,6 +340,19 @@ _NEED_TYPE_ALIASES: dict[str, str] = {
 #: already on the list", which is a different question and was answered wrongly.
 _EQUIVALENT_NEED_TYPES: dict[str, str] = {
     "drivers_license": "government_id",
+    # bug-009 — the alias above stops the pair FORMING; this collapses the ones already on a file.
+    # Both are needed and they answer different questions: `_NEED_TYPE_ALIASES` decides what a new
+    # proposal is STORED as, and a stored row cannot be renamed retroactively without touching live
+    # files (LP-623's reasoning, unchanged). This map is what `repair_needs_for_file` groups on, so
+    # it is what merges LF-AWBB's existing pair. Preventing a defect does not undo it.
+    "title_report": "title_commitment",
+    # The same six, for the same two reasons: the alias above stops the pair forming, this collapses
+    # a pair already on a file.
+    "credit_authorization": "authorization_to_run_credit",
+    "installment_statement": "installment_loan_statement",
+    "investment_statement": "investment_account",
+    "retirement_statement": "retirement_account",
+    "property_tax_statement": "property_tax_bill",
 }
 
 
@@ -315,6 +373,53 @@ def equivalent_need_type(needs_type: str | None) -> str | None:
         return None
     slug = needs_type.strip().lower()
     return _EQUIVALENT_NEED_TYPES.get(slug, slug)
+
+
+def satisfiable_need_types() -> list[str]:
+    """Every need type an uploaded document can actually satisfy, sorted (bug-009).
+
+    THE ROOT CAUSE THE ALIASES ONLY PATCH. The reasoning prompt used to say "use a concise lowercase
+    snake_case need_type when an obvious document type fits" and give four examples, so the model
+    invented plausible names for types that do not exist — `title_report`, `credit_card_statement`,
+    `investment_statement`, `retirement_statement`, `property_tax_statement`, `credit_authorization`.
+    Satisfaction matches ``needs_type == document_type``, so each became a row on a real file that no
+    upload could ever clear, and each was found one at a time by someone noticing it.
+
+    The classifier already solved this: its type list is RENDERED FROM THE CATALOG
+    (`app.ai.classification_prompt`), so the prompt and the catalog cannot drift. This is the same
+    move for the reasoner.
+
+    The four sources are the same four `canonical_need_type` resolves through, in the same order, so
+    a type this function offers is a type that function accepts.
+    """
+    return sorted(
+        set(CATALOG)
+        | set(_UMBRELLA_NEED_CATEGORY)
+        | set(_NEED_ALTERNATIVES)
+        | set(_NEED_TYPE_ALIASES)
+    )
+
+
+def _is_unactionable_alias(needs_type: str | None) -> bool:
+    """A STORED type that no document can ever match, reachable only through an alias (bug-009).
+
+    Satisfaction matches ``needs_type == document_type`` on the row as stored, so a type the catalog
+    does not carry can never be cleared by any upload no matter what the alias map later says —
+    aliasing changes what a NEW proposal is stored as, and does not rewrite a row already on a file.
+
+    ``title_report`` is the case: LP-69 proposes it, the catalog defines ``title_commitment`` and
+    ``preliminary_title_report`` and not that, so the row sits on the list forever.
+
+    This is the second proof of redundancy the merge can use, alongside "the floor minted it". A row
+    that CANNOT be satisfied is not a requirement anyone can act on, so collapsing it into an
+    equivalent row that can be is not taking anything away from a processor.
+    """
+    if not needs_type:
+        return False
+    slug = needs_type.strip().lower()
+    if slug in CATALOG or slug in _UMBRELLA_NEED_CATEGORY or slug in _NEED_ALTERNATIVES:
+        return False  # a document can match it directly — not our case
+    return slug in _NEED_TYPE_ALIASES
 
 
 def canonical_need_type(proposed: str | None) -> str | None:
@@ -433,7 +538,7 @@ async def apply_document_to_needs(db: AsyncSession, document: Document) -> Needs
             NeedsItem.needs_type.in_(
                 [document.document_type, *umbrella_types, *aliased, *alternatives]
             ),
-            NeedsItem.status.in_(_OPEN_STATES),
+            NeedsItem.status.in_(OPEN_STATES),
         )
         .order_by(_MATCH_PRIORITY, NeedsItem.created_at)
         .limit(1)
@@ -532,6 +637,47 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
         # The furthest-along row wins; ties break on age, so the outcome does not depend on row order.
         group.sort(key=lambda n: (_PROGRESS_RANK.get(n.status, 0), -n.created_at.timestamp()))
         keeper = group[-1]
+        # bug-009 REVIEW — the survivor is chosen by PROGRESS, not by whether a document can ever
+        # satisfy it. So when the unmatchable row is the further along one (a processor marked the
+        # `title_report` row received by hand), it becomes the keeper and the clearable
+        # `title_commitment` row is waived — leaving the file with ONLY a need no upload can reach.
+        # Strictly worse than doing nothing.
+        #
+        # The framing that stalls here is "preserve the progress OR prefer the actionable row". It is
+        # a false choice: RENAMING the keeper does both. The alias map is a declaration that these
+        # two types are the same requirement, so rewriting `title_report` -> `title_commitment` on a
+        # row changes nothing about what was asked for — it changes only whether an upload can ever
+        # match it. Progress is kept, and the row becomes satisfiable.
+        #
+        # This does mutate the keeper, which the merge otherwise never does. That convention exists
+        # to stop the merge SILENTLY REVISING a requirement; a rename between declared-equivalent
+        # types is not a revision, and leaving the row unsatisfiable to honour the convention would
+        # protect the rule at the processor's expense.
+        #
+        # NOT FOR A MANUAL KEEPER. There the stored string is what a processor typed, and correcting
+        # their words underneath them is exactly what the MANUAL guard below exists to prevent — so
+        # that case is still only reported.
+        if _is_unactionable_alias(keeper.needs_type) and any(
+            not _is_unactionable_alias(n.needs_type) for n in group
+        ):
+            retyped = canonical_need_type(keeper.needs_type)
+            if retyped and keeper.origin is not NeedsItemOrigin.MANUAL:
+                logger.info(
+                    "needs_merge_retyped_the_keeper",
+                    loan_file_id=str(loan_file_id),
+                    was=keeper.needs_type,  # a document type, not PII
+                    now=retyped,
+                    status=keeper.status.value,
+                )
+                keeper.needs_type = retyped
+                touched += 1
+            else:
+                logger.warning(
+                    "needs_merge_kept_an_unsatisfiable_row",
+                    loan_file_id=str(loan_file_id),
+                    kept_type=keeper.needs_type,  # a document type, not PII
+                    kept_status=keeper.status.value,
+                )
         for redundant in group[:-1]:
             # ONLY A ROW THE FLOOR MINTED MAY BE MERGED AWAY. The defect being repaired is the FLOOR
             # creating a second row under a renamed type, so a floor-origin duplicate is provably
@@ -551,7 +697,27 @@ async def repair_needs_for_file(db: AsyncSession, loan_file_id: UUID) -> int:
             # received need is a fixed point"), applied to the axis that matters here. It is NOT that
             # module's PROPOSED+PENDING test: the floor ships CONFIRMED, so that test would make this
             # repair a no-op against its own motivating case — LF-ABRS's pair is VERIFIED + REJECTED.
-            if redundant.origin is not NeedsItemOrigin.FLOOR:
+            # bug-009 REVIEW — a SECOND provably-redundant case, because the FLOOR test alone
+            # missed the pair this repair was written for. LP-69 creates its proposals with
+            # origin AI_REASONING (`needs_ai.py`), not FLOOR, so the `title_report` row on a live
+            # file was skipped here and the merge did nothing — while a test using a FLOOR-origin
+            # fixture passed.
+            #
+            # A row whose stored type no document can ever match is redundant for a different
+            # reason than the floor's: it is not a requirement a processor can act on, it is an
+            # artifact. Collapsing it into an equivalent row that CAN be satisfied takes nothing
+            # away.
+            #
+            # MANUAL IS STILL NEVER MERGED, whatever its type. The protection this guard exists for
+            # is a processor's own ask — the Wells Fargo statement in the paragraph above — and a
+            # mistyped manual need is something they can see and correct, not something to waive
+            # underneath them.
+            mergeable = redundant.origin is NeedsItemOrigin.FLOOR or (
+                redundant.origin is not NeedsItemOrigin.MANUAL
+                and _is_unactionable_alias(redundant.needs_type)
+                and not _is_unactionable_alias(keeper.needs_type)
+            )
+            if not mergeable:
                 logger.info(
                     "needs_duplicate_merge_skipped",
                     loan_file_id=str(loan_file_id),
@@ -746,6 +912,22 @@ _PER_BORROWER_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = [
 _PER_FILE_UNIVERSAL: list[tuple[str, str, DocumentCategory]] = []
 
 
+async def _subject_property(db: AsyncSession, loan_file_id: UUID) -> Property | None:
+    """The file's subject property row, or None (LP-642).
+
+    Returns None on the ambiguous case too — more than one active row — rather than picking. A file
+    cannot hold two today (`uq_properties_loan_file_id` is a plain UNIQUE on `loan_file_id`), so this
+    is a guard against that constraint being relaxed, not a live path; `rental_treatment` makes the
+    same distinction and says the same thing about it.
+    """
+    rows = (
+        await db.scalars(
+            only_active(select(Property).where(Property.loan_file_id == loan_file_id), Property)
+        )
+    ).all()
+    return rows[0] if len(rows) == 1 else None
+
+
 async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsItem]:
     """Seed the THIN deterministic floor of near-certain needs.
 
@@ -889,6 +1071,44 @@ async def seed_floor_needs(db: AsyncSession, loan_file: LoanFile) -> list[NeedsI
             )
         )
         specs.append(("payoff_statement", "Payoff statement", DocumentCategory.PROPERTY, refi_src))
+    # LP-642 — AN INVESTMENT SUBJECT NEEDS A RENT SCHEDULE, and until now nothing asked for one.
+    #
+    # Fannie B3-3.8-02 (09/02/2026) makes Form 1007 (one unit) or Form 1025 (two-to-four) MANDATORY
+    # where the subject's rental income is used to qualify. LF-ZE9N is the shape this is for: an
+    # investment purchase whose DTI gates because no document on the file states what the subject will
+    # rent for — and the processor was shown a blanked ratio with nothing to send the borrower.
+    #
+    # THE UNIT COUNT PICKS THE FORM, and an ABSENT count does not silently pick 1007. Asking for the
+    # wrong form is a wasted round-trip with the borrower, so an unknown count asks for neither and the
+    # gate keeps saying why — honest, and recoverable once the count is known.
+    if (subject := await _subject_property(db, loan_file.id)) is not None and (
+        subject.occupancy_type is OccupancyType.INVESTMENT
+    ):
+        units = subject.financed_unit_count
+        form = (
+            ("comparable_rent_schedule", "Comparable rent schedule (Form 1007)")
+            if units == 1
+            else ("small_residential_income_appraisal", "Rent schedule (Form 1025)")
+            if units is not None and 2 <= units <= 4
+            else None
+        )
+        if form is not None:
+            specs.append(
+                (
+                    form[0],
+                    form[1],
+                    DocumentCategory.PROPERTY,
+                    [
+                        {
+                            "kind": "mismo_field",
+                            "label": (
+                                "The subject is an investment property, so its market rent must be "
+                                f"documented to qualify the loan ({units}-unit)"
+                            ),
+                        }
+                    ],
+                )
+            )
     if await _has_stated_assets(db, loan_file.id):
         specs.append(
             (

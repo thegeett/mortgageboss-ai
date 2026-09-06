@@ -21,15 +21,24 @@ from app.models.verification_progress import VerificationProgress
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rule_engine.reasons import document_label
-from app.verification.rules.specs import RuleSpec, load_rule_spec
+from app.verification.rules.specs import RuleSpec, RuleSpecError, load_rule_spec
 
 
 def _rule_spec(rule_id: str) -> RuleSpec | None:
     """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
-    rule_id with no spec file."""
+    rule_id with no spec file.
+
+    ⚠️ ``RuleSpecError`` IS THE ONE THAT ACTUALLY FIRES. ``load_rule_spec`` raises
+    :class:`RuleSpecNotFound` — a subclass of ``Exception``, NOT of ``OSError``/``KeyError``/
+    ``ValueError`` — so the tolerance this function's own docstring promised did not exist: a finding
+    whose rule has no spec file raised straight out of ``RuleFindingPublic.from_model`` and 500'd the
+    whole verification-status response. LP-640 made that reachable on ordinary files (its synthetic
+    ``UNIDENTIFIED-DOCUMENTS`` id carries no spec by design), and a genuinely retired rule id would
+    have done the same to every file still holding one of its findings.
+    """
     try:
         return load_rule_spec(rule_id)
-    except (OSError, KeyError, ValueError):
+    except (RuleSpecError, OSError, KeyError, ValueError):
         return None
 
 

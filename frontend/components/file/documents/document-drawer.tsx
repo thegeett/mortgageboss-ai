@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Sheet,
   SheetContent,
@@ -16,25 +17,27 @@ import {
   useDeleteDocument,
   useDevTextLayer,
   useDocumentDetail,
+  useDocumentTypes,
   useDocumentVersions,
   useOverrideDocumentType,
   useReplaceDocument,
+  useReprocessDocument,
   useResolveStaleness,
 } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { humanize } from "@/lib/format";
 import {
-  OVERRIDE_TYPE_OPTIONS,
   formatConfidence,
   formatFileSize,
+  isTerminalStatus,
   packageReadyBadge,
-  typeReExtracts,
   validateUploadFile,
   versionLabel,
 } from "@/lib/loan-files/documents";
 import { notifyError, notifyStarted, notifySuccess } from "@/lib/toast";
 import type { DocumentDetailResponse, DocumentResponse, DocumentTier } from "@/lib/types/document";
 import { cn } from "@/lib/utils";
+import { isAxiosError } from "axios";
 import { format } from "date-fns";
 import {
   Check,
@@ -52,6 +55,8 @@ import { useMemo, useRef, useState } from "react";
 import { DocumentStatusBadge } from "./document-status";
 import { ExtractionView } from "./extraction-view";
 import { GenericAnalysisView } from "./generic-analysis-view";
+import { ReprocessDocumentButton } from "./reprocess-document";
+import { TypeOverride } from "./type-override";
 
 /** Non-production only — matches the LP-40 dev endpoint's gating. */
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -73,91 +78,6 @@ function fmtDate(iso: string): string {
   }
 }
 
-/**
- * Manual document-type override (LP-44) — the human-correction half of the loop.
- * When the AI is unsure (`needs_review`) or simply wrong, the processor sets the
- * authoritative type here; saving PATCHes the document and the server re-runs
- * extraction for the corrected type (relabel-only for types we don't extract).
- */
-function TypeOverride({ summary, fileId }: { summary: DocumentResponse; fileId: string }) {
-  const override = useOverrideDocumentType(fileId, summary.id);
-  const [selected, setSelected] = useState(summary.document_type ?? "");
-  const needsReview = summary.status === "needs_review";
-
-  // Keep the current type selectable even when it isn't one of the standard options.
-  const options = useMemo(() => {
-    const current = summary.document_type;
-    if (current && !OVERRIDE_TYPE_OPTIONS.some((o) => o.value === current)) {
-      return [{ value: current, label: humanize(current) }, ...OVERRIDE_TYPE_OPTIONS];
-    }
-    return OVERRIDE_TYPE_OPTIONS;
-  }, [summary.document_type]);
-
-  const changed = selected !== "" && selected !== summary.document_type;
-
-  function handleSave() {
-    override.mutate(selected, {
-      onSuccess: () =>
-        notifySuccess({
-          title: `Type set to ${humanize(selected)}`,
-          consequence: typeReExtracts(selected)
-            ? "The document is being read again; its fields update when that finishes."
-            : "Relabeled only — this type isn’t extracted, so no fields change.",
-        }),
-      onError: (error) =>
-        notifyError({ title: "Couldn’t update the type", whatToDo: getErrorMessage(error) }),
-    });
-  }
-
-  return (
-    <section className="mt-6">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <PencilLine className="h-3.5 w-3.5" />
-        Correct type
-      </h3>
-      {needsReview && (
-        <p className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          The AI wasn’t confident about this classification — confirm or correct the type below.
-        </p>
-      )}
-      <div className="mt-3 flex items-center gap-2">
-        <select
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          disabled={override.isPending}
-          className="h-9 flex-1 rounded-md border border-input bg-card px-2.5 text-field text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60 md:text-sm"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <Button
-          type="button"
-          size="sm"
-          onClick={handleSave}
-          disabled={!changed || override.isPending}
-          className="gap-1.5"
-        >
-          {override.isPending && <Spinner className="h-3.5 w-3.5" />}
-          Apply
-        </Button>
-      </div>
-      <p className="mt-1.5 text-[11px] text-muted-foreground">
-        {typeReExtracts(selected)
-          ? "Saving re-runs extraction for this type."
-          : "This type is recorded only — no data is extracted."}
-      </p>
-    </section>
-  );
-}
-
-/**
- * Explicit replace (Model C, LP-71) — the processor deliberately supersedes THIS
- * document with a new upload (old → historical, new → current, both kept). A hidden
- * file input + a button; reused in the staleness warning and the footer.
- */
 function ReplaceButton({
   summary,
   fileId,
@@ -497,10 +417,27 @@ export function DocumentDrawer({
   onClose: () => void;
 }) {
   const open = summary !== null;
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
-      <SheetContent>
-        {summary && <DrawerBody summary={summary} fileId={fileId} onClose={onClose} />}
+      <SheetContent
+        // ESCAPE BELONGS TO THE INNERMOST THING THAT IS OPEN. Radix dismisses the Sheet from a
+        // capture-phase listener on `document`, which runs before any handler inside it — so with
+        // the type picker open, Escape closed the whole drawer and lost the correction in
+        // progress, and no amount of stopping the event lower down could prevent it (LP-638
+        // review). The child says when it is open; this stands down while it is.
+        onEscapeKeyDown={(event) => {
+          if (typePickerOpen) event.preventDefault();
+        }}
+      >
+        {summary && (
+          <DrawerBody
+            summary={summary}
+            fileId={fileId}
+            onClose={onClose}
+            onTypePickerOpenChange={setTypePickerOpen}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -510,10 +447,12 @@ function DrawerBody({
   summary,
   fileId,
   onClose,
+  onTypePickerOpenChange,
 }: {
   summary: DocumentResponse;
   fileId: string;
   onClose: () => void;
+  onTypePickerOpenChange: (open: boolean) => void;
 }) {
   const { data: detail, isPending, isError, refetch } = useDocumentDetail(summary.id);
   const del = useDeleteDocument(fileId);
@@ -576,6 +515,18 @@ function DrawerBody({
             File: {summary.original_filename}
           </p>
         )}
+        {/*
+          WHY THE LAST RUN DID NOT FINISH (LP-637 review). The pipeline has always written this
+          column on the strength of "it is the only place a processor looks", and until now no
+          response schema carried it and nothing rendered it — so LF-ZE9N's oversized document read
+          "Processing / uncategorized" with no explanation, which is the complaint the whole
+          feature was opened for. The text is PII-safe by the writer's own module invariant.
+        */}
+        {summary.processing_error && (
+          <p className="rounded-md border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+            {summary.processing_error}
+          </p>
+        )}
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -592,7 +543,11 @@ function DrawerBody({
         <StalenessWarning summary={summary} fileId={fileId} />
 
         {/* Manual type override (LP-44) */}
-        <TypeOverride summary={summary} fileId={fileId} />
+        <TypeOverride
+          summary={summary}
+          fileId={fileId}
+          onPickerOpenChange={onTypePickerOpenChange}
+        />
 
         {/* Tier-aware detail (LP-72) — Tier 1 fields / Tier 2 summary / Tier 3 findings. */}
         <TierDetail

@@ -79,6 +79,8 @@ export interface DocumentResponse {
   summary: string | null;
   classification_confidence: number | null;
   status: DocumentStatus;
+  /** Why the last run could not finish, in words meant for a processor (LP-637). */
+  processing_error: string | null;
   upload_source: UploadSource;
   uploaded_by_user_id: string | null;
   created_at: string;

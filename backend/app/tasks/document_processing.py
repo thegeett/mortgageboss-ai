@@ -39,27 +39,40 @@ worker async session (``task_session``).
 (ids, status, classified type, confidence, tokens/cost).
 """
 
+from datetime import timedelta
 from uuid import UUID
 
 import structlog
 from celery import Task
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.classification import classify_document
-from app.ai.client import INFRA_RATE_LIMITED
+from app.ai.client import is_rerunnable_infra
 from app.ai.cost import estimate_cost
 from app.ai.extraction import EXTRACTORS, Extractor
 from app.ai.extraction.consistency import run_consistency_checks
 from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
-from app.documents.catalog import get_category, get_tier
+from app.documents.catalog import (
+    explain_catalog_match,
+    get_category,
+    get_tier,
+    match_catalog_type,
+)
 from app.models.activity_log import ActivityType
-from app.models.document import Document, DocumentStatus, Tier
+from app.models.base import utcnow
+from app.models.document import (
+    PIPELINE_IN_FLIGHT_STATUSES,
+    PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS,
+    Document,
+    DocumentStatus,
+    Tier,
+)
 from app.models.document_finding import DocumentFindingType
-from app.models.extraction import ExtractionStatus
+from app.models.extraction import ConfidenceSource, ExtractionStatus
 from app.models.helpers import only_active
 from app.services.activity_log import log_activity
 from app.services.document_borrower_links import assign_document_borrower_links
@@ -67,6 +80,7 @@ from app.services.document_findings import (
     coerce_finding_type,
     create_document_finding,
     record_findings_from_extraction,
+    supersede_open_findings,
 )
 from app.services.extractions import create_extraction_version
 from app.storage import get_storage_backend
@@ -106,6 +120,105 @@ def _enqueue_needs_update(loan_file_id: UUID, document_id: UUID) -> None:
         logger.warning("needs_update_enqueue_failed", document_id=str(document_id))
 
 
+async def _claim_for_processing(
+    db: AsyncSession, document_id: UUID, *, into: DocumentStatus = DocumentStatus.CLASSIFYING
+) -> bool:
+    """Take exclusive ownership of a document's pipeline run, atomically (LP-637).
+
+    One conditional UPDATE: move to ``CLASSIFYING``, but ONLY from a status that is not already
+    in flight. Whoever the database lets through owns the run; every other task gets ``False`` and
+    returns without touching the document.
+
+    ``PIPELINE_IN_FLIGHT_STATUSES`` is the same set the API refuses on, imported rather than
+    restated — two
+    definitions of "already running" would drift, and the API's is the one a processor is shown.
+
+    Returns ``False`` for a document that no longer exists, which is correct: there is nothing to
+    claim, and the caller's own missing-document branch has already run.
+
+    AN IN-FLIGHT STATUS ALONE DOES NOT BLOCK THE CLAIM, and it must not. A worker killed mid-run —
+    an OOM, a deploy, or LP-630's nightly 22:00 shutdown of staging's services — leaves the status
+    set with nobody behind it. On status alone that document was stuck for good: refused by the
+    reprocess endpoint, skipped by bulk, and unclaimable by any later task. So the claim also
+    succeeds when the row has not been written for longer than a live worker could possibly go
+    without writing it (:data:`PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS`), which is the same
+    judgement :func:`is_pipeline_in_flight` makes for the API.
+
+    THERE IS NO RETRY ESCAPE HATCH, and a draft of this function had one. The reasoning for it was
+    that a retry of the task holding the claim would find its own status set and give up — but a
+    retry can only ever be scheduled by a failure BEFORE the claim is taken. Everything after it is
+    inside the pipeline's `try`, which absorbs every exception into a terminal status, and the one
+    it re-raises (`SoftTimeLimitExceeded`) is in `terminal_on` and is never retried. So a retrying
+    task has never owned anything, and letting it claim unconditionally only let it steal a live
+    run from a duplicate that had legitimately won — reintroducing the double-run this exists to
+    prevent, through its own fix.
+    """
+    abandoned_before = utcnow() - timedelta(seconds=PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS)
+    claimable = or_(
+        Document.status.not_in(PIPELINE_IN_FLIGHT_STATUSES),
+        Document.updated_at < abandoned_before,
+    )
+    result = await db.execute(
+        update(Document)
+        .where(Document.id == document_id, claimable)
+        .values(status=into)
+        .returning(Document.id)
+    )
+    claimed = result.scalar_one_or_none() is not None
+    # Committed immediately: the claim only excludes a second worker once it is VISIBLE to one.
+    await db.commit()
+    return claimed
+
+
+#: The phrase that marks a document refused for payload SIZE, and the sentence built around it.
+#:
+#: Shared, not restated. `app/api/documents.py` reads this marker off `processing_error` to keep
+#: such a document out of the bulk-reprocess default, and an earlier version had the reader holding
+#: its own copy of the phrase with a test pinning the two together. A test that catches drift is
+#: weaker than a structure that cannot drift: the marker is a substring of the message here by
+#: construction, so rewording the sentence cannot silently disable the filter.
+#:
+#: THE COPY ASSERTS PERMANENCE — "re-reading won't help" — and it is now said only when
+#: `fit_pdf_to_payload_budget` actually reports `still_over_budget`, carried out through
+#: `ClassificationResult.payload_over_budget`. An earlier version of this note claimed that basis
+#: while nothing read the flag: the branch keyed on the infra KIND, and the comment recorded a
+#: dependency it did not enforce.
+#:
+#: What remains unguarded is a change to trimming itself. If it ever gains a way to shrink a page —
+#: downscaling a scan, say — a file refused today might fit tomorrow, and two things go wrong
+#: together: this sentence, and the bulk exclusion that keeps such documents from being retried
+#: automatically. No test can detect "trimming got smarter", so this is a pointer for whoever does
+#: it. The per-document reprocess stays available meanwhile, which bounds the cost to "a processor
+#: must ask by hand".
+PAYLOAD_TOO_LARGE_MARKER = "too large for the AI to read"
+PAYLOAD_TOO_LARGE_MESSAGE = (
+    f"This file is {PAYLOAD_TOO_LARGE_MARKER}. Re-reading won't help — split it into smaller "
+    "files or upload a lower-resolution scan."
+)
+
+
+def _classification_failure_message(infra_failure: str, *, payload_over_budget: bool) -> str:
+    """What a processor is told when classification failed on infrastructure (LP-637).
+
+    A named function so the choice can be tested as a PROPERTY over every infra kind rather than
+    over the cases that happened to come to mind. Two versions of this shipped keyed on the wrong
+    thing, both the same mistake — a proxy standing in for a signal that exists:
+
+    * `is_rerunnable_infra`, whose set excludes `INFRA_FAILED`, so auth and permission failures were
+      told their file was too large;
+    * `infra_failure == INFRA_OVERSIZED`, which `infra_failure_kind` returns for EVERY non-throttle
+      HTTP 400 — a corrupt or encrypted PDF, or a misconfigured model id, none of them size
+      problems. A 300 KB unreadable scan was told to be split, and then dropped from bulk forever.
+
+    ``payload_over_budget`` is the actual measurement: the payload did not fit after trimming to the
+    smallest page count, so this file cannot be sent at any size. It is the ONLY thing that earns
+    the permanent voice, and it is what `_refused_for_size` keys the bulk exclusion on.
+    """
+    if payload_over_budget:
+        return PAYLOAD_TOO_LARGE_MESSAGE
+    return f"Couldn't read this document ({infra_failure}) — try re-reading it."
+
+
 async def _process_document(db: AsyncSession, document_id: str) -> None:
     """The core pipeline for one document. Always reaches a terminal status.
 
@@ -122,12 +235,53 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         logger.info("process_document_missing", document_id=document_id)
         return
 
+    # --- Claim the document, or leave it to the worker that already has it --- #
+    #
+    # LP-637 — THE RACE THE STATUS GUARDS COULD NOT CLOSE. The API refuses a reprocess for a
+    # document already in flight, but a status only moves when a WORKER starts: two clicks seconds
+    # apart both read the row as it was before either was picked up, and both enqueue. Bulk
+    # multiplies that by the batch. Two overlapping runs both write a current extraction, and
+    # `UNIQUE (document_id) WHERE is_current` admits one — the loser absorbs the IntegrityError
+    # into FAILED, so the document reads FAILED while carrying the winner's good extraction.
+    #
+    # Closed HERE rather than at the enqueue, because this is the only place that can be
+    # authoritative: the claim is a conditional UPDATE, so the database decides the winner and a
+    # duplicate task simply finds nothing to do. Enqueue-side deduplication cannot, whatever it
+    # keys on — the tasks are already in the queue by the time anyone could compare them.
+    #
+    # A DATABASE CLAIM RATHER THAN THE REDIS LOCK used for needs (`loan_file_needs_lock`). Note the
+    # claim DOES expire — see `PIPELINE_PRESUMED_ABANDONED_AFTER_SECONDS` — so the difference is not
+    # "no timeout"; an earlier version of this comment rejected timeouts while the code already used
+    # one. The difference is that the expiry lives on the row the work is about, so the API's
+    # refusal, the bulk skip and this claim all read one fact, and a claim cannot outlive the row or
+    # be lost to a cache eviction. The timeout objection was also overstated: a window derived from
+    # the SIGKILL ceiling cannot expire under a live run, because past that ceiling there is none.
+    if not await _claim_for_processing(db, document.id):
+        logger.info("process_document_already_claimed", document_id=document_id)
+        return
+
     try:
         content = await get_storage_backend().read(document.storage_path)
 
+        # --- Supersede the previous run's findings (LP-637 review) ----------- #
+        # Findings are not versioned the way extractions are, and nothing removed the prior run's.
+        # Harmless while this ran exactly once per document, at upload; the reprocess endpoint
+        # makes it reachable, and BEFORE classification is the only place that covers the case
+        # that matters — a document re-classifying away from Tier 3 never enters the Tier 3
+        # branch, so a cleanup living there would leave its stale findings standing. A no-op on
+        # first upload, where there are none.
+        superseded = await supersede_open_findings(db, document=document)
+
         # --- Classify -------------------------------------------------------- #
-        document.status = DocumentStatus.CLASSIFYING
+        # The status is already CLASSIFYING — `_claim_for_processing` set it, which is what makes
+        # the claim visible to a second worker. Committing here still settles the superseding above.
         await db.commit()
+        if superseded:
+            logger.info(
+                "document_findings_superseded",
+                document_id=document_id,
+                superseded=superseded,
+            )
         classification = await classify_document(content, document.mime_type)
 
         # --- Infrastructure-failure gate (LP-462) → NEEDS_REVIEW, but DISTINCT - #
@@ -141,6 +295,32 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # stays re-runnable. (Same terminal status; a different, honest cause.)
         if classification.infra_failure is not None:
             document.status = DocumentStatus.NEEDS_REVIEW
+            # SAY WHY, ON THE DOCUMENT (LP-637). This branch knew the cause, logged it, and wrote an
+            # activity entry — and left `processing_error` empty, so the only place a processor
+            # looks said nothing at all. LF-ZE9N's last unidentified document is the worked example:
+            # a 25 MB scan that encodes to 33 MB against a 23 MB budget, correctly refused by the
+            # LP-636 payload cap, and shown as "Processing / uncategorized" with no explanation.
+            # The extraction branches below have always written this column; classification never
+            # did, and reprocess now CLEARS it, so any older text is gone too.
+            #
+            # The two voices are the re-runnable split `infra_failure_kind` already draws, reused
+            # rather than restated: a throttle or a dropped connection is worth another go, and an
+            # oversized payload is not — re-reading the same file produces the same refusal, which
+            # is a promise the UI must not make.
+            # THE PERMANENT VOICE IS FOR OVERSIZED ALONE, and keying it on `is_rerunnable_infra`
+            # was wrong (LP-637 review). That set is {rate_limited, connection, server_error}, so
+            # INFRA_FAILED — which `infra_failure_kind` returns for auth, permission and
+            # AccessDenied — fell into the else branch and told a processor their file was too
+            # large and to go split it. False, actively wasteful advice, and it also excluded the
+            # document from bulk reprocess forever through `_refused_for_size`, when re-reading is
+            # exactly what fixes it once the credential is. ADR-387 records out-of-band credentials
+            # as a live concern here, so this is the likely route rather than a hypothetical one —
+            # the same shape that made an expired credential the one outage the breaker could never
+            # trip (LP-635).
+            document.processing_error = _classification_failure_message(
+                classification.infra_failure,
+                payload_over_budget=classification.payload_over_budget,
+            )
             await log_activity(
                 db,
                 loan_file_id=document.loan_file_id,
@@ -176,6 +356,17 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         document.tier = get_tier(effective_type)
         document.category = get_category(effective_type)
         document.classification_confidence = classification.confidence
+        # LP-636: keep the model's OWN name for the document. LP-463 emits it before the
+        # constrained pick and calls it "a more reliable signal than the constrained pick";
+        # until now it was used for the type_matches_document self-check and discarded, so a
+        # confident `unknown` the model had already named correctly left no trace. Stored, not
+        # acted on: routing is unchanged by this line.
+        #
+        # NOT logged and NOT put in the activity detail. It is model prose over the document and
+        # can carry a borrower name, which the C7 scrub cannot catch (it matches identifier
+        # shapes, and a name is not digit-shaped) — activity detail is readable through the
+        # readonly query path, so a name there would reach a terminal and a transcript.
+        document.document_name = classification.document_name
         document.status = DocumentStatus.CLASSIFIED
         await db.commit()
         await log_activity(
@@ -211,13 +402,77 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
         # terminal status. Catalog types are tried first (below); free extraction is
         # the fallback for the flagged / declined tail, never the default.
         review_reason: str | None = None
+        missed_catalog_type: str | None = None
         if type_mismatch:
             review_reason = "type_mismatch"
         elif classification.confidence < _CONFIDENCE_THRESHOLD:
             review_reason = "low_confidence"
+        elif effective_type == "unknown":
+            # LP-636 defect 5 — a CONFIDENT `unknown` whose own name says otherwise.
+            #
+            # A high-confidence `unknown` means "confident it is none of the known types" and
+            # routes to Tier 3, completing with no flag (LP-59). That contract is right when the
+            # model is right, and has no answer for a model that is confidently wrong. On LF-ZE9N
+            # four Tier-1 types went this way — a driver's licence, a closing disclosure, a credit
+            # report and an earnest-money receipt — each completed, each with no typed data, none
+            # of them in anyone's queue.
+            #
+            # The evidence was already in hand and thrown away: `document_name` is emitted BEFORE
+            # the constrained pick and LP-463 calls it "a more reliable signal than the constrained
+            # pick" — "on an `unknown` this names the missing catalog type".
+            #
+            # FLAGGED, NEVER APPLIED. Applying a type from a name match would put a wrong schema on
+            # a document, which is the T4→w2 harm LP-463 exists to prevent, and this is a text
+            # match rather than a judgement. So the document takes exactly the path a flagged
+            # document already takes — read via Tier 3, terminal NEEDS_REVIEW, needs NOT advanced —
+            # and a human applies the type through the LP-44 override. A false positive costs one
+            # review; applying one would cost wrong data.
+            # THE DECISION COMES FROM THE MATCHER, the explanation only from the explainer
+            # (LP-639 review). Both existed, but the flag was being taken from
+            # `explain_catalog_match(...).matched` — so `match_catalog_type` had no production
+            # caller at all, and the design note justifying the second pass ("observability must not
+            # sit on the path that decides whether a processor sees a flag") described something
+            # that was no longer true. An edit to an early return in the explainer would have
+            # silently changed who gets flagged.
+            missed_catalog_type = match_catalog_type(classification.document_name)
+            if missed_catalog_type is not None:
+                review_reason = "unknown_names_catalog_type"
+            # LP-639 — SAY WHY THIS DOCUMENT IS UNEXPLAINED, without saying what it is.
+            #
+            # A confident `unknown` was the one outcome nobody could account for after the fact. The
+            # only surviving evidence is the model's own `document_name`, and that is free text that
+            # can quote borrower details, so it is never logged or stored. So "why is this
+            # uncategorised?" could only be answered by inference — and on LF-ZE9N the inference was
+            # wrong twice: once from `has_full_text=False`, a field LP-463 stopped populating so it
+            # reads False for every document, and once by assuming a scan.
+            #
+            # Every value here is a count, a boolean or a catalog SLUG. The name never appears.
+            # `near_miss` with `rejected_by=coverage` is the answer that pays for the whole line: it
+            # means the model DID name a catalog type and this matcher turned it away, which is a
+            # different bug from the model not recognising the document, and they need opposite
+            # fixes.
+            explanation = explain_catalog_match(classification.document_name)
+            logger.info(
+                "classification_unknown_explained",
+                document_id=str(document.id),
+                confidence=classification.confidence,
+                name_present=explanation.name_present,
+                name_words=explanation.name_words,
+                matched=explanation.matched,
+                near_miss=explanation.near_miss,
+                near_miss_coverage=explanation.near_miss_coverage,
+                rejected_by=explanation.rejected_by,
+            )
 
         if review_reason is not None:
-            logger.info("document_needs_review", document_id=str(document.id), reason=review_reason)
+            logger.info(
+                "document_needs_review",
+                document_id=str(document.id),
+                reason=review_reason,
+                # The catalog SLUG, not the model's prose — a closed vocabulary, so it is safe
+                # here and in the activity detail where `document_name` is not.
+                **({"suggested_type": missed_catalog_type} if missed_catalog_type else {}),
+            )
             await _tier3_analyze(db, document, content, review_reason=review_reason)
             # A flagged document's LABEL is not trusted, so it must NOT auto-advance a need (the pre-LP-463
             # low-confidence gate returned here too). Its untrusted document_type would drive a matching OPEN
@@ -379,6 +634,14 @@ async def _extract_branch(
     # (INFRA_OVERSIZED → a graceful FAILED that LP-471 falls back to Tier-3). Do NOT add a naive page cap: a
     # 069-style multi-document PACKAGE keeps its 1003 liabilities/REO deep in the file, so a cap trades an
     # honest crash for SILENT wrong data. The real fix is the splitter (its own ticket) — LP-473 ADR.
+    #
+    # LP-636 defect 4 DELIBERATELY STOPS HERE. Its byte-aware cap
+    # (``fit_pdf_to_payload_budget``) went to classification and Tier 3 — the two paths where
+    # trimming is already the accepted strategy — and NOT to this one. The ticket had proposed
+    # capping here too; that was wrong, for the reason above: this cap works by dropping pages, so
+    # applying it to a typed extractor would produce exactly the silent partial read the paragraph
+    # above forbids. An honest OVERSIZED failure here is the better outcome, and it is not a dead
+    # end — it falls back to Tier 3, which IS byte-capped, so the document still gets read.
     result = await extractor(content, document.mime_type)
 
     # --- LP-464: a THROTTLED extraction is infrastructure, not a content failure - #
@@ -390,14 +653,32 @@ async def _extract_branch(
     # so nothing is recorded as content; the document is flagged re-runnable.
     # (109 extractors surface the call's ``failure_reason`` as ``reasoning``, so the
     # throttle marker rides that channel — no per-extractor change.)
-    if result.status == ExtractionStatus.FAILED and result.reasoning == INFRA_RATE_LIMITED:
+    if result.status == ExtractionStatus.FAILED and is_rerunnable_infra(result.reasoning):
         document.status = DocumentStatus.NEEDS_REVIEW
-        document.processing_error = "extraction throttled (rate_limited) — re-runnable"
+        # LP-636 defect 2: name the ACTUAL cause. This read "throttled (rate_limited)" for every
+        # transient failure, including the connection errors that were the real fault on staging —
+        # a message that sent a reader to the Bedrock quota rather than the transport.
+        #
+        # INTERPOLATING `result.reasoning` IS SAFE **HERE ONLY**, and the difference is the gate on
+        # the line above. `is_rerunnable_infra` is a membership test against a closed set of three
+        # constants, so reaching this line proves `reasoning` is `rate_limited`, `connection` or
+        # `server_error` — never free text.
+        #
+        # Sixty lines below, the FAILED branch forbids exactly this ("DON'T interpolate
+        # `result.reasoning` here … it is the model's free-text reasoning and can quote document
+        # details"), and it is right: there the value is unconstrained. Said out loud because the
+        # two sites otherwise look like a contradiction, and a reader resolving it either way is
+        # wrong — copying this into the other branch leaks, and "fixing" this one loses the cause.
+        #
+        # It matters because `processing_error` is UI-shown AND `readonly.documents` selects it
+        # unscrubbed, so anything free-form here would reach a terminal and a transcript
+        # (LP-635 round 5 found the same shape on `extractions.error_detail`).
+        document.processing_error = f"extraction incomplete ({result.reasoning}) — re-runnable"
         await db.commit()
         logger.info(
             "document_needs_review",
             document_id=str(document.id),
-            reason="rate_limited",
+            reason=result.reasoning,
             infra_failure=True,
         )
         return True  # re-runnable infra — the caller must NOT advance needs (see docstring)
@@ -519,14 +800,59 @@ async def _extract_branch(
         )
         # A CONTENT failure (not a throttle) — the need is correctly advanced to REJECTED below.
         return False
-    if result.confidence < _CONFIDENCE_THRESHOLD:
+    # LP-636 defect 3 — gate on the HONEST pair, not the coerced float.
+    #
+    # This used to read ``result.confidence < _CONFIDENCE_THRESHOLD``. ``coerce_confidence``
+    # collapses a model that OMITTED confidence to 0.0, so "the model did not say" was read as
+    # "the model said zero" and the document was flagged "extraction low confidence" — a reason
+    # that was not true. LP-201 keeps the distinction two lines up (NULL / ``not_provided``,
+    # "absence is a legitimate state") and this gate immediately re-conflated it. Measured on
+    # staging: 15 of 115 successful extractions (13%) carried no confidence, every one flagged.
+    #
+    # ABSENCE IS NOT TREATED AS LOW CONFIDENCE, deliberately. An extraction that captured nothing
+    # is already handled above — FAILED → Tier 3 fallback — so by this line the extraction HAS
+    # typed fields, and a missing self-report is not evidence of unsureness. A 13% false-flag rate
+    # is how a review queue stops being read, and it costs the true flags along with the false.
+    #
+    # WHAT THAT SAFETY NET DOES NOT COVER, stated plainly so the argument is not stronger than it
+    # is: FAILED → Tier 3 catches EMPTY, not POOR. An extraction that captured something badly and
+    # omitted its confidence is no longer flagged. So this trades a MEASURED 13% false-positive
+    # rate against an UNMEASURED false-negative one — accepted because the false negatives were
+    # never being caught for a good reason anyway (they were flagged by a coerced 0.0, not by any
+    # judgement about quality), and because ``extraction_confidence_not_reported`` below plus the
+    # persisted ``confidence_source`` make the population measurable if that ever needs revisiting.
+    #
+    # NOT A CONFLATION THIS GATE INTRODUCES. A model reporting exactly 0.0 is indistinguishable
+    # from one reporting nothing — but that happens two layers up, before anything here sees it:
+    # ``coerce_confidence`` collapses missing/non-numeric to 0.0, and
+    # ``document_confidence_provenance`` maps ``0.0 → (None, not_provided)``. This gate never had
+    # the distinction to lose; what it stops doing is MIS-LABELLING the conflated value as "low
+    # confidence". If the distinction is ever wanted back, the fix is upstream —
+    # ``coerce_optional_confidence`` already keeps genuine absence as ``None``, and the
+    # document-level path simply does not use it.
+    #
+    # The population stays measurable: ``confidence_source`` is persisted on the extraction
+    # version and is exposed by ``readonly.extractions``, so this decision can be revisited with
+    # data rather than reopened by argument.
+    if confidence_source is ConfidenceSource.NOT_PROVIDED:
+        logger.info(
+            "extraction_confidence_not_reported",
+            document_id=str(document.id),
+            document_type=document.document_type,
+        )
+    elif reported_confidence is not None and reported_confidence < _CONFIDENCE_THRESHOLD:
         # LOW confidence but NOT empty — the extraction captured typed fields (LP-471 A6: do NOT fall back;
         # mixing typed + untyped data for one document would let a reader conflate them). Keep the typed
         # fields; a human reviews. No Tier-3 fallback.
         document.status = DocumentStatus.NEEDS_REVIEW
         document.processing_error = "extraction low confidence"
         await db.commit()
-        logger.info("document_needs_review", document_id=str(document.id), reason="low_confidence")
+        logger.info(
+            "document_needs_review",
+            document_id=str(document.id),
+            reason="low_confidence",
+            confidence=reported_confidence,
+        )
         return False
 
     document.status = DocumentStatus.COMPLETED
@@ -639,6 +965,20 @@ async def _run_reprocess(document_id: str) -> None:
         if document is None:
             logger.info("reprocess_document_missing", document_id=document_id)
             return
+        # THE CLAIM COVERS THIS PATH TOO (LP-637 review), and its first version did not. A claim
+        # only exclusive against itself is not exclusive: the LP-44 type-override enqueues THIS
+        # task, which writes a current extraction and a terminal status of its own. Run alongside a
+        # claimed `_process_document` it produced the same collision the claim was added to stop —
+        # `UNIQUE (document_id) WHERE is_current` admits one and the loser lands in FAILED — and
+        # worse, its terminal write RELEASED the other run's claim mid-flight, letting a third task
+        # in behind it.
+        #
+        # Claimed into EXTRACTING rather than CLASSIFYING, because that is what this path does: it
+        # skips classification by design.
+        if not await _claim_for_processing(db, document.id, into=DocumentStatus.EXTRACTING):
+            logger.info("reprocess_document_already_claimed", document_id=document_id)
+            return
+        await db.refresh(document)
         await reprocess_document_extraction(db, document)
 
 
@@ -689,7 +1029,15 @@ def process_document(self: Task, document_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(document_id)),
-        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        # `_exc` is ignored DELIBERATELY, and the reason is worth recording so nobody "completes"
+        # this the way the run's failure detail was completed (LP-635 review). A backend outage
+        # never reaches here: `_process_document` absorbs every exception except the soft
+        # time-limit, so an unreachable Bedrock already ends as NEEDS_REVIEW with the honest cause
+        # on the document ("extraction incomplete (connection) — re-runnable", LP-462/LP-636).
+        # What DOES reach here is the case this hook was written for — a DB or Redis blip outside
+        # the pipeline's own handling — where "processing error" is the honest answer and the
+        # column is UI-shown and must stay PII-safe.
+        on_exhausted=lambda _exc: run_async(_mark_document_failed(document_id)),
         event="process_document_exhausted",
         # LP-625 — A TIME LIMIT IS TERMINAL, NOT TRANSIENT, and this is the half of the bug that the
         # raised ceiling above does not fix. `retry_or_terminal`'s own docstring says a task time
@@ -725,7 +1073,7 @@ def reprocess_document(self: Task, document_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run_reprocess(document_id)),
-        on_exhausted=lambda: run_async(_mark_document_failed(document_id)),
+        on_exhausted=lambda _exc: run_async(_mark_document_failed(document_id)),
         event="reprocess_document_exhausted",
         # Same reasoning as `process_document`: re-running the same extraction after a timeout takes
         # the same time and meets the same wall.

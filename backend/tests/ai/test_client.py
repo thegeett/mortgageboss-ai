@@ -17,6 +17,7 @@ import pytest
 import structlog
 from anthropic import (
     APIConnectionError,
+    APIStatusError,
     APITimeoutError,
     AuthenticationError,
     BadRequestError,
@@ -140,14 +141,111 @@ def _wrapped(cause: Exception) -> AIClientError:
 
 
 def test_infra_failure_kind_classifies_by_cause() -> None:
+    """LP-636 defect 2: each cause gets its OWN label.
+
+    Every transient cause used to return "rate_limited", because this reused ``_is_transient`` —
+    the right grouping for deciding whether to RETRY, the wrong one for saying what HAPPENED. On
+    staging, 91 connection failures were logged as throttling and the investigation started at the
+    Bedrock quota instead of the transport."""
     from app.ai.client import infra_failure_kind
 
-    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429
-    assert infra_failure_kind(_wrapped(_server_error())) == "rate_limited"  # 5xx is transient
-    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "rate_limited"
+    assert infra_failure_kind(_wrapped(_rate_limit())) == "rate_limited"  # 429, a real throttle
+    assert infra_failure_kind(_wrapped(_server_error())) == "server_error"  # reached it, it failed
+    # Never reached the service — the distinction the single old label destroyed.
+    assert infra_failure_kind(_wrapped(APITimeoutError(request=_REQUEST))) == "connection"
+    assert infra_failure_kind(_wrapped(APIConnectionError(request=_REQUEST))) == "connection"
     assert infra_failure_kind(_wrapped(_bad_request())) == "oversized"  # 400 = payload/over-limit
     assert infra_failure_kind(_wrapped(_status_error(AuthenticationError, 401))) == "failed"
     assert infra_failure_kind(AIClientError("no cause")) == "failed"
+
+
+def test_the_split_labels_keep_the_old_rerunnable_grouping() -> None:
+    """Routing must be unchanged by the rename.
+
+    The three transient kinds have to remain re-runnable as a SET. Before the split, callers got
+    that grouping by comparing ``== INFRA_RATE_LIMITED``; if the set and ``_is_transient`` ever
+    drift, a dead socket starts being recorded as a content coverage gap."""
+    from app.ai.client import (
+        INFRA_CONNECTION,
+        INFRA_FAILED,
+        INFRA_OVERSIZED,
+        INFRA_RATE_LIMITED,
+        INFRA_SERVER,
+        is_rerunnable_infra,
+    )
+
+    assert is_rerunnable_infra(INFRA_RATE_LIMITED)
+    assert is_rerunnable_infra(INFRA_CONNECTION)
+    assert is_rerunnable_infra(INFRA_SERVER)
+    # A bad payload and an auth failure are NOT worth re-running — retrying changes nothing.
+    assert not is_rerunnable_infra(INFRA_OVERSIZED)
+    assert not is_rerunnable_infra(INFRA_FAILED)
+    assert not is_rerunnable_infra(None)
+
+
+#: A response body carrying a Bedrock throttle code, and one that does not. The throttle check
+#: reads the BODY, so every status has to be tried both ways — a status that is not itself
+#: retryable becomes retryable when the body says throttled.
+_THROTTLE_BODY = {"message": "ThrottlingException: rate exceeded"}
+_PLAIN_BODY = {"message": "something else entirely"}
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 429, 500, 503])
+@pytest.mark.parametrize(
+    ("body", "label"), [(_THROTTLE_BODY, "throttle-body"), (_PLAIN_BODY, "plain-body")]
+)
+def test_rerunnable_kinds_match_the_retry_predicate_across_the_status_space(
+    status: int, body: dict[str, str], label: str
+) -> None:
+    """``is_rerunnable_infra(infra_failure_kind(e))`` must equal ``_is_transient(cause)``, always.
+
+    They are two expressions of ONE decision — "can this be tried again" — reached by different
+    code, so any disagreement means retry and routing have diverged. When they do, a call the retry
+    loop would happily repeat gets recorded as permanently failed and the document is stranded.
+
+    OVER THE STATUS SPACE, not over chosen examples. An earlier version of this test listed six
+    exceptions somebody had thought of, and it missed a live divergence: a 400 carrying a Bedrock
+    throttle code returned OVERSIZED (not re-runnable) while ``_is_transient`` said retry, because
+    the status branch was tested before the body check. Sixteen mechanical cases catch that without
+    anyone having to imagine it."""
+    from app.ai.client import _is_transient, infra_failure_kind, is_rerunnable_infra
+
+    response = httpx.Response(status, request=_REQUEST, json=body)
+    cause = APIStatusError("boom", response=response, body=body)
+
+    assert is_rerunnable_infra(infra_failure_kind(_wrapped(cause))) == _is_transient(cause), (
+        f"status {status} with a {label}: retry says {_is_transient(cause)}, "
+        f"routing says {is_rerunnable_infra(infra_failure_kind(_wrapped(cause)))} "
+        f"(kind={infra_failure_kind(_wrapped(cause))})"
+    )
+
+
+def test_a_400_carrying_a_throttle_code_is_a_throttle_not_an_oversized_payload() -> None:
+    """The specific divergence, named so a regression reads as itself rather than as an arithmetic
+    failure in the parametrized test above.
+
+    ``_looks_like_bedrock_throttle`` exists precisely because a throttle is NOT trusted to arrive
+    as a 429, and it reads the response body — which a 400 has. Checking the status first put a
+    branch in front of the belt-and-braces path that was built for this."""
+    from app.ai.client import infra_failure_kind, is_rerunnable_infra
+
+    response = httpx.Response(400, request=_REQUEST, json=_THROTTLE_BODY)
+    cause = APIStatusError("throttled", response=response, body=_THROTTLE_BODY)
+
+    assert infra_failure_kind(_wrapped(cause)) == "rate_limited"
+    assert is_rerunnable_infra(infra_failure_kind(_wrapped(cause)))
+
+
+def test_a_plain_400_is_still_an_oversized_payload() -> None:
+    """The other side of that fix: a genuine request-shape rejection must NOT become re-runnable,
+    or an over-limit document would be retried forever instead of hitting the page cap."""
+    from app.ai.client import infra_failure_kind, is_rerunnable_infra
+
+    response = httpx.Response(400, request=_REQUEST, json=_PLAIN_BODY)
+    cause = APIStatusError("too big", response=response, body=_PLAIN_BODY)
+
+    assert infra_failure_kind(_wrapped(cause)) == "oversized"
+    assert not is_rerunnable_infra(infra_failure_kind(_wrapped(cause)))
 
 
 # --------------------------------------------------------------------------- #

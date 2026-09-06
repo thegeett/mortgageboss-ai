@@ -323,11 +323,22 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
 
 
 def _tag_outcome(record: dict[str, Any], tally: CallTally) -> dict[str, Any]:
-    """Stamp the per-document infrastructure-outcome flags from the call tally. ``rate_limited`` = the
-    document was throttled; ``ai_failed`` = any model call failed (auth/throttle/bad-request); the
-    ``failure_error_type`` names the cause. These let the report separate infrastructure failures from
-    genuine coverage — a throttle or an auth failure must never read as a schema gap."""
+    """Stamp the per-document infrastructure-outcome flags from the call tally.
+
+    ``ai_failed`` = any model call failed (auth/throttle/bad-request); ``failure_error_type`` names
+    the exception class; ``infra_kind`` names the CAUSE. These let the report separate
+    infrastructure failures from genuine coverage — a throttle or an auth failure must never read
+    as a schema gap.
+
+    ``rate_limited`` IS A HISTORICAL KEY NAME AND MEANS "RE-RUNNABLE" (LP-636 defect 2). It is true
+    for the whole transient family — throttles, connection failures, 5xx — because that is what
+    resume and abort need: all three are worth retrying. Reading it as "was throttled" is what made
+    the bench agree with production's mislabel, so ``infra_kind`` now carries the honest answer
+    alongside it. The key is not renamed because bench records already on disk use it, and rewriting
+    their meaning is worse than documenting it.
+    """
     record["rate_limited"] = tally.current_doc_throttled
+    record["infra_kind"] = tally.current_doc_infra_kind
     record["ai_failed"] = tally.current_doc_failed
     record["failure_error_type"] = tally.last_error_type
     return record

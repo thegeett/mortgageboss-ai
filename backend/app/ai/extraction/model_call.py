@@ -47,12 +47,12 @@ from typing import Any
 import structlog
 
 from app.ai.client import (
-    INFRA_RATE_LIMITED,
     TRUNCATED_STOP_REASON,
     AIClientError,
     AICompletion,
     complete,
     infra_failure_kind,
+    is_rerunnable_infra,
 )
 from app.core.config import settings
 
@@ -147,10 +147,20 @@ async def _attempt(
 
 
 def _failure_reason(infra_kind: str | None) -> str:
-    """The ``failure_reason`` an extractor surfaces for a failed call. A THROTTLE carries the machine
-    constant ``INFRA_RATE_LIMITED`` (so the pipeline records it as re-runnable infrastructure, not a content
-    coverage gap — LP-464); any other AI error keeps the human "AI call failed"."""
-    return INFRA_RATE_LIMITED if infra_kind == INFRA_RATE_LIMITED else "AI call failed"
+    """The ``failure_reason`` an extractor surfaces for a failed call.
+
+    A RE-RUNNABLE infrastructure outcome carries its machine constant through, so the pipeline
+    records it as infrastructure rather than a content coverage gap (LP-464). Any other AI error
+    keeps the human "AI call failed".
+
+    LP-636 defect 2: this used to pass through only ``INFRA_RATE_LIMITED``, which was fine when
+    that constant meant "any transient cause". Now that connection and server failures have their
+    own labels, the test has to be membership of :data:`RERUNNABLE_INFRA_KINDS` — an equality check
+    against one member would drop the other two out of the re-runnable branch and record a dead
+    socket as a content failure."""
+    if infra_kind is not None and is_rerunnable_infra(infra_kind):
+        return infra_kind
+    return "AI call failed"
 
 
 async def run_extraction_completion(

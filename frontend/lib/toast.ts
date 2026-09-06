@@ -37,11 +37,28 @@ export interface SuccessToast {
   undo?: UndoAction;
 }
 
+export interface RetryAction {
+  /** Shown on the toast. Name the retry, not the failure: "Re-read anyway". */
+  label?: string;
+  onRetry: () => void;
+}
+
 export interface ErrorToast {
   /** What failed, naming the thing: "ellis-appraisal.pdf couldn't be uploaded". */
   title: string;
   /** Why, and the next move. */
   whatToDo: string;
+  /**
+   * A way past THIS refusal, where one genuinely exists.
+   *
+   * The mirror of `undo` on a success, and added for a real loss: LP-637 offered
+   * "Re-read anyway" on a 409 by passing sonner's `action` straight through, and
+   * routing that call through this wrapper dropped it silently — a conditional
+   * spread carries no excess-property check, so nothing failed to compile and the
+   * button simply stopped appearing. Offer it only where the retry can actually
+   * succeed; a button that returns the same error is worse than no button.
+   */
+  retry?: RetryAction;
 }
 
 /** How long an undoable toast stays up. */
@@ -62,8 +79,18 @@ export function notifySuccess({ title, consequence, undo }: SuccessToast): void 
   });
 }
 
-export function notifyError({ title, whatToDo }: ErrorToast): void {
-  sonner.error(title, { description: whatToDo });
+export function notifyError({ title, whatToDo, retry }: ErrorToast): void {
+  sonner.error(title, {
+    description: whatToDo,
+    // Same duration as an undo: a recovery a processor cannot reach in time is
+    // not a recovery.
+    ...(retry
+      ? {
+          duration: UNDO_DURATION_MS,
+          action: { label: retry.label ?? "Try again", onClick: retry.onRetry },
+        }
+      : {}),
+  });
 }
 
 /**

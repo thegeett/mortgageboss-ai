@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.services.rule_findings import outcome_for_verdict
 from app.verification.eval.cases import EvalCase, FixtureTxn
@@ -42,6 +42,9 @@ _FIXTURES = (
     Path(__file__).resolve().parent.parent.parent.parent / "tests/verification/eval/fixtures"
 )
 _DOC = "docstmt0000000000"
+# bug-010 — the per-file salt for a fixture's masked row fields. Fixed, so a rebuilt fixture is
+# byte-identical run to run; a fixture snapshot is never persisted, so the value itself is arbitrary.
+_FIXTURE_LOAN_FILE_ID = UUID("00000000-0000-0000-0000-00000000f1e0")
 _WHEN = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
 
 _TAG_IS_MONEY_IN = "txn.is_money_in"
@@ -116,7 +119,13 @@ def _build_snapshot(case: EvalCase) -> Snapshot:
         }
         for t in case.txns
     ]
-    field_sets = transaction_field_sets({"transactions": raw}, "bank_statement")
+    field_sets = transaction_field_sets(
+        # bug-010 — the match-hash salt. A fixture snapshot is built in memory and never persisted, so
+        # any stable id serves; a FIXED one keeps a rebuilt fixture byte-identical run to run.
+        {"transactions": raw},
+        "bank_statement",
+        loan_file_id=_FIXTURE_LOAN_FILE_ID,
+    )
     txns = build_transactions(field_sets, document_content_id=_DOC)
     assert txns is not None
     for fx, built in zip(case.txns, txns, strict=True):

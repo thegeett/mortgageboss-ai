@@ -133,7 +133,11 @@ async def test_net_rent_is_never_substituted_for_gross(db_session) -> None:
     )
 
     assert treatment.net_monthly is None
-    assert "GROSS" in (treatment.gate_reason or "")
+    # LP-642 — the gate NAMES THE DOCUMENT rather than the empty field. "the application states no
+    # GROSS monthly rent" pointed at the 1003, where MISMO never puts the subject's rent.
+    reason = treatment.gate_reason or ""
+    assert "Form 1007" in reason and "lease" in reason, "it says what to go and get"
+    assert "net figure cannot substitute for gross" in reason, "and why a net figure will not do"
 
 
 async def test_a_missing_own_housing_cost_gates(db_session) -> None:
@@ -163,7 +167,7 @@ async def test_lf_abrs_gates_on_both_counts(db_session) -> None:
     assert treatment.applies is True
     assert treatment.net_monthly is None
     reason = treatment.gate_reason or ""
-    assert "GROSS" in reason and "OWN monthly housing cost" in reason
+    assert "Form 1007" in reason and "OWN monthly housing cost" in reason
 
 
 async def test_no_subject_row_states_no_rent(db_session) -> None:

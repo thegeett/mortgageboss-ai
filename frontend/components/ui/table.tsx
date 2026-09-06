@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,6 +29,15 @@ import { cn } from "@/lib/utils";
  * passing `stickyFirstColumn` or a `containerClassName` that bounds its height.
  * Otherwise it stays `overflow-visible` and the header sticks to whatever the
  * page actually scrolls — `main` in today's shell.
+ *
+ * DRAG-TO-SCROLL (from the bedrock branch) rides on the SAME wrapper, and only
+ * bites where that wrapper is a scrollport. `useDragScroll` measures overflow and
+ * offers neither the grab cursor nor the drag until there is something to pan, so
+ * on a table that fits — and on one whose `overflow-visible` wrapper lets the page
+ * do the scrolling — it is inert and ordinary text selection is untouched. The two
+ * branches wrote incompatible wrappers: bedrock's was unconditionally
+ * `overflow-auto`, which is exactly what stops the sticky header above from
+ * sticking, so the conditional wrapper is kept and the hook composes with it.
  */
 
 const ScrolledXContext = React.createContext(false);
@@ -42,6 +52,7 @@ const Table = React.forwardRef<
   }
 >(({ className, stickyFirstColumn = false, containerClassName, ...props }, ref) => {
   const [scrolledX, setScrolledX] = React.useState(false);
+  const drag = useDragScroll<HTMLDivElement>();
   const ownsScroll = stickyFirstColumn || containerClassName !== undefined;
 
   const onScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>) => {
@@ -51,10 +62,12 @@ const Table = React.forwardRef<
   return (
     <ScrolledXContext.Provider value={scrolledX}>
       <div
+        ref={drag.ref}
         className={cn(
           "relative w-full",
           ownsScroll ? "overflow-auto" : "overflow-visible",
           containerClassName,
+          drag.className,
         )}
         onScroll={stickyFirstColumn ? onScroll : undefined}
         data-scrolled-x={scrolledX ? "true" : undefined}

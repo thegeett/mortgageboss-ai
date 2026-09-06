@@ -14,6 +14,7 @@ from app.documents.catalog import (
     get_tier,
     get_tier_and_category,
     is_cataloged,
+    match_catalog_type,
 )
 from app.models.document import DocumentCategory, Tier
 
@@ -196,9 +197,11 @@ def test_every_spec_document_type_resolves_to_a_catalog_entry() -> None:
     assert unresolved == set(), (
         f"spec types the classifier can never emit (silent routing): {unresolved}"
     )
-    assert (
-        len(spec_types) == 121
-    )  # 114 + LP-467 (cert_of_liability_insurance, service_invoice) + LP-472 (passport spec 121)
+    # 114 + LP-467 (cert_of_liability_insurance, service_invoice) + LP-472 (passport, 121)
+    # + LP-642 step 2 (comparable_rent_schedule 122, small_residential_income_appraisal 123) — the
+    # Form 1007 / 1025 rent schedules, which B3-3.8-02 makes mandatory where rental income qualifies
+    # the loan and which had no spec, no extractor and no catalog type until LP-642.
+    assert len(spec_types) == 123
 
 
 def test_the_four_merges_and_the_split_resolve() -> None:
@@ -271,3 +274,106 @@ def test_all_seven_categories_represented() -> None:
 def test_spread_of_new_types(document_type: str, tier: Tier, category: DocumentCategory) -> None:
     assert get_tier(document_type) is tier
     assert get_category(document_type) == category
+
+
+# --------------------------------------------------------------------------- #
+# LP-636 defect 5 — matching a free-text document name to a catalog type
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("document_name", "expected"),
+    [
+        # The four Tier-1 types LF-ZE9N lost to a confident `unknown`.
+        ("a driver's license", "drivers_license"),
+        ("Closing Disclosure", "closing_disclosure"),
+        ("a credit report", "credit_report"),
+        ("Earnest Money / EMD Receipt image", "earnest_money_receipt"),
+        # An apostrophe is DELETED, not spaced — "driver s license" matched nothing and that
+        # silently lost one of the four.
+        # The curly apostrophe is BUILT rather than typed: a literal one trips the
+        # ambiguous-character lint, while being exactly what a model emits.
+        ("A Driver" + "\u2019" + "s License", "drivers_license"),
+    ],
+)
+def test_a_name_that_says_a_catalog_type_is_matched(document_name: str, expected: str) -> None:
+    assert match_catalog_type(document_name) == expected
+
+
+@pytest.mark.parametrize(
+    "document_name",
+    [
+        # LP-463's own evidence: these were CORRECT declines. There is no catalog type for any of
+        # them, and declining is the right answer, not a failure. If these start matching, the
+        # matcher has gone fuzzy and `misc` has stopped being reachable.
+        "wiring instructions from a law firm",
+        "HOA 2026 annual budget",
+        "year-end compensation summary",
+        "A Declaration of Condominium",
+        # Order is load-bearing: the words are all present, but the name does not say the thing.
+        "a receipt for the earnest money",
+        # One-word slugs are ignored entirely — they appear inside ordinary prose.
+        "the appraisal is attached",
+        "a survey",
+        "",
+        None,
+    ],
+)
+def test_a_name_that_does_not_say_a_catalog_type_is_not_matched(document_name: str | None) -> None:
+    assert match_catalog_type(document_name) is None
+
+
+@pytest.mark.parametrize(
+    "document_name",
+    [
+        # CLASS A — the slug's words are present in order but SCATTERED across unrelated phrases.
+        # This class was created by loosening a contiguous match to catch "Earnest Money / EMD
+        # Receipt"; the bounded gap catches that case (one intervening token) while declining
+        # these (two to four).
+        "a closing statement with a separate disclosure page",
+        "a credit memo and a separate report on fees",
+        "a tax summary and a return envelope",
+        "pay history and a stub of the check",
+    ],
+)
+def test_scattered_words_are_not_a_name(document_name: str) -> None:
+    assert match_catalog_type(document_name) is None
+
+
+@pytest.mark.parametrize(
+    "document_name",
+    [
+        # CLASS B — names that MENTION a document type without BEING one. These match under a
+        # contiguous rule too, so ordering cannot separate them; only coverage can.
+        #
+        # This is the class that matters most in practice: a confident `unknown` is very often a
+        # cover letter, a transmittal, a fax sheet or an email printout — exactly the documents
+        # whose names reference other documents.
+        "a letter from the lender about the missing closing disclosure",
+        "an email asking the borrower to send a bank statement",
+        "a cover page listing the credit report and the pay stub",
+        "a fax cover sheet for the purchase agreement",
+        "a note explaining why the tax return is late",
+    ],
+)
+def test_a_name_that_mentions_a_type_without_being_one_is_not_matched(document_name: str) -> None:
+    assert match_catalog_type(document_name) is None
+
+
+def test_the_longest_match_wins() -> None:
+    """A name carrying both a specific type and a general one gets the specific one."""
+    assert (
+        match_catalog_type("prior closing disclosure final cd from purchase")
+        == "prior_closing_disclosure_final_cd_from_purchase"
+    )
+
+
+def test_every_matched_slug_is_actually_in_the_catalog() -> None:
+    """The matcher builds its answers from CATALOG, so a hit must be routable.
+
+    Cheap, and it is what stops a returned slug that ``get_tier``/``get_category`` cannot resolve.
+    """
+    for name in ("a driver's license", "Closing Disclosure", "a credit report"):
+        slug = match_catalog_type(name)
+        assert slug is not None
+        assert is_cataloged(slug)

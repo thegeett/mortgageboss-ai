@@ -1,0 +1,599 @@
+"""LP-643 — processor-added DTI lines, and the ungate.
+
+Three policy decisions are pinned here, each recommended and then confirmed by the user. They are
+POLICY rather than mechanics, so the tests state the reasoning: a later reader deciding to loosen one
+should have to disagree with an argument rather than delete an unexplained assertion.
+
+  1. An added row does NOT clear a gate.
+  2. An ENGINE row is excludable-with-reason, never deletable.
+  3. Ungate ships, behind an itemised consent — and refuses the gates a zero cannot answer.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from app.models import Company
+from app.models.property import OccupancyType
+from app.schemas.dti import DtiCustomLineInput, DtiOverrideInput
+from app.services.dti import (
+    RENTAL_NET,
+    add_dti_custom_line,
+    apply_dti_ungate,
+    build_dti_calculation,
+    preview_dti_ungate,
+    remove_dti_custom_line,
+    set_dti_override,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
+from tests.integration import factories
+
+
+async def _file(db: AsyncSession, slug: str):
+    company = await factories.make_company(db, slug=slug)
+    loan_file = await factories.make_loan_file(db, company=company)
+    return loan_file, company
+
+
+async def _actor(db: AsyncSession, company: Company):
+    return (await factories.make_user(db, company=company)).id
+
+
+async def test_an_added_line_is_itemised_and_sums_into_its_section(db_session) -> None:
+    """Routed through `_to_items` like every other line, which is the whole reason to shape a custom
+    line as an `_AutoLine`. LP-621 records what happens otherwise: a figure appended straight to the
+    engine lines landed "in the headline but not the breakdown, so the itemized list stopped summing
+    to the number beside it"."""
+    loan_file, company = await _file(db_session, "custom-sums")
+    actor = await _actor(db_session, company)
+
+    calc = await add_dti_custom_line(
+        db_session,
+        loan_file=loan_file,
+        data=DtiCustomLineInput(
+            section="debt", label="Private loan from family", amount=Decimal("250.00")
+        ),
+        actor_user_id=actor,
+    )
+
+    line = next(i for i in calc.debt_items if i.label == "Private loan from family")
+    assert line.amount == Decimal("250.00")
+    assert line.source == "manual", "a figure with no document behind it must not read as extracted"
+    assert sum(i.amount for i in calc.debt_items if not i.excluded) == calc.monthly_debts
+
+
+async def test_an_added_line_does_NOT_clear_a_gate(db_session) -> None:
+    """DECISION 1, AND THE REASON. A gate says a REQUIRED INPUT IS UNKNOWN. Adding an unrelated row
+    does not make it known — a processor who types "Rent — $2,000" into income has not produced the
+    Form 1007 that B3-3.8-02 requires, and letting the row clear the gate would route the fail-closed
+    discipline around through the UI.
+
+    Overriding the GATED LINE ITSELF remains the way to supply a figure, and that already clears the
+    gate, because it answers the actual question.
+    """
+    loan_file, company = await _file(db_session, "no-ungate-by-row")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.PRIMARY_RESIDENCE
+    await db_session.flush()
+
+    before = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert before.gated, "the fixture must actually be gated or this asserts nothing"
+
+    after = await add_dti_custom_line(
+        db_session,
+        loan_file=loan_file,
+        data=DtiCustomLineInput(section="income", label="Side work", amount=Decimal("2000.00")),
+        actor_user_id=actor,
+    )
+
+    assert after.gated, "an added row must not answer a question it does not address"
+    assert after.gate_reason == before.gate_reason, "and must not change what the gate says"
+
+
+async def test_removing_a_line_a_processor_added_is_a_soft_delete(db_session) -> None:
+    """It leaves the trail, the same discipline as clearing an override."""
+    from app.models.dti_custom_line import DtiCustomLine
+    from sqlalchemy import select
+
+    loan_file, company = await _file(db_session, "remove-own")
+    actor = await _actor(db_session, company)
+    await add_dti_custom_line(
+        db_session,
+        loan_file=loan_file,
+        data=DtiCustomLineInput(section="debt", label="Storage unit", amount=Decimal("95.00")),
+        actor_user_id=actor,
+    )
+    row = (await db_session.scalars(select(DtiCustomLine))).all()[-1]
+
+    calc = await remove_dti_custom_line(
+        db_session, loan_file=loan_file, line_id=row.id, actor_user_id=actor
+    )
+
+    assert not [i for i in calc.debt_items if i.label == "Storage unit"]
+    await db_session.refresh(row)
+    assert row.deleted_at is not None, "soft delete — the row is the trail"
+
+
+async def test_there_is_no_way_to_DELETE_an_engine_line(db_session) -> None:
+    """DECISION 2. Removing a credit-report liability is an EXCLUSION — a claim that a real debt
+    should not count — and the calculator already renders that as a struck-through line with its
+    reason. A vanished row cannot be argued with, nothing records who decided it, and the itemisation
+    stops reconciling with the source data.
+
+    `remove_dti_custom_line` scopes to `dti_custom_lines`, so an engine key simply is not found.
+    """
+    from app.services.dti import UnknownDtiFieldError
+
+    loan_file, company = await _file(db_session, "no-engine-delete")
+    actor = await _actor(db_session, company)
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    engine_line = calc.housing_items[0]
+
+    from uuid import uuid4
+
+    import pytest
+
+    with pytest.raises(UnknownDtiFieldError):
+        await remove_dti_custom_line(
+            db_session, loan_file=loan_file, line_id=uuid4(), actor_user_id=actor
+        )
+    assert engine_line.key in {i.key for i in calc.housing_items}
+
+
+async def test_a_line_cannot_be_removed_from_another_file(db_session) -> None:
+    """The scoping that keeps a line-id from being a cross-file handle."""
+    import pytest
+    from app.models.dti_custom_line import DtiCustomLine
+    from app.services.dti import UnknownDtiFieldError
+    from sqlalchemy import select
+
+    mine, company = await _file(db_session, "scope-mine")
+    theirs, _ = await _file(db_session, "scope-theirs")
+    actor = await _actor(db_session, company)
+    await add_dti_custom_line(
+        db_session,
+        loan_file=mine,
+        data=DtiCustomLineInput(section="debt", label="Mine", amount=Decimal("10.00")),
+        actor_user_id=actor,
+    )
+    row = (await db_session.scalars(select(DtiCustomLine))).all()[-1]
+
+    with pytest.raises(UnknownDtiFieldError):
+        await remove_dti_custom_line(
+            db_session, loan_file=theirs, line_id=row.id, actor_user_id=actor
+        )
+
+
+# --------------------------------------------------------------------------- #
+# The ungate
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_preview_names_every_line_and_what_it_asserts(db_session) -> None:
+    """DECISION 3, AND WHAT MAKES IT A CONSENT RATHER THAN A CLICK-THROUGH. Not "3 values will be set
+    to $0" — a processor recognises *Property taxes* and cannot act on *3 values*. And not the
+    mechanism but the CLAIM: "the DTI will be computed as if this file has no property taxes
+    obligation" is the half they can judge as true or false."""
+    loan_file, _ = await _file(db_session, "ungate-preview")
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+
+    labels = {line.label for line in preview.lines}
+    assert "Property taxes" in labels and "Homeowners insurance" in labels
+    for line in preview.lines:
+        assert "$0.00" in line.assertion and "computed as if" in line.assertion
+
+
+async def test_the_preview_shows_the_ratio_the_apply_would_produce(db_session) -> None:
+    """THE NUMBER IS WHAT THE CONSENT IS REALLY ABOUT, so the popup has to show it — and it must be
+    the number Apply delivers, not one computed a second way. The preview runs the SAME calculator
+    with the SAME overrides, in memory; this asserts the two agree."""
+    loan_file, company = await _file(db_session, "ungate-agrees")
+    actor = await _actor(db_session, company)
+    # REAL INCOME, OR THE ASSERTION IS VACUOUS. Without it both ratios are None on a bare file and
+    # `None == None` passes however far the preview diverges — verified: with the preview computing
+    # its hypothetical from $99,999 instead of $0, the first version of this test stayed green.
+    from app.models import StatedIncomeItem
+
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    loan_file.loan_amount = Decimal("300000.00")
+    loan_file.note_rate_percent = Decimal("7.000")
+    loan_file.amortization_months = 360
+    await db_session.flush()
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+    applied = await apply_dti_ungate(
+        db_session, loan_file=loan_file, note="taxes confirmed exempt", actor_user_id=actor
+    )
+
+    assert preview.back_end_after is not None, "a None here would make the comparison meaningless"
+    assert preview.back_end_after == applied.back_end_dti
+    assert preview.front_end_after == applied.front_end_dti
+
+
+async def test_the_ungate_writes_ordinary_overrides_so_undo_already_exists(db_session) -> None:
+    """WHY OVERRIDES AND NOT AN `ungated` FLAG. Undo is the per-line clear that already ships; the
+    breakdown still reconciles with the headline; and the file records WHICH values were asserted. A
+    boolean would give none of those and would reintroduce the LP-621 defect."""
+    from app.services.dti import clear_dti_override
+
+    loan_file, company = await _file(db_session, "ungate-undo")
+    actor = await _actor(db_session, company)
+
+    ungated = await apply_dti_ungate(
+        db_session, loan_file=loan_file, note="confirmed", actor_user_id=actor
+    )
+    assert not ungated.gated, "the point of the button"
+    taxes = next(i for i in ungated.housing_items if i.label == "Property taxes")
+    assert taxes.overridden and taxes.amount == Decimal(0)
+
+    restored = await clear_dti_override(
+        db_session, loan_file=loan_file, field_key=taxes.key, actor_user_id=actor
+    )
+    assert restored.gated, "clearing the override puts the gate back — undo, with no new mechanism"
+
+
+async def test_the_rental_gate_is_WAIVED_not_zeroed(db_session) -> None:
+    """THE REVISION, AND WHY IT IS NOT A CLIMBDOWN. The first version REFUSED this gate, because
+    zeroing the subject's missing gross rent asserts the property rents for nothing — the treatment
+    then computes 75% x 0 - PITIA and carries the whole payment as an obligation, which does not
+    unblock a file, it makes the ratio worse on a claim nobody made.
+
+    That reasoning still holds. What it got wrong was the conclusion: a processor was left with three
+    shut doors — no gross-rent line to override, no net-rental line while gated, and a button that
+    declined — on a file they understood perfectly well. Measured on staging, LF-ZE9N and LF-AYK4 are
+    both exactly this shape.
+
+    So the ungate WAIVES the treatment instead. That is a real state rather than an invented number:
+    the subject's PITIA stays in housing as an ordinary payment, exactly as on a home the borrower
+    lives in, and NO RENT IS CLAIMED in either direction.
+    """
+    loan_file, company = await _file(db_session, "ungate-rental")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    before = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert before.gated, "the fixture must be gated on the rental treatment or this asserts nothing"
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+    waiver = next(line for line in preview.lines if "rental treatment" in line.label.lower())
+    assert "no rent will be assumed" in waiver.assertion
+    assert not preview.unresolved, "the waiver answers it — nothing is left to warn about"
+
+    applied = await apply_dti_ungate(
+        db_session, loan_file=loan_file, note="no schedule yet", actor_user_id=actor
+    )
+    assert not applied.gated, "the file computes, which is the point"
+    assert not [i for i in applied.income_items if i.key == RENTAL_NET], "no rent was invented"
+    assert not [i for i in applied.debt_items if i.key == RENTAL_NET], "and none was charged"
+    # The subject's PITIA is ORDINARY HOUSING again — not excluded in favour of a rental netting
+    # that no longer applies.
+    assert any(not i.excluded for i in applied.housing_items)
+
+
+async def test_a_processor_can_supply_the_gross_rent_they_know(db_session) -> None:
+    """THE OTHER DOOR, and the one the gate's own message implied existed. It says a rent schedule or
+    a lease "establishes" the figure, which reads as "upload a document" — but gross rent is an INPUT
+    to the treatment, upstream of the lines, so it was not a key anything could override. Every other
+    fail-closed input in this calculator has always taken a processor's figure; this one never got
+    the door.
+
+    Supplying it CLEARS the gate, and unlike an added row that is right: a gate says a required input
+    is unknown, and this supplies exactly that input.
+    """
+    from app.services.dti import RENTAL_GROSS
+
+    loan_file, company = await _file(db_session, "gross-rent-supplied")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    calc = await set_dti_override(
+        db_session,
+        loan_file=loan_file,
+        field_key=RENTAL_GROSS,
+        data=DtiOverrideInput(amount=Decimal("2200.00"), note="lease seen, tenant in place"),
+        actor_user_id=actor,
+    )
+
+    # The RENTAL half is answered. This bare fixture is also housing-gated (no tax bill, no
+    # binder), which is a different gate with its own door — asserting `not calc.gated` here would
+    # be asserting something this override does not claim to do.
+    # The treatment needs THREE inputs — gross rent, the borrower's own housing, the subject's
+    # PITIA — and this bare fixture supplies none of the others. So the assertion is that the rent is
+    # no longer among what is missing, which is exactly what this override claims to do and no more.
+    reason = " ".join(calc.other_gate_reasons)
+    assert "rent" not in reason.lower(), f"the supplied rent is still reported missing: {reason}"
+
+
+async def test_the_waiver_is_undone_by_the_override_clear_that_already_exists(db_session) -> None:
+    """Stored as an override so undo needs no second mechanism — the same argument as the zeros."""
+    from app.services.dti import RENTAL_WAIVED, clear_dti_override
+
+    loan_file, company = await _file(db_session, "waiver-undo")
+    actor = await _actor(db_session, company)
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    await apply_dti_ungate(db_session, loan_file=loan_file, note=None, actor_user_id=actor)
+    restored = await clear_dti_override(
+        db_session, loan_file=loan_file, field_key=RENTAL_WAIVED, actor_user_id=actor
+    )
+
+    assert restored.gated, "clearing it restores Fannie's treatment, and the gate with it"
+
+
+async def test_an_override_the_processor_already_set_survives_the_preview(db_session) -> None:
+    """The hypothetical is layered ON TOP of stored overrides, not instead of them. A processor who
+    corrected the tax figure yesterday must not see a preview that silently discards it."""
+    loan_file, company = await _file(db_session, "ungate-layered")
+    actor = await _actor(db_session, company)
+    from app.schemas.dti import DtiOverrideInput
+    from app.services.dti import HOUSING_INSURANCE
+
+    await set_dti_override(
+        db_session,
+        loan_file=loan_file,
+        field_key=HOUSING_INSURANCE,
+        data=DtiOverrideInput(amount=Decimal("120.00")),
+        actor_user_id=actor,
+    )
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+
+    assert HOUSING_INSURANCE not in {line.key for line in preview.lines}, (
+        "an already-corrected line is not unknown, so it is not something the ungate would zero"
+    )
+
+
+async def test_the_consent_does_not_list_an_input_as_both_fixed_and_unresolved(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 review — a file gated BOTH ways, which is the case the preview's if/elif was reaching
+    for and then handled identically in both arms.
+
+    `gate_reason` is a JOIN of two independently-produced halves: the fail-closed housing reason and
+    calculation-level reasons like the rental gate. Reporting the joined string put "Property taxes
+    is unknown" in the unresolved list while the line directly above it promised to record property
+    taxes as $0.00 — the same input, in one dialog, in opposite roles. A consent screen that
+    contradicts itself is worse than one that says less, because the processor cannot tell which half
+    to believe and this is the screen where they accept the assertion personally.
+
+    The zeroable lines ARE the housing gate — both are `housing_items` where `unknown` — so an ungate
+    resolves that half in full and what survives is everything else.
+    """
+    from app.models.property import OccupancyType
+
+    loan_file, _ = await _file(db_session, "gated-both-ways")
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    # An investment subject with no rent schedule gates the calculation on TOP of the housing
+    # unknowns every bare file has.
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    current = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert current.housing_gate_reason and current.other_gate_reasons, (
+        "the fixture must be gated BOTH ways or this asserts nothing"
+    )
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+    fixed = {line.label for line in preview.lines}
+    assert fixed, "the fixture must have zeroable lines or this asserts nothing"
+
+    for label in fixed:
+        for reason in preview.unresolved:
+            assert label not in reason, (
+                f"{label!r} is listed as a line the ungate will set to $0.00 AND named in an "
+                f"unresolved reason: {reason!r}"
+            )
+
+    # REVISED: the waiver ANSWERS the rental gate, so nothing survives for the dialog to warn
+    # about. What must not come back is the CONTRADICTION — the same input named as both fixed and
+    # unresolved — so the assertion is that the two lists never overlap, which holds whether or not
+    # anything is left over.
+    fixed = {line.label for line in preview.lines}
+    assert not any(
+        any(label.lower() in reason.lower() for label in fixed) for reason in preview.unresolved
+    ), "an input promised as fixed must never also be listed as unresolved"
+
+
+async def test_the_preview_never_shows_a_confident_ratio_for_a_file_that_stays_gated(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 UI review — the preview was the only DTI read returning RAW ratios.
+
+    The other three endpoints apply `gate_display_ratios` at the API boundary; `GET /dti/ungate` did
+    not. On a file that stays gated after an ungate the raw ratio still computes, because the unknown
+    housing lines carry a fail-closed 0 — so the dialog rendered "Front-end: gated → 19.96%" directly
+    above "This will still be gated afterwards". A confident number resting on a fabricated zero, on
+    the one screen where a processor accepts an assertion personally: the LP-375 failure arriving
+    through the preview.
+
+    The investment subject is the fixture because its gate CANNOT be answered by a zero — zeroing the
+    missing gross rent asserts the property rents for nothing — so it is guaranteed to survive the
+    ungate and is exactly the case the ratio must not be shown for.
+    """
+    from app.models import StatedIncomeItem
+    from app.models.property import OccupancyType
+
+    loan_file, _ = await _file(db_session, "preview-stays-gated")
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    loan_file.loan_amount = Decimal("300000.00")
+    loan_file.note_rate_percent = Decimal("7.000")
+    loan_file.amortization_months = 360
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    preview = await preview_dti_ungate(db_session, loan_file=loan_file)
+
+    assert preview.lines, "the fixture must have zeroable lines or this asserts nothing"
+    # REVISED — the "after" half of this guard lost its case when the rental gate became WAIVABLE:
+    # an ungate now resolves every gate it reports, so nothing stays gated afterwards and there is no
+    # still-gated ratio left to leak. The protection is kept and repointed at the BEFORE ratios,
+    # which are the same claim about the same file: it IS gated right now, its ratio still COMPUTES
+    # (unknown lines carry a fail-closed 0), and the dialog must not open by showing that number.
+    assert preview.front_end_before is None and preview.back_end_before is None, (
+        "the dialog opened by showing a confident ratio for a file that is gated — "
+        f"front={preview.front_end_before}, back={preview.back_end_before}"
+    )
+
+    # THE OTHER DIRECTION: gating the display must not blank a ratio the ungate genuinely delivers.
+    ok_file, _ = await _file(db_session, "preview-ungates-clean")
+    ok_borrower = await factories.make_borrower(db_session, loan_file=ok_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=ok_borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    ok_file.loan_amount = Decimal("300000.00")
+    ok_file.note_rate_percent = Decimal("7.000")
+    ok_file.amortization_months = 360
+    await db_session.flush()
+
+    clean = await preview_dti_ungate(db_session, loan_file=ok_file)
+    assert clean.lines and not clean.unresolved, "this file must ungate completely"
+    assert clean.front_end_after is not None, (
+        "a file the ungate fully resolves must show the ratio it will get — nulling every preview "
+        "would trade a false number for no number"
+    )
+
+
+async def test_a_supplied_gross_rent_does_not_route_around_the_experience_requirement(
+    db_session: AsyncSession,
+) -> None:
+    """LP-643 review — the shape where a UI affordance walks past a guideline.
+
+    `rental.gross_subject` lets a processor supply the figure no document states. A large enough one
+    produces a POSITIVE net rental, and SEL-2026-08 only allows a positive net into qualifying income
+    where the borrower has 12 months of property-management experience (bug-012). Nothing in the
+    override path knows about that requirement, and nothing asserted the interaction.
+
+    It holds — the experience check runs on the COMPUTED net, after the gross is resolved, so it
+    cannot be reached around by changing where the gross came from. Pinned rather than reasoned
+    about, because the entire purpose of an affordance is to give a processor a way past a refusal,
+    and this is the refusal that has to survive one.
+
+    ASSERTED AT `subject_rental_treatment`, which is where BOTH live: the override enters there and
+    the experience gate closes there. Driving it through the DTI would need a full PITIA and a
+    present-housing figure to get a rental line at all — more fixture, no more coverage of the
+    interaction, and the intermediate values are exactly what would be asserted anyway.
+
+    Both directions, because a check that always refuses is not a check.
+    """
+    from app.services.rental_treatment import subject_rental_treatment
+    from tests.services.test_dti_rental_integration_lp621 import _tax_return_with
+    from tests.services.test_rental_treatment_lp621 import _present_housing
+
+    async def _investment_file(slug: str):
+        loan_file, company = await _file(db_session, slug)
+        prop = await factories.make_property(db_session, loan_file=loan_file)
+        prop.occupancy_type = OccupancyType.INVESTMENT
+        await _present_housing(db_session, loan_file, "2500.00")
+        await db_session.flush()
+        return loan_file, company
+
+    # NO tax return on the file, so nothing can establish experience.
+    loan_file, _ = await _investment_file("override-no-experience")
+    treatment = await subject_rental_treatment(
+        db_session,
+        loan_file=loan_file,
+        subject_pitia=Decimal("1500.00"),
+        # 75% of 9000 is 6750, well above the PITIA — an unambiguously positive net.
+        gross_rent_override=Decimal("9000.00"),
+    )
+
+    assert treatment.applies and treatment.gate_reason is None, (
+        "the supplied gross must clear the rent half of the gate, or this asserts nothing"
+    )
+    assert treatment.net_monthly is not None and treatment.net_monthly > 0, (
+        "the fixture must produce a POSITIVE net or the experience rule is not engaged"
+    )
+    assert not treatment.experience_established, (
+        "a processor-supplied gross rent established 12 months of property-management experience — "
+        "the affordance walked past SEL-2026-08"
+    )
+    assert "experience is not established" in treatment.derivation
+
+    # THE OTHER DIRECTION: with a full-year Schedule E, the same override reaches income.
+    loan_file2, _ = await _investment_file("override-with-experience")
+    await _tax_return_with(db_session, loan_file2, days=365, tax_year=2025)
+    treatment2 = await subject_rental_treatment(
+        db_session,
+        loan_file=loan_file2,
+        subject_pitia=Decimal("1500.00"),
+        gross_rent_override=Decimal("9000.00"),
+    )
+
+    assert treatment2.experience_established, (
+        "with a full-year Schedule E the experience IS established, so the same supplied rent must "
+        "reach qualifying income — a check that refuses in both cases is not a check"
+    )
+    assert "added to income" in treatment2.derivation
+
+
+async def test_an_ungate_resolves_every_gate_it_reports(db_session: AsyncSession) -> None:
+    """LP-643 review — the invariant that makes the after-ratio case unreachable, now pinned.
+
+    The earlier guard asserted the preview never shows a confident ratio for a file that STAYS gated.
+    The revision made that case unreachable: `gated` has exactly two producers, zeroable lines and
+    `other_gate_reasons`, and an ungate now answers both — zeros for the housing unknowns, a waiver
+    for the rental treatment. So the "after" half was repointed at the BEFORE ratios, correctly,
+    because no fixture can reach the other one any more.
+
+    That leaves the GUARANTEE doing the work, and nothing was asserting it. Measured: with the
+    invariant holding, `gate_display_ratios(after)` can be deleted outright and every test still
+    passes — it is defence with nothing behind it. The moment a third gate shape appears that neither
+    a zero nor the waiver resolves, `after` is gated again, the raw ratio computes on fail-closed
+    zeros, and LP-375 returns to the consent screen with no test in its way.
+
+    So this asserts the invariant itself rather than its consequence: after an ungate, the file is
+    not gated. It fails when that stops being true, which is the only moment the deleted check would
+    have mattered.
+    """
+    from app.models import StatedIncomeItem
+
+    loan_file, company = await _file(db_session, "ungate-resolves-all")
+    borrower = await factories.make_borrower(db_session, loan_file=loan_file)
+    db_session.add(
+        StatedIncomeItem(
+            borrower_id=borrower.id, monthly_amount=Decimal("10000.00"), income_type="Base"
+        )
+    )
+    loan_file.loan_amount = Decimal("300000.00")
+    loan_file.note_rate_percent = Decimal("7.000")
+    loan_file.amortization_months = 360
+    prop = await factories.make_property(db_session, loan_file=loan_file)
+    # BOTH gate producers at once: housing unknowns AND the rental gate a zero cannot answer.
+    prop.occupancy_type = OccupancyType.INVESTMENT
+    await db_session.flush()
+
+    before = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert before.gated and before.housing_gate_reason and before.other_gate_reasons, (
+        "the fixture must be gated by BOTH producers or this asserts nothing"
+    )
+
+    actor = await _actor(db_session, company)
+    after = await apply_dti_ungate(
+        db_session, loan_file=loan_file, note="taxes exempt, treatment waived", actor_user_id=actor
+    )
+
+    assert not after.gated, (
+        "an ungate left the file gated, which is the case the preview's after-ratios were guarded "
+        f"against and can no longer be tested for: {after.gate_reason}"
+    )

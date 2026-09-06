@@ -226,14 +226,28 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
 
     **Caching is safe for both providers, verified rather than assumed (B1):**
 
-    * *Event loops.* C0 found ``aioboto3`` clients are event-loop-bound, and the Celery
-      bridge builds a fresh loop per task (``app/tasks/base.py:41-43``). Both Anthropic
-      clients are **httpx**-based (``AsyncHttpxClientWrapper`` — the same wrapper class
-      for direct and Bedrock), and httpx re-establishes a pooled connection whose loop has
+    * *Event loops.* The original measurement here was too gentle, and it shipped a bug
+      (LP-636 defect 1). It read: "httpx re-establishes a pooled connection whose loop has
       gone rather than raising. Measured: one client instance issuing SUCCESSFUL requests
-      across three separate ``asyncio.run()`` loops returned 200 each time. So this is not
-      the aioboto3 situation, and Bedrock adds no constraint the direct client did not
-      already have under the same ``lru_cache``.
+      across three separate ``asyncio.run()`` loops returned 200 each time."
+
+      httpx does NOT re-establish it. A pooled keep-alive connection whose loop has been
+      closed raises ``RuntimeError: Event loop is closed`` when the next caller takes it,
+      which the SDK surfaces as ``APIConnectionError``. The three-loop test passed because
+      the SDK pool sets ``keepalive_expiry=5.0``: three sequential calls, each slow enough
+      to clear five seconds, never reuse a connection. The bug needs consecutive calls
+      INSIDE that window — a burst, which is exactly when it matters. On staging it cost
+      5 of 44 documents in one upload.
+
+      **The cache is scoped to the TASK, not the process.** :func:`run_async`
+      (``app/tasks/base.py``) closes and clears this client inside the loop it belongs to,
+      before that loop ends, so a client never outlives its loop — while pooling stays ON
+      WITHIN a task, which is where it earns its keep: one verification run makes hundreds
+      of calls on a single loop, and a handshake per call would be paid hundreds of times.
+
+      This is the shape ``task_session`` already uses for the database — a fresh engine per
+      task, disposed at the end — rather than one cached forever with pooling disabled.
+      ``tests/ai/test_client_event_loops_lp636.py`` fails if the boundary is removed.
     * *Credential refresh.* ``AsyncAnthropicBedrock`` signs **per request** (its
       ``_prepare_request`` calls the SigV4 signer), and the cached ``boto3.Session`` it
       signs with resolves credentials through the provider chain, so a rotating ECS task
@@ -265,6 +279,28 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     if not settings.anthropic_api_key:
         raise AIClientError("ANTHROPIC_API_KEY is not configured")
     return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
+
+
+async def close_anthropic_client() -> None:
+    """Close the cached client and forget it. **Await this INSIDE the loop that built it.**
+
+    LP-636 defect 1. The client is cached for reuse, but its connection pool belongs to the event
+    loop that opened those connections. ``run_async`` gives every Celery task a fresh loop and
+    closes it at the end, so a client that survives the task hands the next one a dead socket:
+    ``RuntimeError: Event loop is closed``, surfaced as ``APIConnectionError`` in 1-5ms.
+
+    Called from ``run_async``'s ``finally``, still inside the loop — ``close()`` is a coroutine and
+    has to shut its transports down while their loop is alive. Closing after ``asyncio.run``
+    returns would be too late, and would leak the sockets it meant to release.
+
+    A no-op when nothing was cached, so the many tasks that never make an AI call pay nothing —
+    and it must not CONSTRUCT a client merely to close one.
+    """
+    if get_anthropic_client.cache_info().currsize == 0:
+        return
+    client = get_anthropic_client()
+    get_anthropic_client.cache_clear()
+    await client.close()
 
 
 #: Bedrock error codes that mean "try again shortly", matched on the SDK exception's
@@ -337,30 +373,123 @@ def _is_transient(exc: Exception) -> bool:
 
 
 #: The infrastructure-outcome tags :func:`infra_failure_kind` returns — a call that never completed, by cause.
-INFRA_RATE_LIMITED = "rate_limited"
+#:
+#: LP-636 defect 2 SPLIT THESE. ``INFRA_RATE_LIMITED`` used to mean "any transient cause": 429,
+#: Bedrock throttle codes, 5xx, connection errors and timeouts alike. That is the correct grouping
+#: for the RETRY decision — all of them are worth retrying — and the wrong one for a LABEL, where
+#: the distinction is the entire point. It cost a real diagnosis: 91 connection failures on staging
+#: were recorded as "rate_limited", so the investigation began at the Bedrock quota (10,000 req/min
+#: against ~90 calls) instead of at the transport, where the actual bug was.
+INFRA_RATE_LIMITED = "rate_limited"  #: a genuine 429, or a Bedrock throttle/capacity code
+INFRA_CONNECTION = "connection"  #: never reached the service — connection refused, reset, timeout
+INFRA_SERVER = "server_error"  #: reached it and it failed — 5xx
+#: HTTP 400 — a request-shape rejection. NOT a measurement of the file's size, despite the name:
+#: `infra_failure_kind` returns this for EVERY non-throttle 400, so a corrupt or encrypted PDF and a
+#: misconfigured model or inference-profile id all arrive here. Anything that tells a person their
+#: file is too big, or that treats the failure as permanent, must read an actual size measurement —
+#: `PayloadFit.still_over_budget`, carried on `ClassificationResult.payload_over_budget` — and not
+#: this label. LP-637 shipped copy keyed on it that told the owner of a 300 KB unreadable scan to
+#: split it into smaller files, and then excluded the document from bulk reprocessing for good.
 INFRA_OVERSIZED = "oversized"
+#: Everything else — auth, permission, AccessDenied, an exhausted non-throttle. See the note on
+#: `RERUNNABLE_INFRA_KINDS` before treating this as a lesser case than the others.
 INFRA_FAILED = "failed"
+
+#: The kinds that mean "the call never completed, for a reason that may not recur" — so the
+#: document is worth re-running and must NOT be recorded as a content failure.
+#:
+#: ROUTING KEYS OFF THIS SET, NOT OFF ANY SINGLE LABEL. That is what makes the split above safe:
+#: before it, callers compared ``== INFRA_RATE_LIMITED`` and got the whole transient family by
+#: accident. Comparing against one member now would silently drop connection and server failures
+#: out of the re-runnable branch — the exact regression this set exists to prevent.
+#:
+#: THIS SET IS NOT A PERMANENCE CLASSIFIER, AND USING IT AS ONE HAS PRODUCED THREE DEFECTS.
+#: "Not re-runnable" is not the same as "will never work", because ``INFRA_FAILED`` is what
+#: `infra_failure_kind` returns for AUTH, PERMISSION and AccessDenied — outages that are entirely
+#: recoverable, just not by retrying the same call in the same minute. Each time, the code treated
+#: `not is_rerunnable_infra(...)` as "give up on this document":
+#:
+#: 1. LP-635 — the AI breaker counted only re-runnable kinds, so an expired credential RESET the
+#:    counter on every call and was the one outage that could never trip it, while the pass ground
+#:    through its whole budget producing an all-``couldn't check`` run.
+#: 2. LP-637 — a classification failure message keyed on this set told auth failures their file was
+#:    too large to read, and advised splitting it.
+#: 3. LP-637 — the same message then excluded those documents from bulk reprocessing permanently,
+#:    which is precisely the action that fixes them once the credential is.
+#:
+#: ADR-387 records out-of-band credentials as a live concern in this environment, so this is the
+#: likely shape rather than a hypothetical one. If you are about to branch on this set, ask what
+#: your branch does to a 403 — and if the answer is "the same thing it does to an oversized
+#: payload", the branch is wrong.
+RERUNNABLE_INFRA_KINDS = frozenset({INFRA_RATE_LIMITED, INFRA_CONNECTION, INFRA_SERVER})
+
+
+def is_rerunnable_infra(kind: str | None) -> bool:
+    """True when an infrastructure outcome means "try this document again".
+
+    Use this rather than an equality test against a single kind; see
+    :data:`RERUNNABLE_INFRA_KINDS`.
+    """
+    return kind in RERUNNABLE_INFRA_KINDS
 
 
 def infra_failure_kind(err: AIClientError) -> str:
     """Classify a caught :class:`AIClientError` by its underlying cause, for observability + routing (LP-462).
 
     ``complete`` raises ``AIClientError(...) from exc``, so the ORIGINAL SDK exception is on ``__cause__``.
-    Returns ``INFRA_RATE_LIMITED`` for a throttle/transient cause (429, Bedrock throttle codes, 5xx,
-    connection/timeout — the same test the retry loop and the bench use), ``INFRA_OVERSIZED`` for an HTTP 400
-    (a payload/bad-request rejection — an over-limit document is the case LP-462 fixes), or ``INFRA_FAILED``
-    for anything else (auth, permission, an exhausted non-throttle, …). This lets a caller record a THROTTLE
-    distinctly from a JUDGMENT: a throttled document persisted as "low confidence" would read as a coverage
-    gap and corrupt every downstream audit. Keeps SDK-exception knowledge in this module, beside
-    ``_is_transient``.
+
+    ============================  ===============================================================
+    ``INFRA_RATE_LIMITED``        a genuine 429, or a Bedrock throttle/capacity code
+    ``INFRA_CONNECTION``          connection refused/reset, or a timeout — never reached the service
+    ``INFRA_SERVER``              5xx — reached it and it failed
+    ``INFRA_OVERSIZED``           HTTP 400, a request-shape rejection (the over-limit document, LP-462)
+    ``INFRA_FAILED``              anything else — auth, permission, an exhausted non-throttle
+    ============================  ===============================================================
+
+    This lets a caller record a THROTTLE distinctly from a JUDGMENT: a throttled document persisted as
+    "low confidence" would read as a coverage gap and corrupt every downstream audit.
+
+    ``INFRA_CONNECTION`` and ``INFRA_SERVER`` are LP-636 defect 2. Every one of these used to return
+    ``INFRA_RATE_LIMITED``, because this function reused ``_is_transient`` — which is the right
+    grouping for deciding whether to RETRY and the wrong one for saying what HAPPENED. 91 connection
+    failures on staging were logged as "rate_limited", and the investigation started at the Bedrock
+    quota rather than at the transport.
+
+    **Retry behaviour is unchanged.** ``_is_transient`` still decides retries and is untouched; the
+    three transient kinds are exactly :data:`RERUNNABLE_INFRA_KINDS`. Route on that set, never on one
+    label. Keeps SDK-exception knowledge in this module, beside ``_is_transient``.
     """
     cause = err.__cause__
-    if isinstance(cause, Exception) and _is_transient(cause):
+    if isinstance(cause, APIStatusError):
+        if cause.status_code == _RATE_LIMIT_STATUS:
+            return INFRA_RATE_LIMITED
+        if cause.status_code >= _SERVER_ERROR_FLOOR:
+            return INFRA_SERVER
+        # THE THROTTLE CHECK COMES BEFORE THE 400 BRANCH, and the order is load-bearing.
+        #
+        # ``_looks_like_bedrock_throttle`` reads the response BODY, and a 400 has one. Testing the
+        # status first meant a 400 carrying a Bedrock throttle code returned OVERSIZED — which is
+        # not re-runnable — while ``_is_transient`` (which falls through 400 to the same body
+        # check) said retry. Retry and routing disagreed, so a throttled call was recorded as a
+        # permanent request-shape problem and the document was stranded instead of retried: the
+        # exact harm this function exists to prevent, arriving by a different door.
+        #
+        # This path is not hypothetical by our own reasoning — ``_looks_like_bedrock_throttle``
+        # exists precisely because throttles are NOT trusted to arrive as 429.
+        if _looks_like_bedrock_throttle(cause):
+            return INFRA_RATE_LIMITED
+        # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit
+        # payload (>100 pages / >32 MB). Not transient — the page cap is the fix, not a retry.
+        if cause.status_code == _BAD_REQUEST_STATUS:
+            return INFRA_OVERSIZED
+        return INFRA_FAILED
+    # APIConnectionError covers APITimeoutError, and TimeoutError is `complete`'s own wait_for
+    # bound. Neither reached the service, so neither is a throttle: this is the distinction the
+    # single old label destroyed.
+    if isinstance(cause, APIConnectionError | TimeoutError):
+        return INFRA_CONNECTION
+    if isinstance(cause, Exception) and _looks_like_bedrock_throttle(cause):
         return INFRA_RATE_LIMITED
-    # An HTTP 400 is a request-shape rejection; for a document call that is an over-limit payload (>100 pages
-    # / >32 MB). Not transient — the page cap is the fix, not a retry.
-    if isinstance(cause, APIStatusError) and cause.status_code == _BAD_REQUEST_STATUS:
-        return INFRA_OVERSIZED
     return INFRA_FAILED
 
 

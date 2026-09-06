@@ -82,6 +82,7 @@ critical:
     - company_license_number
     - cpa_license_number
     - surveyor_license_number
+    - appraiser_license_number
     - pest_control_business_license_number
     - recipient_or_escrow_account_last4
 
@@ -151,6 +152,7 @@ critical:
     - total_deductions_current
     - total_allotments
     - stated_monthly_income_total
+    - total_gross_monthly_income
     # Hours are the income calculation's multiplicand — a wrong one is a wrong
     # income by exactly the same arithmetic as a wrong rate.
     - average_hours_per_week

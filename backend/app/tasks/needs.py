@@ -80,8 +80,9 @@ async def _run_needs_update(loan_file_id: str, document_id: str) -> None:
         # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
         # to ask whether the file already answers it. It flags; it never closes (ADR-388).
         await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
-        # LP-634 — LAST, and it only ever rewrites `reasoning`. The list is settled by the passes
-        # above; this is the sentence that says WHY each row is on it.
+        # LP-634 — LAST, and it writes `explanation` only. `reasoning` is this pass INPUT and must
+        # never be overwritten with its own output. The list is settled by the passes above; this is
+        # the sentence that says WHY each row is on it.
         await compose_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
@@ -94,8 +95,9 @@ async def _run_propose_ai_needs(loan_file_id: str) -> None:
         # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left
         # to ask whether the file already answers it. It flags; it never closes (ADR-388).
         await flag_covered_needs(db, loan_file_id=UUID(loan_file_id))
-        # LP-634 — LAST, and it only ever rewrites `reasoning`. The list is settled by the passes
-        # above; this is the sentence that says WHY each row is on it.
+        # LP-634 — LAST, and it writes `explanation` only. `reasoning` is this pass INPUT and must
+        # never be overwritten with its own output. The list is settled by the passes above; this is
+        # the sentence that says WHY each row is on it.
         await compose_needs(db, loan_file_id=UUID(loan_file_id))
         await db.commit()
 
@@ -112,7 +114,7 @@ def update_needs_for_document(self: Task, loan_file_id: str, document_id: str) -
     retry_or_terminal(
         self,
         lambda: run_async(_run_needs_update(loan_file_id, document_id)),
-        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        on_exhausted=lambda _exc: run_async(_mark_ai_needs_failed(loan_file_id)),
         event="needs_update_exhausted",
     )
 
@@ -128,6 +130,6 @@ def propose_ai_needs(self: Task, loan_file_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run_propose_ai_needs(loan_file_id)),
-        on_exhausted=lambda: run_async(_mark_ai_needs_failed(loan_file_id)),
+        on_exhausted=lambda _exc: run_async(_mark_ai_needs_failed(loan_file_id)),
         event="propose_ai_needs_exhausted",
     )

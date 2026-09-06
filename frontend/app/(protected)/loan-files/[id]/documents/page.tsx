@@ -4,6 +4,7 @@ import { DocumentDrawer } from "@/components/file/documents/document-drawer";
 import { DocumentDropzone } from "@/components/file/documents/document-dropzone";
 import { DocumentList } from "@/components/file/documents/document-list";
 import { ProcessingStrip } from "@/components/file/documents/processing-strip";
+import { ReprocessAll } from "@/components/file/documents/reprocess-all";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { DocumentResponse } from "@/lib/types/document";
 import Link from "next/link";
@@ -49,6 +50,15 @@ function DocumentsWorkspace() {
     router.replace(`/loan-files/${id}/review?doc=${docParam}`, { scroll: false });
   }, [docParam, id, router]);
 
+  // THE DRAWER MUST SEE THE REFRESHED DOCUMENT (LP-637 feature 3 review). `selected` is a
+  // snapshot taken when the row was clicked and never re-derived, so invalidating the list updated
+  // the page behind the drawer and nothing inside it: the status badge kept its pre-reprocess
+  // value for as long as the drawer stayed open. A processor pressed Re-read, saw nothing change,
+  // and pressed again — and the second press is accepted, because PENDING is deliberately not an
+  // in-flight status. The atomic claim does not help there: it excludes CONCURRENT runs, and a
+  // serial worker simply runs the duplicate afterwards.
+  const live = selected ? (documents?.find((doc) => doc.id === selected.id) ?? selected) : null;
+
   return (
     <div className="space-y-6">
       {/* The way into the reviewer (LP-UI-030). Without an entry point the route
@@ -67,6 +77,7 @@ function DocumentsWorkspace() {
       {/* Above the list on purpose (LP-UI-019): watching uploads land must not
           move the documents already settled underneath them. */}
       <ProcessingStrip documents={documents ?? []} />
+      <ReprocessAll fileId={id} documentCount={documents?.length ?? 0} isLoading={isPending} />
       <DocumentList
         documents={documents}
         isPending={isPending}
@@ -78,7 +89,7 @@ function DocumentsWorkspace() {
         onOpen={(doc) => router.push(`/loan-files/${id}/review?doc=${doc.id}`)}
         onOpenDetails={setSelected}
       />
-      <DocumentDrawer document={selected} fileId={id} onClose={() => setSelected(null)} />
+      <DocumentDrawer document={live} fileId={id} onClose={() => setSelected(null)} />
     </div>
   );
 }

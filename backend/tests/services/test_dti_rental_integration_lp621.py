@@ -99,9 +99,12 @@ async def test_the_borrowers_own_housing_replaces_the_subject_pitia(db_session) 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
     assert calc.housing_payment == Decimal("2500.00")
-    assert calc.gross_monthly_income == Decimal("29655.55")  # 24,333.33 + 5,322.22
-    # Front-end = 2,500 / 29,655.55. With the subject PITIA left in it read 677.78/29,655.55.
-    assert calc.front_end_dti == Decimal("8.43")
+    # bug-012 — the $5,322.22 net NO LONGER reaches income. SEL-2026-08 conditions that on 12 months
+    # of property-management experience, which no file can establish yet, so the rent may only offset
+    # the subject's PITIA — and that offset is the exclusion this test is about. The housing
+    # substitution, which is what LP-621 wrote this for, is unchanged.
+    assert calc.gross_monthly_income == Decimal("24333.33")
+    assert calc.front_end_dti == Decimal("10.27")  # 2,500 / 24,333.33
 
 
 async def test_the_subject_pitia_lines_are_shown_excluded_not_dropped(db_session) -> None:
@@ -123,22 +126,41 @@ async def test_the_subject_pitia_lines_are_shown_excluded_not_dropped(db_session
 
 async def test_the_rental_line_is_in_the_breakdown_and_sums_to_the_headline(db_session) -> None:
     """The transparency guarantee the module docstring calls "the feature": the itemized lines a
-    processor reads must add up to the number beside them."""
+    processor reads must add up to the number beside them.
+
+    bug-012 — AND AN EXCLUDED LINE IS PART OF THAT GUARANTEE, not an exception to it. The positive
+    net is shown with its arithmetic and marked excluded, so the visible lines still reconcile with
+    the headline; a figure this large that simply disappeared could not be argued with.
+    """
     loan_file = await _investment_file(db_session, "breakdown")
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
     rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
-    assert rental.amount == Decimal("5322.22")
+    assert rental.amount == Decimal("5322.22"), (
+        "the arithmetic is unchanged — its TREATMENT changed"
+    )
     # The arithmetic behind it travels WITH it (LP-621 promised this and computed it into a local).
     assert "75% of $8,000.00" in (rental.derivation or "")
-    assert sum(i.amount for i in calc.income_items) == calc.gross_monthly_income
+    assert rental.excluded and "SEL-2026-08" in (rental.excluded_reason or "")
+    assert (
+        sum(i.amount for i in calc.income_items if not i.excluded) == calc.gross_monthly_income
+    ), "what is COUNTED still sums to the headline"
 
 
-async def test_the_rental_line_can_be_overridden(db_session) -> None:
-    """A figure this large that a processor cannot correct is worse than no figure. It routes through
-    the same `_to_items` override path as every other line, so it gets this for free — which is the
-    argument for putting it there rather than appending a bare engine line."""
+async def test_an_override_corrects_the_figure_but_cannot_restore_it_to_income(db_session) -> None:
+    """bug-012 — THE OVERRIDE STILL WORKS, AND IT NO LONGER RE-INCLUDES.
+
+    `_to_items` treats an override as DISPUTING an exclusion and re-includes the line (LP-569), which
+    is right where the exclusion is a claim about the file a processor can correct. The SEL-2026-08
+    restriction is not that kind of claim: an override changes an AMOUNT, and no amount establishes 12
+    months of property-management experience. So the exclusion is applied structurally, after
+    `_to_items` — the same treatment the occupancy exclusion gets, for the same reason. Without it a
+    processor correcting the rent would silently put the figure back into qualifying income.
+
+    A processor who HAS verified the experience needs a way to say so. That is bug-012 step 2, and it
+    is a different assertion from correcting a number.
+    """
     from app.schemas.dti import DtiOverrideInput
     from app.services.dti import set_dti_override
 
@@ -156,8 +178,9 @@ async def test_the_rental_line_can_be_overridden(db_session) -> None:
     )
 
     rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
-    assert rental.overridden and rental.amount == Decimal("4000.00")
-    assert calc.gross_monthly_income == Decimal("28333.33")  # 24,333.33 + 4,000
+    assert rental.overridden and rental.amount == Decimal("4000.00"), "the correction is honoured"
+    assert rental.excluded, "and it still cannot reach qualifying income"
+    assert calc.gross_monthly_income == Decimal("24333.33"), "the override did not re-include it"
 
 
 async def test_a_shortfall_becomes_an_obligation_and_still_replaces_housing(db_session) -> None:
@@ -181,7 +204,7 @@ async def test_a_gated_treatment_leaves_the_housing_side_alone(db_session) -> No
 
     calc = await build_dti_calculation(db_session, loan_file=loan_file)
 
-    assert calc.gated and "GROSS monthly rent" in (calc.gate_reason or "")
+    assert calc.gated and "Form 1007" in (calc.gate_reason or "")
     assert calc.housing_payment == Decimal("677.78")
     assert not any(i.key == RENTAL_NET for i in (*calc.income_items, *calc.debt_items))
 
@@ -203,7 +226,7 @@ async def test_the_gate_reaches_the_snapshot_the_rules_read(db_session) -> None:
 
     assert entry is not None
     assert entry.gated, "the rules must not receive a ratio the calculator gated"
-    assert "GROSS monthly rent" in (entry.gate_reason or "")
+    assert "Form 1007" in (entry.gate_reason or "")
     assert entry.value["back_end_dti"] is None
 
 
@@ -248,3 +271,460 @@ async def test_a_primary_residence_is_untouched(db_session) -> None:
     assert calc.housing_payment == Decimal("677.78")
     assert not calc.gated
     assert not any(i.key == HOUSING_PRESENT for i in calc.housing_items)
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 — SEL-2026-08: positive rental income needs 12 months of experience
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_positive_net_does_not_inflate_qualifying_income(db_session) -> None:
+    """THE DEFECT, IN THE DIRECTION THAT MATTERS. Before this, a positive net went straight into
+    qualifying income for every borrower:
+
+        positive = rental.net_monthly > 0
+        if positive:
+            income_items = [*income_items, *rental_items]
+
+    SEL-2026-08 (02 September 2026) permits that only where the borrower has 12 months of
+    property-management experience; without it the rent may only OFFSET the subject's PITIA. So a
+    first-time landlord had their income inflated and their DTI understated — we over-qualified,
+    which is the one direction this codebase refuses everywhere else.
+    """
+    loan_file = await _investment_file(db_session, "no-experience")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.amount == Decimal("5322.22"), "computed, and shown"
+    assert rental.excluded, "but not counted"
+    assert calc.gross_monthly_income == Decimal("24333.33"), "income is the stated income alone"
+
+
+async def test_the_offset_is_real_even_though_the_income_line_is_not(db_session) -> None:
+    """ "Offset the PITIA" is not a thing this code does separately — it is what the housing exclusion
+    ALREADY achieves. The subject's PITIA is out of the housing total whether or not the net reaches
+    income, so a capped positive net still gets the borrower the full benefit the guide allows. This
+    pins that the cap did not silently take the offset away with it."""
+    loan_file = await _investment_file(db_session, "offset-still-applies")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    subject_lines = [i for i in calc.housing_items if i.key != HOUSING_PRESENT]
+    assert subject_lines and all(i.excluded for i in subject_lines), "the PITIA is still offset"
+    assert calc.housing_payment == Decimal("2500.00"), "housing is the borrower's OWN cost"
+
+
+async def test_a_shortfall_is_untouched_by_the_experience_rule(db_session) -> None:
+    """The restriction is on ADDING income. A shortfall is an obligation under both regimes, and
+    capping it would understate the ratio — the same over-qualifying direction, arrived at from the
+    other side."""
+    loan_file = await _investment_file(db_session, "shortfall-unaffected", gross_rent="400.00")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    shortfall = next(i for i in calc.debt_items if i.key == RENTAL_NET)
+    assert not shortfall.excluded, "an obligation is still counted"
+    assert shortfall.amount > 0
+
+
+async def test_the_derivation_says_which_treatment_was_applied(db_session) -> None:
+    """A capped figure and a genuinely small one look identical on the line. The derivation is the
+    only thing that tells a processor which they are reading, and it must name the rule rather than
+    assert a fact about the borrower — we did not establish that they LACK experience, only that the
+    file does not establish they have it."""
+    loan_file = await _investment_file(db_session, "derivation-says-why")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    derivation = rental.derivation or ""
+    assert "not established" in derivation, "not established — never 'the borrower has none'"
+    assert "SEL-2026-08" in derivation
+    assert "offsets the subject's PITIA" in derivation
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 review — the exclusion reason a processor reads
+# --------------------------------------------------------------------------- #
+def test_the_rental_exclusion_reason_does_not_point_anywhere() -> None:
+    """A DIRECTION WORD IN THIS SENTENCE IS A CLAIM ABOUT THE SCREEN, and the screen disagreed.
+
+    An earlier draft ended "— and that offset is the PITIA exclusion above". True of `dti.py`, where
+    the housing exclusion is a few lines up. False where it is read: `dti-calculator.tsx` renders
+    "Gross monthly income" FIRST and "Housing payment" SECOND, so an exclusion reason sitting on an
+    income line and pointing "above" sends a processor away from the thing it describes.
+
+    Pinned as a property rather than a wording check. The reason has to name what it means, because
+    this file cannot know where the frontend will put either section — and the next person to reorder
+    those two sections should not silently falsify a sentence in the backend.
+    """
+    import inspect
+
+    from app.services import dti
+
+    source = inspect.getsource(dti)
+    start = source.index("not added to qualifying income: 12 months")
+    reason = source[start : start + 600]
+    for direction in (" above", " below", " to the right", " to the left"):
+        assert direction not in reason.split('")')[0], (
+            f"the rental exclusion reason says{direction!r}, which is a claim about layout that this "
+            "module cannot make"
+        )
+    assert "housing payment" in reason, "it should name the section it means instead"
+
+
+# --------------------------------------------------------------------------- #
+# bug-012 step 2 — experience established from Schedule E's Fair Rental Days
+# --------------------------------------------------------------------------- #
+
+
+async def _tax_return_with(db_session, loan_file, *, days, tax_year=2025):
+    """A current tax-return extraction whose Schedule E reports `days` fair rental days."""
+    from app.models.document import DocumentStatus
+
+    company = await db_session.get(Company, loan_file.company_id)
+    assert company is not None
+    document = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type="tax_return",
+        status=DocumentStatus.COMPLETED,
+    )
+    await factories.make_extraction(
+        db_session,
+        document=document,
+        data={
+            # `None` renders a present-but-unreadable year, which is what an OCR miss looks like —
+            # distinct from the key being absent.
+            "tax_year": {"value": tax_year} if tax_year is not None else {"value": "  "},
+            "schedule_e": {
+                "properties": [
+                    {
+                        "address": {"value": "9 Rental Way"},
+                        "rents_received": {"value": "24000"},
+                        "fair_rental_days": {"value": days},
+                    }
+                ]
+            },
+        },
+    )
+    await db_session.flush()
+
+
+async def test_a_full_year_of_fair_rental_days_puts_the_rental_into_income(db_session) -> None:
+    """THE POINT OF STEP 2. Step 1 capped EVERY positive net out of income, because nothing could
+    establish experience for anyone — safe, but a blanket under-qualification of a whole loan
+    category, and 12 months of landlord experience is common rather than exceptional.
+
+    Fannie B3-3.8-01: a borrower whose most recent Schedule E shows Fair Rental Days of 365 HAS the
+    experience, and their positive rental income is qualifying income again.
+    """
+    loan_file = await _investment_file(db_session, "experienced")
+    await _tax_return_with(db_session, loan_file, days=365)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert not rental.excluded, "365 fair rental days establishes the 12 months"
+    assert calc.gross_monthly_income == Decimal("29655.55"), "24,333.33 + the 5,322.22 net"
+
+
+async def test_a_partial_year_leaves_the_rental_out_of_income(db_session) -> None:
+    """The negative control the test above needs. A property rented for part of the year does not
+    establish 12 months, so the offset-only treatment stands — and this is what proves the test
+    above is measuring the days rather than the presence of a return."""
+    loan_file = await _investment_file(db_session, "partial-year")
+    await _tax_return_with(db_session, loan_file, days=200)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded and "not established" in (rental.excluded_reason or "")
+    assert calc.gross_monthly_income == Decimal("24333.33")
+
+
+async def test_a_leap_year_366_still_counts(db_session) -> None:
+    """`>= 365`, not `== 365`. A property rented through a leap year reports 366, and an equality
+    test would read that as failing the bar it exceeds. The guide states the number, not the
+    comparison."""
+    loan_file = await _investment_file(db_session, "leap-year")
+    await _tax_return_with(db_session, loan_file, days=366, tax_year=2024)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert not next(i for i in calc.income_items if i.key == RENTAL_NET).excluded
+
+
+async def test_the_MOST_RECENT_return_decides_not_the_last_uploaded(db_session) -> None:
+    """The guide says the MOST RECENT return. A borrower who uploads an older return afterwards has
+    not made it their most recent one, so the check keys on the TAX YEAR rather than upload order —
+    otherwise a 2024 return uploaded today would override the 2025 one that supersedes it."""
+    loan_file = await _investment_file(db_session, "upload-order")
+    await _tax_return_with(db_session, loan_file, days=200, tax_year=2025)  # the current picture
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=2023)  # uploaded LATER, older
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded, "2025 is the most recent return and it shows a partial year"
+
+
+async def test_no_tax_return_is_not_established_rather_than_denied(db_session) -> None:
+    """A file with no return cannot answer the question, and the treatment is the same as a failed
+    test — but the WORDING is not, because we did not determine that the borrower lacks experience.
+    That distinction is what lets a processor tell a missing document from a real shortfall."""
+    loan_file = await _investment_file(db_session, "no-return")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert rental.excluded
+    assert "not established" in (rental.derivation or "")
+
+
+async def test_a_return_whose_year_cannot_be_read_is_not_superseded_by_an_older_one(
+    db_session,
+) -> None:
+    """bug-012 step 2 review — the undateable return sorts NEWEST, and the first version had it
+    backwards.
+
+    Keying "most recent" on the tax year is right: a 2023 return uploaded today has not become the
+    borrower's current picture. But an unparseable year was ranked -1, which does not mean "unknown",
+    it means OLDEST — so the newest return lost to every dateable return behind it. Measured on this
+    exact fixture, that returned experience ESTABLISHED from a stale 2023 return showing a full year,
+    while the borrower's own most recent return showed 200 days.
+
+    That is the OVER-qualifying direction. Every other unbuilt route in this check under-qualifies on
+    purpose, which is safe and visible; this one silently qualified a file its own newest document
+    contradicts, which is neither.
+
+    BOTH DIRECTIONS ABSTAIN, and the second half is a correction — see the comment beside it.
+    """
+    from app.services.rental_treatment import _management_experience_established
+
+    company = await factories.make_company(db_session, slug="undateable")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=2023)
+    # Uploaded after, and the year will not parse — the current picture, undateable.
+    await _tax_return_with(db_session, loan_file, days=200, tax_year="20?5")
+
+    assert not await _management_experience_established(db_session, loan_file.id), (
+        "an undateable newest return was superseded by an older one, and the file qualified on a "
+        "picture its own most recent return contradicts"
+    )
+
+    # THE OTHER DIRECTION, AND IT ABSTAINS TOO — which is a correction to this test's first version.
+    #
+    # That version asserted the mirror case ESTABLISHES: an undateable return showing 365 beside an
+    # older dateable one showing 200, on the reasoning that sorting it newest must consult it rather
+    # than skip it. But "it is newest" is exactly what the file does not say. The only thing making it
+    # look newest is UPLOAD ORDER — and this whole check keys on tax year precisely because upload
+    # order does not determine recency: a borrower can upload an old return today. Upload order cannot
+    # be too weak to order returns in one direction and strong enough in the other.
+    #
+    # So it over-qualifies from the opposite side, and the cost of abstaining is the safe one: a
+    # borrower whose genuinely-newest return will not OCR is under-qualified, visibly, and a clean
+    # copy of the return fixes it.
+    company2 = await factories.make_company(db_session, slug="undateable-ok")
+    loan_file2 = await factories.make_loan_file(db_session, company=company2)
+    await _tax_return_with(db_session, loan_file2, days=200, tax_year=2023)
+    await _tax_return_with(db_session, loan_file2, days=365, tax_year="20?5")
+
+    assert not await _management_experience_established(db_session, loan_file2.id), (
+        "an undateable return showing a full year qualified the file, but nothing establishes it is "
+        "the most recent one — the guide's test is about THE most recent return"
+    )
+
+
+async def test_an_undateable_return_beside_a_dateable_one_abstains(db_session) -> None:
+    """BOTH SENTINELS OVER-QUALIFY, IN OPPOSITE SHAPES — which is why this abstains instead.
+
+    The first version sorted an undateable return OLDEST, so a stale 2023 return showing 365 days
+    beat a newer unreadable one showing 200 and qualified the file. The proposed fix sorted it
+    NEWEST, which closes that and opens the mirror: an undateable return showing 365 then beats a
+    genuinely newer 2025 return showing 200.
+
+        sentinel   undateable=200d, 2025=365d   undateable=365d, 2025=200d
+        oldest     ESTABLISHED  (wrong)          not established
+        newest     not established               ESTABLISHED  (wrong)
+
+    Both answer a question the file does not: which return is most recent. The guide's test is about
+    THE most recent return, so where that cannot be identified the test cannot run — and not
+    established is the outcome every other unbuilt route already takes.
+
+    THE SECOND SHAPE IS THE ONE A SENTINEL FIX MISSES, so it is asserted first.
+    """
+    loan_file = await _investment_file(db_session, "undateable-365")
+    await _tax_return_with(db_session, loan_file, days=200, tax_year=2025)
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=None)  # year unreadable
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert next(i for i in calc.income_items if i.key == RENTAL_NET).excluded, (
+        "an undateable 365 must not beat a dateable newer return showing a partial year"
+    )
+
+    other = await _investment_file(db_session, "undateable-200")
+    await _tax_return_with(db_session, other, days=365, tax_year=2023)
+    await _tax_return_with(db_session, other, days=200, tax_year=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=other)
+    assert next(i for i in calc.income_items if i.key == RENTAL_NET).excluded, (
+        "and a stale dateable 365 must not qualify a file whose undateable return shows 200"
+    )
+
+
+async def test_a_LONE_undateable_return_is_still_used(db_session) -> None:
+    """Abstaining is about ORDERING, not about readability. One return is trivially the most recent
+    whatever its year says, so refusing to read it would discard the only evidence on the file and
+    under-qualify a borrower for an OCR miss on a field the test does not depend on."""
+    loan_file = await _investment_file(db_session, "lone-undateable")
+    await _tax_return_with(db_session, loan_file, days=365, tax_year=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert not next(i for i in calc.income_items if i.key == RENTAL_NET).excluded
+
+
+async def test_an_undateable_year_abstains_only_when_the_ordering_changes_the_answer(
+    db_session,
+) -> None:
+    """bug-012 review round 2 — abstaining is right, and it was firing wider than its own reason.
+
+    The reason for abstaining is that the file cannot say which return is most recent, and the
+    guide's test names that return specifically. That reason bites only when the candidates DISAGREE.
+    Where every return on the file shows a property rented a full year, the test passes on whichever
+    of them is most recent, so nothing had to be ordered — and the previous version still refused,
+    under-qualifying a borrower whose every return qualifies because one would not OCR a four-digit
+    year.
+
+    Three shapes, and the middle one is the only place the ordering is load-bearing:
+
+        both show a full year   -> established   (ordering irrelevant)
+        they disagree           -> abstain       (ordering decides; the file cannot supply it)
+        neither shows one       -> not established (ordering irrelevant, and the answer is no)
+    """
+    from app.services.rental_treatment import _management_experience_established
+
+    async def _file(slug: str, first: tuple[int, object], second: tuple[int, object]) -> bool:
+        company = await factories.make_company(db_session, slug=slug)
+        loan_file = await factories.make_loan_file(db_session, company=company)
+        await _tax_return_with(db_session, loan_file, days=first[0], tax_year=first[1])
+        await _tax_return_with(db_session, loan_file, days=second[0], tax_year=second[1])
+        return await _management_experience_established(db_session, loan_file.id)
+
+    assert await _file("agree-full", (365, 2025), (365, None)), (
+        "every return on the file shows a full rented year, so the guide's test passes on whichever "
+        "one is most recent — abstaining here refuses a file that needed no ordering"
+    )
+    assert not await _file("disagree", (200, 2025), (365, None)), (
+        "the answer depends on which return is most recent and the file cannot say — the only "
+        "honest outcome is not-established"
+    )
+    assert not await _file("agree-short", (200, 2025), (200, None)), (
+        "no return shows a full rented year, whichever is most recent"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# LP-642 step 3 — the subject's gross rent, across the sources the guide permits
+# --------------------------------------------------------------------------- #
+
+
+async def _rent_schedule(db_session, loan_file, *, opinion, doc_type="comparable_rent_schedule"):
+    """A current Form 1007 / 1025 extraction stating an opinion of monthly market rent."""
+    from app.models.document import DocumentStatus
+
+    company = await db_session.get(Company, loan_file.company_id)
+    assert company is not None
+    document = await factories.make_document(
+        db_session,
+        loan_file=loan_file,
+        company=company,
+        document_type=doc_type,
+        status=DocumentStatus.COMPLETED,
+    )
+    await factories.make_extraction(
+        db_session,
+        document=document,
+        data={
+            "form_type": {"value": "1007" if doc_type == "comparable_rent_schedule" else "1025"},
+            "opinion_of_monthly_market_rent": {"value": str(opinion)}
+            if opinion is not None
+            else {"value": None},
+        },
+    )
+    await db_session.flush()
+
+
+async def test_a_rent_schedule_alone_computes_the_ratio(db_session) -> None:
+    """THE FILE THIS WAS BUILT FOR. LF-ZE9N is an investment PURCHASE: the borrower does not own the
+    subject yet, so the MISMO owned-property schedule has no row for it and never will — the export
+    does not repeat the subject there. The old lookup read only that row, found nothing, and gated.
+
+    With the mandatory document on the file, the ratio computes."""
+    loan_file = await _investment_file(db_session, "schedule-only", gross_rent=None)
+    await _rent_schedule(db_session, loan_file, opinion="8000")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert not calc.gated, calc.gate_reason
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $8,000.00" in (rental.derivation or "")
+
+
+async def test_the_LESSER_wins_where_the_two_sources_disagree(db_session) -> None:
+    """B3-3.8-02, and it is the guide's own answer rather than a convention we chose:
+
+        "If the current market rents do not reasonably support the gross rents reported on the lease
+         agreement, the lender must: determine if additional documentation is necessary … provide a
+         written analysis explaining the discrepancy … OR USE THE LESSER AMOUNT."
+
+    An `or`, so the lesser is a route the lender may simply take. The written-analysis branch needs a
+    processor's document attached to the file, which a calculator cannot supply — so this implements
+    the conservative half of a rule the guide states in full.
+    """
+    loan_file = await _investment_file(db_session, "disagree", gross_rent="8000")
+    await _rent_schedule(db_session, loan_file, opinion="6000")  # appraiser says less
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $6,000.00" in (rental.derivation or ""), "the lesser of the two"
+
+
+async def test_the_lesser_wins_in_the_other_direction_too(db_session) -> None:
+    """The control the test above needs: `min`, not "the appraiser always wins". Reversing which
+    source is lower must reverse which is used, or the rule is a preference wearing a rule's name."""
+    loan_file = await _investment_file(db_session, "disagree-other", gross_rent="5000")
+    await _rent_schedule(db_session, loan_file, opinion="9000")
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    rental = next(i for i in calc.income_items if i.key == RENTAL_NET)
+    assert "75% of $5,000.00" in (rental.derivation or "")
+
+
+async def test_a_1025_is_read_the_same_as_a_1007(db_session) -> None:
+    """Both forms answer the same question and share an extractor; the lookup must accept either, or
+    a two-to-four-unit file is gated for holding exactly the document the guide required of it."""
+    loan_file = await _investment_file(db_session, "form-1025", gross_rent=None)
+    await _rent_schedule(
+        db_session, loan_file, opinion="8000", doc_type="small_residential_income_appraisal"
+    )
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+    assert not calc.gated, calc.gate_reason
+
+
+async def test_a_blank_opinion_does_not_ungate_the_file(db_session) -> None:
+    """A form on the file is not a rent on the file. The extractor is told to return null rather than
+    guess at a blank opinion line, and a null must not read as a rent of zero — that would compute a
+    net of -PITIA and carry the whole payment as an obligation, which is a different wrong answer
+    rather than an answer."""
+    loan_file = await _investment_file(db_session, "blank-opinion", gross_rent=None)
+    await _rent_schedule(db_session, loan_file, opinion=None)
+
+    calc = await build_dti_calculation(db_session, loan_file=loan_file)
+
+    assert calc.gated and "Form 1007" in (calc.gate_reason or "")

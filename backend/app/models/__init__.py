@@ -35,6 +35,7 @@ from app.models.document_finding import (
     DocumentFindingStatus,
     DocumentFindingType,
 )
+from app.models.dti_custom_line import DtiCustomLine
 from app.models.dti_override import DtiOverride
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
@@ -75,6 +76,7 @@ from app.models.stated_financials import (
     StatedLiability,
 )
 from app.models.tag import RuleTag, Tag, TagDependency
+from app.models.tag_cache import TagCacheEntry, TagCacheKind
 from app.models.types import (
     LongStr,
     MediumStr,
@@ -108,6 +110,7 @@ __all__ = [
     "DocumentFindingStatus",
     "DocumentFindingType",
     "DocumentStatus",
+    "DtiCustomLine",
     "DtiOverride",
     "EncryptedString",
     "EvaluationOutcome",
@@ -161,6 +164,8 @@ __all__ = [
     "StatedIncomeItem",
     "StatedLiability",
     "Tag",
+    "TagCacheEntry",
+    "TagCacheKind",
     "TagDependency",
     "Tier",
     "TimestampMixin",

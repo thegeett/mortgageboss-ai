@@ -311,6 +311,57 @@ export function phaseLabel(phase: string): string {
   return PHASE_LABELS[phase] ?? "Working";
 }
 
+/** A finished run's duration in whole seconds, or null when it cannot be known. */
+export function runDurationSeconds(run: {
+  started_at: string | null;
+  completed_at: string | null;
+}): number | null {
+  if (!run.started_at || !run.completed_at) return null;
+  const seconds = (Date.parse(run.completed_at) - Date.parse(run.started_at)) / 1000;
+  // NaN from an unparseable date, and negatives from clock skew between the two writes, both mean
+  // "no honest answer" — better nothing than a duration of -3 seconds on screen.
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
+}
+
+/** `938` -> `"15m 38s"`, `47` -> `"47s"`. Compact enough for a secondary line. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+/**
+ * What the last run was and how long it took — the line beside "Re-run anyway".
+ *
+ * TO THE SECOND, unlike `remainingLabel` below, and the difference is the point. That one rounds to
+ * the minute because it renders an ESTIMATE with about half a minute of spread, and a ticking
+ * countdown would claim a precision it does not have. This renders a MEASUREMENT of a run that has
+ * already finished: the duration is exactly known, so rounding it away would discard real
+ * information — including the thing a processor most wants from it, which is whether a re-run costs
+ * them one minute or fifteen.
+ *
+ * Returns null for a RUNNING run rather than a placeholder. While a pass is in flight `latest_run`
+ * IS that pass, so it has no duration yet, and the panel is already showing its phase and estimate
+ * two lines up. A "last run" line there would describe the run the processor is watching.
+ */
+export function lastRunLabel(
+  run: {
+    status: "running" | "completed" | "failed";
+    started_at: string | null;
+    completed_at: string | null;
+  } | null,
+  relative: (iso: string) => string,
+): string | null {
+  if (!run || run.status === "running" || !run.completed_at) return null;
+  const when = relative(run.completed_at);
+  const seconds = runDurationSeconds(run);
+  const verb = run.status === "failed" ? "Last run failed" : "Last run";
+  return seconds === null ? `${verb} ${when}` : `${verb} ${when} · took ${formatDuration(seconds)}`;
+}
+
 /** LP-591 — remaining time, in a processor's words, or null when there is nothing honest to say.
  *
  * Two behaviours matter more than the number itself.

@@ -24,9 +24,10 @@ from app.ai.extraction.shape import TypedField
 from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
+from app.models.activity_log import ActivityLog
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
-from app.models.extraction import Extraction, ExtractionStatus
+from app.models.extraction import ConfidenceSource, Extraction, ExtractionStatus
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemOrigin,
@@ -369,6 +370,357 @@ async def test_tier3_analyzed_findings_recorded_and_text_indexed(
 # --------------------------------------------------------------------------- #
 
 
+def _paystub_with_confidence(confidence: float) -> PayStubExtractionResult:
+    """A SUCCEEDED extraction that captured typed fields, at a given self-reported confidence.
+
+    0.0 is how a model that OMITTED the field arrives here: ``coerce_confidence`` collapses a
+    missing/non-numeric value to 0.0 before the result is built (``ai/parsing.py``)."""
+    return PayStubExtractionResult(
+        data=PayStubExtraction(
+            employer_name=TypedField(value="ACME Corp"),
+            gross_pay=TypedField(value=Decimal("4200.00")),
+        ),
+        status=ExtractionStatus.SUCCEEDED,
+        confidence=confidence,
+        reasoning="clear",
+        input_tokens=300,
+        output_tokens=90,
+    )
+
+
+async def test_absent_extraction_confidence_is_not_treated_as_low_confidence(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 3: "the model did not say" is not "the model said zero".
+
+    ``coerce_confidence`` collapses an omitted confidence to 0.0 and the gate compared that to the
+    threshold, so a SUCCEEDED extraction with typed fields was flagged "extraction low confidence"
+    — a reason that was not true. On staging this hit 15 of 115 successful extractions (13%).
+
+    LP-201 already keeps the distinction in storage (NULL / ``not_provided``, "absence is a
+    legitimate state"); this asserts the review gate now honours it."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_with_confidence(0.0))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.processing_error is None or "low confidence" not in doc.processing_error
+    # The absence is still RECORDED — honestly, and without claiming a judgement was made.
+    assert any(e["event"] == "extraction_confidence_not_reported" for e in logs)
+    assert not any(e.get("reason") == "low_confidence" for e in logs)
+
+    # And it is persisted as absence, not as a zero the reader could mistake for a self-report.
+    extraction = await _current_extraction(db_session, doc.id)
+    assert extraction is not None
+    assert extraction.confidence is None
+    assert extraction.confidence_source == ConfidenceSource.NOT_PROVIDED
+
+
+async def test_a_genuinely_low_reported_confidence_is_still_flagged(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The real gate must survive the fix — a model that SAYS it is unsure still gets a human.
+
+    Without this, "stop flagging absence" could be implemented as "stop flagging", and the whole
+    low-confidence review path would quietly disappear with every test still green."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_with_confidence(0.3))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    assert doc.processing_error == "extraction low confidence"
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "low_confidence"
+
+
+async def test_a_connection_failure_takes_the_rerunnable_branch_too(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 2: splitting the labels must not narrow the routing.
+
+    This branch used to be gated on ``reasoning == INFRA_RATE_LIMITED``, which caught the whole
+    transient family only because that one constant meant all of it. Now that connection failures
+    have their own label, an equality test would drop them out of the re-runnable branch and record
+    a dead socket as a content coverage gap — advancing the matching need to REJECTED, which is not
+    re-matched, so the successful re-run could never advance it.
+
+    The staging failure was exactly this kind, so this is the case that matters most."""
+    from app.ai.client import INFRA_CONNECTION
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.9, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, PayStubExtractionResult.failed(INFRA_CONNECTION))
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW
+    # Named honestly — not "throttled", which is what sent the staging diagnosis to the quota.
+    assert doc.processing_error == "extraction incomplete (connection) — re-runnable"
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == INFRA_CONNECTION
+    assert review[0]["infra_failure"] is True
+
+
+async def test_a_confident_unknown_naming_a_catalog_type_is_flagged_not_completed(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 5, the whole point.
+
+    A high-confidence ``unknown`` routes to Tier 3 and COMPLETES with no flag — right when the
+    model is right, and no answer for a model that is confidently wrong. LF-ZE9N lost four Tier-1
+    types this way, each completed with no typed data and none of them in anyone's queue.
+
+    The document is still READ (Tier 3), and the type is NOT applied — only surfaced."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.90,
+            reasoning="none of the listed types fit",
+            document_name="a driver's license",
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    extract = _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.NEEDS_REVIEW  # was COMPLETED, silently
+    assert doc.document_type == "unknown"  # the type is SURFACED, never applied
+    assert analyze.call_count == 1  # still read via Tier 3
+    assert extract.call_count == 0  # and no typed extractor guessed at
+
+    review = [e for e in logs if e["event"] == "document_needs_review"]
+    assert review and review[0]["reason"] == "unknown_names_catalog_type"
+    assert review[0]["suggested_type"] == "drivers_license"
+
+
+async def test_a_genuinely_unknown_document_still_completes_quietly(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """``misc`` must stay reachable, or this trades one silent failure for a noisy one.
+
+    LP-463's own evidence is the fixture: "wiring instructions from a law firm" was a CORRECT
+    decline — there is no catalog type for it — and declining is the right answer, not a failure.
+    If this test ever starts flagging, the matcher has gone fuzzy."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.95,
+            reasoning="genuinely none of them",
+            document_name="wiring instructions from a law firm",
+        ),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+    assert doc.document_type == "unknown"
+
+
+async def test_a_confident_unknown_with_no_name_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """No name, no evidence, no change — the pre-LP-636 path exactly.
+
+    Every document classified before ``document_name`` was persisted has a null one, so this is
+    also the behaviour on re-processing anything from before that change."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="unknown", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.status == DocumentStatus.COMPLETED
+
+
+async def test_document_name_is_persisted_on_a_normal_classification(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636: the model's own name for the document is STORED, not just used and dropped.
+
+    LP-463 emits ``document_name`` before the constrained pick and calls it the more reliable
+    signal; it was consumed by the ``type_matches_document`` self-check and then lost. Persisting
+    it changes no routing — asserted here so the fix cannot be mistaken for a behaviour change."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="pay_stub",
+            confidence=0.95,
+            reasoning="x",
+            document_name="a bi-weekly pay stub",
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_name == "a bi-weekly pay stub"
+    # Unchanged by the new line: same type, same terminal status.
+    assert doc.document_type == "pay_stub"
+    assert doc.status == DocumentStatus.COMPLETED
+
+
+async def test_document_name_is_persisted_for_a_confident_unknown(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-636 defect 5 step 1 — the name survives on a confident ``unknown``.
+
+    Uses a name with NO catalog match on purpose. Step 2 now flags a confident ``unknown`` whose
+    name does match (see ``test_a_confident_unknown_naming_a_catalog_type_is_flagged_not_completed``),
+    so a matching name here would be testing that instead. This one holds the original property:
+    the name is persisted, and a genuine decline still completes via Tier 3 untouched."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.90,
+            reasoning="none of the listed types fit",
+            document_name="wiring instructions from a law firm",
+        ),
+    )
+    analyze = _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_name == "wiring instructions from a law firm"
+    assert doc.document_type == "unknown"
+    assert analyze.call_count == 1  # still Tier 3
+    assert doc.status == DocumentStatus.COMPLETED  # a genuine decline still completes
+
+
+async def test_document_name_survives_a_rejected_type_mismatch(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The name is stored even when the model's TYPE is thrown away.
+
+    ``type_matches_document=False`` discards the pick and stores ``unknown``. The name is the
+    part worth keeping in exactly that case — it is the only record of what the document was."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="w2",
+            confidence=0.85,
+            reasoning="a Canadian T4",
+            document_name="a Canadian T4 slip",
+            type_matches_document=False,
+        ),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_type == "unknown"  # the pick is still rejected
+    assert doc.document_name == "a Canadian T4 slip"  # the name is not
+
+
+@pytest.mark.parametrize(
+    ("document_type", "confidence", "type_matches"),
+    [
+        pytest.param("pay_stub", 0.95, True, id="confident-known-type"),
+        pytest.param("unknown", 0.90, True, id="confident-unknown"),
+        pytest.param("w2", 0.85, False, id="rejected-type-mismatch"),
+    ],
+)
+async def test_document_name_is_never_logged_or_put_in_the_activity_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    document_type: str,
+    confidence: float,
+    type_matches: bool,
+) -> None:
+    """LP-636: it is model prose and can carry a borrower name, so it stays out of both.
+
+    The C7 scrub matches identifier SHAPES, and a person's name is not digit-shaped, so a name in
+    an activity detail would cross ``readonly.activity_logs`` intact and reach a terminal and a
+    transcript. The column is excluded from the readonly views for the same reason
+    (``tests/test_readonly_query.py``).
+
+    PARAMETRIZED OVER ALL THREE BRANCHES, because the activity detail is branch-dependent: the
+    mismatch branch adds ``rejected_type`` / ``type_mismatch`` and a longer summary string, and it
+    is the branch a future "let's record the name here so we can debug it" would most naturally
+    land in — so it is the one most worth pinning."""
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    secret = "Jane Q Borrower's 2025 W-2"
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type=document_type,
+            confidence=confidence,
+            reasoning="x",
+            document_name=secret,
+            type_matches_document=type_matches,
+        ),
+    )
+    # Both downstream paths patched: which one runs depends on the branch, and the assertion
+    # below is about what was WRITTEN, not about which route was taken.
+    _patch_extract(monkeypatch, _paystub_success())
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    # Stored — so removing the assignment fails this test rather than passing it vacuously.
+    assert doc.document_name == secret
+    assert not any(secret in str(entry) for entry in logs), "document_name reached a log"
+
+    rows = (
+        await db_session.execute(
+            select(ActivityLog).where(ActivityLog.loan_file_id == doc.loan_file_id)
+        )
+    ).scalars()
+    assert not any(secret in str(row.detail) + str(row.summary) for row in rows), (
+        "document_name reached an activity record, which is readable through readonly.activity_logs"
+    )
+
+
 async def test_type_mismatch_not_applied_and_free_extracted_for_review(
     monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
 ) -> None:
@@ -608,9 +960,28 @@ async def test_low_confidence_or_unknown_needs_review(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("infra", ["rate_limited", "oversized", "failed"])
+# (infra kind, the payload genuinely did not fit, expect the permanent "too large" voice).
+#
+# `oversized` APPEARS TWICE ON PURPOSE, and the second row is the bug this parametrization used to
+# contain: `infra_failure_kind` returns "oversized" for EVERY non-throttle HTTP 400, so a corrupt or
+# encrypted PDF, or a misconfigured model id, arrives under that name while being nothing to do with
+# size. The old table read the kind as the measurement and asserted the file was too large — the
+# same assumption the production branch was making, so the test agreed with the defect.
+@pytest.mark.parametrize(
+    ("infra", "over_budget", "permanent"),
+    [
+        ("rate_limited", False, False),
+        ("failed", False, False),
+        ("oversized", False, False),  # a 400 that is not a size problem
+        ("oversized", True, True),  # the file really cannot be sent
+    ],
+)
 async def test_infra_failure_needs_review_with_distinct_reason(
-    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, infra: str
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+    infra: str,
+    over_budget: bool,
+    permanent: bool,
 ) -> None:
     import structlog
 
@@ -618,7 +989,9 @@ async def test_infra_failure_needs_review_with_distinct_reason(
     _patch_storage(monkeypatch)
     _patch_classify(
         monkeypatch,
-        ClassificationResult.unknown("AI call failed", infra_failure=infra),
+        ClassificationResult.unknown(
+            "AI call failed", infra_failure=infra, payload_over_budget=over_budget
+        ),
     )
     extract = _patch_extract(monkeypatch, _paystub_success())
 
@@ -633,6 +1006,86 @@ async def test_infra_failure_needs_review_with_distinct_reason(
     # The reason is the infrastructure cause, NOT "low_confidence" — that is the whole point.
     assert review[0]["reason"] == infra
     assert review[0].get("infra_failure") is True
+    # LP-637 — AND IT REACHES THE DOCUMENT. Asserting the log line proves the pipeline KNEW; a
+    # processor reads `processing_error`, and this branch left it empty. LF-ZE9N's last
+    # unidentified document sat as "Processing / uncategorized" with no explanation for exactly
+    # that reason, while the log said "oversized".
+    assert doc.processing_error, f"{infra} left the document with no reason on it"
+    if permanent:
+        # Re-reading cannot help, so the copy must not promise that it will.
+        assert "too large" in doc.processing_error
+        assert "won't help" in doc.processing_error
+    else:
+        # And it must not blame a file that is not the problem. A processor told to split a 300 KB
+        # corrupt scan does the work and gets nowhere.
+        assert "too large" not in doc.processing_error
+        assert "re-reading" in doc.processing_error.lower()
+
+
+async def test_a_confident_unknown_logs_why_it_could_not_be_matched(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """LP-639 — AT THE LAYER THE QUESTION IS ASKED. The explanation being correct is not the same as
+    the pipeline emitting it, and this branch is the only place a confident `unknown` passes through.
+
+    The name here is the shape that caused the investigation: it DOES name a catalog type, and the
+    coverage rule turns it away. Before this line the log said nothing, so "the matcher is too
+    strict" and "the model recognised nothing" were indistinguishable after the fact.
+    """
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown",
+            confidence=0.85,
+            reasoning="not a known type",
+            document_name="a Closing Disclosure for the subject property",
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+
+    explained = [e for e in logs if e["event"] == "classification_unknown_explained"]
+    assert len(explained) == 1, "a confident unknown left no explanation behind"
+    entry = explained[0]
+    assert entry["near_miss"] == "closing_disclosure"
+    assert entry["rejected_by"] == "coverage"
+    assert entry["name_present"] is True
+    # AND THE NAME ITSELF IS NOT IN IT. The reason this was never logged is that it can quote
+    # borrower details; a diagnostic that leaks what it exists to describe is worse than none.
+    rendered = repr(entry)
+    for word in ("Closing", "Disclosure", "subject", "property"):
+        assert word not in rendered, f"{word!r} leaked into the log line"
+
+
+async def test_an_unknown_with_no_name_is_logged_as_such(
+    monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession
+) -> None:
+    """The other branch of the diagnosis: the model produced nothing to match. That is a prompt
+    problem rather than a matcher problem, and the log has to tell them apart."""
+    import structlog
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(
+            document_type="unknown", confidence=0.9, reasoning="no idea", document_name=None
+        ),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    with structlog.testing.capture_logs() as logs:
+        await pipeline._process_document(db_session, str(doc.id))
+
+    entry = next(e for e in logs if e["event"] == "classification_unknown_explained")
+    assert entry["name_present"] is False
+    assert entry["near_miss"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -746,7 +1199,7 @@ async def test_throttled_extraction_is_not_a_content_failure(
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.NEEDS_REVIEW
-    assert "throttled" in doc.processing_error and "re-runnable" in doc.processing_error
+    assert doc.processing_error == "extraction incomplete (rate_limited) — re-runnable"
     # ⚠️ NO FAILED extraction version — the call never produced content, so none is recorded.
     assert await _current_extraction(db_session, doc.id) is None
     review = [e for e in logs if e["event"] == "document_needs_review"]
@@ -1370,3 +1823,119 @@ async def test_clean_w2_raises_no_consistency_finding(
     await pipeline._process_document(db_session, str(doc.id))
     findings = await _findings_for(db_session, doc.loan_file_id)
     assert [f for f in findings if f.finding_type == DocumentFindingType.CONSISTENCY] == []
+
+
+# --------------------------------------------------------------------------- #
+# LP-637 review — findings are not versioned, so a re-run must supersede them
+# --------------------------------------------------------------------------- #
+async def test_reprocessing_supersedes_the_previous_runs_findings(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`create_document_finding` adds unconditionally and nothing removed the prior run's rows.
+
+    Harmless while `process_document` ran exactly once per document, at upload. LP-637's reprocess
+    endpoint makes it reachable: run the Tier 3 path twice and the `key_finding` rows DOUBLE, in the
+    same queue the ticket exists to shrink.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    after_first = await _findings_for(db_session, doc.loan_file_id)
+    assert after_first, "the fixture must actually produce a finding, or this proves nothing"
+
+    await pipeline._process_document(db_session, str(doc.id))
+    after_second = await _findings_for(db_session, doc.loan_file_id)
+
+    assert len(after_second) == len(after_first), (
+        f"reprocessing doubled the findings: {len(after_first)} became {len(after_second)}"
+    )
+
+
+async def test_a_reclassification_away_from_tier_3_does_not_strand_its_findings(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE CASE THAT DECIDES WHERE THE CLEANUP LIVES, and the one that matters most.
+
+    This is the SUCCESS path of the whole feature: an `unknown` document reprocesses and the
+    improved classifier gives it a real Tier 1 type. That run never enters the Tier 3 branch — so a
+    cleanup written inside that branch would never fire, and the document would keep OPEN Tier 3
+    `key_finding` rows while no longer being a Tier 3 document, still surfaced through
+    `/document-findings` and still reachable as `NeedsItem.source_finding`.
+    """
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    await pipeline._process_document(db_session, str(doc.id))
+    assert await _findings_for(db_session, doc.loan_file_id), "no Tier 3 finding to strand"
+
+    # The improved classifier now recognises it, and a registered extractor takes over.
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="pay_stub", confidence=0.95, reasoning="x"),
+    )
+    _patch_extract(monkeypatch, _paystub_success())
+
+    await pipeline._process_document(db_session, str(doc.id))
+    await db_session.refresh(doc)
+
+    assert doc.document_type == "pay_stub"
+    assert not await _findings_for(db_session, doc.loan_file_id), (
+        "Tier 3 findings outlived the Tier 3 classification that produced them"
+    )
+
+
+async def test_a_triaged_finding_survives_a_reprocess(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reprocess is not entitled to erase a decision a person made.
+
+    Nothing writes REVIEWED or DISMISSED today — the lifecycle is Phase 3 work and the API only
+    lists — so this changes nothing now. It is here so the cleanup is already correct when that
+    lands, rather than quietly deleting triaged rows the first day it can.
+    """
+    from app.models.document_finding import DocumentFinding, DocumentFindingStatus
+
+    doc = await _setup_document(db_session)
+    _patch_storage(monkeypatch)
+    monkeypatch.delitem(pipeline.EXTRACTORS, "tax_return")
+    _patch_classify(
+        monkeypatch,
+        ClassificationResult(document_type="tax_return", confidence=0.9, reasoning="x"),
+    )
+    _patch_analyze(monkeypatch, _generic_analysis_with_finding())
+    await pipeline._process_document(db_session, str(doc.id))
+
+    existing = (
+        await db_session.scalars(
+            select(DocumentFinding).where(DocumentFinding.document_id == doc.id)
+        )
+    ).all()
+    assert existing
+    for finding in existing:
+        finding.status = DocumentFindingStatus.DISMISSED
+    await db_session.commit()
+
+    await pipeline._process_document(db_session, str(doc.id))
+
+    survivors = (
+        await db_session.scalars(
+            select(DocumentFinding).where(
+                DocumentFinding.document_id == doc.id,
+                DocumentFinding.status == DocumentFindingStatus.DISMISSED,
+                DocumentFinding.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    assert len(survivors) == len(existing), "a processor's triage was erased by a reprocess"

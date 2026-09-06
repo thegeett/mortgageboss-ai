@@ -36,6 +36,19 @@ def _drive(task: _FakeTask, work, on_exhausted) -> str:
             return "ok"
         except Retry:
             continue  # the worker would re-run with the incremented retry count
+        except (TypeError, AttributeError, NameError):
+            # LP-635 review — a HARNESS bug, not a task outcome, so it must not be reported as one.
+            #
+            # `except Exception` alone swallowed the TypeError from calling a zero-arg
+            # `on_exhausted` with an argument and returned "terminal", which is a legitimate
+            # result — so the suite failed as `assert 0 == 1`, pointing nowhere near a signature
+            # mismatch. The tests caught the breakage; the message cost time it should not have.
+            #
+            # Narrow on purpose: every failure these tests deliberately raise is a RuntimeError or
+            # the fake soft-timeout, so nothing legitimate is caught here. A production worker
+            # rightly catches everything; a harness pretending to be one should still say when the
+            # harness itself is wrong.
+            raise
         except Exception:
             return "terminal"
 
@@ -48,7 +61,7 @@ def test_transient_failure_retries_then_succeeds() -> None:
         if calls["work"] < 2:  # fail once, then succeed
             raise RuntimeError("transient blip")
 
-    result = _drive(_FakeTask(MAX_RETRIES), work, lambda: calls.__setitem__("terminal", 1))
+    result = _drive(_FakeTask(MAX_RETRIES), work, lambda _exc: calls.__setitem__("terminal", 1))
 
     assert result == "ok"
     assert calls["work"] == 2  # retried once, then succeeded
@@ -63,7 +76,9 @@ def test_exhausted_retries_set_terminal_failed() -> None:
         raise RuntimeError("persistent failure")
 
     result = _drive(
-        _FakeTask(MAX_RETRIES), work, lambda: calls.__setitem__("terminal", calls["terminal"] + 1)
+        _FakeTask(MAX_RETRIES),
+        work,
+        lambda _exc: calls.__setitem__("terminal", calls["terminal"] + 1),
     )
 
     assert result == "terminal"
@@ -88,7 +103,7 @@ def test_terminal_on_exception_fails_closed_without_retrying() -> None:
     result = _drive_terminal(
         _FakeTask(MAX_RETRIES),
         work,
-        lambda: calls.__setitem__("terminal", calls["terminal"] + 1),
+        lambda _exc: calls.__setitem__("terminal", calls["terminal"] + 1),
         terminal_on=(_SoftTimeout,),
     )
 
@@ -118,7 +133,7 @@ def test_a_scheduled_retry_passes_through_untouched() -> None:
         raise Retry(exc=RuntimeError("already scheduling"))
 
     try:
-        retry_or_terminal(task, work, on_exhausted=lambda: None, event="test")
+        retry_or_terminal(task, work, on_exhausted=lambda _exc: None, event="test")
     except Retry:
         pass
     else:  # pragma: no cover

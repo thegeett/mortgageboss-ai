@@ -355,8 +355,9 @@ def _liability_context(
       name (a tradeline field no declaration reads) is still passed through under its own name rather
       than dropped, so nothing is hidden from a reasoner.
     * **The universal PII backstop.** Values go through :func:`_scrub_list_value`, like every other
-      list-derived context. A ``ListRow.fields`` value is a plain ``Field``, never a ``PiiField``, and
-      ``ListSpec.redact`` covers only the fields a spec NAMED — so an account number a bureau prints
+      list-derived context. A ``ListRow.fields`` value is USUALLY a plain ``Field`` — bug-010 added
+      ``ListSpec.pii``, so a DECLARED row field arrives already masked — and neither that nor
+      ``ListSpec.redact`` covers a field a spec did not name, so an account number a bureau prints
       inside ``creditor_name`` would otherwise reach the model unscrubbed.
 
     ⚠️ ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has
@@ -395,9 +396,11 @@ def _field_value(field: RawField) -> object:
 def _scrub_list_value(value: object) -> object:
     """Belt-and-braces PII scrub for one list-row value before it reaches a reasoner (LP-444 A4).
 
-    A ``ListRow.fields`` value is a PLAIN ``Field`` (model.py) — NEVER a ``PiiField`` — so unlike a
-    document's top-level fields (which contribute only a PiiField's MASKED display), a list-row value
-    carries whatever the extractor stored (list-row PII is not ``_PII_FIELDS``-routed). The snapshot layer
+    A ``ListRow.fields`` value is USUALLY a plain ``Field``, so unlike a document's top-level fields
+    (which contribute only a PiiField's MASKED display), a list-row value generally carries whatever
+    the extractor stored. bug-010 added a per-list ``pii`` declaration (``ListSpec.pii``), so a
+    DECLARED row field is a ``PiiField`` and reaches here already masked; everything else still
+    depends on the scrub below. The snapshot layer
     already applies a PER-LIST DECLARED redact to the known account/SSN row fields (the LP-443 review
     backstop — ``ListSpec.redact`` on ``_TRADELINES_LIST`` etc.), but that only covers the fields a spec
     named. THIS is the UNIVERSAL backstop at the context boundary — the last gate before an AI reasoner,
@@ -513,9 +516,14 @@ def _stated_liabilities(snapshot: Snapshot) -> list[dict[str, object]]:
 
 
 def _serialize_row(row: ListRow) -> dict[str, object]:
-    """One list row → ``{field: scrubbed value}`` (present fields only)."""
+    """One list row → ``{field: scrubbed value}`` (present fields only).
+
+    bug-010 — through ``_field_value``, because a row field can now be a ``PiiField``: reading
+    ``.value`` off one raises, and a masked field must contribute its DISPLAY (``****3312``), never
+    a raw value it does not hold. The same accessor the flat-field path already uses.
+    """
     return {
-        name: _scrub_list_value(field.value)
+        name: _scrub_list_value(_field_value(field))
         for name, field in row.fields.items()
         if field.is_present
     }

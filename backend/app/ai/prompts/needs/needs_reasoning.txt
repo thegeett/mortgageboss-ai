@@ -70,9 +70,15 @@ CRITICAL RULES:
   - You PROPOSE; you do not decide. A human processor will confirm, adjust, or dismiss
     each proposal. Be helpful and reasonably complete, but don't invent needs the file
     gives no basis for.
-  - Use a concise lowercase snake_case need_type when an obvious document type fits
-    (e.g. "tax_return", "profit_and_loss", "gift_letter", "mortgage_statement"); use
-    null for a free-form need.
+  - NEED_TYPE MUST COME FROM THE LIST BELOW, copied exactly, or be null. This is not a
+    style preference: a need is satisfied by matching its need_type against an uploaded
+    document's type, so a name that is not on this list can never be cleared by any
+    document and leaves the processor a row they cannot act on. If no listed type fits,
+    use null and describe the need in the title — a free-form need is handled correctly;
+    an invented type name is not.
+
+VALID NEED TYPES (copy one exactly, or use null):
+{satisfiable_need_types}
 
 WITHDRAWING A NEED THAT NO LONGER APPLIES (the "retract" list). Needs are proposed at
 import, when the file has NO documents yet — so some of them are answered by documents

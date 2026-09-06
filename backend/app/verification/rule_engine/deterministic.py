@@ -24,6 +24,7 @@ from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
     missing_document_subject_id,
     resolve_applicabilities,
+    undetermined_by_document_type,
 )
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
@@ -126,6 +127,7 @@ def _result(
     threshold_used: Decimal | None = None,
     how_to_fix: str | None = None,
     ratification_pending: bool = False,
+    unidentified_document: bool = False,
 ) -> RuleEvaluation:
     assert spec.deterministic is not None
     return RuleEvaluation(
@@ -191,6 +193,9 @@ def _result(
         # ai_fuzzy_match rule (CR-1, CR-4, CR-5, OC-1, …) would have shipped an unmeasured AI judgment as
         # an AUTO verdict with NO HUMAN IN THE LOOP — the hole that had to close before anything activated.
         ratification_pending=ratification_pending or _ratifies_every_finding(spec.rule_id),
+        # LP-640 — set only by the applicability path, and only when the DOCUMENT-TYPE predicate is what
+        # abstained. Every other construction site leaves it False.
+        unidentified_document=unidentified_document,
     )
 
 
@@ -428,9 +433,8 @@ def evaluate_deterministic_rule(
     for subject_id, subject_tags in subjects:
         # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
-            terminal = resolve_applicabilities(
-                _as_conditions(det.applicability), subject_tags, _loan_tags(snapshot)
-            )
+            conditions = _as_conditions(det.applicability)
+            terminal = resolve_applicabilities(conditions, subject_tags, _loan_tags(snapshot))
             if terminal is not None:
                 verdict, reason = terminal
                 results.append(
@@ -440,6 +444,14 @@ def evaluate_deterministic_rule(
                         verdict,
                         reason,
                         subject_tags,
+                        # LP-640 — consolidatable only when the DOCUMENT TYPE is what we could not
+                        # determine; an abstention on any other predicate keeps its own finding.
+                        unidentified_document=(
+                            verdict is Verdict.COULDNT_CHECK
+                            and undetermined_by_document_type(
+                                conditions, subject_tags, _loan_tags(snapshot)
+                            )
+                        ),
                         # LP-526 — only a COULDNT_CHECK gets a fix. A not_applicable subject is out of
                         # scope and is never persisted, so asking for a document there would be noise.
                         how_to_fix=(

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from app.models import (
     Company,
     EvaluationOutcome,
+    Finding,
     FindingCategory,
     FindingEvent,
     FindingEventType,
@@ -450,3 +451,207 @@ async def test_a_retired_finding_stops_reading_as_a_concern(db_session: AsyncSes
     ).all()
     superseded = [e.detail.get("superseded_message") for e in events if e.detail]
     assert original in superseded, "the prior wording must survive in the event history"
+
+
+# --------------------------------------------------------------------------- #
+# bug-011 — a rule that produces findings without being ACTIVE
+# --------------------------------------------------------------------------- #
+_HELD_RULE = "PC-5"
+
+
+def _held_result(subject: str = "loan", *, reasoning: str = "pending automation") -> RuleEvaluation:
+    """A result from a rule the caller does NOT list as evaluated.
+
+    PC-5 is BUILT AND HELD, so it is absent from `ACTIVE_RULE_IDS`, and it still reaches this table
+    through LP-391's pending-checks path as a PENDING_AUTOMATION flag.
+    """
+    return RuleEvaluation(
+        rule_id=_HELD_RULE,
+        subject_id=subject,
+        verdict=Verdict.PENDING_AUTOMATION,
+        verdict_confidence=None,
+        load_bearing_tags=(),
+        threshold_used=None,
+        priya_validated=False,
+        gated_pending_signoff=True,
+        reasoning=reasoning,
+        how_to_fix=None,
+    )
+
+
+async def test_a_held_rule_can_be_reconciled_twice(db_session: AsyncSession) -> None:
+    """THE REPORTED FAILURE. The first run MINTS the flag; the second must CARRY IT FORWARD.
+
+    Before this, the prior row was never loaded — `evaluated_rule_ids` is the ACTIVE list and a held
+    rule is not on it — so the second run minted a duplicate and
+    `uq_findings_loan_file_rule_subject` refused it. That IntegrityError failed the persist step of a
+    pass that had just spent thirteen minutes of model calls, and the retry restarted the whole pass:
+    four attempts, four times the AI spend, and a progress bar the processor watched fall from step
+    three back to step two.
+    """
+    lf_id = await _loan_file_id(db_session)
+
+    first = await _reconcile(db_session, lf_id, [_held_result()])
+    assert len(first.minted) == 1
+
+    second = await _reconcile(db_session, lf_id, [_held_result(reasoning="still pending")])
+
+    # Carried forward onto the SAME row, not minted again — which is what the unique index refused.
+    assert len(second.minted) == 0
+    rows = (
+        (
+            await db_session.execute(
+                select(Finding).where(Finding.loan_file_id == lf_id, Finding.rule_id == _HELD_RULE)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, "the held rule minted a second row instead of updating its own"
+
+
+async def test_a_held_rule_is_never_retired_by_a_run_that_did_not_produce_it(
+    db_session: AsyncSession,
+) -> None:
+    """THE REGRESSION THE FIX MUST NOT CAUSE — and the protection is STRUCTURAL, not a guard.
+
+    `_evaluate_pending_checks` is best-effort and isolated: it swallows every exception and returns
+    `[]`. So a run where that path failed for its own reasons produces no PC-5 result, and if that
+    could retire the existing flag it would turn a real one green — the false-closed that
+    `retire_eligible_rule_ids` exists to prevent, reached from the other direction.
+
+    WHAT ACTUALLY PREVENTS IT is that the load set is derived from THIS RUN'S RESULTS. A rule absent
+    from the results is never loaded, so it never enters `prior_by_identity`, so the retire loop
+    never sees it — whatever the retire gate says. Verified rather than assumed: this test still
+    passes with `if prior_finding.rule_id not in retire_eligible` disabled entirely, while the
+    pre-existing `test_degraded_run_does_not_retire_findings_it_could_not_reevaluate` fails. Two
+    independent protections, and this one is the load's own shape.
+
+    Stated because an earlier version of this docstring claimed the test guarded against widening
+    `retire_eligible` alongside the load. It does not — widening it with the run's own result ids
+    cannot reach a rule that produced no result — and a docstring naming the wrong mechanism is how
+    the next person removes the right one.
+
+    That reasoning is right and stops one step short: retirement is gated per RULE and applied per
+    IDENTITY, so widening DOES reach every other SUBJECT of a rule that produced a result for any one
+    of them. `test_widening_retirement_to_the_load_set_would_retire_a_live_subject` is the test that
+    fails on that mutation; this one cannot, and now says so.
+    """
+    lf_id = await _loan_file_id(db_session)
+    await _reconcile(db_session, lf_id, [_held_result()])
+
+    # A later run produces NOTHING for the held rule — exactly what a failed pending-checks pass looks
+    # like from here.
+    await _reconcile(db_session, lf_id, [_as1("txn_1", Verdict.SATISFIED)])
+
+    row = (
+        (
+            await db_session.execute(
+                select(Finding).where(Finding.loan_file_id == lf_id, Finding.rule_id == _HELD_RULE)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.evaluation_outcome is not EvaluationOutcome.NO_LONGER_APPLIES, (
+        "a run that never looked at the held rule retired its flag — a false green"
+    )
+
+
+async def test_widening_retirement_to_the_load_set_would_retire_a_live_subject(
+    db_session: AsyncSession,
+) -> None:
+    """THE MUTATION THE OTHER TEST CANNOT CATCH, and the reason to write this one.
+
+    `test_a_held_rule_is_never_retired_by_a_run_that_did_not_produce_it` records — correctly — that
+    widening `retire_eligible` with the run's own result ids "cannot reach a rule that produced no
+    result". True, and incomplete: retirement is gated per RULE and applied per IDENTITY
+    ``(rule_id, subject_key)``. So widening reaches every OTHER SUBJECT of a rule that produced a
+    result for any one of them.
+
+    Concretely: a held rule flags two subjects; a later run re-detects only the first. Its second
+    finding is loaded (the rule is in the results), unmatched, and — if retirement widened with the
+    load — retire-eligible. A real pending flag turns green because a different subject of the same
+    rule happened to be re-detected. That is the false-closed the whole mechanism exists to prevent.
+
+    So `load_rule_ids` must stay separate from `retire_eligible`, and this fails if they are merged.
+    """
+    lf_id = await _loan_file_id(db_session)
+    await _reconcile(db_session, lf_id, [_held_result("loan"), _held_result("borrower_2")])
+
+    # A later run re-detects ONE of them. The other is not gone — nothing re-evaluated it.
+    await _reconcile(db_session, lf_id, [_held_result("loan")])
+
+    rows = {
+        f.subject_key: f
+        for f in (
+            await db_session.execute(
+                select(Finding).where(Finding.loan_file_id == lf_id, Finding.rule_id == _HELD_RULE)
+            )
+        )
+        .scalars()
+        .all()
+    }
+    assert set(rows) == {"loan", "borrower_2"}, "a subject lost its row entirely"
+    assert rows["borrower_2"].evaluation_outcome is not EvaluationOutcome.NO_LONGER_APPLIES, (
+        "a held rule's un-re-evaluated subject was retired because a SIBLING subject was "
+        "re-detected — retirement has been widened to the load set"
+    )
+
+
+async def test_every_blocked_candidate_is_covered_by_the_load_set() -> None:
+    """The fix is general BY CONSTRUCTION — the load set is derived from results, so it covers any
+    rule that produces one. This pins that the population is what the ticket assumes.
+
+    Worth stating because the ticket names PC-5 and speaks of "the pending-checks path" as one
+    thing: that path carries SIX held rules, any of which could have produced this outage, and a
+    seventh added later is covered only so long as blocked candidates stay disjoint from the active
+    set. If they ever overlap, a rule would be both evaluated and blocked and the reasoning about
+    which set it lands in stops holding.
+    """
+    from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
+    from app.verification.rule_engine.registry import ACTIVE_RULE_IDS
+
+    blocked = set(blocked_candidate_rule_ids())
+    assert blocked, "no blocked candidates — the pending-checks path can no longer produce a result"
+    assert not (blocked & set(ACTIVE_RULE_IDS)), (
+        f"{sorted(blocked & set(ACTIVE_RULE_IDS))} are both active and blocked, so they are in "
+        "`evaluated_rule_ids` AND produced by the pending path — the load/retire split assumes not"
+    )
+    assert _HELD_RULE in blocked, (
+        f"{_HELD_RULE} is no longer a blocked candidate, so the tests above exercise nothing"
+    )
+
+
+def test_a_held_rule_is_filed_under_its_own_category() -> None:
+    """A blocked rule reaches the findings table while being absent from `ACTIVE_RULE_IDS`, and the
+    category map was built over the active list — so all six fell through to the ASSETS default and
+    tripped LP-595's own `finding_category_unresolved` warning. PC-5 and CO-5 are property; CR-5 is
+    credit.
+
+    It mattered little while the second run crashed. Now that the row carries forward it is filed
+    wrong permanently: `_update_finding` is handed `category_by_rule.get("PC-5")`, which is None, so
+    LP-598's "the category is refreshed too" writes nothing and the row never self-corrects.
+
+    ASSERTED ON THE MAP, not on the resolver. The first version of this test checked that
+    `category_for_rule` answers for each blocked rule — which it always did, so it passed with the
+    widening reverted. What can be wrong is which rules go INTO the map.
+    """
+    from app.services.verification_run import finding_category_map
+    from app.verification.rule_engine.pending_checks import blocked_candidate_rule_ids
+
+    mapping = finding_category_map()
+    missing = sorted(set(blocked_candidate_rule_ids()) - set(mapping))
+    assert not missing, (
+        f"{missing} can produce a finding and are absent from the category map, so each files under "
+        "the ASSETS fallback and LP-598's refresh cannot correct it"
+    )
+
+    # And the fallback is genuinely wrong for most of them, which is why the widening matters.
+    off_default = {
+        r for r in blocked_candidate_rule_ids() if mapping[r] is not FindingCategory.ASSETS
+    }
+    assert off_default, (
+        "every blocked rule now maps to ASSETS, so the fallback happens to be right and this test "
+        "proves nothing — check whether the map still needs widening"
+    )

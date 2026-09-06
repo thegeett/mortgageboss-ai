@@ -26,6 +26,14 @@ export const POLL_INTERVAL_MS = 2500;
 // endpoint forever. Normal processing settles in a few polls (well under this
 // cap); a refresh resumes polling. ~40 × 2.5s ≈ 100s.
 export const MAX_STATUS_POLLS = 40;
+// ...and after it, SLOW DOWN rather than stop (LP-637 feature 3 review). The backstop was
+// calibrated for one upload settling in a few polls; a bulk reprocess legitimately runs for tens
+// of minutes, because the worker is serial and each document may take up to its 600s soft limit.
+// Stopping dead at ~100s froze the list mid-batch at "Pending" — the exact "watching for documents
+// to change, indistinguishable from a slow queue" failure the toast copy exists to prevent. Worse,
+// `dataUpdateCount` is cumulative for the query's lifetime and invalidation does not reset it, so a
+// processor who had already watched an upload for two minutes got no live polling at all.
+export const SLOW_POLL_INTERVAL_MS = 15000;
 
 /**
  * The polling interval for the documents list: keep polling while any document
@@ -37,8 +45,9 @@ export function documentsRefetchInterval(
   fetchCount: number,
 ): number | false {
   if (!documents || !hasInProgressDocuments(documents)) return false;
-  if (fetchCount > MAX_STATUS_POLLS) return false; // stuck doc → stop hammering
-  return POLL_INTERVAL_MS;
+  // The primary stop is the line above — nothing in progress, no polling. Past the budget this
+  // backs off rather than giving up, so long-running work stays visible without hammering.
+  return fetchCount > MAX_STATUS_POLLS ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
 }
 
 /** A 404 (missing or out-of-company) won't change on retry — surface it. */
@@ -154,6 +163,127 @@ export function useOverrideDocumentType(fileId: string, documentId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
       void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+    },
+  });
+}
+
+// --- The document-type catalog (LP-638) -------------------------------------- //
+
+export interface DocumentTypeOption {
+  value: string;
+  label: string;
+  category: string;
+  /** Does choosing this type re-run extraction? Served by the backend — see the hook's note. */
+  extracts: boolean;
+}
+
+const documentTypesQueryKey = ["document-types"] as const;
+
+export async function fetchDocumentTypes(): Promise<DocumentTypeOption[]> {
+  const res = await apiClient.get<DocumentTypeOption[]>(`${API_V1}/documents/types/catalog`);
+  return res.data;
+}
+
+/**
+ * Every type a document can be corrected to (LP-638).
+ *
+ * FETCHED, NOT HARDCODED. The list this replaces was eight options written when the catalog had
+ * three document types; it now has 164, so `closing_disclosure` and 150-odd others could not be
+ * chosen at all — and two of the eight were not catalog types, so picking them set a document to a
+ * string with no tier, no category and no extractor.
+ *
+ * Reference data that changes only on deploy, so it is cached for the session rather than refetched
+ * every time a drawer opens.
+ */
+export function useDocumentTypes() {
+  return useQuery({
+    queryKey: documentTypesQueryKey,
+    queryFn: fetchDocumentTypes,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+// --- Reprocess: read the document again from scratch (LP-637) ---------------- //
+
+/** What a bulk reprocess did. `skipped` maps a reason to how many were passed over. */
+export interface BulkReprocessResult {
+  queued: number;
+  queued_document_ids: string[];
+  skipped: Record<string, number>;
+}
+
+export async function reprocessDocument(
+  documentId: string,
+  force = false,
+): Promise<DocumentResponse> {
+  const res = await apiClient.post<DocumentResponse>(
+    `${API_V1}/documents/${documentId}/reprocess`,
+    { force },
+  );
+  return res.data;
+}
+
+/**
+ * Re-run the FULL pipeline on one document — classification included (LP-637).
+ *
+ * Not the type override: that supplies a type and skips classification, which cannot help a
+ * document nobody can name. This is for the ones the classifier got wrong or could not read, and
+ * for every document processed before a classifier fix landed.
+ *
+ * Invalidates the list and this document's detail so the status moves visibly; the server sets it
+ * back to PENDING, so live polling shows the pipeline running rather than nothing changing.
+ */
+export function useReprocessDocument(fileId: string, documentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (force?: boolean) => reprocessDocument(documentId, force ?? false),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      // The endpoint writes a DOCUMENT_REPROCESSED entry and calls `mark_verification_stale`, so
+      // both of those views are wrong without this — the sibling mutations below invalidate
+      // activity for exactly the same reason (LP-637 review). Leaving verification meant the tab
+      // kept presenting a run the server had just marked out of date.
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
+      void queryClient.invalidateQueries({ queryKey: ["verification", fileId] });
+    },
+  });
+}
+
+export async function reprocessDocuments(
+  fileId: string,
+  options: { allDocuments?: boolean; force?: boolean } = {},
+): Promise<BulkReprocessResult> {
+  const res = await apiClient.post<BulkReprocessResult>(
+    `${API_V1}/loan-files/${fileId}/documents/reprocess`,
+    { all_documents: options.allDocuments ?? false, force: options.force ?? false },
+  );
+  return res.data;
+}
+
+/**
+ * Reprocess a file's documents in one call (LP-637).
+ *
+ * The default set is bounded server-side to the documents a re-read could plausibly improve, so
+ * this is not "spend the whole file's model budget". The result reports what was SKIPPED and why —
+ * surface it, because a bulk action that quietly does less than asked leaves a processor waiting
+ * for documents that were never sent.
+ */
+export function useReprocessDocuments(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (options?: { allDocuments?: boolean; force?: boolean }) =>
+      reprocessDocuments(fileId, options ?? {}),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      // One batch entry is still an entry, and the file is marked stale once (LP-637 review).
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
+      void queryClient.invalidateQueries({ queryKey: ["verification", fileId] });
+      // The drawer may be open on a document in the batch. `queued_document_ids` is exactly the
+      // set whose detail is about to change, and was otherwise unused.
+      for (const id of result.queued_document_ids) {
+        void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(id) });
+      }
     },
   });
 }

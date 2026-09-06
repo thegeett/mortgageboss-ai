@@ -92,6 +92,18 @@ class Verification(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     # --- AI cost tracking (if the run used AI-assisted checks) --------------
     total_tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    #: The hard time limit this run was ENQUEUED with, in seconds (LP-635 review).
+    #:
+    #: Persisted rather than re-derived, because the two are not the same number. The limit is a
+    #: function of the file's document count, and the stuck-run watchdog runs on READ — minutes or
+    #: hours later, against a file that may have changed. Soft-delete 25 documents during a
+    #: 44-document run and a re-derived bound shrinks below the one the running task is actually
+    #: holding, so the watchdog fails a healthy run and tells the processor it "timed out".
+    #:
+    #: NULLABLE for the runs that predate this column, and for any enqueue path that does not set
+    #: it; readers fall back to deriving the bound, which is the behaviour they had before.
+    time_limit_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_cost_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # A stable hash of the verification INPUTS (the stated + verified data the

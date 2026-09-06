@@ -106,6 +106,11 @@ class NeedFacts:
     #: The application's own data, already in a processor's vocabulary. `_file_facts` builds it.
     loan: dict[str, str] = field(default_factory=dict)
     employment: tuple[str, ...] = ()
+    #: bug-008 — WHICH KINDS of income the application states (Base, Bonus, Commission, Self
+    #: Employment). `_file_facts` was already paying for this query and then dropping it on the floor:
+    #: `summarize` never passed it and this dataclass had no field for it. It is what lets an income
+    #: reason say which earnings the document has to evidence.
+    income_types: tuple[str, ...] = ()
     liabilities: tuple[str, ...] = ()
     assets: tuple[str, ...] = ()
     #: Which KINDS of document the file already holds — so a reason can say "the pay stubs show income
@@ -123,10 +128,22 @@ class NeedFacts:
 #: Rule ids (CL-1, IN-13, DT-6) and the words that name our own plumbing. A reason carrying any of
 #: these has described the software instead of the file — the register LP-527 spent four tickets
 #: removing from findings, and which needs have been shipping untouched.
-_RULE_ID = re.compile(r"\b[A-Z]{2}-\d{1,3}\b")
+#:
+#: bug-008 — THE PREFIXES ARE THE REAL ONES, not "any two capitals and a number". Mortgage forms are
+#: named that way too: `HO-6` is a unit owner's walls-in policy (`specs/IH-7.yaml`,
+#: `classification_prompt.py`) and `HO-3` a homeowner's. A correct condo hazard-insurance reason —
+#: "the project's master policy does not cover the unit interior; an HO-6 walls-in policy does" — was
+#: rejected as machinery talk, retried, rejected again, and dropped, leaving the need blank. The
+#: prefixes are the spec-file families; a new family adds itself here.
+_RULE_ID = re.compile(r"\b(?:AS|AU|CL|CO|CR|DT|FR|ID|IH|IN|LO|MI|OC|PC|PE|PR|RE|TI)-\d{1,3}\b")
+#: bug-008 — `origin` and `confidence` were on this list as BARE NOUNS and are not. The finding
+#: composer's equivalent carries a comment reading "NARROW ON PURPOSE — only phrases that name the
+#: SOFTWARE AS AN ACTOR", and two ordinary English words are not that: "a letter explaining the
+#: origin of the $12,000 deposit" is the exact sentence a source-of-funds need wants, and it was
+#: rejected twice and dropped. The phrases that name our plumbing are still here.
 _MACHINERY = re.compile(
     r"\b(?:the system|the ai|verification rule|rule engine|the engine|couldn'?t[- ]check|"
-    r"needs[- ]item|the model|confidence|load[- ]bearing|origin)\b",
+    r"needs[- ]item|the model|confidence score|load[- ]bearing|need origin)\b",
     re.IGNORECASE,
 )
 
@@ -154,7 +171,15 @@ def rejection_reason(facts: NeedFacts, why: str) -> str | None:
         return "identifier"
     if machinery_talk_in(why):
         return "machinery_talk"
-    if invented := unsupported_numbers_in(facts.to_json(), why):
+    # bug-008 — TWO FIELDS WHOSE DIGITS ARE NAMES, NOT QUANTITIES, and neither may license a number
+    # into the output. `documents_on_file` holds catalog labels and several ARE numbers, so a file
+    # holding a 1099 licensed the literal "1099" anywhere in the reason (LP-613, by the same route
+    # that cost the finding composer the same defect). `trigger` often opens "Required by
+    # verification rule(s) CR-13", and the rule ids license their own numerals. Only the RULE IDS are
+    # withdrawn from the trigger rather than the whole of it: an AI-reasoned need's trigger carries
+    # real amounts ("the $12,000 deposit"), and those are exactly what the reason should quote.
+    unlicensed = (str(facts.documents_on_file), " ".join(_RULE_ID.findall(facts.trigger)))
+    if invented := unsupported_numbers_in(facts.to_json(), why, unlicensed=unlicensed):
         return f"unsupported_numbers:{len(invented)}"
     return None
 

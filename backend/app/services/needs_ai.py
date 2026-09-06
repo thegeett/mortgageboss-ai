@@ -41,6 +41,7 @@ context — cost + latency + eval apply).
 
 import json
 from collections.abc import Sequence
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -76,12 +77,34 @@ from app.services.needs_engine import (
     canonical_need_type,
     category_for_need_type,
     equivalent_need_type,
+    satisfiable_need_types,
 )
 from app.services.needs_items import create_needs_item
 
 logger = structlog.get_logger(__name__)
 
 _PROMPT_PATH = "needs/needs_reasoning.txt"
+#: A literal template token in that file (not an f-string), filled from the catalog.
+_TYPES_PLACEHOLDER = "{satisfiable_need_types}"
+
+
+@cache
+def _render_reasoning_prompt() -> str:
+    """The reasoning prompt with the valid need types injected from the catalog (bug-009).
+
+    Rendered rather than hardcoded for the reason the classification prompt is
+    (`app.ai.classification_prompt`): there is one source of truth for what types exist, so adding a
+    document type to the catalog cannot leave the reasoner proposing a name nothing can satisfy.
+
+    Cached like `load_prompt` — the catalog does not change at runtime.
+    """
+    prompt = load_prompt(_PROMPT_PATH)
+    if _TYPES_PLACEHOLDER not in prompt:  # pragma: no cover - guarded by a test
+        raise ValueError(f"{_PROMPT_PATH} is missing {_TYPES_PLACEHOLDER}")
+    listed = "\n".join(f"  {slug}" for slug in satisfiable_need_types())
+    return prompt.replace(_TYPES_PLACEHOLDER, listed)
+
+
 # A reasoning call over a compact structured context — the proposals + reasoning are
 # the output, so a moderate cap is plenty.
 _MAX_TOKENS = 3072
@@ -464,7 +487,7 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> ReasonedNeeds:
     context (PII) and the raw response are never logged — only counts.
     """
     context = await assemble_file_context(db, loan_file)
-    system_prompt = load_prompt(_PROMPT_PATH)
+    system_prompt = _render_reasoning_prompt()
     user_content = (
         "Here is the loan file's context as JSON. Reason about what it still needs.\n\n"
         + context.model_dump_json()

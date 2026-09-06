@@ -26,16 +26,26 @@ import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.ai.extraction import EXTRACTORS
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
-from app.documents.catalog import get_category, get_tier
+from app.documents.catalog import CATALOG, get_category, get_tier
 from app.models.activity_log import ActivityType
-from app.models.document import Document
+from app.models.document import (
+    PIPELINE_IN_FLIGHT_STATUSES,
+    Document,
+    DocumentStatus,
+    is_pipeline_in_flight,
+)
 from app.models.field_review import FieldVerdict
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
+    BulkReprocessRequest,
+    BulkReprocessResponse,
     DocumentDetailResponse,
+    DocumentReprocessRequest,
     DocumentResponse,
+    DocumentTypeOption,
     DocumentTypeOverrideRequest,
     StalenessResolveRequest,
 )
@@ -67,6 +77,7 @@ from app.services.page_render import DEFAULT_ZOOM, render_page
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
+    PAYLOAD_TOO_LARGE_MARKER,
     process_document,
     reprocess_document,
 )
@@ -82,6 +93,150 @@ flat_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
+#: Slugs whose humanised form reads badly or wrongly. Everything else is derived, so this stays
+#: short by construction rather than becoming a second catalog.
+#:
+#: NOT THE SAME THING AS ``naming.NAME_RULES[...].label``, though they overlap and look like
+#: duplication (LP-638 review). These are DISPLAY names for a picker — spaces, slashes and
+#: parentheses are fine, because "Verification of employment (VOE)" is what a processor is looking
+#: for. Those are FILENAME components, assembled into ``{Type}_{Identifier}_{Date}``, so they must
+#: stay free of spaces and separators: the same type is "VOE" there and reads correctly in both
+#: places. ``w2`` → "W-2" agreeing in both is a coincidence of that slug being punctuation-only.
+#:
+#: So do not "fix" one to match the other. `tests/documents/test_label_vocabularies.py` pins the
+#: property that keeps them separate.
+_TYPE_LABEL_OVERRIDES: dict[str, str] = {
+    "w2": "W-2",
+    "form_1098": "Form 1098",
+    "form_4506c": "Form 4506-C",
+    "k1_statement": "K-1 statement",
+    "voe": "Verification of employment (VOE)",
+    "verification_of_deposit": "Verification of deposit (VOD)",
+    "ira_401k": "IRA / 401(k) statement",
+    "uniform_residential_loan_application": "Uniform residential loan application (1003)",
+}
+
+#: Words that are acronyms, not words, and that `capitalize` would flatten. Applied per WORD, so
+#: this covers every slug containing one instead of needing an entry per slug — which is what keeps
+#: the override map above from growing into the second catalog this ticket exists to abolish.
+_LABEL_ACRONYMS = frozenset(
+    {"aus", "cd", "cpa", "ead", "emd", "hoa", "id", "ira", "loe", "ltr", "ssa", "voe", "vod"}
+)
+
+
+def _type_label(slug: str) -> str:
+    """A human label for a catalog slug — the override, else derived word by word.
+
+    `capitalize()` alone lowercased everything after the first letter, so a processor picked from
+    "Hoa statement", "Aus findings" and "E consent disclosure" (LP-638 review). Deriving per word
+    with an acronym set fixes a dozen-plus labels without one entry each.
+    """
+    if slug in _TYPE_LABEL_OVERRIDES:
+        return _TYPE_LABEL_OVERRIDES[slug]
+    words = [word.upper() if word in _LABEL_ACRONYMS else word for word in slug.split("_") if word]
+    if not words:
+        return slug
+    first = words[0]
+    rest = words[1:]
+    return " ".join([first if first.isupper() else first.capitalize(), *rest])
+
+
+#: What the type-override endpoint writes to mean "a person chose this type" (LP-44). Named rather
+#: than spelled 1.0 inline, because it is a PROXY and readers need to see that it is one — the model
+#: can reach the same value through `coerce_confidence`'s clamp.
+_HUMAN_CLASSIFIED_CONFIDENCE = 1.0
+
+
+#: The bodies used when a request sends none. Module-level singletons rather than calls in the
+#: argument defaults (ruff B008): they are only ever READ, so one shared instance each is safe.
+_DEFAULT_REPROCESS_REQUEST = DocumentReprocessRequest()
+_DEFAULT_BULK_REQUEST = BulkReprocessRequest()
+
+#: Why a document was passed over by a bulk reprocess. Reported back per document, so a processor
+#: can tell "I skipped this and here is why" from "the queue is slow".
+_SKIP_SUPERSEDED = "superseded_version"
+_SKIP_IN_FLIGHT = "already_processing"
+_SKIP_HUMAN_TYPE = "type_set_by_a_person"
+_SKIP_ALREADY_CLASSIFIED = "already_classified"
+#: Already queued by an earlier press and not yet picked up. `all_documents` overrides it.
+_SKIP_ALREADY_QUEUED = "already_queued"
+#: The broker refused the task, so the document was put back the way it was found.
+_SKIP_ENQUEUE_FAILED = "enqueue_failed"
+#: The file cannot be sent at any page count, so re-reading it reaches the same refusal.
+_SKIP_TOO_LARGE = "too_large_to_read"
+
+#: Most documents a single bulk press may queue.
+#:
+#: A foot-gun guard, not a capacity limit. `all_documents` on a large file enqueues one task per
+#: document, each with a 600s soft limit, onto a worker that runs them serially — one press can
+#: occupy the document worker for hours and put every other file's uploads behind it. The largest
+#: real file we have is 44 documents (LF-ZE9N), so this is comfortably above the motivating case
+#: and well below a pathological one.
+_MAX_BULK_REPROCESS = 100
+
+#: What the classifier writes when it cannot name a document (`app/ai/classification.py`): a literal
+#: type rather than a null, so it reaches the catalog lookup and takes the Tier 3 path. LP-636 defect
+#: 5 is the shape that makes this worth re-reading — a CONFIDENT `unknown` completes cleanly, raises
+#: no flag, and produces no typed data.
+_UNKNOWN_DOCUMENT_TYPE = "unknown"
+
+
+def _refused_for_size(document: Document) -> bool:
+    """Was this document's last run refused because the file is too big to send? (LP-637)
+
+    Read off `processing_error`, which the pipeline writes for a classification that failed on
+    infrastructure. A string match is a weak signal and a persisted `infra_failure` column would be
+    exact — but that is a migration, and this only ever removes a document from an OPTIONAL bulk
+    default. Getting it wrong costs one skipped document a processor can still re-read by hand from
+    the drawer; the per-document endpoint does not consult this at all, deliberately, because there
+    a processor is naming one document and is entitled to try anyway.
+
+    That is a different trade from the `type_set_by_human` column, which is worth the migration: an
+    ambiguous signal THERE either blocks a legitimate reprocess or silently overwrites a person's
+    decision, and a forced reprocess destroys the signal outright. Here the worst case is one
+    document missing from an optional list, with the manual route still open.
+
+    The marker is IMPORTED from the writer rather than copied, so the two cannot drift: it is a
+    substring of `PAYLOAD_TOO_LARGE_MESSAGE` by construction.
+    """
+    return PAYLOAD_TOO_LARGE_MARKER in (document.processing_error or "")
+
+
+def _would_benefit(document: Document) -> bool:
+    """Is this a document a re-classification could plausibly improve? (LP-637)
+
+    The bounded default for bulk. A document is worth re-reading when nothing knows what it is
+    (no type, or the literal ``unknown`` that LP-636 defect 5 produces), or when the pipeline
+    already flagged it — NEEDS_REVIEW and FAILED are the two states that say "this did not go
+    well". Everything else has a type the classifier was content with, and re-deriving it costs a
+    model call to reach the same answer.
+
+    Deliberately not "reprocess anything not COMPLETED", which would sweep in PENDING and every
+    other transient state.
+
+    THIS FUNCTION DOES NOT STOP A SECOND PRESS RE-QUEUEING THE FIRST'S WORK, and an earlier version
+    of this docstring claimed it did. Nothing here looks at status except to include NEEDS_REVIEW
+    and FAILED — an untyped or `unknown` document is STILL untyped while it sits at PENDING, so it
+    stayed eligible, and that is the exact cohort the feature exists for. The bulk endpoint carries
+    its own PENDING skip for that; see `_SKIP_ALREADY_QUEUED`.
+
+    A document refused for payload SIZE is excluded too, but by the caller rather than here — see
+    `_SKIP_TOO_LARGE` — so that the skip can be REPORTED as what it is. Folded in here it came back
+    to the processor as `already_classified`, which the UI renders "already identified", about a
+    document sitting on screen with no type at all.
+    """
+    return (
+        document.document_type is None
+        or document.document_type == _UNKNOWN_DOCUMENT_TYPE
+        or document.status in (DocumentStatus.NEEDS_REVIEW, DocumentStatus.FAILED)
+        # An in-flight status that reached this far is an ABANDONED one — the caller checks
+        # `is_pipeline_in_flight` first, and that is time-aware. Without this line a document
+        # stranded mid-pipeline WITH a type fell through to "the classifier was content with it"
+        # and was reported to the processor as `already_classified`: the default bulk press still
+        # could not recover it, and said so in words that described a different situation.
+        or document.status in PIPELINE_IN_FLIGHT_STATUSES
+    )
+
 
 def _enqueue_processing(document_id: UUID) -> None:
     """Fire-and-forget enqueue of the LP-42 processing task for a stored document.
@@ -94,6 +249,33 @@ def _enqueue_processing(document_id: UUID) -> None:
         process_document.delay(str(document_id))
     except Exception:
         log.warning("document_enqueue_failed", document_id=str(document_id))
+
+
+def _enqueue_full_reprocess(document_id: UUID) -> bool:
+    """Enqueue the FULL pipeline — classify then extract (LP-637). ``True`` if it landed.
+
+    Deliberately a separate helper from :func:`_enqueue_reprocess`, which enqueues the
+    extraction-only task. The two differ by exactly the step this ticket exists to provide, and one
+    helper taking a flag would make the call sites read the same.
+
+    Never raises, for the reason the other one does not: a broker hiccup should leave a document
+    that can be reprocessed again rather than a 500 on a request whose durable half succeeded.
+
+    IT REPORTS THE OUTCOME rather than only logging it (LP-637 review), because both callers write
+    the document to PENDING and clear its ``processing_error`` before this runs, and a swallowed
+    failure made that permanent: a FAILED document became a PENDING one with a type and no error,
+    which reads as healthy, is invisible in the UI, and — for the bulk path — falls outside
+    `_would_benefit`, so the default bulk reprocess skips it as `already_classified` forever. The
+    callers use this to put such a document back the way they found it.
+    """
+    try:
+        from app.tasks.document_processing import process_document
+
+        process_document.delay(str(document_id))
+    except Exception:
+        log.warning("full_reprocess_enqueue_failed", document_id=str(document_id))
+        return False
+    return True
 
 
 def _enqueue_reprocess(document_id: UUID) -> None:
@@ -207,6 +389,166 @@ async def list_(loan_file: ScopedLoanFile, db: DbSession) -> list[DocumentRespon
     return await build_document_responses(db, documents)
 
 
+@nested_router.post("/reprocess", response_model=BulkReprocessResponse)
+async def reprocess_documents(
+    loan_file: ScopedLoanFile,
+    current_user: CurrentUser,
+    db: DbSession,
+    body: BulkReprocessRequest = _DEFAULT_BULK_REQUEST,
+) -> BulkReprocessResponse:
+    """Reprocess a file's documents in one call — classification included (LP-637).
+
+    THE PER-DOCUMENT ENDPOINT'S REFUSALS BECOME FILTERS HERE, and that difference is the design. A
+    single reprocess is a processor pointing at one document, so telling them "no, and why" is the
+    right answer. A bulk reprocess is a processor pointing at a file: failing all ten because one
+    is mid-pipeline would make the button useless exactly when a file is busy, which is when it is
+    most likely to be pressed. Each document is judged on its own and the skips are REPORTED, so
+    doing less than asked is visible rather than silent.
+
+    LF-ZE9N is why this exists rather than ten clicks: ten unidentifiable documents, and every
+    future improvement to the classifier will leave its own cohort behind in the same way.
+
+    The default set is bounded — see :func:`_would_benefit`. ``all_documents`` widens it to every
+    current document on the file.
+    """
+    documents = await list_documents(db, loan_file_id=loan_file.id)
+    skipped: dict[str, int] = {}
+    queued: list[Document] = []
+
+    def skip(reason: str) -> None:
+        skipped[reason] = skipped.get(reason, 0) + 1
+
+    for document in documents:
+        if not document.is_current:
+            skip(_SKIP_SUPERSEDED)
+        elif is_pipeline_in_flight(document):
+            skip(_SKIP_IN_FLIGHT)
+        elif not body.all_documents and document.status is DocumentStatus.PENDING:
+            # ALREADY QUEUED. This is the skip that stops a second press re-queueing the first
+            # press's work, and `_would_benefit` never did: an untyped or `unknown` document is
+            # still untyped while it sits at PENDING, so it stayed eligible — and that is exactly
+            # the cohort this feature exists for. A processor who sees nothing change for a minute
+            # (the worker is serial, the soft limit is 600s) and presses again would otherwise send
+            # every document a second time, and two overlapping pipelines end with one of them
+            # absorbing an IntegrityError into FAILED while the other's extraction is the current
+            # one.
+            #
+            # `all_documents` overrides it, which is what keeps a genuinely stranded PENDING
+            # document reachable in bulk. The per-document endpoint takes PENDING unconditionally,
+            # and that asymmetry is deliberate: there a processor is naming one document, so
+            # "queue this again" is exactly what they asked for.
+            skip(_SKIP_ALREADY_QUEUED)
+        elif document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
+            skip(_SKIP_HUMAN_TYPE)
+        elif not body.all_documents and _refused_for_size(document):
+            # THE FILE IS WHAT IT IS. Re-reading spends a classification call to reach the same
+            # refusal; LF-ZE9N's last unidentified document — 15 pages encoding to 33 MB against a
+            # 23 MB budget — would otherwise be re-queued on every press forever, always failing,
+            # always still uncategorized.
+            #
+            # Reported under its OWN reason rather than folded into `already_classified`, which the
+            # UI renders as "already identified" — a direct contradiction of the untyped document
+            # the processor is looking at, and it buried the one instruction the pipeline actually
+            # produced (split the file, or rescan lower). Every other infrastructure failure stays
+            # eligible: a throttle is precisely what re-reading is for.
+            skip(_SKIP_TOO_LARGE)
+        elif not body.all_documents and not _would_benefit(document):
+            skip(_SKIP_ALREADY_CLASSIFIED)
+        else:
+            queued.append(document)
+
+    if len(queued) > _MAX_BULK_REPROCESS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{len(queued)} documents selected, more than the {_MAX_BULK_REPROCESS} a single "
+                "reprocess may queue. Narrow the request, or reprocess documents individually."
+            ),
+        )
+
+    # Remembered before anything is written, so a refused enqueue can be undone.
+    previous = {d.id: (d.status, d.processing_error) for d in queued}
+
+    if queued:
+        # ONE activity entry for the batch, not one per document. Ten entries saying the same thing
+        # at the same second buries the file's actual history, which is what the feed is for.
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.DOCUMENT_REPROCESSED,
+            summary=(
+                f"{len(queued)} document{'s' if len(queued) != 1 else ''} sent for reprocessing"
+            ),
+            actor_user_id=current_user.id,
+            detail={
+                "document_ids": [str(d.id) for d in queued],
+                "forced": body.force,
+                "all_documents": body.all_documents,
+            },
+        )
+        # Once for the file, for the same reason the per-document endpoint does it per document.
+        await mark_verification_stale(db, loan_file_id=loan_file.id)
+        # Without the rollback below, a broker outage turned a FAILED document into a PENDING one
+        # with a type and no error — which reads as healthy, shows nothing wrong in the UI, and
+        # falls outside `_would_benefit`, so the DEFAULT bulk path then skips it as
+        # `already_classified` for good. At batch scale that is a whole file's diagnostics, gone
+        # silently.
+        for document in queued:
+            document.status = DocumentStatus.PENDING
+            document.processing_error = None
+    await db.commit()
+
+    # After the commit, so a broker failure cannot leave the database claiming work that was never
+    # reported. Anything the broker refuses is put back the way it was found, in a second commit,
+    # and reported as a skip rather than counted as queued.
+    enqueued: list[Document] = []
+    for document in queued:
+        if _enqueue_full_reprocess(document.id):
+            enqueued.append(document)
+        else:
+            document.status, document.processing_error = previous[document.id]
+            skip(_SKIP_ENQUEUE_FAILED)
+    if len(enqueued) != len(queued):
+        await db.commit()
+
+    return BulkReprocessResponse(
+        queued=len(enqueued),
+        queued_document_ids=[d.id for d in enqueued],
+        skipped=skipped,
+    )
+
+
+@flat_router.get("/types/catalog", response_model=list[DocumentTypeOption])
+async def list_document_types(_current_user: CurrentUser) -> list[DocumentTypeOption]:
+    """Every document type a processor may correct a document to (LP-638).
+
+    THE CATALOG, NOT A COPY OF IT. The control this feeds offered eight hardcoded options written
+    when the catalog had three types. It now has 164 — so `closing_disclosure`,
+    `purchase_agreement`, `mortgage_statement` and 150-odd others could not be chosen at all, and a
+    misclassified document had no manual remedy. Two of the eight were not catalog types either, so
+    picking them set a document to a string with no tier, no category and no extractor.
+
+    Serving it from `CATALOG` is what stops that recurring: a type added to the catalog is
+    selectable the same day, and a list that cannot drift cannot go stale again.
+
+    Sorted by label within category so the picker groups the way a processor thinks. Reference data
+    with no loan content — authenticated, but not company-scoped, because it is the same for
+    everyone.
+    """
+    return sorted(
+        (
+            DocumentTypeOption(
+                value=slug,
+                label=_type_label(slug),
+                category=category.value,
+                extracts=slug in EXTRACTORS,
+            )
+            for slug, (_tier, category) in CATALOG.items()
+        ),
+        key=lambda option: (option.category, option.label),
+    )
+
+
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def retrieve(
     document_id: UUID, current_user: CurrentUser, db: DbSession
@@ -259,7 +601,35 @@ async def override_document_type(
     if document is None:
         raise _NOT_FOUND
 
+    if is_pipeline_in_flight(document):
+        # THE CLAIM IS ONLY EXCLUSIVE AGAINST ITSELF unless every path that writes an extraction
+        # respects it (LP-637 review). This endpoint enqueues `reprocess_document`, which now takes
+        # the claim in its own task — so a type override during a live pipeline would simply be
+        # dropped by that claim, silently, and the processor would see their correction do nothing.
+        # Refusing here says so instead.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is already being processed. Wait for it to finish, then retry.",
+        )
+
     new_type = body.document_type.strip()
+    if new_type not in CATALOG:
+        # LP-638 — THE HOLE THAT PRODUCED THE PROBLEM THIS FIXES. This endpoint accepted any string,
+        # and the control feeding it offered `tax_return_1040` and `other`, neither a catalog type.
+        # Choosing one set a document to a slug with no tier, no category and no extractor — and
+        # because satisfaction matches `needs_type == document_type` exactly, a document corrected
+        # to `tax_return_1040` could never satisfy a `tax_return` need. Correcting the type made the
+        # file quietly worse, which is the opposite of what the control is for.
+        #
+        # Rejecting here rather than only fixing the dropdown: the list was one caller, and the next
+        # one would have had the same freedom. `list_document_types` serves the same CATALOG, so
+        # anything the picker can offer, this accepts.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            # No repr: this reaches a processor through the error envelope, and
+            # "'tax_return_1040' is not a known document type" reads better without Python quoting.
+            detail=f"{new_type} is not a known document type.",
+        )
     document.document_type = new_type
     # Catalog-driven (LP-58): re-derive both tier and category from the new type.
     document.tier = get_tier(new_type)
@@ -281,6 +651,150 @@ async def override_document_type(
 
     # Re-extract in the background (fire-and-forget; the override is already saved).
     _enqueue_reprocess(document.id)
+
+    return await build_document_response(db, document=document)
+
+
+@flat_router.post("/{document_id}/reprocess", response_model=DocumentResponse)
+async def reprocess_document_from_scratch(
+    document_id: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    # Defaulted so a body-less POST works. FastAPI makes a Pydantic body parameter REQUIRED
+    # regardless of every field on it having a default, so without this the natural call — a
+    # button that posts nothing — is a 422.
+    body: DocumentReprocessRequest = _DEFAULT_REPROCESS_REQUEST,
+) -> DocumentResponse:
+    """Read a stored document again from scratch — CLASSIFICATION INCLUDED (LP-637).
+
+    THE GAP THIS FILLS. Classification runs once, at upload, and nothing re-runs it. So every
+    improvement to the classifier is invisible to every document already in the system, and the only
+    route to a corrected type is a processor typing it by hand — which cannot help a document that
+    classified as ``unknown``, because nobody knows what it is.
+
+    LF-ZE9N is the worked example: ten documents classified nineteen hours before the LP-636 fixes
+    that would have classified them correctly, still untyped, generating 220 of that file's 256
+    `couldnt_check` findings. The fixes were deployed and could not reach them.
+
+    NOT :func:`app.tasks.document_processing.reprocess_document`, which the type-override endpoint
+    uses and which SKIPS classification by design — correctly, because there a human has already
+    supplied the type. This enqueues the full ``process_document`` pipeline against the stored file.
+
+    A HUMAN-CLASSIFIED DOCUMENT IS REFUSED unless ``force``; see
+    :class:`~app.schemas.document.DocumentReprocessRequest` for why that signal is imperfect and why
+    refusing is the cheaper error. Tenant-scoped (404 for another company's document). Refused
+    (409) for a superseded version and for a document the pipeline is already running on. The
+    document returns to PENDING and moves through its statuses as the background pipeline runs.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+
+    if not document.is_current:
+        # A superseded version is kept for AUDIT, and it cannot affect an answer: the verification
+        # snapshot selects `Document.is_current.is_(True)`, so no finding on this file reads it.
+        # Reprocessing one would re-classify a historical record, spend a full classify+extract on
+        # work that provably changes nothing, and mark the whole file's verification stale — a
+        # "needs re-verification" for a document that is not part of the file's current state. The
+        # replace endpoint below refuses the same thing for the same reason.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the current version of a document can be reprocessed.",
+        )
+
+    if is_pipeline_in_flight(document):
+        # The pipeline is already running on this document — a status in the in-flight set AND a
+        # row written recently enough that a worker can still be behind it. The time half is not
+        # decoration: on status alone, a worker killed mid-run left the document refused here
+        # forever, with no route back through the product at all.
+        #
+        # Two overlapping `_process_document`
+        # runs both write a current extraction, and `UNIQUE (document_id) WHERE is_current` lets
+        # only one of them: the loser absorbs the IntegrityError into FAILED, so the document ends
+        # up reading FAILED while carrying the winner's perfectly good extraction.
+        #
+        # WHAT THIS DOES NOT DO IS STOP A DOUBLE-CLICK, and an earlier draft of this comment said
+        # it did. No status guard can: the status only moves when a WORKER starts, so two clicks
+        # two seconds apart both read whatever the row said before either was picked up, and both
+        # enqueue. Closing that needs task-level deduplication or a lock — neither is this
+        # endpoint's to add, and the frontend action in feature 3 should disable on submit.
+        #
+        # What it does stop is a reprocess landing on a pipeline that is visibly running, which is
+        # the longer and likelier window. The residual is a confusing status, recoverable by
+        # reprocessing again — not a corrupt one.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document is already being processed. Wait for it to finish, then retry.",
+        )
+
+    if document.classification_confidence == _HUMAN_CLASSIFIED_CONFIDENCE and not body.force:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This document's type looks as though a person set it, so it was left "
+                "unchanged. Re-reading it anyway will replace that type with the classifier's "
+                "answer."
+            ),
+        )
+
+    await log_activity(
+        db,
+        loan_file_id=document.loan_file_id,
+        activity_type=ActivityType.DOCUMENT_REPROCESSED,
+        summary="Document sent for reprocessing",
+        actor_user_id=current_user.id,
+        detail={"document_id": str(document.id), "forced": body.force},
+    )
+    # The type may change, so findings computed from the old one are out of date. The override
+    # endpoint marks the run stale for exactly this reason; a re-classification that left a green
+    # verification standing would be a false green.
+    await mark_verification_stale(db, loan_file_id=document.loan_file_id)
+    # Back to PENDING, so the response says what is actually true. Returning the document's OLD
+    # status meant a processor reprocessing a COMPLETED document got `completed` back and saw
+    # nothing change until a worker happened to pick the task up.
+    #
+    # It is NOT free, and an earlier draft claimed it was. `_enqueue_full_reprocess` swallows every
+    # exception, so with the broker down a COMPLETED document is left at PENDING with no task
+    # behind it, having lost a terminal status it had legitimately earned. That is recoverable the
+    # same way any other stranded PENDING is — by reprocessing again — and the alternative is
+    # answering `completed` to a request that changed the document's future.
+    previous_state = (document.status, document.processing_error)
+    document.status = DocumentStatus.PENDING
+    # And clear the previous run's error, as the override endpoint does. `_process_document` only
+    # ever WRITES this column — no path through it clears one — so a document that failed, was
+    # reprocessed and then succeeded reached COMPLETED still carrying "extraction incomplete
+    # (connection) — re-runnable" from the run that no longer exists. That is the common case here,
+    # not an edge: the documents this endpoint was built for are the ones sitting in NEEDS_REVIEW
+    # with an error on them. `readonly.documents` selects the column unscrubbed, so the stale text
+    # is what someone querying staging reads. (The comment at document_processing.py:460 also calls
+    # it UI-shown; no response schema exposes it today, so that half looks stale.)
+    document.processing_error = None
+    await db.commit()
+
+    if not _enqueue_full_reprocess(document.id):
+        # Put it back. Without this, a broker outage made a FAILED document look like a healthy
+        # PENDING one and threw away the reason it failed.
+        document.status, document.processing_error = previous_state
+        await db.commit()
+        # AND SAY SO (LP-637 feature 3 review). Returning 200 with the restored document was the
+        # earlier choice, on the principle that a request whose durable half succeeded should not
+        # 500. The rollback above changed that premise: nothing durable happened TO THE DOCUMENT,
+        # so a 200 is a claim that it is being reprocessed when it is not — and the drawer says
+        # "Classifying and extracting in the background…" on the strength of it. Bulk reports this
+        # per document as a skip; a single reprocess has no partial result to report, so the status
+        # code is the only place the truth fits.
+        #
+        # The activity entry and the stale marker stand. They record that a processor ASKED, which
+        # is true, and staleness errs in the recoverable direction.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Couldn't queue this document for reprocessing. Nothing was changed — "
+                "try again shortly."
+            ),
+        )
 
     return await build_document_response(db, document=document)
 

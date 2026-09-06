@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from functools import cache
@@ -41,6 +42,7 @@ from sqlalchemy.orm import selectinload
 from app.ai.client import AIClientError
 from app.ai.cost import estimate_cost
 from app.ai.cross_source import CrossSourceRawFinding, CrossSourceResult, reason_cross_source
+from app.ai.stage_metrics import StageMetrics
 from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.models.borrower import Borrower
@@ -121,10 +123,17 @@ async def run_cross_source(
     no longer detected (a completed processor action — the applied data change, the audit trail,
     and Undo depend on the record; ADR-061).
     """
+    # LP-644 §1 — ONE timing implementation, not two. This module measured itself with a
+    # second `StageTiming` type while every other stage used `StageMetrics`; the merge that
+    # brought them together is what made the duplication visible. Ported rather than kept in
+    # parallel, for the reason LP-645 was raised about the dispatch helpers.
+    metrics = StageMetrics()
+    started = time.monotonic()
     # Resolve the reasoner at call time so the worker-task path (which calls without an
     # explicit reason_fn) can be stubbed in the real-stack integration test (LP-89).
     reasoner = reason_fn if reason_fn is not None else reason_cross_source
     context = await assemble_cross_source_context(db, loan_file)
+    call_started = time.monotonic()
     try:
         result = await reasoner(json.dumps(context))
     except AIClientError:
@@ -140,6 +149,15 @@ async def run_cross_source(
     # any type the deterministic pass fired this run (no double-reporting the same discrepancy;
     # the deterministic, stable, templated finding is the one shown). The AI keeps the types it
     # didn't fire + the novel "other" bucket — narrowed to genuine discovery.
+    # RECORDED, not inferred. The port could have kept this module's wall-clock-only shape, but
+    # `StageMetrics.as_log_fields` reports `ai_calls`, and a pass that makes exactly one AI call
+    # logging zero of them is a false number in the one place LP-644 exists to make trustworthy.
+    metrics.record_call(
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        seconds=time.monotonic() - call_started,
+    )
+
     det_facts = await build_cross_source_facts(db, loan_file=loan_file, context=context)
     det_red, det_yellow, fired_types = await run_cross_source_deterministic(
         db, loan_file=loan_file, run=run, facts=det_facts
@@ -214,6 +232,9 @@ async def run_cross_source(
     await db.flush()
     logger.info(
         "cross_source_pass_done",
+        **metrics.as_log_fields(),  # LP-644 §1
+        # The whole pass, AI and persistence together — `ai_wall_seconds` covers only the call.
+        stage_wall_seconds=round(time.monotonic() - started, 1),
         loan_file_id=str(loan_file.id),
         findings=red + yellow,  # counts only — never the findings' content (PII)
         red=red,

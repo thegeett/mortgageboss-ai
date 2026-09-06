@@ -9,12 +9,17 @@ their unreadable licence, and a RECEIVED W-2 need still reading "could not be pr
 
 from __future__ import annotations
 
+import structlog
 from app.models.needs_item import (
     NeedsItemDisposition,
     NeedsItemOrigin,
     NeedsItemStatus,
 )
-from app.services.needs_engine import repair_needs_for_file, transition_need
+from app.services.needs_engine import (
+    canonical_need_type,
+    repair_needs_for_file,
+    transition_need,
+)
 from tests.integration import factories
 
 
@@ -318,3 +323,199 @@ def test_a_matchable_ai_need_gets_no_such_note() -> None:
     from app.services.needs_ai import _unmatchable_note
 
     assert _unmatchable_note("x", matchable=True) == "x"
+
+
+async def test_the_duplicate_title_need_is_merged(db_session) -> None:
+    """THE SECOND REPORTED PAIR (bug-009). LF-AWBB carried two rows for ONE title search: ID-7 raised
+    `title_commitment` from its `requires_documents` group, and LP-69 separately proposed
+    "title_report" — a type the catalog does not define, so it canonicalised to nothing, stored raw,
+    and no upload could ever clear it. A processor saw one need they could satisfy and one they
+    could not, for the same document.
+
+    Aliasing stops the pair FORMING; this merges the ones already on live files. Both are needed —
+    a stored row's type is not rewritten retroactively.
+    """
+    _company, loan_file = await _file(db_session)
+    stuck = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.PENDING,
+    )
+    real = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.RECEIVED,
+    )
+
+    assert await repair_needs_for_file(db_session, loan_file.id) >= 1
+
+    # The row a document actually reached survives; the unclearable one is merged away.
+    assert real.status is NeedsItemStatus.RECEIVED
+    assert stuck.status is NeedsItemStatus.WAIVED
+
+
+async def test_the_title_pair_is_merged_at_the_origin_lp69_actually_creates(db_session) -> None:
+    """bug-009 REVIEW — the pair on a live file is AI_REASONING, not FLOOR.
+
+    `_EQUIVALENT_NEED_TYPES` exists to collapse the rows already on live files, and the merge only
+    waived FLOOR-origin rows. LP-69 creates its proposals with `origin=AI_REASONING`
+    (`needs_ai.py`), so the `title_report` row was skipped and the repair did nothing — while a
+    test using a FLOOR fixture passed. This is that test with the origin production uses.
+
+    It matters because satisfaction matches `needs_type == document_type` on the row AS STORED:
+    aliasing changes what a NEW proposal is stored as and cannot rewrite a row already on a file,
+    so if the merge does not reach it, nothing does and the row sits there forever.
+    """
+    _company, loan_file = await _file(db_session)
+    stuck = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.AI_REASONING,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    real = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    assert await repair_needs_for_file(db_session, loan_file.id) >= 1
+
+    assert real.status is NeedsItemStatus.RECEIVED
+    assert stuck.status is NeedsItemStatus.WAIVED
+
+
+async def test_a_processors_own_need_is_never_merged_even_when_unactionable(db_session) -> None:
+    """The boundary of the widening above. MANUAL is still never merged, whatever its type.
+
+    The protection exists for a processor's own ask — the floor's `bank_statement` is RECEIVED and
+    they add "Bank statement, Wells Fargo, November" — and waiving that loses a real requirement.
+    A mistyped manual need is something they can see and correct; it is not something to waive
+    underneath them.
+    """
+    _company, loan_file = await _file(db_session)
+    manual = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.MANUAL,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    assert manual.status is NeedsItemStatus.PENDING
+
+
+async def test_an_actionable_duplicate_is_not_merged_by_the_new_rule(db_session) -> None:
+    """The widening must not reach a type a document CAN satisfy.
+
+    `drivers_license` is in the catalog and equivalent to `government_id`, so an AI-proposed
+    `drivers_license` row is a real ask a licence upload clears. Only the FLOOR rule may merge it —
+    if this starts passing through the unactionable branch, the guard has gone too wide.
+    """
+    _company, loan_file = await _file(db_session)
+    proposed = await _need(
+        db_session,
+        loan_file,
+        needs_type="drivers_license",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.AI_REASONING,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    await _need(
+        db_session,
+        loan_file,
+        needs_type="government_id",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    assert proposed.status is NeedsItemStatus.PENDING
+
+
+async def test_an_unsatisfiable_survivor_is_reported(db_session) -> None:
+    """bug-009 REVIEW — the survivor is picked by PROGRESS, not by satisfiability, so the
+    unmatchable row can win.
+
+    A processor marked the `title_report` row received by hand, so it outranks the clearable
+    `title_commitment` row and becomes the keeper. Waiving the clearable one then leaves the file
+    with ONLY a need no upload can reach — the reverse order of the pair this repair was written
+    for, and strictly worse than doing nothing.
+
+    "Keep the progress OR keep the actionable row" is a false choice: RENAMING the keeper does both.
+    The alias map declares the two types to be the same requirement, so the rewrite changes nothing
+    about what was asked for and only changes whether a document can match it.
+    """
+    _company, loan_file = await _file(db_session)
+    stuck = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.AI_REASONING,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    clearable = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    await repair_needs_for_file(db_session, loan_file.id)
+
+    # The processor's progress survives...
+    assert stuck.status is NeedsItemStatus.RECEIVED
+    # ...and the row it survives on is now one a document can actually match.
+    assert stuck.needs_type == "title_commitment"
+    assert clearable.status is NeedsItemStatus.WAIVED
+    # The whole point: the file is not left with a need no upload can reach.
+    assert canonical_need_type(stuck.needs_type) == stuck.needs_type
+
+
+async def test_a_manual_keeper_is_reported_and_not_rewritten(db_session) -> None:
+    """The one case the rename must NOT take. A MANUAL row's type is what a processor typed, and
+    correcting their words underneath them is what the MANUAL guard exists to prevent — so it is
+    reported instead, and the signal is pinned here so it cannot go quiet."""
+    _company, loan_file = await _file(db_session)
+    typed_by_hand = await _need(
+        db_session,
+        loan_file,
+        needs_type="title_report",
+        status=NeedsItemStatus.RECEIVED,
+        origin=NeedsItemOrigin.MANUAL,
+        disposition=NeedsItemDisposition.CONFIRMED,
+    )
+    await _need(
+        db_session,
+        loan_file,
+        needs_type="title_commitment",
+        status=NeedsItemStatus.PENDING,
+        origin=NeedsItemOrigin.FLOOR,
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        await repair_needs_for_file(db_session, loan_file.id)
+
+    assert typed_by_hand.needs_type == "title_report"
+    assert any(e["event"] == "needs_merge_kept_an_unsatisfiable_row" for e in logs), (
+        "the merge kept a row no document can satisfy and said nothing"
+    )

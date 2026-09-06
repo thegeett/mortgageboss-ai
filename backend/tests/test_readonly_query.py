@@ -294,6 +294,14 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # shapes it knows, and a hand-typed value is the one place a raw identifier arrives in
     # a shape nobody predicted. The view answers "was there a correction?" with a boolean.
     "field_reviews": frozenset({"corrected_value", "note"}),
+    # LP-643 — a processor's own DTI line. The label and the note are typed by hand about one
+    # borrower's file, which is where an identifier arrives in a shape no scrubber predicts. The
+    # view answers which section, how much and how often, and reports the two as booleans.
+    "dti_custom_lines": frozenset({"label", "note"}),
+    # LP-644 — the AI tag cache. `cache_key` fingerprints raw transaction fields and `value` is
+    # the model's judgment about one transaction. The operational question is whether the cache
+    # is earning its keep, which `cache_kind` and `hit_count` answer without either.
+    "tag_cache_entries": frozenset({"cache_key", "value"}),
     "borrowers": frozenset(
         {
             "first_name",
@@ -307,7 +315,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
         }
     ),
     "properties": frozenset({"address_line", "address_line_2", "postal_code"}),
-    "documents": frozenset({"full_text", "generic_analysis", "summary", "storage_path"}),
+    # document_name (LP-636) joins summary/generic_analysis for the same reason: model
+    # prose over the document, and the scrub matches identifier shapes, not names.
+    "documents": frozenset(
+        {"full_text", "generic_analysis", "summary", "storage_path", "document_name"}
+    ),
     "mismo_imports": frozenset({"catch_all", "raw_file_path"}),
     "findings": frozenset({"source_snippet"}),
     "companies": frozenset({"settings"}),
@@ -324,6 +336,13 @@ EXCLUDED: dict[str, frozenset[str]] = {
 #: assertion over the whole migration text rather than per table.
 NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("documents", "full_text"),
+    # LP-636. Listing it in EXCLUDED only RECORDS the decision: a later migration that adds
+    # it to a view would pass both drift tests and silently turn that entry into a stale
+    # comment. This asserts absence from every view, so the decision cannot be undone
+    # quietly. It is here rather than only in EXCLUDED because the argument for excluding it
+    # is the strong form — the scrub matches identifier SHAPES, and a person's name is not
+    # digit-shaped, so a name in this column would cross a view intact.
+    ("documents", "document_name"),
     ("mismo_imports", "catch_all"),
     ("borrowers", "ssn"),
     ("users", "hashed_password"),
@@ -357,7 +376,13 @@ def _later_view_redefinitions() -> dict[str, str]:
         # previous shape is also a `CREATE ... VIEW` in the same file, and reading the whole file
         # let the ROLLBACK definition win — reporting a freshly exposed column as unexposed.
         text = path.read_text(encoding="utf-8")
-        upgrade_body = text.split("def downgrade(")[0]
+        # ANCHORED TO THE START OF A LINE. Splitting on the bare substring let a DOCSTRING that
+        # quoted the marker truncate the slice above the file's own SQL — the migration then
+        # contributed nothing and the guard silently kept checking C7's definition. A function
+        # definition is at column 0 and a docstring mention is indented, so anchoring removes that
+        # trap at the root rather than detecting it afterwards.
+        upgrade_body = re.split(r"^def downgrade\(", text, maxsplit=1, flags=re.MULTILINE)[0]
+        seen_here: set[str] = set()
         for view in re.findall(
             # LP-568: `CREATE OR REPLACE VIEW` counts too. Appending a column is the one view
             # change Postgres allows without a drop, so it is the natural way to expose a new
@@ -371,7 +396,24 @@ def _later_view_redefinitions() -> dict[str, str]:
         ):
             match = re.search(r"FROM\s+public\.(\w+)", view)
             assert match, f"view without a public.<table> source in {path.name}"
-            bodies[match.group(1)] = view
+            table = match.group(1)
+            # THE OTHER TRAP, caught precisely. Hoisting both statements to module constants puts
+            # the ROLLBACK one above the split too, where it overwrites the live definition and the
+            # guard reports a freshly scrubbed column as bare. A legitimate upgrade never defines
+            # one view twice above the split, so a repeat is unambiguous — unlike a whole-file
+            # search, which also fires on a migration that only recreates a view in its DOWNGRADE
+            # and on prose that merely quotes the SQL.
+            if table in seen_here:
+                raise AssertionError(
+                    f"{path.name} defines readonly.{table} twice above its rollback function. "
+                    "That is usually view SQL hoisted to module constants: the rollback statement "
+                    "lands in the slice this scan reads as live and wins, so the drift guard "
+                    "checks a definition the database does not have. Keep each statement inside "
+                    "the function that runs it."
+                )
+            seen_here.add(table)
+            bodies[table] = view
+
     return bodies
 
 
@@ -674,3 +716,90 @@ def test_validate_sql_refuses_everything_else(sql: str) -> None:
 
     with pytest.raises(QueryRefused):
         validate_sql(sql)
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — a run's failure reason is scrubbed like every other free-text column
+# --------------------------------------------------------------------------- #
+def test_a_runs_error_detail_is_scrubbed() -> None:
+    """C7 scrubs `error_detail` on `readonly.communications` and selected the identically-named
+    column BARE on `readonly.verifications`.
+
+    That was defensible while only this repo's own composed strings reached it. LP-635 widened who
+    writes it: `_failure_detail` asks an exception to explain itself through `user_detail` and writes
+    the result verbatim, so the column's safety became a promise about every exception that might
+    ever define that attribute — the shape we removed from `AiBackendUnavailable`'s constructor,
+    reappearing one level up at the protocol.
+    """
+    view = _view_bodies()["verifications"]
+    assert re.search(r"scrub\(\s*error_detail\s*\)", view), (
+        "verifications.error_detail is selected bare; a reason written from an exception would "
+        "reach a transcript unredacted"
+    )
+
+
+def test_scrubbing_does_not_damage_the_reasons_a_processor_reads() -> None:
+    """The other half, and why this was close to free: `scrub` redacts identifier SHAPES, so the
+    failure messages LP-635 composes pass through untouched.
+
+    READ FROM THE SHIPPED VALUES, not from copies. The first version of this test hand-copied the
+    three strings, and one had already drifted — a third sentence was added to the timeout message
+    in a later round and the copy never grew it. So the untested tail could acquire something
+    scrub-shaped ("raise it with support (ref 8005551234)") and be redacted in the one field a
+    processor reads, while this test went on passing. A test that names a mechanism has to exercise
+    the real thing.
+    """
+    from app.tasks.verification_rules import _FAILURE_DETAIL, _failure_detail
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    messages = (
+        *_FAILURE_DETAIL.values(),
+        str(AiBackendUnavailable(consecutive=5)),
+        _failure_detail(RuntimeError("anything")),  # the generic fallback line
+    )
+    assert len(messages) >= 3, "the failure messages moved — this test is no longer reading them"
+
+    ssn_like = re.compile(r"\b\d{3}[- ]\d{2}[- ]\d{4}\b|\b\d{9,}\b")
+    for message in messages:
+        assert not ssn_like.search(message), f"scrub would redact part of: {message!r}"
+
+
+def test_an_extractions_error_detail_is_scrubbed() -> None:
+    """THE SIBLING OF THE COLUMN ABOVE, and the one carrying the most sensitive text of the three.
+
+    There are three `error_detail` columns in the readonly schema. C7 scrubbed exactly one
+    (`communications`); round 4 fixed `verifications`; this is `extractions`, and it is written from
+    `failure_detail(status, reasoning)` — the model's FREE TEXT for why an extraction failed.
+
+    The codebase already knows what that can contain. `document_processing.py` refuses to put it in
+    the document's `processing_error` because "for an all-null-parse FAILED it is the model's
+    free-text reasoning and can quote document details", and sends it here instead as "THE
+    ACCESS-CONTROLLED PLACE FOR IT". That reasoning only holds if it is actually access-controlled;
+    through this view it was not, and the query stage returns rows into a terminal and a transcript.
+    """
+    view = _view_bodies()["extractions"]
+    assert re.search(r"scrub\(\s*error_detail\s*\)", view), (
+        "extractions.error_detail is selected bare — it holds model prose the pipeline deliberately "
+        "keeps out of the UI-shown column, so it must not reach a transcript unredacted"
+    )
+
+
+def test_every_error_detail_in_the_readonly_schema_is_scrubbed() -> None:
+    """The property, so the next one is not found one at a time.
+
+    Three columns share this name and three separate migrations decided about them independently —
+    which is how two ended up bare while the third was scrubbed. A fourth table with an
+    `error_detail` should fail here rather than wait to be noticed.
+    """
+    unscrubbed = []
+    for table, body in _view_bodies().items():
+        select_part = body.split("FROM")[0]
+        if not re.search(r"\berror_detail\b", select_part):
+            continue
+        if not re.search(r"scrub\(\s*error_detail\s*\)", select_part):
+            unscrubbed.append(table)
+
+    assert not unscrubbed, (
+        f"these views select error_detail without scrubbing it: {sorted(unscrubbed)}. It is a "
+        "free-text column and free text is where identifiers hide."
+    )

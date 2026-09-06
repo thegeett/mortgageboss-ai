@@ -33,7 +33,7 @@ def run_cross_source_pass(self: Task, loan_file_id: str, run_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(loan_file_id, run_id)),
-        on_exhausted=lambda: run_async(_mark_failed(run_id)),
+        on_exhausted=lambda _exc: run_async(_mark_failed(run_id)),
         event="cross_source_pass_exhausted",
     )
 

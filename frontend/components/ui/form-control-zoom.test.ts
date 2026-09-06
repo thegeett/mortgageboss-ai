@@ -67,7 +67,10 @@ const CONTROLS = [
   "components/ui/input.tsx",
   "components/ui/textarea.tsx",
   "components/ui/select.tsx",
-  "components/file/documents/document-drawer.tsx",
+  // The drawer's control moved to `type-override.tsx` in the branch merge, and that
+  // one renders `SearchableSelect` — so the raw input to hold to the rule is the
+  // primitive's, not the drawer's.
+  "components/ui/searchable-select.tsx",
   "components/file/verification/rule-finding-actions.tsx",
   "app/(protected)/admin/validation/page.tsx",
   "app/(protected)/dev/extraction-bench/page.tsx",

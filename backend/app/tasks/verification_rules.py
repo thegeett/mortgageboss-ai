@@ -23,7 +23,7 @@ sets it. The two failure paths:
     does NOT depend on the dying task. Because soft time-limits no longer retry, the watchdog only ever
     bounds a single un-retried attempt, so its "above one hard limit" sizing is correct.
 
-The governed pass gets its OWN, generous time limits (below): the 65s sweep keeps the short global limits
+The governed pass gets its OWN, generous time limits (``app.core.run_limits``): the 65s sweep keeps the short global limits
 (``celery_app.py``), but a ~282s pass must not be killed at the global 120s soft limit — the fourth
 fail-open (LP-377-C: nobody put 282 next to 120). These cover the current realistic file sizes with margin;
 a file large enough to exceed even these needs the engine-level fix (parallelize / gate the per-document AI
@@ -38,6 +38,10 @@ from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.run_limits import (
+    RULE_ENGINE_HARD_LIMIT_SECONDS,
+    RULE_ENGINE_SOFT_LIMIT_SECONDS,
+)
 from app.models.base import utcnow
 from app.models.finding import (
     EvaluationOutcome,
@@ -47,23 +51,25 @@ from app.models.finding import (
 )
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification, VerificationStatus
+from app.services.tag_cache_store import load_tag_caches, save_tag_caches
 from app.services.verification_run import run_verification
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
 from app.tasks.retry import MAX_RETRIES, retry_or_terminal
+from app.verification.tag_materialization.breaker import AiBackendUnavailable
 
 logger = structlog.get_logger(__name__)
 
-# The governed pass's OWN time limits (LP-377-C, Fix 1). LP-365 measured ~282s on a 30-document file; the
-# runtime is dominated by SEQUENTIAL AI calls (6 materialization groups, each over per-document batches,
-# plus Stage A/B), so it grows with document count. Sized generously above 282s so a realistic file
-# completes; the soft limit raises inside the task for a graceful mark, the hard limit is the SIGKILL
-# ceiling. The stuck-run watchdog (``verification.py``) is sized ABOVE the hard limit so a hard-kill (which
-# cannot commit its own FAILED marker) is still caught.
-RULE_ENGINE_SOFT_LIMIT_SECONDS = 900  # 15 min — a 30-doc run (~282s) finishes with wide headroom
-RULE_ENGINE_HARD_LIMIT_SECONDS = 1200  # 20 min — the SIGKILL ceiling
 
-
+# The pass's time limits live in `app.core.run_limits` (LP-635 review) — the LP-377-C rationale that
+# used to sit here moved with them, rather than being left behind describing values this module no
+# longer defines. The API watchdog and the
+# deploy CLI both need them, and importing THIS module to reach them pulled Celery and the whole rule
+# engine into the request path — 263 `app.*` modules, which is exactly what the function-local
+# `import run_rule_engine_pass` in `api/verification.py` was arranged to avoid.
+#
+# NOT re-exported from here. A re-export would be an unused import that every `ruff --fix` deletes;
+# it did, and the callers importing it from this module broke. Importers name the leaf module.
 @celery_app.task(  # type: ignore[untyped-decorator]
     bind=True,
     name="verification.run_rule_engine",
@@ -78,12 +84,39 @@ def run_rule_engine_pass(self: Task, loan_file_id: str, run_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run(loan_file_id, run_id)),
-        on_exhausted=lambda: run_async(_mark_failed(run_id)),
+        on_exhausted=lambda exc: run_async(_mark_failed(run_id, exc)),
         event="rule_engine_pass_exhausted",
         # LP-377-C: a SOFT time-limit is terminal, NOT transient — retrying re-runs the same ~282s+ work
         # and will time out again, and stacked retries (up to 3x the hard limit) would outlast the 1500s
         # stuck-run watchdog and let it fail a run mid-retry. Fail closed once, immediately.
-        terminal_on=(SoftTimeLimitExceeded,),
+        #
+        # LP-635 REVIEW — `AiBackendUnavailable` joins it, for the SAME reason and two more. It was
+        # left transient so Celery would retry it, on the reasoning that the backend might be back;
+        # measured, it is not:
+        #
+        #   * THE WATCHDOG. `started_at` is set once at run creation and never reset per attempt,
+        #     while `_reconcile_stuck_run` measures against a SINGLE-attempt bound (`hard + 300`).
+        #     The comment above says that sizing only holds "because soft time-limits no longer
+        #     retry". A retried run keeps the original clock, so a 44-doc file that works 2200s,
+        #     trips, and retries is failed by the watchdog at 3262s while the retry is still working
+        #     — and `_run`'s FAILED-wins lock then suppresses COMPLETED while the findings commit
+        #     anyway. A FAILED run carrying a full set of fresh findings is worse than either.
+        #   * THE COST. A retry re-issued every Stage A / Stage B / materialization call already paid
+        #     for, so an outage near the end of a 591-call pass cost up to 4x a normal run.
+        #     LP-644 §3 REDUCES THIS BUT DOES NOT REMOVE IT: the caches now persist, so a retry
+        #     re-reads what the failed attempt had already stored rather than re-asking for it. What
+        #     it cannot recover is the work in flight when the breaker tripped — and the caches are
+        #     saved AFTER `run_verification` returns, so an attempt that raises saves nothing at all.
+        #     A failing attempt still pays full price; only a LATER attempt is cheaper. The other two
+        #     reasons below are untouched by §3 and are each sufficient on their own.
+        #   * THE WINDOW. `retry_countdown` is 5s/10s/20s over MAX_RETRIES=3 — about 35 seconds. An
+        #     outage long enough to trip the breaker (5 consecutive failures) is essentially never
+        #     over inside 35 seconds, so all three attempts fail and the run ends FAILED regardless.
+        #
+        # The benefit the breaker actually delivers is unchanged by this: the slot is released in
+        # under a minute instead of grinding for the file's whole budget, and the run is visibly
+        # FAILED and re-runnable by hand. That was always the win; the retry was not.
+        terminal_on=(SoftTimeLimitExceeded, AiBackendUnavailable),
     )
 
 
@@ -94,6 +127,13 @@ async def _run(loan_file_id: str, run_id: str) -> None:
         if loan_file is None or run is None:
             logger.warning("rule_engine_pass_missing_target", run_id=run_id)
             return
+        # LP-644 §3 — the caches are loaded HERE, not inside `run_verification`, and saved after it
+        # returns. That placement is a correctness constraint, not tidiness: since LP-644 §2 the
+        # materialization cache is written by concurrent groups and is safe only because every write
+        # happens in an apply loop with no `await` in it (the same property the breaker's lock-free
+        # counting depends on). A database round-trip inside one of those loops would yield, let
+        # another group interleave, and break both. Outside the run, neither can happen.
+        caches = await load_tag_caches(db, loan_file.id)
         # reasoners omitted → run_verification uses the REAL model (a real run must never use a stub).
         await run_verification(
             db,
@@ -101,7 +141,21 @@ async def _run(loan_file_id: str, run_id: str) -> None:
             loan_file_id=loan_file.id,
             company_id=loan_file.company_id,
             verification_id=run.id,
+            caches=caches,
         )
+        # Best-effort, and deliberately AFTER the run: this makes the NEXT verification cheaper and
+        # has no bearing on this one's findings. `save_tag_caches` swallows its own errors for the
+        # same reason — failing a verification that produced correct findings, in order to record a
+        # cache, would be a grotesque trade.
+        #
+        # FLUSHED FIRST, which is bug-006's lesson applied to a second savepoint. The save runs
+        # inside `begin_nested()` so a DB failure cannot abort the outer transaction; but rolling
+        # back to a savepoint expires whatever was dirty when it was taken, so anything
+        # `run_verification` left unflushed must be settled BEFORE it rather than left inside the
+        # window the rollback would discard. That is the exact shape bug-006 fixed for the triage
+        # counts — a savepoint added to protect the commit being the one thing that could destroy it.
+        await db.flush()
+        await save_tag_caches(db, loan_file.id, caches)
         # LP-377-C Fix 2: the governed pass is the completion authority. Re-read status under a ROW LOCK
         # (the LP-377 BUG-1 pattern, moved here from the sweep) and mark COMPLETED only if a concurrent
         # FAILED (a sweep failure) has not been committed — the lock is held to commit, so a FAILED that
@@ -192,7 +246,65 @@ async def _triage_counts(db: AsyncSession, loan_file_id: UUID) -> tuple[int, int
     )
 
 
-async def _mark_failed(run_id: str) -> None:
+#: What a processor is told when a run fails, by cause (LP-635).
+#:
+#: This is `error_detail` — the one string from this ticket that a human actually reads, and it was
+#: wrong twice over. It said "after retries" for `terminal_on` failures that are never retried,
+#: because `on_exhausted` fires from both branches of `retry_or_terminal`. And it was generic where
+#: the cause was specific: the breaker composes a sentence naming what happened and what to do, and
+#: nothing could carry it here, because `on_exhausted` took no arguments.
+#:
+#: Both halves mattered. A timed-out run and an unreachable backend need DIFFERENT actions from a
+#: processor — one is "this file is too big for the window", the other is "try again shortly" — and
+#: telling them the same thing makes the message worth ignoring.
+_FAILURE_DETAIL: dict[type[BaseException], str] = {
+    # LP-635 review — NAMES NO CAUSE, because a timeout cannot tell them apart.
+    #
+    # It used to say "this usually means the file has more documents than one run can process". A
+    # small file hitting the LF-ZE9N outage reaches here and is told exactly that: the breaker
+    # counts BATCHES of up to fifteen subjects, so a pass of fewer than five batches can never trip
+    # it, grinds to the soft limit, and the processor reads "too many documents" about a transport
+    # outage. That is the misdiagnosis this ticket was opened to end, written into the field they
+    # read.
+    #
+    # "Re-run it" was the other half: `rule_engine_limits` is deterministic from document count, so
+    # a genuinely oversized file gets the identical budget on the re-run and burns another slot to
+    # fail the same way.
+    SoftTimeLimitExceeded: (
+        "Verification ran out of time before it finished. That can mean the file is larger than "
+        "one run's budget, or that the AI backend was slow or unreachable. Re-running is worth one "
+        "attempt; if it times out again, raise it with support rather than repeating it."
+    ),
+}
+
+
+def _failure_detail(exc: BaseException | None) -> str:
+    """The user-visible reason a run failed.
+
+    An exception that can explain itself is ASKED, via a ``user_detail`` attribute, before any type
+    matching happens — so a future self-describing failure is not silently flattened into the
+    generic line.
+
+    LP-635 review: this docstring previously claimed exactly that while the code did
+    ``isinstance(exc, AiBackendUnavailable)`` — a type match against one hardcoded class. The next
+    self-describing exception would have been flattened, and the next reader would have trusted the
+    sentence and not wired it. The protocol is now real, so the claim is true.
+
+    ``user_detail`` must be safe to show: it is written verbatim into ``error_detail``, which
+    ``readonly.verifications`` scrubs for identifier SHAPES ONLY. A digit run is redacted; a
+    borrower's name or address is not — so this protocol still requires what it writes to be
+    composed rather than quoted, and scrubbing is the second line, not the first.
+    """
+    detail = getattr(exc, "user_detail", None)
+    if isinstance(detail, str) and detail:
+        return detail
+    for kind, detail in _FAILURE_DETAIL.items():
+        if isinstance(exc, kind):
+            return detail
+    return "Rule-engine pass failed — re-run the verification."
+
+
+async def _mark_failed(run_id: str, exc: BaseException | None = None) -> None:
     async with task_session() as db:
         run = await db.get(Verification, UUID(run_id))
         if run is None:
@@ -200,7 +312,7 @@ async def _mark_failed(run_id: str) -> None:
         # FAILED is sticky and fail-closed — a governed-engine failure must be VISIBLE on the run.
         run.status = VerificationStatus.FAILED
         run.completed_at = utcnow()
-        run.error_detail = "Rule-engine pass failed after retries"
+        run.error_detail = _failure_detail(exc)
         await db.commit()
 
 

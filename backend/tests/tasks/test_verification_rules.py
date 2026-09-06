@@ -125,6 +125,27 @@ async def test_exhaustion_marks_run_failed(monkeypatch) -> None:
     assert run.completed_at is not None and "Rule-engine pass failed" in run.error_detail
 
 
+async def test_the_outage_sentence_is_written_onto_the_run(monkeypatch) -> None:
+    """The arrival test, at the layer the processor sees. `_failure_detail` being right is not the
+    same as `error_detail` carrying it — the previous version of this file had a passing test for the
+    breaker's wording while `_mark_failed` ignored the exception entirely and wrote a fixed
+    string."""
+    from app.tasks import verification_rules as vr
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    run = SimpleNamespace(
+        id=_RUN, status=VerificationStatus.RUNNING, completed_at=None, error_detail=None
+    )
+    cm, _db = _fake_session({_RUN: run})
+    monkeypatch.setattr(vr, "task_session", cm)
+
+    await vr._mark_failed(str(_RUN), AiBackendUnavailable(consecutive=5))
+
+    assert run.status is VerificationStatus.FAILED
+    assert "5 calls in a row" in run.error_detail
+    assert "after retries" not in run.error_detail
+
+
 def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> None:
     # The POST handler enqueues BOTH; the governed pass rides the same trigger as the sweep.
     from app.api import verification as api
@@ -132,14 +153,22 @@ def test_enqueue_fires_the_governed_pass_alongside_the_sweep(monkeypatch) -> Non
     delayed: list[tuple] = []
 
     class _Task:
-        def delay(self, *a):
-            delayed.append(a)
+        def apply_async(self, *a, **kw):
+            delayed.append((kw["args"], kw["soft_time_limit"], kw["time_limit"]))
 
     import app.tasks.verification_rules as vr
 
     monkeypatch.setattr(vr, "run_rule_engine_pass", _Task())
-    assert api._enqueue_rule_engine(_LF, _RUN) is True  # enqueued OK
-    assert delayed == [(str(_LF), str(_RUN))]  # enqueued once, with the run's ids
+    assert api._enqueue_rule_engine(_LF, _RUN, document_count=44) is True  # enqueued OK
+    # LP-635 — enqueued once with the run's ids AND the limits this file's size earns. `delay` cannot
+    # carry per-run limits, which is why the call moved to `apply_async`.
+    from app.core.run_limits import rule_engine_limits
+
+    soft, hard = rule_engine_limits(44)
+    assert delayed == [((str(_LF), str(_RUN)), soft, hard)]
+    # The point of the change, stated as an assertion rather than left to the reader: a 44-document
+    # file gets more than the old fixed limit, which is what it could not finish under.
+    assert soft > 900
 
 
 def test_enqueue_never_raises_but_reports_failure(monkeypatch) -> None:
@@ -149,9 +178,13 @@ def test_enqueue_never_raises_but_reports_failure(monkeypatch) -> None:
     import app.tasks.verification_rules as vr
     from app.api import verification as api
 
-    boom = SimpleNamespace(delay=lambda *a: (_ for _ in ()).throw(RuntimeError("broker down")))
+    boom = SimpleNamespace(
+        apply_async=lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("broker down"))
+    )
     monkeypatch.setattr(vr, "run_rule_engine_pass", boom)
-    assert api._enqueue_rule_engine(_LF, _RUN) is False  # does not raise, reports the failure
+    assert (
+        api._enqueue_rule_engine(_LF, _RUN, document_count=0) is False
+    )  # does not raise, reports the failure
 
 
 def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
@@ -159,13 +192,14 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     limits that clear the LP-365-measured ~282s with headroom (it no longer runs under the global 120s soft
     limit that killed it), and the watchdog clears the hard limit so a hard-kill is still caught. This FAILS
     on the pre-fix code, where run_rule_engine_pass had no per-task limit and inherited the global 120s."""
-    from app.api.verification import _STUCK_RUN_TIMEOUT_SECONDS
-    from app.tasks.celery_app import celery_app
-    from app.tasks.verification_rules import (
+    from app.api.verification import _WATCHDOG_SLACK_SECONDS
+    from app.core.run_limits import (
         RULE_ENGINE_HARD_LIMIT_SECONDS,
+        RULE_ENGINE_MAX_HARD_SECONDS,
         RULE_ENGINE_SOFT_LIMIT_SECONDS,
-        run_rule_engine_pass,
     )
+    from app.tasks.celery_app import celery_app
+    from app.tasks.verification_rules import run_rule_engine_pass
 
     measured_runtime = 282  # LP-365, a 30-document file
     global_soft = celery_app.conf.task_soft_time_limit  # the sweep's short limit (120)
@@ -176,8 +210,25 @@ def test_the_governed_pass_limit_clears_its_measured_runtime() -> None:
     # 282 finally fits under the limit — and it did NOT under the global 120s (the fourth fail-open).
     assert RULE_ENGINE_SOFT_LIMIT_SECONDS > measured_runtime > global_soft
     assert RULE_ENGINE_HARD_LIMIT_SECONDS > RULE_ENGINE_SOFT_LIMIT_SECONDS
-    # The watchdog must clear the hard limit so a hard-killed pass (which cannot self-mark FAILED) is failed.
-    assert _STUCK_RUN_TIMEOUT_SECONDS > RULE_ENGINE_HARD_LIMIT_SECONDS
+    # The watchdog must clear the hard limit so a hard-killed pass (which cannot self-mark FAILED) is
+    # failed. LP-635 made both sides of that a FUNCTION of the file, so the invariant is now checked
+    # at the widest bound any run can be given rather than against a single pair of constants — a
+    # watchdog that cleared the default hard limit but not the largest one would fail healthy runs on
+    # exactly the big files this ticket exists to make work.
+    # LP-635 REVIEW — asserted against `rule_engine_limits` itself, not against the constants.
+    # `MAX_HARD + SLACK > MAX_HARD` only ever caught a non-positive slack; it could not notice the
+    # watchdog and the enqueue drifting apart, which is the failure it claims to guard. Checked at
+    # both ends of the range and past the cap, since the floor and the ceiling are where a
+    # divergence would actually appear.
+    from app.core.run_limits import rule_engine_limits
+
+    for documents in (0, 1, 21, 44, 200, 10_000):
+        _soft, hard = rule_engine_limits(documents)
+        assert hard + _WATCHDOG_SLACK_SECONDS > hard, "the watchdog must clear the hard limit"
+        assert hard <= RULE_ENGINE_MAX_HARD_SECONDS, (
+            f"{documents} documents exceeds the widest bound the watchdog is sized for"
+        )
+    assert RULE_ENGINE_MAX_HARD_SECONDS >= RULE_ENGINE_HARD_LIMIT_SECONDS
 
 
 def test_rule_pass_completion_respects_a_concurrently_committed_failed() -> None:
@@ -196,3 +247,162 @@ def test_rule_pass_completion_respects_a_concurrently_committed_failed() -> None
     assert rule_pass_effective_status(VerificationStatus.FAILED) is VerificationStatus.FAILED
     # a healthy run (no FAILED in the DB) completes when the governed pass finishes
     assert rule_pass_effective_status(VerificationStatus.RUNNING) is VerificationStatus.COMPLETED
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — the limit is a function of the file, not a constant
+# --------------------------------------------------------------------------- #
+def test_a_44_document_file_gets_more_than_the_old_fixed_limit() -> None:
+    """THE REPORTED FILE. LF-ZE9N could not verify: 44 documents against a flat 900s, killed twice at
+    exactly fifteen minutes while still doing useful work.
+
+    At the measured 35.6 s/doc it needs ~1,566s. The assertion is against the MEASUREMENT rather than
+    a hardcoded expectation, so if someone re-measures the per-document cost this test still asks the
+    right question — does the file fit? — instead of pinning a number that was only ever a
+    consequence.
+    """
+    from app.core.run_limits import MEASURED_SECONDS_PER_DOCUMENT, rule_engine_limits
+
+    soft, _hard = rule_engine_limits(44)
+    assert soft > 900, "the old fixed limit is what this file could not finish under"
+    assert soft > 44 * MEASURED_SECONDS_PER_DOCUMENT
+
+
+def test_a_small_file_keeps_exactly_the_limits_it_had() -> None:
+    """The floor. This change must not make anything detect a stuck small run more slowly than
+    before — a longer leash on files that never needed one would be a regression bought with the
+    fix."""
+    from app.core.run_limits import rule_engine_limits
+
+    assert rule_engine_limits(0) == (900, 1200)
+    assert rule_engine_limits(5) == (900, 1200)
+
+
+def test_the_budget_is_bounded() -> None:
+    """The ceiling is a REFUSAL, not a budget: past it a file needs a resumable pass, not a longer
+    lease on a worker slot. Without this, one enormous file could hold a prefork slot indefinitely
+    and starve everything queued behind it."""
+    from app.core.run_limits import RULE_ENGINE_MAX_SOFT_SECONDS, rule_engine_limits
+
+    soft, _hard = rule_engine_limits(10_000)
+    assert soft == RULE_ENGINE_MAX_SOFT_SECONDS
+
+
+def test_the_limit_never_shrinks_as_a_file_grows() -> None:
+    """Monotonic. A property rather than examples, because the floor and the ceiling are two places
+    a clamp can inadvertently invert the ordering."""
+    from app.core.run_limits import rule_engine_limits
+
+    seen = [rule_engine_limits(n)[0] for n in range(0, 200, 7)]
+    assert seen == sorted(seen)
+
+
+def test_soft_hard_and_watchdog_stay_ordered_at_every_size() -> None:
+    """THE INVARIANT THE WHOLE CHAIN RESTS ON, checked across the range rather than at one point.
+
+    Each bound has a distinct job: the soft limit lets the task mark its own run FAILED, the hard
+    limit SIGKILLs a task that ignored it, and the watchdog catches a hard-killed task that could not
+    write its own marker. If any two cross, the run is failed by something that cannot explain
+    itself — and before LP-635 these were three unrelated constants that could only be checked by
+    reading them.
+    """
+    from app.api.verification import _WATCHDOG_SLACK_SECONDS
+    from app.core.run_limits import rule_engine_limits
+
+    for documents in (0, 1, 21, 30, 44, 60, 100, 1000):
+        soft, hard = rule_engine_limits(documents)
+        assert soft < hard < hard + _WATCHDOG_SLACK_SECONDS
+
+
+# --------------------------------------------------------------------------- #
+# LP-635 — what a processor is actually told
+# --------------------------------------------------------------------------- #
+def test_the_backend_outage_reason_reaches_the_run_the_processor_reads() -> None:
+    """THE CLAIM I MADE THAT WAS FALSE.
+
+    The breaker composes a careful sentence — how many calls failed, and to re-run once the backend
+    is back — and a test asserted that sentence's wording. That test passed while the sentence went
+    nowhere: `_mark_failed` wrote a fixed string, so `error_detail` said "failed after retries" for a
+    failure that is never retried. Asserting what a message SAYS proves nothing about whether anyone
+    sees it; this asserts it ARRIVES.
+    """
+    from app.tasks.verification_rules import _failure_detail
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    detail = _failure_detail(AiBackendUnavailable(consecutive=5))
+    assert "5 calls in a row" in detail
+    assert "retries" not in detail
+
+
+def test_a_timeout_and_an_outage_do_not_read_the_same() -> None:
+    """They need DIFFERENT actions from a processor — "this file is too big for the window" versus
+    "try again shortly" — and one string for both is a string worth ignoring."""
+    from app.tasks.verification_rules import _failure_detail
+    from app.verification.tag_materialization.breaker import AiBackendUnavailable
+
+    # LP-635 review — imported from `celery.exceptions`, the way production does. They are the
+    # same object in the pinned Celery, so pinning billiard's passed while keying the wrong
+    # symbol: if Celery ever wrapped its re-export, `_FAILURE_DETAIL` would stop matching what
+    # is actually raised into the task while this test kept passing — the exact
+    # passes-while-the-sentence-goes-nowhere failure this commit is about.
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    timeout = _failure_detail(SoftTimeLimitExceeded())
+    outage = _failure_detail(AiBackendUnavailable(consecutive=5))
+    assert timeout != outage
+    assert "ran out of time" in timeout
+    # Neither may claim retries that `terminal_on` never performs.
+    assert "after retries" not in timeout and "after retries" not in outage
+
+
+def test_an_unrecognised_failure_still_says_something_useful() -> None:
+    """The fallback must not be an empty string or a class name — it is what a processor sees for
+    every cause nobody has thought about yet."""
+    from app.tasks.verification_rules import _failure_detail
+
+    for unknown in (RuntimeError("boom"), None):
+        detail = _failure_detail(unknown)
+        assert "re-run" in detail.lower()
+
+
+def test_the_timeout_message_does_not_diagnose_a_cause_it_cannot_know() -> None:
+    """LP-635 review — a timeout cannot tell "too many documents" from "the backend was down".
+
+    The breaker counts BATCHES of up to fifteen subjects, so a pass of fewer than five batches can
+    never trip it: a small file hitting the LF-ZE9N outage grinds to the soft limit and lands here.
+    The message used to tell that processor the file had too many documents — the misdiagnosis this
+    ticket was opened to end, written into the field they read.
+    """
+    from app.tasks.verification_rules import _failure_detail
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    message = _failure_detail(SoftTimeLimitExceeded())
+
+    assert "more documents than one run can process" not in message
+    assert "backend" in message.lower(), "the other cause must be offered, not just omitted"
+
+
+def test_a_self_describing_exception_is_asked_rather_than_type_matched() -> None:
+    """The protocol the docstring claims, asserted on a type the table has never heard of.
+
+    It previously did `isinstance(exc, AiBackendUnavailable)` while claiming to ask the exception,
+    so the next self-describing failure would have been flattened to the generic line and the next
+    reader would have trusted the sentence."""
+    from app.tasks.verification_rules import _failure_detail
+
+    class _FutureFailure(RuntimeError):
+        user_detail = "The rules index was rebuilt mid-run — re-run the verification."
+
+    assert _failure_detail(_FutureFailure()) == _FutureFailure.user_detail
+
+
+def test_an_exception_with_no_detail_falls_back_rather_than_writing_a_blank() -> None:
+    """A FAILED run with an empty reason is worse than a generic one — the UI shows a failure with
+    nothing to act on. `user_detail` must be a non-empty string to win."""
+    from app.tasks.verification_rules import _failure_detail
+
+    class _Blank(RuntimeError):
+        user_detail = ""
+
+    assert _failure_detail(_Blank()) == _failure_detail(RuntimeError("anything"))
+    assert _failure_detail(_Blank())

@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.extraction.divorce_decree import DivorceDecreeExtraction
+from app.models.base import utcnow
 from app.models.document import Document
 from app.models.document_finding import (
     DocumentFinding,
@@ -47,6 +48,50 @@ def coerce_finding_type(value: str | None) -> DocumentFindingType:
         return DocumentFindingType(value.strip().lower())
     except ValueError:
         return DocumentFindingType.OTHER
+
+
+async def supersede_open_findings(db: AsyncSession, *, document: Document) -> int:
+    """Soft-delete a document's UNTRIAGED findings before it is analysed again (LP-637 review).
+
+    Findings are not versioned the way extractions are. ``create_document_finding`` unconditionally
+    adds a row, and nothing removed the previous run's — which was unreachable while
+    ``process_document`` ran exactly once per document, at upload. The reprocess endpoint makes it
+    reachable, in two shapes:
+
+    * reprocess a Tier 3 document twice and its ``key_finding`` rows DOUBLE;
+    * reprocess an ``unknown`` that re-classifies to a Tier 1 type — the SUCCESS case, the whole
+      point of the feature — and its Tier 3 findings stay OPEN on a document that is no longer
+      Tier 3, still surfaced through ``/document-findings`` and still reachable as
+      ``NeedsItem.source_finding``. That adds noise to the queue the feature exists to shrink.
+
+    CALLED BEFORE CLASSIFICATION, not inside the Tier 3 branch, precisely because of the second
+    shape: a re-classification away from Tier 3 never enters that branch, so a cleanup living there
+    would miss the case that matters most.
+
+    ONLY ``OPEN`` FINDINGS. ``REVIEWED`` and ``DISMISSED`` mean a person made a decision, and a
+    reprocess is not entitled to erase one. Nothing writes those two today — the lifecycle is
+    Phase 3 work and the API only lists — so this changes nothing now and is already correct when
+    it does.
+
+    Soft-delete, in line with every other removal here: the rows stay for audit and only leave
+    active reads. Returns how many were superseded, so a caller can log a number rather than a
+    claim.
+
+    The tradeoff worth naming: a pipeline that fails after this point leaves the document with
+    neither the old findings nor new ones. They described an extraction that was being replaced
+    anyway, the document ends FAILED or NEEDS_REVIEW rather than looking trustworthy, and a re-run
+    regenerates them — which is better than showing two copies or a stale one.
+    """
+    stmt = select(DocumentFinding).where(
+        DocumentFinding.document_id == document.id,
+        DocumentFinding.status == DocumentFindingStatus.OPEN,
+    )
+    stmt = only_active(stmt, DocumentFinding)
+    findings = list((await db.scalars(stmt)).all())
+    for finding in findings:
+        finding.deleted_at = utcnow()
+    await db.flush()
+    return len(findings)
 
 
 async def create_document_finding(

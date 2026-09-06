@@ -34,6 +34,9 @@ classification prompt is built from these slugs (see
 classifier can return is a type the catalog knows, and vice versa.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from app.models.document import DocumentCategory, Tier
 
 # --------------------------------------------------------------------------- #
@@ -142,6 +145,19 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     # ===================================================================== #
     # Property
     # ===================================================================== #
+    # LP-642 — the SUBJECT-PROPERTY RENT SCHEDULES. Fannie B3-3.8-02 (09/02/2026) makes one of these
+    # MANDATORY where rental income is used to qualify: "a Single-Family Comparable Rent Schedule
+    # (Form 1007) or Small Residential Income Property Appraisal Report (Form 1025), as applicable".
+    # Until now neither existed as a type, so the one document a rental purchase cannot qualify
+    # without could be neither requested nor filed — `activation_bars.yaml` recorded that as a
+    # limitation and SEL-2026-08 turned it into a blocker.
+    #
+    # TIER 1 AS OF LP-642 STEP 2. Step 1 catalogued these at Tier 2 — classified, categorised and
+    # fileable, with no structured extraction — precisely because no extractor existed and Tier 1
+    # would have claimed one that did not. `extract_comparable_rent_schedule` now reads both forms,
+    # so the tier moves with the fact rather than ahead of it.
+    "comparable_rent_schedule": (Tier.TIER_1, DocumentCategory.PROPERTY),  # Form 1007, one-unit
+    "small_residential_income_appraisal": (Tier.TIER_1, DocumentCategory.PROPERTY),  # Form 1025
     "purchase_agreement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "homeowners_insurance": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
     "mortgage_statement": (Tier.TIER_1, DocumentCategory.PROPERTY),  # T1
@@ -201,6 +217,11 @@ CATALOG: dict[str, tuple[Tier, DocumentCategory]] = {
     "debt_payoff_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "student_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     "installment_loan_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
+    # A revolving-account statement. The catalog carried `installment_loan_statement` and
+    # `student_loan_statement` but nothing for the commonest consumer debt of all, so a need asking
+    # for one named a document the classifier could not produce and no upload could ever clear
+    # (bug-009).
+    "credit_card_statement": (Tier.TIER_2, DocumentCategory.CREDIT),
     # LP-442 — schema'd credit types.
     "bankruptcy_filing": (Tier.TIER_1, DocumentCategory.CREDIT),
     "unsecured_note": (Tier.TIER_1, DocumentCategory.CREDIT),
@@ -334,6 +355,274 @@ def get_category(document_type: str | None) -> DocumentCategory:
 def is_cataloged(document_type: str | None) -> bool:
     """Whether ``document_type`` is a known (cataloged) type, vs. long-tail."""
     return bool(document_type) and document_type in CATALOG
+
+
+#: Slugs of one word are NOT matched against a free-text name (LP-636 defect 5). "survey",
+#: "appraisal", "w2" and the like appear inside ordinary prose — "the appraisal is attached", "a
+#: letter about the survey" — so a one-word match is a coin flip. Multi-word slugs are specific
+#: enough that an ordered match means what it says.
+_MIN_SLUG_WORDS_FOR_NAME_MATCH = 2
+#: An upper bound for the explanation's band searches — no catalog slug is near this long.
+_MAX_SLUG_WORDS = 32
+
+#: Tokens allowed BETWEEN consecutive slug words. 1, because the case this tolerance exists for —
+#: "Earnest Money / EMD Receipt" → ``earnest_money_receipt`` — has exactly one, while the
+#: false-positive names it must decline have two or more.
+_MAX_GAP_TOKENS = 1
+
+#: The fraction of the name's tokens the matched slug must account for. A genuine name for a
+#: document is mostly the type; a name that MENTIONS one is mostly other words. Measured on both
+#: populations: true names 0.5-0.67, mentions 0.18-0.25. 0.4 sits in the gap with room either side.
+#:
+#: This is the guard that matters most in practice, because of WHERE the feature runs: a confident
+#: ``unknown`` is very often a cover letter, a transmittal, a fax sheet or an email printout —
+#: exactly the documents whose names reference OTHER documents.
+_MIN_SLUG_COVERAGE = 0.4
+
+
+def _normalize_for_match(text: str) -> str:
+    """Lowercase, drop punctuation, collapse whitespace: ``"a Driver's License"`` → ``"drivers license"``.
+
+    An apostrophe is DELETED, not turned into a space. Replacing it split "driver's" into
+    "driver s" and the driver's-licence case — one of the four this exists for — silently failed
+    to match.
+    """
+    dropped = text.lower().replace("'", "").replace("\u2019", "")
+    return " ".join("".join(c if c.isalnum() else " " for c in dropped).split())
+
+
+def match_catalog_type(free_text: str | None) -> str | None:
+    """The catalog slug that a free-text document NAME names, or ``None``.
+
+    LP-636 defect 5. The classifier emits ``document_name`` — its own words for what the document
+    is — BEFORE it makes the constrained ``document_type`` pick, and LP-463 records that the free
+    name is "a more reliable signal than the constrained pick". When the pick comes back a
+    confident ``unknown``, that name is the only surviving evidence that a catalog type was missed.
+    On LF-ZE9N four Tier-1 types were lost this way — a driver's licence, a closing disclosure, a
+    credit report and an earnest-money receipt — each routed to Tier 3 and COMPLETED with no flag.
+
+    DELIBERATELY CONSERVATIVE, AND DELIBERATELY NOT AUTHORITATIVE. Three guards, each with a
+    measured reason rather than a taste:
+
+    * the slug's words must appear IN ORDER, with at most :data:`_MAX_GAP_TOKENS` between them;
+    * the slug must account for at least :data:`_MIN_SLUG_COVERAGE` of the name's tokens;
+    * one-word slugs are ignored entirely (:data:`_MIN_SLUG_WORDS_FOR_NAME_MATCH`).
+
+    No fuzzy distance, no stemming. ``misc`` is the correct destination for a genuinely unknown
+    document and must stay reachable, so a near-miss has to fall through rather than be captured.
+
+    THE COVERAGE GUARD IS THE ONE THAT EARNS ITS KEEP, and the reason is where this runs. A
+    confident ``unknown`` is very often a cover letter, a transmittal, a fax sheet or an email
+    printout — precisely the documents whose names reference OTHER documents. "an email asking the
+    borrower to send a bank statement" names a bank statement and is not one. Ordering alone
+    cannot tell those apart; the proportion of the name the type accounts for can.
+
+    Expect this to produce some flags a processor dismisses. That is the accepted cost of the
+    asymmetry below, not a defect — but the rate is worth watching rather than assuming.
+
+    The caller uses this to FLAG FOR REVIEW, never to apply the type. Applying a type from a name
+    match would put a wrong schema on a document — the T4→w2 harm LP-463 exists to prevent — and
+    the whole point of that ticket is not applying a label we do not trust. A false positive here
+    therefore costs one review; a false positive in an auto-applied version would cost wrong data.
+
+    Longest match wins, so ``prior_closing_disclosure_final_cd_from_purchase`` is preferred over
+    ``closing_disclosure`` when the name carries both.
+    """
+    if not free_text:
+        return None
+    haystack = _normalize_for_match(free_text)
+    if not haystack:
+        return None
+
+    tokens = haystack.split()
+    best: str | None = None
+    best_words = 0
+    for slug in CATALOG:
+        words = slug.split("_")
+        if len(words) < _MIN_SLUG_WORDS_FOR_NAME_MATCH:
+            continue
+        if len(words) <= best_words:
+            continue
+        if not _matches_in_order_with_small_gaps(words, tokens):
+            continue
+        # COVERAGE. A genuine name for a document is mostly the type: "a driver's license" is 3
+        # tokens of which 2 are the slug. A name that merely MENTIONS a type is mostly other words:
+        # "an email asking the borrower to send a bank statement" is 9 tokens of which 2 are.
+        # Measured on both populations the gap is clean — true names 0.5-0.67, mentions 0.18-0.25 —
+        # so this is the discriminator, not the ordering rule.
+        if len(words) / len(tokens) < _MIN_SLUG_COVERAGE:
+            continue
+        best, best_words = slug, len(words)
+    return best
+
+
+#: Why nothing matched (LP-639). A closed vocabulary — safe to log, unlike the name itself.
+#:
+#: ONE REASON PER GUARD, because a single "it did not match" cannot be acted on. `match_catalog_type`
+#: applies three, and the first version of this modelled two — so a one-word catalog type named
+#: EXACTLY ("Appraisal") reported the same thing as a name with no catalog words in it at all.
+REJECTED_BY_COVERAGE = "coverage"
+REJECTED_BY_ORDER = "order"
+REJECTED_BY_MIN_WORDS = "min_words"
+#: No catalog slug's words appear in the name at all — a model problem, not a matcher one.
+NO_CATALOG_WORDS = "no_catalog_words"
+#: A name was produced but normalised away to nothing (punctuation, or a script the normaliser
+#: strips). Its own state, because sharing ``None`` with a successful match made a log query
+#: counting matches silently include it.
+UNUSABLE_NAME = "unusable_name"
+
+
+@dataclass(frozen=True)
+class CatalogMatchExplanation:
+    """Why :func:`match_catalog_type` answered the way it did — WITHOUT the name (LP-639).
+
+    THE PROBLEM THIS EXISTS FOR. When the classifier returns a confident ``unknown``, the only
+    surviving evidence is the model's own ``document_name`` — free text that can quote a borrower's
+    details, so it is never logged or stored. A confident ``unknown`` therefore has no account of
+    itself, and diagnosing one means inferring. On LF-ZE9N the inference was wrong twice.
+
+    Every field is a COUNT, a RATIO, a BOOLEAN or a catalog SLUG — closed vocabularies and numbers.
+    The name's content never appears.
+    """
+
+    #: Did the model produce a name at all? False means the evidence never existed.
+    name_present: bool
+    #: How many words it ran to, after normalisation.
+    name_words: int
+    #: The type it matched, if any.
+    matched: str | None
+    #: The type it came closest to, when nothing matched.
+    near_miss: str | None
+    #: What fraction of the name ``near_miss`` accounts for, rounded to two places.
+    #:
+    #: THE FIELD THAT MAKES ``coverage`` ACTIONABLE, and its absence made the first version
+    #: misleading. ``rejected_by=coverage`` was documented as meaning "the model named a real type
+    #: and the matcher turned it away, so loosen the matcher" — but it is equally what the guard
+    #: produces when working correctly: "an email asking the borrower to send a bank statement" is
+    #: the case the coverage rule was measured to reject, and it yielded a byte-identical
+    #: explanation to LF-ZE9N's genuine Closing Disclosure. The ratio is what separates them, and
+    #: `match_catalog_type` already documents the populations: true names 0.5-0.67, mentions
+    #: 0.18-0.25. Without it, acting on the field as written would loosen the guard against exactly
+    #: the names it exists to exclude.
+    near_miss_coverage: float | None
+    #: Which guard stopped the match. See the constants above; ``None`` only when something matched.
+    rejected_by: str | None
+
+
+def _longest_slug_where(
+    tokens: list[str],
+    predicate: Callable[[list[str], list[str]], bool],
+    *,
+    min_words: int,
+    max_words: int,
+) -> str | None:
+    """The longest catalog slug within the word-count band that satisfies ``predicate``."""
+    best: str | None = None
+    best_words = 0
+    for slug in CATALOG:
+        words = slug.split("_")
+        if not (min_words <= len(words) <= max_words) or len(words) <= best_words:
+            continue
+        if predicate(words, tokens):
+            best, best_words = slug, len(words)
+    return best
+
+
+def explain_catalog_match(free_text: str | None) -> CatalogMatchExplanation:
+    """Run the same match as :func:`match_catalog_type`, and report why it landed (LP-639).
+
+    Deliberately a SECOND pass rather than a rewrite of the matcher to return both: the matcher is
+    what decides whether a processor sees a flag, and threading a diagnostic through it would put
+    observability on that path. The caller keeps calling `match_catalog_type` for the decision, and
+    this for the log — a rationale that was stated once while the pipeline had quietly started
+    taking its decision from here instead.
+
+    The near miss is what makes it worth logging. "Nothing matched" cannot tell a name that named no
+    type from a name that named one and failed a guard. This names the slug, the guard, and the
+    coverage ratio — which is the number that says whether the guard was wrong or right.
+    """
+    if not free_text:
+        return CatalogMatchExplanation(False, 0, None, None, None, None)
+    haystack = _normalize_for_match(free_text)
+    if not haystack:
+        return CatalogMatchExplanation(True, 0, None, None, None, UNUSABLE_NAME)
+
+    tokens = haystack.split()
+    matched = match_catalog_type(free_text)
+    if matched is not None:
+        return CatalogMatchExplanation(True, len(tokens), matched, None, None, None)
+
+    def _cover(slug: str) -> float:
+        return round(len(slug.split("_")) / len(tokens), 2)
+
+    # Ordered, long enough to be considered — so coverage is the only guard left that can have
+    # stopped it. This is the case worth acting on, and `near_miss_coverage` says whether to.
+    ordered = _longest_slug_where(
+        tokens,
+        _matches_in_order_with_small_gaps,
+        min_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH,
+        max_words=_MAX_SLUG_WORDS,
+    )
+    if ordered is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, ordered, _cover(ordered), REJECTED_BY_COVERAGE
+        )
+
+    # Ordered but TOO SHORT to be considered at all — the third guard, which the first version of
+    # this did not model. `explain_catalog_match("Appraisal")` reported "the model named nothing",
+    # about a name that named a catalog type exactly.
+    short = _longest_slug_where(
+        tokens,
+        _matches_in_order_with_small_gaps,
+        min_words=1,
+        max_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH - 1,
+    )
+    if short is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, short, _cover(short), REJECTED_BY_MIN_WORDS
+        )
+
+    # Every word present, but not in that order — a genuine near miss on the ordering guard, which
+    # was previously indistinguishable from a name containing no catalog words whatsoever.
+    def _all_present(words: list[str], haystack_tokens: list[str]) -> bool:
+        return all(word in haystack_tokens for word in words)
+
+    unordered = _longest_slug_where(
+        tokens, _all_present, min_words=_MIN_SLUG_WORDS_FOR_NAME_MATCH, max_words=_MAX_SLUG_WORDS
+    )
+    if unordered is not None:
+        return CatalogMatchExplanation(
+            True, len(tokens), None, unordered, _cover(unordered), REJECTED_BY_ORDER
+        )
+
+    return CatalogMatchExplanation(True, len(tokens), None, None, None, NO_CATALOG_WORDS)
+
+
+def _matches_in_order_with_small_gaps(needle: list[str], haystack: list[str]) -> bool:
+    """Every word of ``needle`` present in ``haystack``, in order, with at most
+    :data:`_MAX_GAP_TOKENS` intervening tokens between consecutive matches.
+
+    BOUNDED, not free. An unbounded ordered subsequence was the first attempt and it overfits: it
+    was widened to catch "Earnest Money / EMD Receipt" (one token wedged mid-phrase) and in doing
+    so it started matching names where the words are merely scattered — "a closing statement with a
+    separate disclosure page", "a credit memo and a separate report on fees". Those have two to
+    four intervening tokens; the case worth catching has one.
+
+    So the bound is set from the case it exists for rather than loosened until an example passed.
+    Order still has to hold, so "a receipt for the earnest money" does not match
+    ``earnest_money_receipt`` — that is the line between "the name contains these words" and "the
+    name says this thing".
+    """
+    position = -1
+    for word in needle:
+        try:
+            found = haystack.index(word, position + 1)
+        except ValueError:
+            return False
+        if position >= 0 and found - position - 1 > _MAX_GAP_TOKENS:
+            return False
+        position = found
+    return True
 
 
 def types_for_category(category: DocumentCategory) -> list[str]:

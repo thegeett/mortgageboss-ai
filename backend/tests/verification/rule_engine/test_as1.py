@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.verification.rule_engine.as1 import (
     TAG_AMOUNT,
@@ -101,6 +101,7 @@ def _evaluate(
                 ]
             },
             "bank_statement",
+            loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
         ),
         document_content_id=_DOC,
     )

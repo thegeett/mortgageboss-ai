@@ -59,10 +59,24 @@ class ActivityType(StrEnum):
     # fact in two places and let them disagree.
     FIELD_REVIEWED = "field_reviewed"
     FIELD_REVIEW_REVERTED = "field_review_reverted"  # the verdict withdrawn
+
+    #: LP-637 — a processor asked for the document to be read again from scratch, classification
+    #: included. Distinct from DOCUMENT_TYPE_OVERRIDDEN (a human supplying the type) and from
+    #: DOCUMENT_REPLACED (a new file): the file is unchanged and nobody has decided what it is.
+    DOCUMENT_REPROCESSED = "document_reprocessed"
     FINDING_RESOLVED = "finding_resolved"
     FINDING_UNDONE = "finding_undone"  # processor reversed a resolution — Undo (LP-98)
     VERIFICATION_RUN = "verification_run"
     DTI_OVERRIDDEN = "dti_overridden"  # processor overrode a DTI calculator input (LP-76)
+    # LP-643 — a line the processor ADDED, and its removal. Distinct from an override, which changes
+    # a value the calculator produced: these are rows the engine never emitted, so the audit has to
+    # record the label as well as the amount or the entry names nothing.
+    DTI_LINE_ADDED = "dti_line_added"
+    DTI_LINE_REMOVED = "dti_line_removed"
+    # LP-643 — the ungate: a BATCH of zero-value overrides applied behind one confirmation. Logged as
+    # its own type rather than as N overrides, because the decision a processor made was one decision
+    # about a set, and an audit that shows five unrelated overrides loses that.
+    DTI_UNGATED = "dti_ungated"
     LTV_OVERRIDDEN = "ltv_overridden"  # processor overrode an LTV calculator input (LP-77)
     CALCULATOR_OVERRIDDEN = "calculator_overridden"  # overrode an LP-87 calculator input
     LENDER_OVERLAY_UPDATED = "lender_overlay_updated"  # admin edited a lender overlay (LP-87)

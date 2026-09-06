@@ -27,6 +27,9 @@ export interface DtiLineItem {
    * qualify). Distinct from `unknown`: the amount is real and known, it simply stops existing.
    * Render struck-through WITH the reason — never hide the row, or the processor cannot tell a
    * debt was considered at all. */
+  /** LP-643 review: whether a processor can REMOVE this line — the server's answer, not a prefix
+   * test retyped here. Only processor-added lines are removable. */
+  removable?: boolean;
   excluded?: boolean;
   excluded_reason?: string | null;
 }
@@ -89,4 +92,41 @@ export interface UnverifiedInput {
 export interface DtiOverrideInput {
   amount: string;
   note?: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* LP-643 — processor-added lines, and the ungate                             */
+/* -------------------------------------------------------------------------- */
+
+/** A line a PROCESSOR adds, that the calculator did not produce. */
+export interface DtiCustomLineInput {
+  section: "income" | "housing" | "debt";
+  label: string;
+  amount: string;
+  note?: string | null;
+}
+
+/** One line an ungate would set to zero, and what that ASSERTS. */
+export interface DtiUngateLine {
+  key: string;
+  label: string;
+  /** What the processor is agreeing to, in their terms. The number is the mechanism; this is the
+   * claim, and the claim is the half they can judge as true or false. */
+  assertion: string;
+}
+
+/** What an ungate WOULD do, itemised — the dialog's entire content (LP-643).
+ *
+ * AN ITEMISED CONSENT, NOT A CONFIRMATION. "Are you sure" tells a processor nothing they can weigh.
+ * Every line by NAME (they recognise "Property taxes"; they cannot act on "3 values"), what each
+ * zero asserts, the ratios before and after, and what will NOT move — a processor who ungates and
+ * finds the file still gated, with nothing saying which part did not, has been told less than before
+ * they clicked. */
+export interface DtiUngatePreview {
+  lines: DtiUngateLine[];
+  unresolved: string[];
+  front_end_before: string | null;
+  back_end_before: string | null;
+  front_end_after: string | null;
+  back_end_after: string | null;
 }

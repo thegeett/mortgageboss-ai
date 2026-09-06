@@ -33,6 +33,7 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
     tier: null,
     summary: null,
     classification_confidence: null,
+    processing_error: null,
     status: "pending",
     upload_source: "user_upload",
     uploaded_by_user_id: "u1",

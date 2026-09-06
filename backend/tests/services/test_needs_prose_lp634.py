@@ -12,6 +12,7 @@ real-file question, judged by reading the list, not asserted here.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -117,8 +118,12 @@ async def test_a_floor_need_stops_showing_a_blank(db_session, monkeypatch) -> No
     assert need.reasoning is None, "the origin's own record is the INPUT and is never overwritten"
 
 
-async def test_a_rejected_reason_leaves_what_was_stored(db_session, monkeypatch) -> None:
-    """Constraint 3 — it falls back rather than blanking. A failure changes prose and nothing else."""
+async def test_a_rejected_floor_reason_falls_back_to_the_stored_floor(db_session, monkeypatch):
+    """bug-008 — CONSTRAINT 3, WHICH WAS DOCUMENTED AND NOT BUILT. "It falls back to what is stored,
+    which for a floor need is a template floor rather than the blank that ships today" was true of
+    nothing: `_FLOOR_TRIGGER` was model INPUT only, so a rejected floor composition left `explanation`
+    NULL and the card fell back to `reasoning` — NULL on every floor need, 17 of 17 measured. The
+    blank came back on exactly the needs this ticket exists for."""
     from app.core.config import settings
 
     loan_file, need = await _file_with_need(db_session)
@@ -126,6 +131,25 @@ async def test_a_rejected_reason_leaves_what_was_stored(db_session, monkeypatch)
     await db_session.flush()
     monkeypatch.setattr(settings, "need_prose_enabled", True)
     _mock_ai(monkeypatch, "Required by verification rule(s) CL-1.")  # machinery — rejected twice
+
+    assert await compose_needs(db_session, loan_file_id=loan_file.id) == 1
+    await db_session.refresh(need)
+    assert need.explanation is not None
+    assert "paid off at closing" in need.explanation, "the payoff floor's own stored clause"
+    assert need.explanation[0].isupper() and need.explanation.endswith(".")
+    assert need.reasoning == "the stored sentence", "the INPUT is never overwritten"
+
+
+async def test_a_rejected_reason_on_a_non_floor_need_stays_blank(db_session, monkeypatch) -> None:
+    """The fallback is the FLOOR's, because the floor is the only origin whose trigger we know without
+    a model. Everywhere else the card falls back to `reasoning`, which those origins do store."""
+    from app.core.config import settings
+
+    loan_file, need = await _file_with_need(db_session, origin=NeedsItemOrigin.AI_REASONING)
+    need.reasoning = "the stored sentence"
+    await db_session.flush()
+    monkeypatch.setattr(settings, "need_prose_enabled", True)
+    _mock_ai(monkeypatch, "Required by verification rule(s) CL-1.")
 
     assert await compose_needs(db_session, loan_file_id=loan_file.id) == 0
     await db_session.refresh(need)
@@ -187,3 +211,217 @@ async def test_the_summary_carries_the_stated_facts(db_session) -> None:
 
     facts = await service._file_facts(db_session, loan_file)
     assert any("ALLY FINANCIAL" in row and "$438/month" in row for row in facts.liabilities)
+
+
+# --------------------------------------------------------------------------- #
+# bug-008 — the containment, the scope, and what a reason may draw on
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_failure_in_the_pass_never_reaches_the_caller(db_session, monkeypatch) -> None:
+    """BOTH CALLERS LOSE REAL WORK OTHERWISE. In `verification_run` this runs inside the savepoint
+    wrapping the whole needs sync; in `tasks/needs.py` it runs immediately before `db.commit()` under a
+    `task_session` that does not commit on an exception — so a raise there discards the LP-68 document
+    match and the LP-69 AI needs, retries the task, and on exhaustion shows the processor a terminal
+    AI-needs failure. A pass whose contract is "a failure changes a sentence" was able to lose a
+    document→need match."""
+    from app.core.config import settings
+
+    loan_file, need = await _file_with_need(db_session)
+    monkeypatch.setattr(settings, "need_prose_enabled", True)
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("the file facts query fell over")
+
+    monkeypatch.setattr(service, "_file_facts", _boom)
+
+    assert await compose_needs(db_session, loan_file_id=loan_file.id) == 0
+    # The session is still usable — the savepoint absorbed it — which is the whole property.
+    await db_session.flush()
+    await db_session.refresh(need)
+    assert need.explanation is None
+
+
+async def test_one_needs_failure_does_not_cancel_the_others(db_session, monkeypatch) -> None:
+    """`asyncio.gather` without `return_exceptions` propagates the FIRST raise and cancels every other
+    call in flight, turning a per-need pass into an all-or-nothing one."""
+    from app.core.config import settings
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    needs = []
+    for i, kind in enumerate(("payoff_statement", "pay_stub", "government_id")):
+        need = await factories.make_needs_item(db_session, loan_file=loan_file, title=f"N{i}")
+        need.origin, need.needs_type, need.reasoning = NeedsItemOrigin.FLOOR, kind, None
+        needs.append(need)
+    await db_session.flush()
+    monkeypatch.setattr(settings, "need_prose_enabled", True)
+
+    calls = {"n": 0}
+
+    async def _one_explodes(facts, **_kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("this one blew up")
+        return "The application states employment income, so recent earnings must be evidenced."
+
+    monkeypatch.setattr(service, "compose", _one_explodes)
+
+    changed = await compose_needs(db_session, loan_file_id=loan_file.id)
+    assert changed == 3, "two composed; the third fell back to its stored floor sentence"
+    assert calls["n"] == 3, "every need was still attempted"
+
+
+async def test_only_open_needs_are_composed(db_session, monkeypatch) -> None:
+    """The docstring said "every open need" and the query said every need. A VERIFIED or WAIVED need
+    cost a model call on every document arrival and every verification run, to reword a sentence under
+    a row nobody is being asked to act on."""
+    from app.core.config import settings
+    from app.models.needs_item import NeedsItemStatus
+
+    company = await factories.make_company(db_session, slug="acme")
+    loan_file = await factories.make_loan_file(db_session, company=company)
+    open_need = await factories.make_needs_item(db_session, loan_file=loan_file, title="Open")
+    closed = await factories.make_needs_item(db_session, loan_file=loan_file, title="Closed")
+    for need in (open_need, closed):
+        need.origin, need.needs_type, need.reasoning = NeedsItemOrigin.FLOOR, "pay_stub", None
+    open_need.status = NeedsItemStatus.PENDING
+    closed.status = NeedsItemStatus.VERIFIED
+    await db_session.flush()
+    monkeypatch.setattr(settings, "need_prose_enabled", True)
+    mock = _mock_ai(
+        monkeypatch, "The application states employment income from the stated employer."
+    )
+
+    assert await compose_needs(db_session, loan_file_id=loan_file.id) == 1
+    assert mock.await_count == 1, "the verified need was never sent"
+    await db_session.refresh(closed)
+    assert closed.explanation is None
+
+
+async def test_a_need_with_no_recorded_reason_is_skipped(db_session, monkeypatch) -> None:
+    """A FABRICATED JUSTIFICATION IS WORSE THAN A BLANK. The generic floor line — "this document is
+    required on every file of this kind" — was handed to the model as ground truth for ANY need with
+    no stored reasoning, floor or not. A processor's own one-off ask ("send me the divorce decree")
+    would come back explained as a universal requirement, stated confidently."""
+    from app.core.config import settings
+
+    loan_file, need = await _file_with_need(
+        db_session, origin=NeedsItemOrigin.MANUAL, needs_type="divorce_decree"
+    )
+    monkeypatch.setattr(settings, "need_prose_enabled", True)
+    mock = _mock_ai(monkeypatch, "anything at all")
+
+    assert await compose_needs(db_session, loan_file_id=loan_file.id) == 0
+    assert mock.await_count == 0, "nothing recorded a reason, so nothing was asked"
+    await db_session.refresh(need)
+    assert need.explanation is None
+
+
+def test_a_reason_draws_only_on_the_facts_its_document_kind_concerns() -> None:
+    """bug-008 — the cache key is the hash of what the model was GIVEN, which is right; the defect was
+    that every need was given the whole file, so any edit anywhere re-composed all nineteen needs at
+    once and could reword all nineteen. `_run_needs_update` runs on every document arrival, so that is
+    the common case."""
+    facts = service._FileFacts(
+        loan={"purpose": "refinance"},
+        employment=("Amazon Com Services LLC — W-2 employee",),
+        income_types=("Base",),
+        liabilities=("UNITED WHOLESALE MORTGAGE — $3,907/month",),
+        assets=("checking",),
+        documents_on_file=("pay stub",),
+    )
+    need = SimpleNamespace(
+        title="Pay stub", needs_type="pay_stub", origin=NeedsItemOrigin.FLOOR, reasoning=None
+    )
+
+    summary = service.summarize(need, facts)  # type: ignore[arg-type]
+    assert summary is not None
+    assert summary.employment and summary.income_types, "an income document's own families"
+    assert summary.liabilities == () and summary.assets == ()
+    assert summary.loan and summary.documents_on_file, "always: they frame every request"
+
+    # An edit to a family this need cannot draw on leaves its cached sentence alone.
+    moved = service.summarize(need, replace(facts, liabilities=("A DIFFERENT CREDITOR",)))  # type: ignore[arg-type]
+    assert moved is not None and moved.cache_key() == summary.cache_key()
+
+
+def test_an_unknown_document_kind_still_gets_everything() -> None:
+    """A custom or free-form need has no kind to reason from, and the safe default there is the input
+    this pass shipped with rather than a guess at relevance."""
+    facts = service._FileFacts(
+        loan={"purpose": "purchase"},
+        employment=("Acme",),
+        income_types=("Base",),
+        liabilities=("A creditor",),
+        assets=("checking",),
+        documents_on_file=(),
+    )
+    need = SimpleNamespace(
+        title="Something unusual",
+        needs_type="custom",
+        origin=NeedsItemOrigin.AI_REASONING,
+        reasoning="the model's own earlier prose",
+    )
+
+    summary = service.summarize(need, facts)  # type: ignore[arg-type]
+    assert summary is not None
+    assert summary.employment and summary.liabilities and summary.assets and summary.income_types
+
+
+# --------------------------------------------------------------------------- #
+# bug-008 — the guards rejected sentences a processor wants, and licensed ones they must not read
+# --------------------------------------------------------------------------- #
+
+
+def test_a_policy_form_code_is_not_a_rule_id() -> None:
+    """`[A-Z]{2}-\\d{1,3}` matched mortgage form names as well as rule ids. `HO-6` is a unit owner's
+    walls-in policy (`specs/IH-7.yaml`, `classification_prompt.py`) and `HO-3` a homeowner's, so the
+    one sentence a condo hazard-insurance need most wants to say was rejected as machinery talk,
+    retried, rejected again, and dropped — leaving the need blank."""
+    assert not machinery_talk_in(
+        "The project's master policy does not cover the unit interior; an HO-6 walls-in policy does."
+    )
+    assert machinery_talk_in("Required by verification rule(s) CL-1."), "a real rule id still is"
+    assert machinery_talk_in("IH-7 asked for this."), "and so is one with no lead-in"
+
+
+def test_two_ordinary_nouns_are_not_machinery() -> None:
+    """`origin` and `confidence` were banned as BARE WORDS. "A letter explaining the origin of the
+    deposit" is the exact sentence a source-of-funds need wants; it was rejected twice and dropped.
+    The finding composer's equivalent list is documented as "NARROW ON PURPOSE — only phrases that
+    name the SOFTWARE AS AN ACTOR", and two English nouns are not that."""
+    assert not machinery_talk_in("A letter explaining the origin of the deposit.")
+    assert not machinery_talk_in("The appraisal states the value with confidence.")
+    assert machinery_talk_in("The model returned a low confidence score.")
+    assert machinery_talk_in("The need origin is a floor rule.")
+
+
+def test_a_numeric_document_label_does_not_license_its_digits() -> None:
+    """LP-613, BY THE SAME ROUTE, REOPENED BY SHARING THE HELPER. `documents_on_file` holds catalog
+    labels and several ARE numbers — `document_label("1099")` is `"1099"` — so a file holding one
+    licensed the literal token anywhere in the reason. The finding composer subtracts exactly this
+    field and the shared helper dropped the subtraction."""
+    holds_one = _facts(documents_on_file=("1099", "pay stub"))
+    assert rejection_reason(holds_one, "The borrower has 1099 months of reserves.").startswith(
+        "unsupported_numbers"
+    )
+
+    # The need whose own document kind IS the 1099 may still name it: `document_kind` is not one of
+    # the withdrawn fields, because there the digits are the subject of the sentence.
+    asks_for_one = _facts(document_kind="1099", documents_on_file=("pay stub",))
+    assert rejection_reason(asks_for_one, "The 1099 shows the non-employee pay stated.") is None
+
+
+def test_a_rule_id_in_the_trigger_does_not_license_its_number() -> None:
+    """A finding-derived need's trigger opens "Required by verification rule(s) CR-13", and those
+    numerals rode straight into the allow-list. Only the rule ids are withdrawn, not the whole
+    trigger: an AI-reasoned need's trigger carries real amounts, and those are what the reason should
+    quote."""
+    machinery = _facts(trigger="Required by verification rule(s) CR-13, IN-4.")
+    assert rejection_reason(machinery, "The file needs 13 months of statements.").startswith(
+        "unsupported_numbers"
+    )
+
+    real = _facts(trigger="an unsourced $12,000 deposit landed on 2026-04-02")
+    assert rejection_reason(real, "A letter must explain the $12,000 deposit.") is None
