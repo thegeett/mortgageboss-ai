@@ -167,9 +167,9 @@ export function PageCanvas({
           </div>
         ) : isError || !data || imageBroken ? (
           <Empty>
-            No page image for this document. It may be a scan with no text layer, a file that is not
-            a PDF, or a page the document does not have — the extracted fields are still on the
-            right, with the text each value was read from.
+            No page image for this document. The file may be damaged or password-protected, or this
+            page may not exist in it — the extracted fields are still on the right, with the text
+            each value was read from.
           </Empty>
         ) : (
           // `alt` is deliberately not the page's content: it is an image of a

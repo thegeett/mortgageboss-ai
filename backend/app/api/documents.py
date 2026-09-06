@@ -73,7 +73,12 @@ from app.services.field_reviews import (
     record_review,
     revert_review,
 )
-from app.services.page_render import DEFAULT_ZOOM, RENDERABLE_TYPES, render_page
+from app.services.page_render import (
+    DEFAULT_ZOOM,
+    RENDERABLE_TYPES,
+    TEXT_SEARCHABLE_TYPES,
+    render_page,
+)
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
@@ -1067,7 +1072,7 @@ async def field_boxes(
         raise _NOT_FOUND
     extraction = await get_current_extraction(db, document=document)
     fields = (extraction.extracted_data or {}) if extraction is not None else {}
-    if document.mime_type != "application/pdf" or not isinstance(fields, dict):
+    if document.mime_type not in TEXT_SEARCHABLE_TYPES or not isinstance(fields, dict):
         return FieldBoxesResponse(boxes=[], fabricated_pages=[], relocated=[])
 
     storage = get_storage_backend()
@@ -1147,8 +1152,10 @@ async def page_image(
     if rendered is None:
         raise _NOT_FOUND
     return Response(
-        content=rendered.png,
-        media_type="image/png",
+        content=rendered.content,
+        # The renderer chooses: PNG for a PDF page, JPEG for a photograph, which
+        # is smaller than the source rather than larger than it.
+        media_type=rendered.media_type,
         headers={
             "X-Page-Width-Points": str(rendered.width_points),
             "X-Page-Height-Points": str(rendered.height_points),

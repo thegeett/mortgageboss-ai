@@ -80,6 +80,18 @@ export function zoomLabel(current: number): string {
  * a narrow pane, where a fixed 46rem base would make 50% wider than the pane it
  * is meant to fit inside.
  */
+/**
+ * The unzoomed page column, in rem.
+ *
+ * NAMED BECAUSE THE BACKEND DEPENDS ON IT. `MAX_RENDERED_EDGE` in
+ * `services/page_render.py` is derived from this number times the largest zoom
+ * step times a 2x device pixel ratio — pixels past that are shipped, decoded and
+ * never seen. Nothing connected the two, so widening this column would have
+ * silently started costing sharpness instead of showing more page.
+ * `page-budget.test.ts` does that arithmetic against the Python source.
+ */
+export const PAGE_COLUMN_REM = 46;
+
 export function zoomWidth(current: number): string {
-  return `calc(min(100%, 46rem) * ${current})`;
+  return `calc(min(100%, ${PAGE_COLUMN_REM}rem) * ${current})`;
 }

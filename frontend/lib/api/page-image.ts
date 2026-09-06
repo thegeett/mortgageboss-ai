@@ -65,10 +65,15 @@ export async function fetchPageImage(documentId: string, page: number): Promise<
 /**
  * A document's page, or an error the caller renders as "no page image".
  *
- * A 404 here is ordinary, not exceptional: it is a scan, a non-PDF, or a page
- * the document does not have. Measured on stored documents — 12 of 105 PDFs have
- * no text layer, and a model-cited page is out of range on ~4% of fields — so
- * retrying it would just be slower on the common case.
+ * A 404 here is ordinary, not exceptional: the file is damaged or encrypted, or
+ * the page does not exist in it. Measured on stored documents, a model-cited page
+ * is out of range on ~4% of fields — so retrying would just be slower on the
+ * common case.
+ *
+ * NEITHER "a scan" NOR "a non-PDF" any more, though this said both. A scan
+ * renders perfectly — a missing text layer costs the highlight boxes, not the
+ * image — and LP-704 made JPEG and PNG render too. Two of the three reasons a
+ * processor was given for an empty pane were wrong.
  */
 export function usePageImage(documentId: string | null, page: number) {
   return useQuery({
