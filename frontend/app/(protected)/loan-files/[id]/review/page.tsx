@@ -6,6 +6,7 @@ import {
   buildQueue,
   editableFieldKey,
   isFullyReviewed,
+  needsAttention,
   nextAttention,
   stepField,
 } from "@/components/file/documents/reviewer/review-queue";
@@ -30,6 +31,7 @@ import { usePageImage } from "@/lib/api/page-image";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import { currentDocuments, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
+import { notifyPartial } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
@@ -216,7 +218,26 @@ function Reviewer() {
       zoomReset: () => setZoom(FIT),
       previousDocument: () => goToDocument(-1),
       nextDocument: () => goToDocument(1),
-      markReviewed: () => isFullyReviewed(queue) && goToDocument(1),
+      // A KEYSTROKE THAT DECLINES SAYS SO. ⌘Enter moved on when the document was
+      // fully reviewed and did NOTHING otherwise — and nothing on screen carries
+      // the attention count, so a processor pressing it had no way to learn
+      // either that fields remained or how many. Silence reads as a dead binding.
+      markReviewed: () => {
+        if (isFullyReviewed(queue)) {
+          goToDocument(1);
+          return;
+        }
+        const remaining = queue.filter(needsAttention).length;
+        notifyPartial({
+          title: "Not finished with this document",
+          consequence:
+            remaining === 0
+              ? "There is nothing here to review yet."
+              : `${remaining} field${remaining === 1 ? "" : "s"} still need${
+                  remaining === 1 ? "s" : ""
+                } a look — Tab jumps to the next one.`,
+        });
+      },
       toggleHelp: () => setHelpOpen((open) => !open),
     },
     // The sheet and the verdict editor each own the keyboard while they are open;

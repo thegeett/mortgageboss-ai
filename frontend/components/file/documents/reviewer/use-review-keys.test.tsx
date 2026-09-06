@@ -175,6 +175,22 @@ describe("useReviewKeys", () => {
     expect(on.toggleOverlay).not.toHaveBeenCalled();
   });
 
+  it("leaves the arrows' DEFAULT intact there, which is what actually scrolls", () => {
+    // The assertion the test above cannot make. "No action fired" stays true if
+    // the pan check is moved BELOW `preventDefault` — the early return still
+    // stops the action, but the browser's own scroll has already been cancelled,
+    // and a keyboard reader can no longer move a zoomed page at all. Verified by
+    // swapping that ordering: every other test here passes.
+    const on = actions();
+    const { getByLabelText } = render(<Harness on={on} />);
+    const inside = getByLabelText("inside the page");
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", " "]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      inside.dispatchEvent(event);
+      expect(event.defaultPrevented, `${key} was cancelled inside the page view`).toBe(false);
+    }
+  });
+
   it("still answers its other keys inside the page view", () => {
     // Only the scroll keys are given up. Enter, R and the brackets are not how
     // anyone scrolls, and a reader with focus on the page still wants them.

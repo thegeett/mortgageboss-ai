@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SHORTCUTS, ShortcutSheet } from "./shortcut-sheet";
-import { type ReviewKeyActions, actionFor } from "./use-review-keys";
+import { REVIEW_KEY_ACTIONS, type ReviewKeyActions, actionFor } from "./use-review-keys";
 
 afterEach(cleanup);
 
@@ -77,24 +77,12 @@ describe("the sheet and the bindings agree", () => {
       "nextDocument",
     ]);
     const acted = new Set(DOCUMENTED.map(([, , action]) => action));
-    const every: (keyof ReviewKeyActions)[] = [
-      "nextRow",
-      "previousRow",
-      "nextField",
-      "previousField",
-      "accept",
-      "acceptAndAdvance",
-      "edit",
-      "reject",
-      "toggleOverlay",
-      "zoomIn",
-      "zoomOut",
-      "zoomReset",
-      "previousDocument",
-      "nextDocument",
-      "markReviewed",
-      "toggleHelp",
-    ];
+    // ENUMERATED FROM THE SOURCE, not restated. A local copy typed
+    // `keyof ReviewKeyActions` catches a REMOVED action and misses an ADDED one —
+    // the new name is simply absent, and a list that never mentions it cannot
+    // notice it. `REVIEW_KEY_ACTIONS` is guarded against the interface in both
+    // directions where it is declared.
+    const every = REVIEW_KEY_ACTIONS;
     expect(every.filter((a) => !acted.has(a) && !COUNTERPART.has(a))).toEqual([]);
   });
 });

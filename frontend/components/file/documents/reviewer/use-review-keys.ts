@@ -16,6 +16,46 @@ import { useEffect } from "react";
  * scattering of `onKeyDown`s.
  */
 
+/**
+ * Every action name, as DATA.
+ *
+ * `shortcut-sheet.test.tsx` asserts the sheet documents every action the reviewer
+ * has. It held its own copy of this list, typed `keyof ReviewKeyActions` — which
+ * catches a REMOVED action (the literal stops compiling) and misses an ADDED one
+ * entirely: the new name is simply absent, and a list that never mentions it
+ * cannot notice it. That is the failure the test exists to prevent, one level up.
+ *
+ * The `satisfies` clause rejects a name here that is not on the interface, and
+ * `_everyActionListed` below rejects an interface member that is not here. So the
+ * two cannot drift in either direction, and the test enumerates this instead.
+ */
+export const REVIEW_KEY_ACTIONS = [
+  "nextRow",
+  "previousRow",
+  "nextField",
+  "previousField",
+  "accept",
+  "acceptAndAdvance",
+  "edit",
+  "reject",
+  "toggleOverlay",
+  "zoomIn",
+  "zoomOut",
+  "zoomReset",
+  "previousDocument",
+  "nextDocument",
+  "markReviewed",
+  "toggleHelp",
+] as const satisfies readonly (keyof ReviewKeyActions)[];
+
+/**
+ * Compile-time exhaustiveness: an interface member missing from the list above
+ * makes this type `false`, and `true` no longer assigns to it.
+ */
+type _MissingFromList = Exclude<keyof ReviewKeyActions, (typeof REVIEW_KEY_ACTIONS)[number]>;
+const _everyActionListed: [_MissingFromList] extends [never] ? true : false = true;
+void _everyActionListed;
+
 export interface ReviewKeyActions {
   /**
    * The next row in the list, in the order the list is drawn (LP-701).
