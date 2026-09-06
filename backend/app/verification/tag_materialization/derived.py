@@ -38,7 +38,26 @@ from app.verification.tag_materialization.subjects import (
 # unchanged (the regression canary, _app_required_fields_present).
 # A recipe returns ``(value, reasoning)``; a ``None`` value DECLINES the subject (LP-447 — the producer
 # materialises no tag), for a recipe scoped narrower than its subject type (e.g. one document_type).
-Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
+#: LP-647 §1 — A RECIPE MAY NAME THE DOCUMENTS IT READ.
+#:
+#: The two-element form is unchanged and is what 77 of 79 recipes return. The optional third element
+#: is the content_ids the tag was computed FROM, and it exists because a LOAN-subject recipe had no
+#: way to say them: `produce_derived_tags` sets `source_facts=(subject_id,)`, which for a loan
+#: subject is the literal string "loan".
+#:
+#: That is what made AS-8 and AS-10 unable to name a document. `stmt.continuity` compares two
+#: specific statements — it knows the account and both balances and says so in its prose — and
+#: recorded "loan" as its source, so `_attach_document_provenance` had nothing to attach and the
+#: finding rendered with no documents. The processor is told the statements do not chain and not
+#: which statements.
+#:
+#: A UNION RATHER THAN A THIRD REQUIRED SLOT so the 77 recipes with nothing to add stay untouched.
+#: Empty is honest for them: a tag over a computed figure (DTI, reserves) has no document to point
+#: at, and inventing one would send a processor to the wrong page.
+Recipe = Callable[
+    [Snapshot, str, object],
+    tuple[JsonValue | None, str] | tuple[JsonValue | None, str, tuple[str, ...]],
+]
 
 _UNKNOWN = "unknown"
 
@@ -1532,7 +1551,7 @@ def _stmt_nsf_count(
 
 def _stmt_min_account_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """stmt.min_account_months — the FEWEST distinct statement months any ONE account has (AS-10 recency).
     Groups statements per account via resolve_accounts (LP-336) and takes the MIN across accounts, so a
     single short account is never MASKED by a well-documented one (fire-if-any). Abstains when no
@@ -1551,6 +1570,11 @@ def _stmt_min_account_months(
         )
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     per_account: list[int] = []
+    # LP-647 §1 — the SHORTEST account's statements, so the finding can name what it counted. The tag
+    # reports one number ("the account with the fewest statements has 1 month"); the documents it
+    # names must be that account's, not every statement on the file, or the finding points at
+    # statements it is saying nothing about.
+    shortest: tuple[str, ...] = ()
     for content_ids in resolved.values():
         months = set()
         for cid in content_ids:
@@ -1572,9 +1596,15 @@ def _stmt_min_account_months(
                 "an account's statement period dates could not be parsed — cannot count its months "
                 "without reporting a false 0",
             )
+        if not per_account or len(months) < min(per_account):
+            shortest = tuple(content_ids)
         per_account.append(len(months))
     fewest = min(per_account)
-    return str(fewest), f"the account with the fewest statements has {fewest} distinct month(s)"
+    return (
+        str(fewest),
+        f"the account with the fewest statements has {fewest} distinct month(s)",
+        shortest,
+    )
 
 
 def _cash_to_close_shortfall(
@@ -5772,7 +5802,7 @@ def _stated_liabilities_all(snapshot: Snapshot) -> list[dict[str, str]]:
 
 def _stmt_continuity(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """stmt.continuity — do each account's consecutive statements CHAIN (statement N's ending balance ==
     statement N+1's beginning balance)? Unblocks AS-8.
 
@@ -5829,12 +5859,13 @@ def _stmt_continuity(
 
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     saw_break = saw_unknown = saw_chained = False
+    break_sources: tuple[str, ...] = ()  # LP-647 §1 — the two statements that disagree
     break_detail: str | None = (
         None  # the FIRST break's account + balances — an ACTIONABLE reason (AS-8 fires
     )
     # on this, and its finding carries this as provenance, so the processor knows WHICH account/gap to fix).
     for (account_key, _borrower), content_ids in groups.items():
-        stmts: list[tuple[date, Decimal | None, Decimal | None]] = []
+        stmts: list[tuple[date, Decimal | None, Decimal | None, str]] = []
         period_unreadable = False
         for cid in content_ids:
             tags = by_subject.get(cid, {})
@@ -5845,11 +5876,15 @@ def _stmt_continuity(
             if start is None:
                 period_unreadable = True
                 continue
+            # LP-647 §1 — the CONTENT_ID rides along. This recipe knows exactly which two statements
+            # disagree; without carrying their ids the finding could say the balances and not the
+            # documents, and a processor was told the chain breaks without being told where to look.
             stmts.append(
                 (
                     start,
                     _decimal_or_none(tags.get("stmt.beginning_balance")),
                     _decimal_or_none(tags.get("stmt.ending_balance")),
+                    cid,
                 )
             )
         if len(stmts) < 2:
@@ -5867,7 +5902,7 @@ def _stmt_continuity(
             continue
         stmts.sort(key=lambda s: s[0])
         account_result: str | None = None
-        for (_s0, _b0, end_n), (_s1, begin_n1, _e1) in pairwise(stmts):
+        for (_s0, _b0, end_n, cid_n), (_s1, begin_n1, _e1, cid_n1) in pairwise(stmts):
             if end_n is None or begin_n1 is None:
                 account_result = "unknown"  # a balance we could not read → cannot confirm the chain
                 break
@@ -5883,6 +5918,10 @@ def _stmt_continuity(
                         f"the {locator} account's statements do not chain — an ending balance of {end_n} "
                         f"does not carry into the next statement's opening balance of {begin_n1}"
                     )
+                    # The PAIR that disagrees, in order, and only the first break — the message names
+                    # one break, so naming more documents than the sentence explains would send a
+                    # processor to statements the finding says nothing about.
+                    break_sources = (cid_n, cid_n1)
                 break
         if account_result == "broken":
             saw_break = True
@@ -5899,6 +5938,7 @@ def _stmt_continuity(
                 or "an account's consecutive statements do not chain — an ending balance does not carry into "
                 "the next statement's opening balance"
             ),
+            break_sources,
         )
     if saw_unknown:
         return _UNKNOWN, (
@@ -6938,7 +6978,10 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
         raise KeyError(f"unknown derived recipe {decl.data!r} (known: {sorted(_RECIPES)})")
     out: dict[str, dict[str, Tag]] = {}
     for subject_id, subject_raw in subject_type(decl.subject).enumerate(snapshot):
-        value, reasoning = recipe(snapshot, subject_id, subject_raw)
+        produced = recipe(snapshot, subject_id, subject_raw)
+        # LP-647 §1 — the third element is optional; see the `Recipe` alias.
+        value, reasoning = produced[0], produced[1]
+        named_sources = produced[2] if len(produced) == 3 else ()
         if value is None:
             # A recipe returns ``None`` to DECLINE producing a tag for an out-of-scope subject (LP-447) —
             # e.g. a per-document recipe scoped to one document_type. Skip it, so a document-subject derived
@@ -6949,7 +6992,10 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
                 value=value,
                 confidence=None,
                 reasoning=reasoning,
-                source_facts=(subject_id,),
+                # LP-647 §1 — what the recipe READ, where it can say so; the subject otherwise.
+                # A loan-subject recipe's `subject_id` is the string "loan", which names no document,
+                # so a recipe that knows its documents must be able to say them or the finding cannot.
+                source_facts=named_sources or (subject_id,),
                 produced_by=TagProducedBy.DERIVED,
                 tag_role=TagRole.STRUCTURAL_FACT,
                 stage=TagStage.A,

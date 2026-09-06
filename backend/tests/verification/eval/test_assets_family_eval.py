@@ -208,8 +208,12 @@ def test_as10_domain13_a_short_account_is_not_masked_by_a_full_one() -> None:
         "w2": {"stmt.period_end": _tag("2026-05-31")},
         "w3": {"stmt.period_end": _tag("2026-06-30")},
     }
-    val, _ = _stmt_min_account_months(_snap(docs=docs, by_subject=by), "loan", None)
-    assert val == "1"  # Chase has 1 month, not masked by Wells's 3 → AS-10 would fire
+    produced = _stmt_min_account_months(_snap(docs=docs, by_subject=by), "loan", None)
+    assert produced[0] == "1"  # Chase has 1 month, not masked by Wells's 3 → AS-10 would fire
+    # LP-647 §1 — and it names the SHORT account's statement, not every statement on the file. The
+    # tag reports one number about one account; pointing at Wells's three as well would send a
+    # processor to documents the finding says nothing about.
+    assert produced[2] == ("c1",)
 
 
 # ================================================================================================= #

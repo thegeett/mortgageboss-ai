@@ -162,11 +162,20 @@ def test_continuity_broken_when_balances_do_not_carry() -> None:
         **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
         **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
     }
-    value, reason = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    produced = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    value, reason = produced[0], produced[1]
     assert value == "broken" and "carry" in reason
     # LP-406-2b review: the reason must LOCATE the break (account + the two mismatched balances) so AS-8's
     # fired finding is actionable — not a generic "some account doesn't chain".
     assert "****1" in reason and "1200" in reason and "1250" in reason
+    # LP-647 §1 — AND IT MUST NAME THE TWO STATEMENTS, in order.
+    #
+    # Locating the break in PROSE was half the job: `produce_derived_tags` sets
+    # `source_facts=(subject_id,)`, which for a loan-subject recipe is the literal "loan", so the
+    # finding could say the balances and not the documents. A processor was told the chain breaks
+    # and not which statements to open.
+    assert len(produced) == 3, "the broken path must carry the statements it compared"
+    assert produced[2] == ("s1", "s2"), "the PAIR that disagrees, in order"
 
 
 def test_continuity_single_statement_is_nothing_to_chain_not_couldnt_check() -> None:
@@ -233,8 +242,11 @@ def test_continuity_break_in_one_account_is_surfaced_fire_if_any() -> None:
         **_stmt_tags("w1", start="2026-01-01", begin="5000", end="5100"),
         **_stmt_tags("w2", start="2026-02-01", begin="6000", end="6100"),  # 5100 ≠ 6000
     }
-    value, _ = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
-    assert value == "broken"
+    produced = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    assert produced[0] == "broken"
+    # LP-647 §1 — the WELLS pair, not the Chase one that chains cleanly. Naming every statement on
+    # the file would point a processor at documents the finding says nothing about.
+    assert produced[2] == ("w1", "w2")
 
 
 def test_continuity_per_borrower_isolation_colliding_last4_not_merged() -> None:
@@ -426,3 +438,65 @@ def test_days_until_closing_uses_the_snapshot_date_object() -> None:
     value, _ = _contract_days_until_closing(_closing_snap("2026-07-14"), "loan", None)
     assert value == "0"
     assert _FILE_DATE.date() == date(2026, 7, 14)
+
+
+def test_the_tag_carries_its_statements_all_the_way_into_source_facts() -> None:
+    """LP-647 §1 — AT THE LAYER THE DEFECT WAS SEEN, not at the recipe that returns the ids.
+
+    The recipe returning `("s1", "s2")` proves nothing on its own: the value has to survive
+    `produce_derived_tags`, which is the function that was overwriting it. It sets
+    `source_facts=(subject_id,)`, and a loan-subject recipe's subject_id is the literal string
+    "loan" — which is exactly what LF-JR4T's AS-8 finding carried, and why
+    `_attach_document_provenance` had nothing to attach and the finding rendered with no documents.
+
+    A test that stopped at the recipe would have passed against the shipped defect.
+    """
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1250", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
+    }
+    decl = load_declarations()["stmt.continuity"]
+
+    produced = produce_derived_tags(decl, _snap(docs=docs, tags=tags))
+
+    tag = produced["loan"]["stmt.continuity"]
+    assert tag.value == "broken"
+    assert tag.source_facts == ("s1", "s2"), (
+        "the tag reached the snapshot naming the loan instead of the statements — the shipped "
+        f"behaviour this closes, got {tag.source_facts}"
+    )
+
+
+def test_a_recipe_with_nothing_to_name_still_falls_back_to_its_subject() -> None:
+    """THE POSITIVE CONTROL, and it guards a real regression: 77 of 79 recipes return two elements
+    and must keep their subject as their source. A tag over a computed figure — DTI, reserves — has
+    no document to point at, and `_attach_document_provenance`'s own rule is that inventing one
+    "would send a processor to the wrong page with the system's confidence behind it".
+
+    The chained path is the same recipe with nothing to name, which makes it the cheapest proof that
+    the fallback survives.
+    """
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1200", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1200", end="1300"),  # chains
+    }
+    decl = load_declarations()["stmt.continuity"]
+
+    tag = produce_derived_tags(decl, _snap(docs=docs, tags=tags))["loan"]["stmt.continuity"]
+
+    assert tag.value == "chained"
+    assert tag.source_facts == ("loan",), "no break, nothing to name — the subject stands"
