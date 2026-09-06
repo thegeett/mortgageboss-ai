@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
+import pytest
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -500,3 +501,77 @@ def test_a_recipe_with_nothing_to_name_still_falls_back_to_its_subject() -> None
 
     assert tag.value == "chained"
     assert tag.source_facts == ("loan",), "no break, nothing to name — the subject stands"
+
+
+@pytest.mark.asyncio
+async def test_as8_end_to_end_names_the_statements_on_the_evaluation() -> None:
+    """LP-647 §1 review — THROUGH THE REAL EVALUATOR, which is the only version that proves the fix.
+
+    This repo has a standing rule for exactly this reason (LP-487): a verdict assertion runs through
+    `materialize_tags` then `evaluate_rules`, "never by calling a recipe or the gate directly",
+    because LP-508 shipped a guard whose own test called the mechanism directly — the mechanism
+    worked and the WIRING did not.
+
+    My first attempt at this test broke that rule in a subtler way: it hand-built the
+    `RuleEvaluation` with `source_content_ids` already set, so it asserted the field the bridge is
+    supposed to POPULATE. Removing the bridge entirely left it green. The unit test below is a
+    supplement to this one, never a substitute.
+    """
+    from app.verification.rule_engine.registry import evaluate_rules
+    from app.verification.tag_materialization.producer import materialize_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1250", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
+    }
+    snapshot = await materialize_tags(_snap(docs=docs, tags=tags), only_groups=frozenset())
+
+    evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("AS-8",))
+
+    assert evaluations, "AS-8 produced no evaluation — the fixture does not reach the rule"
+    result = evaluations[0]
+    assert result.source_content_ids == ("s1", "s2"), (
+        "the statements the recipe compared must reach `source_content_ids` — the ONLY field "
+        f"`_source_document_ids` reads, and therefore the only one a processor sees. Got "
+        f"{result.source_content_ids}"
+    )
+
+
+def test_the_statements_reach_the_evaluation_that_becomes_the_finding() -> None:
+    """LP-647 §1 review — THE LAYER THE DEFECT IS ACTUALLY SEEN AT, one further out again.
+
+    Asserting the tag's `source_facts` proved the recipe's ids survived `produce_derived_tags`. It did
+    NOT prove they reach a processor: a finding's document links come from `_source_document_ids`,
+    which reads `result.source_content_ids` and nothing else, and only `consistency.py` was setting
+    that field. So AS-8 carried its two statements in the provenance JSON and still rendered with no
+    documents — the exact symptom §1 exists to fix, surviving §1's first version.
+
+    That is the same reasoning as the last layer, applied once more: the tag carrying ids proves
+    nothing if the FINDING is built from a different field. This asserts the field the finding is
+    built from.
+    """
+    from app.verification.rule_engine.deterministic import _named_documents
+    from app.verification.rule_engine.result import LoadBearingTag
+
+    def _lb(tag_id: str, sources: tuple[str, ...]) -> LoadBearingTag:
+        return LoadBearingTag(tag_id, "broken", None, "because", sources)
+
+    named = _named_documents((_lb("stmt.continuity", ("s1", "s2")),))
+    assert named == ("s1", "s2"), "what the recipe named must reach source_content_ids"
+
+    # DEDUPED AND ORDER-PRESERVING across several tags: two tags naming the same statement produce
+    # one link, and the order a processor reads them in is the order the rule declared.
+    deduped = _named_documents(
+        (_lb("stmt.continuity", ("s1", "s2")), _lb("stmt.min_account_months", ("s2", "s3")))
+    )
+    assert deduped == ("s1", "s2", "s3")
+
+    # A TAG THAT NAMED NOTHING contributes nothing. The 77 untouched recipes fall back to their
+    # subject, which for a loan-level rule is the string "loan" — it reaches here and is dropped
+    # downstream by `document_id_by_content_id`, never written as a dangling link.
+    assert _named_documents((_lb("dti.back_end", ("loan",)),)) == ("loan",)
+    assert _named_documents(()) == ()

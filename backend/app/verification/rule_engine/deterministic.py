@@ -105,6 +105,31 @@ def _load_bearing(
     )
 
 
+def _named_documents(load_bearing: tuple[LoadBearingTag, ...]) -> tuple[str, ...]:
+    """Content ids the rule's tags NAMED, for `source_content_ids` (LP-647 §1 review).
+
+    THE BRIDGE THAT WAS MISSING, and without it the rest of §1 changed nothing a processor sees.
+    A recipe can now return the documents it read and `produce_derived_tags` puts them on the tag —
+    but a finding's document links come from `_source_document_ids`, which reads
+    `result.source_content_ids` and NOTHING else, and only `consistency.py` was setting that. So AS-8
+    carried its two statements in `load_bearing_tags` JSON and still rendered with no documents.
+
+    SAFE BY CONSTRUCTION, WHICH IS WHY THE UNION IS UNFILTERED HERE. `_source_document_ids` keeps
+    only ids present in `document_id_by_content_id`, so anything that is not a current document on
+    this file is DROPPED rather than written as a dangling or wrong link. The two vocabularies cannot
+    collide either: content ids are prefixed (`doc` / `txn`), so a transaction id can never resolve
+    as a document.
+
+    AND IT SURFACES ONLY WHAT A RECIPE DELIBERATELY NAMED. The 77 recipes that return two elements
+    fall back to `(subject_id,)`, which for a loan subject is the string "loan" and resolves to
+    nothing; for a per-document subject it is that document's own id, which the subject path already
+    supplies. So this adds links exactly where a producer chose to name them.
+    """
+    return tuple(
+        dict.fromkeys(cid for tag in load_bearing for cid in tag.source_facts)  # order-preserving
+    )
+
+
 def _ratifies_every_finding(rule_id: str) -> bool:
     """Is this rule activated on a self-consistency rate (LP-490a / ADR-378)?
 
@@ -135,7 +160,10 @@ def _result(
         subject_id=subject_id,
         verdict=verdict,
         verdict_confidence=verdict_confidence,
-        load_bearing_tags=_load_bearing(spec.deterministic, subject_tags),
+        load_bearing_tags=(_lb := _load_bearing(spec.deterministic, subject_tags)),
+        # LP-647 §1 review — see `_named_documents`. `_attach_document_provenance` never overwrites a
+        # rule's own answer, so naming them here is what reaches the finding.
+        source_content_ids=_named_documents(_lb),
         # LP-564 — NOT ON EVERY OUTCOME. `_result` is the single constructor for all eight paths, so
         # resolving unconditionally put an apply block on every one. CR-1's DEFAULT outcome is a
         # couldnt_check reading "this debt could not be matched against the application's stated

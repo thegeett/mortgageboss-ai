@@ -211,3 +211,81 @@ async def test_the_value_matcher_still_serves_a_retired_xsrc_finding(db_session)
     await populate_finding_source_documents(db_session, loan_file_id=loan_file.id)
 
     assert xsrc.source_document_ids == [str(doc.id)], "the xsrc finding lost its provenance"
+
+
+def test_a_loan_level_rule_links_the_documents_its_tags_named() -> None:
+    """LP-647 §1 review — end to end, at the field a processor reads.
+
+    AS-8's subject is the LOAN, so `_attach_document_provenance` has nothing to attach: its two paths
+    are "what the rule carried" and "the subject's own document", and a loan is not a document. The
+    fix runs the other way — the recipe names the two statements it compared, the tag carries them,
+    and `deterministic._named_documents` puts them on `source_content_ids`, which is the ONLY field
+    `_source_document_ids` reads.
+
+    Asserting the tag alone would not have caught this. §1's first version did exactly that and the
+    finding still rendered with no documents.
+    """
+    from app.verification.rule_engine.result import LoadBearingTag
+
+    s1, s2 = uuid4(), uuid4()
+    finding = _finding()
+    result = RuleEvaluation(
+        rule_id="AS-8",
+        subject_id="loan",  # the case with no document of its own
+        verdict=Verdict.FIRED,
+        verdict_confidence=None,
+        load_bearing_tags=(
+            LoadBearingTag(
+                "stmt.continuity", "broken", None, "does not chain", ("doc-s1", "doc-s2")
+            ),
+        ),
+        threshold_used=None,
+        priya_validated=True,
+        gated_pending_signoff=False,
+        reasoning="the statements do not chain",
+        how_to_fix=None,
+        source_content_ids=("doc-s1", "doc-s2"),
+    )
+
+    _update_finding(
+        finding,
+        verification_id=uuid4(),
+        result=result,
+        outcome=EvaluationOutcome.OPEN,
+        severity=FindingStatus.YELLOW,
+        message="the statements do not chain",
+        category=FindingCategory.DOCUMENTATION,
+        document_id_by_content_id={"doc-s1": s1, "doc-s2": s2},
+    )
+
+    assert finding.source_document_ids == [str(s1), str(s2)], (
+        "a loan-level rule that named its statements must link them — this is the field the "
+        "SourceDocuments component renders from"
+    )
+
+
+def test_a_named_id_that_is_not_a_current_document_is_dropped_not_linked() -> None:
+    """THE SAFETY THE BRIDGE RESTS ON, asserted rather than assumed.
+
+    `_named_documents` unions a tag's `source_facts` without filtering, which is only safe because
+    this resolution keeps ids present in the document map and DROPS the rest. A loan-level rule whose
+    tags fell back to the subject contributes the literal string "loan"; a per-deposit tag could
+    contribute a `txn` id. Neither is a document, and writing either would send a processor to the
+    wrong page with the system's confidence behind it — the failure the whole section is written
+    against.
+    """
+    real = uuid4()
+    finding = _finding()
+
+    _update_finding(
+        finding,
+        verification_id=uuid4(),
+        result=_result(subject_id="loan", content_ids=("loan", "txn-abc", "doc-real")),
+        outcome=EvaluationOutcome.OPEN,
+        severity=FindingStatus.YELLOW,
+        message="m",
+        category=FindingCategory.DOCUMENTATION,
+        document_id_by_content_id={"doc-real": real},
+    )
+
+    assert finding.source_document_ids == [str(real)], "only the real document survives"
