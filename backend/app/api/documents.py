@@ -66,7 +66,7 @@ from app.services.documents import (
     soft_delete_document,
     validate_upload,
 )
-from app.services.field_boxes import find_all_field_boxes
+from app.services.field_boxes import BoxRequest, find_all_field_boxes
 from app.services.field_reviews import (
     FieldReviewError,
     list_reviews,
@@ -1092,7 +1092,7 @@ async def field_boxes(
     storage = get_storage_backend()
     content = await storage.read(document.storage_path)
 
-    requests: dict[str, tuple[str, int]] = {}
+    requests: dict[str, BoxRequest] = {}
     for key, field in fields.items():
         if not isinstance(field, dict) or field.get("value") is None:
             continue
@@ -1100,7 +1100,10 @@ async def field_boxes(
         snippet, page = source.get("snippet"), source.get("page")
         if not isinstance(snippet, str) or not isinstance(page, int):
             continue
-        requests[key] = (snippet, page)
+        # The VALUE travels with the request (LP-706/709): it is the last-resort
+        # needle when the quoted text is nowhere on the page, and a value-tier match
+        # is held to a stricter rule than a quoted-text one.
+        requests[key] = BoxRequest(snippet=snippet, value=str(field["value"]), cited_page=page)
 
     # One open for the whole document, not one per field (see the service).
     lookups = await find_all_field_boxes(content, requests)
