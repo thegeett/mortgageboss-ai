@@ -496,6 +496,15 @@ class VerificationStatusPublic(BaseModel):
     """
 
     stale: bool
+    #: LP-647 §2 — documents still classifying or extracting RIGHT NOW.
+    #:
+    #: Distinct from `stale`, and the distinction is the point: `stale` means the inputs changed
+    #: since the last run (the past), this means work is in flight (the present). A flag meaning
+    #: both is how LP-643's joined gate reason happened.
+    #:
+    #: Served from the SAME helper the run endpoint refuses on, so a disabled button and a 409 can
+    #: never disagree about whether the file is busy.
+    documents_processing: int = 0
     program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
     # The LEGACY quarantine (Tab 5) — the AI cross-source sweep AND the retired xsrc deterministic findings

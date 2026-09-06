@@ -20,7 +20,7 @@ from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.core.run_limits import rule_engine_limits
 from app.models.base import utcnow
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 from app.models.finding import EvaluationOutcome, Finding, FindingOrigin, FindingStatus
 from app.models.finding_event import FindingEvent
 from app.models.helpers import only_active
@@ -206,6 +206,56 @@ async def _get_finding(db: DbSession, *, loan_file: LoanFile, finding_id: UUID) 
     return (await db.execute(stmt)).scalars().first()
 
 
+#: LP-647 §2 — the statuses a document passes THROUGH, not the ones it rests in.
+#:
+#: Measured on staging rather than read off the enum: only `completed` and `needs_review` persist
+#: (199 and 16 of 215 documents). The four below are transient, so a document sitting in one means
+#: work is in flight right now.
+#:
+#: FAILED is NOT here, deliberately. A failed document is finished — it will never gain fields, so
+#: waiting for it would block the run forever. It is a reason to re-process, which is LP-637's
+#: button, not a reason to refuse a verification.
+_DOCUMENT_IN_FLIGHT_STATUSES = (
+    DocumentStatus.PENDING,
+    DocumentStatus.CLASSIFYING,
+    DocumentStatus.CLASSIFIED,
+    DocumentStatus.EXTRACTING,
+)
+
+
+async def _documents_in_flight(db: DbSession, loan_file_id: UUID) -> int:
+    """Documents still classifying or extracting on this file (LP-647 §2).
+
+    WHY A VERIFICATION MUST NOT START OVER ONE. `build_documents_section` selects the file's current
+    documents with NO status filter, so a document mid-extraction goes into the frozen snapshot with
+    an empty `fields` map and, before its classification lands, no `document_type` either. Every rule
+    needing a typed field from it then abstains on the document-type predicate — the
+    `undetermined_by_document_type` shape — and those findings PERSIST under the reconcile identity
+    until a later run retires them. LP-640 measured that cost on a file where it happened by other
+    means: one unidentified document produced 22 queue rows.
+
+    So the processor is shown a list of things to chase that are seconds away from resolving
+    themselves, and the run that would have been right is the one they did not wait for.
+
+    ONE helper, read by the guard AND by the status response, so a refused run and a disabled button
+    can never disagree about whether the file is busy.
+    """
+    return (
+        await db.scalar(
+            only_active(
+                select(func.count())
+                .select_from(Document)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.is_current.is_(True),
+                    Document.status.in_(_DOCUMENT_IN_FLIGHT_STATUSES),
+                ),
+                Document,
+            )
+        )
+    ) or 0
+
+
 async def _document_count(db: DbSession, loan_file_id: UUID) -> int:
     """Active documents on the file — the input to this run's time limits (LP-635).
 
@@ -307,6 +357,37 @@ async def run_verification(
             run_id=str(in_flight.id),
         )
         return VerificationRunPublic.from_model(in_flight)
+
+    # LP-647 §2 — REFUSE WHILE A DOCUMENT IS STILL BEING READ.
+    #
+    # The snapshot takes the file's current documents with no status filter, so one mid-extraction
+    # is frozen into the run with empty fields and, before classification lands, no type — and every
+    # rule needing a typed field from it abstains. Those findings then persist under the reconcile
+    # identity, so the processor chases a list generated from a document that was seconds from
+    # answering the question itself.
+    #
+    # A 409, unlike the in-flight-run case above, which returns the run. There is nothing to return
+    # here: the client asked for a run and is getting none, so the honest answer is a refusal that
+    # says why. The count is in the detail because "1 document" and "9 documents" are different
+    # waits, and a processor deciding whether to sit and watch needs to know which.
+    #
+    # NOT gated on `force`. `force` bypasses the input-fingerprint CACHE — it is an answer to "the
+    # inputs look unchanged", not permission to read a half-written file.
+    processing = await _documents_in_flight(db, loan_file.id)
+    if processing:
+        log.info(
+            "verification_run_refused_documents_in_flight",
+            loan_file_id=str(loan_file.id),
+            documents_processing=processing,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{processing} document{'s are' if processing != 1 else ' is'} still being read. "
+                "Verification would run against a file it cannot see yet — it will be available "
+                "when processing finishes."
+            ),
+        )
 
     # Compare the CURRENT inputs to the last completed run's fingerprint.
     fingerprint = compute_input_fingerprint(await assemble_cross_source_context(db, loan_file))
@@ -462,6 +543,7 @@ async def _build_status(
 
     return VerificationStatusPublic(
         stale=loan_file.verification_stale,
+        documents_processing=await _documents_in_flight(db, loan_file.id),  # LP-647 §2
         program=loan_file.loan_program.value if loan_file.loan_program else None,
         latest_run=(
             VerificationRunPublic.from_model(

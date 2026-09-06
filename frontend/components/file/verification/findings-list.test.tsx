@@ -60,6 +60,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
 function status(findings: VerificationFinding[]): VerificationStatus {
   return {
     stale: false,
+    documents_processing: 0,
     program: "conventional",
     latest_run: {
       id: "r",

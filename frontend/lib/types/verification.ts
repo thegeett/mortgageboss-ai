@@ -166,6 +166,12 @@ export interface Aggression {
 
 export interface VerificationStatus {
   stale: boolean;
+  /** LP-647 §2 — documents still classifying or extracting RIGHT NOW.
+   *
+   * Distinct from `stale`: that means the inputs changed since the last run (the past), this means
+   * work is in flight (the present). Served from the same helper the run endpoint refuses on, so a
+   * disabled button and a 409 cannot disagree. */
+  documents_processing: number;
   /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
   program: string | null;
   latest_run: VerificationRun | null;

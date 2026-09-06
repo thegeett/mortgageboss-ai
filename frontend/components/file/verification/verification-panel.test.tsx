@@ -76,6 +76,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
 
 const STATUS: VerificationStatus = {
   stale: false,
+  documents_processing: 0,
   program: "conventional",
   latest_run: {
     id: "run-1",
@@ -577,5 +578,61 @@ describe("the last-run line", () => {
     render(<VerificationPanel fileId="LF-1" />);
 
     expect(screen.queryByText(/Last run/)).toBeNull();
+  });
+});
+
+describe("LP-647 §2 — the Run button while documents are still being read", () => {
+  /** THE HARMFUL DIRECTION, and the reason it is a server guard with a UI half rather than UI only.
+   *
+   *  `build_documents_section` selects the file's current documents with NO status filter, so a
+   *  document mid-extraction is frozen into the snapshot with empty fields and, before its
+   *  classification lands, no type. Every rule needing a typed field from it abstains, and those
+   *  findings persist under the reconcile identity — LP-640 measured one unidentified document
+   *  costing 22 queue rows. The processor is handed a list generated from a document that was
+   *  seconds from answering the question itself. */
+  it("disables Run and says why, naming the count", () => {
+    mock({ data: { ...STATUS, documents_processing: 2, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    const button = screen.getByRole("button", { name: /run verification/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText(/2 documents are still being read/)).toBeTruthy();
+  });
+
+  /** The count is in the sentence because "1 document" and "9 documents" are different waits, and a
+   *  processor deciding whether to sit and watch needs to know which. Singular gets its own grammar
+   *  — "1 documents are" is the tell that a count was interpolated without being read. */
+  it("uses singular grammar for one document", () => {
+    mock({ data: { ...STATUS, documents_processing: 1, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/1 document is still being read/)).toBeTruthy();
+  });
+
+  /** THE POSITIVE CONTROL: a guard that disables unconditionally would pass both tests above while
+   *  making verification unreachable. */
+  it("enables Run when nothing is processing", () => {
+    mock({ data: { ...STATUS, documents_processing: 0, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    const button = screen.getByRole("button", { name: /run verification/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(screen.queryByText(/still being read/)).toBeNull();
+  });
+
+  /** A RUNNING verification already disables the button, and its own "Running…" label explains it.
+   *  Showing the document message on top would be a second reason for one disabled control, and the
+   *  processor cannot act on either — the run has to finish first regardless. */
+  it("does not stack the document message onto a running verification", () => {
+    mock({
+      data: {
+        ...STATUS,
+        documents_processing: 2,
+        latest_run: { ...baseRun(), status: "running" },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.queryByText(/still being read/)).toBeNull();
   });
 });
