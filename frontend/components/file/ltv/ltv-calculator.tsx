@@ -33,7 +33,7 @@ import {
   Scale,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /** The subject-property line whose basis source we make explicit (LP-90 / LP-90.1). */
 const LTV_APPRAISED_VALUE_KEY = "ltv.appraised_value";
@@ -87,18 +87,49 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
   const setOverride = useSetLtvOverride(fileId);
   const clearOverride = useClearLtvOverride(fileId);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — THE THIRD COMPONENT WITH THIS DEFECT, and the one the first fix missed.
+  //
+  // Same shape as the DTI panel and the calculator card: `editingKey` single at the parent, the
+  // draft local to the row, and a reset on the edit trigger. Opening a second row closed the first
+  // and took its draft with it, silently. An LTV override is audited under its own `ltv_overridden`
+  // activity type, so this is not a lesser surface than the other two.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const isMutating = setOverride.isPending || clearOverride.isPending;
+
+  const discardDraft = (fieldKey: string) =>
+    setDrafts((current) => {
+      const { [fieldKey]: _dropped, ...rest } = current;
+      return rest;
+    });
+
+  // Partial by design, the same limit as its two siblings: a tab close or reload, not Next's
+  // client-side navigation. The in-row caption is the primary signal.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
 
   const rowProps = {
     editingKey,
     onEdit: setEditingKey,
-    onCancel: () => setEditingKey(null),
+    onCancel: (fieldKey: string) => {
+      discardDraft(fieldKey);
+      setEditingKey(null);
+    },
+    drafts,
+    onDraftChange: (fieldKey: string, value: string) =>
+      setDrafts((current) => ({ ...current, [fieldKey]: value })),
     onSave: (fieldKey: string, amount: string) => {
       setOverride.mutate({ fieldKey, input: { amount } });
+      discardDraft(fieldKey);
       setEditingKey(null);
     },
     onClear: (fieldKey: string) => {
       clearOverride.mutate(fieldKey);
+      discardDraft(fieldKey);
       setEditingKey(null);
     },
     disabled: isMutating,
@@ -280,9 +311,13 @@ function ValueBasisCallout({ data }: { data: LtvCalculation }) {
 interface RowControls {
   editingKey: string | null;
   onEdit: (key: string) => void;
-  onCancel: () => void;
+  /** LP-647 §3 — discards this row's draft. The only discard besides Save, and both are deliberate. */
+  onCancel: (key: string) => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — unsaved edits by field key, held by the parent so a row switch does not lose one. */
+  drafts: Record<string, string>;
+  onDraftChange: (key: string, value: string) => void;
   disabled: boolean;
 }
 
@@ -321,10 +356,17 @@ function LineRow({
   onCancel,
   onSave,
   onClear,
+  drafts,
+  onDraftChange,
   disabled,
 }: { item: LtvLineItem; appraisedValueSource: string | null } & RowControls) {
   const editing = editingKey === item.key;
-  const [draft, setDraft] = useState<string>(item.amount);
+  // LP-647 §3 — from the PARENT, so a row switch pauses rather than discards. A row not being
+  // edited but still holding a draft is UNSAVED and says so: an unsaved edit and a never-started
+  // edit rendered identically, which is what made the loss invisible.
+  const draft = drafts[item.key] ?? item.amount;
+  const unsaved = drafts[item.key] !== undefined && drafts[item.key] !== item.amount;
+  const setDraft = (value: string) => onDraftChange(item.key, value);
 
   // The appraised-value row is sourced from valuation_amount / estimated_value — NOT
   // borrower-stated. Show the real provenance + a working tooltip, correcting the old
@@ -337,7 +379,14 @@ function LineRow({
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-gray-700">{item.label}</span>
         <span className="text-[11px] text-gray-400">
-          {item.overridden ? (
+          {/* FIRST in the chain, ahead of `overridden` — a second edit to an already-overridden
+              row would otherwise read as saved while holding an unsaved figure. Same ordering as
+              the DTI panel's, and for the same reason (LP-569's chain-order defect). */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${drafts[item.key]}
+            </span>
+          ) : item.overridden ? (
             <span className="text-primary">
               overridden · auto {formatMoneyPrecise(item.auto_amount)}
             </span>
@@ -363,7 +412,7 @@ function LineRow({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onSave(item.key, draft);
-              if (e.key === "Escape") onCancel();
+              if (e.key === "Escape") onCancel(item.key);
             }}
             className="h-8 w-32 text-right text-sm tabular-nums"
           />
@@ -382,7 +431,7 @@ function LineRow({
             variant="ghost"
             className="h-8 w-8 text-gray-400"
             aria-label="Cancel"
-            onClick={onCancel}
+            onClick={() => onCancel(item.key)}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -392,7 +441,8 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET — this line is what made a paused edit unrecoverable even once the draft
+              // survived the switch. The row seeds from `item.amount` on read.
               onEdit(item.key);
             }}
             className={cn(

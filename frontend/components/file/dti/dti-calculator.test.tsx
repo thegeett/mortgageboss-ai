@@ -479,6 +479,39 @@ describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
     );
   });
 
+  /** THE CAPTION ORDER, which only a comment defended. `unsaved` must beat `overridden` in the
+   *  mutually-exclusive chain, or a second edit to an already-overridden line reads as saved while
+   *  holding an unapplied figure — saved-looking and unsaved at once. LP-569's chain-order defect
+   *  in a new place. Pinned in all three calculators, not just the one where it was noticed. */
+  it("reports an overridden line as unsaved while it holds a pending edit", () => {
+    useDtiMock.mockReturnValue({
+      data: {
+        ...twoHousingLines,
+        housing_items: [
+          {
+            ...twoHousingLines.housing_items[0],
+            override_amount: "300.00",
+            auto_amount: "275.00",
+            overridden: true,
+          },
+          twoHousingLines.housing_items[1],
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$300.00"));
+    fireEvent.change(screen.getByLabelText("Override Property taxes"), {
+      target: { value: "312.50" },
+    });
+    fireEvent.click(screen.getByText("$120.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312\.50/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+
   /** Cancel stays an explicit discard — the ONLY one besides saving. If it stopped discarding, the
    *  X would leave a permanent "unsaved" caption a processor cannot clear. */
   it("discards the draft on Cancel", () => {

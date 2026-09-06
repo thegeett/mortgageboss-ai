@@ -163,6 +163,36 @@ describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
     );
   });
 
+  /** The same chain-order guard as its two siblings — see the DTI panel's for the reasoning. */
+  it("reports an overridden input as unsaved while it holds a pending edit", () => {
+    useCalcMock.mockReturnValue({
+      data: {
+        ...TWO_INPUTS,
+        inputs: [
+          {
+            ...TWO_INPUTS.inputs[0],
+            override_amount: "300000.00",
+            auto_amount: "290000.00",
+            overridden: true,
+          },
+          TWO_INPUTS.inputs[1],
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312500/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+
   it("does not claim an unsaved edit on an untouched input", () => {
     useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
     render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
