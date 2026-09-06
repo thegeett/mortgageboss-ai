@@ -67,6 +67,8 @@ _NEW_VALUES = (
     "document_type_overridden",
     "document_replaced",
     "document_staleness_resolved",
+    "field_reviewed",
+    "field_review_reverted",
     "document_reprocessed",
     "finding_resolved",
     "finding_undone",
@@ -87,8 +89,6 @@ _NEW_VALUES = (
     "communication_sent",
     "communication_received",
     "note_added",
-    "field_reviewed",
-    "field_review_reverted",
 )
 
 

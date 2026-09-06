@@ -80,11 +80,25 @@ depends_on: str | Sequence[str] | None = None
 
 _CONSTRAINT = "ck_activity_logs_activitytype"
 
-# `activity_type` is a VARCHAR + CHECK (ADR-037), so two new values are a constraint
-# swap. The set is written out in model-definition order rather than read from the
-# database: a migration that derives its own target from the live schema cannot be
-# reviewed, and cannot run against a database that is already wrong.
-_OLD_ACTIVITY_TYPES = (
+# `activity_type` is a VARCHAR + CHECK (ADR-037), so a swap RECREATES the constraint
+# from this tuple alone -- the list has to be complete, not just the additions.
+#
+# COMPLETE MEANS THE UNION OF BOTH LINEAGES, not this branch's own enum. This
+# migration and LP-643 (`b3f7a2d19c46`) grew on branches that diverged from a common
+# ancestor having neither side's values, and `d7e3a9b41f02` merges them. Alembic is
+# free to run either lineage first, so whichever swap runs second REVOKES the values
+# the other added -- and if any row already carries one, the ADD CONSTRAINT is
+# rejected outright and the upgrade cannot reach the merge that would repair it.
+#
+# That is not hypothetical: staging ran the LP-643 lineage for weeks and holds
+# `document_reprocessed` and `dti_*` rows, so the 27-value version of this tuple
+# stopped `deploy` dead with a CheckViolationError. Every swap on a diverged lineage
+# carries the union; `tests/test_activity_type_migrations.py` now enforces it.
+#
+# Written out rather than read from the live schema: a migration that derives its own
+# target from the database cannot be reviewed, and cannot repair a database that is
+# already wrong.
+_NEW_VALUES = (
     "file_created",
     "file_updated",
     "file_deleted",
@@ -94,10 +108,16 @@ _OLD_ACTIVITY_TYPES = (
     "document_type_overridden",
     "document_replaced",
     "document_staleness_resolved",
+    "field_reviewed",
+    "field_review_reverted",
+    "document_reprocessed",
     "finding_resolved",
     "finding_undone",
     "verification_run",
     "dti_overridden",
+    "dti_line_added",
+    "dti_line_removed",
+    "dti_ungated",
     "ltv_overridden",
     "calculator_overridden",
     "lender_overlay_updated",
@@ -111,12 +131,11 @@ _OLD_ACTIVITY_TYPES = (
     "communication_received",
     "note_added",
 )
-_NEW_ACTIVITY_TYPES = (
-    *_OLD_ACTIVITY_TYPES[:9],
-    "field_reviewed",
-    "field_review_reverted",
-    *_OLD_ACTIVITY_TYPES[9:],
-)
+
+#: What this migration adds. `_OLD_VALUES` is the union minus these, so a downgrade
+#: withdraws only what LP-UI-033 introduced and leaves the other lineage's values be.
+_ADDED = ("field_reviewed", "field_review_reverted")
+_OLD_VALUES = tuple(v for v in _NEW_VALUES if v not in _ADDED)
 
 
 def _swap_check(values: tuple[str, ...]) -> None:
@@ -129,7 +148,7 @@ def _swap_check(values: tuple[str, ...]) -> None:
 
 
 def upgrade() -> None:
-    _swap_check(_NEW_ACTIVITY_TYPES)
+    _swap_check(_NEW_VALUES)
     op.create_table(
         "field_reviews",
         sa.Column("id", sa.UUID(), primary_key=True),
@@ -167,7 +186,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    _swap_check(_OLD_ACTIVITY_TYPES)
+    _swap_check(_OLD_VALUES)
     op.execute(f"DROP VIEW IF EXISTS {_SCHEMA}.field_reviews")
     op.drop_index("uq_field_reviews_extraction_field_active", table_name="field_reviews")
     op.drop_index("ix_field_reviews_extraction_id", table_name="field_reviews")
