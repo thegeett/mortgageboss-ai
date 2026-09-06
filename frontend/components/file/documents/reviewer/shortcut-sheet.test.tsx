@@ -36,8 +36,9 @@ describe("the sheet and the bindings agree", () => {
    * and still look right.
    */
   const DOCUMENTED: Array<[string, Parameters<typeof actionFor>[0], keyof ReviewKeyActions]> = [
-    ["Tab / ↓", { ...NONE, key: "Tab" }, "nextField"],
-    ["Shift+Tab / ↑", { ...NONE, key: "Tab", shiftKey: true }, "previousField"],
+    ["↓ / ↑", { ...NONE, key: "ArrowDown" }, "nextRow"],
+    ["Tab", { ...NONE, key: "Tab" }, "nextField"],
+    ["Shift+Tab", { ...NONE, key: "Tab", shiftKey: true }, "previousField"],
     ["Enter", { ...NONE, key: "Enter" }, "accept"],
     ["Shift+Enter", { ...NONE, key: "Enter", shiftKey: true }, "acceptAndAdvance"],
     ["E", { ...NONE, key: "e" }, "edit"],
@@ -63,5 +64,37 @@ describe("the sheet and the bindings agree", () => {
       (keys) => !documented.has(keys) && keys !== "Alt (hold)",
     );
     expect(undocumented).toEqual([]);
+  });
+
+  it("documents every ACTION the reviewer has, not just every row of the sheet", () => {
+    // The check above only proves the sheet's rows are real. It would pass with a
+    // new action bound to a key nobody had written down — which is how ↓ ran
+    // `nextField` while the sheet claimed it was the same key as Tab (LP-701).
+    // The counterparts are reached by a modifier of a documented key.
+    const COUNTERPART: ReadonlySet<keyof ReviewKeyActions> = new Set([
+      "previousRow",
+      "zoomOut",
+      "nextDocument",
+    ]);
+    const acted = new Set(DOCUMENTED.map(([, , action]) => action));
+    const every: (keyof ReviewKeyActions)[] = [
+      "nextRow",
+      "previousRow",
+      "nextField",
+      "previousField",
+      "accept",
+      "acceptAndAdvance",
+      "edit",
+      "reject",
+      "toggleOverlay",
+      "zoomIn",
+      "zoomOut",
+      "zoomReset",
+      "previousDocument",
+      "nextDocument",
+      "markReviewed",
+      "toggleHelp",
+    ];
+    expect(every.filter((a) => !acted.has(a) && !COUNTERPART.has(a))).toEqual([]);
   });
 });

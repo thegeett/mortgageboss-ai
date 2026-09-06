@@ -29,8 +29,8 @@ describe("actionFor — the binding table", () => {
     ["Enter", { ctrlKey: true }, "markReviewed"],
     ["Tab", {}, "nextField"],
     ["Tab", { shiftKey: true }, "previousField"],
-    ["ArrowDown", {}, "nextField"],
-    ["ArrowUp", {}, "previousField"],
+    ["ArrowDown", {}, "nextRow"],
+    ["ArrowUp", {}, "previousRow"],
     ["e", {}, "edit"],
     ["E", {}, "edit"],
     ["r", {}, "reject"],
@@ -94,6 +94,8 @@ describe("isTypingTarget", () => {
 
 function actions(): ReviewKeyActions {
   return {
+    nextRow: vi.fn(),
+    previousRow: vi.fn(),
     nextField: vi.fn(),
     previousField: vi.fn(),
     accept: vi.fn(),
@@ -168,8 +170,8 @@ describe("useReviewKeys", () => {
     for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", " "]) {
       fireEvent.keyDown(inside, { key });
     }
-    expect(on.nextField).not.toHaveBeenCalled();
-    expect(on.previousField).not.toHaveBeenCalled();
+    expect(on.nextRow).not.toHaveBeenCalled();
+    expect(on.previousRow).not.toHaveBeenCalled();
     expect(on.toggleOverlay).not.toHaveBeenCalled();
   });
 
@@ -249,5 +251,38 @@ describe("the button-focus path the editor exposed", () => {
     // cover it, so something else had to.
     const button = document.createElement("button");
     expect(isTypingTarget(button)).toBe(false);
+  });
+});
+
+describe("the arrows are not Tab (LP-701)", () => {
+  /**
+   * A processor reported that ↓ moved "randomly". It moved exactly as designed:
+   * both keys ran `nextField`, which skips every confident and already-decided
+   * field. Measured on a real pay stub, ↓ walked rows 5, 6, 7, 9, 11, 12, 13,
+   * 15, 16 and then wrapped to 5 — and a confident field draws no mark, so
+   * nothing on the screen accounted for a single one of those jumps.
+   */
+  it("binds ↓ and Tab to DIFFERENT actions", () => {
+    expect(actionFor({ ...NONE, key: "ArrowDown" })).not.toBe(actionFor({ ...NONE, key: "Tab" }));
+  });
+
+  it("runs the plain step, not the attention jump", () => {
+    const on = actions();
+    render(<Harness on={on} />);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(on.nextRow).toHaveBeenCalledTimes(1);
+    expect(on.previousRow).toHaveBeenCalledTimes(1);
+    expect(on.nextField).not.toHaveBeenCalled();
+    expect(on.previousField).not.toHaveBeenCalled();
+  });
+
+  it("still takes the arrows' default away, so the pane does not also scroll", () => {
+    const on = actions();
+    render(<Harness on={on} />);
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      const prevented = !fireEvent.keyDown(window, { key, cancelable: true });
+      expect(prevented, `${key} should be prevented`).toBe(true);
+    }
   });
 });

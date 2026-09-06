@@ -17,7 +17,19 @@ import { useEffect } from "react";
  */
 
 export interface ReviewKeyActions {
-  /** Next field wanting attention. Skips the confident ones — that is the point. */
+  /**
+   * The next row in the list, in the order the list is drawn (LP-701).
+   *
+   * Bound to the ARROWS, and separate from `nextField` on purpose. A processor
+   * pressing ↓ is reading the list, and a list that answers ↓ by moving four
+   * rows and wrapping does not read as a shortcut — it reads as broken.
+   */
+  nextRow: () => void;
+  previousRow: () => void;
+  /**
+   * Next field wanting attention. Skips the confident ones — that is the point,
+   * and Tab is the key that says so in the shortcut sheet.
+   */
   nextField: () => void;
   previousField: () => void;
   /** Accept the extracted value. */
@@ -123,10 +135,14 @@ export function actionFor(event: {
   switch (key) {
     case "Tab":
       return shiftKey ? "previousField" : "nextField";
+    // THE ARROWS STEP ONE ROW. They used to be aliases for Tab, which skips
+    // every confident and already-decided field — so on a real pay stub ↓ went
+    // 5, 6, 7, 9, … 13, 15, 16 and wrapped to 5, and a confident field draws no
+    // mark, so nothing on the screen explained any of it (LP-701).
     case "ArrowDown":
-      return "nextField";
+      return "nextRow";
     case "ArrowUp":
-      return "previousField";
+      return "previousRow";
     case "e":
     case "E":
       return "edit";
@@ -163,6 +179,8 @@ const PREVENT_DEFAULT = new Set<keyof ReviewKeyActions>([
   "toggleOverlay",
   "nextField",
   "previousField",
+  "nextRow",
+  "previousRow",
   "markReviewed",
   "acceptAndAdvance",
 ]);

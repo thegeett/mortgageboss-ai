@@ -91,6 +91,29 @@ export function nextAttention(
   return null;
 }
 
+/**
+ * The next row in list order, wrapping (LP-701).
+ *
+ * The plain motion, over EVERY field including the list-valued ones the
+ * attention queue leaves out. `nextAttention` answers "where should I work
+ * next"; this answers "what is below this row", and the two were the same
+ * function until a processor noticed that ↓ skipped rows for reasons the screen
+ * never showed.
+ *
+ * With nothing selected it takes the first row (or the last, going up) rather
+ * than returning null: the first ↓ on a document has to land somewhere.
+ */
+export function stepField(
+  keys: readonly string[],
+  from: string | null,
+  direction: 1 | -1 = 1,
+): string | null {
+  if (keys.length === 0) return null;
+  const index = from === null ? -1 : keys.indexOf(from);
+  if (index === -1) return (direction === 1 ? keys[0] : keys[keys.length - 1]) ?? null;
+  return keys[(index + direction + keys.length) % keys.length] ?? null;
+}
+
 /** Whether anything on this document still wants a decision. */
 export function isFullyReviewed(queue: readonly QueueField[]): boolean {
   return queue.length > 0 && queue.every((field) => !needsAttention(field));

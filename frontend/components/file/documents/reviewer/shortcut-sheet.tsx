@@ -23,8 +23,9 @@ export interface Shortcut {
 }
 
 export const SHORTCUTS: readonly Shortcut[] = [
-  { keys: "Tab / ↓", what: "Next field needing attention" },
-  { keys: "Shift+Tab / ↑", what: "Previous field" },
+  { keys: "↓ / ↑", what: "Next / previous field" },
+  { keys: "Tab", what: "Skip ahead to the next field needing attention" },
+  { keys: "Shift+Tab", what: "Back to the previous field needing attention" },
   { keys: "Enter", what: "Accept the extracted value" },
   { keys: "Shift+Enter", what: "Accept and go to the next flagged field" },
   { keys: "E", what: "Correct the value" },

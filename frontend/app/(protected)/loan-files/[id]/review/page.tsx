@@ -6,6 +6,7 @@ import {
   buildQueue,
   isFullyReviewed,
   nextAttention,
+  stepField,
 } from "@/components/file/documents/reviewer/review-queue";
 import { ReviewerFields } from "@/components/file/documents/reviewer/reviewer-fields";
 import { type PaneSplit, ReviewerShell } from "@/components/file/documents/reviewer/reviewer-shell";
@@ -85,12 +86,18 @@ function Reviewer() {
     return map;
   }, [boxes]);
 
-  const labels = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const f of extractionFields(detail?.current_extraction?.extracted_data ?? {}))
-      map.set(f.key, f.label);
-    return map;
-  }, [detail]);
+  // ONE call, three consumers. The labels map, the attention queue and the plain
+  // row order all describe the same list, and computing each from its own call
+  // is how they get to disagree about what "the next row" means.
+  const fields = useMemo(
+    () => extractionFields(detail?.current_extraction?.extracted_data ?? {}),
+    [detail],
+  );
+
+  const labels = useMemo(() => new Map(fields.map((f) => [f.key, f.label])), [fields]);
+
+  /** The rows as drawn, which is what the arrow keys walk (LP-701). */
+  const rowKeys = useMemo(() => fields.map((f) => f.key), [fields]);
 
   // FOCUS A FIELD -> THE PAGE FOLLOWS. The page number is the whole navigation
   // here: the overlay only draws boxes belonging to the page on screen, so
@@ -107,14 +114,7 @@ function Reviewer() {
   // --- The keyboard loop (LP-UI-033) -------------------------------------- //
 
   const scrutiny = detail?.field_scrutiny ?? {};
-  const queue = useMemo(
-    () =>
-      buildQueue(
-        extractionFields(detail?.current_extraction?.extracted_data ?? {}),
-        detail?.field_scrutiny ?? {},
-      ),
-    [detail],
-  );
+  const queue = useMemo(() => buildQueue(fields, detail?.field_scrutiny ?? {}), [fields, detail]);
 
   const recordReview = useRecordFieldReview(documentId);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -138,9 +138,16 @@ function Reviewer() {
     [current, documentIndex, field],
   );
 
+  /** Tab: the next field WANTING ATTENTION, skipping what is already settled. */
   const move = useCallback(
     (direction: 1 | -1) => field.select(nextAttention(queue, field.selected, direction)),
     [queue, field],
+  );
+
+  /** The arrows: one row, in the order the list is drawn (LP-701). */
+  const step = useCallback(
+    (direction: 1 | -1) => field.select(stepField(rowKeys, field.selected, direction)),
+    [rowKeys, field],
   );
 
   // ACCEPT WITHOUT A SELECTED FIELD DOES NOTHING. Enter is one keystroke from
@@ -153,6 +160,8 @@ function Reviewer() {
 
   useReviewKeys(
     {
+      nextRow: () => step(1),
+      previousRow: () => step(-1),
       nextField: () => move(1),
       previousField: () => move(-1),
       accept,

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { ExtractionField } from "@/lib/loan-files/documents";
 import type { FieldScrutiny } from "@/lib/types/document";
-import { buildQueue, isFullyReviewed, needsAttention, nextAttention } from "./review-queue";
+import {
+  buildQueue,
+  isFullyReviewed,
+  needsAttention,
+  nextAttention,
+  stepField,
+} from "./review-queue";
 
 const BARE: FieldScrutiny = {
   critical: false,
@@ -176,5 +182,40 @@ describe("list fields stay out of the loop (LP-702)", () => {
   it("does not let a list field hold a document back from fully reviewed", () => {
     const queue = buildQueue([listField("earnings_lines"), field("gross_pay", 0.99)], {});
     expect(isFullyReviewed(queue)).toBe(true);
+  });
+});
+
+describe("stepField — the plain motion the arrows use (LP-701)", () => {
+  const KEYS = ["employer_name", "gross_pay", "net_pay", "earnings_lines"];
+
+  it("moves exactly one row, skipping nothing", () => {
+    expect(stepField(KEYS, "employer_name", 1)).toBe("gross_pay");
+    expect(stepField(KEYS, "gross_pay", 1)).toBe("net_pay");
+    expect(stepField(KEYS, "net_pay", -1)).toBe("gross_pay");
+  });
+
+  it("includes rows the attention queue leaves out", () => {
+    // `earnings_lines` is a list field, so `buildQueue` drops it — but it is a
+    // row on the screen, and ↓ has to reach what a processor can see.
+    expect(stepField(KEYS, "net_pay", 1)).toBe("earnings_lines");
+  });
+
+  it("starts at the first row going down, the last going up", () => {
+    expect(stepField(KEYS, null, 1)).toBe("employer_name");
+    expect(stepField(KEYS, null, -1)).toBe("earnings_lines");
+  });
+
+  it("wraps at both ends", () => {
+    expect(stepField(KEYS, "earnings_lines", 1)).toBe("employer_name");
+    expect(stepField(KEYS, "employer_name", -1)).toBe("earnings_lines");
+  });
+
+  it("takes the first row when the selected key is gone", () => {
+    expect(stepField(KEYS, "a_field_from_another_document", 1)).toBe("employer_name");
+  });
+
+  it("has nothing to move to on an empty list", () => {
+    expect(stepField([], null, 1)).toBeNull();
+    expect(stepField([], "gross_pay", 1)).toBeNull();
   });
 });
