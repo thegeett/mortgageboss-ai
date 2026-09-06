@@ -190,6 +190,16 @@ async def test_the_binder_naming_ignores_a_flood_policy_that_also_states_an_expi
     So IH-9 has no single-mutation over-naming to catch, because two independent defences guard it.
     That is a stronger position than a test, and worth knowing rather than assuming — the danger is
     reading redundancy as a missing guard and deleting one of the two.
+
+    WHICH SINGLE REMOVAL IS SAFE TODAY, AND WHY THAT IS NOT PERMISSION. Removing the recipe's
+    `document_type != "homeowners_insurance"` filter is safe RIGHT NOW: the declaration's
+    `document_type: homeowners_insurance` already keeps the tag off a flood policy, so every test
+    stays green. A reader who does that has not found dead code — they have SPENT THE REDUNDANCY.
+    The next person to touch the declaration's scoping for an unrelated reason then has nothing
+    between a flood policy and IH-9's provenance, and this test is what fails at that second step.
+
+    That is the split: this docstring is what should stop the FIRST deletion, because a test cannot;
+    this test is what catches the SECOND, because a comment cannot.
     """
     from app.verification.eval.fire_path_scenarios import (
         _LOAN_INS_EXPIRED,
