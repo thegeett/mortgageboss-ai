@@ -2978,6 +2978,17 @@ stage_status() {
     local n
     n=$(jq -r 'length' "$TF_OUTPUT_CACHE")
     status_line "phase1" "applied -- $n terraform outputs available"
+  elif printf '%s' "$TF_OUTPUT_STDERR" | grep -qi 'terraform init'; then
+    # Not the same thing as un-applied, and status is where someone looks to find
+    # out which. Reading the state needs the local .terraform/ cache, which is
+    # gitignored; without it nothing below can be determined either way.
+    status_line "phase1" "UNKNOWN -- $ENV_DIR is not initialised, so state was not read"
+    hr
+    info "The remote state is untouched -- this is the gitignored .terraform/ cache,"
+    info "which never arrives with a clone. Restore it, then re-run status:"
+    info ""
+    info "  AWS_PROFILE=$AWS_PROFILE terraform -chdir=$ENV_DIR init"
+    return 0
   else
     status_line "phase1" "not applied (no outputs); everything below is unknown"
     hr
