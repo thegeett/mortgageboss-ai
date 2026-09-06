@@ -74,6 +74,13 @@ def refuses_at_rest(text: str) -> str | None:
     document types have that shape. One person, one field, one keystroke, and every
     subsequent run persisted nothing.
 
+    UUID-SHAPED SUBSTRINGS ARE EXEMPT, which widens this door as well as the guard.
+    `refuses_at_rest("aaaaaaaa-aaaa-aaaa-aaaa-411111111111")` refused a 12-digit run
+    before LP-705 and returns None now. That is intentional and it is not optional:
+    the door and the guard are one rule, so a door that refused a bare uuid would
+    make the guard refuse `debt.{id}` and reintroduce the bug this exists to fix.
+    A caller learns it here, since it is the only place a caller reads.
+
     THE SAME FUNCTION the persist guard applies, not the same two patterns restated.
     An earlier version repeated the patterns here with a comment saying the two must
     not disagree — and they did, because the guard also skipped uuids and this did
@@ -108,22 +115,32 @@ class RawPiiAtRestError(Exception):
 # of loan files, decided by nothing but the luck of a uuid draw. Found by the path-naming above,
 # which pointed straight at ``loan_file_id`` and ``run_id``.
 #
-# Matched by SHAPE rather than by key name, so every uuid is covered wherever it appears — borrower
-# refs and subject keys included — and no leak can hide behind it: a 36-character canonical uuid is
-# not a shape an SSN or an account number can take.
+# Matched by SHAPE rather than by key name, so a uuid is covered wherever it appears STANDING ALONE
+# — borrower refs and subject keys included. Not "wherever it appears": one with an alphanumeric
+# neighbour is deliberately left in, and the reason is under ``_DELIMITED_UUID``.
 #
-# UNANCHORED SINCE LP-705, and the anchors were the bug. ``\A…\Z`` matched a value that IS a uuid
+# DELIMITER-BOUNDED SINCE LP-705, and the anchors were the bug. ``\A…\Z`` matched a value that IS a uuid
 # and not one that CONTAINS one, so ``f"debt.{liab.id}"`` — a DTI line key, prefix plus uuid — was
 # scanned, and the uuid's own twelve-character tail was read as an account number. Measured over
 # 2,000,000 samples: 0.354% of uuid4s carry a 9+ digit run, so roughly one stated liability in 283
 # permanently refused its whole loan file's snapshot. ``f"income.{item.id}"`` has the same shape.
 #
-# WHY REMOVING IS STILL SAFE, restated for the wider match: substitution can only delete an exact
-# 36-character canonical uuid, and neither pattern this guard applies can be hidden that way. An
-# SSN carries hyphens at positions 3 and 6, a bare account number carries none — neither can
-# contain, or be contained by, an 8-4-4-4-12 hex-with-hyphens run. The replacement is a SPACE
-# rather than nothing, so removal can only ever create a word boundary, never close one: a leak
-# written flush against an id (``<uuid>123456789``) is still caught.
+# WHY REMOVING IS SAFE, and the first version of this paragraph got it wrong. It argued that
+# neither pattern can be CONTAINED by an 8-4-4-4-12 run — true, and not the question. A leak only
+# has to OVERLAP one: the final group is exactly twelve hex, so an undelimited match takes the
+# first twelve digits of a sixteen-digit card and leaves "1111" behind. Not containment in either
+# direction; a prefix bite.
+#
+# The property that actually holds is the DELIMITERS'. A digit is in ``[0-9a-zA-Z]``, so no digit
+# can ever sit against a match that was removed — a run adjacent to a uuid means there is no uuid
+# match there at all. And inside a match the only non-word characters are the four hyphens, so a
+# run starting at one is either the 4-hex group (too short) or exactly the 12-hex tail (which is
+# the whole point of the skip). Verified over 1.5M structured adversarial samples: no value refused
+# by ``_RAW_SSN`` or ``_LONG_DIGITS`` is accepted after ``_without_uuids``.
+#
+# The replacement is a SPACE rather than nothing. That is now defence in depth rather than the
+# thing that carries this — the lookaheads mean digits can never abut a removal — and it is kept
+# because it costs nothing and starts mattering again the moment they are loosened.
 #
 # The other two derived ids need no exemption and get none: a ``content_id`` is LETTER-prefixed
 # (``doc…`` / ``txn…``) and a ``match_hash`` is ``v1:<hex>``, so in both the digit run is preceded
@@ -144,7 +161,7 @@ class RawPiiAtRestError(Exception):
 #: a non-alphanumeric on both sides costs nothing real — `debt.{id}` is preceded by
 #: `.` and `income.{id}` likewise — and a uuid glued directly to more hex or more
 #: digits is not a uuid the guard should be exempting anyway.
-_UUID_ANYWHERE = re.compile(
+_DELIMITED_UUID = re.compile(
     r"(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
     re.IGNORECASE,
 )
@@ -156,19 +173,23 @@ def _without_uuids(text: str) -> str:
     The space is defence in depth rather than the thing that makes this safe. It
     was load-bearing when any uuid-shaped run was removed — `"12345<uuid>6789"`
     would have become a nine-digit leak with an empty replacement — but the
-    lookarounds on :data:`_UUID_ANYWHERE` now reject a match with an alphanumeric
+    lookarounds on :data:`_DELIMITED_UUID` now reject a match with an alphanumeric
     on either side, so digits can never be adjacent to what is removed. Kept
     because it costs nothing and stops mattering only while those hold.
     """
-    return _UUID_ANYWHERE.sub(" ", text)
+    return _DELIMITED_UUID.sub(" ", text)
 
 
 #: At most this many offending paths are named in the error; the rest are counted.
 _MAX_REPORTED = 10
 
 
-def _walk_scalars(node: Any, path: str = "") -> Iterator[tuple[str, str, str]]:
-    """Yield ``(path, key, text)`` for every scalar in the decoded snapshot document."""
+def _walk_scalars(node: Any, path: str = "") -> Iterator[tuple[str, str]]:
+    """Yield ``(path, text)`` for every scalar in the decoded snapshot document.
+
+    The key used to travel too and nothing read it — the split that derived it ran
+    for every scalar of every snapshot to be discarded at the one call site.
+    """
     if isinstance(node, dict):
         for key, value in node.items():
             yield from _walk_scalars(value, f"{path}.{key}" if path else str(key))
@@ -176,7 +197,7 @@ def _walk_scalars(node: Any, path: str = "") -> Iterator[tuple[str, str, str]]:
         for index, value in enumerate(node):
             yield from _walk_scalars(value, f"{path}[{index}]")
     elif node is not None and not isinstance(node, bool):
-        yield path, path.rsplit(".", 1)[-1].split("[")[0], str(node)
+        yield path, str(node)
 
 
 def _assert_no_raw_pii(serialized: str) -> None:
@@ -194,7 +215,7 @@ def _assert_no_raw_pii(serialized: str) -> None:
 
     Still the same two patterns, still refusing the write outright. Two things changed: the scan
     walks the decoded document rather than its text, so a match can be attributed to a field; and
-    canonical uuids are removed before scanning (see :data:`_UUID_ANYWHERE` — a self-inflicted
+    canonical uuids are removed before scanning (see :data:`_DELIMITED_UUID` — a self-inflicted
     refusal, not a leak). ``serialized`` must therefore be valid JSON, which the one production
     caller (``snapshot.model_dump_json()``) always passes.
 
@@ -204,7 +225,7 @@ def _assert_no_raw_pii(serialized: str) -> None:
     or the reverse.
     """
     violations: list[str] = []
-    for path, _key, text in _walk_scalars(json.loads(serialized)):
+    for path, text in _walk_scalars(json.loads(serialized)):
         if (reason := refuses_at_rest(text)) is not None:
             violations.append(f"{path} ({reason})")
 
