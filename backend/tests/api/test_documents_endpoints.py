@@ -34,6 +34,7 @@ from app.models.document import (
 )
 from app.models.extraction import ExtractionStatus
 from app.services.loan_files import create_loan_file
+from app.services.page_render import DEFAULT_ZOOM, MAX_RENDERED_EDGE
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -712,6 +713,82 @@ async def test_a_page_the_document_does_not_have_is_a_404(
     doc = await _upload_real_pdf(client, loan_file.display_id, token)
     resp = await client.get(f"/api/v1/documents/{doc['id']}/page/99", headers=_auth(token))
     assert resp.status_code == 404
+
+
+def _real_png(width: int = 400, height: int = 300) -> bytes:
+    """An actual image, the way a photographed document arrives."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.insert_text((20, 40), "photographed pay stub")
+    data: bytes = page.get_pixmap().tobytes("png")  # type: ignore[no-untyped-call]
+    doc.close()
+    return data
+
+
+async def test_an_image_document_previews(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Uploads accept image/png; this endpoint used to refuse it (LP-704).
+
+    AT THE ENDPOINT, because that is where the refusal was — a service-level test
+    would have passed against the old code, which rendered images perfectly well
+    and was never asked to. The processor's symptom was a document that uploaded
+    happily and then showed "No page image for this document" for ever, which
+    reads as "still loading", not as "cannot show this".
+    """
+    company, _user, token = await _make_user(db_session, slug="imgpreview")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("paystub.png", _real_png(), "image/png"))],
+    )
+    assert resp.status_code == 201, resp.text
+    doc = resp.json()[0]
+    assert doc["mime_type"] == "image/png"
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200, page.text
+    assert page.content.startswith(b"\x89PNG\r\n\x1a\n")
+    # One page, so the reviewer offers no Next that renders nothing.
+    assert page.headers["X-Page-Count"] == "1"
+    assert float(page.headers["X-Page-Width-Points"]) > 0
+
+    beyond = await client.get(f"/api/v1/documents/{doc['id']}/page/2", headers=_auth(token))
+    assert beyond.status_code == 404
+
+
+async def test_a_page_larger_than_the_budget_is_scaled_down(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A 56-by-69-inch survey shipped 69.3 MB in 4.9 s at the default zoom.
+
+    MEASURED on a stored document, not reasoned. `MAX_ZOOM` never applied — 2.0
+    is already under it — because it caps a MULTIPLIER and the page it multiplies
+    is unbounded. The response has to say the zoom it actually used, or every box
+    the client places is off by the reduction.
+    """
+    company, _user, token = await _make_user(db_session, slug="bigpage")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = pymupdf.open()
+    doc.new_page(width=4047, height=4998)
+    huge = bytes(doc.tobytes())
+    doc.close()
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("survey.pdf", huge, "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    document = resp.json()[0]
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{document['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200
+    applied = float(page.headers["X-Page-Zoom"])
+    assert applied < DEFAULT_ZOOM
+    # The point space is the PAGE's, unchanged — only the pixels were reduced.
+    assert float(page.headers["X-Page-Width-Points"]) == 4047.0
+    assert max(4047.0, 4998.0) * applied <= MAX_RENDERED_EDGE + 1
 
 
 async def test_another_companys_page_is_a_404(

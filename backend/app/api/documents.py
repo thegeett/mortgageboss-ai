@@ -73,7 +73,7 @@ from app.services.field_reviews import (
     record_review,
     revert_review,
 )
-from app.services.page_render import DEFAULT_ZOOM, render_page
+from app.services.page_render import DEFAULT_ZOOM, RENDERABLE_TYPES, render_page
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
 from app.tasks.document_processing import (
@@ -1115,25 +1115,35 @@ async def page_image(
     content, so it is exactly as sensitive as the bytes and gets the same 404 for
     another company's file.
 
-    `404` for a page the document does not have, and for a non-PDF: the reviewer
-    has a designed no-page state, and it is reachable often enough to matter — 12
-    of 105 stored PDFs are scans with no text layer, and a model-cited page is out
-    of range on ~4% of extracted fields.
+    PDFs AND IMAGES. Uploads have accepted image/jpeg and image/png since LP-36
+    while this endpoint refused them, so a photographed pay stub uploaded happily
+    and then showed the no-page state for ever — which reads as "still loading",
+    not as "cannot show this" (LP-704). MuPDF opens an image as a one-page
+    document, so it travels the same path with the same headers.
+
+    `404` for a page the document does not have, and for a type MuPDF cannot open:
+    the reviewer has a designed no-page state, and it is reachable often enough to
+    matter — 12 of 105 stored PDFs are scans with no text layer, and a model-cited
+    page is out of range on ~4% of extracted fields.
 
     The page geometry travels in headers rather than a second request, because a
     caller placing a highlight needs the image AND the point-space it was rendered
-    from, and fetching those separately is how the two drift.
+    from, and fetching those separately is how the two drift. `X-Page-Zoom` is the
+    zoom that was APPLIED, which is not always the one asked for: a page larger
+    than the render budget is scaled down (`MAX_RENDERED_EDGE`).
     """
     document = await get_document_for_company(
         db, document_id=document_id, company_id=current_user.company_id
     )
     if document is None:
         raise _NOT_FOUND
-    if document.mime_type != "application/pdf":
+    if document.mime_type not in RENDERABLE_TYPES:
         raise _NOT_FOUND
     storage = get_storage_backend()
     content = await storage.read(document.storage_path)
-    rendered = await render_page(content, page_number=page_number, zoom=zoom)
+    rendered = await render_page(
+        content, page_number=page_number, zoom=zoom, mime_type=document.mime_type
+    )
     if rendered is None:
         raise _NOT_FOUND
     return Response(
