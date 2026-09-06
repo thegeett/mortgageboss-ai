@@ -74,13 +74,15 @@ def refuses_at_rest(text: str) -> str | None:
     document types have that shape. One person, one field, one keystroke, and every
     subsequent run persisted nothing.
 
-    The same two patterns the persist guard applies, so the two cannot disagree
-    about what is refusable: restating them here is how a value gets accepted at
-    the door and rejected at the end.
+    THE SAME FUNCTION the persist guard applies, not the same two patterns restated.
+    An earlier version repeated the patterns here with a comment saying the two must
+    not disagree — and they did, because the guard also skipped uuids and this did
+    not. Sharing the code is the only form of that promise which cannot rot.
     """
-    if _RAW_SSN.search(text):
+    scannable = _without_uuids(text)
+    if _RAW_SSN.search(scannable):
         return "a dashed SSN pattern"
-    found = _LONG_DIGITS.search(text)
+    found = _LONG_DIGITS.search(scannable)
     return f"a {len(found.group(0))}-digit run" if found is not None else None
 
 
@@ -110,13 +112,32 @@ class RawPiiAtRestError(Exception):
 # refs and subject keys included — and no leak can hide behind it: a 36-character canonical uuid is
 # not a shape an SSN or an account number can take.
 #
+# UNANCHORED SINCE LP-705, and the anchors were the bug. ``\A…\Z`` matched a value that IS a uuid
+# and not one that CONTAINS one, so ``f"debt.{liab.id}"`` — a DTI line key, prefix plus uuid — was
+# scanned, and the uuid's own twelve-character tail was read as an account number. Measured over
+# 2,000,000 samples: 0.354% of uuid4s carry a 9+ digit run, so roughly one stated liability in 283
+# permanently refused its whole loan file's snapshot. ``f"income.{item.id}"`` has the same shape.
+#
+# WHY REMOVING IS STILL SAFE, restated for the wider match: substitution can only delete an exact
+# 36-character canonical uuid, and neither pattern this guard applies can be hidden that way. An
+# SSN carries hyphens at positions 3 and 6, a bare account number carries none — neither can
+# contain, or be contained by, an 8-4-4-4-12 hex-with-hyphens run. The replacement is a SPACE
+# rather than nothing, so removal can only ever create a word boundary, never close one: a leak
+# written flush against an id (``<uuid>123456789``) is still caught.
+#
 # The other two derived ids need no exemption and get none: a ``content_id`` is LETTER-prefixed
 # (``doc…`` / ``txn…``) and a ``match_hash`` is ``v1:<hex>``, so in both the digit run is preceded
 # by a word character and ``\b`` never opens one. That prefix is deliberate and is pinned by
 # ``test_content_ids_never_trip_the_pii_guard``.
-_UUID = re.compile(
-    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.IGNORECASE
+_UUID_ANYWHERE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
 )
+
+
+def _without_uuids(text: str) -> str:
+    """``text`` with every canonical uuid replaced by a space — see :data:`_UUID_ANYWHERE`."""
+    return _UUID_ANYWHERE.sub(" ", text)
+
 
 #: At most this many offending paths are named in the error; the rest are counted.
 _MAX_REPORTED = 10
@@ -148,19 +169,20 @@ def _assert_no_raw_pii(serialized: str) -> None:
     logging raw PII must not log raw PII itself.
 
     Still the same two patterns, still refusing the write outright. Two things changed: the scan
-    walks the decoded document rather than its text, so a match can be attributed to a field; and a
-    value that IS a canonical uuid is skipped (see :data:`_UUID` — a self-inflicted refusal, not a
-    leak). ``serialized`` must therefore be valid JSON, which the one production caller
-    (``snapshot.model_dump_json()``) always passes.
+    walks the decoded document rather than its text, so a match can be attributed to a field; and
+    canonical uuids are removed before scanning (see :data:`_UUID_ANYWHERE` — a self-inflicted
+    refusal, not a leak). ``serialized`` must therefore be valid JSON, which the one production
+    caller (``snapshot.model_dump_json()``) always passes.
+
+    THE DECISION IS ``refuses_at_rest``'S, not a second copy of it. That function is also what the
+    reviewer calls when a person types a value, and the two answering differently is the failure
+    LP-703 opened and LP-705 found: a value accepted at the door and refused at the end of the run,
+    or the reverse.
     """
     violations: list[str] = []
     for path, _key, text in _walk_scalars(json.loads(serialized)):
-        if _UUID.match(text):
-            continue
-        if _RAW_SSN.search(text):
-            violations.append(f"{path} (a dashed SSN pattern)")
-        elif (found := _LONG_DIGITS.search(text)) is not None:
-            violations.append(f"{path} (a {len(found.group(0))}-digit run)")
+        if (reason := refuses_at_rest(text)) is not None:
+            violations.append(f"{path} ({reason})")
 
     if not violations:
         return
