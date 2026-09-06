@@ -10,7 +10,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest_asyncio
-from app.api.verification import _WATCHDOG_SLACK_SECONDS
+from app.api.verification import _STUCK_DOCUMENT_AFTER_SECONDS, _WATCHDOG_SLACK_SECONDS
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
@@ -1432,3 +1432,77 @@ async def test_the_status_response_reports_what_the_guard_refuses_on(
 
     assert resp.status_code == 200
     assert resp.json()["documents_processing"] == 2
+
+
+async def test_a_document_wedged_in_extracting_does_not_block_forever(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """LP-647 §2 review — the guard's own reason for excluding FAILED applies here too.
+
+    A failed document is excluded because it will never gain fields, so holding a file for it would
+    block that file's verification forever. A document WEDGED in `extracting` is the same thing and
+    does not say so in its status: `document_processing` reaches a terminal status on every HANDLED
+    path, and a SIGKILL at the hard limit or an OOM taking the worker is not one. There is no sweep.
+
+    It is not hypothetical — three documents on staging have sat in `extracting` since 2026-08-23.
+    They are harmless only because they were soft-deleted, which `only_active` already excludes; the
+    next one may not be.
+    """
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *_a, **_kw: None,
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    document = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="wedged.pdf"
+    )
+    document.status = DocumentStatus.EXTRACTING
+    await db.flush()
+    # Past the window, by the same clock the guard reads.
+    document.updated_at = utcnow() - timedelta(seconds=_STUCK_DOCUMENT_AFTER_SECONDS + 60)
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 200, resp.text
+
+
+async def test_a_document_that_only_just_started_still_blocks(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE POSITIVE CONTROL for the age bound. A window that treated everything as stuck would pass
+    the test above while removing the guard entirely — and the guard is the point."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    document = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="fresh.pdf"
+    )
+    document.status = DocumentStatus.EXTRACTING
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 409, resp.text
+
+
+def test_the_stuck_window_stays_above_the_task_that_produces_it() -> None:
+    """The dependency the constant rests on, pinned rather than commented.
+
+    The window is derived from `DOCUMENT_HARD_LIMIT_SECONDS` — the SIGKILL ceiling for one attempt —
+    but it is written as a literal in `api/verification.py` so that module does not import the Celery
+    task and drag its dependencies into the API's import graph (the LP-635 lesson that moved
+    `run_limits` to a leaf). A literal and its source can drift; this is what stops them.
+
+    Raising the task's limit past the window would make a legitimately-running document read as
+    stuck, which is the failure this asserts against.
+    """
+    from app.tasks.document_processing import DOCUMENT_HARD_LIMIT_SECONDS
+
+    assert _STUCK_DOCUMENT_AFTER_SECONDS >= DOCUMENT_HARD_LIMIT_SECONDS * 4, (
+        "the stuck window must stay comfortably above one attempt's hard limit, or a document that "
+        f"is merely slow reads as wedged (window={_STUCK_DOCUMENT_AFTER_SECONDS}s, "
+        f"hard limit={DOCUMENT_HARD_LIMIT_SECONDS}s)"
+    )

@@ -223,6 +223,31 @@ _DOCUMENT_IN_FLIGHT_STATUSES = (
 )
 
 
+#: LP-647 §2 review — HOW LONG A DOCUMENT CAN BE "IN FLIGHT" BEFORE IT IS STUCK.
+#:
+#: The guard's own reason for excluding FAILED is not about the FAILED label: a failed document will
+#: never gain fields, so holding a file for it would block that file's verification forever. A
+#: document WEDGED in `extracting` is exactly the same thing and does not say so in its status.
+#:
+#: It happens. Three documents on staging have sat in `extracting` since 2026-08-23 — two weeks —
+#: and they are harmless only because someone soft-deleted them, which `only_active` already
+#: excludes. The next one may not be deleted. `document_processing`'s module docstring says a
+#: document is "never left stuck in CLASSIFYING / EXTRACTING", and the word carrying that claim is
+#: "every HANDLED path": a SIGKILL at the hard limit, or an OOM taking the worker (the risk LP-629
+#: raised worker memory for), is not a handled path. There is no sweep that fixes one afterwards.
+#:
+#: THE BOUND COMES FROM THE TASK, not from a percentile. `updated_at` moves on every status
+#: transition, so it is a progress heartbeat; once a document is claimed into a transient status the
+#: task has at most `DOCUMENT_HARD_LIMIT_SECONDS` (660) before Celery SIGKILLs it, and a retry
+#: re-claims and moves the timestamp again. Five times that ceiling is comfortably longer than any
+#: legitimate attempt and far short of the fortnight a genuinely wedged one sits there.
+#:
+#: Measuring `updated_at - created_at` across completed documents would NOT give this: that column is
+#: bumped by later edits (a type override, a reprocess), so its p99 on staging is 3.4 days and its
+#: median is 108 seconds. The statistic describes "time until last touched", not time to process.
+_STUCK_DOCUMENT_AFTER_SECONDS = 660 * 5  # DOCUMENT_HARD_LIMIT_SECONDS x 5 — pinned by a test
+
+
 async def _documents_in_flight(db: DbSession, loan_file_id: UUID) -> int:
     """Documents still classifying or extracting on this file (LP-647 §2).
 
@@ -239,6 +264,11 @@ async def _documents_in_flight(db: DbSession, loan_file_id: UUID) -> int:
 
     ONE helper, read by the guard AND by the status response, so a refused run and a disabled button
     can never disagree about whether the file is busy.
+
+    BOUNDED BY AGE (review). A document wedged in a transient status is not in flight and must not
+    hold a file's verification hostage — see `_STUCK_DOCUMENT_AFTER_SECONDS`. Excluding it means a
+    run over a genuinely stuck document proceeds and reports what it can see, which is the same trade
+    already made for FAILED and strictly better than a file nobody can ever verify again.
     """
     return (
         await db.scalar(
@@ -249,6 +279,9 @@ async def _documents_in_flight(db: DbSession, loan_file_id: UUID) -> int:
                     Document.loan_file_id == loan_file_id,
                     Document.is_current.is_(True),
                     Document.status.in_(_DOCUMENT_IN_FLIGHT_STATUSES),
+                    # A document that stopped moving is not in flight — see the constant.
+                    Document.updated_at
+                    > utcnow() - timedelta(seconds=_STUCK_DOCUMENT_AFTER_SECONDS),
                 ),
                 Document,
             )
