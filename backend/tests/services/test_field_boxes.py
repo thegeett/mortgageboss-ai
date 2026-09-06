@@ -538,3 +538,100 @@ class TestAmbiguityIsCountedAcrossTheDocument:
         )
         assert found.match_kind is MatchKind.VALUE
         assert {b.page for b in found.boxes} == {1}
+
+
+# --- LP-707: the snippet is often a synthesis, not a quotation --------------- #
+
+
+def _synthesis_pdf() -> bytes:
+    """A page whose figures live in three places, as a real pay stub's do."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "Total Taxes 3,663.31")
+    page.insert_text((72, 140), "Total Pre-Tax 1,410.00")
+    page.insert_text((72, 180), "Total Post-Tax 335.00")
+    page.insert_text((72, 260), "Net pay 9,706.69")
+    return bytes(doc.tobytes())
+
+
+class TestThePartialTier:
+    """MEASURED, and the measurement is what replaced LP-707's plan.
+
+    That ticket proposed rewriting the JSON contract in 119 extraction prompts so
+    the model would return neighbouring words as anchors. Measuring first — which
+    the ticket required — showed the rewrite is not needed: of the 72 fields the
+    earlier tiers cannot place on typed documents, EVERY ONE already has its
+    snippet's words on the page. The snippet is a synthesis spanning places the
+    page keeps apart, and the matcher was demanding all of it in one run.
+    """
+
+    async def test_a_synthesised_snippet_is_placed_on_the_part_that_is_real(self) -> None:
+        # The real shape, from the corpus: three figures from three places joined
+        # by the model's arithmetic. No contiguous run of the whole thing exists.
+        found = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="Total Taxes 3,663.31 + Total Pre-Tax 1,410.00 + Total Post-Tax 335.00",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert found.boxes
+        assert found.match_kind is MatchKind.PARTIAL
+
+    async def test_the_earlier_tiers_really_do_fail_on_it(self) -> None:
+        # The control. Without it this class would pass for any snippet the exact
+        # or normalised tier already handles, and would go on passing if the
+        # partial tier were deleted.
+        doc = pymupdf.open(stream=_synthesis_pdf(), filetype="pdf")
+        whole = "Total Taxes 3,663.31 + Total Pre-Tax 1,410.00 + Total Post-Tax 335.00"
+        assert doc[0].search_for(whole) == []
+        assert _runs(_index_page(doc[0]), fold(whole)) == []
+        doc.close()
+
+    async def test_a_run_that_does_NOT_contain_the_value_is_refused(self) -> None:
+        """The anchor rule, and the whole reason this tier is not a licence.
+
+        Taking the longest run that merely OCCURS recovers all 72 measured fields —
+        at a median of half the snippet and a minimum of 3% of it, which is one
+        word in thirty. Requiring the run to contain the extracted value recovers
+        26, and each is a box over text that demonstrably includes the figure cited.
+        """
+        found = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="Total Taxes 3,663.31 and some other words entirely",
+            # A value that is nowhere in the snippet AND nowhere on the page, so
+            # neither this tier nor the value tier below it can fire.
+            value="88,888.88",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_it_ranks_below_the_quoted_tiers_and_above_the_bare_value(self) -> None:
+        # A snippet the page holds verbatim must still report EXACT — the partial
+        # tier must not be reached for it, or a box that was correct before LP-707
+        # would be re-derived by a weaker rule.
+        found = await find_field_boxes(
+            _synthesis_pdf(), snippet="Net pay 9,706.69", value="9,706.69", cited_page=1
+        )
+        assert found.match_kind is MatchKind.EXACT
+
+    async def test_the_longest_confirmable_run_is_what_gets_boxed(self) -> None:
+        # Longest first, so the box carries as much confirmed context as the page
+        # will support rather than the bare figure.
+        by_partial = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="nonsense prefix Total Pre-Tax 1,410.00 nonsense suffix",
+            value="1,410.00",
+            cited_page=1,
+        )
+        by_value_only = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="a quoted line that is nowhere on this page",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert by_partial.match_kind is MatchKind.PARTIAL
+        assert by_value_only.match_kind is MatchKind.VALUE
+        # "Total Pre-Tax 1,410.00" is wider than "1,410.00" alone.
+        assert (by_partial.boxes[0].x1 - by_partial.boxes[0].x0) > (
+            by_value_only.boxes[0].x1 - by_value_only.boxes[0].x0
+        )

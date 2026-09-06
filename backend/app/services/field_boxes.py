@@ -113,8 +113,18 @@ class MatchKind(StrEnum):
     EXACT = "exact"
     #: The quoted text, found after folding formatting away on both sides.
     NORMALISED = "normalised"
+    #: PART of the quoted text, the longest run of it the page actually has, and
+    #: only ever a run CONTAINING the extracted value (LP-707).
+    #:
+    #: The snippet is often a SYNTHESIS rather than a quotation — "Total Taxes
+    #: $3,663.31 + Total Pre-Tax $1,410.00 + Total Post-Tax $335.00" is three
+    #: figures from three places on the page joined by a person's arithmetic, and
+    #: it is nowhere on the page as one run. Measured on the typed corpus: of 72
+    #: fields the first two tiers cannot place, every one has its snippet's words
+    #: on the page somewhere, and none has the whole snippet anywhere.
+    PARTIAL = "partial"
     #: The quoted text was not on the page in any form; the VALUE itself was. The
-    #: weakest of the three — the model's claim about what it read could not be
+    #: weakest of the four — the model's claim about what it read could not be
     #: confirmed, only its answer located.
     VALUE = "value"
 
@@ -426,6 +436,49 @@ def _folded(
     )
 
 
+def _partial(
+    index: _PageIndex, page: pymupdf.Page, request: BoxRequest, page_number: int
+) -> tuple[FieldBox, ...]:
+    """The longest run of the snippet's words that the page HAS and that contains the value.
+
+    WHY THIS TIER EXISTS, and it is the finding that replaced LP-707's plan. The
+    ticket proposed rewriting the JSON contract in 119 extraction prompts so the
+    model would return neighbouring words as anchors instead of a retyped snippet.
+    Measuring first — which that ticket required — showed the rewrite is not needed:
+    of the 72 fields the earlier tiers cannot place on typed documents, **every one
+    already has its snippet's words on the page**. The snippet is not wrong; it is
+    a SYNTHESIS, spanning places the page keeps apart, and the matcher was
+    demanding one contiguous run of the whole of it.
+
+    ANCHORED ON THE VALUE, which is what keeps this from being a licence to match
+    anything. Taking the longest run that merely occurs recovers all 72 — and at a
+    median of half the snippet and a minimum of 3% of it, which is one word in
+    thirty and no evidence at all. Requiring the run to CONTAIN the extracted value
+    recovers 26, and each of those 26 is a box drawn over text that demonstrably
+    includes the figure being cited. The other 46 keep their honest no-box state.
+
+    Longest first, so the most context that can be confirmed is what gets boxed.
+    """
+    folded_value = fold(request.value)
+    if len(folded_value) < MIN_FOLDED_LENGTH:
+        return ()
+    words = request.snippet.split()
+    if not words:
+        return ()
+    for length in range(len(words), 0, -1):
+        for start in range(len(words) - length + 1):
+            needle = fold(" ".join(words[start : start + length]))
+            # The run has to be long enough to mean something AND has to contain the
+            # value — a run of the snippet that does not include the figure is
+            # context pointing at nothing in particular.
+            if len(needle) < MIN_FOLDED_LENGTH or folded_value not in needle:
+                continue
+            found = _folded(index, page, needle, page_number)
+            if found:
+                return found
+    return ()
+
+
 _EMPTY = BoxLookup(boxes=(), cited_page_exists=True, found_elsewhere=False)
 
 
@@ -457,6 +510,9 @@ def _tier_on_page(
 
     if tier is MatchKind.NORMALISED:
         return _folded(index, page, fold(request.snippet), page_number)
+
+    if tier is MatchKind.PARTIAL:
+        return _partial(index, page, request, page_number)
 
     # TIER 3, HELD TO A STRICTER RULE (LP-709). The quoted text could not be
     # confirmed anywhere, so all we have is the answer. A figure appearing twice —
@@ -492,7 +548,12 @@ def _lookup_in(
         cited_exists = 0 <= cited < doc.page_count
         order = ([cited] if cited_exists else []) + [n for n in range(doc.page_count) if n != cited]
 
-        for tier in (MatchKind.EXACT, MatchKind.NORMALISED, MatchKind.VALUE):
+        for tier in (
+            MatchKind.EXACT,
+            MatchKind.NORMALISED,
+            MatchKind.PARTIAL,
+            MatchKind.VALUE,
+        ):
             if tier is MatchKind.VALUE:
                 # THE AMBIGUITY RULE IS DOCUMENT-WIDE, because the search is. Held
                 # per page it could not see the case it exists for: the same figure
