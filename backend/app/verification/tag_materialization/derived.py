@@ -4195,6 +4195,13 @@ def _condo_questionnaire_present(
     # LP-647 §1 group A — the ENTRIES, not just their types. This built a set of type strings and
     # discarded the documents, so a "yes" could say the file carries a questionnaire and not WHICH,
     # and CO-1's finding rendered with nothing to open.
+    #
+    # DROPPING A `None` document_type here is inert ONLY because both sets below are CLOSED LITERALS
+    # ({"condo_questionnaire"}, {"hoa_certification"}), so `types & <set>` could never have selected
+    # None and the old set's None membership was dead. If either set ever becomes data-driven — a
+    # catalog lookup, a spec value — a None could enter it and these two versions diverge. The thing
+    # that would break is the SET's construction elsewhere, which is why this is a note here rather
+    # than a test.
     by_type: dict[str, list[str]] = {}
     for entry in snapshot.documents.entries:
         if entry.document_type is not None:
