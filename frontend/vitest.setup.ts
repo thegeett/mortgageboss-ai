@@ -36,3 +36,16 @@ if (typeof Element !== "undefined" && !Element.prototype.setPointerCapture) {
   Element.prototype.releasePointerCapture = () => {};
   Element.prototype.hasPointerCapture = () => false;
 }
+
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  // jsdom implements no `scrollIntoView`. Two components rely on it — the fields
+  // pane brings the selected ROW into view, and the box overlay brings the
+  // selected BOX into view — and a component that calls it would throw here
+  // rather than in a browser.
+  //
+  // A NO-OP, and deliberately not something a test can read. A test that wants to
+  // assert scrolling replaces it with its own spy (see
+  // `reviewer-fields-scroll.test.tsx`); a shared recorder here would let a test
+  // pass by observing the shim rather than the component.
+  Element.prototype.scrollIntoView = () => {};
+}

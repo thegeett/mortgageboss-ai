@@ -363,6 +363,7 @@ function Reviewer() {
         fields={
           <ReviewerFields
             documentId={documentId}
+            fields={fields}
             selected={field.selected}
             hovered={field.hovered}
             onSelect={field.select}

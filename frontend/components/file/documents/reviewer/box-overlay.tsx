@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import type { FieldBox } from "@/lib/api/field-boxes";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +54,25 @@ export function BoxOverlay({
   labelFor: (fieldKey: string) => string;
 }) {
   const onThisPage = boxes.filter((box) => box.page === page);
+
+  // BRING THE SELECTED BOX INTO VIEW. Selecting a field already jumped to the
+  // box's PAGE, and that was the whole of it — so on a zoomed page, where the pan
+  // region scrolls, selecting a field highlighted a rectangle somewhere outside
+  // the visible area and the screen appeared not to respond. The fields pane has
+  // had the mirror of this since LP-UI-030 (`selectedRow.scrollIntoView`); the
+  // document side never did.
+  //
+  // KEYED ON `selected`, NOT ON HOVER. Scrolling the page under a moving pointer
+  // would make the document unusable, and hover is how a processor skims.
+  //
+  // `block: "nearest"` so a box already on screen does not move: a processor who
+  // clicked a box must not have the page jump out from under the click.
+  const selectedBox = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!selected) return;
+    selectedBox.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected]);
+
   if (onThisPage.length === 0) return null;
 
   return (
@@ -65,6 +86,7 @@ export function BoxOverlay({
         return (
           <button
             key={`${box.field_key}-${box.x0}-${box.y0}`}
+            ref={isSelected ? selectedBox : undefined}
             type="button"
             aria-label={`Highlight for ${labelFor(box.field_key)}`}
             aria-pressed={isSelected}

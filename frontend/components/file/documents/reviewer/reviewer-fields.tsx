@@ -11,12 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDocumentDetail } from "@/lib/api/documents";
 import { tierInputFor } from "@/lib/confidence";
-import {
-  EMPTY_VALUE,
-  correctionsOf,
-  extractionFields,
-  sensitiveKeysOf,
-} from "@/lib/loan-files/documents";
+import { EMPTY_VALUE, type ExtractionField } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +29,7 @@ import { cn } from "@/lib/utils";
  */
 export function ReviewerFields({
   documentId,
+  fields,
   selected,
   hovered,
   onSelect,
@@ -53,6 +49,22 @@ export function ReviewerFields({
   busy,
 }: {
   documentId: string | null;
+  /**
+   * The rows to draw — DERIVED BY THE PAGE, not here (LP-703 review).
+   *
+   * This component used to call `extractionFields` itself while the page called
+   * it again for the keyboard, and the two lists drifted three times. Each time
+   * the symptom was a field a processor could SEE but not REACH, or reach but not
+   * see: a backend-sensitive field that rendered masked and arrived at the queue
+   * as a list, and an ADDED field drawn with no row key, no queue entry and no
+   * label, which `editableFieldKey` could never name — the one value a human is
+   * personally answerable for was the one row the keyboard could not touch.
+   *
+   * Both were fixed by making the ARGUMENTS impossible to differ (`sensitiveKeysOf`,
+   * `correctionsOf`). This removes the second call instead, which is the only
+   * version of the fix that survives the next argument someone adds.
+   */
+  fields: readonly ExtractionField[];
   selected?: string | null;
   hovered?: string | null;
   onSelect?: (fieldKey: string) => void;
@@ -114,19 +126,6 @@ export function ReviewerFields({
   }
 
   const scrutiny = data.field_scrutiny ?? {};
-  const sensitiveKeys = sensitiveKeysOf(scrutiny);
-  // WHAT THE PROCESSOR SUPPLIED, fed into the same pipeline the extracted values
-  // go through (LP-703). Before this the row rendered the model's value with a
-  // "Verified" mark beside it, so someone who had just typed 4,200 went on reading
-  // 15,000 — and once corrections started reaching the rule engine, that was the
-  // screen and the checks disagreeing about the same field.
-  const corrections = correctionsOf(scrutiny);
-
-  const fields = extractionFields(
-    data.current_extraction?.extracted_data ?? {},
-    sensitiveKeys,
-    corrections,
-  );
 
   return (
     // One provider for the pane rather than one per row — forty providers is forty
@@ -147,26 +146,44 @@ export function ReviewerFields({
         ) : (
           <ul className="space-y-2">
             {fields.map((field) => (
+              // THE WHOLE ROW IS THE CONTROL, and until now only the label was. The
+              // comment here has claimed "the whole row is the control rather than a
+              // small affordance inside it" since LP-UI-030, while the click handler
+              // sat on the label button alone — so clicking a value, a snippet or the
+              // space beside them did nothing, and a processor reading a row had to go
+              // back and hit the one word at its left edge to see the box.
+              //
+              // On the LI rather than a wrapping button, because the row already
+              // contains buttons (Undo, the verdict editor, a table disclosure) and
+              // nesting them inside a button is invalid. A click on one of those
+              // bubbles here and also selects, which is what someone acting on a row
+              // means anyway.
+              //
+              // The KEYBOARD path is the label button inside this row, which selects
+              // the same field — the a11y rule below cannot see it from here, and a key
+              // handler on the LI as well would fire a second time for every Enter
+              // pressed on that button. The claim is held by
+              // `reviewer-fields-scroll.test.tsx`, which asserts the label is a real
+              // button and that activating it selects.
+              // biome-ignore lint/a11y/useKeyWithClickEvents: the label button is the keyboard path — see above
               <li
                 key={field.key}
                 ref={field.key === selected ? selectedRow : undefined}
                 className={cn(
-                  "field-row rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
+                  "field-row cursor-pointer rounded-sm border-b border-border px-1 pb-2 last:border-b-0",
                   field.key === selected && "bg-primary/10",
                   field.key === hovered && field.key !== selected && "bg-muted",
                 )}
+                onClick={() => onSelect?.(field.key)}
+                onMouseEnter={() => onHover?.(field.key)}
+                onMouseLeave={() => onHover?.(null)}
               >
-                {/* FOCUS A FIELD -> THE VIEWER GOES TO ITS BOX. The ticket calls
-                  this the direction that actually saves time, so the whole row
-                  is the control rather than a small affordance inside it. */}
                 <button
                   type="button"
                   className="text-left text-xs text-muted-foreground"
                   onClick={() => onSelect?.(field.key)}
                   onFocus={() => onHover?.(field.key)}
                   onBlur={() => onHover?.(null)}
-                  onMouseEnter={() => onHover?.(field.key)}
-                  onMouseLeave={() => onHover?.(null)}
                 >
                   {field.label}
                 </button>

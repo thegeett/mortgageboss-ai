@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FieldBox } from "@/lib/api/field-boxes";
 import { BoxOverlay } from "./box-overlay";
@@ -116,5 +116,112 @@ describe("BoxOverlay", () => {
     // link back to the field has to work the same way there.
     fireEvent.focus(box);
     expect(onHover).toHaveBeenLastCalledWith("employer");
+  });
+});
+
+describe("the selected box is brought into view (LP-703 review follow-up)", () => {
+  /**
+   * Selecting a field already jumped to the box's PAGE, and that was the whole of
+   * it. On a zoomed page — where the pan region scrolls — selecting a field
+   * highlighted a rectangle somewhere outside the visible area and the screen
+   * appeared not to respond. The fields pane has had the mirror of this since
+   * LP-UI-030; the document side never did. Reported from the app.
+   */
+  // RECORDS WHICH ELEMENT SCROLLED, not merely that something did. The mock sits
+  // on `Element.prototype`, so it is the SAME function object on every element —
+  // asserting `element.scrollIntoView` was called proves nothing about which
+  // element. A first version did exactly that and survived a mutation putting the
+  // ref on every box.
+  const scrolls: { el: Element; arg: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolls.length = 0;
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element, arg) {
+      scrolls.push({ el: this, arg });
+    }) as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  const SCROLL_BOXES: FieldBox[] = [
+    { field_key: "gross_pay", page: 1, x0: 0.1, y0: 0.1, x1: 0.3, y1: 0.15 },
+    { field_key: "net_pay", page: 1, x0: 0.1, y0: 0.8, x1: 0.3, y1: 0.85 },
+  ];
+
+  function overlay(selected: string | null) {
+    return (
+      <BoxOverlay
+        boxes={SCROLL_BOXES}
+        page={1}
+        selected={selected}
+        hovered={null}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />
+    );
+  }
+
+  it("scrolls to the box when a field is selected", () => {
+    const { rerender } = render(overlay(null));
+    expect(scrolls).toHaveLength(0);
+    rerender(overlay("net_pay"));
+    expect(scrolls).toHaveLength(1);
+  });
+
+  it("uses `nearest`, so a box already on screen does not move", () => {
+    // A processor who clicked a box must not have the page jump out from under
+    // the click.
+    render(overlay("net_pay"));
+    expect(scrolls[0]?.arg).toMatchObject({ block: "nearest", inline: "nearest" });
+  });
+
+  it("does NOT scroll on hover", () => {
+    // Hover is how a processor skims. Scrolling the page under a moving pointer
+    // would make the document unusable.
+    //
+    // SOMETHING IS SELECTED THROUGHOUT, which is what makes this a test of the
+    // guard rather than of the ref. With nothing selected the ref is never
+    // attached and no scroll can happen for any reason — so a first version of
+    // this passed with the hover guard removed entirely.
+    const { rerender } = render(
+      <BoxOverlay
+        boxes={SCROLL_BOXES}
+        page={1}
+        selected="gross_pay"
+        hovered={null}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />,
+    );
+    expect(scrolls).toHaveLength(1); // the selection itself
+
+    rerender(
+      <BoxOverlay
+        boxes={SCROLL_BOXES}
+        page={1}
+        selected="gross_pay"
+        hovered="net_pay"
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />,
+    );
+    expect(scrolls, "moving the pointer must not scroll the page").toHaveLength(1);
+  });
+
+  it("scrolls to the SELECTED box, not merely to some box", () => {
+    // The control, and it has to compare ELEMENTS. `scrollIntoView` is one shared
+    // function on `Element.prototype`, so "was it called on this element" is
+    // unanswerable through the spy — only the recorded `this` distinguishes a ref
+    // on the selected box from a ref on every box.
+    const { rerender } = render(overlay(null));
+    rerender(overlay("gross_pay"));
+    const target = document.querySelector('[aria-label="Highlight for gross_pay"]');
+    expect(target).toBeTruthy();
+    expect(scrolls).toHaveLength(1);
+    expect(scrolls[0]?.el).toBe(target);
   });
 });
