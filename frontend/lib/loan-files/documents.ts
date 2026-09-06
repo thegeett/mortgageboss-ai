@@ -13,7 +13,6 @@ import type {
   DocumentStatus,
   QualificationReason,
   SourceLocation,
-  Transaction,
 } from "@/lib/types/document";
 
 /**
@@ -291,10 +290,34 @@ export const EXTRACTION_FIELD_LABELS: Record<string, string> = {
 
 const EXTRACTION_FIELD_ORDER = Object.keys(EXTRACTION_FIELD_LABELS);
 
+/**
+ * What shape an extracted field's value has (LP-702).
+ *
+ * The typed core is NOT flat. 67 of the document types in
+ * `app/ai/prompts/extraction/` declare at least one list-valued key — a pay
+ * stub's `earnings_lines`, an HOA statement's `payment_ledger`, a credit
+ * report's `tradelines` — and the display layer used to stringify them, which
+ * is how `[object Object],[object Object]` reached a processor's screen.
+ *
+ * The kind is DERIVED FROM THE VALUE, never from a list of key names. Two
+ * hardcoded key names is how that bug existed; a third would be the same bug
+ * with one more name in it.
+ */
+export type ExtractionFieldKind = "scalar" | "list" | "record";
+
 export interface ExtractionField {
   key: string;
   label: string;
+  /**
+   * One line for the field. A scalar's value; for a list or a record, how much
+   * is in it ("14 rows") — the detail is in `rows`.
+   */
   value: string;
+  kind: ExtractionFieldKind;
+  /** Column labels for a `list`/`record`. Empty for a scalar, and for a list of plain values. */
+  columns: string[];
+  /** One array of cells per row, aligned to `columns`. Empty for a scalar. */
+  rows: string[][];
   source: SourceLocation | null;
   /** The model's self-rating, or null when it gave none — which is the common case. */
   confidence: number | null;
@@ -339,6 +362,166 @@ function displayValue(key: string, raw: unknown): string {
   return String(raw);
 }
 
+// --- Shape-aware display (LP-702) ------------------------------------------- //
+
+/** The grouped catch-all, which has its own labelled renderer. */
+const CATCH_ALL_KEY = "additional_sections";
+
+/**
+ * Row keys that say WHERE a value was read rather than what it is.
+ *
+ * Every list contract in `app/ai/prompts/extraction/` carries `page` and
+ * `snippet` on each row. They are kept — dropping them would throw away the
+ * only provenance a nested row has — but they sort to the end, so the columns a
+ * processor came to read are the ones on the left.
+ */
+const PROVENANCE_KEYS = new Set(["page", "snippet", "source"]);
+
+const PROVENANCE_LABELS: Record<string, string> = {
+  page: "Page",
+  snippet: "Read from",
+  source: "Source",
+};
+
+/** "1 row" / "14 rows" — a count that reads as a sentence rather than a number. */
+function countLabel(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+function isPlainObject(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw);
+}
+
+/**
+ * A display string for any single value.
+ *
+ * THE ONE GUARANTEE: this never returns `[object Object]`. A shape with no
+ * honest one-line form says what it is instead of being handed to `String()`.
+ */
+function leafDisplay(raw: unknown): string {
+  if (raw === null || raw === undefined || raw === "") return EMPTY_VALUE;
+  if (Array.isArray(raw)) {
+    return raw.length === 0 ? EMPTY_VALUE : countLabel(raw.length, "item");
+  }
+  if (isPlainObject(raw)) return compactRecord(raw);
+  return String(raw);
+}
+
+/** How many of a nested object's own entries are worth putting on one line. */
+const INLINE_ENTRY_LIMIT = 3;
+
+/**
+ * A nested object flattened onto one line — `Charge: 450 · Paid: 0`.
+ *
+ * A count ("4 fields") would be honest and useless. Naming the first few
+ * entries is what lets a processor tell two rows apart without opening either.
+ */
+function compactRecord(raw: Record<string, unknown>): string {
+  const entries = Object.entries(raw).filter(
+    ([, value]) => value !== null && value !== undefined && value !== "",
+  );
+  if (entries.length === 0) return EMPTY_VALUE;
+  const shown = entries
+    .slice(0, INLINE_ENTRY_LIMIT)
+    .map(([key, value]) => `${labelFor(key)}: ${scalarOrCount(value)}`)
+    .join(" · ");
+  const rest = entries.length - INLINE_ENTRY_LIMIT;
+  return rest > 0 ? `${shown} · +${rest} more` : shown;
+}
+
+/** A leaf inside an already-flattened line: scalars as themselves, deeper shapes as a count. */
+function scalarOrCount(raw: unknown): string {
+  if (Array.isArray(raw)) return countLabel(raw.length, "item");
+  if (isPlainObject(raw)) return countLabel(Object.keys(raw).length, "field");
+  return String(raw);
+}
+
+/**
+ * One cell of a nested row.
+ *
+ * Masked through `catchAllDisplay`, not through the backend's identity list.
+ * Nested rows are keyed by names the MODEL chose — `tradelines[].account_number`
+ * is not a key `field_scrutiny` reports on — so the label+value test is the only
+ * one that reaches this path. It excludes money first, so a running balance is
+ * not hidden for having digits in it.
+ */
+function cellDisplay(key: string, raw: unknown): string {
+  if (MASKED_FIELD_KEYS.has(key)) return maskedDisplay(key, raw);
+  const text = leafDisplay(raw);
+  if (text === EMPTY_VALUE) return text;
+  return catchAllDisplay(labelFor(key), text);
+}
+
+function columnLabel(key: string): string {
+  return PROVENANCE_LABELS[key] ?? labelFor(key);
+}
+
+/**
+ * A list of objects as aligned columns and rows.
+ *
+ * Columns are the UNION of the items' keys, not the first item's: a ledger whose
+ * first row has no `paid` would otherwise drop that column for every row after
+ * it. Order is first-seen, with the provenance keys pushed to the end.
+ *
+ * A list whose items are not all objects (plain strings, or a mix) gets no
+ * columns and one cell per row — there is nothing to align.
+ */
+function tableFrom(items: readonly unknown[]): { columns: string[]; rows: string[][] } {
+  if (!items.every(isPlainObject)) {
+    return { columns: [], rows: items.map((item) => [leafDisplay(item)]) };
+  }
+  const keys: string[] = [];
+  for (const item of items) {
+    for (const key of Object.keys(item)) if (!keys.includes(key)) keys.push(key);
+  }
+  const ordered = [
+    ...keys.filter((k) => !PROVENANCE_KEYS.has(k)),
+    ...keys.filter((k) => PROVENANCE_KEYS.has(k)),
+  ];
+  return {
+    columns: ordered.map(columnLabel),
+    rows: items.map((item) => ordered.map((key) => cellDisplay(key, item[key]))),
+  };
+}
+
+/** The value half of an `ExtractionField` — everything except its key, label and provenance. */
+type FieldShape = Pick<ExtractionField, "value" | "kind" | "columns" | "rows">;
+
+const SCALAR: Pick<FieldShape, "kind" | "columns" | "rows"> = {
+  kind: "scalar",
+  columns: [],
+  rows: [],
+};
+
+/**
+ * What a field's value is, and how it should be shown.
+ *
+ * A field the backend calls an identifier is NEVER expanded, whatever shape it
+ * arrives in — a masked list would leak through its rows. It renders as bullets,
+ * which says something is there without saying what.
+ */
+function shapeOf(key: string, value: unknown, masked: boolean): FieldShape {
+  if (masked) {
+    if (Array.isArray(value) || isPlainObject(value)) return { ...SCALAR, value: "•••" };
+    return { ...SCALAR, value: maskedDisplay(key, value) };
+  }
+  if (Array.isArray(value)) {
+    // An empty list is not a table with no rows; it is a field with nothing in it.
+    if (value.length === 0) return { ...SCALAR, value: EMPTY_VALUE };
+    return { ...tableFrom(value), kind: "list", value: countLabel(value.length, "row") };
+  }
+  if (isPlainObject(value)) {
+    const entries = Object.keys(value);
+    if (entries.length === 0) return { ...SCALAR, value: EMPTY_VALUE };
+    return {
+      ...tableFrom([value]),
+      kind: "record",
+      value: countLabel(entries.length, "field"),
+    };
+  }
+  return { ...SCALAR, value: displayValue(key, value) };
+}
+
 /**
  * Pull `{value, source, confidence}` out of a typed-core entry, tolerating odd shapes.
  *
@@ -362,18 +545,22 @@ function readTypedField(entry: unknown): {
   return { value: entry ?? null, source: null, confidence: null }; // tolerant: a bare value
 }
 
-/**
- * The typed core as ordered, labelled rows (value + source). Works for any
- * document type — known fields (pay stub / W-2) appear first in a sensible order,
- * then any others. Sensitive fields (e.g. the W-2 SSN) are **masked** in display;
- * absent/null values render as `EMPTY_VALUE`.
- */
 function maskedDisplay(key: string, value: unknown): string {
   const raw = value == null ? null : String(value);
   // An SSN or ITIN gets the ***-**-#### format; other ids (account number) get last-4.
   return /ssn|itin/.test(key) ? maskSsn(raw) : maskLast4(raw);
 }
 
+/**
+ * The typed core as ordered, labelled rows. Works for any document type — known
+ * fields (pay stub / W-2) appear first in a sensible order, then any others.
+ * Sensitive fields (e.g. the W-2 SSN) are **masked** in display; absent/null
+ * values render as `EMPTY_VALUE`.
+ *
+ * Only the catch-all is held back, because it has its own labelled renderer.
+ * `transactions` used to be held back too and is not any more: it is a list like
+ * the other 77, and giving it a private renderer is what left the rest with none.
+ */
 export function extractionFields(
   data: Record<string, unknown>,
   /**
@@ -385,14 +572,10 @@ export function extractionFields(
 ): ExtractionField[] {
   const fields: ExtractionField[] = [];
   for (const key of Object.keys(data)) {
-    // The catch-all and the transactions list are rendered separately.
-    if (key === "additional_sections" || key === "transactions") continue;
+    if (key === CATCH_ALL_KEY) continue;
     const { value, source, confidence } = readTypedField(data[key]);
-    const display =
-      MASKED_FIELD_KEYS.has(key) || sensitiveKeys?.has(key)
-        ? maskedDisplay(key, value)
-        : displayValue(key, value);
-    fields.push({ key, label: labelFor(key), value: display, source, confidence });
+    const masked = MASKED_FIELD_KEYS.has(key) || Boolean(sensitiveKeys?.has(key));
+    fields.push({ key, label: labelFor(key), ...shapeOf(key, value, masked), source, confidence });
   }
   // Known typed-core fields first (in order), then any others.
   const orderIndex = (k: string) => {
@@ -400,13 +583,6 @@ export function extractionFields(
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
   return fields.sort((a, b) => orderIndex(a.key) - orderIndex(b.key));
-}
-
-/** The bank statement transactions (`transactions`), or [] if absent/odd. */
-export function extractionTransactions(data: Record<string, unknown>): Transaction[] {
-  const raw = data.transactions;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((t): t is Transaction => Boolean(t) && typeof t === "object");
 }
 
 /** The grouped catch-all (`additional_sections`), or [] if absent/odd. */

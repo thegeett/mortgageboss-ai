@@ -25,17 +25,25 @@ export function buildQueue(
   fields: readonly ExtractionField[],
   scrutiny: Record<string, FieldScrutiny>,
 ): QueueField[] {
-  return fields.map((field) => {
-    const entry = scrutiny[field.key];
-    return {
-      key: field.key,
-      // `tierInputFor` rather than a second copy of the mapping: the queue and the
-      // mark beside the row have to agree, and they did not when each built its
-      // own inputs.
-      tier: tierFor(tierInputFor(field.confidence, entry)),
-      verdict: entry?.verdict ?? null,
-    };
-  });
+  return (
+    fields
+      // SCALARS ONLY. The loop's three verbs — accept, correct, reject — all name
+      // one value, and a pay stub's `earnings_lines` has fourteen rows and no
+      // single value to name (LP-702). Stopping on one would open a text editor
+      // over a table and record a verdict on whichever cell the processor read.
+      .filter((field) => field.kind === "scalar")
+      .map((field) => {
+        const entry = scrutiny[field.key];
+        return {
+          key: field.key,
+          // `tierInputFor` rather than a second copy of the mapping: the queue and the
+          // mark beside the row have to agree, and they did not when each built its
+          // own inputs.
+          tier: tierFor(tierInputFor(field.confidence, entry)),
+          verdict: entry?.verdict ?? null,
+        };
+      })
+  );
 }
 
 /** Whether the loop should stop on this field. */

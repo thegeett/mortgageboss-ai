@@ -13,7 +13,29 @@ const BARE: FieldScrutiny = {
 };
 
 function field(key: string, confidence: number | null): ExtractionField {
-  return { key, label: key, value: "x", source: null, confidence };
+  return {
+    key,
+    label: key,
+    value: "x",
+    kind: "scalar",
+    columns: [],
+    rows: [],
+    source: null,
+    confidence,
+  };
+}
+
+function listField(key: string): ExtractionField {
+  return {
+    key,
+    label: key,
+    value: "3 rows",
+    kind: "list",
+    columns: ["Date"],
+    rows: [["a"], ["b"], ["c"]],
+    source: null,
+    confidence: null,
+  };
 }
 
 describe("buildQueue", () => {
@@ -140,5 +162,19 @@ describe("isFullyReviewed", () => {
     // Nothing to review is not the same as reviewed, and marking an empty
     // document complete would be a claim nobody made.
     expect(isFullyReviewed([])).toBe(false);
+  });
+});
+
+describe("list fields stay out of the loop (LP-702)", () => {
+  it("does not queue a list field", () => {
+    // It would be `unrated`, so the loop WOULD stop on it, and `e` would open a
+    // one-line text editor over a fourteen-row table.
+    const queue = buildQueue([field("gross_pay", 0.99), listField("earnings_lines")], {});
+    expect(queue.map((f) => f.key)).toEqual(["gross_pay"]);
+  });
+
+  it("does not let a list field hold a document back from fully reviewed", () => {
+    const queue = buildQueue([listField("earnings_lines"), field("gross_pay", 0.99)], {});
+    expect(isFullyReviewed(queue)).toBe(true);
   });
 });

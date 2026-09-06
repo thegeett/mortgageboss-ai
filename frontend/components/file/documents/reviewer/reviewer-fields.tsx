@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
+import { ExtractionTable } from "@/components/file/documents/extraction-table";
 import { ScrutinyMark } from "@/components/file/documents/reviewer/scrutiny-mark";
 import { VerdictEditor } from "@/components/file/documents/reviewer/verdict-editor";
 import { StatusToken } from "@/components/status-token";
@@ -142,9 +143,22 @@ export function ReviewerFields({
                   {field.label}
                 </button>
                 <span className="min-w-0">
-                  <span className="block break-words text-sm font-medium text-foreground">
-                    {field.value || EMPTY_VALUE}
-                  </span>
+                  {/* A list or a nested record — the count IS the value line, and
+                    it opens the rows. Without this the row showed
+                    `[object Object]` for every one of the 78 list keys the
+                    extraction contracts declare. The label is not repeated: the
+                    button above is already this field's name. */}
+                  {field.kind === "scalar" ? (
+                    <span className="block break-words text-sm font-medium text-foreground">
+                      {field.value || EMPTY_VALUE}
+                    </span>
+                  ) : (
+                    <ExtractionTable
+                      summary={field.value}
+                      columns={field.columns}
+                      rows={field.rows}
+                    />
+                  )}
                   {/* The text the value was read from. On a document with no page
                     image this is the only provenance a processor has, so it is
                     shown rather than hidden behind a hover. */}
@@ -156,12 +170,15 @@ export function ReviewerFields({
                   ) : null}
 
                   {/* A field with no value has nothing to check — a mark here
-                      would be telling a processor to go and read a dash. */}
-                  {field.value && field.value !== EMPTY_VALUE ? (
+                      would be telling a processor to go and read a dash. A list
+                      has no single value to accept or correct either, so it
+                      carries no mark and opens no editor (LP-702); editing rows
+                      is LP-703's subject. */}
+                  {field.kind === "scalar" && field.value && field.value !== EMPTY_VALUE ? (
                     <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
                   ) : null}
 
-                  {editing === field.key ? (
+                  {editing === field.key && field.kind === "scalar" ? (
                     <VerdictEditor
                       fieldLabel={field.label}
                       currentValue={field.value}
