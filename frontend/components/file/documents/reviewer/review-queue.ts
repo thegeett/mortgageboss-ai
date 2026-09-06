@@ -118,3 +118,25 @@ export function stepField(
 export function isFullyReviewed(queue: readonly QueueField[]): boolean {
   return queue.length > 0 && queue.every((field) => !needsAttention(field));
 }
+
+/**
+ * The selected field, when a verdict can actually be recorded against it.
+ *
+ * A NAMED RULE RATHER THAN AN INLINE CHECK, because the rule is the part that was
+ * wrong and a rule inside a page component cannot be tested — the review page has
+ * no test and would need the whole data layer to get one.
+ *
+ * LP-702 made list fields render as tables: out of the queue, no `ScrutinyMark`,
+ * and `VerdictEditor` gated on `kind === "scalar"`. The keyboard was not told.
+ * `Enter` wrote an "accepted" verdict against a fourteen-row table nobody could
+ * review, and `E`/`R` set `editing` to a key whose editor never mounts — while
+ * `shortcutsEnabled` had already switched the keyboard off, so nothing could clear
+ * it and the whole loop died until a page reload.
+ */
+export function editableFieldKey(
+  fields: readonly ExtractionField[],
+  selected: string | null,
+): string | null {
+  if (!selected) return null;
+  return fields.find((f) => f.key === selected)?.kind === "scalar" ? selected : null;
+}

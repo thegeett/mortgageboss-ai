@@ -4,6 +4,7 @@ import { BoxOverlay } from "@/components/file/documents/reviewer/box-overlay";
 import { PageCanvas } from "@/components/file/documents/reviewer/page-canvas";
 import {
   buildQueue,
+  editableFieldKey,
   isFullyReviewed,
   nextAttention,
   stepField,
@@ -27,7 +28,7 @@ import { useFieldBoxes } from "@/lib/api/field-boxes";
 import { useRecordFieldReview } from "@/lib/api/field-reviews";
 import { usePageImage } from "@/lib/api/page-image";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
-import { currentDocuments, extractionFields } from "@/lib/loan-files/documents";
+import { currentDocuments, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -90,7 +91,14 @@ function Reviewer() {
   // row order all describe the same list, and computing each from its own call
   // is how they get to disagree about what "the next row" means.
   const fields = useMemo(
-    () => extractionFields(detail?.current_extraction?.extracted_data ?? {}),
+    // THE SAME `sensitiveKeys` THE PANE USES. Without them a backend-sensitive
+    // list is a masked scalar on screen and a list to the queue, so it is shown
+    // as reviewable and can never be reached.
+    () =>
+      extractionFields(
+        detail?.current_extraction?.extracted_data ?? {},
+        sensitiveKeysOf(detail?.field_scrutiny),
+      ),
     [detail],
   );
 
@@ -150,13 +158,42 @@ function Reviewer() {
     [rowKeys, field],
   );
 
+  // The rule lives in `review-queue.ts`, where it can be tested — this page has no
+  // test, and the rule is the part that was wrong.
+  const editableSelection = useCallback(
+    () => editableFieldKey(fields, field.selected),
+    [fields, field.selected],
+  );
+
   // ACCEPT WITHOUT A SELECTED FIELD DOES NOTHING. Enter is one keystroke from
   // every other action, and "accept whichever field is first" would silently
   // vouch for a value the processor never looked at.
+  //
+  // AND NOT AGAINST A LIST. Enter on a selected `earnings_lines` used to write an
+  // "accepted" verdict for a fourteen-row table the processor cannot review, with
+  // nothing on screen changing to say it had happened — a human confirmation
+  // recorded against something no human confirmed.
   const accept = useCallback(() => {
-    if (!field.selected) return;
-    recordReview.mutate({ fieldKey: field.selected, verdict: "accepted" });
-  }, [field.selected, recordReview]);
+    const key = editableSelection();
+    if (!key) return;
+    recordReview.mutate({ fieldKey: key, verdict: "accepted" });
+  }, [editableSelection, recordReview]);
+
+  /**
+   * Open the verdict editor, and only where one can open.
+   *
+   * THE LOCKOUT THIS PREVENTS. `setEditing(<a list field>)` mounted nothing,
+   * because the editor is gated on `kind === "scalar"` — while
+   * `shortcutsEnabled({helpOpen, editing})` had already switched the whole
+   * keyboard off. The three callbacks that clear `editing` are props of the
+   * editor that never mounted, and `goToDocument`, which also clears it, is
+   * itself keyboard-driven. So `E` or `R` on any list field killed the reviewer's
+   * keyboard — arrows, Enter, even `?` — until the page was reloaded.
+   */
+  const openEditor = useCallback(() => {
+    const key = editableSelection();
+    if (key) setEditing(key);
+  }, [editableSelection]);
 
   useReviewKeys(
     {
@@ -169,10 +206,10 @@ function Reviewer() {
         accept();
         move(1);
       },
-      edit: () => field.selected && setEditing(field.selected),
+      edit: openEditor,
       // A rejection needs a reason, so `R` opens the editor on the reject tab
       // rather than recording a bare verdict the API would refuse anyway.
-      reject: () => field.selected && setEditing(field.selected),
+      reject: openEditor,
       toggleOverlay: () => setShowBoxes((on) => !on),
       zoomIn: () => setZoom(stepIn),
       zoomOut: () => setZoom(stepOut),
@@ -205,6 +242,12 @@ function Reviewer() {
                     setSelected(doc.id);
                     setPage(1);
                     field.select(null);
+                    // The SAME lockout by the other route. `editing` holds a field
+                    // KEY; the new document need not have that key, so the editor
+                    // gated on it never mounts while `shortcutsEnabled` stays
+                    // false. `goToDocument` already clears it — the mouse path
+                    // has to as well, or the keyboard dies on a click.
+                    setEditing(null);
                   }}
                   aria-current={doc.id === documentId ? "true" : undefined}
                   className={cn(

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ColumnSpec } from "@/lib/loan-files/documents";
 import { ChevronRight } from "lucide-react";
 
 import { EMPTY_VALUE } from "@/lib/loan-files/documents";
@@ -37,7 +38,7 @@ export function ExtractionTable({
   /** The count line — "14 rows" — the disclosure's own summary. */
   summary: string;
   /** Column headers; empty when the rows are plain values with nothing to align. */
-  columns: readonly string[];
+  columns: readonly ColumnSpec[];
   rows: readonly (readonly string[])[];
   className?: string;
 }) {
@@ -92,14 +93,17 @@ export function ExtractionTable({
               <tr>
                 {columns.map((column, i) => (
                   <th
-                    key={column}
+                    // Keyed on the ROW KEY, not the label: the label is humanized and
+                    // therefore not injective (`{amount, Amount}` both read "Amount"),
+                    // which repeated a React key inside one row.
+                    key={column.key}
                     scope="col"
                     className={cn(
                       "whitespace-nowrap px-2 py-1.5 font-medium",
                       numeric[i] ? "text-right" : "text-left",
                     )}
                   >
-                    {column}
+                    {column.label}
                   </th>
                 ))}
               </tr>
@@ -113,7 +117,7 @@ export function ExtractionTable({
                     const cell = row[c] ?? EMPTY_VALUE;
                     return (
                       <td
-                        key={column}
+                        key={columns[c]?.key ?? c}
                         // Long snippets truncate with the full text on hover;
                         // everything else is short enough to show whole.
                         title={cell.length > TRUNCATE_OVER ? cell : undefined}

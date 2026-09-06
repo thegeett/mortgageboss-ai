@@ -4,6 +4,7 @@ import type { ExtractionField } from "@/lib/loan-files/documents";
 import type { FieldScrutiny } from "@/lib/types/document";
 import {
   buildQueue,
+  editableFieldKey,
   isFullyReviewed,
   needsAttention,
   nextAttention,
@@ -37,7 +38,7 @@ function listField(key: string): ExtractionField {
     label: key,
     value: "3 rows",
     kind: "list",
-    columns: ["Date"],
+    columns: [{ key: "date", label: "Date" }],
     rows: [["a"], ["b"], ["c"]],
     source: null,
     confidence: null,
@@ -217,5 +218,37 @@ describe("stepField — the plain motion the arrows use (LP-701)", () => {
   it("has nothing to move to on an empty list", () => {
     expect(stepField([], null, 1)).toBeNull();
     expect(stepField([], "gross_pay", 1)).toBeNull();
+  });
+});
+
+describe("editableFieldKey (LP-702 review)", () => {
+  /**
+   * The keyboard's two verdict paths acted on whatever was selected, while the
+   * mark, the queue and the editor had all been gated on `kind === "scalar"`.
+   *
+   * `E`/`R` on a list field set `editing` to a key whose editor never mounts —
+   * and `shortcutsEnabled({helpOpen, editing})` had already switched the keyboard
+   * off, so no key could clear it, the three callbacks that would are props of the
+   * editor that never mounted, and `goToDocument` is itself keyboard-driven. The
+   * reviewer's whole keyboard loop, `?` included, was dead until a page reload.
+   */
+  const scalar = (key: string) => ({ ...listField(key), kind: "scalar" as const });
+
+  it("returns a selected SCALAR, which is what has an editor", () => {
+    expect(editableFieldKey([scalar("gross_pay")], "gross_pay")).toBe("gross_pay");
+  });
+
+  it("refuses a selected LIST — no editor mounts, and nothing could clear it", () => {
+    expect(editableFieldKey([listField("earnings_lines")], "earnings_lines")).toBeNull();
+  });
+
+  it("refuses when nothing is selected", () => {
+    expect(editableFieldKey([scalar("gross_pay")], null)).toBeNull();
+  });
+
+  it("refuses a key that is not in this document", () => {
+    // A `selected` left over from the previous document: it names no field here,
+    // so there is nothing to record a verdict against.
+    expect(editableFieldKey([scalar("gross_pay")], "net_pay")).toBeNull();
   });
 });

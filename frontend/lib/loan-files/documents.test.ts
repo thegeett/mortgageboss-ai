@@ -268,7 +268,13 @@ describe("list-valued fields (LP-702)", () => {
     // `charge` is on the first row only and `paid` on the second. Reading columns
     // off the first item drops `paid` — and with it the payment half of a ledger.
     const [field] = extractionFields(LEDGER);
-    expect(field?.columns).toEqual(["Date", "Description", "Charge", "Paid", "Page"]);
+    expect(field?.columns.map((c) => c.label)).toEqual([
+      "Date",
+      "Description",
+      "Charge",
+      "Paid",
+      "Page",
+    ]);
     expect(field?.rows[0]).toEqual(["2026-01-05", "Monthly dues", "450.00", "—", "2"]);
     expect(field?.rows[1]).toEqual(["2026-01-20", "Payment received", "—", "450.00", "2"]);
   });
@@ -277,7 +283,7 @@ describe("list-valued fields (LP-702)", () => {
     const [field] = extractionFields({
       earnings_lines: [{ page: 1, snippet: "Regular 40.00", earning_type: "Regular" }],
     });
-    expect(field?.columns).toEqual(["Earning type", "Page", "Read from"]);
+    expect(field?.columns.map((c) => c.label)).toEqual(["Earning type", "Page", "Read from"]);
   });
 
   it("renders a list of plain values as rows with no columns", () => {

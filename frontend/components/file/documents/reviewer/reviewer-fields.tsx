@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDocumentDetail } from "@/lib/api/documents";
 import { tierInputFor } from "@/lib/confidence";
-import { EMPTY_VALUE, extractionFields } from "@/lib/loan-files/documents";
+import { EMPTY_VALUE, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -93,11 +93,7 @@ export function ReviewerFields({
   }
 
   const scrutiny = data.field_scrutiny ?? {};
-  const sensitiveKeys = new Set(
-    Object.entries(scrutiny)
-      .filter(([, s]) => s.sensitive)
-      .map(([key]) => key),
-  );
+  const sensitiveKeys = sensitiveKeysOf(scrutiny);
   const fields = extractionFields(data.current_extraction?.extracted_data ?? {}, sensitiveKeys);
 
   return (

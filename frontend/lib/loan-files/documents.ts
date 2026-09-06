@@ -315,7 +315,13 @@ export interface ExtractionField {
   value: string;
   kind: ExtractionFieldKind;
   /** Column labels for a `list`/`record`. Empty for a scalar, and for a list of plain values. */
-  columns: string[];
+  /**
+   * The table's columns. Carries the ROW KEY beside the label because the label is
+   * a lossy projection — `columnLabel` humanizes, and `{amount, Amount}` both
+   * render "Amount", which repeated as a React key inside one row. The key is an
+   * object key and is unique by construction.
+   */
+  columns: ColumnSpec[];
   /** One array of cells per row, aligned to `columns`. Empty for a scalar. */
   rows: string[][];
   source: SourceLocation | null;
@@ -423,7 +429,14 @@ function compactRecord(raw: Record<string, unknown>): string {
   if (entries.length === 0) return EMPTY_VALUE;
   const shown = entries
     .slice(0, INLINE_ENTRY_LIMIT)
-    .map(([key, value]) => `${labelFor(key)}: ${scalarOrCount(value)}`)
+    // MASKED PER ENTRY. Joining first and masking the result asks the identifier
+    // test about a line like `Number: 123456789 · Balance: 450.00` — where the
+    // money exclusion fires on the SIBLING's cents and clears the whole cell,
+    // identifier included. Each entry is judged against its own label and value.
+    .map(([key, value]) => {
+      const label = labelFor(key);
+      return `${label}: ${catchAllDisplay(label, scalarOrCount(value))}`;
+    })
     .join(" · ");
   const rest = entries.length - INLINE_ENTRY_LIMIT;
   return rest > 0 ? `${shown} · +${rest} more` : shown;
@@ -449,7 +462,27 @@ function cellDisplay(key: string, raw: unknown): string {
   if (MASKED_FIELD_KEYS.has(key)) return maskedDisplay(key, raw);
   const text = leafDisplay(raw);
   if (text === EMPTY_VALUE) return text;
+  // A PROVENANCE CELL IS A SENTENCE, not a value. `snippet` is the quoted line a
+  // row was read from, and it is kept precisely because it is the only provenance
+  // a nested row has — but the whole-cell mask replaced it outright, so a snippet
+  // reading "CHASE CARD 4147202512345678 Balance 1,203" became "••••1203": the
+  // provenance gone, and the last-4 taken from the balance rather than the card.
+  // The identifier inside it is redacted in place instead.
+  if (PROVENANCE_KEYS.has(key)) return redactIdentifiers(text);
   return catchAllDisplay(labelFor(key), text);
+}
+
+/**
+ * Mask identifier-shaped runs WITHIN a string, leaving the words around them.
+ *
+ * For provenance text only. Everywhere else a value either is an identifier or is
+ * not, and the whole cell is the right unit; a snippet is prose that may happen to
+ * contain one.
+ */
+function redactIdentifiers(text: string): string {
+  return text
+    .replace(/\b\d{3}[- ]\d{2}[- ]\d{4}\b/g, (m) => `•••-••-${m.slice(-4)}`)
+    .replace(/\b\d{9,}\b/g, (m) => `••••${m.slice(-4)}`);
 }
 
 function columnLabel(key: string): string {
@@ -466,9 +499,17 @@ function columnLabel(key: string): string {
  * A list whose items are not all objects (plain strings, or a mix) gets no
  * columns and one cell per row — there is nothing to align.
  */
-function tableFrom(items: readonly unknown[]): { columns: string[]; rows: string[][] } {
+function tableFrom(
+  parentKey: string,
+  items: readonly unknown[],
+): { columns: ColumnSpec[]; rows: string[][] } {
   if (!items.every(isPlainObject)) {
-    return { columns: [], rows: items.map((item) => [leafDisplay(item)]) };
+    // THROUGH THE MASK, like every other cell. This branch called `leafDisplay`
+    // directly, so a list of bare strings was the one path that skipped the
+    // identifier test entirely: `borrower_identifiers: ["123-45-6789"]` rendered
+    // in the clear, while the same value inside an object row was masked. There
+    // is no row key here, so the LIST's own key names the column.
+    return { columns: [], rows: items.map((item) => [cellDisplay(parentKey, item)]) };
   }
   const keys: string[] = [];
   for (const item of items) {
@@ -479,9 +520,15 @@ function tableFrom(items: readonly unknown[]): { columns: string[]; rows: string
     ...keys.filter((k) => PROVENANCE_KEYS.has(k)),
   ];
   return {
-    columns: ordered.map(columnLabel),
+    columns: ordered.map((key) => ({ key, label: columnLabel(key) })),
     rows: items.map((item) => ordered.map((key) => cellDisplay(key, item[key]))),
   };
+}
+
+/** One column of a nested table: the row key it reads, and the words shown for it. */
+export interface ColumnSpec {
+  key: string;
+  label: string;
 }
 
 /** The value half of an `ExtractionField` — everything except its key, label and provenance. */
@@ -508,13 +555,17 @@ function shapeOf(key: string, value: unknown, masked: boolean): FieldShape {
   if (Array.isArray(value)) {
     // An empty list is not a table with no rows; it is a field with nothing in it.
     if (value.length === 0) return { ...SCALAR, value: EMPTY_VALUE };
-    return { ...tableFrom(value), kind: "list", value: countLabel(value.length, "row") };
+    return {
+      ...tableFrom(key, value),
+      kind: "list",
+      value: countLabel(value.length, "row"),
+    };
   }
   if (isPlainObject(value)) {
     const entries = Object.keys(value);
     if (entries.length === 0) return { ...SCALAR, value: EMPTY_VALUE };
     return {
-      ...tableFrom([value]),
+      ...tableFrom(key, [value]),
       kind: "record",
       value: countLabel(entries.length, "field"),
     };
@@ -604,6 +655,26 @@ export function formatSource(source: SourceLocation | null): string | null {
   return parts.length > 0 ? parts.join(": ") : null;
 }
 
+/**
+ * The keys the backend reports as identifiers, as a set.
+ *
+ * ONE DEFINITION, because two callers need it and they disagreed. The reviewer's
+ * field pane computed it and passed it in; the review PAGE called
+ * `extractionFields` without it, to feed the queue. So a backend-sensitive field
+ * arriving as a list was a masked SCALAR in the pane — mark, editor and all — and
+ * a LIST to the queue, which drops lists: it could never be stopped on, and
+ * `isFullyReviewed` ignored it.
+ */
+export function sensitiveKeysOf(
+  scrutiny: Record<string, { sensitive?: boolean }> | undefined,
+): Set<string> {
+  return new Set(
+    Object.entries(scrutiny ?? {})
+      .filter(([, s]) => s?.sensitive)
+      .map(([key]) => key),
+  );
+}
+
 /** Sensitive typed-core keys masked in display (W-2 SSN LP-39b; bank acct LP-39c). */
 export const MASKED_FIELD_KEYS = new Set(["employee_ssn", "account_number_masked"]);
 
@@ -627,11 +698,42 @@ export const MASKED_FIELD_KEYS = new Set(["employee_ssn", "account_number_masked
  * - Value alone misses short identifiers. An eight-digit brokerage account number is
  *   not distinguishable from any other number without its label.
  *
- * So: money and rates are excluded first, then a bare 9+ digit run or an SSN shape is
- * an identifier whatever the label claims, and below that the label has to say so.
+ * So: money and rates are excluded first, then an SSN SHAPE is an identifier whatever
+ * the label claims, then a label naming a WORKING identifier wins over a bare digit
+ * run, and below that the label has to say so.
  */
 const IDENTIFIER_LABEL =
   /\b(ssns?|social security (number|no)|tax(payer)? id|tins?|eins?|account (number|no)|routing|passport|licen[sc]e number)\b/i;
+
+/**
+ * A WORKING identifier — one a processor reads in order to do the job.
+ *
+ * MIRRORS THE BACKEND'S `pii_readable` (`critical_fields.yaml`), which already lists
+ * loan_number, policy_number, case_number, permit_number and twenty more as
+ * classified-PII-but-shown: they are kept out of LLM snapshots and analytics views
+ * and put on the processor's own screen, because reading them IS the job.
+ *
+ * Without this, the two masking paths answered differently about the same field. A
+ * typed-core `loan_number` is shown — the backend says so. The same loan number
+ * inside a nested row was masked to `••••6789` by the bare 9+ digit rule, since
+ * `field_scrutiny` does not report on row keys and nothing else spoke for it. Worse,
+ * the answer depended on the LENDER: an 8-digit loan number rendered, a 10-digit one
+ * did not, which is not a distinction about sensitivity at all.
+ *
+ * It is deliberately checked AFTER the SSN shape. A dashed `123-45-6789` is an SSN
+ * whoever labelled the column; this only decides bare digit runs, where the label is
+ * the sole evidence either way.
+ *
+ * EVERY ALTERNATIVE HERE IS A STEM FROM THAT BACKEND LIST, and nothing else. A first
+ * draft added `check`, `claim`, `item`, `reference` and `confirmation` on the reasoning
+ * that they "look like" working identifiers — inventing policy the backend had not
+ * agreed. One of them was a live leak: `claim_number_masked` IS masked there, so
+ * "Claim number" would have been un-masked by a rule meant only to stop over-masking.
+ * An allow-list that makes things LESS hidden is green by construction; it grows only
+ * when `pii_readable` does.
+ */
+const READABLE_IDENTIFIER_LABEL =
+  /\b(loan|invoice|receipt|policy|control|document|project|job|employee|certificate|registration|parcel|apn|case|permit|quote|commitment|form|amendment|submission)\s*(number|no|id)\b|\bphone\b/i;
 
 export function catchAllIsSensitive(label: string, value: string): boolean {
   // A status word ("Match", "No alert") carries no identifier to hide, and masking it
@@ -640,7 +742,11 @@ export function catchAllIsSensitive(label: string, value: string): boolean {
   // Money and rates. A decimal fraction or a currency/percent mark says this is an
   // amount — no identifier is written with cents.
   if (/[$%]|\d\.\d/.test(value)) return false;
-  if (/\d{3}[- ]\d{2}[- ]\d{4}|\b\d{9,}\b/.test(value)) return true;
+  // An SSN SHAPE is an SSN whatever the column is called.
+  if (/\d{3}[- ]\d{2}[- ]\d{4}/.test(value)) return true;
+  // A named working identifier is READ, not hidden — however many digits it runs to.
+  if (READABLE_IDENTIFIER_LABEL.test(label)) return false;
+  if (/\b\d{9,}\b/.test(value)) return true;
   return IDENTIFIER_LABEL.test(label);
 }
 
