@@ -42,8 +42,9 @@ import type {
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
-import { phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
+import { lastRunLabel, phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGGRESSION_META, AggressionDial } from "./aggression-dial";
@@ -56,6 +57,18 @@ interface Consequence {
 
 /** A run that did not produce findings — either the trigger request never landed (`request`) or the
  * run reached the worker and failed there (`run`, carrying the run's own reason). */
+/** The house relative-time shape (see `file-header.tsx`): never throw on a bad date, show "—".
+ *
+ * Passed INTO `lastRunLabel` rather than called inside it, so the label is a pure function of its
+ * inputs — testable without freezing the clock or stubbing date-fns. */
+function fmtRelative(iso: string): string {
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true });
+  } catch {
+    return "—";
+  }
+}
+
 type FailedRun = { kind: "request" } | { kind: "run"; detail: string | null };
 
 /** Count of findings shown (in-scope for display) at a given level's cutoff. */
@@ -259,14 +272,31 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
               exactly when you need it (the default button caches against the last COMPLETED run, so a failed
               or stale run leaves no other way to force). Gating this on status === "completed" hid the hatch
               after a failure — the bug this restores. The cache being blind to engine changes is LP-377. */}
+          {/* WHEN IT LAST RAN, AND WHAT IT COST. Beside the escape hatch because they answer the
+              same question in sequence: is this stale enough to re-run, and what does re-running
+              cost me? The duration is the half a processor has no other way to find — a pass takes
+              anywhere from one minute to fifteen depending on the file, and pressing Run with no
+              idea which is why the button felt like a gamble.
+
+              Same gate as the hatch (`latest_run != null && !running`), and deliberately so: while
+              a pass is in flight `latest_run` IS that pass, so a "last run" line there would be
+              describing the run being watched, with the phase and estimate already two lines up. */}
           {data?.latest_run != null && !running && (
-            <button
-              type="button"
-              onClick={() => run.mutate(true)}
-              className="text-[11px] text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
-            >
-              Re-run anyway
-            </button>
+            <div className="flex flex-col items-end gap-0.5">
+              {(() => {
+                const label = lastRunLabel(data.latest_run, fmtRelative);
+                return label ? (
+                  <span className="text-[11px] tabular-nums text-gray-500">{label}</span>
+                ) : null;
+              })()}
+              <button
+                type="button"
+                onClick={() => run.mutate(true)}
+                className="text-[11px] text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
+              >
+                Re-run anyway
+              </button>
+            </div>
           )}
         </div>
       </CardHeader>

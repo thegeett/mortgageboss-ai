@@ -545,3 +545,37 @@ describe("VerificationPanel", () => {
     });
   });
 });
+
+describe("the last-run line", () => {
+  it("tells a processor when the last pass ran and what it cost", () => {
+    // The panel's own report: pressing Run was a gamble because nothing on screen said whether a
+    // pass takes one minute or fifteen on THIS file. The duration is the half with no other source.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "completed",
+          started_at: "2026-09-04T00:08:47Z",
+          completed_at: "2026-09-04T00:23:25Z",
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/Last run .*took 14m 38s/)).toBeDefined();
+  });
+
+  it("is absent while a pass is running, where it would describe the run being watched", () => {
+    // `latest_run` IS the running pass, and its phase and estimate are already on screen.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: { ...baseRun(), status: "running", completed_at: null },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.queryByText(/Last run/)).toBeNull();
+  });
+});
