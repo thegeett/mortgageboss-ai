@@ -126,9 +126,11 @@ class MatchKind(StrEnum):
     #: RANKED ABOVE `VALUE` ONLY BECAUSE IT CARRIES CONTEXT, so a run that turns
     #: out to be the value and nothing else is not this tier — see `_partial`,
     #: where dropping that rule was measured to hand 38 ambiguous figures a box.
-    #: It fires zero times on the stored corpus, and is kept and labelled honestly
-    #: for the same reason `NORMALISED` is: it closes a failure mode the tests
-    #: demonstrate and this corpus happens not to contain.
+    #: It fires TWICE on the stored corpus, both on scanned pages, and never on a
+    #: typed one — measured across all 79 documents, not the 69 typed ones the
+    #: review's first pass looked at. So it is nearly but not entirely inert, and
+    #: is kept on the same footing as `NORMALISED`: a failure mode the tests
+    #: demonstrate and real documents almost never present.
     PARTIAL = "partial"
     #: The quoted text was not on the page in any form; the VALUE itself was. The
     #: weakest of the four — the model's claim about what it read could not be
