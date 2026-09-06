@@ -254,8 +254,20 @@ def test_recipe_employment_gap_pairs_consecutive_not_spanning_records() -> None:
             "c": {"income.employment_start": _parsed("2023-02-01")},
         },
     )
-    value, _ = _income_max_employment_gap(snap, "loan", None)
-    assert value == "31"  # the consecutive gap, not the B-spanning 1127-day cartesian pair
+    produced = _income_max_employment_gap(snap, "loan", None)
+    assert produced[0] == "31"  # the consecutive gap, not the B-spanning 1127-day cartesian pair
+    # LP-647 §1 group A — and it names the two records the gap SPANS: the job that ended and the one
+    # that started after it. Not every employment record the borrower has, which is what the finding
+    # is not about, and not one of the pair, which would name half a comparison.
+    # LP-647 §1 group A — and it names the two records the gap SPANS: the job that ended and the one
+    # that started after it. Not every employment record the borrower has, which is not what the
+    # sentence is about, and not one of the pair, which would name half a comparison.
+    #
+    # THIS FIXTURE IS A TIE and that is worth stating rather than hiding: a→b and b→c are BOTH 31
+    # days. The message says "the largest gap is 31 day(s)", singular, so one pair is named — the
+    # first in iteration order, which is deterministic rather than arbitrary. Naming all four
+    # documents for a single-number claim would be the over-naming this section is written against.
+    assert produced[2] == ("a", "b"), "the ended record then the resumed one, in that order"
 
 
 def test_recipe_days_since_pay_abstains_on_a_future_pay_date() -> None:

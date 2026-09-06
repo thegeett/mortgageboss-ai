@@ -509,7 +509,11 @@ def _income_max_employment_gap(
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
     # (starts, ends) keyed by the document's borrower attribution — records only pair WITHIN a group,
     # so a gap is never spanned across two different borrowers' timelines.
-    groups: dict[object, tuple[list[date], list[date]]] = {}
+    # LP-647 §1 group A — each date carries the RECORD it was read from, so the gap can name the two
+    # documents it spans: the job that ended and the job that started after it. Those are the two a
+    # processor opens to check the claim; the borrower's other records are not what the sentence is
+    # about.
+    groups: dict[object, tuple[list[tuple[date, str]], list[tuple[date, str]]]] = {}
     for entry in snapshot.documents.entries:
         tags = snapshot.tags.by_subject.get(entry.content_id)
         if not tags:
@@ -529,22 +533,24 @@ def _income_max_employment_gap(
                 continue
             parsed = coerce_date(str(tag.value))
             if parsed is not None:
-                bucket.append(parsed)
+                bucket.append((parsed, entry.content_id))
     # Each end pairs with the NEXT start in its OWN group (the earliest start after it), NOT every later
     # start — else the max would span intervening jobs (end of job A → start of job C) and overstate a
     # gap that job B actually fills. The largest of those consecutive per-borrower gaps is the answer.
-    gaps: list[int] = []
+    gaps: list[tuple[int, str, str]] = []  # (days, ended-record, next-started-record)
     for starts, ends in groups.values():
-        for end in ends:
-            later_starts = [s for s in starts if s > end]
-            if later_starts:
-                gaps.append((min(later_starts) - end).days)
+        for end_date, end_cid in ends:
+            later = [(s, cid) for s, cid in starts if s > end_date]
+            if later:
+                next_start, start_cid = min(later, key=lambda pair: pair[0])
+                gaps.append(((next_start - end_date).days, end_cid, start_cid))
     if not gaps:
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
-    max_gap = max(gaps)
+    max_gap, ended_at, resumed_at = max(gaps, key=lambda g: g[0])
     return (
         str(max_gap),
         f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)",
+        tuple(dict.fromkeys((ended_at, resumed_at))),  # one record may state both
     )
 
 
@@ -3178,19 +3184,28 @@ def _property_address_match(
             "no documents in the file — no purchase contract to read a property address from",
         )
     contract_addrs: dict[str, str] = {}  # normalized -> an original rendering (for the reason)
+    # LP-647 §1 group A — the CONTRACT each address came from. Every branch below is a claim about a
+    # purchase contract, so every branch has a document a processor would open to check it.
+    from_contract: dict[str, str] = {}
     for entry in snapshot.documents.entries:
         if entry.document_type != "purchase_agreement":
             continue
         field = entry.fields.get("property_address")
         if isinstance(field, Field) and field.is_present and str(field.value).strip():
             raw = str(field.value).strip()
-            contract_addrs[_norm_address(raw)] = raw
+            norm = _norm_address(raw)
+            contract_addrs[norm] = raw
+            from_contract.setdefault(norm, entry.content_id)
     if not contract_addrs:
         return _UNKNOWN, "no purchase contract states a property address"
     if len(contract_addrs) > 1:
-        return _UNKNOWN, (
+        # ALL of them: the finding IS the disagreement, so a processor reconciling it needs each
+        # contract, not one of them.
+        return (
+            _UNKNOWN,
             "the file's purchase contracts disagree on the property address "
-            f"({', '.join(sorted(contract_addrs.values()))}) — ambiguous"
+            f"({', '.join(sorted(contract_addrs.values()))}) — ambiguous",
+            tuple(from_contract.values()),
         )
     contract_norm, contract_raw = next(iter(contract_addrs.items()))
 
@@ -3200,19 +3215,27 @@ def _property_address_match(
         _mismo_str(snapshot, k) for k in _MISMO_PROPERTY_ADDRESS_KEYS
     )
     if not (line and city and state and postal):
-        return _UNKNOWN, (
+        # The MISMO side is what is missing, and MISMO is not a document in the catalog — but the
+        # contract IS what a processor would open to see the address that could not be compared.
+        return (
+            _UNKNOWN,
             "the loan file (1003/MISMO) does not state a complete subject-property address — cannot compare "
-            "(never a comparison against a partial or mailing address)"
+            "(never a comparison against a partial or mailing address)",
+            (from_contract[contract_norm],),
         )
     file_raw = " ".join(p for p in (line, line2, city, state, postal) if p)
     if contract_norm == _norm_address(file_raw):
-        return "yes", (
+        return (
+            "yes",
             f"the purchase contract's property address matches the loan file's subject property "
-            f"('{contract_raw}' vs the file's '{file_raw}')"
+            f"('{contract_raw}' vs the file's '{file_raw}')",
+            (from_contract[contract_norm],),
         )
-    return "no", (
+    return (
+        "no",
         f"the purchase contract is for '{contract_raw}' but the loan file states the subject property is "
-        f"'{file_raw}' — confirm they describe the same property"
+        f"'{file_raw}' — confirm they describe the same property",
+        (from_contract[contract_norm],),  # the contract whose address disagrees
     )
 
 
