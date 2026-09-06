@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -22,6 +23,17 @@ from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rule_engine.reasons import document_label
 from app.verification.rules.specs import RuleSpec, RuleSpecError, load_rule_spec
+from app.verification.tag_materialization.declarations import (
+    ProductionMode,
+    TagDeclaration,
+    load_declarations,
+)
+
+
+@cache
+def _tag_declarations() -> dict[str, TagDeclaration]:
+    """The tag declarations, cached — this is a read path and the file does not change per request."""
+    return load_declarations()
 
 
 def _rule_spec(rule_id: str) -> RuleSpec | None:
@@ -323,6 +335,26 @@ def _missing_documents(
 _LOAN_SUBJECT_KEY = "loan"
 
 
+def _reads_an_ai_tag(finding: Finding) -> bool:
+    """Does any of this finding's load-bearing tags come from a MODEL rather than a computation?
+
+    Read from the tag DECLARATIONS, which is where the mode is stated, rather than from the rule's
+    `kind` — OC-1 is `structural` and still reads an AI tag, so kind is the wrong axis.
+    """
+    tag_ids: set[str] = {
+        tag_id
+        for tag in (finding.load_bearing_tags or [])
+        if isinstance(tag, dict) and isinstance(tag_id := tag.get("tag_id"), str)
+    }
+    if not tag_ids:
+        return False
+    declarations = _tag_declarations()
+    return any(
+        (decl := declarations.get(tag_id)) is not None and decl.mode is ProductionMode.AI
+        for tag_id in tag_ids
+    )
+
+
 def _source_statement(finding: Finding, source_documents: list[SourceDocument]) -> str | None:
     """Why a finding names no document, where the reason is known (LP-647).
 
@@ -342,6 +374,18 @@ def _source_statement(finding: Finding, source_documents: list[SourceDocument]) 
     exactly the thing worth finding.
     """
     if source_documents or (finding.subject_key or "") != _LOAN_SUBJECT_KEY:
+        return None
+    # LP-647 review — AND NOT WHERE AN AI READ THE DOCUMENTS. A loan-subject rule over an AI tag is
+    # not "computed from stated data": the group is handed the file's DOCUMENTS (`applies_to: all`,
+    # a cap of 60 — 44 of them on LF-ZE9N) and the model judges over them. Telling a processor the
+    # verdict came from the 1003 would be false, and a false provenance sentence is worse than none:
+    # they cannot tell which of the true ones to trust.
+    #
+    # Those rules (DT-7, OC-3, and the AI half of OC-1 / OC-2) get SILENCE, which is honest — "all 44
+    # documents" is not provenance either, and the only real answer is asking the model which drove
+    # the judgement. That is group D, a prompt change, and not something a read-layer sentence can
+    # stand in for.
+    if _reads_an_ai_tag(finding):
         return None
     return (
         "No document states this — it is computed from the loan file's stated data "

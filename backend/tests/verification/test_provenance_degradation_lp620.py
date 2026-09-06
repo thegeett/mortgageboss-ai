@@ -368,3 +368,71 @@ def test_a_document_subject_with_no_provenance_stays_SILENT() -> None:
     public = RuleFindingPublic.from_model(finding, subject_label="a document")
 
     assert public.source_statement is None, "an unexplained gap must stay visible as one"
+
+
+def test_an_AI_JUDGED_rule_gets_no_statement_because_the_model_read_the_documents() -> None:
+    """LP-647 review — the defect the group C fix SHIPPED WITH, found by asking what group D is.
+
+    `_source_statement` fired on any loan-subject finding with no documents. DT-7, OC-3 and the AI
+    half of OC-1/OC-2 are all loan-subject and carry no provenance — so they were told "computed from
+    the loan file's stated data (the application / MISMO import)".
+
+    That is FALSE. Those verdicts come from a model that was handed the file's DOCUMENTS —
+    `applies_to: all`, a cap of 60, 44 of them on LF-ZE9N — not from the 1003. And a false provenance
+    sentence is worse than none: a processor cannot tell which of the true ones to trust, which is the
+    exact reason the group C wording was kept vague enough to be true of all eleven rules.
+
+    Silence is right here. "All 44 documents" is not provenance either; the only real answer is asking
+    the model which drove the judgement, and that is group D — a prompt change, not something a
+    read-layer sentence can stand in for.
+    """
+    from app.schemas.verification import RuleFindingPublic
+
+    finding = _finding()
+    finding.subject_key = "loan"
+    finding.source_document_ids = None
+    finding.evaluation_outcome = EvaluationOutcome.NEEDS_REVIEW
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.confidence = 0.9
+    finding.status = FindingStatus.YELLOW
+    finding.id = uuid4()
+    # DT-7's shape: one load-bearing tag, declared `mode: ai`.
+    finding.load_bearing_tags = [
+        {
+            "tag_id": "dti.atr_factors_documented",
+            "value": "no",
+            "reasoning": "r",
+            "source_facts": [],
+        }
+    ]
+
+    public = RuleFindingPublic.from_model(finding, subject_label="the loan")
+
+    assert public.source_statement is None, (
+        "an AI judgement over the file's documents must not claim to come from stated data — "
+        f"got {public.source_statement!r}"
+    )
+
+
+def test_a_derived_loan_rule_still_gets_its_statement() -> None:
+    """THE POSITIVE CONTROL. Excluding AI tags must not silence the eleven rules the statement was
+    built for — and the check is on the TAG's declared mode, not the rule's `kind`, because OC-1 is
+    `structural` and still reads an AI tag."""
+    from app.schemas.verification import RuleFindingPublic
+
+    finding = _finding()
+    finding.subject_key = "loan"
+    finding.source_document_ids = None
+    finding.evaluation_outcome = EvaluationOutcome.OPEN
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.confidence = 0.9
+    finding.status = FindingStatus.YELLOW
+    finding.id = uuid4()
+    finding.load_bearing_tags = [
+        {"tag_id": "occupancy.stated", "value": "primary", "reasoning": "r", "source_facts": []}
+    ]
+
+    public = RuleFindingPublic.from_model(finding, subject_label="the loan")
+
+    assert public.source_statement is not None
+    assert "computed from the loan file's stated data" in public.source_statement
