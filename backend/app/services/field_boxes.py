@@ -84,6 +84,8 @@ from enum import StrEnum
 import pymupdf
 import structlog
 
+from app.services.page_ocr import words_for
+
 logger = structlog.get_logger(__name__)
 
 #: More matches than this and the snippet is not identifying anything — a bare
@@ -246,6 +248,22 @@ class _PageIndex:
     rects: tuple[pymupdf.Rect, ...]
 
 
+def _page_words(page: pymupdf.Page) -> list[tuple[float, float, float, float, str]]:
+    """This page's words with their rectangles — native if it has any, OCR if not.
+
+    THE ONE PLACE THE THREE DOCUMENT KINDS DIFFER (LP-708). A typed page carries
+    its own word list, exact and free. A scanned page carries nothing and is OCR'd.
+    An image document is a scan by another name and takes the same path. Everything
+    above this line — folding, matching, the boundary guard, the union rectangle —
+    is identical for all three and does not know which it is looking at.
+
+    NATIVE TEXT IS AUTHORITATIVE and is never re-derived: positions encoded in a
+    PDF are the source of record, while OCR estimates them. The check is per PAGE,
+    because six of 101 stored documents are mixed.
+    """
+    return words_for(page)
+
+
 def _index_page(page: pymupdf.Page) -> _PageIndex:
     """Fold a page's word list into a searchable index. Empty for a page with no text."""
     text_parts: list[str] = []
@@ -254,7 +272,7 @@ def _index_page(page: pymupdf.Page) -> _PageIndex:
     ends: set[int] = set()
     rects: list[pymupdf.Rect] = []
     cursor = 0
-    for word in page.get_text("words"):  # type: ignore[no-untyped-call]
+    for word in _page_words(page):
         x0, y0, x1, y1, raw = word[0], word[1], word[2], word[3], word[4]
         folded = fold(str(raw))
         if not folded:

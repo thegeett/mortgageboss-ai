@@ -4,6 +4,30 @@
 # from the API). Managed with uv.
 FROM python:3.12-slim
 
+# Tesseract, for OCR word POSITIONS on scanned pages (LP-708).
+#
+# NOT for reading the document — Claude already does that, and does it well
+# (scanned PDFs yield 9.0 extracted values per document against 8.0 for typed
+# ones). What Claude never returns is a position, so a scanned page had no word
+# rectangles at all and could never show a highlight box. PyMuPDF drives Tesseract
+# itself, so there is no new PYTHON dependency; this is the system binary it needs.
+#
+# Local rather than a hosted OCR service, and not on cost — priced properly the
+# hosted services are about fifty cents a month at this volume. These are mortgage
+# documents carrying SSNs, account numbers and borrower names, and sending them to
+# a third-party API is a data-residency decision nobody has been asked for.
+#
+# `tesseract-ocr-eng` is the language data, and without it the binary installs and
+# recognises nothing. `--no-install-recommends` keeps the image from pulling every
+# other language pack.
+#
+# ITS ABSENCE IS NOT FATAL. `page_ocr.ocr_available()` probes for it and a false
+# means scanned pages keep the no-box state they have always had. An image built
+# without this line degrades; it does not break.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv (pinned image provides the static binaries).
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
 
