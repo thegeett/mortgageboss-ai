@@ -8,12 +8,16 @@
  * and the ticket's headline interaction appeared to do nothing in the direction
  * it was built for.
  */
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const detail = vi.hoisted(() => ({ data: undefined as unknown }));
+const detail = vi.hoisted(() => ({
+  data: undefined as unknown,
+  isPending: false,
+  isError: false,
+}));
 vi.mock("@/lib/api/documents", () => ({
-  useDocumentDetail: () => ({ ...detail, isPending: false, isError: false }),
+  useDocumentDetail: () => detail,
 }));
 
 import { extractionFields } from "@/lib/loan-files/documents";
@@ -33,6 +37,8 @@ const scrolls: { block?: string }[] = [];
 
 beforeEach(() => {
   scrolls.length = 0;
+  detail.isPending = false;
+  detail.isError = false;
   Element.prototype.scrollIntoView = vi.fn(function (this: Element, arg) {
     scrolls.push((arg as { block?: string }) ?? {});
   }) as unknown as typeof Element.prototype.scrollIntoView;
@@ -65,6 +71,34 @@ describe("the selected field is brought into view", () => {
     const { rerender } = render(<ReviewerFields documentId="d1" fields={FIELDS} selected={null} />);
     rerender(<ReviewerFields documentId="d1" fields={FIELDS} selected="gross_pay" />);
     expect(scrolls[0]?.block).toBe("nearest");
+  });
+
+  it("scrolls once the ROWS arrive, not only when the selection changes", () => {
+    // SELECTION COMES FROM THE DOCUMENT TOO, and the two sides load on separate
+    // queries. A processor who clicks a box while this pane is still a skeleton
+    // set `selected` in a commit with no rows in it and a null ref; the rows
+    // arrived later with the selection unchanged, so nothing ran again and the
+    // row stayed below the fold — the exact symptom this effect exists to remove.
+    //
+    // This side is where the box overlay copied the pattern FROM, so the same gap
+    // was on both.
+    detail.isPending = true;
+    const { rerender } = render(<ReviewerFields documentId="d1" fields={[]} selected="net_pay" />);
+    expect(scrolls, "there is no row to scroll to yet").toHaveLength(0);
+
+    detail.isPending = false;
+    rerender(<ReviewerFields documentId="d1" fields={FIELDS} selected="net_pay" />);
+    expect(scrolls).toHaveLength(1);
+  });
+
+  it("does not scroll for a selection this document has no row for", () => {
+    // The control for the test above: "the rows arrived" must mean THIS row, not
+    // any row. A key from the document the processor just navigated away from
+    // must not scroll the new document's list to whatever happens to be first.
+    render(
+      <ReviewerFields documentId="d1" fields={FIELDS} selected="a_key_from_another_document" />,
+    );
+    expect(scrolls).toHaveLength(0);
   });
 
   it("does not scroll when nothing is selected", () => {
@@ -111,6 +145,35 @@ describe("the WHOLE ROW selects the field, not just its name", () => {
     );
     expect(snippet, "the row should render its source snippet").toBeTruthy();
     fireEvent.click(snippet as Element);
+    expect(onSelect).toHaveBeenCalledWith("gross_pay");
+  });
+
+  it("pointing at anywhere in the row hovers its field, and leaving clears it", () => {
+    // LP-710 MOVED hover from the label button to the row, so that pointing at a
+    // value emphasises its box the way pointing at the label always did — and
+    // nothing tested it in either place. The handlers could be deleted with the
+    // whole suite green, which is how a behaviour this pane is built around gets
+    // to disappear silently.
+    const onHover = vi.fn();
+    render(<ReviewerFields documentId="d1" fields={FIELDS} selected={null} onHover={onHover} />);
+    const row = screen.getByText("v-gross_pay").closest("li");
+    expect(row).toBeTruthy();
+    fireEvent.mouseEnter(row as Element);
+    expect(onHover).toHaveBeenCalledWith("gross_pay");
+    fireEvent.mouseLeave(row as Element);
+    expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+
+  it("selects ONCE when the label is activated, not once per handler", () => {
+    // The row and the label each carried a handler calling the same thing, so a
+    // label click fired `onSelect` twice — harmless only because selection happens
+    // to be idempotent, and invisible to every existing test. Neither copy could be
+    // held: delete either one and the other still selects, with the whole suite
+    // green. There is one handler now, on the row, and this counts the calls.
+    const onSelect = vi.fn();
+    render(<ReviewerFields documentId="d1" fields={FIELDS} selected={null} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: "Gross pay" }));
+    expect(onSelect.mock.calls).toHaveLength(1);
     expect(onSelect).toHaveBeenCalledWith("gross_pay");
   });
 

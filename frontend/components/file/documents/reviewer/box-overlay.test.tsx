@@ -212,6 +212,128 @@ describe("the selected box is brought into view (LP-703 review follow-up)", () =
     expect(scrolls, "moving the pointer must not scroll the page").toHaveLength(1);
   });
 
+  it("scrolls once the page CATCHES UP, which is the case this was reported for", () => {
+    // THE REAL SEQUENCE, and the one no test had: the box is on page 3 and the
+    // processor is on page 1. Selection commits first; `review/page.tsx` moves the
+    // page from an effect, so it lands in a LATER commit. Keyed on the selection
+    // alone the effect ran only in the first of those two — against a box that was
+    // not rendered — and never again, so the reported bug survived its own fix and
+    // only a box already on the page on screen ever scrolled.
+    const across: FieldBox[] = [
+      { field_key: "gross_pay", page: 1, x0: 0.1, y0: 0.1, x1: 0.3, y1: 0.15 },
+      { field_key: "pay_date", page: 3, x0: 0.1, y0: 0.8, x1: 0.3, y1: 0.85 },
+    ];
+    const view = (page: number, selected: string | null) => (
+      <BoxOverlay
+        boxes={across}
+        page={page}
+        selected={selected}
+        hovered={null}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />
+    );
+    const { rerender } = render(view(1, null));
+    rerender(view(1, "pay_date"));
+    expect(scrolls, "nothing to scroll to yet — the box is not on this page").toHaveLength(0);
+    rerender(view(3, "pay_date"));
+    expect(scrolls).toHaveLength(1);
+    expect(scrolls[0]?.el).toBe(document.querySelector('[aria-label="Highlight for pay_date"]'));
+  });
+
+  it("scrolls when the boxes ARRIVE, not only when the selection changes", () => {
+    // The boxes come from a query. Selecting a field before it resolves ran the
+    // effect against a ref that was null, and nothing ran it again.
+    const view = (boxes: FieldBox[], selected: string | null) => (
+      <BoxOverlay
+        boxes={boxes}
+        page={1}
+        selected={selected}
+        hovered={null}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />
+    );
+    const { rerender } = render(view([], null));
+    rerender(view([], "gross_pay"));
+    expect(scrolls).toHaveLength(0);
+    rerender(view(SCROLL_BOXES, "gross_pay"));
+    expect(scrolls).toHaveLength(1);
+    expect(scrolls[0]?.el).toBe(document.querySelector('[aria-label="Highlight for gross_pay"]'));
+  });
+
+  it("scrolls to the FIRST of a field's boxes, not to whichever mounted last", () => {
+    // A field can have several boxes on one page — the matcher returns up to
+    // `MAX_MATCHES` of them. They all held the same ref, so `current` ended up
+    // pointing at the last one React attached and the page scrolled to the
+    // bottom-most occurrence by accident.
+    const many: FieldBox[] = [
+      { field_key: "amount", page: 1, x0: 0.1, y0: 0.1, x1: 0.3, y1: 0.15 },
+      { field_key: "amount", page: 1, x0: 0.1, y0: 0.5, x1: 0.3, y1: 0.55 },
+      { field_key: "amount", page: 1, x0: 0.1, y0: 0.9, x1: 0.3, y1: 0.95 },
+    ];
+    const view = (selected: string | null) => (
+      <BoxOverlay
+        boxes={many}
+        page={1}
+        selected={selected}
+        hovered={null}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />
+    );
+    const { rerender } = render(view(null));
+    rerender(view("amount"));
+    const drawn = [...document.querySelectorAll('[aria-label="Highlight for amount"]')];
+    expect(drawn).toHaveLength(3);
+    expect(scrolls).toHaveLength(1);
+    expect(drawn.indexOf(scrolls[0]?.el as Element)).toBe(0);
+  });
+
+  it("does not scroll again while the same box stays selected", () => {
+    // The guard against the obvious over-correction. Re-running on every render
+    // would fight a processor who has panned away from a box deliberately.
+    const { rerender } = render(overlay("net_pay"));
+    expect(scrolls).toHaveLength(1);
+    rerender(overlay("net_pay"));
+    rerender(overlay("net_pay"));
+    expect(scrolls).toHaveLength(1);
+  });
+
+  it("does not scroll for a HOVERED box when nothing is selected either", () => {
+    // THE HOVER TEST ABOVE CANNOT FAIL for the reason it names. `hovered` is not a
+    // dependency of the effect, so no guard inside the effect decides anything
+    // about hover, and a mutation weakening one passes. What DOES distinguish the
+    // code from a plausible regression is a target that falls back to the hovered
+    // field — `selected ?? hovered` is the natural way someone would add
+    // "highlight what I am pointing at", and the earlier test cannot see it
+    // because something is selected throughout and selection wins.
+    //
+    // Here nothing is selected, so a fallback would attach the ref and scroll.
+    const view = (hovered: string | null) => (
+      <BoxOverlay
+        boxes={SCROLL_BOXES}
+        page={1}
+        selected={null}
+        hovered={hovered}
+        showAll={false}
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+        labelFor={(k) => k}
+      />
+    );
+    const { rerender } = render(view(null));
+    rerender(view("net_pay"));
+    rerender(view("gross_pay"));
+    expect(scrolls, "the pointer moved the page").toHaveLength(0);
+  });
+
   it("scrolls to the SELECTED box, not merely to some box", () => {
     // The control, and it has to compare ELEMENTS. `scrollIntoView` is one shared
     // function on `Element.prototype`, so "was it called on this element" is

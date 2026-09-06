@@ -102,11 +102,22 @@ export function ReviewerFields({
   //
   // `block: "nearest"` so a row already on screen does not move: clicking a row
   // directly must not scroll the list out from under the pointer.
+  //
+  // KEYED ON THE ROW BEING THERE, not on the selection alone — the same correction
+  // the box overlay needed, and this side is where that pattern was copied FROM.
+  // Selection arrives from the document as well as from here, and the two sides
+  // load on separate queries: a processor who clicks a box while this pane is
+  // still a skeleton set `selected` in a commit where no row is rendered and the
+  // ref is null. The rows arrive in a later commit with the selection unchanged,
+  // so nothing ran again and the row stayed below the fold — which is the exact
+  // symptom this effect was written to remove, in the direction it was written for.
   const selectedRow = useRef<HTMLLIElement | null>(null);
+  const rowOnScreen =
+    !isPending && !isError && selected && fields.some((f) => f.key === selected) ? selected : null;
   useEffect(() => {
-    if (!selected) return;
+    if (!rowOnScreen) return;
     selectedRow.current?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+  }, [rowOnScreen]);
 
   if (!documentId) {
     return <Note>No document selected.</Note>;
@@ -159,12 +170,20 @@ export function ReviewerFields({
               // bubbles here and also selects, which is what someone acting on a row
               // means anyway.
               //
-              // The KEYBOARD path is the label button inside this row, which selects
-              // the same field — the a11y rule below cannot see it from here, and a key
-              // handler on the LI as well would fire a second time for every Enter
-              // pressed on that button. The claim is held by
-              // `reviewer-fields-scroll.test.tsx`, which asserts the label is a real
-              // button and that activating it selects.
+              // THE KEYBOARD REACHES THIS ROW THROUGH THE LABEL BUTTON, whose
+              // activation the browser delivers as a click and which therefore lands
+              // on the handler here — so the row is reachable without a pointer and a
+              // key handler on the LI would fire a SECOND time for every Enter. That
+              // is the whole justification for the suppression below, and it is held
+              // by `reviewer-fields-scroll.test.tsx`: the label is a real button, and
+              // activating it selects.
+              //
+              // ONE HANDLER, AND IT IS THIS ONE. The button carried its own `onClick`
+              // calling the same thing, which fired `onSelect` TWICE for every label
+              // activation — harmless only because selection happens to be idempotent
+              // — and could be deleted with the whole suite green, because this
+              // handler caught the click either way. A second copy of a rule that
+              // nothing can hold is the shape that drifts.
               // biome-ignore lint/a11y/useKeyWithClickEvents: the label button is the keyboard path — see above
               <li
                 key={field.key}
@@ -181,7 +200,6 @@ export function ReviewerFields({
                 <button
                   type="button"
                   className="text-left text-xs text-muted-foreground"
-                  onClick={() => onSelect?.(field.key)}
                   onFocus={() => onHover?.(field.key)}
                   onBlur={() => onHover?.(null)}
                 >

@@ -33,6 +33,16 @@ function pct(value: number): string {
   return `${Math.round(value * 1_000_000) / 10_000}%`;
 }
 
+/**
+ * One box's identity, for React's key AND for deciding which box holds the ref.
+ *
+ * Written out twice these drift, and the drift is silent: the ref would attach to
+ * a box the effect is not watching, so the scroll would simply not happen.
+ */
+function boxKey(box: FieldBox): string {
+  return `${box.field_key}-${box.x0}-${box.y0}`;
+}
+
 export function BoxOverlay({
   boxes,
   page,
@@ -62,16 +72,36 @@ export function BoxOverlay({
   // had the mirror of this since LP-UI-030 (`selectedRow.scrollIntoView`); the
   // document side never did.
   //
-  // KEYED ON `selected`, NOT ON HOVER. Scrolling the page under a moving pointer
-  // would make the document unusable, and hover is how a processor skims.
+  // KEYED ON THE BOX, NOT ON `selected`, and that is the whole of this fix rather
+  // than a tidying of it. Keyed on the selection alone, the effect ran in the
+  // commit where the selection changed — which for a box on ANOTHER page is a
+  // commit where that box is not rendered and the ref is null. The page follows
+  // in a LATER commit (`review/page.tsx` moves it from an effect), by which time
+  // the selection has not changed and the effect does not run again. So the case
+  // this was reported for — the box is on page 3, the processor is on page 1 —
+  // scrolled nowhere, and only a box already on the page on screen ever worked.
+  // The same shape hides a second one: the boxes arrive from a query, so
+  // selecting a field before they load also ran the effect against a null ref.
+  //
+  // The identity below changes when the box APPEARS, however it appears, so both
+  // commits are covered by one dependency and neither needs an ordering
+  // assumption. Hover is not in it, so skimming still never scrolls.
+  //
+  // THE FIRST BOX, not whichever React attached last. A field can have several
+  // boxes on one page — the matcher returns up to `MAX_MATCHES` — and giving them
+  // all the same ref left `current` holding the last one to mount, so the page
+  // scrolled to the bottom-most occurrence by accident rather than to the first
+  // one a reader would look for.
   //
   // `block: "nearest"` so a box already on screen does not move: a processor who
   // clicked a box must not have the page jump out from under the click.
+  const target = selected ? onThisPage.find((box) => box.field_key === selected) : undefined;
+  const targetKey = target ? boxKey(target) : null;
   const selectedBox = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (!selected) return;
+    if (!targetKey) return;
     selectedBox.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selected]);
+  }, [targetKey]);
 
   if (onThisPage.length === 0) return null;
 
@@ -85,8 +115,8 @@ export function BoxOverlay({
         const visible = isSelected || isHovered || showAll;
         return (
           <button
-            key={`${box.field_key}-${box.x0}-${box.y0}`}
-            ref={isSelected ? selectedBox : undefined}
+            key={boxKey(box)}
+            ref={boxKey(box) === targetKey ? selectedBox : undefined}
             type="button"
             aria-label={`Highlight for ${labelFor(box.field_key)}`}
             aria-pressed={isSelected}
