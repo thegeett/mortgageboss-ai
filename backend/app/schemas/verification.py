@@ -319,6 +319,36 @@ def _missing_documents(
     return [document_label(group[0]) for group in groups if not set(group) & on_file]
 
 
+#: LP-647 — the subject key a LOAN-level rule carries. Its findings are about the file, not a page.
+_LOAN_SUBJECT_KEY = "loan"
+
+
+def _source_statement(finding: Finding, source_documents: list[SourceDocument]) -> str | None:
+    """Why a finding names no document, where the reason is known (LP-647).
+
+    Only for a LOAN-subject rule with no documents. Those compute from the file's stated data — the
+    1003 / MISMO import — and from figures other rules derived, so there is genuinely no page to
+    open. Saying so is the difference a processor cannot otherwise see: "no document states this" is
+    a different instruction from "the document is missing", and an empty list reads as the second.
+
+    DELIBERATELY NOT PER RULE. Eight of the eleven loan-subject rules with no provenance read MISMO
+    directly (AS-4, ID-6, IN-2, MI-1, PE-1, PE-3, PR-2, and occupancy.stated); two do not — CL-1
+    reads other documents' tags and MI-4 computes from program constants. A per-rule claim would have
+    to be right about each, and a wrong attribution is the failure this whole area avoids. The wording
+    below is true of all of them: computed rather than read.
+
+    Returns None wherever the reason is NOT known — a per-document or per-borrower rule with no
+    provenance has a gap rather than an explanation, and inventing a sentence for it would paper over
+    exactly the thing worth finding.
+    """
+    if source_documents or (finding.subject_key or "") != _LOAN_SUBJECT_KEY:
+        return None
+    return (
+        "No document states this — it is computed from the loan file's stated data "
+        "(the application / MISMO import)."
+    )
+
+
 def _requested_documents(details: Mapping[str, Any]) -> list[str]:
     """What the EVALUATOR recorded this finding is waiting on (LP-620), or empty.
 
@@ -402,6 +432,17 @@ class RuleFindingPublic(BaseModel):
     # point at, and a fabricated link is worse than none. Same shape as `FindingPublic.source_documents`
     # so the client renders both lists identically.
     source_documents: list[SourceDocument] = []
+    #: LP-647 — WHY there is no document, for a finding that has none.
+    #:
+    #: A loan-level rule computes from the file's STATED data — the 1003 / MISMO import — and from
+    #: figures other rules derived. There is no page to open, so `source_documents` is correctly
+    #: empty; the failure is that empty renders identically to "we looked and found nothing", and a
+    #: processor cannot tell a rule with no document from a rule whose document is missing.
+    #:
+    #: A STATEMENT, never a link. The MISMO import IS stored (`mismo_imports.raw_file_path`) but is
+    #: not a `Document` — `UploadSource.MISMO_IMPORT` exists in the enum with no writer anywhere — so
+    #: `document_id_by_content_id` can never resolve it and a link would dangle.
+    source_statement: str | None = None
 
     @classmethod
     def from_model(
@@ -451,11 +492,15 @@ class RuleFindingPublic(BaseModel):
             # LP-617 — resolved against the file's CURRENT documents, so a stored id whose document
             # was deleted or superseded is skipped rather than rendered as a broken link. Identical
             # resolution to FindingPublic's, one line above in spirit and in behaviour.
-            source_documents=[
-                SourceDocument(id=doc_id, filename=(document_names or {})[doc_id])
-                for raw_id in (finding.source_document_ids or [])
-                if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
-            ],
+            source_documents=(
+                resolved_documents := [
+                    SourceDocument(id=doc_id, filename=(document_names or {})[doc_id])
+                    for raw_id in (finding.source_document_ids or [])
+                    if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
+                ]
+            ),
+            # LP-647 — why there is NO document, where the reason is known. See `_source_statement`.
+            source_statement=_source_statement(finding, resolved_documents),
             # LP-620 — the FINDING's own answer wins where it has one. `requires_documents` is a
             # per-rule presence test and cannot express "one more source than the file already has";
             # an evaluator that knows what this subject is waiting on records it, and everything else

@@ -145,6 +145,10 @@ export interface RuleFinding {
    * processor opened all of them. Empty is honest, not a gap — a loan-level rule over a computed
    * value (DTI, reserves, LTV) has no document to point at. */
   source_documents: FindingSourceDocument[];
+  /** LP-647: why this finding names no document, when the reason is known — a loan-level rule
+   * computes from the file's stated data and has no page to open. Null when there ARE documents, and
+   * null when the absence is a GAP rather than an explanation. */
+  source_statement?: string | null;
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */

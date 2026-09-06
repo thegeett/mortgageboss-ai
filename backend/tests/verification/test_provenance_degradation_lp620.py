@@ -15,6 +15,7 @@ from app.models.finding import (
     Finding,
     FindingCategory,
     FindingOrigin,
+    FindingResolutionStatus,
     FindingStatus,
 )
 from app.services.finding_source_matching import populate_finding_source_documents
@@ -289,3 +290,81 @@ def test_a_named_id_that_is_not_a_current_document_is_dropped_not_linked() -> No
     )
 
     assert finding.source_document_ids == [str(real)], "only the real document survives"
+
+
+def test_a_loan_level_finding_with_no_document_says_why() -> None:
+    """LP-647 — an empty document list and a missing document rendered identically.
+
+    A loan-level rule computes from the file's STATED data — the 1003 / MISMO import — and from
+    figures other rules derived, so `source_documents` is correctly empty. But empty rendered as
+    nothing, and "no document states this" is the opposite instruction to "the document is missing":
+    one says read the application, the other says go and get a document.
+
+    A STATEMENT, NEVER A LINK, and that is forced rather than chosen. The MISMO import IS stored
+    (`mismo_imports.raw_file_path`) but is not a `Document` — `UploadSource.MISMO_IMPORT` exists in
+    the enum with no writer anywhere — so nothing could resolve a link and it would dangle.
+    """
+    from app.schemas.verification import RuleFindingPublic
+
+    finding = _finding()
+    finding.subject_key = "loan"
+    finding.source_document_ids = None
+    finding.evaluation_outcome = EvaluationOutcome.OPEN
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.confidence = 0.9
+    finding.status = FindingStatus.YELLOW
+    finding.id = uuid4()  # DB-assigned in production; the schema requires it
+
+    public = RuleFindingPublic.from_model(finding, subject_label="the loan")
+
+    assert public.source_documents == []
+    assert public.source_statement is not None
+    assert "computed from the loan file's stated data" in public.source_statement
+    assert "MISMO" in public.source_statement
+
+
+def test_a_finding_that_HAS_documents_makes_no_statement() -> None:
+    """The statement explains an absence. With documents present there is nothing to explain, and a
+    sentence beside a document list would be noise contradicting the list next to it."""
+    from app.schemas.verification import RuleFindingPublic
+
+    doc_id = uuid4()
+    finding = _finding()
+    finding.subject_key = "loan"
+    finding.source_document_ids = [str(doc_id)]
+    finding.evaluation_outcome = EvaluationOutcome.OPEN
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.confidence = 0.9
+    finding.status = FindingStatus.YELLOW
+    finding.id = uuid4()  # DB-assigned in production; the schema requires it
+
+    public = RuleFindingPublic.from_model(
+        finding, subject_label="the loan", document_names={doc_id: "1003.pdf"}
+    )
+
+    assert public.source_documents and public.source_statement is None
+
+
+def test_a_document_subject_with_no_provenance_stays_SILENT() -> None:
+    """THE CASE THAT MUST NOT GAIN A SENTENCE, and the reason the statement is scoped to loan
+    subjects rather than to "no documents".
+
+    A per-document or per-borrower rule with no provenance has a GAP — its subject IS or belongs to a
+    document, so something should have named it. Explaining that absence away would paper over
+    exactly the thing worth finding, which is how 449 findings across 57 rules went unnoticed until
+    they were counted.
+    """
+    from app.schemas.verification import RuleFindingPublic
+
+    finding = _finding()
+    finding.subject_key = "doc-abc123"  # a document subject, not the loan
+    finding.source_document_ids = None
+    finding.evaluation_outcome = EvaluationOutcome.OPEN
+    finding.resolution_status = FindingResolutionStatus.OPEN
+    finding.confidence = 0.9
+    finding.status = FindingStatus.YELLOW
+    finding.id = uuid4()  # DB-assigned in production; the schema requires it
+
+    public = RuleFindingPublic.from_model(finding, subject_label="a document")
+
+    assert public.source_statement is None, "an unexplained gap must stay visible as one"
