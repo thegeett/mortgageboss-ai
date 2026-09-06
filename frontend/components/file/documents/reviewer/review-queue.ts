@@ -1,9 +1,15 @@
 /**
  * The order the keyboard loop walks fields in (LP-UI-033).
  *
- * `Tab` / `↓` go to the next field NEEDING ATTENTION, not the next field. On a
- * pay stub that is the difference between three stops and thirteen, and the
- * ticket's metric is flagged fields per minute.
+ * `Tab` goes to the next field NEEDING ATTENTION, not the next field. On a pay
+ * stub that is the difference between three stops and thirteen, and the ticket's
+ * metric is flagged fields per minute.
+ *
+ * `↓` DOES NOT, since LP-701. It used to, and a processor read the skipping as
+ * the arrows selecting at random — correctly, because a confident field draws no
+ * mark (LP-UI-032), so nothing on screen explained a jump. The arrows step one
+ * row now (`stepField`, below); Tab keeps the jump, on a key the shortcut sheet
+ * says it for.
  *
  * WHAT COUNTS AS NEEDING ATTENTION: anything not already decided, whose tier is
  * not `confident`. A field the processor has accepted, corrected or rejected is
@@ -69,22 +75,38 @@ export function nextAttention(
   queue: readonly QueueField[],
   from: string | null,
   direction: 1 | -1 = 1,
+  /**
+   * The order the rows are DRAWN in, which is longer than the queue: LP-702 keeps
+   * list-valued fields off the queue, and LP-701 made the arrows walk every drawn
+   * row. So the selection can now sit on a row the queue has never heard of, and
+   * resolving the position against the queue alone answered "not started".
+   *
+   * Concretely, on `[a, b, c, earnings_lines, d]`: four presses of ↓ select
+   * `earnings_lines`, and Tab went BACK to `a` while Shift+Tab went FORWARD to
+   * `d` — both directions inverted. Neither branch was wrong on its own; the two
+   * tickets composed into it, and before LP-701 the arrows could not reach the
+   * state at all.
+   *
+   * Defaults to the queue's own keys, which is the pre-LP-701 behaviour exactly.
+   */
+  order: readonly string[] = queue.map((field) => field.key),
 ): string | null {
-  const stops = queue.filter(needsAttention);
-  if (stops.length === 0) return null;
+  const stops = new Set(queue.filter(needsAttention).map((field) => field.key));
+  if (stops.size === 0) return null;
 
-  const currentIndex = from === null ? -1 : queue.findIndex((f) => f.key === from);
+  const currentIndex = from === null ? -1 : order.indexOf(from);
   if (currentIndex === -1) {
-    // Not started, or the current field is gone. Take the first stop in the
-    // direction of travel rather than guessing a position.
-    return (direction === 1 ? stops[0] : stops[stops.length - 1])?.key ?? null;
+    // Genuinely not started, or the selection names no row that is drawn. Take
+    // the first stop in the direction of travel rather than guessing a position.
+    const inOrder = order.filter((key) => stops.has(key));
+    return (direction === 1 ? inOrder[0] : inOrder[inOrder.length - 1]) ?? null;
   }
 
-  const total = queue.length;
+  const total = order.length;
   for (let step = 1; step <= total; step++) {
     const index = (currentIndex + direction * step + total * total) % total;
-    const candidate = queue[index];
-    if (candidate && needsAttention(candidate)) return candidate.key;
+    const candidate = order[index];
+    if (candidate !== undefined && stops.has(candidate)) return candidate;
   }
   // Unreachable in practice: the loop above covers every index, so a non-empty
   // `stops` always matches something. Kept as the honest fallback.

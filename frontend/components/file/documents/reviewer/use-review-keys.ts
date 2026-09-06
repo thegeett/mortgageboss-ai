@@ -223,6 +223,13 @@ const PREVENT_DEFAULT = new Set<keyof ReviewKeyActions>([
   "previousRow",
   "markReviewed",
   "acceptAndAdvance",
+  // AND PLAIN ENTER. Each field row's label is a `<button>`, so after clicking one
+  // it holds focus while the arrows move the SELECTION elsewhere — the normal
+  // state since LP-701 made ↓ step one row. Enter then accepted the selected field
+  // and the browser's own activation of the still-focused button snapped the
+  // selection back to the clicked row. `acceptAndAdvance` was immune only because
+  // it was already here.
+  "accept",
 ]);
 
 export function useReviewKeys(actions: ReviewKeyActions, enabled = true): void {

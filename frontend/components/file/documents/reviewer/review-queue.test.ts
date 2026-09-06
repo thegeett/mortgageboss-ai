@@ -252,3 +252,42 @@ describe("editableFieldKey (LP-702 review)", () => {
     expect(editableFieldKey([scalar("gross_pay")], "net_pay")).toBeNull();
   });
 });
+
+describe("Tab from a row the queue does not carry (LP-701 review)", () => {
+  /**
+   * TWO TICKETS COMPOSING INTO A BUG, neither wrong alone.
+   *
+   * LP-702 keeps list-valued fields off the queue; LP-701 made the arrows walk
+   * every drawn row. So the selection can sit on a row `nextAttention` has never
+   * heard of — and resolving against the queue alone read that as "not started",
+   * which took the FIRST stop regardless of where the processor actually was.
+   *
+   * On `[a, b, c, earnings_lines, d]`, four presses of ↓ select `earnings_lines`;
+   * Tab then went back to `a` and Shift+Tab forward to `d`. Both inverted.
+   */
+  const drawn = ["a", "b", "c", "earnings_lines", "d"];
+  const fields = [
+    { ...listField("a"), kind: "scalar" as const },
+    { ...listField("b"), kind: "scalar" as const },
+    { ...listField("c"), kind: "scalar" as const },
+    listField("earnings_lines"),
+    { ...listField("d"), kind: "scalar" as const },
+  ];
+
+  it("goes FORWARD to the next stop below the list row", () => {
+    const queue = buildQueue(fields, {});
+    expect(nextAttention(queue, "earnings_lines", 1, drawn)).toBe("d");
+  });
+
+  it("goes BACKWARD to the stop above it", () => {
+    const queue = buildQueue(fields, {});
+    expect(nextAttention(queue, "earnings_lines", -1, drawn)).toBe("c");
+  });
+
+  it("keeps the pre-LP-701 answer when no drawn order is supplied", () => {
+    // The default is the queue's own keys, so every existing caller and test is
+    // unchanged — the new argument only adds the rows the queue cannot see.
+    const queue = buildQueue(fields, {});
+    expect(nextAttention(queue, "c", 1)).toBe("d");
+  });
+});

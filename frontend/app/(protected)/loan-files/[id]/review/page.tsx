@@ -150,8 +150,10 @@ function Reviewer() {
 
   /** Tab: the next field WANTING ATTENTION, skipping what is already settled. */
   const move = useCallback(
-    (direction: 1 | -1) => field.select(nextAttention(queue, field.selected, direction)),
-    [queue, field],
+    // `rowKeys` is the DRAWN order, which includes the list rows the queue drops —
+    // without it Tab from a list row resolves as "not started" and jumps to the top.
+    (direction: 1 | -1) => field.select(nextAttention(queue, field.selected, direction, rowKeys)),
+    [queue, field, rowKeys],
   );
 
   /** The arrows: one row, in the order the list is drawn (LP-701). */
@@ -177,9 +179,22 @@ function Reviewer() {
   // recorded against something no human confirmed.
   const accept = useCallback(() => {
     const key = editableSelection();
-    if (!key) return;
-    recordReview.mutate({ fieldKey: key, verdict: "accepted" });
-  }, [editableSelection, recordReview]);
+    if (key) {
+      recordReview.mutate({ fieldKey: key, verdict: "accepted" });
+      return;
+    }
+    // NOTHING SELECTED IS NOT THE SAME AS A ROW THAT CANNOT BE ACCEPTED. With no
+    // selection, silence is right — there is no field to speak about. But since
+    // LP-701 the arrows stop on list rows, so a processor can sit on a fourteen-row
+    // table and press Enter, and the refusal that LP-702's review introduced was
+    // silent. A keystroke that declines says why.
+    if (!field.selected) return;
+    notifyPartial({
+      title: "That is a table, not a value",
+      consequence:
+        "A verdict is recorded against a single value. Check the rows against the document and accept the fields they came from.",
+    });
+  }, [editableSelection, field.selected, recordReview]);
 
   /**
    * Open the verdict editor, and only where one can open.
