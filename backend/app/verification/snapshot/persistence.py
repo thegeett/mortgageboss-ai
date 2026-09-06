@@ -129,13 +129,37 @@ class RawPiiAtRestError(Exception):
 # (``doc…`` / ``txn…``) and a ``match_hash`` is ``v1:<hex>``, so in both the digit run is preceded
 # by a word character and ``\b`` never opens one. That prefix is deliberate and is pinned by
 # ``test_content_ids_never_trip_the_pii_guard``.
+#: DELIMITED, and the lookarounds are the whole safety of this skip.
+#:
+#: The argument for removing uuids was that neither leak pattern can be CONTAINED
+#: by an 8-4-4-4-12 run. True, and not sufficient — a leak does not need to be
+#: contained, only to OVERLAP. The final group is exactly 12 hex, so an undelimited
+#: match will happily eat the first twelve digits of a longer run and leave the
+#: remainder too short to report:
+#:
+#:     "aaaaaaaa-aaaa-aaaa-aaaa-4111111111111111"   a 16-digit card
+#:      └────────── matched as a uuid ──────────┘   leaves "1111"
+#:
+#: That value was refused before this skip existed and was accepted after. Requiring
+#: a non-alphanumeric on both sides costs nothing real — `debt.{id}` is preceded by
+#: `.` and `income.{id}` likewise — and a uuid glued directly to more hex or more
+#: digits is not a uuid the guard should be exempting anyway.
 _UUID_ANYWHERE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+    r"(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    re.IGNORECASE,
 )
 
 
 def _without_uuids(text: str) -> str:
-    """``text`` with every canonical uuid replaced by a space — see :data:`_UUID_ANYWHERE`."""
+    """``text`` with every DELIMITED canonical uuid replaced by a space.
+
+    The space is defence in depth rather than the thing that makes this safe. It
+    was load-bearing when any uuid-shaped run was removed — `"12345<uuid>6789"`
+    would have become a nine-digit leak with an empty replacement — but the
+    lookarounds on :data:`_UUID_ANYWHERE` now reject a match with an alphanumeric
+    on either side, so digits can never be adjacent to what is removed. Kept
+    because it costs nothing and stops mattering only while those hold.
+    """
     return _UUID_ANYWHERE.sub(" ", text)
 
 
