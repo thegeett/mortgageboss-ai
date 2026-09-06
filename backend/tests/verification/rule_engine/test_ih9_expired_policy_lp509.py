@@ -170,3 +170,53 @@ async def test_the_effective_date_finding_names_its_binder_too() -> None:
     tag = mat.tags.by_subject[_LOAN]["ins.loan_effective_date"]
     assert tag.source_facts != ("loan",), "IH-3's effective-date tag must name its binder"
     assert len(tag.source_facts) == 1
+
+
+async def test_the_binder_naming_ignores_a_flood_policy_that_also_states_an_expiry() -> None:
+    """LP-647 §1 review — the PROVENANCE half of a property `test_the_expiry_tag_reads_only_homeowners
+    _binders` already covers for the value. Kept because it asserts a different thing, and written up
+    honestly because the investigation behind it corrected two of my own claims.
+
+    WHAT I GOT WRONG FIRST. I said the earlier fixture had no decoy. It has two documents — a binder
+    and a purchase contract — so it looked guarded. It is not, but not for the reason I gave: the
+    contract carries no `ins.expiration_date`, so dropping IH-9's document-type filter changes
+    nothing and that mutation passes clean. A decoy only guards if the rule could plausibly name it.
+
+    THEN THE FLOOD POLICY DID NOT GUARD IT EITHER, and that is the useful part. `ins.expiration_date`
+    is DECLARED `document_type: homeowners_insurance`, so the parsed layer never puts it on a flood
+    policy — the recipe's own filter is redundant with the declaration. Measured: removing either one
+    alone leaves every test green; removing BOTH fails this test and the value one above.
+
+    So IH-9 has no single-mutation over-naming to catch, because two independent defences guard it.
+    That is a stronger position than a test, and worth knowing rather than assuming — the danger is
+    reading redundancy as a missing guard and deleting one of the two.
+    """
+    from app.verification.eval.fire_path_scenarios import (
+        _LOAN_INS_EXPIRED,
+        _binder,
+        _doc,
+        _snapshot,
+    )
+
+    flood = _doc(
+        "95-flood-current",
+        "flood_insurance_policy",
+        carrier_name="Rivertown Mutual",
+        policy_number="FL-0001",
+        effective_date="2026-06-01",
+        expiration_date="2027-06-01",  # in force, and NOT the hazard policy
+    )
+    snap = _snapshot(
+        _LOAN_INS_EXPIRED,
+        [_binder("95-binder-expired", "2024-06-25", expiration_date="2025-06-25"), flood],
+    )
+    mat = await _materialize(snap)
+
+    tag = mat.tags.by_subject[_LOAN]["ins.policy_expired"]
+    assert str(tag.value) == "yes", (
+        "the hazard policy lapsed — a current flood policy must not mask it"
+    )
+    assert tag.source_facts == ("95-binder-expired",), (
+        "the finding must name the hazard binder and NOT the flood policy — naming it would send a "
+        f"processor to a document this finding says nothing about, got {tag.source_facts}"
+    )
