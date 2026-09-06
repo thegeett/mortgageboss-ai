@@ -332,7 +332,7 @@ function BreakdownSection({
           items.map((item) => <LineRow key={item.key} item={item} fileId={fileId} {...controls} />)
         )}
         {fileId && section && (
-          <div className="border-t border-gray-200 px-3 pb-2">
+          <div className="border-t border-border px-3 pb-2">
             <DtiAddLine fileId={fileId} section={section} />
           </div>
         )}
@@ -523,7 +523,7 @@ function RemoveCustomLine({ fileId, item }: { fileId: string; item: DtiLineItem 
     <Button
       size="icon"
       variant="ghost"
-      className="h-7 w-7 text-gray-400 hover:text-danger"
+      className="h-7 w-7 text-muted-foreground hover:text-danger"
       aria-label={`Remove ${item.label}`}
       disabled={remove.isPending}
       onClick={() => remove.mutate(customLineId(item.key))}

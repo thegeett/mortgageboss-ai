@@ -76,7 +76,7 @@ export function ReprocessDocumentButton({
         )}
         Re-read this document
       </Button>
-      <p className="mt-1.5 text-[11px] text-gray-400">
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
         {isTerminalStatus(summary.status)
           ? "Runs classification again, so the type may change. Use this when the type is wrong or unknown — not when you already know what it is."
           : "This document is being read now. You can re-read it again once it finishes."}

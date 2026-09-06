@@ -71,8 +71,8 @@ export function DtiUngateDialog({
                     key={line.key}
                     className="rounded-md border border-warning/40 bg-warning/5 p-3"
                   >
-                    <p className="font-medium text-gray-900">{line.label}</p>
-                    <p className="mt-0.5 text-gray-600">{line.assertion}</p>
+                    <p className="font-medium text-foreground">{line.label}</p>
+                    <p className="mt-0.5 text-foreground-2">{line.assertion}</p>
                   </li>
                 ))}
               </ul>
@@ -80,14 +80,14 @@ export function DtiUngateDialog({
 
             {/* THE NUMBER IS WHAT THE CONSENT IS REALLY ABOUT. */}
             {data.lines.length > 0 && (
-              <div className="rounded-md border border-gray-200 p-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              <div className="rounded-md border border-border p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   The ratio you will get
                 </p>
                 <dl className="mt-2 grid grid-cols-2 gap-2">
                   <div>
-                    <dt className="text-xs text-gray-500">Front-end</dt>
-                    <dd className="text-gray-900">
+                    <dt className="text-xs text-muted-foreground">Front-end</dt>
+                    <dd className="text-foreground">
                       {formatPercent(data.front_end_before) ?? "gated"} →{" "}
                       <span className="font-semibold">
                         {formatPercent(data.front_end_after) ?? "still gated"}
@@ -95,8 +95,8 @@ export function DtiUngateDialog({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-gray-500">Back-end</dt>
-                    <dd className="text-gray-900">
+                    <dt className="text-xs text-muted-foreground">Back-end</dt>
+                    <dd className="text-foreground">
                       {formatPercent(data.back_end_before) ?? "gated"} →{" "}
                       <span className="font-semibold">
                         {formatPercent(data.back_end_after) ?? "still gated"}
@@ -113,17 +113,20 @@ export function DtiUngateDialog({
             {data.unresolved.length > 0 && (
               <div
                 role="note"
-                className="flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3"
+                className="flex items-start gap-2 rounded-md border border-border bg-muted p-3"
               >
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                <AlertTriangle
+                  className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                  aria-hidden
+                />
                 <div>
-                  <p className="font-medium text-gray-900">
+                  <p className="font-medium text-foreground">
                     {nothingToDo
                       ? "This cannot be resolved by recording zeros"
                       : "This will still be gated afterwards"}
                   </p>
                   {data.unresolved.map((reason) => (
-                    <p key={reason} className="mt-1 text-gray-600">
+                    <p key={reason} className="mt-1 text-foreground-2">
                       {reason}
                     </p>
                   ))}
@@ -135,7 +138,7 @@ export function DtiUngateDialog({
               <div>
                 <label
                   htmlFor="ungate-note"
-                  className="text-xs font-medium uppercase tracking-wide text-gray-500"
+                  className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
                 >
                   Why (recorded on the file)
                 </label>

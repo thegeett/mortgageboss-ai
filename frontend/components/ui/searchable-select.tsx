@@ -180,7 +180,7 @@ export function SearchableSelect({
     <div ref={containerRef} className="relative">
       <div className="relative">
         <Search
-          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400"
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
         <input
@@ -214,10 +214,10 @@ export function SearchableSelect({
           // focus event and nothing happened — the control was dead until you clicked away first.
           onMouseDown={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          className="h-9 w-full rounded-md border border-gray-200 bg-white pl-8 pr-8 text-field text-gray-900 md:text-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+          className="h-9 w-full rounded-md border border-border bg-card pl-8 pr-8 text-field text-foreground md:text-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
         />
         <ChevronDown
-          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400"
+          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
       </div>
@@ -231,10 +231,10 @@ export function SearchableSelect({
           // stays on the input, moving the highlight via aria-activedescendant.
           role="listbox"
           tabIndex={-1}
-          className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+          className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-card py-1 shadow-lg"
         >
           {matches.length === 0 && (
-            <div className="px-3 py-2 text-sm text-gray-500">{emptyMessage}</div>
+            <div className="px-3 py-2 text-sm text-muted-foreground">{emptyMessage}</div>
           )}
           {matches.map((option, index) => {
             // A group header whenever the group changes, so a filtered list still reads as grouped.
@@ -249,7 +249,7 @@ export function SearchableSelect({
                   // tradeoff this pattern makes without a `role="group"` restructure.
                   <div
                     role="presentation"
-                    className="px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400"
+                    className="px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
                   >
                     {option.group}
                   </div>
@@ -272,8 +272,8 @@ export function SearchableSelect({
                   }}
                   onMouseEnter={() => setActive(index)}
                   className={cn(
-                    "flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm text-gray-900",
-                    index === active && "bg-gray-100",
+                    "flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm text-foreground",
+                    index === active && "bg-muted",
                   )}
                 >
                   <span className="truncate">{option.label}</span>

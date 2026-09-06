@@ -74,8 +74,9 @@ function TabStrip({
       ref={drag.ref}
       role="tablist"
       aria-label="Verification outcomes"
-      // The TOKEN, not `border-gray-200`: LP-UI-004 moved this tree off ad-hoc
-      // greys and `a11y`/token guards keep it there. The drag class is bedrock's.
+      // The token, not the ad-hoc grey the other branch had here: LP-UI-004 moved
+      // this tree onto tokens and `design-tokens.test.ts` now keeps it there. The
+      // drag class is bedrock's.
       className={cn("flex gap-1 overflow-x-auto border-b border-border", drag.className)}
     >
       {tabs.map((tab) => {

@@ -40,7 +40,7 @@ export function DtiAddLine({
       <Button
         variant="ghost"
         size="sm"
-        className="mt-1 h-7 gap-1 px-2 text-xs text-gray-500 hover:text-gray-900"
+        className="mt-1 h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
         onClick={() => setOpen(true)}
       >
         <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -50,7 +50,7 @@ export function DtiAddLine({
   }
 
   return (
-    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50/60 p-2">
+    <div className="mt-2 flex items-start gap-2 rounded-md border border-border bg-muted/60 p-2">
       <Input
         aria-label="Description"
         value={label}

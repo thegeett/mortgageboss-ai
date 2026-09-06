@@ -97,7 +97,7 @@ export function TypeOverride({
 
   return (
     <section className="mt-6">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <PencilLine className="h-3.5 w-3.5" />
         Correct type
       </h3>
@@ -141,7 +141,7 @@ export function TypeOverride({
           {changed ? "Apply" : "Confirm"}
         </Button>
       </div>
-      <p className="mt-1.5 text-[11px] text-gray-400">
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
         {/*
           NO CLAIM UNTIL THE CATALOG IS KNOWN (LP-638 review). `reExtracts` reads `catalog ?? []`,
           so while the list is loading — and permanently if the request fails — it is `false`, and
