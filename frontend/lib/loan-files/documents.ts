@@ -305,6 +305,14 @@ const EXTRACTION_FIELD_ORDER = Object.keys(EXTRACTION_FIELD_LABELS);
  */
 export type ExtractionFieldKind = "scalar" | "list" | "record";
 
+/** What a processor supplied for one field (LP-703), as the screen needs it. */
+export interface FieldCorrection {
+  /** The value they typed. Null for a removal, which supplies nothing. */
+  value: string | null;
+  /** They said the field is not on the document. */
+  removed: boolean;
+}
+
 export interface ExtractionField {
   key: string;
   label: string;
@@ -327,6 +335,19 @@ export interface ExtractionField {
   source: SourceLocation | null;
   /** The model's self-rating, or null when it gave none — which is the common case. */
   confidence: number | null;
+  /** A person supplied this value — corrected or added (LP-703). */
+  corrected: boolean;
+  /**
+   * What the model said, when a person overruled it. Null when nothing was
+   * replaced.
+   *
+   * SHOWN BESIDE THE CORRECTION, not instead of it. Until LP-703 the row rendered
+   * the EXTRACTED value with a "Verified" mark next to it, so a processor who had
+   * just typed 4,200 went on reading 15,000 — and once corrections started
+   * reaching the rule engine that became the screen and the checks disagreeing
+   * about the same field.
+   */
+  replacedValue: string | null;
 }
 
 /** Money-ish keys we render as currency (pay stub + W-2 boxes + bank balances). */
@@ -620,13 +641,42 @@ export function extractionFields(
    * not be able to un-mask something that is masked today.
    */
   sensitiveKeys?: ReadonlySet<string>,
+  /**
+   * What a processor supplied, by field key (LP-703).
+   *
+   * SUBSTITUTED BEFORE THE MASK AND THE FORMATTING, exactly as the backend does it
+   * in `build_document_fields`. A corrected SSN then travels the identical masking
+   * path an extracted one does, and a corrected money field is formatted the same
+   * way. Rendering the correction afterwards would mean a second copy of both, and
+   * the second copy is where a raw identifier eventually reaches the screen.
+   */
+  corrections?: ReadonlyMap<string, FieldCorrection>,
 ): ExtractionField[] {
   const fields: ExtractionField[] = [];
-  for (const key of Object.keys(data)) {
+  // An ADDED field is by definition a key the extraction has no entry for, so it
+  // cannot be reached by walking `data`. Extraction order first, so an addition
+  // can never shadow a key the model produced — the API refuses that case, and
+  // this makes it harmless if it ever slips.
+  const addedKeys = [...(corrections?.keys() ?? [])].filter((key) => !(key in data));
+  for (const key of [...Object.keys(data), ...addedKeys]) {
     if (key === CATCH_ALL_KEY) continue;
     const { value, source, confidence } = readTypedField(data[key]);
     const masked = MASKED_FIELD_KEYS.has(key) || Boolean(sensitiveKeys?.has(key));
-    fields.push({ key, label: labelFor(key), ...shapeOf(key, value, masked), source, confidence });
+    const correction = corrections?.get(key);
+    const supplied = correction !== undefined && !correction.removed && correction.value !== null;
+    const shown = supplied ? correction.value : value;
+    const replaced = supplied && value !== null ? shapeOf(key, value, masked).value : null;
+    fields.push({
+      key,
+      label: labelFor(key),
+      ...shapeOf(key, shown, masked),
+      source,
+      // A person's value has no model rating, and carrying the old one forward
+      // would report the model as sure about a figure it never saw.
+      confidence: supplied ? null : confidence,
+      corrected: supplied,
+      replacedValue: replaced,
+    });
   }
   // Known typed-core fields first (in order), then any others.
   const orderIndex = (k: string) => {

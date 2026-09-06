@@ -940,14 +940,15 @@ class FieldBoxesResponse(BaseModel):
 
 
 class FieldReviewRequest(BaseModel):
-    """Record a verdict on one extracted field (LP-UI-033)."""
+    """Record a verdict on one extracted field (LP-UI-033, LP-703)."""
 
     field_key: str = Field(min_length=1, max_length=100)
     verdict: FieldVerdict
-    #: Required for CORRECTED, forbidden otherwise.
+    #: Required for CORRECTED and ADDED, forbidden otherwise.
     corrected_value: str | None = Field(default=None, max_length=1000)
-    #: Required for REJECTED — an unverifiable field with no reason tells the next
-    #: processor nothing, and the next processor is the whole audience.
+    #: Required for REJECTED and REMOVED — an unverifiable field with no reason tells
+    #: the next processor nothing, and a field taken OUT with no reason leaves them an
+    #: absence with no account of who made it.
     note: str | None = Field(default=None, max_length=2000)
 
 
@@ -962,6 +963,12 @@ class FieldReviewPublic(BaseModel):
     note: str | None
     reviewed_by_user_id: UUID | None
     created_at: datetime
+
+    #: `replaced_value` is NOT here. It holds the extracted value a correction
+    #: overruled — as sensitive as the correction itself, and dropped from the
+    #: readonly views for that reason. The screen already shows what the model read,
+    #: beside the correction, from the extraction; a second copy on this response
+    #: would be the same identifier travelling a second path for no new information.
 
 
 @flat_router.get("/{document_id}/reviews", response_model=list[FieldReviewPublic])
@@ -989,7 +996,7 @@ async def list_field_reviews(
 async def record_field_review(
     document_id: UUID, body: FieldReviewRequest, current_user: CurrentUser, db: DbSession
 ) -> FieldReviewPublic:
-    """Accept, correct or reject one extracted field (LP-UI-033).
+    """Decide about one field: accept, correct, reject, remove or add (LP-UI-033, LP-703).
 
     PUT rather than POST: a field has at most one live verdict, and re-deciding is
     replacing it, not adding a second.
@@ -1007,8 +1014,15 @@ async def record_field_review(
         )
     # A verdict on a field the extraction does not carry is a client bug, and
     # storing it would put a row in the table that no screen can ever show.
+    #
+    # EXCEPT `added`, which is the operation for exactly that case (LP-703): the
+    # model missed a field and a processor is supplying it, so the key being absent
+    # here is the precondition rather than the error. The service checks the harder
+    # question — that the key is one the DOCUMENT TYPE declares — because a key no
+    # schema names is data no rule can read, and this endpoint has no business
+    # holding a second copy of that rule.
     data = extraction.extracted_data if isinstance(extraction.extracted_data, dict) else {}
-    if body.field_key not in data:
+    if body.verdict is not FieldVerdict.ADDED and body.field_key not in data:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"This extraction has no field {body.field_key!r}.",

@@ -26,6 +26,12 @@ const TONE: Record<Exclude<FieldTier, "confident">, Tone> = {
   // Neutral, deliberately. "Nobody rated this" is not a warning, and colouring it
   // as one would put three-quarters of every document in amber.
   unrated: "neutral",
+  // NEUTRAL TOO, and that is the argument rather than an omission. A removal is a
+  // processor doing their job — deciding a figure the model invented is not on the
+  // page — not an error state. Colouring it as a problem would tell them off for
+  // the correct action. It still gets ink, because the row goes on showing the
+  // extracted value and nothing else on it would say the checks no longer read it.
+  removed: "neutral",
 };
 
 /** Why this field is being flagged, in the processor's terms rather than the model's. */
@@ -36,6 +42,12 @@ function reason(input: TierInput, tier: FieldTier): string | null {
   }
   if (tier === "rejected") {
     return "You marked this value wrong. The extraction still says what the model read.";
+  }
+  if (tier === "removed") {
+    // What this claims is exactly what the code does: `build_document_fields`
+    // omits the field, so the snapshot the checks read has no entry for it. It
+    // deliberately does NOT promise what any particular check will then report.
+    return "You said this is not on the document, so the checks no longer read it. The extraction still says what the model read, and this can be undone.";
   }
   if (tier === "check" && input.critical) {
     return "A money figure, a rate or an identity — always checked, however sure the model is.";

@@ -93,6 +93,7 @@ describe("tierInputFor", () => {
       distrustedReason: null,
       humanConfirmed: false,
       rejected: false,
+      removed: false,
     });
   });
 
@@ -110,6 +111,7 @@ describe("tierInputFor", () => {
       distrustedReason: "doc 104",
       humanConfirmed: false,
       rejected: false,
+      removed: false,
     });
   });
 
@@ -186,5 +188,54 @@ describe("a field a person rejected", () => {
 
   it("still says so when the model gave no rating at all", () => {
     expect(tierFor(tierInputFor(null, rejected))).toBe("rejected");
+  });
+});
+
+describe("the two verdicts that change what the checks read (LP-703)", () => {
+  const BARE = {
+    critical: false,
+    distrusted_reason: null,
+    sensitive: false,
+    corrected_value: null,
+  };
+
+  it("counts an ADDED field as confirmed by a person", () => {
+    // A processor read the document and typed what it says. That is the same act
+    // as correcting and a stronger one than accepting. Without this an added
+    // field rendered "Not rated" — no sign at all that a human supplied the one
+    // value on the row they are answerable for.
+    expect(tierFor(tierInputFor(null, { ...BARE, verdict: "added" }))).toBe("verified");
+  });
+
+  it("gives a REMOVED field its own tier", () => {
+    expect(tierFor(tierInputFor(0.99, { ...BARE, verdict: "removed" }))).toBe("removed");
+  });
+
+  it("shows the removal, not an earlier correction, when a field has both in turn", () => {
+    // The verdict is one live row, so this is really asserting the ORDER in
+    // `tierFor`: `removed` is checked before `humanConfirmed`, or a field
+    // corrected and then removed would still read as verified.
+    expect(
+      tierFor({
+        confidence: 0.2,
+        critical: true,
+        distrustedReason: null,
+        humanConfirmed: true,
+        removed: true,
+      }),
+    ).toBe("removed");
+  });
+
+  it("a removal outranks a high confidence, a criticality and a distrust reason", () => {
+    // Every other signal describes how the value was READ. Once a person says the
+    // field is not on the document, none of them is the point any more.
+    expect(
+      tierFor({
+        confidence: 0.99,
+        critical: true,
+        distrustedReason: "this extractor has read it wrong before",
+        removed: true,
+      }),
+    ).toBe("removed");
   });
 });

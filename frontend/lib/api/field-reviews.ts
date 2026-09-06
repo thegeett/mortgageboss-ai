@@ -4,21 +4,31 @@ import type { FieldVerdict } from "@/lib/types/document";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 /**
- * A processor's verdict on one extracted field (LP-UI-033).
+ * A processor's verdict on one extracted field (LP-UI-033, LP-703).
  *
  * The verdict lives beside the extracted value, never on top of it: a correction
  * records what the processor says is right without rewriting what the model read,
  * so "what did the model actually say?" stays answerable.
+ *
+ * SINCE LP-703 THE RULE ENGINE READS THEM. A correction, a removal and an
+ * addition all change what a verification run computes from — which is what the
+ * feature was for, and what it did not do for its first two months: the screen
+ * showed the correction and the DTI was still built from the model's figure.
+ * Every mutation here therefore invalidates the document, and the run on the file
+ * is marked stale by the API.
  */
 export type { FieldVerdict } from "@/lib/types/document";
 
 export interface FieldReviewInput {
   fieldKey: string;
   verdict: FieldVerdict;
-  /** Required for `corrected`. */
+  /** Required for `corrected` and `added`. */
   correctedValue?: string;
-  /** Required for `rejected` — a field nobody could verify, with no reason why,
-   * tells the next processor nothing. */
+  /**
+   * Required for `rejected` and `removed`. A field nobody could verify, with no
+   * reason why, tells the next processor nothing — and a field taken OUT with no
+   * reason leaves them an absence with no account of who made it.
+   */
   note?: string;
 }
 

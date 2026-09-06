@@ -293,7 +293,12 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # borrower's document. Both are dropped rather than scrubbed: scrubbing catches the
     # shapes it knows, and a hand-typed value is the one place a raw identifier arrives in
     # a shape nobody predicted. The view answers "was there a correction?" with a boolean.
-    "field_reviews": frozenset({"corrected_value", "note"}),
+    #
+    # `replaced_value` (LP-703) is the EXTRACTED value a correction overruled, kept so a
+    # re-extraction can ask whether the model still says the same thing. It is the value
+    # from the SSN field the processor was correcting, so it is exactly as sensitive as
+    # the correction and is excluded for the same reason, not a weaker one.
+    "field_reviews": frozenset({"corrected_value", "note", "replaced_value"}),
     # LP-643 — a processor's own DTI line. The label and the note are typed by hand about one
     # borrower's file, which is where an identifier arrives in a shape no scrubber predicts. The
     # view answers which section, how much and how often, and reports the two as booleans.

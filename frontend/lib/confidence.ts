@@ -47,7 +47,15 @@ export type FieldTier =
   /** No confidence was reported. Not a judgement, and not silence either. */
   | "unrated"
   /** A person read this and said it is wrong. Their finding, not the model's doubt. */
-  | "rejected";
+  | "rejected"
+  /**
+   * A person said this field is not on the document (LP-703).
+   *
+   * The row still shows, because the extraction still carries the value and the
+   * removal has to be visible and undoable. What changed is what the CHECKS read:
+   * the field is absent from the snapshot.
+   */
+  | "removed";
 
 export interface TierInput {
   /** The model's self-rating in [0,1], or null when it gave none. */
@@ -60,6 +68,8 @@ export interface TierInput {
   humanConfirmed?: boolean;
   /** Whether a person read this value and said it is wrong. */
   rejected?: boolean;
+  /** Whether a person said this field is not on the document at all (LP-703). */
+  removed?: boolean;
 }
 
 /**
@@ -76,7 +86,14 @@ export function tierFor({
   distrustedReason,
   humanConfirmed = false,
   rejected = false,
+  removed = false,
 }: TierInput): FieldTier {
+  // FIRST, because it outranks even a confirmation: a removed field is one a
+  // person says is not on the document, so nothing about how the value was read
+  // or rated is still the point. It is checked before `humanConfirmed` so that
+  // correcting a field and then removing it shows the removal, not the correction.
+  if (removed) return "removed";
+
   // A person looked at it. Nothing the model reports can downgrade that.
   if (humanConfirmed) return "verified";
 
@@ -109,6 +126,7 @@ export const TIER_LABEL: Record<FieldTier, string> = {
   check: "Check this",
   unrated: "Not rated",
   rejected: "Rejected",
+  removed: "Removed",
 };
 
 /**
@@ -131,7 +149,17 @@ export function tierInputFor(
     distrustedReason: scrutiny?.distrusted_reason ?? null,
     // A rejection is NOT confirmation — "I could not verify this" is the opposite
     // of "this is right", and it must keep its mark.
-    humanConfirmed: scrutiny?.verdict === "accepted" || scrutiny?.verdict === "corrected",
+    //
+    // `added` COUNTS AS CONFIRMED (LP-703): a processor read the document and
+    // typed what it says, which is the same act as correcting and a stronger one
+    // than accepting. Leaving it out let an added field render as "Not rated" —
+    // no sign at all that a person had supplied it — which made the screen say
+    // nothing about the one value on the row that a human is answerable for.
+    humanConfirmed:
+      scrutiny?.verdict === "accepted" ||
+      scrutiny?.verdict === "corrected" ||
+      scrutiny?.verdict === "added",
     rejected: scrutiny?.verdict === "rejected",
+    removed: scrutiny?.verdict === "removed",
   };
 }

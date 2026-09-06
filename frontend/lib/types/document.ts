@@ -149,7 +149,19 @@ export interface Transaction {
 }
 
 /** A processor's decision about one extracted value (LP-UI-033). */
-export type FieldVerdict = "accepted" | "corrected" | "rejected";
+/**
+ * What a processor decided about one extracted field.
+ *
+ * The first three record an opinion about a value the model produced. `removed`
+ * and `added` (LP-703) change what the RULE ENGINE reads: a removed field is
+ * absent from the snapshot, so a rule that needs it says `couldnt_check`; an
+ * added one enters as if it had been read, sourced to a person.
+ *
+ * `rejected` is deliberately NOT `removed`. "I could not verify this" leaves the
+ * model's value in place for the next person; "this is not on the document" takes
+ * it out. Collapsing them would make an illegible page delete data.
+ */
+export type FieldVerdict = "accepted" | "corrected" | "rejected" | "removed" | "added";
 
 /**
  * How much scrutiny one extracted field asks for (LP-UI-032), resolved by the
@@ -217,6 +229,15 @@ export interface DocumentDetailResponse extends DocumentResponse {
   generic_analysis: GenericAnalysis | null;
   /** `{field: scrutiny}` for the fields this extraction carries (LP-UI-032). */
   field_scrutiny: Record<string, FieldScrutiny>;
+  /**
+   * Field names a processor may ADD (LP-703) — the document type's declared keys
+   * minus the ones already extracted, computed by the API.
+   *
+   * NOT derived here. The service is what refuses an undeclared key, and a second
+   * copy of that rule on the screen is one that can offer a choice the API then
+   * rejects — which reads to a processor as a broken save, not a wrong list.
+   */
+  addable_fields: string[];
 }
 
 /** The dev-only text-layer extraction (LP-40; non-production endpoint). */

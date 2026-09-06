@@ -62,6 +62,7 @@ from app.models.borrower import Borrower
 from app.models.document import Document
 from app.models.document_borrower_link import DocumentBorrowerLink
 from app.models.extraction import Extraction
+from app.models.field_review import FieldReview, FieldVerdict
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.services.borrower_name_matching import BORROWER_NAME_FIELDS
@@ -86,6 +87,13 @@ from app.verification.snapshot.model import (
 from app.verification.snapshot.pii import PiiField, PiiKind
 
 _EXTRACTED = FieldSource.EXTRACTED
+#: A value a PERSON supplied, not one the model read (LP-703).
+#:
+#: A separate source rather than a flag, because CLAUDE.md's stated-versus-verified
+#: principle applies here more than anywhere: a finding that cites a corrected figure
+#: has to be able to say a person put it there. Nothing downstream branches on it yet;
+#: it is carried so that the answer exists when something asks.
+_CORRECTED = FieldSource.CORRECTED
 
 # Document types that carry a nested transaction list (only bank statements today).
 _TRANSACTION_DOC_TYPES = frozenset({"bank_statement"})
@@ -406,36 +414,91 @@ def _scalar(value: Any) -> str | int | float | bool | None:
     return None  # nested structures (e.g. bank-statement transactions) not surfaced here
 
 
+@dataclass(frozen=True)
+class FieldOverride:
+    """What a processor decided should reach the rule engine for one field (LP-703).
+
+    Three shapes, and only three: replace the value, take the field out, or put a
+    field in that the model missed. ``removed`` and a ``value`` are mutually
+    exclusive — the service is what enforces that; this is the shape the snapshot
+    reads.
+    """
+
+    #: The value the processor supplied, as they typed it. None for a removal.
+    value: str | None
+    #: Take the field OUT of the snapshot entirely — absent, not null.
+    removed: bool = False
+
+
 def build_document_fields(
-    extracted: dict[str, Any], document_type: str | None, *, loan_file_id: UUID
+    extracted: dict[str, Any],
+    document_type: str | None,
+    *,
+    loan_file_id: UUID,
+    overrides: Mapping[str, FieldOverride] | None = None,
 ) -> dict[str, SnapshotField]:
     """Reshape one document's ``extracted_data`` into snapshot fields (pure).
 
     A field registered in :data:`_PII_FIELDS` is routed through ``PiiField`` — never a
     plain ``Field`` — so a raw SSN/TIN cannot land as plaintext ``Field.value``.
     ``loan_file_id`` salts the per-file match-hash for raw PII.
+
+    ``overrides`` (LP-703) are a processor's corrections, removals and additions. THE
+    SUBSTITUTION HAPPENS BEFORE THE ROUTING, not after the fields are built, and that
+    ordering is the whole safety argument: a corrected SSN then travels the identical
+    ``PiiField`` path an extracted one does, and the LP-569 free-text scrub applies to
+    a hand-typed value as much as to a read one. Overlaying afterwards would mean
+    writing a second copy of both, and the second copy is where a raw identifier would
+    eventually reach ``Field.value``.
+
+    ``extracted`` is never mutated. "What did the model actually say?" is the question
+    every accuracy investigation starts from, and an override answers a different one.
     """
+    overrides = overrides or {}
     fields: dict[str, SnapshotField] = {}
-    for key, entry in extracted.items():
-        if key == _CATCH_ALL_KEY or not isinstance(entry, dict) or "value" not in entry:
+    # A processor's ADDED fields are keys the extraction has no entry for, so they
+    # cannot be reached by walking `extracted`. Walked together, in extraction order
+    # first, so an addition can never shadow a key the model actually produced —
+    # the service refuses that case, and this makes it harmless if it ever slips.
+    added_keys = [key for key in overrides if key not in extracted and key != _CATCH_ALL_KEY]
+    for key in list(extracted) + added_keys:
+        entry = extracted.get(key)
+        override = overrides.get(key)
+        if override is not None and override.removed:
+            # ABSENT, not null. A rule that needs this field now degrades to
+            # `couldnt_check` rather than evaluating against a value nobody stands
+            # behind — which is the difference between "we do not know" and "we
+            # checked and it was empty".
             continue
-        value = entry.get("value")
-        if value is None:  # absent — omit
-            continue
-        confidence = coerce_optional_confidence(entry.get("confidence"))
+        if override is not None and override.value is not None:
+            value: Any = override.value
+            source = _CORRECTED
+            # NO CONFIDENCE. `confidence` is the MODEL's self-rating of its own
+            # reading; a person's value has never had one, and a fabricated 1.0 here
+            # would read as the model being certain about a value it never saw. The
+            # source is what says a human supplied it.
+            confidence = None
+        else:
+            if key == _CATCH_ALL_KEY or not isinstance(entry, dict) or "value" not in entry:
+                continue
+            value = entry.get("value")
+            if value is None:  # absent — omit
+                continue
+            source = _EXTRACTED
+            confidence = coerce_optional_confidence(entry.get("confidence"))
         routing = _PII_FIELDS.get(key)
         if routing is not None:
             kind, pre_masked = routing
             if pre_masked:
                 fields[key] = PiiField.pre_masked(
-                    value, kind=kind, source=_EXTRACTED, confidence=confidence
+                    value, kind=kind, source=source, confidence=confidence
                 )
             else:  # raw value → mask + per-file match-hash; raw is discarded
                 fields[key] = PiiField.from_raw(
                     value,
                     kind=kind,
                     loan_file_id=loan_file_id,
-                    source=_EXTRACTED,
+                    source=source,
                     confidence=confidence,
                 )
             continue
@@ -459,7 +522,7 @@ def build_document_fields(
             redacted = _DESC_REDACT.sub(_REDACTED, as_text)  # embedded SSN/account run (LP-445)
             if redacted != as_text:
                 scalar = redacted
-        fields[key] = Field.present(scalar, source=_EXTRACTED, confidence=confidence)
+        fields[key] = Field.present(scalar, source=source, confidence=confidence)
 
     # ``asserted_name`` — a stable, doc-type-agnostic alias of the RAW borrower-name
     # field the document printed. Point it at the SAME already-built field (never a
@@ -1958,6 +2021,43 @@ class _ReshapedDoc:
     list_drafts: dict[str, _ListDraft]
 
 
+async def _field_overrides(
+    db: AsyncSession, extraction_ids: list[UUID]
+) -> dict[UUID, dict[str, FieldOverride]]:
+    """A processor's live corrections, removals and additions, per extraction (LP-703).
+
+    ONE QUERY for the whole file, like ``_links_by_document`` beside it — a snapshot
+    build already walks every current document, and a query per document would make
+    the cost of reading corrections scale with the size of the file.
+
+    Only the verdicts that CHANGE the snapshot are loaded. ``accepted`` and
+    ``rejected`` are records of a human decision about a value the model produced and
+    leave the facts alone; asking for them here would return rows this function has
+    nothing to do with.
+    """
+    if not extraction_ids:
+        return {}
+    rows = (
+        (
+            await db.execute(
+                only_active(select(FieldReview), FieldReview).where(
+                    FieldReview.extraction_id.in_(extraction_ids),
+                    FieldReview.verdict.in_([v for v in FieldVerdict if v.changes_the_snapshot]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_extraction: dict[UUID, dict[str, FieldOverride]] = {}
+    for row in rows:
+        by_extraction.setdefault(row.extraction_id, {})[row.field_key] = FieldOverride(
+            value=None if row.verdict is FieldVerdict.REMOVED else row.corrected_value,
+            removed=row.verdict is FieldVerdict.REMOVED,
+        )
+    return by_extraction
+
+
 async def _reshape_and_assign_ids(
     db: AsyncSession, loan_file: LoanFile
 ) -> tuple[list[Document], list[_ReshapedDoc], list[str]]:
@@ -1992,6 +2092,9 @@ async def _reshape_and_assign_ids(
 
     borrower_names = await _active_borrower_names(db, loan_file.id)
     links_by_doc = await _links_by_document(db, [d.id for d in documents])
+    overrides_by_extraction = await _field_overrides(
+        db, [d.current_extraction.id for d in documents if d.current_extraction is not None]
+    )
 
     # Pass 1: reshape each document's content (type / resolved borrowers / fields / transaction
     # field sets) WITHOUT ids — nothing here depends on array position.
@@ -1999,7 +2102,14 @@ async def _reshape_and_assign_ids(
     for document in documents:
         extraction = document.current_extraction
         extracted = extraction.extracted_data if extraction and extraction.extracted_data else {}
-        fields = build_document_fields(extracted, document.document_type, loan_file_id=loan_file.id)
+        fields = build_document_fields(
+            extracted,
+            document.document_type,
+            loan_file_id=loan_file.id,
+            overrides=(
+                overrides_by_extraction.get(extraction.id, {}) if extraction is not None else {}
+            ),
+        )
         refs = tuple(
             BorrowerRef(borrower_id=link.borrower_id, name=borrower_names[link.borrower_id])
             for link in links_by_doc.get(document.id, ())

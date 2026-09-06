@@ -28,6 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.documents.naming import standard_name
 from app.documents.period import document_period
+from app.documents.schema_fields import fields_for
 from app.documents.staleness import evaluate_staleness, package_fitness, package_qualification
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
@@ -301,7 +302,25 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
         ),
         generic_analysis=document.generic_analysis,
         field_scrutiny=_field_scrutiny(document, extraction, reviews),
+        addable_fields=_addable_fields(document, extraction),
     )
+
+
+def _addable_fields(document: Document, extraction: Extraction | None) -> list[str]:
+    """Field names a processor may ADD to this document (LP-703).
+
+    The document type's declared keys, minus the ones the extraction already
+    carries. Sent as a list rather than left to the client to compute, because the
+    SERVICE is what refuses an undeclared key and a second copy of that rule on the
+    screen is a second copy that can disagree — the client would offer a choice the
+    API then rejects, which reads as a bug in the save rather than in the list.
+
+    Empty for an untyped document: with no type there is no declared field set, and
+    a key added under none would be a key no rule reads.
+    """
+    data = extraction.extracted_data if extraction is not None else None
+    already = set(data) if isinstance(data, dict) else set()
+    return sorted(fields_for(document.document_type) - already)
 
 
 def _field_scrutiny(
@@ -327,7 +346,11 @@ def _field_scrutiny(
     distrusted = load_distrusted_fields()
     doc_type = document.document_type or ""
     out: dict[str, FieldScrutiny] = {}
-    for field in data:
+    # THE EXTRACTION'S KEYS *AND* THE REVIEWED ONES. An ADDED field (LP-703) is by
+    # definition a key the extraction does not carry, so walking `data` alone would
+    # leave the screen with no verdict for a field the processor had just put there
+    # — it would render as an ordinary value with no sign a person supplied it.
+    for field in sorted(set(data) | set(reviews)):
         if field in ("additional_sections", "transactions"):
             continue
         critical = is_critical(field)

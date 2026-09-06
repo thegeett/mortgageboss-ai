@@ -245,5 +245,10 @@ class DocumentDetailResponse(DocumentResponse):
     #: absent rather than present-and-false, so the payload does not grow with the
     #: 1,603-key spec vocabulary.
     field_scrutiny: dict[str, FieldScrutiny] = {}
+    #: Field names a processor may ADD (LP-703) — the document type's declared keys
+    #: minus the ones already extracted. Computed here rather than on the screen: the
+    #: service is what refuses an undeclared key, and a second copy of that rule in
+    #: the client is one that can offer a choice the API then rejects.
+    addable_fields: list[str] = []
     # The Tier 3 generic-analyzer output (LP-66), if any — for the LP-72 detail view.
     generic_analysis: dict[str, Any] | None = None

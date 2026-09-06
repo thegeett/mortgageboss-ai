@@ -26,7 +26,7 @@ import {
 import { StatusToken } from "@/components/status-token";
 import { useDocumentDetail, useLoanFileDocuments } from "@/lib/api/documents";
 import { useFieldBoxes } from "@/lib/api/field-boxes";
-import { useRecordFieldReview } from "@/lib/api/field-reviews";
+import { useRecordFieldReview, useRevertFieldReview } from "@/lib/api/field-reviews";
 import { usePageImage } from "@/lib/api/page-image";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import { currentDocuments, extractionFields, sensitiveKeysOf } from "@/lib/loan-files/documents";
@@ -127,6 +127,7 @@ function Reviewer() {
   const queue = useMemo(() => buildQueue(fields, detail?.field_scrutiny ?? {}), [fields, detail]);
 
   const recordReview = useRecordFieldReview(documentId);
+  const revertReview = useRevertFieldReview(documentId);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showBoxes, setShowBoxes] = useState(true);
   // Zoom persists across pages and documents for the session: a processor who
@@ -365,6 +366,19 @@ function Reviewer() {
               recordReview.mutate({ fieldKey, verdict: "rejected", note: reason });
               setEditing(null);
             }}
+            onRemove={(fieldKey, reason) => {
+              // THE ROW STAYS. The list is built from `extracted_data`, which a
+              // removal deliberately does not touch — what changes is the snapshot
+              // the checks read. So the row goes on showing the extracted value,
+              // now marked "Removed", which is also the only place Undo can live.
+              recordReview.mutate({ fieldKey, verdict: "removed", note: reason });
+              setEditing(null);
+            }}
+            onAdd={(fieldKey, value) => {
+              recordReview.mutate({ fieldKey, verdict: "added", correctedValue: value });
+            }}
+            addableFields={detail?.addable_fields ?? []}
+            onUndo={(fieldKey) => revertReview.mutate(fieldKey)}
           />
         }
       />

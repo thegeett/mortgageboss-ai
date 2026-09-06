@@ -49,11 +49,39 @@ class FieldVerdict(StrEnum):
     could not verify it: the page is illegible, the document is the wrong one, the
     figure is not there. Rejected is NOT "wrong"; it is "I could not tell", which
     is a different and useful thing for the next person to know.
+
+    ``REMOVED`` and ``ADDED`` are LP-703, and they are not shades of the first
+    three. The first three describe a value the model produced; these two change
+    what the snapshot contains.
+
+    ``REMOVED`` — the model extracted something that is not on this document. The
+    field becomes **absent** from the snapshot, which is not the same as null: a
+    rule that needs it degrades to ``couldnt_check`` rather than evaluating against
+    a value nobody stands behind. ``ADDED`` — the model missed a field that is on
+    the document; the processor supplies it, and it enters the snapshot as if it
+    had been read, but sourced to a person.
+
+    REJECTED IS STILL NOT REMOVED, and the distinction is load-bearing. "I could
+    not verify this" leaves the model's value in place for the next person to try
+    again; "this is not on the document" takes it out. Collapsing them would make
+    an unreadable page delete data.
     """
 
     ACCEPTED = "accepted"
     CORRECTED = "corrected"
     REJECTED = "rejected"
+    REMOVED = "removed"
+    ADDED = "added"
+
+    @property
+    def changes_the_snapshot(self) -> bool:
+        """Whether this verdict alters what the rule engine reads.
+
+        The three original verdicts are a record of a human decision and leave the
+        facts alone; these two are the facts. Named because several call sites need
+        the distinction and each one deriving its own list is how they drift.
+        """
+        return self in (FieldVerdict.CORRECTED, FieldVerdict.REMOVED, FieldVerdict.ADDED)
 
 
 class FieldReview(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -85,10 +113,25 @@ class FieldReview(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: The typed-core key, e.g. ``gross_pay``.
     field_key: Mapped[ShortStr] = mapped_column(nullable=False)
     verdict: Mapped[FieldVerdict] = mapped_column(str_enum(FieldVerdict), nullable=False)
-    #: The value the processor says is right (CORRECTED only). A STRING, exact as
-    #: typed: coercing here would lose what they actually entered, and the audit
+    #: The value the processor says is right (CORRECTED and ADDED). A STRING, exact
+    #: as typed: coercing here would lose what they actually entered, and the audit
     #: question is what they entered.
     corrected_value: Mapped[LongStr | None] = mapped_column(nullable=True)
+    #: What the model said, at the moment the processor overruled it (CORRECTED and
+    #: REMOVED). Null for ADDED, where there was nothing to replace.
+    #:
+    #: THE COLUMN THAT MAKES A CORRECTION SURVIVABLE. A review is keyed to one
+    #: extraction version (ADR-393), so a re-extraction retires it — correctly, since
+    #: a person's confirmation must not vouch for a figure they never saw. But a
+    #: processor who fixed a gross pay does not want to retype it every time the
+    #: document is re-read. With this column the next version can be asked a precise
+    #: question: is the model STILL saying the thing that was overruled? If yes the
+    #: correction carries forward silently; if it has changed its mind, the
+    #: correction is held back for a person to look at again.
+    #:
+    #: It holds an EXTRACTED value, so it is as sensitive as ``corrected_value`` and
+    #: is dropped from the readonly view for the same reason.
+    replaced_value: Mapped[LongStr | None] = mapped_column(nullable=True)
     #: Why — required for REJECTED (an unverifiable field with no reason tells the
     #: next processor nothing), optional otherwise.
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

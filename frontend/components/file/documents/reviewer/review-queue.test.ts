@@ -29,6 +29,8 @@ function field(key: string, confidence: number | null): ExtractionField {
     rows: [],
     source: null,
     confidence,
+    corrected: false,
+    replacedValue: null,
   };
 }
 
@@ -42,6 +44,8 @@ function listField(key: string): ExtractionField {
     rows: [["a"], ["b"], ["c"]],
     source: null,
     confidence: null,
+    corrected: false,
+    replacedValue: null,
   };
 }
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { ExtractionTable } from "@/components/file/documents/extraction-table";
+import { AddField } from "@/components/file/documents/reviewer/add-field";
 import { ScrutinyMark } from "@/components/file/documents/reviewer/scrutiny-mark";
 import { VerdictEditor } from "@/components/file/documents/reviewer/verdict-editor";
 import { StatusToken } from "@/components/status-token";
@@ -38,6 +39,10 @@ export function ReviewerFields({
   editing,
   onCorrect,
   onReject,
+  onRemove,
+  onAdd,
+  onUndo,
+  addableFields,
   onCancelEdit,
   busy,
 }: {
@@ -56,6 +61,14 @@ export function ReviewerFields({
   editing?: string | null;
   onCorrect?: (fieldKey: string, value: string) => void;
   onReject?: (fieldKey: string, reason: string) => void;
+  /** Take the field out of the snapshot — it is not on this document (LP-703). */
+  onRemove?: (fieldKey: string, reason: string) => void;
+  /** Supply a field the extraction missed (LP-703). */
+  onAdd?: (fieldKey: string, value: string) => void;
+  /** Withdraw whatever verdict is on this field, putting the model's value back. */
+  onUndo?: (fieldKey: string) => void;
+  /** Field names this document type declares and the extraction does not carry. */
+  addableFields?: readonly string[];
   onCancelEdit?: () => void;
   busy?: boolean;
 }) {
@@ -94,7 +107,23 @@ export function ReviewerFields({
 
   const scrutiny = data.field_scrutiny ?? {};
   const sensitiveKeys = sensitiveKeysOf(scrutiny);
-  const fields = extractionFields(data.current_extraction?.extracted_data ?? {}, sensitiveKeys);
+  // WHAT THE PROCESSOR SUPPLIED, fed into the same pipeline the extracted values
+  // go through (LP-703). Before this the row rendered the model's value with a
+  // "Verified" mark beside it, so someone who had just typed 4,200 went on reading
+  // 15,000 — and once corrections started reaching the rule engine, that was the
+  // screen and the checks disagreeing about the same field.
+  const corrections = new Map(
+    Object.entries(scrutiny)
+      .filter(
+        ([, s]) => s.verdict === "corrected" || s.verdict === "added" || s.verdict === "removed",
+      )
+      .map(([key, s]) => [key, { value: s.corrected_value, removed: s.verdict === "removed" }]),
+  );
+  const fields = extractionFields(
+    data.current_extraction?.extracted_data ?? {},
+    sensitiveKeys,
+    corrections,
+  );
 
   return (
     // One provider for the pane rather than one per row — forty providers is forty
@@ -145,9 +174,20 @@ export function ReviewerFields({
                     extraction contracts declare. The label is not repeated: the
                     button above is already this field's name. */}
                   {field.kind === "scalar" ? (
-                    <span className="block break-words text-sm font-medium text-foreground">
-                      {field.value || EMPTY_VALUE}
-                    </span>
+                    <>
+                      <span className="block break-words text-sm font-medium text-foreground">
+                        {field.value || EMPTY_VALUE}
+                      </span>
+                      {/* WHAT THE MODEL SAID, kept visible beside the correction.
+                        The extraction is untouched by design, so this is the row
+                        that answers "what did the model actually say?" — the
+                        question every accuracy investigation starts from. */}
+                      {field.replacedValue ? (
+                        <span className="mt-0.5 block break-words text-xs text-muted-foreground">
+                          The extraction read {field.replacedValue}
+                        </span>
+                      ) : null}
+                    </>
                   ) : (
                     <ExtractionTable
                       summary={field.value}
@@ -171,7 +211,25 @@ export function ReviewerFields({
                       carries no mark and opens no editor (LP-702); editing rows
                       is LP-703's subject. */}
                   {field.kind === "scalar" && field.value && field.value !== EMPTY_VALUE ? (
-                    <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                    <span className="flex flex-wrap items-center gap-x-2">
+                      <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                      {/* UNDO IS REACHABLE, which it was not until LP-703.
+                        `useRevertFieldReview` existed from LP-UI-033 and no
+                        component called it, so every decision — including one made
+                        by a mis-key — was permanent from the screen. A removal and
+                        an addition make that worse, because they change what the
+                        checks compute from. */}
+                      {onUndo && scrutiny[field.key]?.verdict ? (
+                        <button
+                          type="button"
+                          className="rounded text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => onUndo(field.key)}
+                          disabled={busy}
+                        >
+                          Undo
+                        </button>
+                      ) : null}
+                    </span>
                   ) : null}
 
                   {editing === field.key && field.kind === "scalar" ? (
@@ -180,6 +238,7 @@ export function ReviewerFields({
                       currentValue={field.value}
                       onCorrect={(value) => onCorrect?.(field.key, value)}
                       onReject={(reason) => onReject?.(field.key, reason)}
+                      onRemove={(reason) => onRemove?.(field.key, reason)}
                       onCancel={() => onCancelEdit?.()}
                       busy={busy}
                     />
@@ -196,6 +255,8 @@ export function ReviewerFields({
             ))}
           </ul>
         )}
+
+        {onAdd ? <AddField fields={addableFields ?? []} onAdd={onAdd} busy={busy} /> : null}
       </div>
     </TooltipProvider>
   );
