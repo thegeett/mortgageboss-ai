@@ -134,3 +134,39 @@ def test_ih9_does_not_depend_on_the_closing_date_tag() -> None:
     tags = set(_IH9.deterministic.load_bearing_tags) | set(_IH9.deterministic.gated_tags)
     assert tags == {"ins.policy_expired"}
     assert not any("closing" in t for t in tags)
+
+
+async def test_the_expired_policy_finding_names_the_binder_it_read() -> None:
+    """LP-647 §1 group A — IH-9 could say WHEN the policy expired and not WHICH policy.
+
+    `produce_derived_tags` stamps `source_facts=(subject_id,)`, and IH-9 is loan-subject, so the
+    subject is the literal string "loan" — it names no document, `_source_document_ids` resolves
+    nothing, and the finding renders with no way to open the binder whose date it just quoted.
+
+    The recipe's loop already visits each homeowners binder to read its expiry tag; it discarded the
+    entry afterwards. Asserted THROUGH the evaluation, not on the recipe, because the evaluation is
+    what becomes the finding — a recipe returning ids proves nothing if the caller drops them.
+    """
+    mat = await _materialize(build_insurance_expired_snapshot())
+
+    tag = mat.tags.by_subject[_LOAN]["ins.policy_expired"]
+    assert tag.source_facts != ("loan",), (
+        "the tag named the loan instead of the binder — the shipped behaviour this closes"
+    )
+    assert len(tag.source_facts) == 1, "one binder states this date; naming more would over-claim"
+
+    (result,) = evaluate_deterministic_rule(_IH9, mat)
+    assert result.source_content_ids == tag.source_facts, (
+        "the binder must reach `source_content_ids` — the only field the finding's document links "
+        f"are built from. Got {result.source_content_ids}"
+    )
+
+
+async def test_the_effective_date_finding_names_its_binder_too() -> None:
+    """IH-3's half of the same fix. Both tags on that rule are loan-subject and both were anonymous;
+    fixing one and leaving the other is the asymmetry this ticket keeps re-learning."""
+    mat = await _materialize(build_insurance_expired_snapshot())
+
+    tag = mat.tags.by_subject[_LOAN]["ins.loan_effective_date"]
+    assert tag.source_facts != ("loan",), "IH-3's effective-date tag must name its binder"
+    assert len(tag.source_facts) == 1

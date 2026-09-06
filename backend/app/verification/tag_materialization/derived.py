@@ -364,7 +364,7 @@ def _latest_ytd(
 
 def _income_ytd_annualized_shortfall(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, PER BORROWER.
 
     LP-509-A3 — THREE STACKED ARITHMETIC DEFECTS, all of which had to go together: fixing any one or
@@ -495,7 +495,7 @@ def _qualifying_income_monthly(
 
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.max_employment_gap_days — the largest gap (days) between consecutive employment records,
     computed PER BORROWER and NEVER across borrowers.
 
@@ -1703,7 +1703,7 @@ def _loan_closing_date(
 
 def _loan_effective_date(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.loan_effective_date — the loan's single homeowners-insurance effective date, promoted to LOAN
     level from the document-subject ins.effective_date (LP-417; ins.effective_date stays a document fact,
     read from the homeowners_insurance binder's effective_date). Mirrors _loan_closing_date's promotion +
@@ -1724,6 +1724,7 @@ def _loan_effective_date(
     # ways is ONE value; >1 distinct date → the binders disagree (the multi-binder abstain). Scoped to
     # homeowners_insurance binders — never a divorce_decree that happens to carry an effective_date field.
     values: dict[object, str] = {}
+    read_from: dict[object, str] = {}  # LP-647 §1 group A — the binder each date came from
     for entry in snapshot.documents.entries:
         if entry.document_type != "homeowners_insurance":
             continue
@@ -1731,24 +1732,30 @@ def _loan_effective_date(
         if tag is None or str(tag.value) == _UNKNOWN:
             continue
         raw = str(tag.value)
-        values[coerce_date(raw) or raw] = raw
+        date_key = coerce_date(raw) or raw
+        values[date_key] = raw
+        read_from.setdefault(date_key, entry.content_id)
     if not values:
         return _UNKNOWN, "no homeowners insurance binder states an effective date in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        # EVERY binder, because the finding IS the disagreement between them.
+        return (
+            _UNKNOWN,
             f"the file's homeowners insurance binders disagree on the effective date "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            tuple(read_from.values()),
         )
-    effective = next(iter(values.values()))
+    chosen, effective = next(iter(values.items()))
     return (
         effective,
         f"the loan's insurance effective date {effective} (from the homeowners binder)",
+        (read_from[chosen],),  # the ONE binder this date came from
     )
 
 
 def _ins_policy_expired(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.policy_expired — has the homeowners policy already lapsed as at the file date? (LP-509-D1)
 
     ⚠️ COMPARED TO THE SNAPSHOT'S OWN BUILD DATE, NEVER THE CLOSING DATE, and that is the whole point.
@@ -1773,6 +1780,10 @@ def _ins_policy_expired(
 
     values: dict[date, str] = {}
     unparseable = False
+    # LP-647 §1 group A — the BINDERS this verdict rests on. The loop already visits each one; it
+    # discarded the entry after reading its tag, so the finding could name the expiry date and not
+    # the policy that states it.
+    read_from: dict[date, str] = {}
     for entry in snapshot.documents.entries:
         if entry.document_type != "homeowners_insurance":
             continue
@@ -1785,6 +1796,7 @@ def _ins_policy_expired(
             unparseable = True
             continue
         values[parsed] = raw
+        read_from.setdefault(parsed, entry.content_id)
 
     if unparseable and not values:
         return _UNKNOWN, (
@@ -1794,18 +1806,24 @@ def _ins_policy_expired(
     if not values:
         return _UNKNOWN, "no homeowners insurance binder states an expiration date in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        # EVERY binder, because the finding is about their DISAGREEMENT — a processor comparing them
+        # needs all the documents in the comparison, not one of them.
+        return (
+            _UNKNOWN,
             f"the file's homeowners insurance binders disagree on the expiration date "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            tuple(read_from[d] for d in sorted(read_from)),
         )
 
     expires_on, raw = next(iter(values.items()))
     as_at = snapshot.created_at.date()
     if expires_on < as_at:
         lapsed_days = (as_at - expires_on).days
-        return "yes", (
+        return (
+            "yes",
             f"the homeowners insurance policy expired {raw} — {lapsed_days} day(s) before the file "
-            f"date {as_at.isoformat()}, so the property is currently uninsured"
+            f"date {as_at.isoformat()}, so the property is currently uninsured",
+            (read_from[expires_on],),  # the ONE binder whose date this is
         )
     return "no", (
         f"the homeowners insurance policy runs to {raw}, which is on or after the file date "
@@ -2477,7 +2495,7 @@ _CONDO_FIDELITY_EXEMPT_MAX_UNITS = 20
 
 def _condo_fidelity_coverage(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.condo_fidelity_coverage — does the project's master policy EVIDENCE fidelity/crime cover? (CO-3)
 
     ⚠️ THIS IS THE ONE CONDO-INSURANCE QUESTION NO LIVE RULE ASKS. IH-7's spec header excludes fidelity
@@ -2561,7 +2579,7 @@ def _condo_fidelity_coverage(
 
 def _condo_reserve_adequacy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.reserve_adequacy — do the HOA's budgeted replacement reserves meet the floor? (CO-4)
 
     ⚠️ THE FLOOR IS DATE-KEYED, and the date is the APPLICATION's, never today's. Fannie LL-2026-03 raises
@@ -2802,7 +2820,7 @@ def _condo_project_eligibility(
 
 def _condo_master_policy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.condo_master_policy — is the condo master policy present and adequate? (IH-7)
 
     LOAN-scoped, because ``absent`` is a statement about the FILE and no per-document tag can be
@@ -3134,7 +3152,7 @@ def _norm_address(raw: str) -> str:
 
 def _property_address_match(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """property.address_normalized_match — does the purchase contract's SUBJECT-PROPERTY address match the loan
     file's (1003/MISMO) subject-property address? Unblocks PC-3.
 
@@ -4159,7 +4177,7 @@ def _fha_ufmip_percent(
 
 def _condo_questionnaire_present(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.questionnaire_present — does the file carry a condo questionnaire? (CO-1, LP-488)
 
     ⚠️ A DOCUMENT-TYPE PRESENCE READ — the classifier's type label, never extracted fields (the
@@ -4174,9 +4192,16 @@ def _condo_questionnaire_present(
             _UNKNOWN,
             "the file carries no documents, so the questionnaire's absence cannot be read",
         )
-    types = {entry.document_type for entry in snapshot.documents.entries}
-    if types & _CONDO_QUESTIONNAIRE_DOC_TYPES:
-        return "yes", "the file carries a condo questionnaire"
+    # LP-647 §1 group A — the ENTRIES, not just their types. This built a set of type strings and
+    # discarded the documents, so a "yes" could say the file carries a questionnaire and not WHICH,
+    # and CO-1's finding rendered with nothing to open.
+    by_type: dict[str, list[str]] = {}
+    for entry in snapshot.documents.entries:
+        if entry.document_type is not None:
+            by_type.setdefault(entry.document_type, []).append(entry.content_id)
+    types = set(by_type)
+    if found := [cid for t in sorted(types & _CONDO_QUESTIONNAIRE_DOC_TYPES) for cid in by_type[t]]:
+        return "yes", "the file carries a condo questionnaire", tuple(found)
     # ⚠️ ABSTAIN ON THE ADJACENT TYPE (reported finding). `hoa_certification` is a sibling Tier-1 type the
     # classifier is explicitly told is confusable with this one ("the project-eligibility certification,
     # distinct from ... condo_questionnaire"), and it carries the very facts CO-1's how_to_fix asks for —
@@ -4184,10 +4209,16 @@ def _condo_questionnaire_present(
     # holding one is the IH-7 defect again: telling a processor to fetch a document already in front of
     # them. Whether a certification SATISFIES the project review is a domain call, so this abstains rather
     # than answering "yes" — the safe half of the fix.
-    if types & _CONDO_PROJECT_ADJACENT_DOC_TYPES:
-        return _UNKNOWN, (
+    if adjacent := [
+        cid for t in sorted(types & _CONDO_PROJECT_ADJACENT_DOC_TYPES) for cid in by_type[t]
+    ]:
+        # The CERTIFICATION is what the human is being asked to look at, so it is what the finding
+        # names — this abstention exists precisely because a document is already in front of them.
+        return (
+            _UNKNOWN,
             "the file carries an HOA/condo project certification but no questionnaire — a human must "
-            "confirm whether the certification satisfies the project review"
+            "confirm whether the certification satisfies the project review",
+            tuple(adjacent),
         )
     return "no", "no document in the file is classified as a condo questionnaire"
 
