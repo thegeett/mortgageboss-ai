@@ -404,3 +404,93 @@ describe("LP-643 review — the remove control", () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
+  afterEach(cleanup);
+
+  const twoHousingLines = {
+    ...CALC,
+    housing_items: [
+      {
+        key: "housing.property_taxes",
+        label: "Property taxes",
+        auto_amount: "300.00",
+        override_amount: null,
+        amount: "300.00",
+        source: "computed",
+        overridden: false,
+      },
+      {
+        key: "housing.homeowners_insurance",
+        label: "Homeowners insurance",
+        auto_amount: "120.00",
+        override_amount: null,
+        amount: "120.00",
+        source: "computed",
+        overridden: false,
+      },
+    ],
+  };
+
+  /** THE DEFECT. `editingKey` is single, so opening a second row closed the first and its LOCAL
+   *  draft went with it. A processor correcting two housing lines in a row — the ordinary case,
+   *  since both come from the same document set — lost the first one every time, with no signal. */
+  it("keeps a draft when the processor opens another row", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+
+    // Switch to the other row WITHOUT saving — the step that used to throw the edit away.
+    fireEvent.click(screen.getByText("$300.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$155\.40/)).toBeTruthy();
+  });
+
+  /** And the caption is the half that makes it VISIBLE. An unsaved edit and a never-started edit
+   *  rendered identically, so the processor's own memory was the only record a number was typed. */
+  it("does not claim an unsaved edit on a row that was never edited", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
+  });
+
+  /** Re-entering must not clobber it either — `setDraft(item.amount)` on the edit button was what
+   *  made a paused edit unrecoverable even once the draft survived the switch. */
+  it("restores the paused draft when the processor comes back to the row", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    const insuranceEdit = () => screen.getByText("$120.00");
+
+    fireEvent.click(insuranceEdit());
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+    fireEvent.click(screen.getByText("$300.00"));
+    fireEvent.click(insuranceEdit());
+
+    expect((screen.getByLabelText("Override Homeowners insurance") as HTMLInputElement).value).toBe(
+      "155.40",
+    );
+  });
+
+  /** Cancel stays an explicit discard — the ONLY one besides saving. If it stopped discarding, the
+   *  X would leave a permanent "unsaved" caption a processor cannot clear. */
+  it("discards the draft on Cancel", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+    fireEvent.click(screen.getByLabelText("Cancel"));
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
+  });
+});
