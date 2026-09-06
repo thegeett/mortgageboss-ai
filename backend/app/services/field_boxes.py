@@ -104,7 +104,7 @@ MIN_FOLDED_LENGTH = 4
 class MatchKind(StrEnum):
     """How a box was found — a claim about how much the box is worth.
 
-    Carried out to the caller because the three are not interchangeable, and a
+    Carried out to the caller because the four are not interchangeable, and a
     screen that shows them identically is overstating the last one.
     """
 
@@ -113,8 +113,8 @@ class MatchKind(StrEnum):
     EXACT = "exact"
     #: The quoted text, found after folding formatting away on both sides.
     NORMALISED = "normalised"
-    #: PART of the quoted text, the longest run of it the page actually has, and
-    #: only ever a run CONTAINING the extracted value (LP-707).
+    #: PART of the quoted text: the longest run of it the page actually has, around
+    #: the extracted value and carrying MORE than it (LP-707).
     #:
     #: The snippet is often a SYNTHESIS rather than a quotation — "Total Taxes
     #: $3,663.31 + Total Pre-Tax $1,410.00 + Total Post-Tax $335.00" is three
@@ -122,6 +122,13 @@ class MatchKind(StrEnum):
     #: it is nowhere on the page as one run. Measured on the typed corpus: of 72
     #: fields the first two tiers cannot place, every one has its snippet's words
     #: on the page somewhere, and none has the whole snippet anywhere.
+    #:
+    #: RANKED ABOVE `VALUE` ONLY BECAUSE IT CARRIES CONTEXT, so a run that turns
+    #: out to be the value and nothing else is not this tier — see `_partial`,
+    #: where dropping that rule was measured to hand 38 ambiguous figures a box.
+    #: It fires zero times on the stored corpus, and is kept and labelled honestly
+    #: for the same reason `NORMALISED` is: it closes a failure mode the tests
+    #: demonstrate and this corpus happens not to contain.
     PARTIAL = "partial"
     #: The quoted text was not on the page in any form; the VALUE itself was. The
     #: weakest of the four — the model's claim about what it read could not be
@@ -292,7 +299,7 @@ def _index_page(page: pymupdf.Page, budget: list[int] | None = None) -> _PageInd
     ends: set[int] = set()
     rects: list[pymupdf.Rect] = []
     cursor = 0
-    for word in _page_words(page):
+    for word in _page_words(page, budget):
         x0, y0, x1, y1, raw = word[0], word[1], word[2], word[3], word[4]
         folded = fold(str(raw))
         if not folded:
@@ -408,7 +415,7 @@ def _normalise(rect: pymupdf.Rect, page_rect: pymupdf.Rect, page_number: int) ->
     )
 
 
-# --- The three tiers -------------------------------------------------------- #
+# --- The four tiers --------------------------------------------------------- #
 
 
 def _exact(page: pymupdf.Page, snippet: str, page_number: int) -> tuple[FieldBox, ...]:
@@ -427,7 +434,7 @@ def _exact(page: pymupdf.Page, snippet: str, page_number: int) -> tuple[FieldBox
 def _folded(
     index: _PageIndex, page: pymupdf.Page, needle: str, page_number: int
 ) -> tuple[FieldBox, ...]:
-    """Tiers 2 and 3 — a folded needle against the page's folded word stream."""
+    """Tiers 2 and 4 — a folded needle against the page's folded word stream."""
     runs = _runs(index, needle)
     if not runs or len(runs) > MAX_MATCHES:
         return ()
@@ -439,23 +446,39 @@ def _folded(
 def _partial(
     index: _PageIndex, page: pymupdf.Page, request: BoxRequest, page_number: int
 ) -> tuple[FieldBox, ...]:
-    """The longest run of the snippet's words that the page HAS and that contains the value.
+    """The longest run of the snippet's words the page HAS, around the value's own words.
 
-    WHY THIS TIER EXISTS, and it is the finding that replaced LP-707's plan. The
-    ticket proposed rewriting the JSON contract in 119 extraction prompts so the
-    model would return neighbouring words as anchors instead of a retyped snippet.
-    Measuring first — which that ticket required — showed the rewrite is not needed:
-    of the 72 fields the earlier tiers cannot place on typed documents, **every one
-    already has its snippet's words on the page**. The snippet is not wrong; it is
-    a SYNTHESIS, spanning places the page keeps apart, and the matcher was
-    demanding one contiguous run of the whole of it.
+    WHY THIS TIER EXISTS. The snippet is often a SYNTHESIS rather than a
+    quotation — "Total Taxes $3,663.31 + Total Pre-Tax $1,410.00 + Total Post-Tax
+    $335.00" is three figures from three places joined by the model's arithmetic,
+    and it is nowhere on the page as one run. Of the 72 fields the earlier tiers
+    cannot place on typed documents, every one has its snippet's words on the page
+    somewhere and none has the whole snippet anywhere, so demanding one contiguous
+    run of all of it is what loses them.
 
-    ANCHORED ON THE VALUE, which is what keeps this from being a licence to match
-    anything. Taking the longest run that merely occurs recovers all 72 — and at a
-    median of half the snippet and a minimum of 3% of it, which is one word in
-    thirty and no evidence at all. Requiring the run to CONTAIN the extracted value
-    recovers 26, and each of those 26 is a box drawn over text that demonstrably
-    includes the figure being cited. The other 46 keep their honest no-box state.
+    IT MUST ADD SOMETHING TO THE BARE VALUE, and that rule is what this tier is,
+    not a refinement of it. Without it the winning run is simply the value: MEASURED
+    over the stored corpus, 45 of 45 fields this tier placed were placed on a run
+    whose fold IS the value's, and for 44 of them no run carrying any context exists
+    on the page at all. That is not "part of the quoted text"; it is the VALUE tier,
+    promoted one tier earlier, with LP-709's document-wide ambiguity rule removed —
+    and 30 of the 45 were figures the document repeats, which that rule exists to
+    refuse. A run that adds nothing therefore falls through to the value tier, where
+    it is counted across the document and labelled for what it is.
+
+    THE ANCHOR IS CHECKED ON THE PAGE, AT WORD BOUNDARIES. Asking whether the
+    model's own snippet text contains the value is an unaligned substring test, and
+    this module exists partly because `1500` is a substring of `21,500.00` and
+    `Smith` of `Blacksmith`: both pass that test and neither page text contains the
+    value. `_runs` already resolves the value to whole-word runs, so requiring the
+    boxed run to CONTAIN one is the same guarantee the rest of the module keeps,
+    and it makes the claim above this line true rather than intended.
+
+    Finding those runs FIRST also bounds the cost. The search below is quadratic in
+    the snippet's words — a forty-word snippet is 820 candidates, each folded and
+    searched, per page, per field, measured at 8 ms per page per field — and it ran
+    in full on every page, including the great majority that do not hold the value
+    at all. A page that cannot anchor anything now costs one search.
 
     Longest first, so the most context that can be confirmed is what gets boxed.
     """
@@ -465,17 +488,27 @@ def _partial(
     words = request.snippet.split()
     if not words:
         return ()
+    value_runs = _runs(index, folded_value)
+    if not value_runs:
+        return ()
     for length in range(len(words), 0, -1):
         for start in range(len(words) - length + 1):
             needle = fold(" ".join(words[start : start + length]))
-            # The run has to be long enough to mean something AND has to contain the
-            # value — a run of the snippet that does not include the figure is
-            # context pointing at nothing in particular.
-            if len(needle) < MIN_FOLDED_LENGTH or folded_value not in needle:
+            # STRICTLY MORE THAN THE VALUE. Equal length plus containment means the
+            # run IS the value, which the value tier below already answers — and
+            # answers under a rule this tier does not have.
+            if len(needle) <= len(folded_value) or folded_value not in needle:
                 continue
-            found = _folded(index, page, needle, page_number)
-            if found:
-                return found
+            anchored = [
+                run
+                for run in _runs(index, needle)
+                if any(run[0] <= v0 and v1 <= run[1] for v0, v1 in value_runs)
+            ]
+            if not anchored or len(anchored) > MAX_MATCHES:
+                continue
+            return tuple(
+                _normalise(_union(index.rects[s:e]), page.rect, page_number) for s, e in anchored
+            )
     return ()
 
 
@@ -514,7 +547,7 @@ def _tier_on_page(
     if tier is MatchKind.PARTIAL:
         return _partial(index, page, request, page_number)
 
-    # TIER 3, HELD TO A STRICTER RULE (LP-709). The quoted text could not be
+    # TIER 4, HELD TO A STRICTER RULE (LP-709). The quoted text could not be
     # confirmed anywhere, so all we have is the answer. A figure appearing twice —
     # the same amount as a subtotal and a total — gives no way to tell which the
     # model read. The count is applied by the caller, across the whole document.
@@ -533,7 +566,7 @@ def _lookup_in(
     """Locate one field across the document, STRONGEST TIER FIRST.
 
     TIER-MAJOR, NOT PAGE-MAJOR, and the difference decides correctness. Trying all
-    three tiers on the cited page and then all three on each other page lets a bare
+    four tiers on the cited page and then all four on each other page lets a bare
     VALUE guess on page 1 beat a verbatim EXACT match on page 3 — which MOVES a box
     that was correct before this change, against the guarantee that running the
     exact tier first means none can. That guarantee only ever held within a page.
