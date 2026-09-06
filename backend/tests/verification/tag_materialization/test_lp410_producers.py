@@ -82,14 +82,16 @@ def _closing_snap(closing: str | None, *, created: datetime = _FILE_DATE) -> Sna
 
 
 def test_days_until_closing_future_is_a_positive_number() -> None:
-    value, _ = _contract_days_until_closing(_closing_snap("2026-07-24"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-24"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "10"  # 2026-07-24 minus 2026-07-14
 
 
 def test_days_until_closing_past_is_a_negative_number() -> None:
     # A past closing date is a MEANINGFUL observation (PC-7 decides it's stale) — the tag emits it, never
     # abstains to "unknown" the way a future-dated PAYSTUB does.
-    value, reason = _contract_days_until_closing(_closing_snap("2026-07-04"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-04"), "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == "-10" and "past" in reason
 
 
@@ -97,12 +99,14 @@ def test_days_until_closing_is_deterministic_no_wall_clock() -> None:
     # Same closing date, a fixed snapshot date → the SAME number every run (recency is against
     # snapshot.created_at, never datetime.now()).
     for _ in range(3):
-        value, _ = _contract_days_until_closing(_closing_snap("2026-08-13"), "loan", None)
+        _p = _contract_days_until_closing(_closing_snap("2026-08-13"), "loan", None)
+        value, _ = _p[0], _p[1]
         assert value == "30"
 
 
 def test_days_until_closing_absent_is_unknown() -> None:
-    value, _ = _contract_days_until_closing(_closing_snap(None), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap(None), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "unknown"
 
 
@@ -116,7 +120,8 @@ def test_days_until_closing_disagreement_is_unknown() -> None:
             "b": {"contract.closing_date": _tag("2026-08-24")},  # a different date
         },
     )
-    value, reason = _contract_days_until_closing(snap, "loan", None)
+    _p = _contract_days_until_closing(snap, "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == "unknown" and "disagree" in reason
 
 
@@ -436,7 +441,8 @@ def test_the_three_tags_are_registered_derived_recipes() -> None:
 
 def test_days_until_closing_uses_the_snapshot_date_object() -> None:
     # Guards against a wall-clock regression: a snapshot dated 2026-07-14 with closing 2026-07-14 is 0.
-    value, _ = _contract_days_until_closing(_closing_snap("2026-07-14"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-14"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "0"
     assert _FILE_DATE.date() == date(2026, 7, 14)
 

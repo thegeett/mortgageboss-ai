@@ -198,7 +198,8 @@ def test_hoa_monthly_unknown_on_conflicting_statements() -> None:
 # --------------------------------------------------------------------------- #
 def test_loan_sales_price_promotes_the_contract_price() -> None:
     snap = _with_parsed(_snapshot([_doc("pa", "purchase_agreement", sales_price="365000.00")]))
-    value, _ = _loan_sales_price(snap, _LOAN, None)
+    _p = _loan_sales_price(snap, _LOAN, None)
+    value, _ = _p[0], _p[1]
     assert value == "365000.00"
 
 
@@ -214,7 +215,8 @@ def test_loan_sales_price_unknown_when_absent_and_on_disagreement() -> None:
             ]
         )
     )
-    value, reason = _loan_sales_price(disagree, _LOAN, None)
+    _p = _loan_sales_price(disagree, _LOAN, None)
+    value, reason = _p[0], _p[1]
     assert value == "unknown"
     assert "disagree" in reason
 

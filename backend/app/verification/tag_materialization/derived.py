@@ -2135,6 +2135,31 @@ def _documents_stating(snapshot: Snapshot, *tag_ids: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _documents_dated(snapshot: Snapshot, tag_id: str, wanted: date) -> tuple[str, ...]:
+    """The document subjects whose ``tag_id`` parses to ``wanted`` (LP-647 §1 group B).
+
+    `_age_in_months_at_closing` is handed a DATE by its `pick` policy, not the subject the date came
+    from, and the two callers pick differently (most-recent for a credit report, earliest elsewhere).
+    Rather than change a shared policy signature for provenance, the chosen date is matched back.
+
+    Names only the documents carrying THAT date — the sentence says "the credit report dated X is N
+    months old", which is about the document it aged, not every credit report on the file.
+    """
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return ()
+    document_ids = {entry.content_id for entry in snapshot.documents.entries}
+    out: list[str] = []
+    for subject_id, tags in snapshot.tags.by_subject.items():
+        if subject_id not in document_ids:
+            continue
+        tag = tags.get(tag_id)
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        if coerce_date(str(tag.value)) == wanted:
+            out.append(subject_id)
+    return tuple(out)
+
+
 def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
     """Every non-empty, non-``unknown`` value of ``tag_id`` across the file's subjects, in subject order."""
     if snapshot.tags.absent:
@@ -3324,7 +3349,7 @@ def _property_address_match(
 
 def _contract_days_until_closing(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """contract.days_until_closing — SIGNED days from the file (snapshot) date to the loan's closing date.
 
     Positive = the closing date is in the FUTURE; negative = it is in the PAST (a stale/past closing
@@ -3337,6 +3362,8 @@ def _contract_days_until_closing(
         return _UNKNOWN, "no tags materialized to read a closing date from"
     # Only PARSEABLE closing dates (a number needs a real date for the arithmetic), deduped by the parsed
     # date so one date rendered two ways is ONE value; >1 distinct parsed date → the documents disagree.
+    # LP-647 §1 group B — the documents stating the closing date; `by_subject`'s keys are content ids.
+    stating = _documents_stating(snapshot, "contract.closing_date")
     dates: dict[date, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("contract.closing_date")
@@ -3349,9 +3376,11 @@ def _contract_days_until_closing(
     if not dates:
         return _UNKNOWN, "no (parseable) closing date is stated in the file"
     if len(dates) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's documents disagree on the closing date "
-            f"({', '.join(sorted(dates.values()))}) — ambiguous"
+            f"({', '.join(sorted(dates.values()))}) — ambiguous",
+            stating,  # ALL of them — the finding is the disagreement
         )
     closing = next(iter(dates))
     days = (closing - snapshot.created_at.date()).days
@@ -3359,6 +3388,7 @@ def _contract_days_until_closing(
         str(days),
         f"the closing date {closing.isoformat()} is {days} day(s) from the file date "
         f"({'future' if days >= 0 else 'past'})",
+        stating,
     )
 
 
@@ -3533,7 +3563,7 @@ def _age_in_months_at_closing(
     label: str,
     *,
     pick: Callable[[Snapshot, str], tuple[date | None, str | None]],
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """Shared body for CR-13 / PR-6: COMPLETE calendar months from a document's date to the closing date.
 
     ⚠️ THE OPERAND SUBSTITUTION, stated where it happens: the guideline measures to the **note date**; the
@@ -3547,6 +3577,11 @@ def _age_in_months_at_closing(
     ORIGINAL effective date. Defaulting either way silently is how the 1004D regression happened.
     The CLOSING date stays abstain-on-disagreement: that is one fact restated, so a contradiction is real.
     """
+    # LP-647 §1 group B — the document whose date is being aged. `pick` returns a DATE, not which
+    # subject it came from, so the document is recovered by matching the chosen date back to the
+    # subjects stating this tag. That is exact where one document states it (the ordinary case) and
+    # names only those sharing the chosen date where several do — never every credit report on the
+    # file, because the sentence is about the one it aged.
     doc_date, why = pick(snapshot, document_date_tag)
     if doc_date is None:
         return _UNKNOWN, f"the {label} date is {why}"
@@ -3567,12 +3602,13 @@ def _age_in_months_at_closing(
         str(months),
         f"the {label} dated {doc_date.isoformat()} is {months} calendar month(s) old at the "
         f"closing date {closing.isoformat()} (a partial month counts as a full one)",
+        _documents_dated(snapshot, document_date_tag, doc_date),
     )
 
 
 def _credit_report_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """credit.report_age_months_at_closing — calendar months from the credit pull to closing (CR-13).
 
     MOST RECENT pull: B1-1-03 ages the credit documents from the newest report, so a re-pull resets it.
@@ -3584,7 +3620,7 @@ def _credit_report_age_months(
 
 def _appraisal_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """property.appraisal_age_months_at_closing — calendar months from the appraisal's EFFECTIVE date to
     closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date.
 
@@ -6317,7 +6353,7 @@ def _income_has_rental_income(
 
 def _loan_sales_price(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """contract.loan_sales_price — the loan's single contract sales price, promoted to LOAN level from the
     document-subject contract.sales_price (contract.sales_price itself stays a document fact). Mirrors
     _loan_closing_date (LP-389-A): a loan-enumerated rule cannot read a per-document tag, so PC-2 reads THIS
@@ -6328,6 +6364,9 @@ def _loan_sales_price(
         return _UNKNOWN, "no tags materialized to read a contract sales price from"
     # Dedup by the parsed Decimal (Decimal("365000") == Decimal("365000.00")), so one price rendered two
     # ways is ONE value; >1 distinct value → the documents disagree.
+    # LP-647 §1 group B — the documents STATING the price. `by_subject`'s keys are content ids, so
+    # the answer was one lookup away and was being discarded with the loop variable.
+    stating = _documents_stating(snapshot, "contract.sales_price")
     values: dict[Decimal, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("contract.sales_price")
@@ -6337,12 +6376,18 @@ def _loan_sales_price(
     if not values:
         return _UNKNOWN, "no contract sales price is stated in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's documents disagree on the contract sales price "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            stating,  # ALL of them — the finding is the disagreement
         )
     price = next(iter(values))
-    return str(price), f"the loan's contract sales price {price} (from the purchase agreement)"
+    return (
+        str(price),
+        f"the loan's contract sales price {price} (from the purchase agreement)",
+        stating,  # every document stating it: they agree, and each is a page that shows the figure
+    )
 
 
 def _housing_taxes_monthly(
