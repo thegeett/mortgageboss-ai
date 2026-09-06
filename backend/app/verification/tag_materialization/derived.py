@@ -393,6 +393,15 @@ def _income_ytd_annualized_shortfall(
     )
     documented, d_present, d_unknown = _distinct_documented_monthly(snapshot, entries)
     ytd, pay_date, y_present, y_unknown = _latest_ytd(snapshot, entries)
+    # LP-647 §1 group A — the pay stubs and W-2s BOTH figures are read from. The verdict compares a
+    # year-to-date pace against a documented monthly income, so the finding is about the documents
+    # stating each side; naming one side would name half a comparison.
+    stating = _documents_stating(
+        snapshot,
+        "income.ytd_gross",
+        "income.pay_date",
+        "income.documented_monthly",
+    )
 
     if not y_present or y_unknown or pay_date is None:
         return _UNKNOWN, (
@@ -432,6 +441,7 @@ def _income_ytd_annualized_shortfall(
         f"year-to-date gross {ytd} through {pay_date.isoformat()} "
         f"({elapsed_months:.2f} months elapsed) = {ytd_monthly:.2f}/mo vs documented "
         f"{documented}/mo → shortfall {shortfall:.1%} (negative = ahead of pace, not a shortfall)",
+        stating,
     )
 
 
@@ -2096,6 +2106,35 @@ def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
     return len(shorter) >= _IH2_MIN_PREFIX_TOKENS and longer[: len(shorter)] == shorter
 
 
+def _documents_stating(snapshot: Snapshot, *tag_ids: str) -> tuple[str, ...]:
+    """The DOCUMENT subjects carrying any of ``tag_ids`` with a real value (LP-647 §1 group A).
+
+    The companion to `_parsed_strings`, which gathers the VALUES across subjects and discards which
+    subject each came from — the discard that left a finding able to quote a figure and unable to
+    name the page it is on.
+
+    Document subjects only: a subject key is a content id, and `document_id_by_content_id` resolves
+    exactly those. A loan- or borrower-keyed tag contributes nothing rather than a link that would be
+    dropped downstream, so the caller does not have to filter.
+
+    Order follows subject order, which is the snapshot's document order — stable across runs, so a
+    finding's document list does not reshuffle between two runs that found the same thing.
+    """
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return ()
+    document_ids = {entry.content_id for entry in snapshot.documents.entries}
+    out: list[str] = []
+    for subject_id, tags in snapshot.tags.by_subject.items():
+        if subject_id not in document_ids:
+            continue
+        for tag_id in tag_ids:
+            tag = tags.get(tag_id)
+            if tag is not None and str(tag.value) != _UNKNOWN and str(tag.value).strip():
+                out.append(subject_id)
+                break
+    return tuple(out)
+
+
 def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
     """Every non-empty, non-``unknown`` value of ``tag_id`` across the file's subjects, in subject order."""
     if snapshot.tags.absent:
@@ -2523,6 +2562,10 @@ def _condo_fidelity_coverage(
             else "the subject property is not a condominium — no project fidelity coverage is required"
         )
 
+    # LP-647 §1 group A — the policies this answer is read FROM. Every branch below except the
+    # no-policy one is a claim about what a master policy says, so each names the policies that say
+    # it; the no-policy branch names nothing because there is nothing to open.
+    stating = _documents_stating(snapshot, "condo.fidelity_present_raw")
     has_policy = any(
         entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
         for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
@@ -2573,13 +2616,17 @@ def _condo_fidelity_coverage(
         # fell to the unrecognised branch, and reported sorted(answers)[0]: "the indicator reads 'no',
         # which is not a recognised yes/no answer". 'no' IS recognised; the reason was false and it hid a
         # contradiction BETWEEN DOCUMENTS.
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's master policies disagree about fidelity/crime coverage "
-            f"({', '.join(sorted(answers))}) — abstaining rather than picking one"
+            f"({', '.join(sorted(answers))}) — abstaining rather than picking one",
+            stating,  # ALL of them — the finding is the disagreement
         )
-    return _UNKNOWN, (
+    return (
+        _UNKNOWN,
         f"the master policy's fidelity/crime indicator reads {sorted(answers)[0]!r}, which is not a "
-        "recognised yes/no answer — abstaining rather than reporting the project as uncovered"
+        "recognised yes/no answer — abstaining rather than reporting the project as uncovered",
+        stating,
     )
 
 
@@ -2606,6 +2653,9 @@ def _condo_reserve_adequacy(
     # real data (6/59, four of them "10"); the condo questionnaire's is the same fact from the association's
     # own form. Read together so a disagreement ABSTAINS instead of one silently overriding the other —
     # IH-7's no-cross-document-pooling finding, applied across document TYPES rather than copies.
+    # LP-647 §1 group A — the HOA statement / questionnaire that STATES the percentage. Both verdicts
+    # quote that figure, so both name the documents it was read from.
+    stating = _documents_stating(snapshot, "condo.reserve_pct")
     reserve_pct, problem = _condo_decimal(snapshot, "condo.reserve_pct")
     if problem is not None:
         return _UNKNOWN, problem
@@ -2658,14 +2708,18 @@ def _condo_reserve_adequacy(
         else "Fannie Mae Selling Guide B4-2.2-02 (08/05/2026)"
     )
     if reserve_pct < floor:
-        return "inadequate", (
+        return (
+            "inadequate",
             f"the association budgets {reserve_pct}% of its annual assessment income to replacement "
             f"reserves, below the {floor}% required for an application dated {application_date} "
-            f"({citation})"
+            f"({citation})",
+            stating,
         )
-    return "adequate", (
+    return (
+        "adequate",
         f"the association budgets {reserve_pct}% of its annual assessment income to replacement reserves, "
-        f"at or above the {floor}% required for an application dated {application_date} ({citation})"
+        f"at or above the {floor}% required for an application dated {application_date} ({citation})",
+        stating,
     )
 
 
@@ -2851,15 +2905,23 @@ def _condo_master_policy(
     # number failed to extract reported "absent" and FIRED, telling a processor to request a document
     # already in front of them. That contradicts this recipe's own discipline two branches down, where an
     # unreadable basis abstains "rather than inferring". A present-but-unreadable document abstains.
-    has_document = any(
-        entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
+    # LP-647 §1 group A — the master-policy DOCUMENTS, not just whether one exists. Every branch
+    # below except "absent" is a claim ABOUT these documents ("no number could be read from it", "the
+    # documents state different bases"), so every one of them has a page a processor would open. The
+    # absent branch names nothing, correctly: there is no document.
+    policy_docs = tuple(
+        entry.content_id
         for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+        if entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
     )
+    has_document = bool(policy_docs)
     if not _parsed_strings(snapshot, "condo.master_policy_number"):
         if has_document:
-            return _UNKNOWN, (
+            return (
+                _UNKNOWN,
                 "the file carries a condominium master-policy document but no policy number could be "
-                "read from it — abstaining rather than reporting the policy as missing"
+                "read from it — abstaining rather than reporting the policy as missing",
+                policy_docs,
             )
         return "absent", (
             "the property is a condominium but the file carries no master insurance policy stating a "
@@ -2868,13 +2930,15 @@ def _condo_master_policy(
 
     bases = _parsed_strings(snapshot, "condo.master_policy_basis_raw")
     if not bases:
-        return _UNKNOWN, "the master policy does not state a replacement-cost basis"
+        return _UNKNOWN, "the master policy does not state a replacement-cost basis", policy_docs
     normalised = {_master_policy_basis(b) for b in bases}
     if None in normalised:
         unrecognised = [b for b in bases if _master_policy_basis(b) is None]
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the master policy's coverage basis reads {unrecognised[0]!r}, which is not a recognised "
-            "replacement-cost or actual-cash-value term — abstaining rather than inferring"
+            "replacement-cost or actual-cash-value term — abstaining rather than inferring",
+            policy_docs,
         )
     # ⚠️ NO CROSS-DOCUMENT POOLING (reported finding). These values are gathered across EVERY master-policy
     # document with no pairing, so two certificates — a current one and a superseded one — were being
@@ -2883,36 +2947,44 @@ def _condo_master_policy(
     # Disagreement is not a finding, it is an unresolved subject: abstain, exactly as _file_lender_name
     # does directly above and as the two-binder housing.insurance_monthly rule does.
     if len(normalised) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's master-policy documents state different coverage bases "
             f"({', '.join(sorted(str(b) for b in normalised))}) — abstaining rather than judging one "
-            "policy by another's terms"
+            "policy by another's terms",
+            policy_docs,  # ALL of them — the finding is the disagreement between them
         )
     if normalised != {"replacement_cost"}:
-        return "present_inadequate", (
+        return (
+            "present_inadequate",
             "the condominium master policy is written on an actual-cash-value basis; Fannie Mae "
-            "B7-3-03 requires coverage equal to at least 100% of replacement cost"
+            "B7-3-03 requires coverage equal to at least 100% of replacement cost",
+            policy_docs,
         )
 
     limits = _parsed_strings(snapshot, "condo.master_liability_limit")
     if not limits:
-        return _UNKNOWN, "the master policy does not state a general liability limit"
+        return _UNKNOWN, "the master policy does not state a general liability limit", policy_docs
     parsed_limits: list[Decimal] = []
     for value in limits:
         try:
             parsed_limits.append(Decimal(value.replace(",", "").replace("$", "").strip()))
         except (InvalidOperation, ValueError):
-            return _UNKNOWN, (
+            return (
+                _UNKNOWN,
                 f"the master policy's general liability limit reads {value!r}, which is not a number — "
-                "abstaining rather than treating it as zero"
+                "abstaining rather than treating it as zero",
+                policy_docs,
             )
     # ⚠️ Same reasoning as the basis above: `min()` across unrelated certificates judged the CURRENT
     # policy by a SUPERSEDED one's limit — a live $2,000,000 certificate beside an old $500,000 one fired.
     if len({*parsed_limits}) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             "the file's master-policy documents state different general liability limits "
             f"({', '.join(f'${v:,}' for v in sorted(set(parsed_limits)))}) — abstaining rather than "
-            "judging the policy by the lowest figure on file"
+            "judging the policy by the lowest figure on file",
+            policy_docs,
         )
     lowest = min(parsed_limits)
     if lowest < _CONDO_MIN_LIABILITY_PER_OCCURRENCE:

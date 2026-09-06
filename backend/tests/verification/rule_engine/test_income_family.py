@@ -126,7 +126,8 @@ def test_recipe_ytd_uses_the_most_recent_pay_date_across_a_year_boundary() -> No
             },
         },
     )
-    value, reason = _ytd_shortfall(snap)
+    produced = _ytd_shortfall(snap)
+    value, reason = produced[0], produced[1]
     # 9060 / 1.5113 = 5995/mo against documented 6000 → essentially no shortfall.
     assert Decimal(str(value)) < Decimal("0.01")
     assert "1.51 months elapsed" in reason
@@ -153,7 +154,8 @@ def test_recipe_ytd_takes_the_latest_stub_never_the_sum() -> None:
             },
         },
     )
-    value, reason = _ytd_shortfall(snap)
+    produced = _ytd_shortfall(snap)
+    value, reason = produced[0], produced[1]
     assert "42404.64" in reason and "78781.26" not in reason
     # 42404.64 over 94/30.4375 = 3.09 months is 13,731/mo against 13,154 documented — AHEAD of pace,
     # so the shortfall is negative and IN-3 cannot fire. The live finding claimed 62.6%.
@@ -181,7 +183,8 @@ def test_recipe_documented_monthly_is_distinct_never_summed() -> None:
             },
         },
     )
-    value, reason = _ytd_shortfall(same)
+    produced = _ytd_shortfall(same)
+    value, reason = produced[0], produced[1]
     assert "13000" in reason and "26000" not in reason
     assert Decimal(str(value)) < Decimal("0.01")  # 39000 / 2.96 months ≈ 13,178 vs 13,000
 
@@ -219,7 +222,8 @@ def test_recipe_abstains_too_early_in_the_year_to_annualize() -> None:
             }
         },
     )
-    value, reason = _ytd_shortfall(snap)
+    produced = _ytd_shortfall(snap)
+    value, reason = produced[0], produced[1]
     assert value == "unknown" and "too short a period" in reason
 
 
@@ -235,7 +239,7 @@ def test_recipe_reports_the_shortfall_as_a_percentage() -> None:
             }
         },
     )
-    _, reason = _ytd_shortfall(snap)
+    reason = _ytd_shortfall(snap)[1]
     assert "%" in reason
     assert not re.search(r"\d\.\d{6}", reason), f"a raw Decimal leaked into the message: {reason}"
 
