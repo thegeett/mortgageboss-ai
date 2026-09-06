@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
+from app.ai.stage_metrics import StageMetrics
 from app.verification.rule_engine.activation_bars import load_activation_bars
 from app.verification.rule_engine.judgment import Reasoner as JudgmentReasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
@@ -112,6 +113,7 @@ async def evaluate_pending_checks(
     judgment_reasoners: dict[str, JudgmentReasoner] | None = None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None = None,
     confidence_floor: float | None = None,
+    metrics: StageMetrics | None = None,
 ) -> list[RuleEvaluation]:
     """The pending-check pass: for every BLOCKED candidate rule, evaluate it and — where it reaches a
     surfaceable verdict — emit a ``PENDING_AUTOMATION`` manual-review flag INSTEAD (never the verdict).
@@ -135,6 +137,9 @@ async def evaluate_pending_checks(
         consistency_reasoners=consistency_reasoners or {},
         confidence_floor=confidence_floor,
         rule_ids=blocked,
+        # LP-644 §1 review — this pass is best-effort and its verdicts are discarded, but the run
+        # WAITS for it: a blocked consistency rule still calls the model. Measured, not assumed free.
+        metrics=metrics,
     )
     # Collapsed per rule, in first-seen order so the output is deterministic across runs.
     surfaceable: dict[str, list[RuleEvaluation]] = {}

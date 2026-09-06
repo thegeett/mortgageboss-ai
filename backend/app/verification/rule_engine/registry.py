@@ -12,6 +12,7 @@ consistency body.
 from __future__ import annotations
 
 from app.ai.rule_judgment import Reasoner
+from app.ai.stage_metrics import StageMetrics
 from app.verification.rule_engine.consistency import evaluate_consistency_rule
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
@@ -558,6 +559,7 @@ async def evaluate_rules(
     consistency_reasoners: dict[str, Reasoner] | None = None,
     confidence_floor: float | None = None,
     rule_ids: tuple[str, ...] = ACTIVE_RULE_IDS,
+    metrics: StageMetrics | None = None,
 ) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Evaluate every requested rule generically (by evaluation block, from its spec).
 
@@ -581,6 +583,7 @@ async def evaluate_rules(
                     snapshot,
                     reasoner=con_reasoners.get(rule_id),
                     confidence_floor=confidence_floor,
+                    metrics=metrics,
                 )
             )
         elif spec.deterministic is not None:
@@ -594,6 +597,7 @@ async def evaluate_rules(
                 snapshot,
                 reasoner=judge_reasoners.get(rule_id),
                 confidence_floor=confidence_floor,
+                metrics=metrics,
             ):
                 results.append(evaluation.evaluation)
                 if evaluation.judgment_tag is not None:

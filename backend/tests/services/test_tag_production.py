@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_production import AIClientError, StageAResult, TagJudgment, TransactionJudgment
 from app.services.tag_production import (
     TransactionTagCache,
@@ -353,18 +354,18 @@ async def test_stage_a_reports_its_elapsed_time_and_call_count() -> None:
 
     snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
     with structlog.testing.capture_logs() as logs:
-        await produce_stage_a_transaction_tags(snap, reasoner=StubReasoner())
+        await produce_stage_a_transaction_tags(
+            snap, reasoner=StubReasoner(), metrics=StageMetrics()
+        )
 
     done = [line for line in logs if line.get("event") == "stage_a_production_done"]
     assert done, "the stage did not log its completion at all"
     entry = done[0]
-    assert {"elapsed_seconds", "calls", "subjects"} <= set(entry), (
+    assert {"ai_calls", "ai_wall_seconds", "ai_latency_seconds"} <= set(entry), (
         f"the completion line is missing timing fields: {sorted(entry)}"
     )
-    assert entry["calls"] >= 1, "a stage that issued a model call reported zero calls"
-    assert entry["subjects"] >= entry["calls"], (
-        "subjects cannot be fewer than the calls that carried them"
-    )
+    assert entry["ai_calls"] >= 1, "a stage that issued a model call reported zero calls"
+    assert entry["ai_wall_seconds"] >= 0
 
 
 async def test_a_stage_whose_every_call_failed_still_reports_its_timing() -> None:
@@ -390,12 +391,12 @@ async def test_a_stage_whose_every_call_failed_still_reports_its_timing() -> Non
 
     snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
     with structlog.testing.capture_logs() as logs:
-        await produce_stage_a_transaction_tags(snap, reasoner=_always_fails)
+        await produce_stage_a_transaction_tags(snap, reasoner=_always_fails, metrics=StageMetrics())
 
     done = [line for line in logs if line.get("event") == "stage_a_production_done"]
     assert done, "a stage that issued calls and failed them all reported nothing at all"
     entry = done[0]
-    assert entry["calls"] >= 1, "the failed call was not counted"
+    assert entry["ai_calls"] >= 1, "the failed call was not counted"
     assert entry["input_tokens"] == 0 and entry["output_tokens"] == 0
     assert entry["cost_estimate"] is None, (
         "a $0 cost reads as a free stage; there is no model to attribute one to"

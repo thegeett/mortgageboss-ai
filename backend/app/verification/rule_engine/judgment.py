@@ -27,10 +27,12 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from time import perf_counter
 
 from app.ai.client import AIClientError
 from app.ai.extraction.parsing import coerce_decimal
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
+from app.ai.stage_metrics import StageMetrics
 from app.core.logging import get_logger
 from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
@@ -525,6 +527,7 @@ async def evaluate_judgment_rule(
     *,
     reasoner: Reasoner | None = None,
     confidence_floor: float | None = None,
+    metrics: StageMetrics | None = None,
 ) -> list[JudgmentEvaluation]:
     """Evaluate a judgment rule over ALL its enumerated subjects, entirely from ``spec.judgment``.
 
@@ -583,6 +586,7 @@ async def evaluate_judgment_rule(
                 floor,
                 _loan_tags(snapshot),
                 lines.get(subject_id),
+                metrics=metrics,
             )
 
     return list(await asyncio.gather(*(_bounded(sid, tags) for sid, tags in subjects)))
@@ -597,6 +601,8 @@ async def _evaluate_one_subject(
     floor: float,
     loan_tags: Mapping[str, Tag],
     statement_line: str | None = None,
+    *,
+    metrics: StageMetrics | None = None,
 ) -> JudgmentEvaluation:
     """The per-subject judgment armor (§3D) — one subject's applicability → gate → AI → tag →
     ratification-pending verdict. Self-contained so one subject's failure never touches another's."""
@@ -676,6 +682,10 @@ async def _evaluate_one_subject(
 
     # 2. Reason over the TAGS (never raw docs). Honest/fail-closed on transport + truncation.
     context = _build_context(jud.reasoned_over, subject_tags)
+    # LP-644 §1 review — the rules pass makes model calls, so it is measured like every other stage
+    # that does. Timed INSIDE the semaphore's slot (the caller acquires it before awaiting this), so
+    # a subject's wait for a slot is not charged to the model — the same rule Stage B follows.
+    call_started = perf_counter()
     try:
         result = await reason_fn(json.dumps(context))
     except AIClientError:
@@ -691,6 +701,14 @@ async def _evaluate_one_subject(
                 subject_tags,
                 verdict_confidence=gate.verdict_confidence,
             ),
+        )
+    if metrics is not None:
+        # A FAILED call is deliberately not counted (see `StageMetrics.record_call`); a truncated or
+        # malformed one IS — it was answered, billed and waited for.
+        metrics.record_call(
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            seconds=perf_counter() - call_started,
         )
     if result.truncated:
         return JudgmentEvaluation(

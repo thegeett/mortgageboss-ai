@@ -17,13 +17,15 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
-from app.ai.client import AIClientError, complete
+from app.ai.client import complete
+from app.ai.concurrency import dispatch_bounded
 from app.ai.parsing import coerce_optional_confidence, extract_json_object, opt_int, opt_str
+from app.ai.stage_metrics import StageMetrics
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.stage_timing import StageTiming
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
@@ -41,6 +43,11 @@ _MAX_TOKENS = 8192
 _BATCH_SIZE = (
     15  # §3D bounded batches — a long file can't degrade the model's attention over its tail
 )
+
+#: LP-644 §2 — batches of ONE group in flight at once (the inner level). Eight, matching Stage A and
+#: Stage B rather than inventing a third number; §4 raises them together on measured TPM. Note this
+#: multiplies with the producer's OUTER group bound, which is why that one is deliberately smaller.
+_MAX_CONCURRENT_BATCHES = 8
 
 _REASON_FAILED = "tag production failed"
 _REASON_TRUNCATED = "structuring response truncated"
@@ -289,7 +296,7 @@ async def produce_ai_group_tags(
     reasoner: Reasoner | None = None,
     cache: AiTagCache | None = None,
     breaker: AiInfraBreaker | None = None,
-    timing: StageTiming | None = None,
+    metrics: StageMetrics | None = None,
 ) -> dict[str, dict[str, Tag]]:
     """Materialize ``group``'s tags for its subjects → ``{subject_id: {tag_id: Tag}}``.
 
@@ -342,27 +349,42 @@ async def produce_ai_group_tags(
     resolved: dict[str, _Resolved] = dict(group_cache)
     shorts = tuple(_short(t) for t in group.tag_ids)
 
-    for batch in _chunks(representatives, _BATCH_SIZE):
-        context = {
-            "subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]
-        }
-        # LP-644 §1 review — COUNTED HERE, WHERE A CALL IS ISSUED, and before the try rather than
-        # after it.
-        #
-        # The producer used to count one per GROUP after this function returned. A group every one of
-        # whose subjects is cached dispatches NOTHING — `representatives` is empty and this loop does
-        # not run — so a re-run of an unchanged file reported a full call count having made almost no
-        # calls. LP-644's projections are a call count times a mean latency, so that overstates AI
-        # time in exactly the case where caching does most of the work: measurement built to replace
-        # a stale estimate, reading high where it mattered most.
-        #
-        # BEFORE the `try` because a FAILED call costs the same wall clock as a successful one, and
-        # the 4.3s baseline this replaces was taken on a run full of them.
-        if timing is not None:
-            timing.record_call(subjects=len(batch))
-        try:
-            result = await reason_fn(json.dumps(context))
-        except AIClientError as err:
+    # LP-644 §2, the INNER of the two levels — this group's batches, asked concurrently. The outer
+    # level (across groups) is in `producer.py`. Contexts are built eagerly and bound with `partial`
+    # so no closure can capture the loop variable and send every call the last batch's subjects.
+    batches = _chunks(representatives, _BATCH_SIZE)
+    contexts = [
+        json.dumps(
+            {"subjects": [{"index": i, **_context(raw)} for i, (_fp, raw) in enumerate(batch, 1)]}
+        )
+        for batch in batches
+    ]
+    outcomes = await dispatch_bounded(
+        [partial(reason_fn, context) for context in contexts],
+        concurrency=_MAX_CONCURRENT_BATCHES,
+        stop_after_failures=None if breaker is None else breaker.threshold,
+        # The breaker's failure POLICY as well as its number: an oversized payload resets its
+        # counter, so it must not close this gate either (LP-644 §2 review).
+        counts_as_failure=None if breaker is None else breaker.counts_toward_trip,
+    )
+
+    # APPLY, IN THE ORIGINAL ORDER, so `resolved`, the group cache and the breaker see the batches in
+    # the sequence they had when this loop was serial.
+    for batch, outcome in zip(batches, outcomes, strict=True):
+        if outcome.not_attempted:
+            # The gate closed before this batch was asked: same fail-closed resolution as a failure,
+            # but the breaker is NOT fed — no call was made, so there is no failure to count.
+            #
+            # LOGGED, for the reason the breaker is not fed. The gate counts failures in COMPLETION
+            # order while the breaker counts them in INPUT order, so a degraded backend can close
+            # this gate on five failures the breaker sees interleaved with successes and never trips
+            # on — and the rest of the group is then resolved unknown without a call being made.
+            # Without this line that outcome has no trace at all.
+            logger.warning("ai_group_batch_not_attempted", group=group.key, size=len(batch))
+            for fp, _ in batch:
+                resolved[fp] = _Resolved({}, _REASON_FAILED)
+            continue
+        if outcome.error is not None:
             logger.warning("ai_group_batch_failed", group=group.key, size=len(batch))
             for fp, _ in batch:
                 resolved[fp] = _Resolved({}, _REASON_FAILED)
@@ -372,10 +394,22 @@ async def produce_ai_group_tags(
             # rest of the run's clock on calls that cannot reach the backend. A content failure
             # resets the counter there rather than counting.
             if breaker is not None:
-                breaker.record_failure(err)
+                breaker.record_failure(outcome.error)
             continue
+        result = outcome.result
+        assert result is not None  # attempted, no error → a result (CallOutcome's contract)
         if breaker is not None:
             breaker.record_success()
+        # LP-644 §1 — one accumulator shared across all 23 groups, so the stage's totals come out
+        # whole rather than per-group. This is the stage the ticket calls "doubly sequential" and
+        # the least-known fact in it, so its measured call count is the one to compare against the
+        # projected 26.
+        if metrics is not None:
+            metrics.record_call(
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                seconds=outcome.seconds,
+            )
         by_index = {j.index: j for j in result.judgments}
         expected = set(range(1, len(batch) + 1))
         if not set(by_index) <= expected:
@@ -457,3 +491,57 @@ __all__ = [
     "produce_ai_group_tags",
     "reason_ai_group",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this producer's cache
+# --------------------------------------------------------------------------- #
+
+
+def dump_ai_group_entry(entry: _Resolved) -> dict[str, object]:
+    """One AI-group cache value as JSON (a per-tag judgment map + the absent-reason)."""
+    return {
+        "tags": {
+            short: (
+                None
+                if judgment is None
+                else {
+                    "value": judgment.value,
+                    "confidence": judgment.confidence,
+                    "reasoning": judgment.reasoning,
+                }
+            )
+            for short, judgment in entry.tags.items()
+        },
+        "reason": entry.reason,
+    }
+
+
+def load_ai_group_entry(raw: dict[str, object]) -> _Resolved | None:
+    """An AI-group cache value from JSON, or None if the row cannot be trusted.
+
+    ⚠️ Rejects any entry carrying a None judgment, matching the in-memory write rule: this producer
+    caches only when EVERY tag in the group resolved (``if all(entry.tags.get(s) is not None ...)``).
+    A row with a hole is either a shape change or a partial that should never have been stored, and
+    serving it would pin an "unknown" onto a subject forever — the tag layer's worst failure, because
+    it looks like an honest abstention rather than a stale cache.
+    """
+    tags_raw = raw.get("tags")
+    if not isinstance(tags_raw, dict) or not tags_raw:
+        return None
+    tags: dict[str, AiTagJudgment | None] = {}
+    for short, judgment_raw in tags_raw.items():
+        if not isinstance(judgment_raw, dict):
+            return None
+        value = judgment_raw.get("value")
+        if not isinstance(value, str):
+            return None
+        confidence = judgment_raw.get("confidence")
+        reasoning = judgment_raw.get("reasoning")
+        tags[str(short)] = AiTagJudgment(
+            value=value,
+            confidence=confidence if isinstance(confidence, int | float) else None,
+            reasoning=reasoning if isinstance(reasoning, str) else None,
+        )
+    reason = raw.get("reason")
+    return _Resolved(tags=tags, reason=reason if isinstance(reason, str) else _REASON_MALFORMED)

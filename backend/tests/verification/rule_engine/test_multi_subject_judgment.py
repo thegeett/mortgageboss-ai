@@ -209,3 +209,56 @@ async def test_evaluate_oc2_fails_loud_when_not_exactly_one_evaluation(monkeypat
     monkeypatch.setattr(oc2, "evaluate_judgment_rule", _fake)
     with pytest.raises(ValueError, match="exactly one"):
         await oc2.evaluate_oc2(_snapshot({"d1": {"x.flag": _flag("a")}}))
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §1 review — the rules pass is an AI stage, and it is measured like one
+# --------------------------------------------------------------------------- #
+
+
+async def test_each_subjects_call_is_recorded_into_the_stage_metrics() -> None:
+    """LP-644's table calls the rule engine deterministic and gives it no row. It is deterministic in
+    what it may DECIDE from (ADR: AI for perception only), not in whether it calls the model — this
+    evaluator awaits one call per SUBJECT. Unrecorded, that waiting was reported as `non_ai_seconds`,
+    the figure the ticket uses to decide whether the rest of it is worth building.
+    """
+    from app.ai.stage_metrics import StageMetrics
+
+    metrics = StageMetrics()
+    snap = _snapshot({"d1": {"x.flag": _flag("a")}, "d2": {"x.flag": _flag("b")}})
+
+    await evaluate_judgment_rule(
+        _SPEC, snap, reasoner=_Reasoner("no"), confidence_floor=0.5, metrics=metrics
+    )
+
+    assert metrics.calls == 2, "one call per subject, the same count the stub sees"
+    assert metrics.input_tokens == 2 and metrics.output_tokens == 2
+    assert metrics.latency_seconds > 0
+
+
+async def test_a_gated_subject_and_a_failed_call_are_not_counted_as_calls() -> None:
+    """The same two exclusions every other stage makes: a subject gated BEFORE the AI never called,
+    and a failed call has no tokens to attribute — counting it would deflate the per-call mean
+    exactly when the backend is degraded.
+    """
+    from app.ai.stage_metrics import StageMetrics
+
+    gated = StageMetrics()
+    await evaluate_judgment_rule(
+        _SPEC,
+        _snapshot({"d1": {}, "d2": {"x.flag": _flag("b")}}),
+        reasoner=_Reasoner("yes"),
+        confidence_floor=0.5,
+        metrics=gated,
+    )
+    assert gated.calls == 1  # d1 never reached the model
+
+    failed = StageMetrics()
+    await evaluate_judgment_rule(
+        _SPEC,
+        _snapshot({"d1": {"x.flag": _flag("a")}}),
+        reasoner=_Reasoner("yes", raise_ai=True),
+        confidence_floor=0.5,
+        metrics=failed,
+    )
+    assert failed.calls == 0 and failed.latency_seconds == 0.0

@@ -31,15 +31,16 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.stage_metrics import RunMetrics, StageMetrics
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.stage_timing import StageTiming
 from app.models.finding import Finding, FindingCategory, FindingResolutionStatus
 from app.models.loan_file import LoanFile
 from app.models.verification import Verification
@@ -481,6 +482,7 @@ async def _evaluate_rules(
     oc2_reasoner: Oc2Reasoner | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
+    metrics: StageMetrics | None = None,
 ) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Run every rule over the tagged snapshot — deterministic (AS-1), judgment (OC-2), and
     cross-source consistency (ID-2 exact / ID-4 fuzzy, LP-326).
@@ -501,6 +503,9 @@ async def _evaluate_rules(
         judgment_reasoners={"OC-2": oc2_reasoner} if oc2_reasoner is not None else {},
         consistency_reasoners=consistency_reasoners or {},
         confidence_floor=confidence_floor,
+        # LP-644 §1 review — 19 judgment rules and 5 consistency ones call the model here, one call
+        # per subject (AS-12 and FR-5 per DEPOSIT). Unmeasured, all of it read as `non_ai_seconds`.
+        metrics=metrics,
     )
 
 
@@ -511,6 +516,7 @@ async def _evaluate_pending_checks(
     materialization_cache: AiTagCache | None,
     consistency_reasoners: dict[str, ConsistencyReasoner] | None,
     confidence_floor: float,
+    metrics: StageMetrics | None = None,
 ) -> list[RuleEvaluation]:
     """LP-391 — evaluate the BLOCKED candidate rules and surface a manual-review flag where each is
     applicable-with-data. Returns only ``PENDING_AUTOMATION`` evaluations (never an uncalibrated verdict);
@@ -543,6 +549,10 @@ async def _evaluate_pending_checks(
                 # protect a preview. Sharing the run's breaker would also let this path's failures
                 # count against a pass that has already finished its own work.
                 breaker=AiInfraBreaker(),
+                # LP-644 §1 review — ON by default, and it materializes the blocked groups' AI tags
+                # every run. Discarded output, but the run waits for the calls, so they are measured.
+                metrics=metrics,
+                pass_name="pending_checks",
             )
             if pending_groups
             else snapshot
@@ -554,6 +564,7 @@ async def _evaluate_pending_checks(
             pending_snapshot,
             consistency_reasoners=consistency_reasoners or {},
             confidence_floor=confidence_floor,
+            metrics=metrics,
         )
     except AiBackendUnavailable:
         # Named rather than left to the catch-all below, so this reads as a decision instead of an
@@ -961,10 +972,15 @@ async def run_verification(
     already-tagged snapshot (reproducibility / a frozen trace). Always completes; what degraded is
     recorded on the result.
     """
-    timing = StageTiming()  # LP-644 §1 — the whole run, for the non-AI remainder
     caches = caches or TagCaches()
     reasoners = reasoners or Reasoners()
     degradations: list[Degradation] = []
+    # LP-644 §1 — run-scoped and threaded exactly like `caches`: each stage records into its own
+    # accumulator and the summary below reads them all. Started here rather than at the first stage
+    # so the snapshot build — which makes no AI calls and is a named suspect for the non-AI
+    # remainder — is inside the measured window.
+    metrics = RunMetrics()
+    run_started = perf_counter()
 
     # 1. RAW snapshot (+ calculators-as-tags, built inside build_snapshot; each section degrades on
     #    its own — LP-318/builder). Calculators read stated financials, not Stage-A/B tags, so they
@@ -995,7 +1011,11 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_a",
             lambda s: produce_stage_a_transaction_tags(
-                s, reasoner=reasoners.stage_a, cache=caches.stage_a, breaker=ai_breaker
+                s,
+                reasoner=reasoners.stage_a,
+                cache=caches.stage_a,
+                breaker=ai_breaker,
+                metrics=metrics.stage_a,
             ),
             snapshot,
             degradations,
@@ -1014,7 +1034,11 @@ async def run_verification(
         snapshot = await _run_stage(
             "stage_b",
             lambda s: produce_stage_b_sourcing_tags(
-                s, reasoner=reasoners.stage_b, cache=caches.stage_b, breaker=ai_breaker
+                s,
+                reasoner=reasoners.stage_b,
+                cache=caches.stage_b,
+                breaker=ai_breaker,
+                metrics=metrics.stage_b,
             ),
             snapshot,
             degradations,
@@ -1035,6 +1059,7 @@ async def run_verification(
                 # never degrades this run or enters the persisted snapshot.)
                 only_groups=_required_ai_groups(),
                 breaker=ai_breaker,
+                metrics=metrics.materialization,
             ),
             snapshot,
             degradations,
@@ -1047,12 +1072,21 @@ async def run_verification(
     # 6. Rules — the fail-closed gate + deterministic + judgment rules. Any rule_judgment tag a
     #    judgment rule produced is written back into the tags layer (not discarded). 7. Findings.
     await report_phase(run_id, "rules", session_factory=reasoners.progress_session)
+    # LP-644 §1 review — TIMED, because this pass calls the model. The ticket's table treats the rule
+    # engine as deterministic and leaves it out; `judgment.py` awaits one call per SUBJECT for 19
+    # judgment rules (AS-12 and FR-5 per deposit, eight more per document) and `consistency.py` for 5
+    # more. Whatever that costs was previously reported as `non_ai_seconds`, the number §2-§5 are
+    # sized against. The wall covers the deterministic rules too — they are part of the same pass and
+    # cannot be subtracted from it, which is the same honesty materialization's wall keeps.
+    rules_started = perf_counter()
     results, judgment_tags = await _evaluate_rules(
         snapshot,
         oc2_reasoner=reasoners.oc2,
         consistency_reasoners=reasoners.consistency,
         confidence_floor=confidence_floor,
+        metrics=metrics.rules,
     )
+    metrics.rules.wall_seconds = perf_counter() - rules_started
     snapshot = _merge_judgment_tags(snapshot, judgment_tags)
     # 6b. LP-391 — pending-check surfacing (ADDITIVE, a DISJOINT rule set): a blocked-but-applicable rule
     #     emits a manual-review flag to Tab 1 instead of silence. Never ships an uncalibrated verdict; the
@@ -1060,13 +1094,16 @@ async def run_verification(
     #     it materializes the BLOCKED rules' uncalibrated AI groups every run — real extra cost a
     #     cost-sensitive deployment can turn off; ON by default (the honest-surfacing behavior).
     if settings.pending_checks_enabled:
+        pending_started = perf_counter()
         results = results + await _evaluate_pending_checks(
             snapshot,
             materialization_reasoners=reasoners.materialization,
             materialization_cache=caches.materialization,
             consistency_reasoners=reasoners.consistency,
             confidence_floor=confidence_floor,
+            metrics=metrics.pending_checks,
         )
+        metrics.pending_checks.wall_seconds = perf_counter() - pending_started
     # LP-617 — resolve each finding's snapshot content ids back to real document ids, so a finding can
     # point a processor AT the documents it is about instead of naming their categories. Built here,
     # next to its one consumer, rather than threaded from the snapshot build minutes earlier. Mirrors
@@ -1238,6 +1275,7 @@ async def run_verification(
                 loan_file_id=snapshot.loan_file_id,
                 snapshot=snapshot,
                 reasoner=reasoners.snapshot_findings,
+                metrics=metrics.cross_source,
             )
             # LP-592 — record the OPEN count on this run. It cannot be derived later: snapshot
             # findings are keyed by loan file and persist across runs by design, so nothing
@@ -1258,23 +1296,21 @@ async def run_verification(
     # finished is exactly what a hung run looks like.
     await clear_progress(run_id, session_factory=reasoners.progress_session)
 
-    # LP-644 §1 — THE RUN'S TOTAL, so the per-stage lines above can be subtracted from something.
-    #
-    # The split between AI and non-AI time is the number that decides whether the rest of LP-644 is
-    # worth doing, and it had the least evidence behind it: every projection was a call count times
-    # a 4.3s mean that predates every fix since and was taken on a FAILING run. The stages log their
-    # own elapsed seconds now; this logs the whole, and the REMAINDER is the non-AI cost.
-    #
-    # Deliberately not computed here. Summing the stages would require this function to know which
-    # ones ran on this file — a scoped re-run skips some — and a subtraction that silently assumes a
-    # full run would report a remainder that is really a missing stage. The parts are all in the log
-    # under one run_id; the arithmetic belongs to whoever reads them, who can see which are present.
+    # LP-644 §1 — THE ROW THE WHOLE TICKET TURNS ON. Its projections put AI waiting at ~464s of a
+    # 946s run and conclude "~49% is the ceiling for everything in this ticket". Every number behind
+    # that is a call count times a 4.3s mean taken from a FAILING run, so `ai_wall_pct` here is what
+    # decides whether §2-§5 are worth building at all — and `non_ai_seconds` is what they can never
+    # touch, however fast the model gets.
+    # ONE clock read, not two: the printed total and the split must be the same number, or
+    # `ai_wall_seconds + non_ai_seconds` fails to reconcile with `run_wall_seconds` in the log.
+    run_wall_seconds = perf_counter() - run_started
     logger.info(
         "verification_run_done",
         run_id=str(run_id),
-        elapsed_seconds=timing.elapsed_seconds,
         findings=len(findings),
         degradations=len(degradations),
+        run_wall_seconds=round(run_wall_seconds, 1),
+        **metrics.as_log_fields(run_wall_seconds),
     )
     return VerificationRun(
         run_id=run_id,
