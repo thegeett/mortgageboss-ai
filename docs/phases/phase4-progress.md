@@ -105,7 +105,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-803 | 4024f921 |  |  | awaiting review. Migration d1a8f37c0e59; nullable company_id against the plan; NULLS NOT DISTINCT dedup; §H1 injector |
 | 2026-09-07 | LP-804a | 66788b19 | 3cd4bce4 | 1 | a corpus fix undone by two sibling hooks the same argument covered |
 | 2026-09-07 | LP-804b | af395644 | 4b4c209d | 1 | two plan-named PDF keys asserted vacuously and unstripped on page annotations |
-| 2026-09-07 | LP-819 | 66426f23 | REVIEW_SHA | 1 | a bounce unwound the need and left the finding claiming the request stood, with the retry button disabled |
+| 2026-09-07 | LP-819 | 66426f23 | 77a5285f | 1 | a bounce unwound the need and left the finding claiming the request stood, with the retry button disabled |
 | 2026-09-07 | LP-819 | 66426f23 |  |  | awaiting review. M2 application code complete. My own fixture assertion caught an empty bounce fixture before review |
 | 2026-09-07 | LP-804b | af395644 |  |  | awaiting review. pikepdf added on evidence; three dependencies declined. A surviving mutant found an untested branch |
 | 2026-09-07 | LP-804a | 66788b19 |  |  | awaiting review. Split from LP-804; LP-804b (safety, deps) is row 13b. Forwarded fixture was wrong and would have passed without recursing |
