@@ -22,6 +22,17 @@ vi.mock("@/lib/api/timeline", () => ({
   useTimeline: (...args: unknown[]) => mockTimeline(...args),
 }));
 
+const mockImportant = vi.fn();
+const mockRead = vi.fn();
+const mockReply = vi.fn();
+
+vi.mock("@/lib/api/messages", () => ({
+  useSetImportant: () => ({ mutate: mockImportant, isPending: false }),
+  useMarkRead: () => ({ mutate: mockRead, isPending: false }),
+  useReply: () => ({ mutate: mockReply, isPending: false }),
+  fetchReplyContext: async () => ({ recipient: "jane@borrower.example", subject: "Re: Docs" }),
+}));
+
 import type { TimelineEntry } from "@/lib/types/timeline";
 import { TimelinePanel } from "./timeline-panel";
 
@@ -43,6 +54,8 @@ const MESSAGE: TimelineEntry = {
   counterparty: "jane@borrower.example",
   actor_user_id: null,
   attachments: ["March_statement.pdf"],
+  is_important: false,
+  unread: true,
   detail: {},
 };
 
@@ -183,5 +196,95 @@ describe("a truncated timeline", () => {
     render(<TimelinePanel fileId="f1" />, { wrapper });
 
     expect(screen.queryByText(/older entries are not shown/i)).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------------------------------------- //
+// LP-818 — the per-row actions, the badge, and what each of them may act on
+// --------------------------------------------------------------------------------------------- //
+describe("the unread badge", () => {
+  it("shows the count the server sent, not the length of this page", () => {
+    // Counted over the WHOLE file. A badge derived from `entries` would shrink when somebody
+    // clicked a filter pill, which is a number that teaches its reader to distrust it.
+    loaded([MESSAGE], { unread_count: 7 });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.getByLabelText("7 unread")).toBeDefined();
+  });
+
+  it("says nothing when everything has been read", () => {
+    // THE CONTROL. A badge that always rendered would pass the test above while telling every
+    // processor they have mail waiting.
+    loaded([MESSAGE], { unread_count: 0 });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.queryByText(/unread/)).toBeNull();
+  });
+});
+
+describe("the per-row actions", () => {
+  it("offers reply and read only on a message that ARRIVED", () => {
+    // Replying to our own would address it to whoever we sent it to and read to them as us
+    // answering ourselves. The server refuses it; offering the button is a worse way to learn that.
+    loaded([
+      MESSAGE,
+      { ...MESSAGE, id: "out", direction: "outbound", status: "sent", unread: false },
+    ]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.getAllByRole("button", { name: "Reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Mark (read|unread)/ })).toHaveLength(1);
+    // Important IS offered on both — a sent message is as worth flagging as a received one.
+    expect(screen.getAllByRole("button", { name: /Mark important|Remove the flag/ })).toHaveLength(
+      2,
+    );
+  });
+
+  it("toggles importance rather than only setting it", () => {
+    loaded([{ ...MESSAGE, is_important: true }]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove the flag" }));
+
+    expect(mockImportant).toHaveBeenCalledWith({ communicationId: "m1", important: false });
+  });
+
+  it("marks an unread message read, and a read one unread", () => {
+    // Reversible: a processor who opens something they cannot deal with needs to put it back.
+    loaded([MESSAGE]);
+    const { unmount } = render(<TimelinePanel fileId="f1" />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Mark read" }));
+    expect(mockRead).toHaveBeenCalledWith({ communicationId: "m1", read: true });
+    unmount();
+
+    loaded([{ ...MESSAGE, unread: false }]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Mark unread" }));
+
+    expect(mockRead).toHaveBeenLastCalledWith({ communicationId: "m1", read: false });
+  });
+});
+
+describe("the reply box", () => {
+  it("opens on the row and says a save is a draft, not a send", () => {
+    // A button labelled "Reply" that silently transmitted would be the one outbound message with no
+    // guardrails on it — and one that silently did NOT would be worse.
+    loaded([MESSAGE]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+    expect(screen.getByLabelText("Reply body")).toBeDefined();
+    expect(screen.getByText(/Saved as a draft/)).toBeDefined();
+  });
+
+  it("will not save an empty reply", () => {
+    loaded([MESSAGE]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+    fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "   " } });
+
+    expect(screen.getByRole("button", { name: "Save reply" })).toHaveProperty("disabled", true);
   });
 });

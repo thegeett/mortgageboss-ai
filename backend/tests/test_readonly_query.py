@@ -372,7 +372,14 @@ EXCLUDED: dict[str, frozenset[str]] = {
         {"hashed_password", "email", "first_name", "last_name", "reviewer_pane_split"}
     ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
-    "communications": frozenset({"sender", "recipient", "subject", "body"}),
+    # LP-818 adds `in_reply_to_message_id`: a sender-written `Message-ID`, which identifies one
+    # message from one person. `external_message_id` beside it is already exposed for dedup
+    # analysis, and a second copy of the same class of identifier buys nothing. `is_important` and
+    # `read_at` are NOT here — they are exposed, because how much a company flags and how long mail
+    # sits unread are facts about how it works and name nobody.
+    "communications": frozenset(
+        {"sender", "recipient", "subject", "body", "in_reply_to_message_id"}
+    ),
     # LP-822 — a processor's writing voice. `greeting`, `closing` and `signature_block` are typed by
     # hand, which is where an identifier arrives in a form no scrubber predicts — the same reason
     # `dti_custom_lines.label` is excluded. `exemplars` is stronger than that: they are excerpts of

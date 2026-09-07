@@ -29,7 +29,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -140,6 +140,35 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # e.g. an inbound email Message-ID, kept for threading/dedup.
     external_message_id: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    #: The RFC 5322 `Message-ID` this message ANSWERS (LP-818). Null when it answers nothing.
+    #:
+    #: SEPARATE FROM `external_message_id`, WHICH WAS BEING OVERLOADED. That column means "this
+    #: message's own id" — it is what LP-805's rung 2 matches a borrower's `References` against — and
+    #: LP-815's nudge was writing the id of the message it was REPLYING TO into it. That happened to
+    #: route correctly, because a reply's `References` carries the borrower's own id too, and it
+    #: would have broken the moment anything stored a genuinely-generated outbound id there: rung 2
+    #: would then match a thread to whichever row held a borrower's id under the wrong meaning.
+    #:
+    #: This is the `In-Reply-To` header the reply carries. RFC 5322 §3.6.4 — without it the borrower
+    #: sees an unrelated message rather than an answer, and their client cannot collapse the two.
+    in_reply_to_message_id: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+
+    #: Flagged by a processor as worth coming back to (LP-818, spec 4.3 "mark important").
+    #:
+    #: A PROCESSOR'S OWN JUDGEMENT, never derived. Nothing computes it, no rule sets it, and no
+    #: model suggests it — the standing rule is that AI may classify and extract and may not decide,
+    #: and "this matters" is the most decision-shaped flag on the record.
+    is_important: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    #: When somebody read this message. Null means unread; INBOUND only (LP-818).
+    #:
+    #: A TIMESTAMP, NOT A BOOLEAN, and the difference earns its column: "unread" and "read four days
+    #: ago" are the same boolean and different facts, and the second is what tells a processor a
+    #: message was seen and then left. Outbound rows are never unread — we wrote them — so this stays
+    #: null there rather than being back-filled with the send time, which would read as somebody
+    #: having looked.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     #: The inbound message this row REPRESENTS on the timeline (LP-812). Null for outbound.
     #:
     #: THE TIMELINE NEEDS ONE ROW PER MESSAGE AND THE ATTACHMENTS HANG OFF THE OTHER ONE. LP-805

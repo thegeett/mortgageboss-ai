@@ -36,6 +36,8 @@ class TimelineEntryPublic(BaseModel):
     counterparty: str | None
     actor_user_id: UUID | None
     attachments: list[str]
+    is_important: bool
+    unread: bool
     detail: dict[str, Any]
 
     @classmethod
@@ -51,6 +53,8 @@ class TimelineEntryPublic(BaseModel):
             counterparty=entry.counterparty,
             actor_user_id=entry.actor_user_id,
             attachments=list(entry.attachments),
+            is_important=entry.is_important,
+            unread=entry.unread,
             detail=entry.detail,
         )
 
@@ -66,6 +70,13 @@ class TimelinePublic(BaseModel):
 
     entries: list[TimelineEntryPublic]
     inbox_address: str
+    #: How many arrived messages nobody has opened — the badge (§C.5: "without the badge the queue is
+    #: pull-only and an evening reply sits unseen until she happens to open the tab").
+    #:
+    #: COUNTED OVER THE WHOLE FILE, not over `entries`. A filtered or truncated page would otherwise
+    #: report a badge that shrank when somebody clicked a pill, which is a number that teaches its
+    #: reader to distrust it.
+    unread_count: int
     #: True when the history is longer than this response. There is no pagination yet (escalated in
     #: LP-812), so the alternative was dropping the oldest entries in silence — a page that looks
     #: complete and is not. A caller that ignores this is no worse off than before; one that reads
@@ -86,9 +97,12 @@ async def read(
     `services/timeline`, and defining them again on the client is how a "sent" pill starts showing
     drafts — two definitions of one word that nothing forces to agree.
     """
+    from app.services.email_reply import unread_count
+
     entries, truncated = await build_timeline(db, loan_file=loan_file, wanted=filter)
     return TimelinePublic(
         entries=[TimelineEntryPublic.of(entry) for entry in entries],
         inbox_address=loan_file.get_inbox_address(),
         truncated=truncated,
+        unread_count=await unread_count(db, loan_file=loan_file),
     )

@@ -336,7 +336,12 @@ async def test_the_reply_threads_to_what_it_answers(db_session: AsyncSession) ->
     reply = await record_auto_reply(db_session, loan_file=loan_file, message=message)
 
     assert reply is not None
-    assert reply.external_message_id == "abc@borrower.example.com"
+    # `in_reply_to_message_id`, NOT `external_message_id` (LP-818 separated them). The latter means
+    # "this message's own id" and is what rung 2 matches a borrower's `References` against; the id
+    # being ANSWERED belongs in its own column, or a genuinely generated outbound id would collide
+    # with a borrower's under one name.
+    assert reply.in_reply_to_message_id == "abc@borrower.example.com"
+    assert reply.external_message_id is None
 
 
 # --------------------------------------------------------------------------------------------- #

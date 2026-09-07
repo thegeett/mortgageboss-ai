@@ -251,7 +251,14 @@ async def record_auto_reply(
         template_version=TEMPLATE_VERSION,
         # THREADED TO WHAT IT ANSWERS. RFC 5322 §3.6.4 — without this the borrower sees an unrelated
         # message rather than a reply, and their client cannot collapse it into the conversation.
-        external_message_id=message.message_id,
+        #
+        # `in_reply_to_message_id`, NOT `external_message_id` (LP-818). The latter means "THIS
+        # message's own id" and is what LP-805's rung 2 matches a borrower's `References` against;
+        # writing the id being ANSWERED there routed correctly by accident — a reply carries the
+        # borrower's own id too — and would break the moment anything stored a genuinely generated
+        # outbound id, because rung 2 would then match a thread to a row holding a borrower's id
+        # under the wrong meaning.
+        in_reply_to_message_id=message.message_id,
     )
     db.add(reply)
     await db.flush()

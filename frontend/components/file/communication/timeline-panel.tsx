@@ -16,10 +16,21 @@
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
 import { useTimeline } from "@/lib/api/timeline";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { formatDistanceToNow } from "date-fns";
-import { Check, Copy, FileText, Mail, MailOpen, PenLine, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FileText,
+  Mail,
+  MailOpen,
+  PenLine,
+  Reply,
+  Star,
+  TriangleAlert,
+} from "lucide-react";
 import { useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
@@ -58,10 +69,159 @@ function when(iso: string): string {
   }
 }
 
+/**
+ * The per-row actions spec 4.3 asks for: reply, mark important, and read state.
+ *
+ * REPLY ONLY ON AN ARRIVED MESSAGE. Replying to our own would address it to whoever we sent it to,
+ * thread it into their conversation, and read to them as us answering ourselves — the server refuses
+ * it, and offering a button the server refuses is a worse way to learn that.
+ */
+function MessageActions({
+  fileId,
+  entry,
+  replying,
+  onReply,
+}: {
+  fileId: string;
+  entry: TimelineEntry;
+  replying: boolean;
+  onReply: () => void;
+}) {
+  const important = useSetImportant(fileId);
+  const read = useMarkRead(fileId);
+  const canReply = entry.direction === "inbound";
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        aria-label={entry.is_important ? "Remove the flag" : "Mark important"}
+        disabled={important.isPending}
+        onClick={() =>
+          important.mutate({ communicationId: entry.id, important: !entry.is_important })
+        }
+      >
+        <Star
+          className={entry.is_important ? "h-3.5 w-3.5 fill-warning text-warning" : "h-3.5 w-3.5"}
+          aria-hidden
+        />
+      </Button>
+      {canReply ? (
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            // REVERSIBLE. A processor who opens something at the end of the day and cannot deal
+            // with it needs to put it back; a one-way flag makes the badge a thing to get rid of
+            // rather than a thing to act on.
+            aria-label={entry.unread ? "Mark read" : "Mark unread"}
+            disabled={read.isPending}
+            onClick={() => read.mutate({ communicationId: entry.id, read: entry.unread })}
+          >
+            {entry.unread ? (
+              <MailOpen className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <Mail className="h-3.5 w-3.5" aria-hidden />
+            )}
+          </Button>
+          <Button size="sm" variant="ghost" aria-label="Reply" onClick={onReply}>
+            <Reply className={replying ? "h-3.5 w-3.5 text-primary" : "h-3.5 w-3.5"} aria-hidden />
+          </Button>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The reply box.
+ *
+ * THE RECIPIENT IS SHOWN, NOT EDITED. It comes from the stored inbound message and is not a
+ * processor's to change: a reply sent elsewhere would still be threaded to this conversation and
+ * would read, to whoever received it, as part of it.
+ *
+ * AND SAVING MAKES A DRAFT, NOT A SEND. The copy says so, because a button labelled "Reply" that
+ * silently transmitted would be the one outbound message in this product with no guardrails — and
+ * one that silently did NOT would be worse.
+ */
+function ReplyBox({
+  fileId,
+  entry,
+  onDone,
+}: {
+  fileId: string;
+  entry: TimelineEntry;
+  onDone: () => void;
+}) {
+  const [body, setBody] = useState("");
+  const [context, setContext] = useState<{ recipient: string; subject: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reply = useReply(fileId);
+
+  // Fetched once when the box opens. Not a query, because it is read exactly once per open and a
+  // cached answer would go stale against a message whose sender changed under it.
+  if (context === null && error === null) {
+    void fetchReplyContext(fileId, entry.id)
+      .then(setContext)
+      .catch(() => setError("This message cannot be replied to."));
+  }
+
+  if (error) return <p className="mt-2 text-xs text-danger">{error}</p>;
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 rounded border border-input bg-background p-2">
+      <p className="text-xs text-muted-foreground">
+        {context ? (
+          <>
+            To {context.recipient} · {context.subject}
+          </>
+        ) : (
+          "Preparing…"
+        )}
+      </p>
+      <textarea
+        className="min-h-20 w-full rounded border border-input bg-background p-2 text-sm"
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        placeholder="Write your reply…"
+        aria-label="Reply body"
+      />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={!body.trim() || reply.isPending || context === null}
+          onClick={() =>
+            reply.mutate(
+              { communicationId: entry.id, body },
+              {
+                onSuccess: () => {
+                  setBody("");
+                  onDone();
+                },
+                onError: () => setError("The reply could not be saved."),
+              },
+            )
+          }
+        >
+          Save reply
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Saved as a draft — send it from the document request above.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function TimelinePanel({ fileId }: { fileId: string }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
 
   async function copyAddress(address: string) {
     await navigator.clipboard.writeText(address);
@@ -73,7 +233,20 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
     <section className="flex flex-col gap-3">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-semibold text-foreground">History</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">History</h2>
+            {/* THE BADGE. §C.5: "without the badge the queue is pull-only and an evening reply sits
+                unseen until she happens to open the tab." Counted over the WHOLE file, so it does
+                not shrink when a pill is clicked. */}
+            {data && data.unread_count > 0 ? (
+              <span
+                className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
+                aria-label={`${data.unread_count} unread`}
+              >
+                {data.unread_count} unread
+              </span>
+            ) : null}
+          </div>
           {data ? (
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -146,7 +319,17 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 <EntryIcon entry={entry} />
               </span>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-foreground">{entry.summary}</span>
+                <span
+                  className={entry.unread ? "font-semibold text-foreground" : "text-foreground"}
+                >
+                  {entry.summary}
+                  {entry.is_important ? (
+                    <Star
+                      className="ml-1 inline h-3.5 w-3.5 fill-warning text-warning"
+                      aria-label="Important"
+                    />
+                  ) : null}
+                </span>
                 {entry.subject ? (
                   <span className="truncate text-xs text-muted-foreground">{entry.subject}</span>
                 ) : null}
@@ -169,8 +352,21 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                     ))}
                   </ul>
                 ) : null}
+                {open === entry.id ? (
+                  <ReplyBox fileId={fileId} entry={entry} onDone={() => setOpen(null)} />
+                ) : null}
               </div>
-              <span className="shrink-0 text-xs text-muted-foreground">{when(entry.at)}</span>
+              <div className="flex shrink-0 items-center gap-1">
+                <span className="text-xs text-muted-foreground">{when(entry.at)}</span>
+                {entry.kind === "message" ? (
+                  <MessageActions
+                    fileId={fileId}
+                    entry={entry}
+                    replying={open === entry.id}
+                    onReply={() => setOpen(open === entry.id ? null : entry.id)}
+                  />
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

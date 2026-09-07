@@ -95,6 +95,11 @@ class TimelineEntry:
     actor_user_id: UUID | None
     #: Filenames on an inbound message, for the manifest. Empty for everything else.
     attachments: tuple[str, ...]
+    #: Flagged by a processor (LP-818). False on an activity, which cannot be flagged.
+    is_important: bool
+    #: True for an INBOUND message nobody has opened. False for everything else, including outbound
+    #: — we wrote those, so "unread" is not a state they can be in.
+    unread: bool
     detail: dict[str, Any]
 
 
@@ -130,6 +135,37 @@ def _summarise(message: Communication) -> str:
     if message.status is CommunicationStatus.FAILED:
         return "A message could not be delivered"
     return "A message was sent"
+
+
+async def _inbound_senders(db: AsyncSession, message_ids: list[UUID]) -> dict[UUID, str | None]:
+    """`{inbound_message_id: from_address}` for the rows that have one.
+
+    THE COMMUNICATION CARRIES NO SENDER, DELIBERATELY. LP-805 declined to copy it: "NO subject, NO
+    body, NO sender. They are on the inbound_message row, which the readonly view already drops;
+    copying them here would put borrower prose in a second place with its own exposure decisions."
+
+    That decision is right and it left the timeline saying "A message arrived" with no From — which
+    LP-818 could not live with, because a processor cannot decide whether to reply to something
+    without knowing who sent it. Read here, from the row that already holds it, rather than
+    denormalised into a second copy.
+    """
+    if not message_ids:
+        return {}
+    from app.models.inbound_message import InboundMessage
+
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(InboundMessage).where(InboundMessage.id.in_(message_ids)),
+                    InboundMessage,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {row.id: row.from_address for row in rows}
 
 
 async def _attachment_names(
@@ -246,9 +282,9 @@ async def build_timeline(
         .all()
     )
 
-    manifests = await _attachment_names(
-        db, [m.inbound_message_id for m in messages if m.inbound_message_id is not None]
-    )
+    inbound_ids = [m.inbound_message_id for m in messages if m.inbound_message_id is not None]
+    manifests = await _attachment_names(db, inbound_ids)
+    senders = await _inbound_senders(db, inbound_ids)
 
     entries: list[TimelineEntry] = [
         TimelineEntry(
@@ -260,13 +296,27 @@ async def build_timeline(
             status=message.status.value,
             subject=message.subject,
             counterparty=(
-                message.sender
+                # INBOUND: read from the stored message, because the Communication has no sender by
+                # LP-805's deliberate choice. `message.sender` is tried first anyway, so a future
+                # writer of that column is not silently ignored.
+                (
+                    message.sender
+                    or (
+                        senders.get(message.inbound_message_id)
+                        if message.inbound_message_id
+                        else None
+                    )
+                )
                 if message.direction is CommunicationDirection.INBOUND
                 else message.recipient
             ),
             actor_user_id=message.initiated_by_user_id,
             attachments=(
                 manifests.get(message.inbound_message_id, ()) if message.inbound_message_id else ()
+            ),
+            is_important=message.is_important,
+            unread=(
+                message.direction is CommunicationDirection.INBOUND and message.read_at is None
             ),
             detail={
                 "template_key": message.template_key,
@@ -287,6 +337,8 @@ async def build_timeline(
             counterparty=None,
             actor_user_id=activity.actor_user_id,
             attachments=(),
+            is_important=False,
+            unread=False,
             detail=dict(activity.detail or {}),
         )
         for activity in activities
