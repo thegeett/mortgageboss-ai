@@ -48,6 +48,11 @@ from app.models.needs_item import (
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
+from app.services.finding_requests import (
+    NotRequestable,
+    docs_requested_marker,
+    requestable,
+)
 from app.services.needs_engine import canonical_need_type
 from app.services.needs_items import create_needs_item
 from app.services.verifications import mark_verification_stale
@@ -503,14 +508,28 @@ async def request_documents_in_bulk(
     }
 
     created: list[NeedsItem] = []
-    for document, findings in by_document.items():
+    # LP-801 — the finding -> needs-item link, written once per finding for the FIRST document it
+    # contributed to. A finding wanting two documents produces two items; the marker's `needs_item_id`
+    # is singular (see `docs_requested_marker`), so the second link is carried the other way — every
+    # item's `reasoning` names the rule ids waiting on it.
+    marked: set[UUID] = set()
+    for document, raw_findings in by_document.items():
+        # LP-801 — THE GATE, AND IT IS HERE RATHER THAN IN THE ENDPOINT. Both request routes come
+        # through a service, so the service is the layer that can state the rule once; an endpoint
+        # check would leave every other caller — Phase 4's drafting engine among them — outside it.
+        # "Request all N" is a bulk verb, so a member that cannot be honoured is dropped quietly,
+        # where `request_docs_for_finding` raises: only that route has a user standing in front of one
+        # specific finding to be told why nothing happened.
+        findings = [f for f in raw_findings if requestable(f)]
+        if not findings:
+            continue
         slug = document.strip().lower().replace(" ", "_")
         if not slug or slug in existing:
             continue
         # LP-624 — A TYPE THE MATCHER CAN REACH, OR NONE. This slugs a DOCUMENT LABEL, which is right
         # for every entry `_missing_documents` produces. LP-620's `requested_documents` channel now
-        # also reaches here, and it carries a SENTENCE ("Another document stating the date of birth"),
-        # which slugged to `another_document_stating_the_date_of_birth` — a needs_type no document can
+        # also reaches here, and it carries a SENTENCE ("One more source stating the date of birth"),
+        # which slugged to `one_more_source_stating_the_date_of_birth` — a needs_type no document can
         # ever match, so the need would sit unsatisfiable forever and group under no category. The
         # title still says what to get; the TYPE stops claiming a match that cannot happen.
         needs_type = canonical_need_type(slug)
@@ -537,16 +556,34 @@ async def request_documents_in_bulk(
         # still offered "Request ..." as though nothing had happened, and a second click would ask the
         # borrower again — the failure the dedupe above exists to prevent, reached by another route.
         for contributor in findings:
-            contributor.details = {**(contributor.details or {}), "docs_requested": True}
+            if contributor.id in marked:
+                continue
+            marked.add(contributor.id)
+            contributor.details = {
+                **(contributor.details or {}),
+                # LP-801 — the SAME shape `request_docs_for_finding` writes. This wrote a bare `True`,
+                # which the UI renders identically (`Boolean(...)` is true for either) and which the
+                # frontend's own declared type says is an object. Phase 4 drafts an email from this
+                # link, so a truthy value carrying no needs-item id is a silent hole there.
+                "docs_requested": docs_requested_marker(
+                    actor_user_id=actor_user_id, needs_item_id=item.id
+                ),
+            }
 
     if created:
         await log_activity(
             db,
             loan_file_id=loan_file.id,
-            activity_type=ActivityType.FINDING_RESOLVED,
+            # LP-801 — NEEDS_ITEM_CREATED, matching `request_docs_for_finding` and matching what this
+            # function's own docstring says it does. It logged FINDING_RESOLVED, so on the Phase 4.3
+            # timeline every bulk request read as a resolution of findings that are still open.
+            activity_type=ActivityType.NEEDS_ITEM_CREATED,
             summary=f"Requested {len(created)} document(s) from verification findings",
             actor_user_id=actor_user_id,
-            detail={"documents": [item.title for item in created]},
+            detail={
+                "documents": [item.title for item in created],
+                "needs_item_ids": [str(item.id) for item in created],
+            },
         )
     await db.flush()
     return created
@@ -567,6 +604,11 @@ async def request_docs_for_finding(
     finding — it stays open until the request is satisfied. The needs item is the artifact
     the needs list + Phase-4 communication act on. ``flush`` only.
     """
+    if not requestable(finding):
+        raise NotRequestable(
+            f"Finding {finding.rule_id} cannot produce a document request — "
+            "it is answered by identifying documents already in the file."
+        )
     title = f"Documents for: {finding.message}"[:200]
     item = await create_needs_item(
         db,
@@ -579,12 +621,10 @@ async def request_docs_for_finding(
         reasoning=f"Requested from verification finding {finding.rule_id}",
     )
     # Mark the finding so the tab shows docs were requested (without resolving it).
-    requested = {
-        "by": str(actor_user_id),
-        "at": utcnow().isoformat(),
-        "needs_item_id": str(item.id),
+    finding.details = {
+        **finding.details,
+        "docs_requested": docs_requested_marker(actor_user_id=actor_user_id, needs_item_id=item.id),
     }
-    finding.details = {**finding.details, "docs_requested": requested}
 
     await log_activity(
         db,

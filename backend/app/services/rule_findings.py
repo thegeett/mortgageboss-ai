@@ -36,17 +36,18 @@ from app.models.finding import (
 )
 from app.models.finding_event import FindingEvent, FindingEventType
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
-from app.verification.rule_engine.result import LoadBearingTag, RuleEvaluation, Verdict
+from app.verification.rule_engine.result import (
+    UNIDENTIFIED_DOCUMENTS_RULE_ID,
+    LoadBearingTag,
+    RuleEvaluation,
+    Verdict,
+)
 
-# LP-640 — the identity of the consolidated unidentified-document finding. NOT a rule id: no spec
-# file carries it, so the read path must TOLERATE a spec-less id — `schemas.verification._rule_spec`
-# returns None for one (it had to be taught to catch `RuleSpecError` to do so; it claimed the
-# tolerance and did not have it) and the UI falls back to the id itself. Deliberately not shaped like
-# `XX-9` so nobody reads it as a rule that someone forgot to write.
-#
-# PUBLIC because the caller has to name it: retirement is gated per rule, and this row's eligibility
-# is the caller's answer about the DOCUMENT domain's health (see `reconcile_evaluation_findings`).
-UNIDENTIFIED_DOCUMENTS_RULE_ID = "UNIDENTIFIED-DOCUMENTS"
+# LP-640/LP-801 — re-exported from `rule_engine.result`, where it now lives beside the in-run
+# `unidentified_document` flag it is the persisted form of. Kept importable from here because this
+# module is where callers learned to find it, and because retirement is gated per rule: this row's
+# eligibility is the caller's answer about the DOCUMENT domain's health (see
+# `reconcile_evaluation_findings`).
 
 _SOURCE_STRENGTH_TAG = "txn.source_strength"
 _HAS_SOURCE_TAG = "txn.has_identified_source"

@@ -68,6 +68,7 @@ from app.services.finding_impact import (
     has_apply_spec,
     preview_finding_apply,
 )
+from app.services.finding_requests import NotRequestable
 from app.services.finding_resolution import (
     CannotApplyError,
     CannotRatifyError,
@@ -1076,9 +1077,12 @@ async def request_docs_endpoint(
     if finding is None:
         raise _FINDING_NOT_FOUND
 
-    await request_docs_for_finding(
-        db, finding=finding, actor_user_id=current_user.id, note=payload.note
-    )
+    try:
+        await request_docs_for_finding(
+            db, finding=finding, actor_user_id=current_user.id, note=payload.note
+        )
+    except NotRequestable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)

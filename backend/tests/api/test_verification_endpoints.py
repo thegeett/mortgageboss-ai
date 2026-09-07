@@ -940,6 +940,40 @@ async def test_request_docs_creates_a_needs_item_and_keeps_the_finding_open(
     assert "docs_requested" in finding.details
 
 
+async def test_request_docs_on_the_unidentified_documents_row_is_refused(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-801 — at the layer a processor actually clicks. The consolidated unidentified-document
+    finding is the processor's own work ("identify these files"), answered by typing documents that
+    are already in the file; a needs item generated from it asks the borrower to re-send what they
+    have already sent, in words naming nothing they could act on.
+
+    409, not a quiet 200 with nothing created: on screen those are the same picture."""
+    from app.models.needs_item import NeedsItem
+    from app.verification.rule_engine.result import UNIDENTIFIED_DOCUMENTS_RULE_ID
+    from sqlalchemy import select
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    finding.rule_id = UNIDENTIFIED_DOCUMENTS_RULE_ID
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": "Please provide the 2024 W-2"},
+    )
+
+    assert resp.status_code == 409
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert needs == []
+
+
 async def test_run_history_lists_runs_newest_first(client: AsyncClient, db: AsyncSession) -> None:
     """The run-history endpoint exposes the versioned runs (newest first) for the selector."""
     company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")

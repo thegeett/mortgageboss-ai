@@ -183,19 +183,21 @@ async def test_a_single_source_records_the_document_it_is_waiting_on() -> None:
     The rule knows the answer here and nowhere else does, so it records it."""
     results = await _eval_id2(_snapshot([("app", _ssn("H"))]))
 
+    # LP-801 — "one more source", never a named document type: the borrower cannot know which of
+    # their papers states the number, and Phase 4 puts this sentence in front of them verbatim.
     assert results[0].requested_documents == (
-        "Another document stating the borrower's Social Security number",
+        "One more source stating the borrower's Social Security number",
     )
 
 
-async def test_no_source_at_all_asks_for_a_first_document_not_another() -> None:
-    """The same branch covers zero sources, where "another" would be simply wrong — there is nothing to
-    be another OF, and a processor reading it would go looking for the first one."""
+async def test_no_source_at_all_asks_for_a_first_source_not_one_more() -> None:
+    """The same branch covers zero sources, where "one more" would be simply wrong — there is nothing
+    to be one more OF, and a processor reading it would go looking for the second one."""
     results = await _eval_id2(_snapshot([("app", {}), ("dl", {})]))
 
     assert results[0].verdict is Verdict.COULDNT_CHECK
     assert results[0].requested_documents == (
-        "A document stating the borrower's Social Security number",
+        "A source stating the borrower's Social Security number",
     )
 
 

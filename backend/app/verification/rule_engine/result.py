@@ -143,3 +143,17 @@ class RuleEvaluation:
     # abstention that happens to mention a document. The verdict itself is unchanged: every one of these
     # is still COULDNT_CHECK, so no blocked rule can ever read as satisfied (the LP-391 silence trap).
     unidentified_document: bool = False
+
+
+#: LP-640/LP-801 — the rule id the consolidated unidentified-document finding is persisted under, and
+#: the ONLY persisted trace of ``unidentified_document`` above. The per-rule abstentions carrying that
+#: flag never become findings: ``consolidate_unidentified_documents`` replaces them with one loan-level
+#: evaluation under this id BEFORE anything is written. So the in-run flag needs no persisted column —
+#: this id already is the column, and LP-640 made it a stable identity the reconciler carries across
+#: runs. It lives here, beside the flag it stands for, so the two cannot drift apart in separate files;
+#: ``services.rule_findings`` re-exports it for callers that knew it there, and the read layer
+#: (``schemas.verification``) can reach it without importing a service.
+#:
+#: Deliberately not shaped like ``XX-9`` so nobody reads it as a rule someone forgot to write, and no
+#: spec file carries it — every consumer must tolerate a spec-less id.
+UNIDENTIFIED_DOCUMENTS_RULE_ID = "UNIDENTIFIED-DOCUMENTS"

@@ -19,7 +19,7 @@ commit per ticket plus one per review pass.
 | # | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|---|
 | 1 | LP-802 ADRs, settings, `inbox_domain`, token widening | REVIEWED | see Log | see Log | ADR-094 amended by ADR-397 — the address contains the token, so exposure is a narrowing not a technicality. Review found `inbox_domain` set by nothing; now wired in both task definitions. LP-802 has no "Done when" clause in the build plan |
-| 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | PENDING | | | |
+| 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | AWAITING_REVIEW | see Log | | ADR-399: no migration. The plan preferred persisting the cause on the finding; the consolidated rule id already IS the persisted cause, because the flagged abstentions are replaced before any write. Predicate gate lives in the service, not the endpoint |
 | 3 | LP-800 Borrower instruction catalog | PENDING | | | Claude writes a first pass for the ~25 borrower-facing types; **Priya reviews after** — do not block on her |
 | 4 | LP-817 Template library (5 templates, versioned) | PENDING | | | LP-810's "plain template" fallback lives here |
 | 5 | LP-822 Tone / style profile | PENDING | | | needs Priya's real emails; ship the mechanism with a neutral default profile and fill it in later |

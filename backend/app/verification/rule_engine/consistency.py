@@ -568,9 +568,17 @@ async def evaluate_consistency_rule(
                     # one qualifying document is on the file — which is precisely this branch's
                     # situation, and it put ID-2/ID-3 in "read or clarify" under a message that read
                     # "Obtain a second document stating the date of birth". The count decides the
-                    # wording: one source needs ANOTHER, none needs A FIRST.
+                    # wording: one source needs ONE MORE, none needs a first.
+                    #
+                    # LP-801 — "source", not "document", and never a named document type. What this
+                    # branch is short of is a second STATEMENT of the fact, and the borrower has no way
+                    # to know which of their papers carries it: a payslip, a bank statement and a
+                    # utility bill can each state an address. Naming a document type here would be the
+                    # engine guessing on their behalf, and Phase 4 puts this string in front of the
+                    # borrower verbatim — the ask has to be true of anything that would actually close
+                    # the gap. LP-624 already stops the sentence becoming a `needs_type`.
                     requested_documents=(
-                        f"{'Another' if gathered else 'A'} document stating the "
+                        f"{'One more source' if gathered else 'A source'} stating the "
                         f"{fact_label(con.gather_tag)}{of_type}",
                     ),
                 )

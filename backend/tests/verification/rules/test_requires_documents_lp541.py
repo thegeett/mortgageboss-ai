@@ -163,8 +163,8 @@ def test_a_findings_own_request_overrides_the_spec_derived_list() -> None:
     """The consistency engine's single-source abstention needs one MORE source than the file has, which
     a presence test can never report. When the evaluator records what it is waiting on, that wins."""
     assert _requested_documents(
-        {"requested_documents": ["Another document stating the borrower's date of birth"]}
-    ) == ["Another document stating the borrower's date of birth"]
+        {"requested_documents": ["One more source stating the borrower's date of birth"]}
+    ) == ["One more source stating the borrower's date of birth"]
 
 
 def test_a_finding_that_records_nothing_falls_back_to_the_spec() -> None:

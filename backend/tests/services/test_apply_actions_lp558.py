@@ -418,14 +418,19 @@ async def test_a_bulk_request_marks_the_findings(db_session: AsyncSession) -> No
     loan_file, actor = await _loan_file(db_session)
     finding = await _judgment_finding(db_session, loan_file)
 
-    await request_documents_in_bulk(
+    created = await request_documents_in_bulk(
         db_session,
         loan_file=loan_file,
         by_document={"credit report": [finding]},
         actor_user_id=actor,
     )
 
-    assert finding.details["docs_requested"] is True
+    # LP-801 — the marker is the SAME object shape the per-finding path writes, not a bare `True`. A
+    # bare truthy value marked the row correctly on screen and carried no link to what was requested.
+    marker = finding.details["docs_requested"]
+    assert marker["by"] == str(actor)
+    assert marker["needs_item_id"] == str(created[0].id)
+    assert marker["at"]
 
 
 async def test_undo_survives_a_malformed_id_in_the_applied_record(

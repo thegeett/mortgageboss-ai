@@ -16021,3 +16021,36 @@ LP-817's templates and LP-810's compliance scanner both enforce it; the scanner 
 makes this ADR checkable rather than advisory.
 
 *Status.* Accepted (LP-802).
+
+---
+
+## ADR-399
+
+**The unidentified-document exclusion is carried by the rule id, not by a new column on `findings`.**
+
+*Context.* `RuleEvaluation.unidentified_document` (LP-640) marks an abstention as "we do not know what
+that document is" rather than "we looked and the fact is missing". It is an in-run flag with no
+persisted counterpart. Phase 4 drafts borrower-facing emails from findings, so it needs to know, from
+a *stored* finding, whether that finding may become a request — and this one may not: it is answered
+by typing documents already in the file, not by asking a borrower for anything. The build plan
+offered two routes and preferred persisting the cause on the finding.
+
+*Decision.* Neither a column nor a re-read of the run. The predicate is
+`finding.rule_id != UNIDENTIFIED_DOCUMENTS_RULE_ID`, in `services/finding_requests.requestable`.
+
+*Rationale.* The per-rule abstentions carrying the flag never become findings. `consolidate_unidentified_documents`
+replaces all of them with one loan-level evaluation under `UNIDENTIFIED-DOCUMENTS` *before* anything
+is written, on both persistence paths. A new column would therefore be written `True` on exactly one
+row per file — the row that id already names, on an identity LP-640 deliberately made stable so the
+reconciler carries it across runs and retires it when the last document is typed. Two spellings of
+one fact can drift; one cannot. The migration the plan allowed for is not needed.
+
+*Consequences.* The constant moves from `services/rule_findings` to `verification/rule_engine/result`,
+beside the flag it is the persisted form of, so the read layer can reach it without importing a
+service; `rule_findings` re-exports it. Anything that gives the synthetic id a spec file, or mints a
+second consolidated identity, must extend the predicate — it is a membership test over ids, so a new
+non-requestable class is a new id in one place rather than a new column and a backfill. If a future
+finding is non-requestable for a reason that is *not* visible in its rule id, that is the point at
+which a persisted cause earns its keep; this decision is not a claim that it never will.
+
+*Status.* Accepted (LP-801). Refines LP-640.
