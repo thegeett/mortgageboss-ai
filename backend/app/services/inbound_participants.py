@@ -4,6 +4,12 @@ SEEDED FROM WHAT ALREADY EXISTS. `borrowers.email`, `loan_files.loan_officer_ema
 `lenders.contact_email` are populated today, so the allowlist is real on day one rather than a table
 somebody has to fill in before the feature works.
 
+WITH ONE CORRECTION MADE IN LP-813. "`lenders.contact_email` is populated today" was true of the
+seed script and of nothing else: there was no create or update path for a lender anywhere in the
+product, so on any real installation that source was always NULL. LP-813 adds the write path and the
+named underwriter assigned to the file, which is the source this actually wanted — an institution's
+generic mailbox is not who a processor corresponds with.
+
 MEMBERSHIP IS NOT TRUST. `phase4.md` §2.3 makes quarantine the default: a participant is somebody we
 recognise, and `is_trusted_sender` is a separate, opt-in fact about whether their attachments may
 skip a human. Seeding sets membership and never sets trust — an estate agent belongs on the file and
@@ -73,6 +79,21 @@ async def seed_participants(db: AsyncSession, *, loan_file: LoanFile) -> int:
 
     if (officer := normalise_address(loan_file.loan_officer_email)) is not None:
         candidates.append((officer, ParticipantRole.LOAN_OFFICER, loan_file.loan_officer_name))
+
+    # THE ASSIGNED UNDERWRITER FIRST (LP-813), so they win the address if the lender's generic
+    # mailbox happens to be the same string. A named person with the role UNDERWRITER is strictly
+    # more information than an institution with the role OTHER, and the de-duplication below keeps
+    # whichever candidate it saw first.
+    if loan_file.underwriter_contact_id is not None:
+        from app.models.lender_contact import LenderContact
+
+        underwriter = await db.get(LenderContact, loan_file.underwriter_contact_id)
+        if (
+            underwriter is not None
+            and underwriter.deleted_at is None
+            and (address := normalise_address(underwriter.email)) is not None
+        ):
+            candidates.append((address, ParticipantRole.UNDERWRITER, underwriter.name))
 
     if loan_file.lender_id is not None:
         from app.models.lender import Lender

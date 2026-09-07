@@ -100,6 +100,16 @@ export interface LoanFileDetail extends LoanFileSummary {
    * limit depends on it; cash-out is stricter). Editable only when the purpose is refinance. */
   refinance_type: RefinanceType | null;
   ai_needs_status: AiNeedsStatus | null;
+  /**
+   * The named underwriter on this file (LP-813), or null.
+   *
+   * THE ID, NOT THE NAME. The server sends the id so the detail read needs no extra eager load;
+   * the screen already fetches that lender's contacts to offer the choice and reads the name from
+   * there. A null here after a lender change is not a loading state — changing the lender clears
+   * the assignment, because an underwriter at a lender the file is no longer going to is worse
+   * than none.
+   */
+  underwriter_contact_id: string | null;
   borrowers: BorrowerPublic[];
   property: PropertyPublic | null;
 }

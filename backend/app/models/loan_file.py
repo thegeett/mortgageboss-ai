@@ -166,6 +166,19 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         index=True,
         nullable=True,
     )
+    #: The named underwriter this file is with (LP-813). A row in `lender_contacts`, which belongs
+    #: to a lender, which belongs to a company — so this is the one place a loan file points at
+    #: something owned by a DIFFERENT row's company, and `assign_underwriter` is what proves the two
+    #: agree. Never assigned directly.
+    #:
+    #: SET NULL rather than RESTRICT, unlike `lender_id`: a contact who leaves the lender is deleted
+    #: and the file must survive it. The file then says "no underwriter", which is true, rather than
+    #: refusing to let anybody remove a person who has gone.
+    underwriter_contact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("lender_contacts.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
 
     # --- Loan attributes (all nullable; may arrive via MISMO/processor) -----
     loan_program: Mapped[LoanProgram | None] = mapped_column(str_enum(LoanProgram), nullable=True)

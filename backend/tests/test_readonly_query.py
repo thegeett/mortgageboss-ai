@@ -301,7 +301,17 @@ def test_scrub_patterns_match_the_at_rest_guard() -> None:
 #: model and NOT listing it here (or in its view) fails ``test_no_model_column_drifts``.
 #: The reason for each is in the migration next to the view.
 EXCLUDED: dict[str, frozenset[str]] = {
-    "loan_files": frozenset({"inbox_token", "loan_officer_name", "loan_officer_email"}),
+    # LP-813 — `underwriter_contact_id` joins straight back to a named person at a lender, so the
+    # view answers the analytic question as a boolean (`has_named_underwriter`) instead. Which
+    # LENDER a file is with stays exposed; which PERSON does not.
+    "loan_files": frozenset(
+        {"inbox_token", "loan_officer_name", "loan_officer_email", "underwriter_contact_id"}
+    ),
+    # LP-813 — a lender contact is a person. The name, address and phone identify them outright,
+    # and `notes` is free prose an admin typed about them, which is where a name ends up in a shape
+    # no scrubber predicts. What is left — the lender, the role, whether they are active — answers
+    # "how many files have a named underwriter" without naming anybody.
+    "lender_contacts": frozenset({"name", "email", "phone", "notes"}),
     # A correction is whatever a processor typed, on whatever field they were correcting —
     # correct an SSN field and the correction IS an SSN. The note is free prose about one
     # borrower's document. Both are dropped rather than scrubbed: scrubbing catches the

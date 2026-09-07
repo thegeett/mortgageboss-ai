@@ -188,6 +188,12 @@ class LoanFileDetail(LoanFileSummary):
     # if no reasoning was triggered. Lets the needs dashboard say "more may be coming"
     # or "reasoning didn't complete" instead of presenting a floor-only list as final.
     ai_needs_status: AiNeedsStatus | None
+    #: The named underwriter on this file (LP-813), or null. THE ID, NOT THE NAME: resolving the
+    #: name here would mean a second eager load on every detail read, and an async session cannot
+    #: lazy-load on attribute access — so the first file whose relationship was not loaded would
+    #: raise rather than return a null. The screen already fetches that lender's contacts to offer
+    #: the choice, and reads the name from there.
+    underwriter_contact_id: UUID | None
     borrowers: list[BorrowerPublic]
     property: PropertyPublic | None
 
@@ -215,6 +221,7 @@ class LoanFileDetail(LoanFileSummary):
             loan_officer_email=loan_file.loan_officer_email,
             refinance_type=loan_file.refinance_type,
             ai_needs_status=loan_file.ai_needs_status,
+            underwriter_contact_id=loan_file.underwriter_contact_id,
             borrowers=[BorrowerPublic.model_validate(b) for b in borrowers],
             property=(
                 PropertyPublic.model_validate(loan_file.property)

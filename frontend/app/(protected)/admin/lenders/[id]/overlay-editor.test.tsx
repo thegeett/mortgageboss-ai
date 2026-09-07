@@ -8,6 +8,20 @@ const useUpdateLenderOverlay = vi.hoisted(() =>
   vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 );
 vi.mock("@/lib/api/overlay-admin", () => ({ useLenderOverlay, useUpdateLenderOverlay }));
+
+// LP-813 put a SECOND data-fetching component on this page — the lender's contacts. These cases
+// render the page bare, with no QueryClientProvider, which worked only while every hook on it was
+// mocked; a real `useQuery` throws "No QueryClient set" and takes all six down. Mocked rather than
+// wrapped in a provider, because these cases are about the overlay editor and a provider would
+// have them silently exercising the contacts fetch as well.
+const useLenderContacts = vi.hoisted(() =>
+  vi.fn(() => ({ data: [], isPending: false, isError: false, refetch: vi.fn() })),
+);
+vi.mock("@/lib/api/lenders", () => ({
+  useLenderContacts,
+  useCreateLenderContact: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteLenderContact: () => ({ mutate: vi.fn(), isPending: false }),
+}));
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "l1" }) }));
 
 const authState = vi.hoisted(() => ({ role: "admin" as string | undefined }));

@@ -9,6 +9,7 @@
  * (the backend gates it); a save returns the recomposed effect-legible view.
  */
 
+import { LenderContacts } from "@/components/admin/lender-contacts";
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
@@ -93,6 +94,12 @@ export default function EditLenderOverlayPage() {
       ) : (
         <OverlayEditor view={data} lenderId={id} />
       )}
+      {/* LP-813 — the people, beside the rules. Both are lender configuration an admin sets up
+          once, and putting contacts on a separate screen would mean adding an underwriter took a
+          different route from everything else about this lender.
+          ON THE PAGE, NOT INSIDE `OverlayEditor`: contacts are not part of the overlay, and putting
+          them there also put a second data-fetching component inside the unit those tests render. */}
+      <LenderContacts lenderId={id} />
     </div>
   );
 }

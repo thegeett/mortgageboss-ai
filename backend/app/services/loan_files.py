@@ -247,9 +247,21 @@ async def update_loan_file(
     so omitted fields are untouched while an explicit ``null`` clears a field.
     Identifiers and ownership are never in :class:`LoanFileUpdate`, so they can't
     be changed here. Uses ``flush``; the caller commits.
+
+    THE UNDERWRITER IS CLEARED WHEN THE LENDER MOVES (LP-813). `underwriter_contact_id` names a
+    person at the file's lender, and this function's whole shape is "setattr whatever you were
+    given" — so a PATCH that changes `lender_id` would otherwise leave the file naming an
+    underwriter at a lender it is no longer going to, with nothing on the screen saying so. Handled
+    here rather than in the endpoint because every caller of this function has the same problem.
     """
+    previous_lender_id = loan_file.lender_id
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(loan_file, field, value)
+    from app.services.lender_contacts import clear_underwriter_if_lender_changed
+
+    await clear_underwriter_if_lender_changed(
+        db, loan_file=loan_file, previous_lender_id=previous_lender_id
+    )
     await db.flush()
     return loan_file
 

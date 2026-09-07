@@ -2,6 +2,7 @@
 
 import { LoanEditor } from "@/components/file/overview/loan-editor";
 import { PropertyEditor } from "@/components/file/overview/property-editor";
+import { UnderwriterPicker } from "@/components/file/overview/underwriter-picker";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -269,7 +270,14 @@ export function LoanCard({
       ) : isError || !file ? (
         <CardError message="Couldn't load loan details." onRetry={onRetry} />
       ) : editing ? (
-        <LoanEditor file={file} />
+        <>
+          <LoanEditor file={file} />
+          {/* OUTSIDE THE EDITOR, IN BOTH MODES. The underwriter saves through its own endpoint,
+              which has its own refusals — folded into the editor's save, a refused assignment
+              would fail the whole edit and tell the processor their loan amount could not be
+              saved. It is shown while editing because that is when somebody is looking to set it. */}
+          <UnderwriterPicker file={file} />
+        </>
       ) : (
         <div>
           <Row label="Status" value={<StatusBadge status={file.status} />} />
@@ -293,6 +301,7 @@ export function LoanCard({
           />
           <Row label="Loan officer" value={file.loan_officer_name || "—"} />
           <Row label="LO email" value={file.loan_officer_email || "—"} />
+          <UnderwriterPicker file={file} />
         </div>
       )}
     </OverviewCard>

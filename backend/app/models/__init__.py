@@ -62,6 +62,7 @@ from app.models.inbound_attachment import (
 )
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.lender import Lender, LoanProgram
+from app.models.lender_contact import LenderContact, LenderContactRole
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.ltv_override import LtvOverride
@@ -151,6 +152,8 @@ __all__ = [
     "InboundMessage",
     "InboundRoutingState",
     "Lender",
+    "LenderContact",
+    "LenderContactRole",
     "LoanFile",
     "LoanFileParticipant",
     "LoanFileStatus",
