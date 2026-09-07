@@ -11,6 +11,7 @@ from app.api.activity import router as activity_router
 from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
 from app.api.calculators import router as calculators_router
+from app.api.communications import router as communications_router
 from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
 from app.api.documents import nested_router as documents_nested_router
@@ -134,6 +135,7 @@ app.include_router(saved_views_router, prefix=API_V1_PREFIX)
 app.include_router(borrowers_router, prefix=API_V1_PREFIX)
 app.include_router(property_router, prefix=API_V1_PREFIX)
 app.include_router(lenders_router, prefix=API_V1_PREFIX)
+app.include_router(communications_router, prefix=API_V1_PREFIX)
 app.include_router(needs_router, prefix=API_V1_PREFIX)
 app.include_router(activity_router, prefix=API_V1_PREFIX)
 app.include_router(documents_nested_router, prefix=API_V1_PREFIX)

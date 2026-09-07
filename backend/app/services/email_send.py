@@ -1,0 +1,240 @@
+"""Marking a draft as sent, and everything that has to be true at that moment (LP-811a).
+
+WHAT "SEND" MEANS IN M1. Nothing transmits. The plan's send path is *copy and send* — the processor
+puts the text into their own mail client — plus an "open in mail client" link. LP-816 is the ticket
+that transmits as her, through a connected mailbox. So this module's job is to record that a draft
+went out, produce the artefacts the message needs to carry, and start the clocks.
+
+THE CLOCK IS THE POINT. `request_needs_item` has existed since LP-19 at `services/needs_items.py`
+with **zero callers**, so `requested_at` is NULL on every needs item that has ever existed. LP-814's
+reminders are a Celery beat over that column; until something writes it, every reminder rule is a
+query over an empty set that cannot fail and cannot fire. This is the ticket that writes it.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import timedelta
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.activity_log import ActivityType
+from app.models.base import utcnow
+from app.models.communication import (
+    Communication,
+    CommunicationDirection,
+    CommunicationStatus,
+)
+from app.models.loan_file import LoanFile
+from app.services.activity_log import log_activity
+from app.services.email_draft import _needs_in_draft, get_open_draft
+from app.services.needs_items import request_needs_item
+
+#: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
+#: `mailto:` does not fail — it opens a compose window containing HALF AN EMAIL, which a processor may
+#: not notice before sending. The link is offered below this length and refused above it; copy-to-
+#: clipboard has no such limit and is always available.
+#:
+#: Conservative on purpose: the real limits differ per client (and per browser, and per OS handler),
+#: so the threshold is set below the lowest one anybody documents rather than at it.
+MAILTO_MAX_CHARS = 1800
+
+#: One send per address per five minutes, and three per day. HEADER-INDEPENDENT, which is the whole
+#: point: `Auto-Submitted` and friends ask a well-behaved correspondent not to reply, and a loop
+#: forms with one that is not. A count over what we have actually recorded cannot be talked out of.
+RATE_LIMIT_WINDOW = timedelta(minutes=5)
+RATE_LIMIT_PER_DAY = 3
+
+#: Headers that tell an autoresponder not to answer. Set on anything AUTOMATED — LP-815's nudge and
+#: LP-819's bounce handling are the consumers; a human-approved send is not automated and carries
+#: none of them.
+#:
+#: NOTHING IN THIS TICKET TRANSMITS, so nothing reads these yet, and that is a deliberate exception to
+#: a rule this codebase otherwise holds to (no API with no reader). The plan places them in LP-811 and
+#: the alternative is that no ticket owns them at all — a suppression header omitted from an
+#: auto-reply is how a mail loop starts, and the loop is with a borrower's mailbox.
+AUTO_REPLY_SUPPRESSION_HEADERS: dict[str, str] = {
+    "Auto-Submitted": "auto-generated",
+    "X-Auto-Response-Suppress": "All",
+    "Precedence": "bulk",
+}
+
+_FOOTER_TAG = re.compile(r"\[(LF-[A-Za-z0-9]+)\]")
+
+
+class CannotSendError(Exception):
+    """The draft cannot be sent. Always tells the caller which rule stopped it."""
+
+
+@dataclass(frozen=True)
+class OutboundMessage:
+    """Everything the processor's mail client needs, assembled once so it cannot disagree with itself."""
+
+    subject: str
+    body: str
+    reply_to: str
+    #: Offered, not applied — the processor chooses. Bccing the file address is how the sent copy is
+    #: captured when the message goes out through their own client rather than ours.
+    suggested_bcc: str
+    #: False when the body is too long for a `mailto:` link to survive intact.
+    mailto_available: bool
+
+
+def footer_tag(loan_file: LoanFile) -> str:
+    """The routing tag a reply carries back, as it appears at the foot of the message.
+
+    `display_id`, NOT `inbox_token`. ADR-048 draws the line this depends on: the display id is an
+    IDENTIFIER whose predictability is low-risk, and the token is a CAPABILITY whose possession lets
+    anyone post documents into the file. A footer is quoted into every reply, forwarded, and pasted
+    into other threads — putting the capability there would hand it to everyone the borrower ever
+    forwards the message to, which is precisely what ADR-397 narrowed rather than widened.
+
+    The tag is a FALLBACK. `Reply-To` is what routes a well-behaved reply; this is what LP-805 can
+    still match on when a client strips or rewrites the header, which several do.
+    """
+    return f"[{loan_file.display_id}]"
+
+
+def loan_reference_in(text: str) -> str | None:
+    """The display id a footer tag carries, or None — LP-805's fallback match."""
+    found = _FOOTER_TAG.search(text)
+    return found.group(1) if found else None
+
+
+def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundMessage:
+    """Assemble the message a processor will send, footer tag included."""
+    address = loan_file.get_inbox_address()
+    tagged = f"{body.rstrip()}\n\n{footer_tag(loan_file)}"
+    return OutboundMessage(
+        subject=subject,
+        body=tagged,
+        reply_to=address,
+        suggested_bcc=address,
+        mailto_available=len(tagged) + len(subject) <= MAILTO_MAX_CHARS,
+    )
+
+
+async def _recent_sends(db: AsyncSession, *, recipient: str, since_hours: int) -> int:
+    return int(
+        await db.scalar(
+            select(func.count())
+            .select_from(Communication)
+            .where(
+                Communication.recipient == recipient,
+                Communication.status == CommunicationStatus.SENT,
+                Communication.direction == CommunicationDirection.OUTBOUND,
+                Communication.sent_at >= utcnow() - timedelta(hours=since_hours),
+            )
+        )
+        or 0
+    )
+
+
+async def _refuse_if_rate_limited(db: AsyncSession, *, recipient: str) -> None:
+    """One per address per five minutes, three per day. Counted across the whole system.
+
+    ACROSS FILES, NOT WITHIN ONE, and that is the direction that matters. A borrower with two loan
+    files in progress is one mailbox; limiting per file would let them be mailed twice in a minute
+    while every individual limit read as respected.
+    """
+    last = await db.scalar(
+        select(func.max(Communication.sent_at)).where(
+            Communication.recipient == recipient,
+            Communication.status == CommunicationStatus.SENT,
+        )
+    )
+    if last is not None and utcnow() - last < RATE_LIMIT_WINDOW:
+        raise CannotSendError(
+            f"{recipient} was emailed less than {int(RATE_LIMIT_WINDOW.total_seconds() // 60)} "
+            "minutes ago; wait before sending again"
+        )
+    if await _recent_sends(db, recipient=recipient, since_hours=24) >= RATE_LIMIT_PER_DAY:
+        raise CannotSendError(
+            f"{recipient} has already been emailed {RATE_LIMIT_PER_DAY} times today"
+        )
+
+
+async def send_draft(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    draft_id: UUID,
+    recipient: str,
+    body: str,
+    approver_user_id: UUID,
+) -> Communication:
+    """Record that ``draft_id`` was sent, and start the clock on everything it asked for.
+
+    ``body`` is what the processor is actually sending — their edit of the draft, not the draft as
+    composed. It replaces the stored body, because the record of an outbound message must be what
+    went out; LP-821 builds the full three-way evidence record (composed / edited / as sent) and is
+    where the composed version gets its own field.
+
+    NO BULK SEND, by construction: this takes one ``draft_id``. The plan says so and the reason is
+    the rate limit above — a bulk path would either bypass it or fail halfway through a list with no
+    way to say which half went.
+    """
+    draft = await db.get(Communication, draft_id)
+    if draft is None or draft.loan_file_id != loan_file.id or draft.deleted_at is not None:
+        raise CannotSendError("no such draft on this loan file")
+    if draft.status is not CommunicationStatus.DRAFT:
+        raise CannotSendError(f"this message is already {draft.status.value}")
+    if not (body or "").strip():
+        raise CannotSendError("an empty message cannot be sent")
+    await _refuse_if_rate_limited(db, recipient=recipient)
+
+    needs = await _needs_in_draft(db, draft=draft)
+    outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)
+
+    draft.body = outbound.body
+    draft.recipient = recipient
+    draft.status = CommunicationStatus.SENT
+    draft.sent_at = utcnow()
+
+    # THE CLOCK. Every need this message asked for moves to REQUESTED and gets `requested_at`, which
+    # is what LP-814's reminders read. Before this line, that column was NULL on every row that has
+    # ever existed, so every reminder rule was a query over an empty set — green, silent, and unable
+    # to fire.
+    for need in needs:
+        await request_needs_item(db, needs_item=need)
+
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.COMMUNICATION_SENT,
+        summary=f"Sent a document request for {len(needs)} item(s)",
+        actor_user_id=approver_user_id,
+        # Metadata only — never the subject, the body, or the recipient's address.
+        detail={
+            "communication_id": str(draft.id),
+            "needs_item_ids": [str(need.id) for need in needs],
+            "template_key": draft.template_key,
+            "template_version": draft.template_version,
+        },
+    )
+    await db.flush()
+    return draft
+
+
+async def open_draft_preview(db: AsyncSession, *, loan_file: LoanFile) -> OutboundMessage | None:
+    """What the file's open draft would look like as a message, or None if there is no draft."""
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    if draft is None:
+        return None
+    return build_outbound(loan_file, subject=draft.subject or "", body=draft.body or "")
+
+
+__all__ = [
+    "AUTO_REPLY_SUPPRESSION_HEADERS",
+    "MAILTO_MAX_CHARS",
+    "CannotSendError",
+    "OutboundMessage",
+    "build_outbound",
+    "footer_tag",
+    "loan_reference_in",
+    "open_draft_preview",
+    "send_draft",
+]
