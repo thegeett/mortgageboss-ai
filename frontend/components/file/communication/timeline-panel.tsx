@@ -175,6 +175,15 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
           ))}
         </ul>
       )}
+      {data?.truncated ? (
+        // NOT A SILENT CAP. There is no pagination yet, so the entries dropped are the OLDEST —
+        // a page that looks complete and is not. A processor hunting the message that started a
+        // thread would otherwise find a whole-looking timeline without it and conclude it never
+        // arrived.
+        <p className="border-t border-border pt-2 text-xs text-muted-foreground">
+          Older entries are not shown — this file has more history than fits on one page.
+        </p>
+      ) : null}
     </section>
   );
 }

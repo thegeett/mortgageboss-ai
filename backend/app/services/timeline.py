@@ -203,8 +203,14 @@ async def build_timeline(
     loan_file: LoanFile,
     wanted: TimelineFilter = TimelineFilter.ALL,
     limit: int = 200,
-) -> list[TimelineEntry]:
+) -> tuple[list[TimelineEntry], bool]:
     """This file's messages and activity, newest first, with each event appearing once.
+
+    Returns the entries AND whether the cap bit. A truncated timeline that does not say so is the
+    wrong failure: it reads as a complete history, and the entries it drops are the OLDEST — so a
+    processor looking for the message that started a thread finds a page that looks whole and does
+    not contain it. Until this is paginated, the screen at least has to be able to say that there
+    is more.
 
     THE FILTER IS APPLIED AFTER THE MERGE, not inside each query. Two filtered queries would each
     have to know which rows the other was responsible for, and the pill definitions would then live
@@ -287,7 +293,8 @@ async def build_timeline(
     ]
 
     entries.sort(key=lambda entry: entry.at, reverse=True)
-    return [entry for entry in entries if _matches(entry, wanted)][:limit]
+    matched = [entry for entry in entries if _matches(entry, wanted)]
+    return matched[:limit], len(matched) > limit
 
 
 __all__ = [

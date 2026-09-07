@@ -36,6 +36,35 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+#: The backfill, as a module constant so a test can RUN it rather than read it. A one-shot UPDATE is
+#: the least reviewable thing in a migration: it executes once, against data nobody has, and is
+#: unfalsifiable afterwards. `tests/test_readonly_query.py` already reaches into migrations for view
+#: DDL for the same reason.
+#:
+#: SOFT DELETES ARE EXCLUDED ON BOTH SIDES, and the two halves have to agree. Without it the join
+#: linked a Communication to a soft-deleted `inbound_message` — measured — while the ambiguity count
+#: still counted deleted rows, so a deleted duplicate suppressed a link that was actually
+#: unambiguous. One half too permissive, the other too strict, from the same omission.
+_BACKFILL = """
+    UPDATE communications AS c
+    SET inbound_message_id = m.id
+    FROM inbound_messages AS m
+    WHERE c.direction = 'inbound'
+      AND c.inbound_message_id IS NULL
+      AND c.external_message_id IS NOT NULL
+      AND c.deleted_at IS NULL
+      AND m.deleted_at IS NULL
+      AND m.message_id = c.external_message_id
+      AND m.loan_file_id = c.loan_file_id
+      AND (
+        SELECT count(*) FROM inbound_messages AS d
+        WHERE d.message_id = c.external_message_id
+          AND d.loan_file_id = c.loan_file_id
+          AND d.deleted_at IS NULL
+      ) = 1
+    """
+
+
 def upgrade() -> None:
     op.add_column(
         "communications",
@@ -55,22 +84,7 @@ def upgrade() -> None:
     # `inbound_messages.message_id`, so the link is recoverable — but `message_id` is not unique, so
     # a match that finds more than one row is left NULL rather than guessed. A timeline row with no
     # manifest is a gap somebody can see; one attached to another borrower's documents is not.
-    op.execute(
-        """
-        UPDATE communications AS c
-        SET inbound_message_id = m.id
-        FROM inbound_messages AS m
-        WHERE c.direction = 'inbound'
-          AND c.inbound_message_id IS NULL
-          AND c.external_message_id IS NOT NULL
-          AND m.message_id = c.external_message_id
-          AND m.loan_file_id = c.loan_file_id
-          AND (
-            SELECT count(*) FROM inbound_messages AS d
-            WHERE d.message_id = c.external_message_id AND d.loan_file_id = c.loan_file_id
-          ) = 1
-        """
-    )
+    op.execute(_BACKFILL)
 
     # The view is rebuilt to carry it. COPIED FROM LP-809's UPGRADE body, which is the shape the
     # database has — LP-806 lost three columns to copying a downgrade block, and the drift guard is

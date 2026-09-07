@@ -26,6 +26,15 @@ export interface TimelineEntry {
 export interface Timeline {
   entries: TimelineEntry[];
   /**
+   * True when the file's history is longer than this response.
+   *
+   * There is no pagination yet, so the cap drops the OLDEST entries — a page that looks complete
+   * and is not. A processor hunting the message that started a thread would find a whole-looking
+   * timeline without it. Render this as "older entries not shown" rather than letting the absence
+   * imply there are none.
+   */
+  truncated: boolean;
+  /**
    * The file's inbox address, for telling a borrower where to send documents.
    *
    * A BEARER CAPABILITY (ADR-397), not a label: anyone holding it can post documents into this file.

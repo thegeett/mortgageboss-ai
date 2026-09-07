@@ -164,3 +164,24 @@ describe("the inbox address", () => {
     expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
   });
 });
+
+describe("a truncated timeline", () => {
+  it("says older entries are not shown", () => {
+    // There is no pagination yet, so the cap drops the OLDEST entries. A page that looks complete
+    // and is not is the wrong failure: a processor hunting the message that started a thread finds
+    // a whole-looking timeline without it.
+    loaded([MESSAGE], { truncated: true });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.getByText(/older entries are not shown/i)).toBeTruthy();
+  });
+
+  it("says nothing when the whole history fits — the control", () => {
+    // Without this, a panel that always showed the notice would pass the test above while telling
+    // every processor their timeline is incomplete.
+    loaded([MESSAGE], { truncated: false });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.queryByText(/older entries are not shown/i)).toBeNull();
+  });
+});

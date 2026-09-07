@@ -66,6 +66,11 @@ class TimelinePublic(BaseModel):
 
     entries: list[TimelineEntryPublic]
     inbox_address: str
+    #: True when the history is longer than this response. There is no pagination yet (escalated in
+    #: LP-812), so the alternative was dropping the oldest entries in silence — a page that looks
+    #: complete and is not. A caller that ignores this is no worse off than before; one that reads
+    #: it can say "older entries not shown" rather than implying there are none.
+    truncated: bool
 
 
 @router.get("", response_model=TimelinePublic)
@@ -81,8 +86,9 @@ async def read(
     `services/timeline`, and defining them again on the client is how a "sent" pill starts showing
     drafts — two definitions of one word that nothing forces to agree.
     """
-    entries = await build_timeline(db, loan_file=loan_file, wanted=filter)
+    entries, truncated = await build_timeline(db, loan_file=loan_file, wanted=filter)
     return TimelinePublic(
         entries=[TimelineEntryPublic.of(entry) for entry in entries],
         inbox_address=loan_file.get_inbox_address(),
+        truncated=truncated,
     )

@@ -19,12 +19,13 @@ from uuid import uuid4
 
 from app.models import Company, LoanProgram
 from app.models.activity_log import ActivityType
+from app.models.base import utcnow
 from app.models.communication import (
     Communication,
     CommunicationDirection,
     CommunicationStatus,
 )
-from app.models.inbound_message import InboundMessage
+from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.services.activity_log import log_activity
 from app.services.inbound_ingest import process_raw_message
 from app.services.timeline import (
@@ -33,7 +34,7 @@ from app.services.timeline import (
     TimelineKind,
     build_timeline,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
@@ -114,7 +115,7 @@ async def test_one_real_arrival_is_one_timeline_row(db_session: AsyncSession) ->
         .all()
     )
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     assert len(timeline) == 1
     assert timeline[0].kind is TimelineKind.MESSAGE
@@ -133,7 +134,7 @@ async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSess
         store_raw=True,
     )
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     assert timeline[0].attachments == ("March_statement.pdf",)
 
@@ -149,7 +150,7 @@ async def test_a_non_message_activity_still_appears(db_session: AsyncSession) ->
         summary="A document was uploaded",
     )
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     assert [entry.kind for entry in timeline] == [TimelineKind.ACTIVITY]
     assert timeline[0].summary == "A document was uploaded"
@@ -188,7 +189,7 @@ async def test_a_bounce_does_not_appear_twice(db_session: AsyncSession) -> None:
         summary="A message bounced",
     )
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     assert len(timeline) == 1
     assert timeline[0].summary == "A message could not be delivered"
@@ -234,7 +235,7 @@ async def test_a_sent_message_sits_at_when_it_was_sent(db_session: AsyncSession)
     activity_row.created_at = utcnow() - timedelta(days=1)
     await db_session.flush()
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     # Newest first, and the message is newest because it was SENT today despite being composed
     # three days ago.
@@ -273,7 +274,7 @@ async def test_all_shows_everything(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_and_file(db_session, slug="pill-all")
     await _mixed(db_session, loan_file)
 
-    assert len(await build_timeline(db_session, loan_file=loan_file)) == 5
+    assert len((await build_timeline(db_session, loan_file=loan_file))[0]) == 5
 
 
 async def test_sent_excludes_drafts(db_session: AsyncSession) -> None:
@@ -282,7 +283,9 @@ async def test_sent_excludes_drafts(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_and_file(db_session, slug="pill-sent")
     await _mixed(db_session, loan_file)
 
-    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.SENT)
+    entries, _truncated = await build_timeline(
+        db_session, loan_file=loan_file, wanted=TimelineFilter.SENT
+    )
 
     assert [entry.status for entry in entries] == [CommunicationStatus.SENT.value]
 
@@ -293,7 +296,9 @@ async def test_drafts_includes_a_queued_auto_reply(db_session: AsyncSession) -> 
     _company, loan_file = await _company_and_file(db_session, slug="pill-drafts")
     await _mixed(db_session, loan_file)
 
-    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.DRAFTS)
+    entries, _truncated = await build_timeline(
+        db_session, loan_file=loan_file, wanted=TimelineFilter.DRAFTS
+    )
 
     assert {entry.status for entry in entries} == {
         CommunicationStatus.DRAFT.value,
@@ -305,7 +310,9 @@ async def test_received_is_inbound_only(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_and_file(db_session, slug="pill-recv")
     await _mixed(db_session, loan_file)
 
-    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.RECEIVED)
+    entries, _truncated = await build_timeline(
+        db_session, loan_file=loan_file, wanted=TimelineFilter.RECEIVED
+    )
 
     assert [entry.direction for entry in entries] == [CommunicationDirection.INBOUND.value]
 
@@ -314,7 +321,9 @@ async def test_activity_excludes_every_message(db_session: AsyncSession) -> None
     _company, loan_file = await _company_and_file(db_session, slug="pill-act")
     await _mixed(db_session, loan_file)
 
-    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.ACTIVITY)
+    entries, _truncated = await build_timeline(
+        db_session, loan_file=loan_file, wanted=TimelineFilter.ACTIVITY
+    )
 
     assert [entry.kind for entry in entries] == [TimelineKind.ACTIVITY]
 
@@ -333,8 +342,8 @@ async def test_a_sibling_files_history_does_not_leak_in(db_session: AsyncSession
     )
     await _mixed(db_session, theirs)
 
-    assert await build_timeline(db_session, loan_file=mine) == []
-    assert len(await build_timeline(db_session, loan_file=theirs)) == 5
+    assert (await build_timeline(db_session, loan_file=mine))[0] == []
+    assert len((await build_timeline(db_session, loan_file=theirs))[0]) == 5
 
 
 async def test_the_timeline_never_carries_a_body(db_session: AsyncSession) -> None:
@@ -357,10 +366,181 @@ async def test_the_timeline_never_carries_a_body(db_session: AsyncSession) -> No
     )
     await db_session.flush()
 
-    timeline = await build_timeline(db_session, loan_file=loan_file)
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     rendered = repr(timeline[0])
     assert "4821" not in rendered
     assert "Dear Jane" not in rendered
     # The SUBJECT does travel — it is what a processor recognises a message by.
     assert timeline[0].subject == "Your documents"
+
+
+# --------------------------------------------------------------------------------------------- #
+# The backfill, RUN rather than read (review finding)
+# --------------------------------------------------------------------------------------------- #
+def _backfill_sql() -> str:
+    """The migration's one-shot UPDATE, imported so a test can execute it.
+
+    A backfill is the least reviewable thing in a migration: it runs once, against data nobody has,
+    and is unfalsifiable afterwards. `test_readonly_query.py` reaches into migrations for view DDL
+    for the same reason.
+    """
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    root = Path(__file__).resolve().parents[1].parent / "alembic" / "versions"
+    # A migration revision id, not a secret — detect-secrets sees the entropy, not the meaning.
+    (path,) = [p for p in root.glob("*.py") if "c5f9a3b71d80" in p.name]  # pragma: allowlist secret
+    spec = spec_from_file_location("_mig_c5f9a3b71d80", path)
+    assert spec and spec.loader
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module._BACKFILL)
+
+
+async def _inbound_pair(
+    db: AsyncSession, *, loan_file, message_id: str, deleted: bool = False
+) -> InboundMessage:
+    message = InboundMessage(
+        company_id=loan_file.company_id,
+        loan_file_id=loan_file.id,
+        ingest_key=f"k-{uuid4().hex}",
+        routing_state=InboundRoutingState.ROUTED,
+        message_id=message_id,
+        raw_storage_path="s3://bucket/key",
+        auth_verdicts={},
+        deleted_at=utcnow() if deleted else None,
+    )
+    db.add(message)
+    await db.flush()
+    return message
+
+
+async def test_the_backfill_does_not_link_to_a_soft_deleted_message(
+    db_session: AsyncSession,
+) -> None:
+    """Measured before the fix: it did.
+
+    Neither side of the join excluded soft deletes, so a Communication was linked to an
+    `inbound_message` somebody had deleted — and the timeline row then pointed at a manifest for a
+    message that is gone.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"bf-{uuid4().hex[:6]}")
+    gone = await _inbound_pair(
+        db_session, loan_file=loan_file, message_id="<only@example.com>", deleted=True
+    )
+    comm = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.INBOUND,
+        status=CommunicationStatus.RECEIVED,
+        external_message_id="<only@example.com>",
+    )
+    db_session.add(comm)
+    await db_session.flush()
+
+    await db_session.execute(text(_backfill_sql()))
+    await db_session.refresh(comm)
+
+    assert gone.deleted_at is not None  # the fixture is armed
+    assert comm.inbound_message_id is None
+
+
+async def test_the_backfill_links_a_live_unambiguous_message(db_session: AsyncSession) -> None:
+    """The control. Excluding deleted rows on both sides must not stop the backfill working —
+    a query that links nothing satisfies the test above and leaves every timeline row without its
+    manifest."""
+    _company, loan_file = await _company_and_file(db_session, slug=f"bf-{uuid4().hex[:6]}")
+    live = await _inbound_pair(db_session, loan_file=loan_file, message_id="<live@example.com>")
+    comm = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.INBOUND,
+        status=CommunicationStatus.RECEIVED,
+        external_message_id="<live@example.com>",
+    )
+    db_session.add(comm)
+    await db_session.flush()
+
+    await db_session.execute(text(_backfill_sql()))
+    await db_session.refresh(comm)
+
+    assert comm.inbound_message_id == live.id
+
+
+async def test_a_deleted_duplicate_no_longer_suppresses_a_good_link(
+    db_session: AsyncSession,
+) -> None:
+    """The other half of the same omission, in the opposite direction.
+
+    The ambiguity guard counted soft-deleted rows too, so a deleted duplicate made a genuinely
+    unambiguous link look ambiguous and left it NULL. One half of the query was too permissive and
+    the other too strict, from one missing predicate.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"bf-{uuid4().hex[:6]}")
+    await _inbound_pair(
+        db_session, loan_file=loan_file, message_id="<dup@example.com>", deleted=True
+    )
+    live = await _inbound_pair(db_session, loan_file=loan_file, message_id="<dup@example.com>")
+    comm = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.INBOUND,
+        status=CommunicationStatus.RECEIVED,
+        external_message_id="<dup@example.com>",
+    )
+    db_session.add(comm)
+    await db_session.flush()
+
+    await db_session.execute(text(_backfill_sql()))
+    await db_session.refresh(comm)
+
+    assert comm.inbound_message_id == live.id
+
+
+async def test_two_live_duplicates_are_still_left_unlinked(db_session: AsyncSession) -> None:
+    """The guard the builder called unreachable, kept and proven to fire.
+
+    It IS reachable: `message_id` is sender-written and not unique, and since LP-807 keyed dedup on
+    the SES id, two deliveries of one thread can carry the same header and route to the same file.
+    A timeline row with no manifest is a gap somebody can see; one attached to another message's
+    documents is not.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"bf-{uuid4().hex[:6]}")
+    await _inbound_pair(db_session, loan_file=loan_file, message_id="<two@example.com>")
+    await _inbound_pair(db_session, loan_file=loan_file, message_id="<two@example.com>")
+    comm = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.INBOUND,
+        status=CommunicationStatus.RECEIVED,
+        external_message_id="<two@example.com>",
+    )
+    db_session.add(comm)
+    await db_session.flush()
+
+    await db_session.execute(text(_backfill_sql()))
+    await db_session.refresh(comm)
+
+    assert comm.inbound_message_id is None
+
+
+async def test_a_truncated_timeline_says_so(db_session: AsyncSession) -> None:
+    """There is no pagination yet, so the cap drops the OLDEST entries.
+
+    A page that looks whole and is not is the wrong failure: a processor hunting the message that
+    started a thread finds a complete-looking timeline that does not contain it. Until this is
+    paginated the response at least has to be able to say there is more.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"trunc-{uuid4().hex[:6]}")
+    for index in range(4):
+        await log_activity(
+            db_session,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.DOCUMENT_UPLOADED,
+            summary=f"entry {index}",
+        )
+    await db_session.flush()
+
+    full, truncated = await build_timeline(db_session, loan_file=loan_file)
+    assert len(full) == 4
+    assert truncated is False  # the control: an uncapped timeline must not claim truncation
+
+    capped, truncated = await build_timeline(db_session, loan_file=loan_file, limit=2)
+    assert len(capped) == 2
+    assert truncated is True
