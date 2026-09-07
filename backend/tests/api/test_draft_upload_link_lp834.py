@@ -239,3 +239,100 @@ async def test_another_companys_draft_is_a_404(client: AsyncClient, db: AsyncSes
     )
 
     assert resp.status_code == 404
+
+
+async def test_attaching_does_not_revoke_a_link_minted_for_somebody_else(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-834 REVIEW — THE REVOKE WAS SCOPED TO THE FILE AND THE REASON IS SCOPED TO THE DRAFT.
+
+    `attach_upload_link` revoked every usable link on the file, on the stated invariant that one live
+    link per file "is the point rather than a tidiness rule". LP-815 does not agree and shipped
+    first: `GET /upload-links` is documented as "every link minted for this file — a processor needs
+    to see what is live before minting more", the panel lists them with a Revoke button each, and
+    minting takes `recipient_email`, `purpose`, `ttl_hours` and `max_uses`. Links are per-recipient
+    and per-purpose there.
+
+    Measured before the fix: a link minted from the panel for `cosigner@example.com`, purpose
+    "Co-borrower's pay stubs", stopped working the moment somebody clicked Add secure link on the
+    BORROWER's draft. A different person's credential, killed with nothing on any screen saying so —
+    and the button's own warning says "any link already sent to THIS BORROWER stops working", a
+    narrower claim than the code was making.
+
+    The control is the second half, and it is the property the ticket actually needs: this draft's
+    own previous link must still die, or "replaces, never appends" stops being true.
+    """
+    from app.services.upload_links import mint_upload_link
+
+    loan_file, draft, token = await _file_with_draft(db)
+    other = await mint_upload_link(
+        db,
+        loan_file=loan_file,
+        recipient_email="cosigner@example.com",
+        purpose="Co-borrower's pay stubs",
+    )
+    await db.commit()
+    assert other.link.is_usable(), (
+        "the fixture must start with a live link, or this asserts nothing"
+    )
+
+    first = await _attach(client, loan_file, draft, token)
+
+    await db.refresh(other.link)
+    assert other.link.is_usable(), (
+        "a link minted from the panel for another recipient was revoked by a draft it has nothing "
+        "to do with"
+    )
+
+    # THE CONTROL: attaching again must still kill THIS draft's previous link, or the fix has
+    # replaced an over-wide revoke with none at all.
+    import re
+
+    def _url_in(payload: dict) -> str:
+        found = re.search(r"https?://\S+/upload/\S+", payload["body"])
+        assert found is not None, "the draft body carries no link"
+        return found.group(0)
+
+    second = await _attach(client, loan_file, draft, token)
+    assert _url_in(second) != _url_in(first)
+
+    spent = await client.get(f"/api/v1/upload/{_token_from(_url_in(first))}")
+    assert spent.status_code == 404, "the draft's own previous link is still live"
+    await db.refresh(other.link)
+    assert other.link.is_usable(), "the second attach revoked somebody else's link"
+
+
+async def test_a_url_naming_another_files_link_revokes_nothing(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The lookup is scoped to the file as well as the token hash, and that is not decoration.
+
+    Found by a surviving mutant: dropping `UploadLink.loan_file_id == loan_file.id` left every test
+    green. `draft.upload_link_url` is TEXT IN A COLUMN — the token hash is 256 bits so a collision
+    is not the risk, but a value that got there by any route other than this function's own mint is,
+    and revoking on the hash alone would be a write into another company's row from a draft that
+    does not own it.
+
+    Constructed rather than hoped for: the other file's URL is put into the column deliberately,
+    because a test that never plants one asserts nothing about the scoping. The control is that the
+    attach still succeeds and still mints — a lookup that refused everything would pass the first
+    assertion and break the feature.
+    """
+    from app.services.upload_links import mint_upload_link
+
+    loan_file, draft, token = await _file_with_draft(db)
+    other_file, _other_draft, _other_token = await _file_with_draft(db)
+    theirs = await mint_upload_link(db, loan_file=other_file, purpose="Their documents")
+    assert theirs.link.is_usable()
+
+    # The other file's URL, in THIS draft's column. Nothing writes this today; the guard is what
+    # keeps it that way.
+    draft.upload_link_url = theirs.url
+    await db.commit()
+
+    body = (await _attach(client, loan_file, draft, token))["body"]
+
+    await db.refresh(theirs.link)
+    assert theirs.link.is_usable(), "another file's link was revoked through a draft on this one"
+    # THE CONTROL: this draft still got a link of its own.
+    assert "/upload/" in body

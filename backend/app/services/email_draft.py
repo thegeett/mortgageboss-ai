@@ -55,8 +55,9 @@ from app.models.email_draft_prose import EmailDraftProse
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
+from app.models.upload_link import UploadLink, hash_token
 from app.models.user import User
-from app.services.upload_links import list_links, mint_upload_link, revoke_link
+from app.services.upload_links import mint_upload_link, revoke_link
 from app.verification.rule_engine.reasons import document_label
 
 logger = get_logger(__name__)
@@ -584,6 +585,31 @@ async def add_needs_to_draft(
     )
 
 
+async def _revoke_link_in_url(db: AsyncSession, *, loan_file: LoanFile, url: str) -> None:
+    """Revoke the link a stored URL names, if it is still live and still this file's.
+
+    The URL's last segment is the plaintext token and `upload_links` stores its SHA-256, so the row
+    is findable by the same hash the redemption path matches on. Scoped to the file as well: a URL
+    is text in a column, and a row is only this draft's to revoke if it belongs to this draft's file.
+    """
+    token = url.rstrip("/").rsplit("/", 1)[-1]
+    if not token:
+        return
+    previous = (
+        await db.execute(
+            only_active(
+                select(UploadLink).where(
+                    UploadLink.token_hash == hash_token(token),
+                    UploadLink.loan_file_id == loan_file.id,
+                ),
+                UploadLink,
+            )
+        )
+    ).scalar_one_or_none()
+    if previous is not None and previous.is_usable():
+        await revoke_link(db, link=previous)
+
+
 async def attach_upload_link(
     db: AsyncSession, *, loan_file: LoanFile, draft: Communication
 ) -> Communication:
@@ -607,9 +633,27 @@ async def attach_upload_link(
     is for whoever the draft is addressed to, which the processor may not have typed yet, and a link
     is not addressed in any way the redemption path checks.
     """
-    for live in await list_links(db, loan_file=loan_file):
-        if live.is_usable():
-            await revoke_link(db, link=live)
+    # LP-834 REVIEW — THIS DRAFT'S PREVIOUS LINK, NOT EVERY LINK ON THE FILE.
+    #
+    # It revoked every usable link, on the reasoning that one live link per file is the invariant.
+    # LP-815 does not agree and shipped first: `GET /upload-links` is documented as "every link
+    # minted for this file — a processor needs to see what is live before minting more", the panel
+    # lists them with a Revoke button each, and `mint` takes `recipient_email`, `purpose`,
+    # `ttl_hours` and `max_uses`. Links are per-recipient and per-purpose there.
+    #
+    # Measured: a link minted from the panel for `cosigner@example.com`, purpose "Co-borrower's pay
+    # stubs", was revoked by clicking Add secure link on the borrower's draft. A different person's
+    # link, killed with nothing on any screen saying so — and the warning on the button says "any
+    # link already sent to THIS BORROWER stops working", which is a narrower claim than the code was
+    # making.
+    #
+    # What this function is actually for is its own second paragraph: adding a link twice must
+    # REPLACE rather than append, so a draft never advertises two links or a dead one. That needs one
+    # revocation — the link this draft is holding — and the row is findable because the URL ends in
+    # the plaintext token and the table stores its hash. Anything else on the file is somebody else's
+    # decision, and `upload-link-panel.tsx` is where it is made.
+    if draft.upload_link_url:
+        await _revoke_link_in_url(db, loan_file=loan_file, url=draft.upload_link_url)
 
     minted = await mint_upload_link(db, loan_file=loan_file)
     draft.upload_link_url = minted.url
