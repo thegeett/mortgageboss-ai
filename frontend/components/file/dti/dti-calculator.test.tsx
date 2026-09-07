@@ -556,6 +556,29 @@ describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
 
   /** And the caption is the half that makes it VISIBLE. An unsaved edit and a never-started edit
    *  rendered identically, so the processor's own memory was the only record a number was typed. */
+  /** THE RELOAD GUARD, WHICH NOTHING HELD on either branch. `beforeunload` is in this panel, the
+   *  LTV panel and the calculator card, and in no test anywhere — deleting the listener passed the
+   *  whole suite. Partial by design (a tab close or reload, not Next's client-side navigation), and
+   *  a partial guarantee with no test is the one a hand-merge drops with nothing going red. */
+  it("warns before a reload while an edit is still held", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    // The control FIRST: with nothing typed, a reload must not be interrupted.
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented, "warned with no unsaved edit").toBe(false);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+
+    const held = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(held);
+    expect(held.defaultPrevented, "a held edit was not defended").toBe(true);
+  });
+
   it("does not claim an unsaved edit on a row that was never edited", () => {
     useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
     render(<DtiCalculator fileId="f1" />);

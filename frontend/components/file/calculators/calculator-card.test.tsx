@@ -224,6 +224,30 @@ describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
    *  this fix and NOTHING covered it — a mutation re-introducing it passed clean until this existed.
    *  Without it a paused edit survives the switch and is then overwritten the moment the processor
    *  returns to correct it, which is the same loss one step later. */
+  /** THE RELOAD GUARD, WHICH NOTHING HELD. `beforeunload` appears in three components — this
+   *  card, the DTI panel and the LTV panel — and in no test on either branch, so deleting the
+   *  listener passed the whole suite. It is a partial guarantee by design (a tab close or reload,
+   *  not Next's client-side navigation), and a partial guarantee with no test is the one that
+   *  disappears in the next hand-merge with nothing going red. */
+  it("warns before a reload while an edit is still held", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    // The control FIRST: with nothing typed, a reload must not be interrupted.
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented, "warned with no unsaved edit").toBe(false);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+
+    const held = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(held);
+    expect(held.defaultPrevented, "a held edit was not defended").toBe(true);
+  });
+
   it("restores the paused draft when the processor comes back to the input", () => {
     useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
     render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);

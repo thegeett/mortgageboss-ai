@@ -260,6 +260,26 @@ describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
     expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$175000/)).toBeTruthy();
   });
 
+  /** The same reload guard as the DTI panel's and the calculator card's, and the same gap: it was
+   *  in three components and no test on either branch, so deleting the listener passed clean. */
+  it("warns before a reload while an edit is still held", () => {
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented, "warned with no unsaved edit").toBe(false);
+
+    fireEvent.click(screen.getByText("$180,000.00"));
+    fireEvent.change(screen.getByLabelText("Override First mortgage"), {
+      target: { value: "175000" },
+    });
+
+    const held = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(held);
+    expect(held.defaultPrevented, "a held edit was not defended").toBe(true);
+  });
+
   it("restores the paused draft when the processor comes back to the row", () => {
     mockLtv();
     render(<LtvCalculator fileId="LF-1" />);
