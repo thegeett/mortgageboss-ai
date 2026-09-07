@@ -40,14 +40,19 @@ def ingest_message(
 
 async def _ingest_message(*, bucket: str, key: str, receipt: dict[str, Any] | None) -> str:
     from app.core.database import async_session_maker
-    from app.services.inbound_ingest import ingest_raw_message
+    from app.services.inbound_ingest import process_raw_message
     from app.storage.s3 import S3StorageBackend
 
     storage = S3StorageBackend(bucket=bucket, region=settings.s3_region)
     raw = await storage.read(key)
 
     async with async_session_maker() as session:
-        result = await ingest_raw_message(
+        # THE WHOLE CHAIN, not just the row. `process_raw_message` stores, assesses (LP-804b) and
+        # routes (LP-805). Calling `ingest_raw_message` alone — which is what this did until LP-807 —
+        # left every message PENDING and unrouted forever, with both service test suites green.
+        #
+        # `store_raw=False`: SES already put the object in its own bucket and the path is passed in.
+        result = await process_raw_message(
             session,
             raw=raw,
             raw_storage_path=f"s3://{bucket}/{key}",

@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.services.documents import get_document_for_company
-from app.services.inbound_ingest import ingest_raw_message
+from app.services.inbound_ingest import process_raw_message
 from app.services.pdf_utils import extract_text_from_pdf
 from app.storage import get_storage_backend
 
@@ -118,8 +118,16 @@ async def inject_raw_message(
     offer a shortcut that the real path does not have. Passing a `dmarcVerdict` of GRAY here is how
     the GRAY-stays-GRAY behaviour is exercised without waiting for a real message to be graded.
 
-    ``raw_storage_path`` is None: nothing was stored in S3, because nothing came from S3. Recording a
-    path to an object that does not exist would be worse than recording none.
+    ``store_raw=True`` writes the bytes through the configured storage backend and records that
+    path. The first version passed ``raw_storage_path=None`` on the reasoning that nothing came from
+    S3 so nothing should be recorded — true, and the consequence was that everything downstream of
+    ingest was dead locally: accept-into-file and the attachment preview both re-derive the bytes
+    from the stored message rather than keeping a second copy, so a NULL path means an injected
+    message can be listed and never opened or accepted. Storing it locally is not a fiction; it is
+    the same object SES would have written, in the backend this environment actually uses.
+
+    The path is built from the new row's uuid (`raw_storage_path_for`) and never from a header or a
+    filename.
 
     Mounted only when ``not settings.is_production`` (see `main.py`), and still auth'd — a dev tool
     is not an excuse to skip the tenant gate, even one that writes an unrouted row belonging to
@@ -131,12 +139,13 @@ async def inject_raw_message(
             status_code=status.HTTP_400_BAD_REQUEST, detail="The uploaded file was empty"
         )
     receipt = {"dmarcVerdict": {"status": dmarc_verdict}} if dmarc_verdict else None
-    result = await ingest_raw_message(
+    result = await process_raw_message(
         db,
         raw=raw,
         raw_storage_path=None,
         ses_message_id=ses_message_id,
         receipt=receipt,
+        store_raw=True,
     )
     await db.commit()
     return InjectedMessageResponse(

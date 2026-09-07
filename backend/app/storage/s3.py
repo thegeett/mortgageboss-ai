@@ -172,6 +172,18 @@ class S3StorageBackend(StorageBackend):
         content: bytes,
     ) -> str:
         storage_path = build_storage_path(company_id, file_id, document_id, filename)
+        return await self._put(storage_path=storage_path, content=content)
+
+    async def save_at(self, *, storage_path: str, content: bytes) -> str:
+        return await self._put(storage_path=storage_path, content=content)
+
+    async def _put(self, *, storage_path: str, content: bytes) -> str:
+        """The one PutObject. Both writers go through it so neither can lose the encryption args.
+
+        `save` and `save_at` differ only in where the key comes from. Written twice, a later change
+        to `_encryption_args` — or to the error mapping this module promises — would land on one
+        writer and not the other, and the unencrypted write is the half that raises no error.
+        """
         try:
             async with self._client() as client:
                 await client.put_object(

@@ -214,3 +214,23 @@ async def test_resolve_within_root_allows_legitimate_nested_path(
     legit = f"{COMPANY_ID}/{FILE_ID}/{DOCUMENT_ID}.pdf"
     resolved = backend._resolve_within_root(legit)
     assert backend._root in resolved.parents
+
+
+# --------------------------------------------------------------------------------------------- #
+# save_at — bytes that are not a document and have no tenant (LP-807)
+# --------------------------------------------------------------------------------------------- #
+async def test_save_at_round_trips_at_the_exact_path_given(backend: LocalStorageBackend) -> None:
+    path = await backend.save_at(storage_path="inbound-raw/abc.eml", content=b"From: a@b\r\n\r\nhi")
+
+    assert path == "inbound-raw/abc.eml"
+    assert await backend.read(path) == b"From: a@b\r\n\r\nhi"
+
+
+async def test_save_at_refuses_a_path_that_climbs_out_of_the_root(
+    backend: LocalStorageBackend,
+) -> None:
+    """The same traversal guard `read` and `delete` have. `save_at` takes a caller-chosen path, so it
+    is the one writer where the guard is not merely defence in depth — and it must refuse BEFORE
+    writing, not clean up afterwards."""
+    with pytest.raises(StorageError):
+        await backend.save_at(storage_path="../escaped.eml", content=b"x")

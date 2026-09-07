@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,6 +35,7 @@ from app.core.logging import get_logger
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.services.inbound_mime import parse_message
+from app.storage import get_storage_backend
 
 logger = get_logger(__name__)
 
@@ -209,12 +211,15 @@ async def ingest_raw_message(
     }
 
     # ON CONFLICT DO NOTHING against the ingest-key index, so a redelivery is a no-op rather than an
-    # IntegrityError the caller has to catch and interpret. `index_where` is not needed: the index is
-    # NULLS NOT DISTINCT, so it covers the unrouted case too.
+    # IntegrityError the caller has to catch and interpret.
+    #
+    # ON `ingest_key` ALONE (LP-807). The conflict target used to include `company_id`, which is NULL
+    # here and is written later by routing — so a redelivery of an already-routed message conflicted
+    # with nothing, inserted a second row, and then collided on the way to the same company.
     statement = (
         pg_insert(InboundMessage)
         .values(**values)
-        .on_conflict_do_nothing(index_elements=["company_id", "ingest_key"])
+        .on_conflict_do_nothing(index_elements=["ingest_key"])
         .returning(InboundMessage.id)
     )
     inserted = (await db.execute(statement)).scalar_one_or_none()
@@ -227,16 +232,89 @@ async def ingest_raw_message(
         logger.info("inbound_message_ingested", ingest_key_prefix=ingest_key[:12], bytes=len(raw))
         return IngestResult(message_id=str(inserted), created=True, ingest_key=ingest_key)
 
+    # NOT SCOPED TO `company_id IS NULL`. It was, and that made the lookup answer None for exactly
+    # the row it was looking for as soon as routing had claimed it — returning `message_id="None"`
+    # to a caller that would treat the redelivery as handled.
     existing = (
-        await db.execute(
-            select(InboundMessage.id).where(
-                InboundMessage.ingest_key == ingest_key,
-                InboundMessage.company_id.is_(None),
-            )
-        )
+        await db.execute(select(InboundMessage.id).where(InboundMessage.ingest_key == ingest_key))
     ).scalar_one_or_none()
     logger.info("inbound_message_duplicate", ingest_key_prefix=ingest_key[:12])
     return IngestResult(message_id=str(existing), created=False, ingest_key=ingest_key)
+
+
+#: Where a raw inbound message lives when it did not come from SES's own bucket — the dev injector
+#: (§H1) and the seed. One flat prefix keyed on the row's uuid: raw mail has no company and no loan
+#: file at the moment it is stored, so it cannot use the tenant-prefixed document path.
+INBOUND_RAW_PREFIX = "inbound-raw"
+
+
+def raw_storage_path_for(message_id: str) -> str:
+    """The key a locally-stored raw message is written to. Server-controlled, never sender-derived."""
+    return f"{INBOUND_RAW_PREFIX}/{message_id}.eml"
+
+
+async def process_raw_message(
+    db: AsyncSession,
+    *,
+    raw: bytes,
+    raw_storage_path: str | None,
+    ses_message_id: str | None = None,
+    receipt: dict[str, Any] | None = None,
+    store_raw: bool = False,
+) -> IngestResult:
+    """The whole ingest chain: store, assess, route. ``flush`` only; the caller commits.
+
+    THE CHAIN HAD NO CALLER. `apply_safety_to_message` (LP-804b) and `apply_routing` (LP-805) were
+    built as services and nothing outside their own tests ever invoked them: `ingest_raw_message`
+    wrote the row and returned. Every message in the system would therefore have sat at
+    `routing_state=PENDING` with every attachment at `safety_state=PENDING` forever — never routed to
+    a file, never assessable, never acceptable, because `accept_attachment` requires `SAFE`. The
+    tests for both services passed throughout, because each called its own function directly.
+
+    That is the shape the repo has learned to distrust: a green suite over a step that never runs.
+    LP-807 is the ticket that noticed, because it is the first one that has to SHOW a processor what
+    arrived.
+
+    SAFETY BEFORE ROUTING, per §2's diagram. `decide_disposition` decides whether a message may skip
+    a human, and one of its conditions is that the attachments passed every safety gate; running it
+    against attachments still in `PENDING` would ask that question before anything had looked.
+
+    ``store_raw`` writes the bytes through the storage backend and records the path. It is False for
+    SES, whose bucket already holds the object and whose path is passed in; it is True for the dev
+    injector and the seed, where nothing else has stored anything. Without it `raw_storage_path` is
+    NULL, and both accept-into-file and the attachment preview refuse — they re-derive the bytes from
+    the stored message rather than keeping a second copy, so no stored message means no bytes.
+
+    ONLY ON A FIRST INSERT. A redelivery returns ``created=False`` and is left exactly as it was: a
+    message a processor has already accepted from must not have its verdicts recomputed underneath
+    them.
+    """
+    result = await ingest_raw_message(
+        db,
+        raw=raw,
+        raw_storage_path=raw_storage_path,
+        ses_message_id=ses_message_id,
+        receipt=receipt,
+    )
+    if not result.created:
+        return result
+
+    message = await db.get(InboundMessage, UUID(result.message_id))
+    if message is None:  # pragma: no cover - the row was just inserted in this transaction
+        return result
+
+    if store_raw:
+        path = raw_storage_path_for(result.message_id)
+        await get_storage_backend().save_at(storage_path=path, content=raw)
+        message.raw_storage_path = path
+
+    from app.services.attachment_safety import apply_safety_to_message
+    from app.services.inbound_routing import apply_routing
+
+    await apply_safety_to_message(db, inbound_message_id=message.id, raw=raw)
+    await apply_routing(db, message=message)
+    await db.flush()
+    return result
 
 
 async def _record_attachments(db: AsyncSession, *, inbound_message_id: Any, raw: bytes) -> int:
@@ -279,6 +357,7 @@ async def _record_attachments(db: AsyncSession, *, inbound_message_id: Any, raw:
 
 
 __all__ = [
+    "INBOUND_RAW_PREFIX",
     "IngestResult",
     "compute_ingest_key",
     "extract_receipt_verdicts",
@@ -286,4 +365,6 @@ __all__ = [
     "is_auto_reply",
     "is_delivery_status_notification",
     "normalise_message_id",
+    "process_raw_message",
+    "raw_storage_path_for",
 ]

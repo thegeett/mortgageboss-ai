@@ -36,6 +36,8 @@ import shutil
 import sys
 from datetime import date
 from decimal import Decimal
+from email import policy as email_policy
+from email.message import EmailMessage
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -59,6 +61,7 @@ from app.models.borrower import Borrower, MaritalStatus
 from app.models.company import Company
 from app.models.document import Document, DocumentCategory, DocumentStatus, UploadSource
 from app.models.extraction import ExtractionStatus
+from app.models.inbound_message import InboundMessage
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.needs_item import (
@@ -797,6 +800,107 @@ async def _seed_loan_files(
     return created
 
 
+#: The seeded messages' `Message-ID`s, which — with no SES id — ARE their ingest keys
+#: (`compute_ingest_key`). Named once because `_clear_seed` deletes by them and the seeder writes
+#: them: two lists of the same three strings is how a reset stops clearing what a re-seed skips.
+_ROUTED_KEY = "seed-routed@demo.invalid"
+_QUARANTINED_KEY = "seed-quarantined@demo.invalid"
+_UNROUTED_KEY = "seed-unrouted@demo.invalid"
+_SEEDED_INGEST_KEYS = (_ROUTED_KEY, _QUARANTINED_KEY, _UNROUTED_KEY)
+
+
+async def _seed_inbound_mail(db: AsyncSession, *, company: Company) -> int:
+    """Seed the triage queue by SENDING MAIL, not by writing rows (§H3). Returns messages created.
+
+    THROUGH THE REAL CHAIN. `process_raw_message` is the same function the SQS consumer calls, so
+    routing, safety and dedup all decide for themselves and the seeded queue is a queue the running
+    system could have produced. Hand-written rows would have let the states be whatever the seed
+    said they were — including combinations the pipeline cannot reach, which is worse than no seed:
+    a frontend built against them looks finished and breaks on the first real message.
+
+    Three shapes, because they are the three a processor has to tell apart:
+
+      routed        a reply to the file's own address, with a readable PDF — one click to accept
+      quarantined   an archive renamed `.pdf`, which arrives, routes, and must not be opened
+      unrouted      addressed to nobody we know, so it has no company and appears in every
+                    company's queue with the sender's own words stripped
+
+    Idempotent through the ingest key, so a re-run adds nothing.
+    """
+    from app.services.inbound_ingest import process_raw_message
+
+    files = (
+        (
+            await db.execute(
+                select(LoanFile)
+                .where(LoanFile.company_id == company.id, LoanFile.deleted_at.is_(None))
+                .order_by(LoanFile.created_at)
+                .limit(1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not files:
+        logger.info("seed_inbound_skipped_no_files")
+        return 0
+    loan_file = files[0]
+    address = loan_file.get_inbox_address()
+
+    # A zip that claims to be a PDF — LP-804b's own acceptance criterion, and the shape a processor
+    # most needs the queue to catch.
+    zip_named_pdf = b"PK\x03\x04" + b"\x00" * 60
+
+    arrivals: list[tuple[str, str, str, bytes, str]] = [
+        (
+            address,
+            _ROUTED_KEY,
+            "Bank statements attached",
+            _make_pdf("Bank statement - March"),
+            "March_statement.pdf",
+        ),
+        (
+            address,
+            _QUARANTINED_KEY,
+            "Everything zipped up",
+            zip_named_pdf,
+            "all_my_documents.pdf",
+        ),
+        (
+            "someone-else@demo.invalid",
+            _UNROUTED_KEY,
+            "Docs for the house",
+            _make_pdf("Pay stub"),
+            "paystub.pdf",
+        ),
+    ]
+
+    created = 0
+    for to_address, message_id, subject, content, filename in arrivals:
+        message = EmailMessage()
+        message["From"] = "borrower@demo.invalid"
+        message["To"] = to_address
+        message["Subject"] = subject
+        message["Message-ID"] = f"<{message_id}>"
+        message.set_content("Here you go.")
+        message.add_attachment(content, maintype="application", subtype="pdf", filename=filename)
+        raw = message.as_bytes(policy=email_policy.default)
+        result = await process_raw_message(
+            db,
+            raw=raw,
+            raw_storage_path=None,
+            # DMARC PASS on the seeded mail, so the auth badge has something to be green about and
+            # the GRAY case is visibly different when a developer injects one by hand.
+            receipt={"dmarcVerdict": {"status": "PASS"}, "virusVerdict": {"status": "PASS"}},
+            store_raw=True,
+        )
+        if result.created:
+            created += 1
+
+    logger.info("seed_inbound_mail", created=created)
+    return created
+
+
 async def _add_completed_document(
     db: AsyncSession,
     *,
@@ -854,6 +958,14 @@ async def _clear_seed(db: AsyncSession) -> None:
     company_id = company.id
     # Deleting loan files cascades (DB ondelete=CASCADE) to borrowers, properties,
     # documents (→ extractions), needs, and activity. Then users, lenders, company.
+    # INBOUND MAIL FIRST, AND BY INGEST KEY. Deleting the company cascades the ROUTED messages
+    # (company_id has ondelete=CASCADE), and the UNROUTED one has no company and no loan file — so
+    # it would survive the reset. That is not merely litter: the seed is idempotent on `ingest_key`,
+    # so the surviving row means a re-seed silently creates nothing for the unrouted case, and the
+    # queue a developer resets to get back is missing exactly the message it exists to demonstrate.
+    await db.execute(
+        delete(InboundMessage).where(InboundMessage.ingest_key.in_(_SEEDED_INGEST_KEYS))
+    )
     await db.execute(delete(LoanFile).where(LoanFile.company_id == company_id))
     await db.execute(delete(User).where(User.company_id == company_id))
     await db.execute(delete(Lender).where(Lender.company_id == company_id))
@@ -920,6 +1032,10 @@ async def seed(*, reset: bool) -> None:
         files_created = await _seed_loan_files(
             db, company=company, processor=processor, uwm=uwm, sunwest=sunwest
         )
+        # §H3 — a triage queue the frontend can be built against. AFTER the files, because the
+        # routed message is addressed to a file's own inbox token and there is nothing to route to
+        # before they exist.
+        mail_created = await _seed_inbound_mail(db, company=company)
         await db.commit()
 
     logger.info(
@@ -930,6 +1046,7 @@ async def seed(*, reset: bool) -> None:
         uwm_created=uwm_created,
         sunwest_created=sunwest_created,
         loan_files_created=files_created,
+        inbound_messages_created=mail_created,
     )
     _print_summary(
         company_created=company_created,
@@ -947,6 +1064,8 @@ def _print_summary(
     print(f"Company: {_COMPANY_NAME} (slug: {_COMPANY_SLUG}) [{state}]")
     print(f"Loan files seeded this run: {files_created} (re-runs skip existing)")
     print("  Incl. one file imported from MISMO (synthetic PII) — the LP-53 import path.")
+    print("Inbound mail: three messages through the real ingest chain (routed / quarantined /")
+    print("  unrouted). Communication tab on the first file; the unrouted one is under Inbox.")
     print("Login (DEV-ONLY passwords):")
     print(f"  Admin:     {_ADMIN_EMAIL} / {_SEED_PASSWORD}")
     print(f"  Processor: {_PROCESSOR_EMAIL} / {_SEED_PASSWORD}")

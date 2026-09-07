@@ -15,6 +15,7 @@ import {
   ClipboardList,
   FileText,
   FolderOpen,
+  Inbox,
   LayoutDashboard,
   MessageSquare,
   Package,
@@ -50,6 +51,10 @@ export const NAV_ITEMS: NavItem[] = [
   // that list. Two rail destinations meaning one screen is the duplication this
   // ticket removes — `/loan-files` now redirects here.
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, owns: ["/loan-files"] },
+  // The company inbox (LP-807). NOT role-gated: triaging inbound mail is a processor's job, and
+  // the one thing only this page can show — a message that matched no loan file — has nowhere else
+  // to appear, because it has no company and so belongs to no file's tab.
+  { label: "Inbox", href: "/inbound", icon: Inbox },
   { label: "Administration", href: "/admin", icon: ShieldCheck, requiredRole: "admin" },
 ];
 

@@ -62,6 +62,16 @@ class LocalStorageBackend(StorageBackend):
         await asyncio.to_thread(_write)
         return storage_path
 
+    async def save_at(self, *, storage_path: str, content: bytes) -> str:
+        full = self._resolve_within_root(storage_path)
+
+        def _write() -> None:
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_bytes(content)
+
+        await asyncio.to_thread(_write)
+        return storage_path
+
     async def read(self, storage_path: str) -> bytes:
         full = self._resolve_within_root(storage_path)
 

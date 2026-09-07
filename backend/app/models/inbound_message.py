@@ -61,18 +61,24 @@ class InboundMessage(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "inbound_messages"
     __table_args__ = (
-        # NULLS NOT DISTINCT is the whole point. Postgres treats NULLs as distinct in a unique
-        # index by default, so an unrouted message — company_id NULL — would never collide with
-        # another unrouted message and the same delivery twice would produce two rows. That is the
-        # ticket's own "Done when", and the default behaviour fails it precisely in the state every
-        # message starts in.
-        Index(
-            "uq_inbound_messages_ingest_key",
-            "company_id",
-            "ingest_key",
-            unique=True,
-            postgresql_nulls_not_distinct=True,
-        ),
+        # THE COMPANY IS NOT PART OF A MESSAGE'S IDENTITY, and this index used to say it was.
+        #
+        # It was `(company_id, ingest_key) NULLS NOT DISTINCT`, which dedups correctly for exactly as
+        # long as nothing fills `company_id`. LP-807 wired routing into the ingest task, and routing
+        # writes that column — so a redelivery no longer collided with the first copy (which had
+        # moved from `(NULL, key)` to `(company, key)`), inserted a second row, and then raised a
+        # UniqueViolation when routing tried to move IT to the same place. A redelivered message
+        # therefore either duplicated or crashed the task, and SQS delivery is at-least-once by
+        # design.
+        #
+        # LP-803's "the same message delivered twice produces exactly one row" passed throughout,
+        # because nothing was routing: the whole test ran in the state where the flaw is invisible.
+        #
+        # A KEY A LATER STEP REWRITES IS NOT A KEY. `ingest_key` is `ses_message_id` when SES gave
+        # one, which it always does on the real path and which is globally unique per delivery — one
+        # message delivered to two of our addresses is ONE SES receipt and ONE bucket object, so it
+        # is genuinely one row. See `compute_ingest_key` for the fallback and its limit.
+        Index("uq_inbound_messages_ingest_key", "ingest_key", unique=True),
         Index("ix_inbound_messages_routing_state", "routing_state"),
     )
 

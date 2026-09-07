@@ -92,6 +92,21 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
+    async def save_at(self, *, storage_path: str, content: bytes) -> str:
+        """Store ``content`` at an exact, caller-chosen ``storage_path``.
+
+        FOR BYTES THAT ARE NOT A DOCUMENT AND HAVE NO TENANT. :meth:`save` builds its path from
+        ``company_id`` / ``file_id`` / ``document_id``, which is right for a document and wrong for a
+        raw inbound message: at the moment mail is stored, nothing knows whose it is — LP-805 has not
+        routed it, and inventing a company to satisfy a path shape is the derivation the routing
+        module exists to confine.
+
+        ``storage_path`` must be built from server-controlled values. It is never derived from a
+        filename, a header or anything else a sender wrote; the traversal check in each backend is
+        the second line of defence, not the first.
+        """
+
+    @abstractmethod
     async def read(self, storage_path: str) -> bytes:
         """Return the bytes for a stored path. Raise :class:`StorageError` if missing."""
 

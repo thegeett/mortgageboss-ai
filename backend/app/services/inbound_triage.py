@@ -249,6 +249,50 @@ async def reject_attachment(
     return attachment
 
 
+async def list_file_messages(db: AsyncSession, *, loan_file: LoanFile) -> list[InboundMessage]:
+    """Everything that arrived for one loan file, newest first.
+
+    SCOPED ON `loan_file_id`, and the file itself came from a company-scoped route. Deliberately NOT
+    a filter applied to `list_triage_queue`'s result: that query returns every routed message for the
+    company plus the unrouted pile, and narrowing a wide answer in the caller means the wide answer
+    was computed, and could be returned, by a caller that forgot to narrow it.
+    """
+    return list(
+        (
+            await db.execute(
+                only_active(
+                    select(InboundMessage)
+                    .where(InboundMessage.loan_file_id == loan_file.id)
+                    .order_by(InboundMessage.received_at.desc().nullslast()),
+                    InboundMessage,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def attachment_preview(db: AsyncSession, *, attachment: InboundAttachment) -> bytes | None:
+    """A PNG thumbnail of one attachment, or None when it has no renderable preview.
+
+    SAFE ONLY, and that is the whole gate. `phase4.md` §2.3 says a rejected message is "never
+    rendered, never extracted" — and a QUARANTINED attachment is quarantined precisely because
+    something about its bytes was wrong, which makes it the last thing to hand a renderer. PENDING is
+    not a pass here either, for the same reason accept refuses it: the scan is asynchronous.
+
+    The bytes come through :func:`_attachment_bytes`, so the same sha256 check applies — a preview
+    cannot show content that is not the content that was assessed.
+    """
+    if attachment.safety_state is not AttachmentSafetyState.SAFE:
+        raise CannotAcceptError(
+            attachment.safety_reason or "This attachment has not been confirmed safe to open."
+        )
+    from app.services.attachment_safety import render_preview_png
+
+    return render_preview_png(await _attachment_bytes(db, attachment=attachment))
+
+
 async def list_triage_queue(
     db: AsyncSession, *, company_id: UUID, include_unrouted: bool = True
 ) -> list[InboundMessage]:
@@ -304,6 +348,8 @@ __all__ = [
     "AcceptResult",
     "CannotAcceptError",
     "accept_attachment",
+    "attachment_preview",
+    "list_file_messages",
     "list_triage_queue",
     "reject_attachment",
 ]

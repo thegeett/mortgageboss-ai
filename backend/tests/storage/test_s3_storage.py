@@ -222,6 +222,21 @@ async def test_save_never_writes_an_unencrypted_object() -> None:
         assert "ServerSideEncryption" in client.store[key]
 
 
+async def test_save_at_never_writes_an_unencrypted_object_either() -> None:
+    """THE SECOND WRITER (LP-807). `save_at` exists for raw inbound mail, which has no tenant and so
+    cannot use `save`'s path shape — and a second PutObject is exactly where an encryption argument
+    goes missing, silently, on the only bytes in the system that a stranger sent us.
+
+    Both writers go through one `_put` for that reason; this asserts the outcome rather than the
+    refactor, so it still bites if they are ever separated again."""
+    for overrides in ({}, {"kms_key_id": "arn:aws:kms:eu-west-1:1:key/x"}):
+        backend, client, _ = make_backend(**overrides)
+        key = await backend.save_at(storage_path="inbound-raw/abc.eml", content=b"x")
+        assert key == "inbound-raw/abc.eml"
+        assert "ServerSideEncryption" in client.store[key]
+        assert await backend.read(key) == b"x"
+
+
 async def test_save_sets_content_type_from_the_extension() -> None:
     backend, client, _ = make_backend()
     for filename, expected in (

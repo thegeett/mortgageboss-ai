@@ -12,7 +12,7 @@ authenticated user, as it does everywhere else in the API.
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
@@ -28,6 +28,8 @@ from app.services.inbound_triage import (
     AcceptAs,
     CannotAcceptError,
     accept_attachment,
+    attachment_preview,
+    list_file_messages,
     list_triage_queue,
     reject_attachment,
 )
@@ -136,6 +138,21 @@ async def triage_queue(
     return [await _message_public(db, message) for message in messages]
 
 
+@router.get("/messages", response_model=list[InboundMessagePublic])
+async def file_messages(
+    loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+) -> list[InboundMessagePublic]:
+    """Everything that arrived for this loan file, newest first.
+
+    FILE-SCOPED, so every message it can return has a `company_id` — it was routed to a file, and a
+    file has an owner. The redaction `_message_public` applies to unclaimed messages is therefore
+    unreachable from here, which is the intended shape: the sender's words are visible exactly where
+    somebody owns them.
+    """
+    messages = await list_file_messages(db, loan_file=loan_file)
+    return [await _message_public(db, message) for message in messages]
+
+
 async def _scoped_attachment(
     db: DbSession, *, loan_file_id: UUID, attachment_id: UUID
 ) -> InboundAttachment:
@@ -148,6 +165,53 @@ async def _scoped_attachment(
         # another company's file" would confirm the id exists — an oracle over other tenants' rows.
         raise _NOT_FOUND
     return attachment
+
+
+@router.get(
+    "/attachments/{attachment_id}/preview",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def attachment_preview_png(
+    attachment_id: UUID,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Response:
+    """A PNG thumbnail of one attachment. 409 when it is not safe, 415 when it cannot be rendered.
+
+    ONLY REACHABLE FOR A ROUTED MESSAGE. The route is file-scoped and an unrouted message has no
+    file, so the company-level queue cannot produce a preview for a message nobody owns — which
+    matters more here than anywhere else in this module: the unrouted queue is visible to every
+    company, and a thumbnail is the sender's content in the most legible form there is. Dropping
+    their filename from that queue and then rendering their document would give back everything the
+    redaction took, and more.
+
+    NOT CACHEABLE BY A SHARED CACHE. The bytes are one borrower's document, served over a route whose
+    authorisation is per-user.
+    """
+    attachment = await _scoped_attachment(
+        db, loan_file_id=loan_file.id, attachment_id=attachment_id
+    )
+    try:
+        png = await attachment_preview(db, attachment=attachment)
+    except CannotAcceptError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if png is None:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="This file has no preview. Accept it to open it in the document viewer.",
+        )
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store",
+            # The body is a PNG this server rendered, but the header costs nothing and the rule is
+            # that nothing on this path relies on a browser agreeing with us about a type.
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/attachments/{attachment_id}/accept", response_model=AcceptAttachmentResponse)

@@ -199,17 +199,63 @@ def sanitise_pdf(data: bytes) -> bytes:
         return buffer.getvalue()
 
 
-def rasterise_pdf(data: bytes, *, dpi: int = RASTER_DPI) -> tuple[bytes, ...]:
+def rasterise_pdf(
+    data: bytes, *, dpi: int = RASTER_DPI, limit: int | None = None
+) -> tuple[bytes, ...]:
     """One PNG per page. What the extraction path reads.
 
     Raises :class:`ValueError` past :data:`MAX_PAGES` — a PDF can declare tens of thousands of pages
     in a few kilobytes, and rendering them all is the cheapest denial of service available against
     anything that renders what arrives.
+
+    ``limit`` renders only the first N pages, for a caller that wants a thumbnail rather than a
+    document. THE PAGE-COUNT GUARD STILL RUNS FIRST and is not weakened by it: a limit bounds the
+    work this call does, and the guard is about what the FILE claims, which is the thing a caller
+    with a limit would otherwise stop checking.
     """
     with fitz.open(stream=data, filetype="pdf") as doc:
         if doc.page_count > MAX_PAGES:
             raise ValueError(f"{doc.page_count} pages exceeds the {MAX_PAGES}-page limit")
-        return tuple(page.get_pixmap(dpi=dpi).tobytes("png") for page in doc)
+        pages = (
+            doc if limit is None else (doc[index] for index in range(min(limit, doc.page_count)))
+        )
+        return tuple(page.get_pixmap(dpi=dpi).tobytes("png") for page in pages)
+
+
+def render_preview_png(data: bytes) -> bytes | None:
+    """A single PNG a browser can show, rendered BY US from ``data``. None when it cannot be.
+
+    NOTHING THE SENDER WROTE REACHES THE BROWSER. The response body is always a PNG this renderer
+    produced — a PDF is sanitised and its first page rasterised, and an image is decoded and
+    re-encoded rather than passed through. That is the same argument as LP-804b's: the defence is
+    rasterisation, not sanitisation, and it is stronger here than serving the original bytes under a
+    sniffed `Content-Type`, because a re-encode cannot carry a trailing payload a content sniffer
+    might reach for.
+
+    Returns None rather than raising for a file this cannot render — a TIFF or a HEIC that the
+    renderer will not decode is a real, SAFE document that simply has no thumbnail, and the caller
+    shows what it is instead of a broken image. Returning None for that is not the same as refusing
+    it; refusal is the caller's job and happens before this is ever called.
+    """
+    sniffed = sniff_content_type(data)
+    if sniffed is None or sniffed not in ALLOWED_CONTENT_TYPES:
+        return None
+
+    if sniffed == "application/pdf":
+        try:
+            pages = rasterise_pdf(sanitise_pdf(data), limit=1)
+        except Exception:
+            logger.warning("attachment_preview_unrenderable", kind="pdf")
+            return None
+        return pages[0] if pages else None
+
+    try:
+        # Decoded and re-encoded, never echoed. `Pixmap` will not open every allowed type — HEIC in
+        # particular — and that is a None, not an error.
+        return bytes(fitz.Pixmap(io.BytesIO(data)).tobytes("png"))
+    except Exception:
+        logger.warning("attachment_preview_unrenderable", kind="image")
+        return None
 
 
 def assess(data: bytes, *, declared_content_type: str | None = None) -> SafetyOutcome:
@@ -314,6 +360,7 @@ __all__ = [
     "assess",
     "is_encrypted_pdf",
     "rasterise_pdf",
+    "render_preview_png",
     "sanitise_pdf",
     "sniff_content_type",
 ]
