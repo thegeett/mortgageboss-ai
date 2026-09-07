@@ -75,7 +75,7 @@ user's call.
 
 | # | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|---|
-| 21 | LP-812 Communication timeline | AWAITING_REVIEW | see Log | | Migration c5f9a3b71d80. **The double-count settled**: one arrival writes three rows in three tables, and the `Communication` is the timeline's — so every `COMMUNICATION_*` activity is excluded, DERIVED from the enum rather than listed, with a non-empty control on the derivation. The test drives a REAL message through the real chain, because a hand-built fixture gives a one-row timeline whether or not the reconciliation exists. Choosing the Communication left it needing the manifest: a real FK, not the sender-written Message-ID |
+| 21 | LP-812 Communication timeline | AWAITING_REVIEW | 8d7fc83c | | Migration c5f9a3b71d80. **The double-count settled**: one arrival writes three rows in three tables, and the `Communication` is the timeline's — so every `COMMUNICATION_*` activity is excluded, DERIVED from the enum rather than listed, with a non-empty control on the derivation. The test drives a REAL message through the real chain, because a hand-built fixture gives a one-row timeline whether or not the reconciliation exists. Choosing the Communication left it needing the manifest: a real FK, not the sender-written Message-ID |
 | 22 | LP-818 Reply, compose, mark important, unread | PENDING | | | schema change, not a button |
 | 23 | LP-814 Reminder suggestions | PENDING | | | blocked until LP-811 and LP-819 are REVIEWED |
 | 24 | LP-820 Non-borrower request paths | PENDING | | | |
@@ -124,6 +124,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-813 | 9874b656 | b8b37d9f | 0 | a COLUMN with no writer — `Lender.contact_email` since LP-13, with no lender create/update path anywhere, so LP-805's participant seeding was always NULL on a real install. Review added the route-enumeration guard for the per-route admin gate |
 | 2026-09-07 | LP-815 | 776b2470 | 1eb03fee | 2 | a SPEC CLAUSE nothing implemented — `Precedence`/`List-Id` named in §5 and read nowhere, so a subscribed address would have been nudged into a list loop. Review: the protocol's one-inversion rule was stale, and the write path's refusals were untested |
 | 2026-09-07 | LP-808 | 6f491620 | 66fbecad | 2 | a forged ARC header authenticated a sender: the allowlist matched a claimed name with no seal verified, and `authenticated` was a disjunction. Also: §3.5 named a procedure for sanctioning an inversion and no actor — the reviewer's own gap, now closed, third inversion PROVISIONAL |
+| 2026-09-07 | LP-812 | 8d7fc83c |  |  | awaiting review. Migration c5f9a3b71d80. The double-count settled — the Communication is the timeline's row, COMMUNICATION_* activities excluded by a derivation with its own non-empty control, and the manifest reached by a real FK rather than the sender-written Message-ID |
 | 2026-09-06 | LP-822 | bb203058 |  |  | awaiting review. Mechanism + neutral default; migration e4a1c7d90b3f. No "Done when" clause in the plan (3rd) |
 | 2026-09-06 | LP-817 | 228b4c19 |  |  | awaiting review. ADR-401 (version pinned by content hash). No "Done when" clause in the plan |
 | 2026-09-06 | LP-800 | 6d71cb9d |  |  | awaiting review. ADR-400. 166 types carry a party, 28 carry full instructions; Priya's pass outstanding and not blocking |
