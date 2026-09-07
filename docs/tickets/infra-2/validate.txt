@@ -24,3 +24,28 @@ aws_guardduty_malware_protection_plan
 $ terraform -chdir=infra/envs/staging plan
   NOT RUN. No AWS credentials in this session; the S3 state backend is contacted even
   under -backend=false. Same blocker as INFRA-1 — see ../INFRA-1.md.
+
+# ---------------------------------------------------------------------------- #
+# Reviewer pass (second session), 2026-09-07
+# ---------------------------------------------------------------------------- #
+
+$ (module copied to a scratch dir so no .terraform.lock.hcl is generated in the repo —
+   the reviewer committed one into this module in INFRA-1 and it had to be removed)
+$ terraform init -backend=false -input=false && terraform validate
+Success! The configuration is valid.        # after the review's detail-type change
+
+$ terraform fmt -check -recursive infra/
+(clean)
+
+$ git status --short
+ M infra/modules/inbound_mail/malware_scan.tf     # and nothing generated
+
+# The rendered event pattern, and what it matches against every detail-type the
+# GuardDuty guide documents:
+#
+#   YES  GuardDuty Malware Protection Object Scan Result
+#   YES  GuardDuty Malware Protection Post Scan Action Failed
+#   YES  GuardDuty Malware Protection Resource Status Active     <- was NOT matched before
+#   YES  GuardDuty Malware Protection Resource Status Warning
+#   YES  GuardDuty Malware Protection Resource Status Error
+#   YES  GuardDuty Malware Protection Resource Status warning    <- the guide's own sample casing
