@@ -40,11 +40,20 @@ _NOT_FOUND = HTTPException(
 )
 
 
-def _attachment_public(attachment: InboundAttachment) -> InboundAttachmentPublic:
+def _attachment_public(
+    attachment: InboundAttachment, *, redacted: bool = False
+) -> InboundAttachmentPublic:
+    """One attachment, with the sender's own words dropped when nobody owns the message yet.
+
+    `redacted` is keyword-only and defaults to False so the file-scoped callers are unchanged; the
+    queue passes True for an unclaimed message. Size, safety state and content types stay — they are
+    OUR assessment of the bytes, not the sender's text, and they are what a processor needs to judge
+    whether a message is worth claiming.
+    """
     return InboundAttachmentPublic(
         id=attachment.id,
-        filename_original=attachment.filename_original,
-        filename_normalized=attachment.filename_normalized,
+        filename_original=None if redacted else attachment.filename_original,
+        filename_normalized=None if redacted else attachment.filename_normalized,
         declared_content_type=attachment.declared_content_type,
         sniffed_content_type=attachment.sniffed_content_type,
         size_bytes=attachment.size_bytes,
@@ -74,6 +83,25 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
         .scalars()
         .all()
     )
+    # AN UNROUTED MESSAGE IS SHOWN TO EVERY COMPANY, so nothing the SENDER wrote may travel with it.
+    #
+    # It has no `company_id` — LP-805 refuses to guess one — so the queue returns it to whoever
+    # asks. Before this redaction that meant one tenant received another tenant's borrower's
+    # personal email address, a subject line that in this domain routinely names the borrower and
+    # the property, and the sender's own filenames. Measured: `from_address` came back as
+    # `jane.borrower@personal-email.com` and the subject as "Docs for 42 Maple Ave - Jane Borrower"
+    # to a company with no connection to either.
+    #
+    # `phase4.md` §2.2 requires an unrouted message to stay VISIBLE — "confidence gates
+    # auto-acceptance, never visibility" — and visible is satisfied by the fact of it, its shape and
+    # its age. `InboundAttachmentPublic`'s own docstring names the condition that makes returning
+    # `filename_original` safe: "an authenticated user of the OWNING COMPANY, over a route already
+    # scoped to their loan file". An unrouted message has no owning company and this route is not
+    # file-scoped, so that condition simply is not met here.
+    #
+    # Everything comes back the moment a company CLAIMS the message, which is the reassign
+    # operation this ticket deliberately left for its own design.
+    unclaimed = message.company_id is None
     return InboundMessagePublic(
         id=message.id,
         loan_file_id=message.loan_file_id,
@@ -82,11 +110,11 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
         routing_confidence=message.routing_confidence,
         is_dsn=message.is_dsn,
         is_auto_reply=message.is_auto_reply,
-        from_address=message.from_address,
-        subject=message.subject,
+        from_address=None if unclaimed else message.from_address,
+        subject=None if unclaimed else message.subject,
         received_at=message.received_at,
         auth_verdicts={k: str(v) for k, v in (message.auth_verdicts or {}).items()},
-        attachments=[_attachment_public(a) for a in attachments],
+        attachments=[_attachment_public(a, redacted=unclaimed) for a in attachments],
     )
 
 

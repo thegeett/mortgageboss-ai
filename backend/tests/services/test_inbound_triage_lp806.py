@@ -25,6 +25,7 @@ from app.models.inbound_attachment import (
     AttachmentSafetyState,
     InboundAttachment,
 )
+from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.services.attachment_safety import apply_safety_to_message
 from app.services.inbound_ingest import ingest_raw_message
 from app.services.inbound_triage import (
@@ -416,3 +417,102 @@ async def test_unrouted_messages_are_visible_but_only_when_asked_for(
     assert without == []
     assert len(with_unrouted) == 1
     assert with_unrouted[0].company_id is None
+
+
+# --------------------------------------------------------------------------------------------- #
+# An unrouted message is shown to EVERY company (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_an_unclaimed_message_carries_nothing_the_sender_wrote(
+    db_session: AsyncSession,
+) -> None:
+    """The queue returns unrouted messages to every company, because none owns them yet.
+
+    Before the redaction that meant one tenant received another tenant's borrower's personal email
+    address, a subject line that in this domain routinely names the borrower and the property, and
+    the sender's own filenames. Measured: `from_address` came back as
+    `jane.borrower@personal-email.com` to a company with no connection to it.
+
+    `InboundAttachmentPublic`'s docstring names the condition that makes returning
+    `filename_original` safe — "an authenticated user of the OWNING COMPANY, over a route already
+    scoped to their loan file". An unrouted message has no owning company and this route is not
+    file-scoped, so that condition is not met and the field must not travel.
+    """
+    from app.api.inbound import _message_public
+
+    stranger = Company(name="Stranger", slug=f"s-{uuid4().hex[:8]}")
+    db_session.add(stranger)
+    await db_session.flush()
+
+    message = InboundMessage(
+        company_id=None,
+        ingest_key=f"k-{uuid4().hex}",
+        routing_state=InboundRoutingState.UNROUTED,
+        from_address="jane.borrower@personal-email.com",
+        subject="Docs for 42 Maple Ave - Jane Borrower",
+        raw_storage_path="s3://bucket/key",
+        auth_verdicts={},
+    )
+    db_session.add(message)
+    await db_session.flush()
+    db_session.add(
+        InboundAttachment(
+            inbound_message_id=message.id,
+            filename_original="Jane_Borrower_2024_tax_return.pdf",
+            filename_normalized="jane_borrower_2024_tax_return.pdf",
+            size_bytes=1024,
+            sha256="0" * 64,
+        )
+    )
+    await db_session.flush()
+
+    public = await _message_public(db_session, message)
+
+    # Nothing the sender wrote.
+    assert public.from_address is None
+    assert public.subject is None
+    assert [a.filename_original for a in public.attachments] == [None]
+    assert [a.filename_normalized for a in public.attachments] == [None]
+
+    # But it is still VISIBLE, which is what §2.2 requires: the fact of it, its shape, its age.
+    assert public.id == message.id
+    assert public.routing_state == InboundRoutingState.UNROUTED.value
+    assert len(public.attachments) == 1
+    assert public.attachments[0].size_bytes == 1024
+
+
+async def test_a_claimed_message_is_returned_in_full(db_session: AsyncSession) -> None:
+    """The control, and the one that matters: redacting everything would satisfy the test above
+    while blinding a processor to their own file's mail."""
+    from app.api.inbound import _message_public
+
+    company = Company(name="Owner", slug=f"o-{uuid4().hex[:8]}")
+    db_session.add(company)
+    await db_session.flush()
+
+    message = InboundMessage(
+        company_id=company.id,
+        ingest_key=f"k-{uuid4().hex}",
+        routing_state=InboundRoutingState.ROUTED,
+        from_address="jane.borrower@personal-email.com",
+        subject="Docs for 42 Maple Ave - Jane Borrower",
+        raw_storage_path="s3://bucket/key",
+        auth_verdicts={},
+    )
+    db_session.add(message)
+    await db_session.flush()
+    db_session.add(
+        InboundAttachment(
+            inbound_message_id=message.id,
+            filename_original="Jane_Borrower_2024_tax_return.pdf",
+            filename_normalized="jane_borrower_2024_tax_return.pdf",
+            size_bytes=1024,
+            sha256="1" * 64,
+        )
+    )
+    await db_session.flush()
+
+    public = await _message_public(db_session, message)
+
+    assert public.from_address == "jane.borrower@personal-email.com"
+    assert public.subject == "Docs for 42 Maple Ave - Jane Borrower"
+    assert public.attachments[0].filename_original == "Jane_Borrower_2024_tax_return.pdf"
