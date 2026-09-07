@@ -5,6 +5,10 @@
 - **Source of truth for scope:** `docs/domain/V1_Build_Plan_v3_rule_engine.docx`, Phase 4 (paras 853–917).
 - **Prior art in-repo:** `docs/tickets/phase4-survey.md` (2026-09-05) — the readiness survey. Read it
   first; this document assumes it and does not repeat its counts.
+- **Figures:** [`phase4-mail-flows.md`](phase4-mail-flows.md) — all eight scenarios drawn.
+- **Execution plan:** [`phase4-build-plan.md`](phase4-build-plan.md) — tracks, milestones,
+  ticket-by-ticket build detail, critical path and risks. This document is the *design*; that one is
+  the *plan*.
 - **External research:** `docs/research/phase4-email-ingestion-research.md` — provider comparison,
   inbound auth, attachment safety, mailbox-API paths, and the compliance control set, with sources.
 - **Ticket series:** Phase 4 uses a fresh **LP-800** block (LP-800 … LP-815). The last Phase 3
@@ -28,7 +32,7 @@ So Phase 4 has to ingest from **two structurally different sources**:
 
 | | Route A — per-file address | Route B — her own mailbox |
 |---|---|---|
-| Address | `lf-{token}@in.mortgageboss.ai` | `processing@herco.com` |
+| Address | `lf-{token}@inbox.mortgageboss.ai` | `processing@herco.com` |
 | Routing | **Deterministic.** The token *is* the loan file. | **Ambiguous.** Nothing in the message names a file. |
 | Sender trust | DMARC on the message itself | DMARC broken by the forward; must read the original hop |
 | Adoption cost | Borrower must be told a new address per file | Zero — it is what already happens |
@@ -109,11 +113,35 @@ subject-matter axis, not a party axis, and it cuts across parties:
 Category alone routes roughly a third of these to the wrong party. A consolidated borrower email
 built without this will ask the borrower to send the appraisal.
 
-**Therefore LP-800 (below) is a data-authoring ticket, not a code ticket:** a
-`document_type → responsible_party` table over the 166-type catalog, with parties
-`borrower | processor | lender | title | employer | cpa | agent | insurer`. It is a prerequisite for
-the drafting engine, it is the kind of thing the domain expert must review, and it is the cheapest
-possible thing to get wrong silently.
+**Therefore LP-800 (below) is a data-authoring ticket, not a code ticket** — and it carries more than
+a party. A borrower who is told "send 2 months of bank statements" sends a screenshot of their
+banking app. The catalog entry is what prevents that round trip:
+
+```
+document_type:        bank_statement
+responsible_party:    borrower          # borrower | processor | lender | title
+                                        # | employer | cpa | agent | insurer
+borrower_label:       "Bank statements — 2 most recent months"
+how_to_obtain:        "Log in to your bank, open Statements or Documents, and download
+                       the PDF for each of the last two full months."
+completeness_rule:    "Must show your name, the account number, and EVERY page —
+                       including pages that look blank ('Page 4 of 4')."
+common_rejects:       ["screenshots", "transaction history printouts",
+                       "partial pages", "a summary rather than a statement"]
+template_url:         null              # set for gift letters, LOEs, 4506-C
+```
+
+The AI drafter **quotes these fields; it does not invent instructions.** That is the same
+rewrite-don't-invent discipline as the prose passes, and here it also removes a real risk: an
+invented instruction ("ask your bank for a certified statement") wastes the borrower's week and is
+deceptive-practice territory if it is wrong.
+
+**Scope the authoring by tier, or it will not get done.** Roughly 25 of the 166 types are ever asked
+of a borrower — pay stubs, W-2s, bank statements, tax returns, IDs, insurance, gift letters, LOEs,
+divorce decrees, lease agreements, EMD proof. Those get the full entry. Everything else gets
+`responsible_party` only, and the drafter falls back to the document label alone. The same catalog
+then feeds the needs-list UI, the borrower nudge auto-reply (§6) and any future upload page — it is
+written once and read in four places.
 
 ---
 
@@ -166,7 +194,7 @@ Both are small, both bite Phase 4 specifically:
 
 ```
                         ┌──────────────────────── SOURCES (pluggable) ─────────────────────────┐
-  borrower ──email──▶   │  A. lf-{token}@in.mortgageboss.ai      (SES inbound, deterministic)  │
+  borrower ──email──▶   │  A. lf-{token}@inbox.mortgageboss.ai      (SES inbound, deterministic)  │
   anyone  ──email──▶    │  B. processing@herco.com ──admin routing rule──▶ co-{token}@in.…     │
   (later) ─────────▶    │  C. Gmail API / Microsoft Graph        (mailbox connection)          │
                         └──────────────────────────────┬───────────────────────────────────────┘
@@ -230,7 +258,7 @@ Budget roughly a week of infra work that Postmark would not cost.
 ```
 mortgageboss.ai                ← corporate; DMARC p=reject; no bulk sending
   ├─ mail.mortgageboss.ai      ← outbound transactional (SPF+DKIM, aligned)
-  ├─ in.mortgageboss.ai        ← INBOUND ONLY. MX → inbound-smtp.us-east-1.amazonaws.com. No A, no sending.
+  ├─ inbox.mortgageboss.ai        ← INBOUND ONLY. MX → inbound-smtp.us-east-1.amazonaws.com. No A, no sending.
   └─ bounces.mortgageboss.ai   ← envelope Return-Path / DSNs. Never a loan-file address.
 ```
 
@@ -239,6 +267,88 @@ when a receiving MX overlaps an authenticated sending domain; the same shape is 
 
 **`INBOX_DOMAIN` moves from a module constant (`models/loan_file.py:59`) to settings** — it must
 differ per environment, and dev must not point at production MX.
+
+### How `lf-{token}@inbox.mortgageboss.ai` actually works
+
+**On the name.** `inbox.` is nothing but a hostname label, the same kind of label as `staging.` —
+SES attaches no meaning to it. It is fixed as `inbox.` because
+`INBOX_DOMAIN = "inbox.mortgageboss.ai"` already ships in `models/loan_file.py:59` and is asserted
+in `tests/models/test_loan_file.py:89` and `test_communication.py:126`. Renaming it buys three
+characters and costs a migration; don't.
+
+The thing to understand first: **there is no per-loan-file mail configuration.** One rule matches the
+whole domain; the local part is resolved in Postgres. Creating a loan file costs zero infrastructure —
+the address is live the moment the row exists, which is already true today, since
+`generate_inbox_token()` runs at creation and `get_inbox_address()` (`models/loan_file.py:303`)
+already composes the string.
+
+1. **A dedicated subdomain, `inbox.mortgageboss.ai`,** with an MX record and **nothing else** — no A
+   record, no SPF, no DKIM, no sending. An inbound MX overlapping a sending domain is the documented
+   cause of an infinite mail loop.
+   ```
+   inbox.mortgageboss.ai.   MX  10  inbound-smtp.us-east-1.amazonaws.com.
+   _amazonses.in...      TXT     "<the SES domain-verification token>"
+   ```
+2. **One SES receipt rule**, in the account's single active rule set, matching the **recipient
+   domain** — not an address. Its actions, in order: write the raw message to S3 under
+   `inbound/` in a bucket with SSE-KMS and no public access; then notify (SNS, or Lambda with
+   `Event` invocation — never `RequestResponse`, which has a 30-second hard timeout).
+3. **S3 → EventBridge → SQS → Celery** `inbound.ingest_message`. The object is durable before any of
+   our code runs, so a deploy or an outage cannot lose a borrower's document.
+4. **The token.** `secrets.token_urlsafe(16)` — 128 bits. The current
+   `INBOX_TOKEN_BYTES = 12` (`services/loan_file_ids.py:29`) gives ~96 bits, which is defensible but
+   free to widen before anything is published. Never derived from the loan-file id.
+5. **Resolution inverts the tenancy invariant, deliberately.** Strip the `lf-` prefix, lower-case the
+   local part (SMTP local parts are technically case-sensitive; real MTAs are not), look up
+   `inbox_token`, and derive `company_id` **from the loan file that comes back** — the opposite of
+   `get_scoped_loan_file`, which starts from an authenticated user. This resolver must be written
+   once, deliberately, and be the only thing in the codebase allowed to do it.
+6. **Unknown or expired tokens behave identically** — same response, same latency — or an
+   enumeration oracle exists. Rate-limit probing by source IP.
+7. **Per-environment separation.** Dev points at MailHog or `dev.in.…`; staging at `stg.in.…`.
+   A shared inbound domain across environments would route a real borrower's documents into a dev
+   database.
+
+**Also required:** ADR-094 currently asserts `inbox_token` never appears in any response, and
+`tests/integration/test_contracts_leaks.py` enforces it. The processor has to see and share the
+address, so LP-802 writes the ADR that changes this — exposing `get_inbox_address()`, never the raw
+token.
+
+### The DNS work, in terms of the infra that already exists
+
+Yes — this is the **same delegation pattern as staging**, using `infra/modules/dns`, which already
+does exactly this: create a delegated Route 53 zone for a subdomain, emit its nameservers, and leave
+the apex at the registrar. The apex `mortgageboss.ai` is never delegated to AWS.
+
+**Staging needs no registrar step at all.** `staging.mortgageboss.ai` is already a delegated zone
+this account is authoritative for, and a zone is authoritative for everything beneath it. So
+`inbox.staging.mortgageboss.ai` is **one `aws_route53_record` of type MX inside the zone that already
+exists** — no new zone, no NS entry, no waiting for propagation:
+
+```hcl
+resource "aws_route53_record" "inbound_mx" {
+  zone_id = module.dns.zone_id                     # the staging zone, already there
+  name    = "inbox.${var.domain_name}"             # inbox.staging.mortgageboss.ai
+  type    = "MX"
+  ttl     = 300
+  records = ["10 inbound-smtp.us-east-1.amazonaws.com"]
+}
+```
+
+**Production is the two-phase dance staging already went through**, because
+`inbox.mortgageboss.ai` sits directly under an apex we do not control in Route 53: phase 1 creates
+the zone and outputs four nameservers, someone enters them at the registrar, phase 2 applies the
+rest. `enable_tls` should be **false** for this zone — an inbound-only mail domain serves no HTTPS
+and needs no ACM certificate.
+
+**Do not put the MX on the apex.** Whatever the team's own mail runs on (Workspace, M365) owns the
+apex MX record, and pointing it at SES would silently take down company email. That is the first
+reason for a subdomain, ahead of reputation isolation and the loop hazard.
+
+**SES constraints to design around:** inbound receipt is not available in every region (and not in
+either GovCloud region); only **one receipt rule set is active** per account per region; and the
+notification's headers are truncated at 10 KB, so always re-parse from the S3 object rather than
+trusting `commonHeaders`.
 
 ### 2.2 The routing ladder
 
@@ -418,10 +528,35 @@ lifecycle, no refresh races, no platform review.
   explicitly not affected. Asking an M365 admin to relax the outbound spam policy is asking them to
   disable a standard exfiltration control; they will refuse, and they are right to.
 - **Prefer selective over blanket.** Best shape: the company creates a dedicated alias —
-  `docs@herco.com` — routed at the domain level to `co-{token}@in.mortgageboss.ai`, and borrowers
+  `docs@herco.com` — routed at the domain level to `co-{token}@inbox.mortgageboss.ai`, and borrowers
   and agents are told to use it. Selective by construction, no per-message rule to maintain, her own
   mailbox untouched, trivially revocable, and defensible in a GLBA vendor review in a way that
   "forward her entire mailbox to a vendor" is not.
+
+### Who creates the rule, and what our UI actually does
+
+**A mail routing rule can only be created inside the customer's own admin console.** There is no
+button we can ship in V1 that creates it for them: on Google it would need `gmail.settings.basic`
+(a **restricted** scope → CASA) or Directory admin rights, and on Microsoft an inbox rule created
+through Graph would be blocked by the default external-forward policy anyway. So the honest design
+is **a guided connection flow with automatic verification**, not automation:
+
+1. **Settings → Email → Connect a mailbox.** We mint the company ingest address
+   `co-{token}@inbox.mortgageboss.ai` and show it with a copy button.
+2. **Pick the provider** — Google Workspace / Microsoft 365 / other. We render the exact
+   click-path for that provider, with the address pre-filled in each step.
+3. **"Email these steps to my admin."** This button matters more than it looks: in a processing
+   company the person who can create the rule is usually *not* the processor. The mail we send
+   contains the steps, the ingest address, and nothing about any loan file.
+4. **Verification is automatic and observable.** The connection sits at
+   `not_verified → awaiting_first_message → verified`. The moment anything arrives at that address
+   we flip it to verified and show the sender and subject we saw, so she can confirm it was her test.
+5. **Health after that.** `last_success_at` staleness is surfaced as a persistent banner on the file
+   list — *"no mail received in 4 days"* — because the worst failure here is silent: the rule was
+   removed, nothing errored, and documents stopped arriving.
+
+The processor's own action is therefore: click Connect, choose the provider, and either follow three
+steps herself or forward them to whoever administers the mail. Everything after that is ours.
 
 **What forwarding cannot give:** read/unread and label state, historical backfill (we see mail only
 from the moment the rule turns on), and **send-as**.
@@ -580,10 +715,42 @@ Two deliberate departures, each of which needs saying out loud in the ticket:
    And structurally: **the drafting context gets no access to pricing, rate sheets, or underwriting
    decisions.** If the model cannot see a rate, it cannot quote one.
 
-**Send model.** V1 stays "AI drafts, processor sends" — and it should be enforced in code, not
-policy: no send path without an authenticated `reviewed_by_user_id` and a `draft_id`, and **no bulk
-send**. Store the model draft, the human edit and the sent version separately; the diff is the
-evidence of meaningful review. Two additions to the plan's "Copy & send":
+### How the mail actually leaves — three paths, two of which we ship
+
+**First, what "processor sends" has to mean.** The compliance argument (§6) is that a named, licensed
+human is the *sender of record* and made the statement. That is about who **decides**, not about who
+operates the SMTP connection. So sending through our infrastructure is fully compatible with it, as
+long as the send path refuses without an authenticated `reviewed_by_user_id` and a `draft_id`, there
+is **no bulk send**, and we store the model draft, the human edit and the sent version separately —
+the diff is the evidence of review.
+
+| | **A. Copy & send** | **B. Open in mail client** | **C. Send from the app** |
+|---|---|---|---|
+| How | She clicks Copy, pastes into her own client | `mailto:` pre-fills to/subject/body | We transmit it |
+| Setup | none | none | a mailbox connection |
+| From address | hers, native | hers, native | hers — see below |
+| Her signature / threading | native | native | we must reproduce it |
+| Do we capture the sent copy? | only if she Bccs the file address | only if she Bccs | **natively** |
+| Breaks on | nothing | **long bodies** — `mailto:` is truncated around 2 000 characters in several clients, carries no HTML and no attachments | a revoked token |
+| Verdict | **ship in V1** | ship as a convenience for short notes only | **ship as the upgrade** |
+
+**B is a trap for exactly our use case.** A consolidated request covering six documents with
+retrieval instructions is several thousand characters; Outlook and some webmail clients silently
+truncate it. Offer it, but never as the only path, and disable it above a length threshold rather
+than sending a half email.
+
+**C has two sub-shapes and only one is acceptable.** Sending from
+`notify@mail.mortgageboss.ai` with her name in the display and `Reply-To` set to her address needs
+no permission from her domain — but the borrower sees an unfamiliar sender on a mortgage file, which
+is the exact shape of the phishing they have been warned about. Don't. Send **as her**, which means
+either a mailbox connection (`gmail.send` — a *sensitive* scope, no CASA; or Graph `Mail.Send`
+delegated, no admin consent) or her domain delegating DKIM to us. The OAuth route is the smaller ask
+and is per-user rather than per-domain.
+
+**Regardless of path, outbound never carries an NPI attachment** (§6) — it carries an authenticated,
+expiring link.
+
+Two additions to "Copy & send" that make the rest of the system work:
 
 - Put an opaque `[LF-8f3a91c2]` reference tag in the footer, and set **Reply-To** to the file's
   inbox address on anything we send. That is what makes replies route deterministically (ladder rung
@@ -649,7 +816,7 @@ Ordered so that each ticket leaves the system working. Backend before frontend, 
 
 | # | Ticket | Scope |
 |---|---|---|
-| **LP-800** | **Document-type → responsible-party table** | Author the party mapping across the 166-type catalog; domain-expert review. **Prerequisite for every borrower-facing draft.** No AI, no email. Pure data + a lookup. |
+| **LP-800** | **Borrower instruction catalog** | Per document type: `responsible_party`, `borrower_label`, `how_to_obtain`, `completeness_rule`, `common_rejects`, optional `template_url`. Full entries for the ~25 borrower-facing types, party-only for the rest; domain-expert review. **Prerequisite for every borrower-facing draft.** No AI, no email — pure data plus a lookup, read by the drafter, the needs list and the nudge auto-reply. |
 | **LP-801** | **Requestable-finding filter** | Exclude the consolidated `unidentified_document` finding (Shape B) — and persist the cause if the drafter cannot reach it from the run; phrase ID-2/3/4 as "one more source" from `requested_documents`; expose a `requestable` view over findings; normalise `details.docs_requested` to one shape and fix the bulk path's `FINDING_RESOLVED` activity type. Closes §1.1, §1.2 and §1.5. |
 | LP-802 | Email infrastructure ADRs + settings | ADR: pluggable ingestion source. ADR: SES over SendGrid. ADR: exposing the inbox address. `INBOX_DOMAIN` → settings. DNS/subdomain plan. No code paths yet. |
 | LP-803 | SES inbound infra + `inbound_messages` skeleton | Receipt rule set → S3 (SSE-KMS) → EventBridge → SQS; `inbound.ingest_message` Celery task; dedup on `(company_id, ingest_key)`; raw `.eml` persisted; auth verdicts stored. Ingest and stop — no routing, no attachments. |
@@ -657,13 +824,14 @@ Ordered so that each ticket leaves the system working. Backend before frontend, 
 | LP-805 | Token routing (Route A) + `loan_file_participants` | Non-company-scoped token resolver; ladder rungs 1–2; participant seeding from borrowers / LO / lender; trust decision; `Communication(inbound, RECEIVED)` + `COMMUNICATION_RECEIVED` activity. |
 | LP-806 | Triage queue API + accept-into-file | The approval gate. `create_document(upload_source=BORROWER_INBOX)`, sets `possible_duplicate`. Per-file opt-in auto-accept, off by default. Reassign and reject paths. |
 | LP-807 | Triage queue UI | Replace `TabPlaceholder`; inbox cards with sender + auth badge + attachment preview + suggested file/type/need; one-click accept. Company-level unrouted queue. |
-| LP-808 | Route B — forwarded mailbox | `mailbox_connections`; per-company `co-{token}@` alias; original-hop `Authentication-Results` / ARC / surviving-DKIM evaluation; ladder rungs 3–5; admin setup runbook for Workspace routing rules and M365 transport rules. |
+| LP-808 | Route B — forwarded mailbox | `mailbox_connections`; per-company `co-{token}@` alias; original-hop `Authentication-Results` / ARC / surviving-DKIM evaluation; ladder rungs 3–5; **the guided connection flow** — mint `co-{token}@`, provider-specific steps, "email these steps to my admin", `not_verified → awaiting_first_message → verified`, and staleness alerting. |
 | LP-809 | Draft accumulation model | `Communication(OUTBOUND, DRAFT)` + `communication_needs_items`; wire `request_documents_in_bulk` into a pending draft; regenerate on add/remove. |
 | LP-810 | AI drafting engine | LP-634 pattern: fact bundle → cache → compose → `rejection_reason` guards **including the compliance scanner** → one retry. Prompts in `ai/prompts/communication/`. Feature flag off by default. |
 | LP-811 | Send model + threading | **Calls `request_needs_item()` on send** — `PENDING` → `REQUESTED`, stamping `requested_at` and starting the reminder clock (§1.4). Copy & send / mailto; Reply-To = file address; `[LF-xxxx]` footer tag; Bcc-the-file; `email_threads`; `reviewed_by_user_id` required; no bulk send; auto-reply suppression + loop breaker. |
 | LP-812 | Communication timeline (4.3) | Merge communications + activity log; filter pills; compose with template selector; inbox address display. |
 | LP-813 | Underwriter contact (4.4) | Lender write endpoints (there is currently **no create/update path for lenders at all**); per-file underwriter assignment (does not exist anywhere today). |
 | LP-814 | Reminder suggestions (4.5) | **Blocked on LP-811** — `requested_at` is NULL on every row today (§1.4). Celery beat over `requested_at` / needs status: pending > 3d, no response > 5d, file untouched > 7d. Suggestion cards with snooze. **Suggests only; never sends.** |
+| LP-816 | Send from the app | Optional upgrade over copy-and-send: transmit as her via a mailbox connection (`gmail.send`, a *sensitive* scope only; or Graph `Mail.Send` delegated). Same send gate, same guards; captures the sent copy natively instead of relying on Bcc. |
 | LP-815 | Secure-link outbound + borrower nudge auto-reply | Tokenized expiring upload link; auto-reply steering borrowers to it; block NPI attachments on outbound in code. |
 
 **What this plan does not decide:**
