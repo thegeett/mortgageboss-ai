@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.models import Company, LoanProgram, User, UserRole
+from app.models.base import utcnow
 from app.models.communication import (
     Communication,
     CommunicationDirection,
@@ -36,7 +37,7 @@ from app.services.email_reply import (
     unread_count,
 )
 from app.services.inbound_ingest import process_raw_message
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
@@ -459,3 +460,117 @@ async def test_reply_context_says_who_and_what_before_anything_is_typed(
     assert context.recipient == "jane.borrower@personal-email.com"
     assert context.subject == "Re: Docs"
     assert context.in_reply_to_message_id == "p@example.com"
+
+
+# --------------------------------------------------------------------------------------------- #
+# The migration, RUN in both directions (review finding)
+# --------------------------------------------------------------------------------------------- #
+def _migration_sql() -> tuple[str, str]:
+    """The upgrade's backfill and the downgrade's restore, imported so a test can execute them.
+
+    `_BACKFILL_NUDGE_REPLY_TO` was hoisted for exactly this and nothing was using it — the
+    hook-with-no-consumer shape, one size down. LP-812's review established the pattern after
+    running a backfill and finding two bugs in it.
+    """
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    root = Path(__file__).resolve().parents[1].parent / "alembic" / "versions"
+    (path,) = [p for p in root.glob("*.py") if "d81b6e4c25f7" in p.name]  # pragma: allowlist secret
+    spec = spec_from_file_location("_mig_lp818", path)
+    assert spec and spec.loader
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    down = """
+        UPDATE communications
+        SET external_message_id = in_reply_to_message_id
+        WHERE template_key = 'borrower_secure_upload_nudge'
+          AND in_reply_to_message_id IS NOT NULL
+          AND external_message_id IS NULL
+    """
+    return str(module._BACKFILL_NUDGE_REPLY_TO), down
+
+
+async def _nudge(db: AsyncSession, loan_file, message_id: str) -> Communication:
+    row = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.SENT,
+        template_key="borrower_secure_upload_nudge",
+        external_message_id=message_id,
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def test_the_nudge_id_round_trips_through_upgrade_and_downgrade(
+    db_session: AsyncSession,
+) -> None:
+    """The separated meaning must be restorable, because the downgrade drops the column it lives in.
+
+    Rung 2 matches `external_message_id`, so an id that does not come back is routing input this
+    migration destroyed.
+    """
+    up, down = _migration_sql()
+    _company, loan_file = await _company_and_file(db_session, slug=f"rt{uuid4().hex[:6]}")
+    nudge = await _nudge(db_session, loan_file, "<nudge@example.com>")
+
+    await db_session.execute(text(up))
+    await db_session.refresh(nudge)
+    assert nudge.external_message_id is None
+    assert nudge.in_reply_to_message_id == "<nudge@example.com>"
+
+    await db_session.execute(text(down))
+    await db_session.refresh(nudge)
+    assert nudge.external_message_id == "<nudge@example.com>"
+
+
+async def test_a_row_soft_deleted_between_the_two_still_comes_back(
+    db_session: AsyncSession,
+) -> None:
+    """Measured before the fix: it did not.
+
+    The downgrade filtered `deleted_at IS NULL`, mirroring the upgrade — but the two statements do
+    different jobs. The upgrade CHOOSES what to migrate; the downgrade RESTORES a column the next
+    statement drops, so anything it skips is destroyed rather than left where it was.
+
+    It matters because rung 2 (`inbound_routing._route_by_thread`) matches `external_message_id`
+    with no `only_active`: a soft-deleted outbound message is still routing input, which is
+    defensible — deleting our record does not unsend the message a borrower is replying to — but it
+    means these ids are live data rather than tombstones.
+    """
+    up, down = _migration_sql()
+    _company, loan_file = await _company_and_file(db_session, slug=f"sd{uuid4().hex[:6]}")
+    nudge = await _nudge(db_session, loan_file, "<deleted-later@example.com>")
+
+    await db_session.execute(text(up))
+    await db_session.refresh(nudge)
+    assert nudge.in_reply_to_message_id == "<deleted-later@example.com>"
+
+    nudge.deleted_at = utcnow()
+    await db_session.flush()
+
+    await db_session.execute(text(down))
+    await db_session.refresh(nudge)
+    assert nudge.external_message_id == "<deleted-later@example.com>"
+
+
+async def test_the_upgrade_leaves_a_soft_deleted_row_where_it_is(db_session: AsyncSession) -> None:
+    """The control for the asymmetry, so the two filters are not "fixed" into agreement.
+
+    The upgrade's `deleted_at IS NULL` is correct: it declines to migrate a deleted row, which
+    leaves the id in `external_message_id` where it already was. Removing that filter would be a
+    different change, not a symmetry.
+    """
+    up, _down = _migration_sql()
+    _company, loan_file = await _company_and_file(db_session, slug=f"al{uuid4().hex[:6]}")
+    nudge = await _nudge(db_session, loan_file, "<already-gone@example.com>")
+    nudge.deleted_at = utcnow()
+    await db_session.flush()
+
+    await db_session.execute(text(up))
+    await db_session.refresh(nudge)
+
+    assert nudge.external_message_id == "<already-gone@example.com>"
+    assert nudge.in_reply_to_message_id is None

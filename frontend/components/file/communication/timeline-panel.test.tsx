@@ -17,6 +17,10 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockTimeline = vi.fn();
+const mockReplyContext = vi.fn(async (_fileId: string, _entryId: string) => ({
+  recipient: "jane@borrower.example",
+  subject: "Re: Docs",
+}));
 
 vi.mock("@/lib/api/timeline", () => ({
   useTimeline: (...args: unknown[]) => mockTimeline(...args),
@@ -30,7 +34,7 @@ vi.mock("@/lib/api/messages", () => ({
   useSetImportant: () => ({ mutate: mockImportant, isPending: false }),
   useMarkRead: () => ({ mutate: mockRead, isPending: false }),
   useReply: () => ({ mutate: mockReply, isPending: false }),
-  fetchReplyContext: async () => ({ recipient: "jane@borrower.example", subject: "Re: Docs" }),
+  fetchReplyContext: (fileId: string, entryId: string) => mockReplyContext(fileId, entryId),
 }));
 
 import type { TimelineEntry } from "@/lib/types/timeline";
@@ -286,5 +290,31 @@ describe("the reply box", () => {
     fireEvent.change(screen.getByLabelText("Reply body"), { target: { value: "   " } });
 
     expect(screen.getByRole("button", { name: "Save reply" })).toHaveProperty("disabled", true);
+  });
+});
+
+describe("the reply box's context fetch", () => {
+  it("fires once, not once per render while the response is pending", async () => {
+    // Measured before the fix: one fetch on open, THREE after two keystrokes. The guard was
+    // `context === null` in the render body, and the fetch is async — so every re-render while the
+    // response was outstanding re-fired it, and typing re-renders on each keystroke.
+    let calls = 0;
+    mockReplyContext.mockImplementation(() => {
+      calls += 1;
+      return new Promise(() => {}); // never resolves: the box stays in the pending state
+    });
+    loaded([MESSAGE]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    const replyButton = screen.getAllByRole("button", { name: /repl/i })[0];
+    expect(replyButton).toBeTruthy();
+    fireEvent.click(replyButton as HTMLElement);
+    expect(calls).toBe(1);
+
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "a" } });
+    fireEvent.change(box, { target: { value: "ab" } });
+
+    expect(calls).toBe(1);
   });
 });

@@ -31,7 +31,7 @@ import {
   Star,
   TriangleAlert,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -161,11 +161,29 @@ function ReplyBox({
 
   // Fetched once when the box opens. Not a query, because it is read exactly once per open and a
   // cached answer would go stale against a message whose sender changed under it.
-  if (context === null && error === null) {
+  //
+  // AN EFFECT, NOT A RENDER-PHASE CALL, and the difference is not stylistic. The guard was
+  // `context === null`, and the fetch is async — so ANY re-render while the response is outstanding
+  // re-fires it, and typing in the textarea below re-renders on every keystroke. Measured: one
+  // fetch on open, THREE after two keystrokes with the response still pending. A processor who
+  // starts typing before it lands is the ordinary case, not a contrived one.
+  //
+  // This is not the LP-811b pattern. That one DERIVES STATE FROM PROPS during render, which React
+  // documents and this codebase already uses. This performs a side effect, which is what an effect
+  // is for — and the dependency list here is honest rather than suppressed.
+  useEffect(() => {
+    let live = true;
     void fetchReplyContext(fileId, entry.id)
-      .then(setContext)
-      .catch(() => setError("This message cannot be replied to."));
-  }
+      .then((next) => {
+        if (live) setContext(next);
+      })
+      .catch(() => {
+        if (live) setError("This message cannot be replied to.");
+      });
+    return () => {
+      live = false;
+    };
+  }, [fileId, entry.id]);
 
   if (error) return <p className="mt-2 text-xs text-danger">{error}</p>;
 

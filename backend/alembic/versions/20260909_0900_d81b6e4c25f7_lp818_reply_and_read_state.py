@@ -125,6 +125,17 @@ def downgrade() -> None:
         """
     )
     # The nudge's id moves back, so a rollback leaves rung 2 exactly as it found it.
+    #
+    # NO `deleted_at` FILTER HERE, DELIBERATELY, AND IT IS NOT AN OVERSIGHT MIRRORING THE UPGRADE'S.
+    # The upgrade skips soft-deleted rows because it is choosing what to migrate; this is RESTORING a
+    # column that the next statement DROPS, so anything it skips is destroyed rather than left where
+    # it was. A row that was live at upgrade and soft-deleted before the rollback would have had its
+    # id moved out and never moved back — measured, before this comment existed.
+    #
+    # It matters because rung 2 (`inbound_routing._route_by_thread`) matches
+    # `external_message_id` with NO `only_active`: a soft-deleted outbound message is still routing
+    # input, which is defensible — deleting our record does not unsend the message a borrower is
+    # replying to — but it means these ids are live data, not tombstones.
     op.execute(
         """
         UPDATE communications
@@ -132,7 +143,6 @@ def downgrade() -> None:
         WHERE template_key = 'borrower_secure_upload_nudge'
           AND in_reply_to_message_id IS NOT NULL
           AND external_message_id IS NULL
-          AND deleted_at IS NULL
         """
     )
     op.execute("DROP INDEX IF EXISTS ix_communications_unread")
