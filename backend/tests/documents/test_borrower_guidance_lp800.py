@@ -134,6 +134,66 @@ def test_a_known_non_borrower_type_returns_a_party_and_no_prose() -> None:
     assert guidance.common_rejects == ()
 
 
+# --------------------------------------------------------------------------------------------- #
+# Assignments the Fannie Mae Selling Guide governs (sourcing pass, 2026-09-07)
+# --------------------------------------------------------------------------------------------- #
+#: The appraiser's work product on a lender's AMC order. B4-1.1-03 does not merely say the lender
+#: obtains these — it says a lender "may not use appraisals ordered or received by borrowers or
+#: other parties with an interest in the transaction". Asking a borrower for one is what produces
+#: the unusable document.
+_APPRAISER_ORDERED = ("appraisal", "comparable_rent_schedule", "small_residential_income_appraisal")
+
+#: Third-party verification forms. B3-4.2-01: "requested directly from the depository institution",
+#: and returned directly by it. The borrower never handles one — that is what the form is FOR, so a
+#: borrower-facing request for it defeats the verification it exists to provide.
+_DIRECT_VERIFICATIONS = (
+    "voe",
+    "verification_of_deposit",
+    "verification_of_assets",
+    "verification_of_mortgage",
+    "verification_of_rent",
+)
+
+
+@pytest.mark.parametrize("document_type", _APPRAISER_ORDERED)
+def test_an_appraiser_ordered_product_is_never_the_borrowers(document_type: str) -> None:
+    """B4-1.1-03, and it is a PROHIBITION rather than a convention — which is why this test names the
+    rule rather than pinning a value. A reviewer who later moves one of these to BORROWER has to
+    read what they are overriding.
+
+    All three are the same appraiser's work on the same order. Two of them shipped as PROCESSOR
+    beside an `appraisal` that was already LENDER, which is how a split like this hides: nothing
+    reaches a borrower either way, so the only symptom would have been LP-820 building two request
+    paths and two clocks for documents that arrive together."""
+    assert get_guidance(document_type).responsible_party is ResponsibleParty.LENDER
+
+
+@pytest.mark.parametrize("document_type", _DIRECT_VERIFICATIONS)
+def test_a_direct_verification_form_is_never_the_borrowers(document_type: str) -> None:
+    """B3-4.2-01. A borrower-handled verification is not a verification, so these can never become a
+    borrower ask however the party vocabulary later changes."""
+    assert get_guidance(document_type).responsible_party is not ResponsibleParty.BORROWER
+
+
+def test_the_signed_authorisation_is_the_borrowers_even_though_we_receive_the_result() -> None:
+    """B3-3.1-06 splits an ask that looks like one thing. The lender enters its own name as the
+    recipient of the transcripts, but "the lender must have each borrower ... complete and sign a
+    separate IRS Form 4506-C" — so the FORM is a borrower ask and the TRANSCRIPT is not.
+
+    Asserted as a pair, because either alone reads as a plausible whole answer and the pair is what
+    the rule actually says."""
+    assert get_guidance("form_4506c").responsible_party is ResponsibleParty.BORROWER
+    assert get_guidance("tax_transcript").responsible_party is ResponsibleParty.PROCESSOR
+
+
+def test_the_earnest_money_pair_is_split_the_way_the_guide_splits_it() -> None:
+    """B3-4.3-09 accepts EITHER "a copy of the borrower's canceled check" OR "a written statement
+    from the holder of the deposit". The catalog carries both documents, so both parties are real
+    and collapsing them to one would lose an alternative the Guide allows."""
+    assert get_guidance("emd_withdrawal_proof").responsible_party is ResponsibleParty.BORROWER
+    assert get_guidance("earnest_money_receipt").responsible_party is ResponsibleParty.AGENT
+
+
 def test_template_urls_are_all_absent_for_now() -> None:
     """Pins the deliberate omission rather than leaving it as an untested intention. LP-817 owns the
     template library; a link that resolves to nothing is worse in an email than no link, so the

@@ -41,7 +41,7 @@ never-raise lookup, and a test keeps all three axes covering the same slug set.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 
 from app.models.document import DocumentCategory, Tier
@@ -711,11 +711,24 @@ class BorrowerGuidance:
 #: is a type Phase 4 cannot address, and the sync test refuses one rather than letting it
 #: fall to a default that would quietly address it to the borrower.
 #:
-#: The assignments below are an INDUSTRY-STANDARD FIRST PASS on the same footing as the
-#: catalog itself: the party a US residential mortgage file normally draws each type from.
-#: They are NOT yet validated against the resident domain expert's real workflow, and a
-#: processing company's own habits move some of them — a shop that orders payoffs through
-#: the borrower rather than the servicer, say. Expect this to refine with Priya.
+#: SOURCED WHERE A SOURCE EXISTS. The assignments the Fannie Mae Selling Guide actually governs
+#: carry their section inline, next to the claim, so a reviewer reads the rule and the assignment
+#: together rather than taking the assignment on trust. Cited sections were read on 2026-09-07.
+#:
+#: The rest — the majority — remain an INDUSTRY-STANDARD FIRST PASS on the same footing as the
+#: catalog itself: the party a US residential mortgage file normally draws each type from. The Guide
+#: says who must OBTAIN a document for a loan to be saleable; it does not say who a processor emails,
+#: and for most types nothing says. Those are still unvalidated against the resident domain expert's
+#: real workflow, and a processing company's own habits move some of them — a shop that orders
+#: payoffs through the borrower rather than the servicer, say. Expect this to refine with Priya.
+#:
+#: THE VOCABULARY CANNOT NAME A DEPOSITORY OR A SERVICER, and the sourcing pass is what surfaced it.
+#: `verification_of_deposit`, `verification_of_assets`, `verification_of_mortgage` and
+#: `verification_of_rent` are third-party forms sent OUT to a bank, a servicer or a landlord — the
+#: same shape as `voe`, which CAN name its third party because `EMPLOYER` exists. They are recorded
+#: as PROCESSOR, which is honest about "not a borrower ask" and wrong about "no outbound request at
+#: all". LP-820 owns the non-borrower request paths and will need a party for each, or it will read
+#: these four as having nowhere to go.
 _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     # ===================================================================== #
     # Income / Employment
@@ -727,10 +740,16 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "w2": ResponsibleParty.BORROWER,
     "1099": ResponsibleParty.BORROWER,
     "tax_return": ResponsibleParty.BORROWER,
+    # B3-4.2-01: a verification form is "requested directly from" the third party and "sent
+    # directly from" it. The borrower never handles it — that is the point of the form.
     "voe": ResponsibleParty.EMPLOYER,
     "profit_and_loss": ResponsibleParty.BORROWER,
     "tax_transcript": ResponsibleParty.PROCESSOR,
-    "form_4506c": ResponsibleParty.BORROWER,  # the borrower SIGNS it; the processor sends it
+    # B3-3.1-06: "The lender must have each borrower whose income is used in qualifying ... complete
+    # and sign a separate IRS Form 4506-C at or before closing", and the LENDER enters its own name
+    # as the recipient of the transcripts. So the ask goes to the borrower — a signature — even
+    # though what comes back comes to us. That is why this is BORROWER and `tax_transcript` is not.
+    "form_4506c": ResponsibleParty.BORROWER,
     "business_tax_return": ResponsibleParty.BORROWER,
     "k1_statement": ResponsibleParty.BORROWER,
     "social_security_award_letter": ResponsibleParty.BORROWER,
@@ -757,7 +776,10 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "disability_award_letter": ResponsibleParty.BORROWER,
     "retirement_pension_award_letter": ResponsibleParty.BORROWER,
     "retirement_check": ResponsibleParty.BORROWER,
-    "verbal_voe": ResponsibleParty.PROCESSOR,  # the processor telephones the employer
+    # B3-3.1-04: the lender obtains it, by telephoning the employer. The artefact is our own written
+    # record of that call — nobody else holds it, so there is no request to send anywhere. This is
+    # the one PROCESSOR in this file that genuinely means "nobody to ask", not "not the borrower".
+    "verbal_voe": ResponsibleParty.PROCESSOR,
     "military_leave_and_earning_statement_les": ResponsibleParty.BORROWER,
     "foster_care_verification": ResponsibleParty.BORROWER,
     "boarder_rental_payments": ResponsibleParty.BORROWER,
@@ -772,11 +794,18 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "bank_statement": ResponsibleParty.BORROWER,
     "investment_account": ResponsibleParty.BORROWER,
     "retirement_account": ResponsibleParty.BORROWER,
-    "gift_letter": ResponsibleParty.BORROWER,  # the DONOR signs; the borrower obtains it
+    # B3-4.3-04: the gift "must be evidenced by a letter signed by the donor". BORROWER regardless —
+    # the party is who we ASK, and we have no relationship with the donor. The borrower gets it.
+    "gift_letter": ResponsibleParty.BORROWER,
+    # B3-4.2-01: "requested directly from the depository institution", and returned directly by it.
+    # See the vocabulary gap above: PROCESSOR here means "not a borrower ask", not "nobody to ask".
     "verification_of_deposit": ResponsibleParty.PROCESSOR,
     "brokerage_statement": ResponsibleParty.BORROWER,
     "money_market_statement": ResponsibleParty.BORROWER,
     "certificate_of_deposit": ResponsibleParty.BORROWER,
+    # B3-4.3-09: receipt is verified by "a copy of the borrower's canceled check OR a written
+    # statement from the holder of the deposit". Two documents, two parties, and the catalog has
+    # both — the holder's statement is the agent's, `emd_withdrawal_proof` is the borrower's half.
     "earnest_money_receipt": ResponsibleParty.AGENT,
     "gift_donor_bank_statement": ResponsibleParty.BORROWER,
     "life_insurance_statement": ResponsibleParty.BORROWER,
@@ -784,9 +813,9 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "crypto_account_statement": ResponsibleParty.BORROWER,
     "ira_401k": ResponsibleParty.BORROWER,
     "bank_deposit_slip": ResponsibleParty.BORROWER,
-    "emd_withdrawal_proof": ResponsibleParty.BORROWER,
+    "emd_withdrawal_proof": ResponsibleParty.BORROWER,  # B3-4.3-09, the cancelled-check half
     "life_insurance_policy": ResponsibleParty.BORROWER,
-    "verification_of_assets": ResponsibleParty.PROCESSOR,
+    "verification_of_assets": ResponsibleParty.PROCESSOR,  # B3-4.2-01 shape; see the gap above
     "financial_statements": ResponsibleParty.BORROWER,
     "statement_of_account": ResponsibleParty.BORROWER,
     # ===================================================================== #
@@ -802,6 +831,7 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     # the following: a Single-Family Comparable Rent Schedule (Form 1007) or Small Residential Income
     # Property Appraisal Report (Form 1025)". Splitting one order across two parties would give
     # LP-820 two request paths and two clocks for documents that arrive together.
+    # B4-1.1-03 covers these two exactly as it covers `appraisal` below: same appraiser, same order.
     "comparable_rent_schedule": ResponsibleParty.LENDER,  # Form 1007, appraiser-prepared
     "small_residential_income_appraisal": ResponsibleParty.LENDER,  # Form 1025 / Freddie 72
     "purchase_agreement": ResponsibleParty.AGENT,
@@ -810,7 +840,12 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "form_1098": ResponsibleParty.BORROWER,
     "property_tax_bill": ResponsibleParty.BORROWER,
     "hoa_statement": ResponsibleParty.BORROWER,
-    "appraisal": ResponsibleParty.LENDER,  # ordered through an AMC; never a borrower ask
+    # B4-1.1-03 IS A PROHIBITION, NOT A CONVENTION: lenders "may not use appraisals ordered or
+    # received by borrowers or other parties with an interest in the transaction, such as the
+    # property seller or real estate agent". An appraisal a borrower sent us is not merely awkward
+    # to have asked for — it is UNUSABLE, and the asking is what invites them to produce one.
+    # `render_document_block` refuses every non-BORROWER type, so this is enforced, not advisory.
+    "appraisal": ResponsibleParty.LENDER,
     "title_commitment": ResponsibleParty.TITLE,
     "preliminary_title_report": ResponsibleParty.TITLE,
     "flood_certification": ResponsibleParty.LENDER,
@@ -857,8 +892,8 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "credit_card_statement": ResponsibleParty.BORROWER,
     "bankruptcy_filing": ResponsibleParty.BORROWER,
     "unsecured_note": ResponsibleParty.BORROWER,
-    "verification_of_mortgage": ResponsibleParty.PROCESSOR,
-    "verification_of_rent": ResponsibleParty.PROCESSOR,
+    "verification_of_mortgage": ResponsibleParty.PROCESSOR,  # B3-4.2-01 shape; see the gap above
+    "verification_of_rent": ResponsibleParty.PROCESSOR,  # B3-4.2-01 shape; see the gap above
     # ===================================================================== #
     # Disclosures
     # ===================================================================== #
@@ -934,6 +969,28 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
 }
 
 
+@dataclass(frozen=True)
+class _Instructions:
+    """The prose half of a guidance entry — everything EXCEPT the responsible party.
+
+    Party lives only in `_RESPONSIBLE_PARTY`. It used to be repeated here as the first argument of
+    each `BorrowerGuidance(...)` literal, and the literal won: `GUIDANCE` preferred the instruction
+    entry wholesale, so for the 28 types that have one, editing `_RESPONSIBLE_PARTY` did NOTHING.
+    A reviewer correcting a party there would have seen no effect and no error.
+
+    Found by mutation during the 2026-09-07 sourcing pass: flipping `form_4506c` to PROCESSOR left
+    the whole suite green. It is the same "two spellings of one fact" ADR-399 refused, in the file
+    that argued for it — and it could only ever disagree in the direction no test looks at, because
+    `test_instructions_exist_only_where_the_borrower_can_act` pins the literals to BORROWER.
+    """
+
+    borrower_label: str
+    how_to_obtain: str
+    completeness_rule: str
+    common_rejects: tuple[str, ...]
+    template_url: str | None = None
+
+
 #: Full instructions for the types a borrower is actually asked for. Everything else gets
 #: its party and no prose — writing thin instructions for all 166 would take longer and
 #: read worse than writing real ones for the types that carry the traffic.
@@ -941,10 +998,9 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
 #: Every entry here has ``responsible_party = BORROWER`` (asserted by the sync test): a
 #: paragraph telling a borrower how to obtain their own appraisal would be instructions
 #: for something they cannot do.
-_BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
+_BORROWER_INSTRUCTIONS: dict[str, _Instructions] = {
     # ---------------------------------------------------------------- income
-    "pay_stub": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "pay_stub": _Instructions(
         borrower_label="Pay stubs — your most recent 30 days",
         how_to_obtain=(
             "From your employer's payroll portal — ADP, Workday, Paychex and similar all "
@@ -961,8 +1017,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "stubs older than 30 days",
         ),
     ),
-    "w2": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "w2": _Instructions(
         borrower_label="W-2s — the last two years",
         how_to_obtain=(
             "From your employer, or downloaded from the same payroll portal as your pay "
@@ -978,8 +1033,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "the state copy with the federal wage boxes cut off",
         ),
     ),
-    "1099": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "1099": _Instructions(
         borrower_label="1099s — the last two years",
         how_to_obtain=(
             "From whoever paid you — a client, a platform, a broker, or the Social Security "
@@ -993,8 +1047,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "one 1099 when you had several payers",
         ),
     ),
-    "tax_return": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "tax_return": _Instructions(
         borrower_label="Personal tax returns — the last two years",
         how_to_obtain=(
             "From your tax preparer, or from the software you filed with — TurboTax, H&R "
@@ -1012,8 +1065,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a state return instead of the federal one",
         ),
     ),
-    "business_tax_return": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "business_tax_return": _Instructions(
         borrower_label="Business tax returns — the last two years",
         how_to_obtain=(
             "From your CPA or tax preparer. This is the return filed for the business — a "
@@ -1028,8 +1080,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a return without the K-1s",
         ),
     ),
-    "profit_and_loss": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "profit_and_loss": _Instructions(
         borrower_label="Profit and loss statement — year to date",
         how_to_obtain=(
             "From your accountant, or exported from your bookkeeping software — QuickBooks, "
@@ -1045,8 +1096,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a statement with no period stated on it",
         ),
     ),
-    "k1_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "k1_statement": _Instructions(
         borrower_label="Schedule K-1 — the last two years",
         how_to_obtain="From the accountant who prepared the partnership or S-corporation return.",
         completeness_rule=("The K-1 issued to you for each of the last two tax years, all pages."),
@@ -1055,8 +1105,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "one year when two were asked for",
         ),
     ),
-    "social_security_award_letter": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "social_security_award_letter": _Instructions(
         borrower_label="Social Security award letter — the current year",
         how_to_obtain=(
             "From ssa.gov: sign in and choose 'get a benefit verification letter'. It can "
@@ -1072,8 +1121,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a 1099-SSA instead of the award letter",
         ),
     ),
-    "form_4506c": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "form_4506c": _Instructions(
         borrower_label="IRS Form 4506-C — signed",
         how_to_obtain=(
             "We send you the form already filled in. Sign and date it; do not change the "
@@ -1090,8 +1138,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
         ),
     ),
     # ---------------------------------------------------------------- assets
-    "bank_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "bank_statement": _Instructions(
         borrower_label="Bank statements — the two most recent months",
         how_to_obtain=(
             "Download them from your bank's website or app. Look for 'statements' or "
@@ -1109,8 +1156,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a statement with your name or the bank's name cropped out",
         ),
     ),
-    "investment_account": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "investment_account": _Instructions(
         borrower_label="Investment account statements — the two most recent months",
         how_to_obtain=(
             "From your brokerage's website — the monthly or quarterly statement, not the "
@@ -1125,8 +1171,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a trade confirmation instead of a statement",
         ),
     ),
-    "retirement_account": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "retirement_account": _Instructions(
         borrower_label="Retirement account statement — the most recent quarter",
         how_to_obtain=(
             "From your 401(k), IRA or pension provider's website, under 'statements' or "
@@ -1141,8 +1186,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "the annual summary instead of the statement",
         ),
     ),
-    "gift_letter": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "gift_letter": _Instructions(
         borrower_label="Gift letter — signed by the person giving the gift",
         how_to_obtain=(
             "We will send you the form. The person giving the gift fills it in and signs it; "
@@ -1158,8 +1202,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a text message or email in place of the signed letter",
         ),
     ),
-    "gift_donor_bank_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "gift_donor_bank_statement": _Instructions(
         borrower_label="The gift donor's bank statement — showing the money leaving",
         how_to_obtain=(
             "Ask the person giving the gift for the statement from the account the money "
@@ -1175,8 +1218,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "your own statement instead of the donor's",
         ),
     ),
-    "emd_withdrawal_proof": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "emd_withdrawal_proof": _Instructions(
         borrower_label="Proof the earnest money left your account",
         how_to_obtain=(
             "Your bank statement or online banking record showing the payment clearing, plus "
@@ -1192,8 +1234,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
         ),
     ),
     # -------------------------------------------------------------- property
-    "homeowners_insurance": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "homeowners_insurance": _Instructions(
         borrower_label="Homeowner's insurance — the declarations page",
         how_to_obtain=(
             "From your insurance agent or the insurer's website. Ask for the 'declarations "
@@ -1209,8 +1250,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a policy whose period begins after the closing date",
         ),
     ),
-    "mortgage_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "mortgage_statement": _Instructions(
         borrower_label="Mortgage statement — the most recent",
         how_to_obtain="From your servicer's website, or the statement they post to you monthly.",
         completeness_rule=(
@@ -1222,8 +1262,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a statement more than 60 days old",
         ),
     ),
-    "property_tax_bill": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "property_tax_bill": _Instructions(
         borrower_label="Property tax bill — the most recent",
         how_to_obtain=(
             "From your county or city tax collector's website — most let you search by "
@@ -1238,8 +1277,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "an assessment notice instead of the bill",
         ),
     ),
-    "hoa_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "hoa_statement": _Instructions(
         borrower_label="HOA statement or dues notice",
         how_to_obtain="From your homeowners association or its management company.",
         completeness_rule=(
@@ -1251,8 +1289,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "the association's rules instead of the dues statement",
         ),
     ),
-    "lease_agreement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "lease_agreement": _Instructions(
         borrower_label="Lease agreement — the signed lease",
         how_to_obtain="Your own copy of the signed lease for the rental property.",
         completeness_rule=(
@@ -1266,8 +1303,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
         ),
     ),
     # -------------------------------------------------------- credit + identity
-    "student_loan_statement": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "student_loan_statement": _Instructions(
         borrower_label="Student loan statement — the most recent",
         how_to_obtain=(
             "From your loan servicer's website. If your loans sit with more than one "
@@ -1284,8 +1320,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a payoff quote instead of a statement",
         ),
     ),
-    "credit_explanation_letter": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "credit_explanation_letter": _Instructions(
         borrower_label="Letter of explanation — credit history",
         how_to_obtain=(
             "You write this one. We will tell you which accounts or inquiries it needs to cover."
@@ -1298,8 +1333,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "an unsigned letter",
         ),
     ),
-    "letter_of_explanation": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "letter_of_explanation": _Instructions(
         borrower_label="Letter of explanation — in your own words",
         how_to_obtain=(
             "You write this one. We will tell you what it needs to cover; a short paragraph "
@@ -1315,8 +1349,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "an explanation sent as a text or email instead of a signed letter",
         ),
     ),
-    "divorce_decree": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "divorce_decree": _Instructions(
         borrower_label="Divorce decree — the complete filed copy",
         how_to_obtain=(
             "From the court that issued it, usually through the clerk's office, or from your "
@@ -1332,8 +1365,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a summary or cover letter from an attorney",
         ),
     ),
-    "drivers_license": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "drivers_license": _Instructions(
         borrower_label="Driver's licence — front and back",
         how_to_obtain="A photograph or scan of your current licence.",
         completeness_rule=(
@@ -1346,8 +1378,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a licence on a dark background where the edges are lost",
         ),
     ),
-    "passport": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "passport": _Instructions(
         borrower_label="Passport — the photo page",
         how_to_obtain="A photograph or scan of the page carrying your photograph and details.",
         completeness_rule=(
@@ -1360,8 +1391,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "the cover instead of the photo page",
         ),
     ),
-    "permanent_resident_card": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "permanent_resident_card": _Instructions(
         borrower_label="Permanent resident card — front and back",
         how_to_obtain="A photograph or scan of your current card.",
         completeness_rule=(
@@ -1373,8 +1403,7 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
             "a photograph where glare covers the card number",
         ),
     ),
-    "social_security_card": BorrowerGuidance(
-        ResponsibleParty.BORROWER,
+    "social_security_card": _Instructions(
         borrower_label="Social Security card",
         how_to_obtain=(
             "A photograph or scan of the card itself. If it is lost, ssa.gov can issue a "
@@ -1394,12 +1423,16 @@ _BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
 
 #: The public mapping: one entry per catalog type, party always, prose where it exists.
 #:
-#: DERIVED rather than written out 166 times, so each fact has one home. A slug's party
-#: lives in `_RESPONSIBLE_PARTY` and its instructions in `_BORROWER_INSTRUCTIONS`, and a
-#: type added to the catalog without a party is missing from GUIDANCE entirely — which is
-#: what the sync test reports, instead of a silent default.
+#: DERIVED rather than written out 166 times, so each fact has one home. A slug's party lives in
+#: `_RESPONSIBLE_PARTY` and ONLY there; its prose lives in `_BORROWER_INSTRUCTIONS` and only there;
+#: this composes them. A type added to the catalog without a party is missing from GUIDANCE
+#: entirely — which is what the sync test reports, instead of a silent default.
 GUIDANCE: dict[str, BorrowerGuidance] = {
-    slug: _BORROWER_INSTRUCTIONS.get(slug) or BorrowerGuidance(party)
+    slug: (
+        BorrowerGuidance(party, **asdict(prose))
+        if (prose := _BORROWER_INSTRUCTIONS.get(slug)) is not None
+        else BorrowerGuidance(party)
+    )
     for slug, party in _RESPONSIBLE_PARTY.items()
 }
 
