@@ -204,7 +204,7 @@ would have meant rebuilding:
 | Ticket | What | Status |
 |---|---|---|
 | [LP-831](../tickets/LP-831.md) | The Communication page becomes a mailbox: a list of drafts, one modal to read or edit | Specified |
-| [LP-832](../tickets/LP-832.md) | A request creates a new draft and the old one stays — removes `get_open_draft`'s single-row assumption, which **raises** rather than picking | Specified |
+| [LP-832](../tickets/LP-832.md) | A request creates a new draft and the old one stays — removes `get_open_draft`'s single-row assumption, which **raises** rather than picking | **REVIEWED** — 1 finding: `remove_need_from_draft` still resolved "the open draft" with `get_open_draft`, which this ticket turned from one row into the newest of several, so removing a line from the older draft silently edited the newer. No caller in `app/` today and LP-831 is the ticket that will reach for it. Verified against a real database rather than read: the migration round-trips and the restored index is byte-identical, the downgrade's refusal leaves `alembic_version` and both drafts intact, and the row lock was exercised with two connections and a barrier — without it, two drafts each missing the other's document |
 | [LP-833](../tickets/LP-833.md) | Compose by picking documents from the 166-type catalog; the model writes the framing, on the request | Specified |
 | [LP-834](../tickets/LP-834.md) | The secure link is added from inside the draft; minting expires the previous one | Specified |
 | [LP-835](../tickets/LP-835.md) | Writing to the other parties, from the same list and the same send path | Specified |

@@ -538,3 +538,94 @@ async def test_the_draft_creation_path_locks_the_file(db_session: AsyncSession) 
         (i for i, s in enumerate(seen) if "communication_needs_items" in s), len(seen)
     )
     assert first_lock < first_membership_read
+
+
+async def test_removing_a_line_edits_the_draft_it_was_asked_about(db_session: AsyncSession) -> None:
+    """LP-832 REVIEW — "the open draft" stopped naming one row, and this function still said it.
+
+    `remove_need_from_draft` resolved its target with `get_open_draft`, which was exactly one row
+    while `uq_communications_open_draft` existed and is now merely the NEWEST of several. With two
+    drafts on a file, removing a line from the OLDER one silently edited the newer.
+
+    Nothing would have caught it: the function has no caller in `app/` today. LP-831 builds the
+    drafts list, and this is the function it will reach for — which is why the id is a parameter now
+    rather than after somebody reports a line vanishing from the wrong email.
+
+    Both halves asserted. The older draft loses the line, and the newer keeps it — either alone
+    passes on a function that edited nothing at all.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    first = NeedsItem(
+        loan_file_id=loan_file.id,
+        title="Bank statements",
+        needs_type="bank_statement",
+        origin=NeedsItemOrigin.FINDING,
+    )
+    second = NeedsItem(
+        loan_file_id=loan_file.id,
+        title="Pay stubs",
+        needs_type="pay_stub",
+        origin=NeedsItemOrigin.FINDING,
+    )
+    db_session.add_all([first, second])
+    await db_session.flush()
+
+    older = (
+        await add_needs_to_draft(
+            db_session, loan_file=loan_file, needs=[first], actor_user_id=actor
+        )
+    ).draft
+    newer = (
+        await add_needs_to_draft(
+            db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        )
+    ).draft
+    assert older is not None and newer is not None and older.id != newer.id
+    assert "Bank statements" in (older.body or "")  # the control: it is there to begin with
+    assert "Bank statements" in (newer.body or "")
+
+    edited = await remove_need_from_draft(
+        db_session,
+        loan_file=loan_file,
+        needs_item_id=first.id,
+        communication_id=older.id,
+    )
+
+    assert edited is not None and edited.id == older.id
+    await db_session.refresh(older)
+    await db_session.refresh(newer)
+    assert "Bank statements" not in (older.body or ""), "the draft asked about was not edited"
+    assert "Bank statements" in (newer.body or ""), "a different draft was edited instead"
+
+
+async def test_removing_from_another_files_draft_is_refused(db_session: AsyncSession) -> None:
+    """The same answer a missing draft gets. A draft on another file must not be distinguishable
+    from one that does not exist, and it must certainly not be editable."""
+    loan_file, _actor = await _file_and_actor(db_session)
+    other_file, other_actor = await _file_and_actor(db_session)
+    need = NeedsItem(
+        loan_file_id=other_file.id,
+        title="Bank statements",
+        needs_type="bank_statement",
+        origin=NeedsItemOrigin.FINDING,
+    )
+    db_session.add(need)
+    await db_session.flush()
+    theirs = (
+        await add_needs_to_draft(
+            db_session, loan_file=other_file, needs=[need], actor_user_id=other_actor
+        )
+    ).draft
+    assert theirs is not None
+
+    assert (
+        await remove_need_from_draft(
+            db_session,
+            loan_file=loan_file,
+            needs_item_id=need.id,
+            communication_id=theirs.id,
+        )
+        is None
+    )
+    await db_session.refresh(theirs)
+    assert "Bank statements" in (theirs.body or ""), "another file's draft was edited"

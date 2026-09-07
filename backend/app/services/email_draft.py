@@ -566,15 +566,42 @@ async def add_needs_to_draft(
 
 
 async def remove_need_from_draft(
-    db: AsyncSession, *, loan_file: LoanFile, needs_item_id: UUID
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    needs_item_id: UUID,
+    communication_id: UUID | None = None,
 ) -> Communication | None:
-    """Drop a need from the open draft and regenerate. Returns the draft, or None if there is none.
+    """Drop a need from ONE draft and regenerate it. Returns that draft, or None if there is none.
 
     An emptied draft is KEPT rather than deleted. A processor who removes the last line is editing,
     not abandoning — deleting the row would discard whatever else they had changed, and an empty
     draft is visibly empty, which a missing one is not.
+
+    LP-832 REVIEW — `communication_id` IS NOT OPTIONAL IN MEANING, ONLY IN SIGNATURE. This read "the
+    open draft" and resolved it with `get_open_draft`, which was one row while
+    `uq_communications_open_draft` existed and is now merely the NEWEST of several. So a request to
+    remove a line from the draft a processor is looking at would have silently edited a different
+    one — and the function has no caller today, so nothing would have caught it: LP-831 builds the
+    drafts list, and this is the function it will reach for.
+
+    The parameter defaults to None so the existing tests still describe the single-draft case
+    honestly, and that fallback still means "the newest". A caller that HAS a draft in front of a
+    person must pass its id.
     """
-    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    if communication_id is not None:
+        draft = await db.get(Communication, communication_id)
+        if (
+            draft is None
+            or draft.loan_file_id != loan_file.id
+            or draft.deleted_at is not None
+            or draft.status is not CommunicationStatus.DRAFT
+        ):
+            # The same answer a missing draft gets. A draft on another file must not be
+            # distinguishable from one that does not exist.
+            return None
+    else:
+        draft = await get_open_draft(db, loan_file_id=loan_file.id)
     if draft is None:
         return None
     row = await db.get(CommunicationNeedsItem, (draft.id, needs_item_id))
