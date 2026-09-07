@@ -24,7 +24,12 @@ _BATCH_SIZE = 10
     bind=True, name="inbound.ingest_message", max_retries=3
 )
 def ingest_message(
-    self: Any, *, bucket: str, key: str, receipt: dict[str, Any] | None = None
+    self: Any,
+    *,
+    bucket: str,
+    key: str,
+    receipt: dict[str, Any] | None = None,
+    ses_message_id: str | None = None,
 ) -> str:
     """Pull one raw message out of the inbound bucket and store it.
 
@@ -35,10 +40,14 @@ def ingest_message(
     """
     import asyncio
 
-    return asyncio.run(_ingest_message(bucket=bucket, key=key, receipt=receipt))
+    return asyncio.run(
+        _ingest_message(bucket=bucket, key=key, receipt=receipt, ses_message_id=ses_message_id)
+    )
 
 
-async def _ingest_message(*, bucket: str, key: str, receipt: dict[str, Any] | None) -> str:
+async def _ingest_message(
+    *, bucket: str, key: str, receipt: dict[str, Any] | None, ses_message_id: str | None = None
+) -> str:
     from app.core.database import async_session_maker
     from app.services.inbound_ingest import process_raw_message
     from app.storage.s3 import S3StorageBackend
@@ -56,7 +65,20 @@ async def _ingest_message(*, bucket: str, key: str, receipt: dict[str, Any] | No
             session,
             raw=raw,
             raw_storage_path=f"s3://{bucket}/{key}",
-            ses_message_id=receipt.get("messageId") if isinstance(receipt, dict) else None,
+            # THE SES MESSAGE ID IS NOT ON THE `receipt` OBJECT. AWS documents it on the `mail`
+            # object ("Contents of notifications for Amazon SES email receiving"), whose fields are
+            # destination / messageId / source / timestamp / headers / commonHeaders; `receipt`
+            # carries action, the verdicts, recipients and timestamps and no id at all. Reading it
+            # from `receipt` returned None for every real message, so `ingest_key` fell through to
+            # its next source — the SENDER-WRITTEN `Message-ID` header — as a globally unique dedup
+            # key. That is the cross-tenant suppression LP-807 escalated as unreachable on the SES
+            # path; it was reachable on every message.
+            #
+            # The object key is the same value: AWS says of the S3 action's `objectKey` that "this
+            # is the same as the messageId in the mail object". It is used as the fallback rather
+            # than the source, so the id travels explicitly and this does not silently depend on
+            # the delivery action being S3.
+            ses_message_id=ses_message_id or key,
             receipt=receipt,
         )
         await session.commit()
@@ -105,12 +127,31 @@ def poll_queue() -> int:
             logger.warning("inbound_queue_unexpected_shape")
             continue
 
-        ingest_message.delay(bucket=record[0], key=record[1], receipt=notification.get("receipt"))
+        ingest_message.delay(
+            bucket=record[0],
+            key=record[1],
+            receipt=notification.get("receipt"),
+            ses_message_id=_ses_message_id(notification),
+        )
         client.delete_message(
             QueueUrl=settings.inbound_queue_url, ReceiptHandle=message["ReceiptHandle"]
         )
         handled += 1
     return handled
+
+
+def _ses_message_id(notification: dict[str, Any]) -> str | None:
+    """The id SES assigned this delivery, from the `mail` object.
+
+    A NAMED FUNCTION so it can be tested against a real notification shape rather than re-derived in
+    a test that would then assert its own copy. AWS documents `messageId` on `mail`; the `receipt`
+    object carries `action`, the verdicts, `recipients` and timestamps and no id at all. Reading it
+    from `receipt` returned None for every real message, and `compute_ingest_key` then fell through
+    to the SENDER-WRITTEN `Message-ID` header as a globally unique dedup key.
+    """
+    mail = notification.get("mail")
+    message_id = mail.get("messageId") if isinstance(mail, dict) else None
+    return message_id if isinstance(message_id, str) and message_id else None
 
 
 def _s3_record(notification: dict[str, Any]) -> tuple[str, str] | None:
