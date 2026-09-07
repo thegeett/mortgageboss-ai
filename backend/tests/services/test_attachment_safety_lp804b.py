@@ -13,8 +13,10 @@ about what a file structurally contains.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
+import pikepdf
 import pytest
 from app.models.inbound_attachment import AttachmentSafetyState
 from app.services.attachment_safety import (
@@ -32,7 +34,18 @@ _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "attachments"
 #: The keys the plan names. Asserted as BYTES against the file, because "the object model no longer
 #: references it" and "the bytes no longer contain it" are different claims and only the second one
 #: survives being handed to another reader.
-DANGEROUS_KEYS = (b"/JS", b"/OpenAction", b"/AA", b"/XFA", b"/JavaScript", b"/EmbeddedFile")
+DANGEROUS_KEYS = (
+    b"/JS",
+    b"/OpenAction",
+    b"/AA",
+    b"/XFA",
+    b"/JavaScript",
+    b"/EmbeddedFile",
+    # Named in the build plan alongside the others and missing from this tuple until the
+    # review. `armed.pdf` carries neither this nor an `/EmbeddedFile`, so the "no dangerous
+    # key survives" assertion was passing VACUOUSLY for both — see the annotation tests below.
+    b"/Launch",
+)
 
 
 def _fixture(name: str) -> bytes:
@@ -404,3 +417,90 @@ async def test_a_second_assessment_does_not_overwrite_a_verdict(db_session) -> N
 
     assert second == 0  # nothing left in PENDING
     assert row.safety_state is AttachmentSafetyState.SAFE
+
+
+# --------------------------------------------------------------------------------------------- #
+# The catalog is not the only place a payload lives (review finding)
+# --------------------------------------------------------------------------------------------- #
+def _pdf_with_dangerous_annotations() -> bytes:
+    """A PDF carrying an embedded file and a `/Launch` action on the PAGE, not in the catalog.
+
+    Generated rather than committed so the shape is readable next to the test that depends on it.
+    An ordinary `/URI` link is included deliberately — see the control below.
+    """
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+
+    embedded = pdf.make_stream(b"malicious payload")
+    embedded.Type = pikepdf.Name("/EmbeddedFile")
+    filespec = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name("/Filespec"),
+            F="evil.exe",
+            EF=pikepdf.Dictionary(F=embedded),
+        )
+    )
+    attachment = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"),
+            Subtype=pikepdf.Name("/FileAttachment"),
+            Rect=[0, 0, 10, 10],
+            FS=filespec,
+        )
+    )
+    launcher = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"),
+            Subtype=pikepdf.Name("/Link"),
+            Rect=[0, 0, 10, 10],
+            A=pikepdf.Dictionary(S=pikepdf.Name("/Launch"), F="cmd.exe"),
+        )
+    )
+    ordinary_link = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"),
+            Subtype=pikepdf.Name("/Link"),
+            Rect=[0, 0, 10, 10],
+            A=pikepdf.Dictionary(S=pikepdf.Name("/URI"), URI="https://example.com"),
+        )
+    )
+    pdf.pages[0].Annots = pdf.make_indirect([attachment, launcher, ordinary_link])
+
+    buffer = io.BytesIO()
+    pdf.save(buffer)
+    pdf.close()
+    return buffer.getvalue()
+
+
+def test_the_annotated_fixture_really_is_armed() -> None:
+    """Assert the fixture before asserting anything about what sanitising does to it.
+
+    `armed.pdf` carries no `/EmbeddedFile` and no `/Launch`, so
+    `test_sanitising_removes_every_dangerous_key` was passing vacuously for both — the two keys the
+    build plan names that nothing here could exercise.
+    """
+    raw = _pdf_with_dangerous_annotations()
+    for key in (b"/EmbeddedFile", b"/Launch", b"/FileAttachment"):
+        assert key in raw, f"{key!r} missing from the annotated fixture"
+
+
+def test_sanitising_removes_payloads_attached_to_a_page() -> None:
+    """An `/EmbeddedFile` can hang off a `/FileAttachment` annotation rather than the catalog's
+    `/Names` tree, and a `/Launch` action can sit in an annotation's `/A` rather than in
+    `/OpenAction`. Measured before the fix: both passed through `sanitise_pdf` untouched."""
+    cleaned = sanitise_pdf(_pdf_with_dangerous_annotations())
+
+    for key in (b"/EmbeddedFile", b"/Launch", b"/FileAttachment"):
+        assert key not in cleaned, f"{key!r} survived sanitisation"
+
+
+def test_an_ordinary_link_survives_sanitising() -> None:
+    """The control, and the reason annotations are removed selectively rather than wholesale.
+
+    Deleting every `/Annots` array would satisfy the test above while quietly stripping the links
+    out of a lender's disclosure PDF. A URL link is ordinary and must come through.
+    """
+    cleaned = sanitise_pdf(_pdf_with_dangerous_annotations())
+
+    assert b"/URI" in cleaned
+    assert b"example.com" in cleaned

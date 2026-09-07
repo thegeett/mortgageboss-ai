@@ -145,6 +145,41 @@ def is_encrypted_pdf(data: bytes) -> bool:
         return False
 
 
+def _strip_dangerous_annotations(page: pikepdf.Page) -> None:
+    """Drop page annotations that carry a payload or an action, leaving ordinary ones alone.
+
+    THE CATALOG IS NOT THE ONLY PLACE THESE LIVE, which is the half `_DANGEROUS_CATALOG_KEYS` does
+    not reach. An `/EmbeddedFile` can hang off a `/FileAttachment` annotation instead of the
+    catalog's `/Names` tree, and a `/Launch` action can sit in an annotation's `/A` rather than in
+    `/OpenAction`. Measured before this existed: an embedded executable and a `/Launch` action, both
+    attached to a page, passed through `sanitise_pdf` completely untouched — while the test asserting
+    "no dangerous key survives" passed, because the armed fixture carried neither.
+
+    Both are named in the build plan's list of what pikepdf must strip.
+
+    Annotations are removed SELECTIVELY here rather than wholesale: a `/Link` to a URL is ordinary in
+    a lender's PDF, and dropping every annotation would take legitimate ones with it. What goes is
+    the subtype that exists to carry a file, and any action that launches or scripts.
+    """
+    if "/Annots" not in page:
+        return
+    kept = []
+    for annot in page.Annots:
+        subtype = str(annot.get("/Subtype", ""))
+        action = annot.get("/A")
+        action_kind = str(action.get("/S", "")) if isinstance(action, pikepdf.Dictionary) else ""
+        if subtype == "/FileAttachment" or action_kind in ("/Launch", "/JavaScript"):
+            continue
+        # An ordinary annotation can still carry an embedded file on a filespec.
+        if "/FS" in annot:
+            del annot["/FS"]
+        kept.append(annot)
+    if kept:
+        page.Annots = kept
+    else:
+        del page["/Annots"]
+
+
 def sanitise_pdf(data: bytes) -> bytes:
     """Strip every catalog key that can execute something or carry a payload.
 
@@ -157,6 +192,8 @@ def sanitise_pdf(data: bytes) -> bytes:
         for key in _DANGEROUS_CATALOG_KEYS:
             if key in pdf.Root:
                 del pdf.Root[key]
+        for page in pdf.pages:
+            _strip_dangerous_annotations(page)
         buffer = io.BytesIO()
         pdf.save(buffer)
         return buffer.getvalue()
