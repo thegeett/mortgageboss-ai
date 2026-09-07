@@ -104,7 +104,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | INFRA-2 | c297a3df | 48244319 | 1 | exact-matched event types the guide spells two ways, and a missing health event; one predicted finding checked and dropped. Plan still not run — human |
 | 2026-09-07 | LP-803 | 4024f921 |  |  | awaiting review. Migration d1a8f37c0e59; nullable company_id against the plan; NULLS NOT DISTINCT dedup; §H1 injector |
 | 2026-09-07 | LP-804a | 66788b19 | 3cd4bce4 | 1 | a corpus fix undone by two sibling hooks the same argument covered |
-| 2026-09-07 | LP-804b | af395644 | REVIEW_SHA | 1 | two plan-named PDF keys asserted vacuously and unstripped on page annotations |
+| 2026-09-07 | LP-804b | af395644 | 4b4c209d | 1 | two plan-named PDF keys asserted vacuously and unstripped on page annotations |
 | 2026-09-07 | LP-804b | af395644 |  |  | awaiting review. pikepdf added on evidence; three dependencies declined. A surviving mutant found an untested branch |
 | 2026-09-07 | LP-804a | 66788b19 |  |  | awaiting review. Split from LP-804; LP-804b (safety, deps) is row 13b. Forwarded fixture was wrong and would have passed without recursing |
 | 2026-09-07 | INFRA-3 | 4c71c20b | 9cd54199 | 2 | a malformed DMARC record one flag-flip away, now fail-closed; the DKIM suffix sourced from the published table; the bounces escalation verified and strengthened |
