@@ -223,6 +223,7 @@ async def send_draft(
     recipient: str,
     body: str,
     approver_user_id: UUID,
+    subject: str | None = None,
 ) -> Communication:
     """Record that ``draft_id`` was sent, and start the clock on everything it asked for.
 
@@ -278,7 +279,11 @@ async def send_draft(
     greeting = await greeting_name_for(db, draft=draft, loan_file=loan_file)
     signature = approver.full_name if approver else ""
     body = finalise_draft_body(body, borrower_first_name=greeting, processor_name=signature)
-    outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)
+    # LP-831 — the processor's subject where they gave one, the stored one otherwise. Same rule as
+    # `body`: what is recorded as sent is what actually went out, and the modal is now a place a
+    # subject can be edited.
+    subject_sent = subject if subject is not None else (draft.subject or "")
+    outbound = build_outbound(loan_file, subject=subject_sent, body=body)
 
     # LP-823 REVIEW — RESOLVED THE SAME WAY, so the comparison downstream is like with like.
     # `EvidencePublic.was_edited` is `body_composed != body_as_sent`, and its own comment says it
@@ -302,6 +307,7 @@ async def send_draft(
     ).body
 
     draft.body = outbound.body
+    draft.subject = outbound.subject
     draft.recipient = recipient
     draft.status = CommunicationStatus.SENT
     draft.sent_at = utcnow()

@@ -8,15 +8,28 @@
  */
 import { MessageDialog } from "@/components/file/communication/message-dialog";
 import type { MessageDetail } from "@/lib/types/communication";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseMessageDetail = vi.fn();
+const mockSend = vi.fn();
+const sendState = { mutate: mockSend, isPending: false, isError: false };
 vi.mock("@/lib/api/communications", () => ({
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
+  useSendDraft: () => sendState,
 }));
 
 afterEach(cleanup);
+
+// LP-831 — CLEARED BETWEEN TESTS, and this was a real defect in the tests rather than a precaution.
+// `mockSend` accumulates across cases, so `mock.calls[0]` in the party-draft test was reading the
+// call the BORROWER-draft test made a moment earlier: it passed alone and failed in the suite, which
+// is the wrong way round for a test to be wrong.
+beforeEach(() => {
+  vi.clearAllMocks();
+  sendState.isPending = false;
+  sendState.isError = false;
+});
 
 function detail(overrides: Partial<MessageDetail> = {}): { data: MessageDetail } {
   return {
@@ -37,6 +50,8 @@ function detail(overrides: Partial<MessageDetail> = {}): { data: MessageDetail }
       documents: ["Bank statements"],
       attachments: [],
       is_open_draft: false,
+      is_editable: false,
+      suggested_recipient: null,
       ...overrides,
     } as MessageDetail,
   };
@@ -56,10 +71,11 @@ describe("MessageDialog", () => {
     expect(screen.getByText("Bank statements")).toBeTruthy();
   });
 
-  it("offers no way to change a message", () => {
-    // A DIALOG THAT EDITED would hold the body in local state beside the panel that owns it, and
-    // whichever saved last would win with nothing on screen to say so.
-    mockUseMessageDetail.mockReturnValue(state(detail()));
+  it("offers no way to change a SENT message", () => {
+    // LP-821 — the evidence record must not change after the fact. LP-831 made this dialog the one
+    // editor, so "there is no editor here" stopped being true of the COMPONENT and became true of
+    // this STATE, which is the thing that actually has to hold.
+    mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false })));
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // LP-829 REVIEW — THE POSITIVE HALF, IN THIS TEST. Both assertions below are absences, and a
@@ -69,16 +85,79 @@ describe("MessageDialog", () => {
     expect(screen.getByText(/Please send the bank statements/)).toBeTruthy();
 
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Mark as sent/ })).toBeNull();
   });
 
-  it("points the open draft at the one place that edits it", () => {
-    mockUseMessageDetail.mockReturnValue(state(detail({ is_open_draft: true, status: "draft" })));
+  it("edits and sends a draft", () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.getByText(/Edit it in/)).toBeTruthy();
-    // Still no editor, which is the half that matters.
-    expect(screen.queryByRole("textbox")).toBeNull();
+    const message = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(message, { target: { value: "Edited by the processor." } });
+    fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[0]).toMatchObject({
+      draftId: "m1",
+      body: "Edited by the processor.",
+    });
+  });
+
+  it("sends a PARTY draft, which no screen could do before", () => {
+    // THE ESCALATED LP-820 DEFECT. A party request is a draft under its own template key;
+    // `get_open_draft` filters on the borrower's, so the old panel never showed one — while the
+    // party panel told a processor to "send it from the document request above", which is the
+    // BORROWER's draft. `is_editable` comes from the server and does not care which template
+    // rendered the body.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          is_open_draft: false,
+          status: "draft",
+          template_key: "title_document_request",
+          counterparty: "t@title.example",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect((screen.getByRole("textbox", { name: "Send to" }) as HTMLInputElement).value).toBe(
+      "t@title.example",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
+    expect(mockSend.mock.calls[0]?.[0]).toMatchObject({ recipient: "t@title.example" });
+  });
+
+  it("seeds the borrower's address when nobody has been addressed yet", () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          status: "draft",
+          counterparty: null,
+          suggested_recipient: "sarah@example.com",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect((screen.getByRole("textbox", { name: "Send to" }) as HTMLInputElement).value).toBe(
+      "sarah@example.com",
+    );
+  });
+
+  it("refuses to send with no recipient", () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, status: "draft", counterparty: null })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(
+      (screen.getByRole("button", { name: /Mark as sent/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("renders a borrower's text as text", () => {

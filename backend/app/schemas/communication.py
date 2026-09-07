@@ -49,6 +49,14 @@ class SendDraftRequest(BaseModel):
 
     recipient: str = Field(min_length=3, max_length=256)
     body: str = Field(min_length=1)
+    #: LP-831 — the subject the processor is actually sending.
+    #:
+    #: OPTIONAL, UNLIKE `body`, and the asymmetry is deliberate. `body` refuses to default because a
+    #: stale draft recorded as sent while the processor had edited it is a false evidence row. A
+    #: subject has no such gap: the modal shows the stored one and posts it back unchanged unless
+    #: somebody edits it, and a caller that omits it is saying "the one already on the draft", which
+    #: is a complete and true answer.
+    subject: str | None = Field(default=None, max_length=256)
 
 
 class SentCommunicationPublic(BaseModel):

@@ -22,6 +22,7 @@ import { useTimeline } from "@/lib/api/timeline";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { formatDistanceToNow } from "date-fns";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
@@ -243,7 +244,26 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   // LP-829 — which message the dialog is showing. Separate from `open`, which is the inline reply
   // box: a processor reading a message and a processor answering one are different acts, and
   // sharing the state would make opening one close the other.
-  const [openMessage, setOpenMessage] = useState<string | null>(null);
+  //
+  // LP-831 — SEEDED FROM THE URL, so a draft is a thing that can be linked to. LP-837's header
+  // popover navigates here and expects the modal to be open on arrival; landing on the list with it
+  // shut looks exactly like a mis-click, which is the way that feature fails quietly. Reading it
+  // here rather than retrofitting later also makes the modal's open state something a processor can
+  // send a colleague.
+  const searchParams = useSearchParams();
+  // OPTIONAL, because `useSearchParams()` is null outside a router context — which is not only a
+  // test artefact: it is also the value during a static render. A deep link is a convenience, and
+  // the panel has to render without one.
+  const linkedDraft = searchParams?.get("draft") ?? null;
+  const [openMessage, setOpenMessage] = useState<string | null>(linkedDraft);
+  // Tracked rather than compared against `openMessage`: after a processor CLOSES the linked message
+  // the parameter is still in the URL, and re-opening it on the next render would make the dialog
+  // impossible to dismiss.
+  const [seededFromUrl, setSeededFromUrl] = useState<string | null>(linkedDraft);
+  if (linkedDraft !== seededFromUrl) {
+    setSeededFromUrl(linkedDraft);
+    setOpenMessage(linkedDraft);
+  }
 
   async function copyAddress(address: string) {
     await navigator.clipboard.writeText(address);

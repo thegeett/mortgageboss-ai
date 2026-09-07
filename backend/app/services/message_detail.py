@@ -66,8 +66,17 @@ class MessageDetail:
     #: OUTBOUND: what this message asks for. INBOUND: what arrived on it, and what became of each.
     documents: tuple[str, ...]
     attachments: tuple[TimelineAttachment, ...]
-    #: Whether this is the file's open draft — the one row the panel above is editing.
+    #: Whether this is the BORROWER's document-request draft (LP-829 kept this narrow deliberately).
     is_open_draft: bool
+    #: LP-831 — whether a processor may edit and send this. WIDER than `is_open_draft`: a party
+    #: request is a draft under its own template key, and the reason it was unsendable is that
+    #: `get_open_draft` filters on the borrower's. `send_draft` takes a draft id and has never cared
+    #: which template rendered it, so the screen was the whole missing piece.
+    is_editable: bool
+    #: LP-831 — who to address it to, when nobody has yet. The borrower's email for a borrower
+    #: draft; None once `recipient` is set, because a party draft carries its own address and a
+    #: suggestion would be wrong there.
+    suggested_recipient: str | None
 
 
 async def message_detail(
@@ -110,12 +119,19 @@ async def message_detail(
         and message.status is CommunicationStatus.DRAFT
         and message.template_key is not None
     )
+    suggested_recipient: str | None = None
     if renders_from_a_template:
         # LP-823 — the same resolution the panel reads, so the dialog and the textarea show the same
         # words. Reading them apart is exactly how "Hello $borrower_first_name," survived.
-        body, _suggested = await draft_for_reading(
+        body, borrower_email = await draft_for_reading(
             db, draft=message, loan_file=loan_file, reader=reader
         )
+        # LP-831 — SUGGESTED ONLY WHEN NOBODY HAS BEEN ADDRESSED YET, and only for a draft addressed
+        # to the borrower. A party draft carries the title company's or the employer's address on the
+        # row (`party_requests` sets it at creation), and offering the borrower's there would put a
+        # third party's document request in the borrower's inbox.
+        if message.recipient is None and message.template_key == DRAFT_TEMPLATE.value:
+            suggested_recipient = borrower_email
     else:
         body = message.body or ""
 
@@ -152,6 +168,11 @@ async def message_detail(
         documents=documents,
         attachments=attachments,
         is_open_draft=is_open_draft,
+        is_editable=(
+            message.direction is CommunicationDirection.OUTBOUND
+            and message.status is CommunicationStatus.DRAFT
+        ),
+        suggested_recipient=suggested_recipient,
     )
 
 

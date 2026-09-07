@@ -102,6 +102,7 @@ async def send_draft_endpoint(
             draft_id=draft_id,
             recipient=payload.recipient,
             body=payload.body,
+            subject=payload.subject,
             approver_user_id=current_user.id,
         )
     except CannotSendError as exc:
@@ -216,6 +217,10 @@ class MessageDetailPublic(BaseModel):
     documents: list[str]
     attachments: list[MessageAttachmentPublic]
     is_open_draft: bool
+    #: LP-831 — whether the modal offers an editor and a send. Wider than `is_open_draft`: a party
+    #: request is a draft under its own template key, and that filter is why no screen could send one.
+    is_editable: bool
+    suggested_recipient: str | None
 
 
 @message_router.get("/{communication_id}", response_model=MessageDetailPublic)
@@ -261,6 +266,8 @@ async def read_message(
             for a in detail.attachments
         ],
         is_open_draft=detail.is_open_draft,
+        is_editable=detail.is_editable,
+        suggested_recipient=detail.suggested_recipient,
     )
 
 

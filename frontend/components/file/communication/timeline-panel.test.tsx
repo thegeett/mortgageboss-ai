@@ -37,6 +37,23 @@ vi.mock("@/lib/api/messages", () => ({
   fetchReplyContext: (fileId: string, entryId: string) => mockReplyContext(fileId, entryId),
 }));
 
+// LP-831 — the panel now renders `MessageDialog`, which reads the URL and fetches one message.
+// Both are mocked here so these cases stay about the LIST; the dialog has its own file.
+const mockSearchParams = vi.fn(() => new URLSearchParams());
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearchParams(),
+}));
+
+const mockMessageDetail = vi.fn(() => ({ data: undefined, isPending: false, isError: false }));
+vi.mock("@/lib/api/communications", () => ({
+  useMessageDetail: (...args: unknown[]) => {
+    mockMessageDetailArgs.push(args);
+    return mockMessageDetail();
+  },
+  useSendDraft: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+const mockMessageDetailArgs: unknown[][] = [];
+
 import type { TimelineEntry } from "@/lib/types/timeline";
 import { TimelinePanel } from "./timeline-panel";
 
@@ -358,5 +375,32 @@ describe("TimelinePanel — the attachment manifest says what happened to each f
     render(<TimelinePanel fileId="f1" />, { wrapper });
 
     expect(screen.getByText("x.pdf").closest("li")?.textContent).toContain("quarantined");
+  });
+});
+
+describe("the ?draft deep link (LP-831)", () => {
+  it("opens the linked message on arrival", () => {
+    // LP-837's header popover navigates HERE and expects the modal open when the page loads.
+    // Landing on the list with it shut looks exactly like a mis-click, which is how that feature
+    // fails quietly — so the parameter is read here rather than retrofitted there.
+    mockSearchParams.mockReturnValue(new URLSearchParams("draft=m-1"));
+    loaded([{ ...MESSAGE, id: "m-1", summary: "Documents we need" }]);
+    mockMessageDetailArgs.length = 0;
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", "m-1"]);
+  });
+
+  it("renders normally with no parameter", () => {
+    // THE CONTROL. A panel that always opened a dialog would satisfy the test above and put a modal
+    // over the list every time somebody visited the page.
+    mockSearchParams.mockReturnValue(new URLSearchParams());
+    loaded([{ ...MESSAGE, id: "m-1", summary: "Documents we need" }]);
+    mockMessageDetailArgs.length = 0;
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", null]);
   });
 });

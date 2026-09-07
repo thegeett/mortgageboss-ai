@@ -59,6 +59,15 @@ export interface MessageDetail {
   documents: string[];
   /** Inbound: what arrived, and what became of each. Empty on outbound. */
   attachments: MessageAttachment[];
-  /** Whether this is the file's open draft — the one the panel above is editing. */
   is_open_draft: boolean;
+  /**
+   * LP-831 — whether the modal offers an editor and a send.
+   *
+   * WIDER THAN `is_open_draft`, which is the BORROWER's draft specifically. A party request is a
+   * draft under its own template key, and `get_open_draft` filtering on the borrower's is the
+   * reason no screen could send one — while `send_draft` has never cared which template rendered it.
+   */
+  is_editable: boolean;
+  /** Who to address it to when nobody has yet. Null once a recipient is set. */
+  suggested_recipient: string | null;
 }

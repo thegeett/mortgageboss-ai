@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -7,22 +8,37 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useMessageDetail } from "@/lib/api/communications";
+import { useMessageDetail, useSendDraft } from "@/lib/api/communications";
 import { format } from "date-fns";
+import { Send } from "lucide-react";
+import { useState } from "react";
 
 /**
  * One message, opened from the timeline (LP-829).
  *
- * A READER, NEVER AN EDITOR. The open draft is already rendered and editable in
- * `OutboundDraftPanel` on the same page; a dialog that also edited it would be two components
- * holding separate local state for one body, and whichever saved last would win with nothing on
- * screen to say so. Sent and received messages are not editable at all — the first because the
- * evidence record must not change after the fact, the second because a borrower's words are not
- * ours to rewrite.
+ * LP-831 — NOW THE ONLY EDITOR, WHICH IS WHY THE ARGUMENT FOR READ-ONLY NO LONGER APPLIES.
  *
- * SO WHY OPEN THE DRAFT HERE AT ALL. Because "what does this say" is a different question from
- * "let me change it", and answering it should not mean scrolling to a textarea and reading around
- * an edit somebody is halfway through. The draft's row points at the panel that owns editing.
+ * LP-829 made this a reader on the reasoning that `OutboundDraftPanel` already owned editing on the
+ * same page, and two components holding separate local state for one body means whichever saves
+ * last wins with nothing on screen to say so. That reasoning was right and its premise is gone: the
+ * panel is off the page, because a compose form open at all times works only while a file has ONE
+ * draft, and LP-832 makes several the ordinary state.
+ *
+ * So the rule stands and its application moves. Exactly one editor, and it is here.
+ *
+ * WHAT STAYS READ-ONLY, and this is not a limitation:
+ *   • a SENT message — LP-821's evidence record must not change after the fact;
+ *   • an INBOUND message — a borrower's words are not ours to rewrite.
+ * `is_editable` comes from the server rather than being re-derived here, so the screen and the send
+ * path cannot disagree about what may be edited.
+ *
+ * A PARTY DRAFT IS EDITABLE AND SENDABLE HERE, and that closes a defect rather than adding a
+ * feature. `party_requests` builds drafts for the title company, the agent, the lender, the CPA, the
+ * insurer and the employer; `get_open_draft` filters on the BORROWER's template key, so the panel
+ * never showed one — while the party panel's own success message said "Send it from the document
+ * request above", where the draft above is the borrower's. A processor following that instruction
+ * mailed the borrower believing they had contacted the title company. `send_draft` takes a draft id
+ * and has never cared which template rendered it; the missing piece was always a screen.
  */
 function when(iso: string): string {
   try {
@@ -42,7 +58,24 @@ export function MessageDialog({
   onClose: () => void;
 }) {
   const { data, isPending, isError } = useMessageDetail(fileId, messageId);
+  const send = useSendDraft(fileId);
   const open = messageId !== null;
+
+  // SEEDED ON THE MESSAGE'S IDENTITY, not in an effect — the same pattern `OutboundDraftPanel` used
+  // and for the same reason. A draft regenerates on every add and remove, so re-seeding whenever the
+  // body changes would throw away an edit mid-sentence; keying on identity means the fields fill
+  // when a different message is opened and never again.
+  const [seededFrom, setSeededFrom] = useState<string | null>(null);
+  const [recipient, setRecipient] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  if (data !== undefined && data.id !== seededFrom) {
+    setSeededFrom(data.id);
+    setRecipient(data.counterparty ?? data.suggested_recipient ?? "");
+    setSubject(data.subject ?? "");
+    setBody(data.body);
+  }
+  const canSend = recipient.trim().length > 0 && body.trim().length > 0 && !send.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -75,9 +108,45 @@ export function MessageDialog({
                 nowhere in the product. Pre-wrapped rather than rendered: this is plain text a person
                 wrote, and interpreting it as anything else is how a borrower's sentence becomes
                 markup. */}
-            <pre className="whitespace-pre-wrap break-words rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs text-foreground">
-              {data.body}
-            </pre>
+            {data.is_editable ? (
+              <div className="flex flex-col gap-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-foreground">Send to</span>
+                  <input
+                    type="email"
+                    value={recipient}
+                    onChange={(event) => setRecipient(event.target.value)}
+                    placeholder="borrower@example.com"
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-foreground">Subject</span>
+                  <input
+                    type="text"
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-foreground">Message</span>
+                  <textarea
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    rows={16}
+                    className="rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
+                  />
+                </label>
+              </div>
+            ) : (
+              // READ-ONLY, AND RENDERED AS TEXT. A borrower's sentence is not markup and a dollar
+              // sign in it is a dollar sign; this is the one place a body is shown in full, so it is
+              // the one place that could get it wrong.
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs text-foreground">
+                {data.body}
+              </pre>
+            )}
 
             {data.documents.length > 0 ? (
               <div className="flex flex-col gap-1 text-sm">
@@ -127,12 +196,38 @@ export function MessageDialog({
               ) : null}
             </dl>
 
-            {data.is_open_draft ? (
-              // ONE EDITOR. The panel above owns the draft; this says where to change it rather
-              // than becoming a second place that can.
-              <p className="rounded-md border border-input bg-muted px-3 py-2 text-xs text-muted-foreground">
-                This is the file's open draft. Edit it in <strong>Document request</strong> at the
-                top of this page.
+            {data.is_editable ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                <Button
+                  type="button"
+                  className="gap-2"
+                  disabled={!canSend}
+                  onClick={() =>
+                    send.mutate(
+                      {
+                        draftId: data.id,
+                        recipient: recipient.trim(),
+                        subject,
+                        body,
+                      },
+                      { onSuccess: onClose },
+                    )
+                  }
+                >
+                  <Send className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
+                </Button>
+                {/* NOTHING HERE TRANSMITS, and the label says so rather than implying otherwise.
+                    LP-816 shipped the transport seam with no provider, so the message still leaves
+                    from the processor's own mail client and this records that it went. */}
+                <span className="text-xs text-muted-foreground">
+                  Records that you sent it. Nothing is transmitted from here.
+                </span>
+              </div>
+            ) : null}
+            {send.isError ? (
+              <p className="text-sm text-danger">
+                This was not recorded as sent. It may already have been sent, or this address may
+                have been emailed too recently.
               </p>
             ) : null}
           </div>

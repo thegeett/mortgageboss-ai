@@ -341,3 +341,141 @@ async def test_a_party_request_resolves_its_placeholders_too(
     assert "Hello there," in body
     # `is_open_draft` still means what it says: the panel above is NOT editing this one.
     assert resp.json()["is_open_draft"] is False
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-831 — the modal is the editor, and a party draft is reachable through it
+# --------------------------------------------------------------------------------------------- #
+async def test_a_borrower_draft_is_editable_and_suggests_the_borrower(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    company, token = await _company_user_token(db, slug="acme")
+    loan_file, draft = await _file_with_draft(db, company)
+    await db.commit()
+
+    payload = (
+        await client.get(f"{API}/{loan_file.display_id}/messages/{draft.id}", headers=_auth(token))
+    ).json()
+
+    assert payload["is_editable"] is True
+    assert payload["suggested_recipient"] == "sarah@example.com"
+
+
+async def test_a_sent_message_is_not_editable(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-821 — the evidence record must not change after the fact. The flag comes from the server so
+    the screen and the send path cannot disagree about what may be edited."""
+    company, token = await _company_user_token(db, slug="acme")
+    loan_file, draft = await _file_with_draft(db, company)
+    draft.status = CommunicationStatus.SENT
+    await db.flush()
+    await db.commit()
+
+    payload = (
+        await client.get(f"{API}/{loan_file.display_id}/messages/{draft.id}", headers=_auth(token))
+    ).json()
+
+    assert payload["is_editable"] is False
+    assert payload["suggested_recipient"] is None
+
+
+async def test_a_party_draft_is_editable_and_keeps_its_own_address(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE ESCALATED LP-820 DEFECT, at the layer that closes it.
+
+    A party request is a draft under its OWN template key. `get_open_draft` filters on the borrower's,
+    so the outbound panel never returned one — while the party panel's success message said "Send it
+    from the document request above", where the draft above is the borrower's. A processor following
+    that instruction mailed the BORROWER believing they had contacted the title company.
+
+    `send_draft` takes a draft id and has never cared which template rendered it, so the missing piece
+    was a screen. `is_editable` therefore must NOT be `is_open_draft`, which is the narrower flag.
+
+    And the address must stay the party's: suggesting the borrower's here would put a title company's
+    document request in the borrower's inbox, which is the same wrong mailbox by a shorter route.
+    """
+    company, token = await _company_user_token(db, slug="acme")
+    loan_file, _borrower_draft = await _file_with_draft(db, company)
+    party = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        template_key="title_document_request",
+        recipient="t@title.example",
+        subject="Documents we need",
+        body="Hello $borrower_first_name,\n\nPlease send the title commitment.\n\n$processor_name",
+    )
+    db.add(party)
+    await db.flush()
+    await db.commit()
+
+    payload = (
+        await client.get(f"{API}/{loan_file.display_id}/messages/{party.id}", headers=_auth(token))
+    ).json()
+
+    assert payload["is_editable"] is True
+    assert payload["is_open_draft"] is False, "the narrow flag must stay narrow"
+    assert payload["suggested_recipient"] is None
+    # LP-829's review fix, still holding: a party draft resolves to the generic greeting, never to
+    # the borrower's first name.
+    assert "$borrower_first_name" not in payload["body"]
+    assert "Sarah" not in payload["body"]
+
+
+async def test_the_modal_can_send_a_party_draft(client: AsyncClient, db: AsyncSession) -> None:
+    """The other half of the same defect: reachable is not the same as sendable."""
+    company, token = await _company_user_token(db, slug="acme")
+    loan_file, _borrower_draft = await _file_with_draft(db, company)
+    party = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        template_key="title_document_request",
+        recipient="t@title.example",
+        subject="Documents we need",
+        body="Hello there,\n\nPlease send the title commitment.\n\nPat Processor",
+    )
+    db.add(party)
+    await db.flush()
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/draft/{party.id}/send",
+        headers=_auth(token),
+        json={
+            "recipient": "t@title.example",
+            "subject": "Title commitment, please",
+            "body": "Hello there,\n\nPlease send the title commitment.\n\nPat Processor",
+        },
+    )
+
+    assert resp.status_code == 200
+    sent = await db.get(Communication, party.id)
+    assert sent is not None
+    assert sent.status is CommunicationStatus.SENT
+    assert sent.recipient == "t@title.example"
+    # LP-831 — the subject the processor actually sent, not the one the template rendered.
+    assert sent.subject == "Title commitment, please"
+
+
+async def test_an_omitted_subject_keeps_the_stored_one(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CONTROL ON THE SUBJECT BEING OPTIONAL. `body` refuses to default because a stale draft
+    recorded as sent is a false evidence row; a subject has no such gap, and a caller that omits it
+    is saying "the one already on the draft" — which must actually be what gets recorded."""
+    company, token = await _company_user_token(db, slug="acme")
+    loan_file, draft = await _file_with_draft(db, company)
+    await db.commit()
+    stored_subject = draft.subject
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/draft/{draft.id}/send",
+        headers=_auth(token),
+        json={"recipient": "sarah@example.com", "body": "Please send the bank statements."},
+    )
+
+    assert resp.status_code == 200
+    sent = await db.get(Communication, draft.id)
+    assert sent is not None
+    assert sent.subject == stored_subject
