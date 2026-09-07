@@ -4,7 +4,11 @@
   This document is the execution plan. Ticket scope lives here; the *why* lives there.
 - **Figures:** [`phase4-mail-flows.md`](phase4-mail-flows.md) — the eight flows this plan builds.
 - **Series:** LP-800 … LP-816. Last Phase 3 ticket was LP-647.
-- **Date:** 2026-09-07.
+- **Date:** 2026-09-07. **Revised 2026-09-07** after a coverage audit against the source
+  specification (`V1_Build_Plan_v3_rule_engine.docx`, Phase 4.1–4.5 and the Phase 4 testing
+  checklist). The audit found eight uncovered requirements; §C.5 holds the tickets that close them
+  and §B now sequences them. Nothing below is aspirational — every gap named was verified against
+  both the spec text and the repo.
 
 ---
 
@@ -37,9 +41,9 @@ instructions in one pass, rather than booking her twice.
 
 Stop after any of these and the product is better than it was. That is the ordering constraint.
 
-### M1 — The email is right (≈ 12–14 days, **zero infrastructure**)
+### M1 — The email is right (≈ 18–20 days, **zero infrastructure**)
 
-`LP-800 · LP-801 · LP-802 · LP-809 · LP-810 · LP-811`
+`LP-800 · LP-801 · LP-802 · LP-817 · LP-822 · LP-809 · LP-810 · LP-811`
 
 > Priya clicks "Request docs" on four findings. She gets one email that asks the borrower only for
 > what the borrower can actually produce, tells them exactly how to get each document, and does not
@@ -49,24 +53,34 @@ Stop after any of these and the product is better than it was. That is the order
 **This is the whole outbound half and it needs no DNS, no SES, no S3, no mailbox.** It is the highest
 value per unit of risk in Phase 4. Build it first, and be willing to ship only this.
 
-### M2 — Mail arrives and is safe (≈ 10–12 days)
+### M2 — Mail arrives and is safe (≈ 14–16 days)
 
-`INFRA-1 · INFRA-2 · LP-803 · LP-804`
+`INFRA-1 · INFRA-2 · INFRA-3 · LP-803 · LP-804 · LP-819`
 
 > Forward an email with a PDF to `lf-<token>@inbox.staging.mortgageboss.ai`. Within seconds there is
 > a row in `inbound_messages` with the SPF/DKIM/DMARC/virus verdicts, the raw `.eml` in S3 under a
 > CMK, and a rasterized, sanitised derivative of the attachment. Nothing is attached to a loan file
 > yet — deliberately.
 
-### M3 — Mail lands on a file (≈ 10 days)
+### M3 — Mail lands on a file (≈ 15 days)
 
-`LP-805 · LP-806 · LP-807`
+`LP-805 · LP-806 · LP-807 · LP-813 · LP-815`
 
 > The borrower replies with three PDFs. Priya opens the Communication tab, sees a card with the
 > sender, a green auth badge, thumbnails and a suggested document type, clicks **Accept**, and the
 > documents enter the existing classify → extract → needs pipeline. The needs flip to Received.
 
-**End of M3 the feature is real.** M4 and M5 make it fit her actual workflow.
+**End of M3 the feature is real — but M3's demo is not yet representative, and that matters.**
+The borrower only replies *to the file address* if she told them to send there, or if the app sent
+the request (LP-816, M5). On M1's copy-and-paste path she sends from Outlook, the borrower replies
+to **her**, and that is Route B. So ladder rungs 1 and 2 are unreachable until either LP-808 or
+LP-816 lands, and rung 3 — the `[LF-xxxxxxxx]` footer tag — is doing the work, from inside a body
+that Gmail and Outlook mobile routinely trim when quoting.
+
+Two honest consequences: **M3 must ship with explicit "send your documents to this address"
+instructions** in the request email (LP-817's initial-request template), and **M4 is not optional
+polish** — it is what makes inbound work for a processor who sends from her own client. Treat M3+M4
+as one release, not two.
 
 ### M4 — She keeps her own address (≈ 4–5 days)
 
@@ -75,13 +89,13 @@ value per unit of risk in Phase 4. Build it first, and be willing to ship only t
 > An admin adds one routing rule at Herco. Mail sent to `processing@herco.com` now also appears in
 > the triage queue, correctly attributed, with trust evaluated from the original hop.
 
-### M5 — The loop closes (≈ 13 days)
+### M5 — The loop closes (≈ 16 days)
 
-`LP-812 · LP-813 · LP-814 · LP-815 · LP-816`
+`LP-812 · LP-818 · LP-814 · LP-820 · LP-821 · LP-816`
 
 > Timeline, reminders, underwriter contact, secure links, and send-from-app.
 
-**Total ≈ 50–55 working days ≈ 10–11 weeks at full time.** The unified build plan budgets 2–3 weeks
+**Total ≈ 68–74 working days ≈ 14–15 weeks at full time.** The unified build plan budgets 2–3 weeks
 for Phase 4; that estimate predates the attachment safety pipeline, the instruction catalog and
 Route B, none of which are optional. Say so now rather than at week four.
 
@@ -234,7 +248,10 @@ and both request paths write the same `docs_requested` shape and the same activi
 - `backend/app/models/inbound_message.py` — company-owned; `loan_file_id` nullable until routed;
   `UNIQUE (company_id, ingest_key)` where `ingest_key = COALESCE(ses_message_id,
   normalized_message_id, sha256(raw))`; `auth_verdicts` and `references` as `jsonb`;
-  `routing_state`, `routing_signal`, `routing_confidence`; `raw_storage_path`.
+  `routing_state`, `routing_signal`, `routing_confidence`; `raw_storage_path`; **`is_dsn`** and
+  **`is_auto_reply`** — both are in `phase4.md` §4 and were dropped from an earlier draft of this
+  ticket. Without `is_dsn` you cannot implement the empty-`Return-Path` suppression rule, and a
+  bounce files itself as a borrower document.
 - `backend/app/tasks/inbound.py` — `inbound.ingest_message`. **Add the module to `_TASK_MODULES` in
   `tasks/celery_app.py:19`.** Its own comment warns that a module left out never imports, the task
   is unregistered, and enqueued messages are dropped silently.
@@ -316,6 +333,10 @@ other company. **Write the cross-tenant test first.**
   that type is already on the file. That column, its schema field and its frontend type all exist and
   nothing has ever written `True` to it; its docstring names this exact case.
 - Per-file `auto_accept_inbound` flag, default **false**.
+- **A `correspondence` disposition alongside `accepted`.** Not every accepted attachment is a
+  borrower document: a lender's conditional-approval PDF satisfies no need and would be classified
+  against a 166-type *borrower* taxonomy. `correspondence` attaches the file to the thread and the
+  timeline without entering classify → extract → needs. Phase 4.5 depends on this existing.
 
 **Done when** accepting produces a document indistinguishable from a manual upload except for its
 `upload_source`, and the needs update runs under the existing per-file Redis lock.
@@ -413,28 +434,116 @@ force: include the document list and every upload silently rewords the draft und
 
 | Ticket | Scope | Days |
 |---|---|---|
-| **LP-812** Timeline | Merge communications and activity log; filter pills; compose with template selector; inbox address displayed for forwarding instructions | 3 |
-| **LP-813** Underwriter contact | Lender write endpoints — **there is currently no create or update path for lenders at all** — and per-file underwriter assignment, which exists nowhere today | 2 |
+| **LP-812** Timeline | Merge communications and activity log **without double-counting** — LP-805 writes both an `inbound_message` and a `Communication` for the same message, and no ticket reconciled them; decide which is the timeline's row and how it reaches the attachment manifest. Filter pills (all / sent / received / drafts / activity, per spec 4.3); inbox address displayed for forwarding instructions. **Depends on LP-811**, which §D's graph was missing. | 5 |
+| **LP-818** Reply, compose, and read state | Reply to an inbound message — `In-Reply-To` set to the **inbound** `message_id`, which is the only thing that keeps a borrower's next message on rungs 1–2; compose a message with no needs behind it; mark important; unread state and a badge. All four are spec 4.3 bullets and none exists. See §C.5 for why this is a schema change, not a button. | 5 |
 | **LP-814** Reminders | Celery beat over `requested_at`: pending > 3d, no reply > 5d, file untouched > 7d. Suggestion cards with snooze. **Blocked on LP-811.** Suggests only, never sends | 2 |
-| **LP-815** Secure link + nudge | Tokenised expiring upload link; auto-reply steering borrowers to it; outbound NPI attachments blocked in code | 3 |
+| **LP-820** Non-borrower requests | LP-800 sorts needs to eight parties; only the borrower has a send path, so title / employer / CPA / underwriter needs sit at PENDING forever, never get `requested_at`, and are invisible to LP-814. Per-party draft variants and their own clock. | 3 |
+| **LP-821** Evidence record + legal hold | `phase4.md` §6's full field set — template + version, body as sent, attachment manifest with hashes, which guardrail fired, model + prompt version, inbound auth verdicts — **append-only, not soft-deletable**. Plus the per-file legal-hold flag, which §6 says ships *before* the purge job — and INFRA-1 builds the purge job on day one. Plus the one-page AI System Disclosure for LP-810. | 4 |
 | **LP-816** Send from app | Transmit as her via a mailbox connection (`gmail.send`, *sensitive* scope only; or Graph `Mail.Send` delegated). Same gate, same guards; captures the sent copy natively | 3 |
+
+---
+
+## §C.5 — Tickets added by the coverage review
+
+Each of these closes a requirement stated in the source specification or in `phase4.md` §6 that the
+first draft of this plan did not cover. They are not scope creep; they are the audit's findings.
+
+### INFRA-3 — Outbound sending identity and the bounce path
+
+**~2 days.** INFRA-1 builds SES *receipt* only, and correctly gives `inbox.` no SPF, no DKIM and no
+A record. But **nothing in the plan could send anything**, while LP-815 auto-replies to every inbound
+message and LP-816 sends as her. Build the other two subdomains `phase4.md` §2.1 specifies:
+`mail.mortgageboss.ai` for transactional outbound (SPF + DKIM + DMARC, `From:` alignment, SES
+sending identity, and the **production sandbox exit request**, which has AWS-side lead time) and
+`bounces.mortgageboss.ai` for envelope Return-Path. Start DMARC at `p=none` with `rua=`.
+
+### LP-817 — Template library
+
+**~3 days.** Spec 4.1 names five: *initial documentation request, reminder / follow-up, status
+update, condition response request, custom*. None exists, and the omission has a sharp edge:
+**LP-810's compliance scanner falls back to "the plain template" and no ticket defines it.** Since
+the drafting flag ships off by default, the plain template is not the fallback — it is the default
+path for every draft until the flag flips. Ship M1 without this and M1 renders nothing.
+
+Templates are versioned, because `phase4.md` §6 requires the audit record to capture *template +
+version*. The initial-request template carries the **"send your documents to this address"** line
+that M3's routing depends on.
+
+### LP-818 — Reply, compose, and read state
+
+**~5 days.** Spec 4.3: *"Per-item actions: view full thread, reply, mark important."* None exists —
+and reply is blocked by the data model, not by a missing button. LP-809 creates a draft **plus a
+`communication_needs_items` join**; LP-811's send endpoint requires a `draft_id`. A reply to *"is
+page 4 really needed?"* has no needs behind it, so it cannot become a draft, so it cannot be sent.
+
+So: a needs-less draft kind, threading that sets `In-Reply-To` to the **inbound** `message_id`
+(LP-805 writes `email_threads` and `references[]` and nothing has ever read them), `mark_important`,
+unread state and a badge. Without the badge the queue is pull-only and an evening reply sits unseen
+until she happens to open the tab.
+
+### LP-819 — Bounces, DSNs and delivery failure
+
+**~3 days.** The plan had zero occurrences of bounce, DSN or Return-Path. Consequences, all real:
+a typo'd borrower address bounces and nobody sees it; **LP-814 keeps counting "no reply > 5 days"
+against a dead mailbox and escalates forever**; and `Communication.error_detail` — a column that
+already exists on the model — never gets a writer. Ingest the `bounces.` subdomain, classify on the
+RFC 3463 status class (`5.x.x` hard → suppress the address and tell her; `4.x.x` soft → retry then
+alert), set `is_dsn` / `is_auto_reply`, and **never** file a DSN as a borrower document.
+
+### LP-820 — Non-borrower request paths
+
+**~3 days.** See the M5 table. LP-800 sorts correctly to eight parties and only one can be written to.
+
+### LP-821 — Evidence record and legal hold
+
+**~4 days.** See the M5 table. The legal-hold flag is the urgent half: `phase4.md` §6 says ship it
+*before* the purge job, and INFRA-1 builds the S3 lifecycle expiry — which **is** the purge job — on
+day one of the critical path.
+
+### LP-822 — Tone and style profile
+
+**~2 days.** Spec 4.1: *"Tone matches sister's voice (informed by Phase 0 template review)."* This
+is not merely absent — it **conflicts with LP-810's central design decision**, which scopes the fact
+bundle to "the requested needs plus borrower name and file basics — nothing else", on bug-008's
+lesson that a wide bundle reworded every draft on any change.
+
+Resolve it by separating the two caches: a **style profile keyed on `user_id`**, holding her
+signature block, greeting and closing conventions and two or three exemplars, cached independently
+of the per-draft fact bundle so editing it invalidates style but not content. **Its input is a Phase
+0 deliverable that is still outstanding** — the spec's own collection list asks for *"examples of her
+current borrower-request emails (templates and actual sends)"*. Ask Priya for them in the same
+session as LP-800.
+
+Ship without this and the drafter writes in generic assistant voice, Priya rewrites every email, and
+an AI drafter whose output is always rewritten is slower than a template — which is the spec's own
+testing checklist item *"drafted emails sound like her voice"* failing.
 
 ---
 
 ## §D — Critical path
 
 ```
-day 1  ├─ INFRA-1 ──────────────► (prod: registrar wait) ──► INFRA-2
-       ├─ LP-800 (Priya) ──┐
-       └─ LP-802 ──┬───────┴─► LP-801 ─► LP-809 ─► LP-810 ─► LP-811 ─► [M1]
-                   └─► LP-803 ─► LP-804 ─► LP-805 ─► LP-806 ─► LP-807 ─► [M3]
-                                                        └─► LP-808 ─► [M4]
-LP-811 ─► LP-814                     LP-807 ─► LP-812
+day 1  ├─ INFRA-1 ──► (prod: registrar wait) ──► INFRA-2 ──► INFRA-3 ──► (SES sandbox exit)
+       ├─ LP-800 + LP-822 inputs (Priya, one session) ──┐
+       └─ LP-802 ──┬─► LP-801 ─► LP-817 ─┬─► LP-809 ─► LP-810 ─► LP-811 ──────► [M1]
+                   │                     └─► LP-822 ──┘                │
+                   └─► LP-803 ─► LP-804 ─► LP-819 ──► [M2]             │
+                                    └─► LP-805 ─► LP-806 ─► LP-807 ─► LP-813 ─► LP-815 ─► [M3]
+                                                              └─► LP-808 ──────────────► [M4]
+       LP-811 ─► LP-814      LP-807 + LP-811 ─► LP-812 ─► LP-818      LP-810 ─► LP-820, LP-821
 ```
 
-**The two real serialisations:** LP-800 gates LP-810 (a drafter with no instruction catalog writes
-the wrong email), and LP-811 gates LP-814 (a reminder with no clock has nothing to fire on).
-Everything else has slack.
+**Four real serialisations, not two:**
+
+1. **LP-800 gates LP-810** — a drafter with no instruction catalog writes the wrong email.
+2. **LP-817 gates LP-810** — the "plain template" the compliance scanner falls back to has to exist,
+   and with the drafting flag off it is the *only* path.
+3. **LP-811 gates LP-814** — a reminder with no clock has nothing to fire on.
+4. **INFRA-3 gates LP-815 and LP-816** — and the SES production sandbox exit has AWS-side lead time,
+   so it belongs on the day-one infra track with the registrar delegation, not in M5.
+
+Everything else has slack. LP-812 also gained an edge from LP-811 that the first graph was missing —
+compose needs the send machinery.
 
 ---
 
@@ -463,7 +572,68 @@ Everything else has slack.
 | Attachment safety turns into a project | M2 doubles | Reject archives outright; rasterize rather than deep-inspect. Both were chosen for this reason |
 | The drafter's fact bundle is too wide | Every upload silently reworded the draft under her cursor | Scope the bundle in LP-810 and assert on it in a test, not in review |
 | Cross-tenant leak through the token resolver | Existential | Write the cross-tenant test before the resolver; the resolver is the only code allowed to derive `company_id` from an address |
+| Nobody can reply to a borrower | She replies from Outlook, the thread leaves our records, and her next inbound message falls off rungs 1–2 | LP-818, and treat M3+M4 as one release |
+| A bounce is invisible | The reminder engine nags forever against a dead address | LP-819, before LP-814 ships |
+| The nightly shutdown pages someone daily | Alert fatigue, then a real alert ignored | H4 — gate the alarms on the shutdown schedule |
 | The AI drafts something that reads as a Reg B notice | Regulatory, and it starts a clock nobody logged | The scanner is deterministic and blocks the draft — never a prompt instruction |
+
+---
+
+## §H — The operational track nobody tickets and everybody needs
+
+None of this is in the spec. All of it decides whether the tickets above are buildable.
+
+### H1 — Local development without AWS
+
+A developer cannot run SES on a laptop, and the ingest path is where the fiddly bugs are. Build a
+**dev-only raw-message injector** — a `dev.py`-style endpoint or a management command that takes an
+`.eml` off disk and enqueues it exactly as the SQS consumer would. Everything downstream of
+`inbound.ingest_message` is then testable offline. MailHog is already in `docker-compose.yml` for the
+outbound side. **This is part of LP-803, not a follow-up** — without it LP-804 and LP-805 are written
+blind and debugged in staging.
+
+### H2 — The `.eml` fixture corpus
+
+The parser gets exercised by shapes, not volume. Commit fixtures for: a plain reply with a PDF; a
+**forwarded** message with the PDF nested in `message/rfc822`; an Outlook RTF message with a
+`winmail.dat`; an encrypted PDF; a HEIC from an iPhone; an RFC 2231 filename and an RFC 2047 one; a
+DSN; an out-of-office auto-reply; a `dmarc=GRAY` message; and one message that arrives twice. Each is
+a named test, and together they are the acceptance criteria for LP-804 and LP-819.
+
+### H3 — Seed data, so the frontend is not blocked
+
+LP-807 (4 days) and LP-812 (5 days) both sit behind backend tickets. Seed a handful of
+`inbound_messages` with attachments, verdicts and routing states — routed, unrouted, quarantined —
+in the existing seed path, and the two frontend tickets can start in parallel with LP-805.
+
+### H4 — Observability, and the one alarm that will lie to you
+
+Structlog throughout, per the repo's convention — and **never log a message body or subject**;
+metadata only. Metrics worth having: ingest lag (SES receipt time → row committed), routing
+confidence distribution, triage queue depth and age, DLQ depth, and drafts rejected per guardrail.
+
+**The trap is specific to this repo.** Staging scales to zero and stops RDS between 22:00 and 09:00
+(LP-630). SES and S3 do not shut down, so mail still arrives all night and lands safely in the
+bucket — but the SQS consumer is down, so the queue drains at 09:00. That means **ingest lag will
+show an 11-hour spike every single night, by design**, and a naive alarm on queue depth or lag will
+page someone daily. Set the SQS message retention well above the window (the 4-day default is fine),
+and gate the alarms on the same schedule the shutdown uses. Say this in the runbook before anyone
+wires a PagerDuty rule to it.
+
+### H5 — Feature flags and how to stop it
+
+LP-810 ships behind a flag by the prose-pass convention. **Ingestion needs one too**: a per-company
+kill switch that stops routing and accepting while still capturing raw mail to S3. If the ladder
+misroutes, the recovery must be "stop attaching, keep receiving", not "lose the mail".
+
+### H6 — Cost
+
+Rounding error, but the repo tracks cost deliberately (budget alarms, overnight shutdown) so it
+should be stated rather than assumed. SES receipt is $0.10 per 1,000 messages plus $0.09 per 1,000
+256 KB chunks; SES sending is $0.10 per 1,000 plus $0.12/GB of attachment data. GuardDuty S3 gives
+1,000 requests and 1 GB free per month per region, which covers the pilot outright. At ~30 files a
+month the whole feature is **well under $5/month**, dominated by S3 storage of the raw `.eml`
+archive — which is a retention decision (§E item 3), not a throughput one.
 
 ---
 
