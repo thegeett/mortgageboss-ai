@@ -103,7 +103,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | INFRA-1 | 662b9400 | 7656cefc | 2 | HUMAN_GATED. Review found the ARN-consequence backwards (fail-open, not closed) and that `noncurrent_version_expiration` was the real §6 conflict — a deleted message destroyed in 30 days, not 5 years |
 | 2026-09-07 | INFRA-2 | c297a3df | 48244319 | 1 | exact-matched event types the guide spells two ways, and a missing health event; one predicted finding checked and dropped. Plan still not run — human |
 | 2026-09-07 | LP-803 | 4024f921 |  |  | awaiting review. Migration d1a8f37c0e59; nullable company_id against the plan; NULLS NOT DISTINCT dedup; §H1 injector |
-| 2026-09-07 | LP-804a | 66788b19 | REVIEW_SHA | 1 | a corpus fix undone by two sibling hooks the same argument covered |
+| 2026-09-07 | LP-804a | 66788b19 | 3cd4bce4 | 1 | a corpus fix undone by two sibling hooks the same argument covered |
 | 2026-09-07 | LP-804a | 66788b19 |  |  | awaiting review. Split from LP-804; LP-804b (safety, deps) is row 13b. Forwarded fixture was wrong and would have passed without recursing |
 | 2026-09-07 | INFRA-3 | 4c71c20b | 9cd54199 | 2 | a malformed DMARC record one flag-flip away, now fail-closed; the DKIM suffix sourced from the published table; the bounces escalation verified and strengthened |
 | 2026-09-07 | LP-803 | 4024f921 | 40067783 | 1 | a drift guard that a nested SELECT switched off silently; my own first fix broke it on a column named from_outcome |
