@@ -379,6 +379,13 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # the reason, the status code, when — makes "how many hard bounces, and of what kind" answerable
     # without naming anybody.
     "suppressed_addresses": frozenset({"address", "diagnostic"}),
+    # LP-805 — a participant list is a list of PEOPLE. Both columns identify one; what is left, the
+    # role and whether they are trusted, answers "how many files have a trusted sender" without
+    # naming anybody.
+    "loan_file_participants": frozenset({"email", "name"}),
+    # LP-805 — `participants` is a list of addresses and `subject_normalized` is prose a borrower
+    # wrote. `root_message_id` identifies one conversation on one file.
+    "email_threads": frozenset({"participants", "subject_normalized", "root_message_id"}),
     "inbound_attachments": frozenset(
         {"filename_original", "filename_normalized", "derived_storage_path"}
     ),
@@ -427,6 +434,9 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # LP-819, strong form: a bounce diagnostic is a provider's free text that quotes the recipient's
     # address back — a mailbox and often a name, in a shape no scrub matches.
     ("suppressed_addresses", "diagnostic"),
+    # LP-805, strong form: a participant's email IS the identifier the trust decision matches on,
+    # and a name has no shape a scrub matches.
+    ("loan_file_participants", "email"),
     # LP-822, and here for the strong-form reason rather than only to record the decision: an
     # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it

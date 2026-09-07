@@ -39,6 +39,7 @@ from app.models.document_finding import (
 from app.models.dti_custom_line import DtiCustomLine
 from app.models.dti_override import DtiOverride
 from app.models.email_draft_prose import EmailDraftProse
+from app.models.email_thread import EmailThread
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
@@ -62,6 +63,7 @@ from app.models.inbound_attachment import (
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
+from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.ltv_override import LtvOverride
 from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.needs_item import (
@@ -129,6 +131,7 @@ __all__ = [
     "DtiCustomLine",
     "DtiOverride",
     "EmailDraftProse",
+    "EmailThread",
     "EncryptedString",
     "EvaluationOutcome",
     "Extraction",
@@ -149,6 +152,7 @@ __all__ = [
     "InboundRoutingState",
     "Lender",
     "LoanFile",
+    "LoanFileParticipant",
     "LoanFileStatus",
     "LoanProgram",
     "LoanPurpose",
@@ -167,6 +171,7 @@ __all__ = [
     "NeedsItemStatus",
     "Observation",
     "OccupancyType",
+    "ParticipantRole",
     "Property",
     "PropertyType",
     "RecordStatus",
