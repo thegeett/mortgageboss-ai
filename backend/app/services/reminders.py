@@ -265,6 +265,20 @@ async def _untouched(
     return result
 
 
+def _is_suppressed(
+    snoozes: dict[tuple[UUID, ReminderKind, UUID | None], ReminderSnooze],
+    suggestion: Suggestion,
+) -> bool:
+    """Whether a processor's decision still covers this suggestion.
+
+    See `build_suggestions` for why the timestamps are compared rather than the keys alone.
+    """
+    snooze = snoozes.get((suggestion.loan_file_id, suggestion.kind, suggestion.subject_id))
+    if snooze is None:
+        return False
+    return snooze.created_at >= suggestion.since
+
+
 async def build_suggestions(
     db: AsyncSession,
     *,
@@ -334,15 +348,24 @@ async def build_suggestions(
             )
         )
 
-    suppressed = {
-        (snooze.loan_file_id, snooze.kind, snooze.subject_id)
+    # A DECISION IS ABOUT THE EVENT THAT WAS IN FRONT OF THE PROCESSOR, NOT ABOUT THE SUBJECT FOREVER.
+    #
+    # `until=None` is a documented dismissal — "stop telling me" — and it never expires. Keyed on
+    # (file, kind, subject) alone, a dismissal of "you asked ten days ago" also silenced a request
+    # made LATER about the same need. Measured before this: dismiss, let LP-819 unwind the request on
+    # a bounce, send a fresh one, leave it four days unanswered — and the engine said nothing.
+    #
+    # `since` is what each rule fired from: `requested_at` for rule 1, the send for rule 2, the last
+    # activity for rule 3. So a decision is stale exactly when its subject's event has moved past it,
+    # and no column is needed to know that. A dismissal still means "stop telling me about THIS", and
+    # a genuinely new request is not that.
+    snoozes = {
+        (snooze.loan_file_id, snooze.kind, snooze.subject_id): snooze
         for snooze in await _snoozes(db, loan_file_ids=file_ids)
         if snooze.suppresses(now=moment)
     }
     remaining = [
-        suggestion
-        for suggestion in suggestions
-        if (suggestion.loan_file_id, suggestion.kind, suggestion.subject_id) not in suppressed
+        suggestion for suggestion in suggestions if not _is_suppressed(snoozes, suggestion)
     ]
     # OLDEST FIRST. A list ordered by anything else buries the thing that has been waiting longest,
     # which is the one the rule exists to surface.

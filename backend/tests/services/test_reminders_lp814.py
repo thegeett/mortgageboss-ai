@@ -580,3 +580,104 @@ async def test_the_oldest_problem_comes_first(db_session: AsyncSession) -> None:
     ]
 
     assert suggestions[0].summary.startswith("Ancient")
+
+
+# --------------------------------------------------------------------------------------------- #
+# A decision covers the event it was about, not the subject forever (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_a_dismissal_does_not_silence_a_later_request(db_session: AsyncSession) -> None:
+    """`until=None` is a documented dismissal and never expires.
+
+    Keyed on (file, kind, subject) alone it also silenced a request made LATER about the same need.
+    Measured before the fix: dismiss, let LP-819 unwind the request on a bounce, send a fresh one,
+    leave it four days unanswered — and the engine produced nothing. The processor's decision was
+    about a request that no longer exists.
+    """
+    company, loan_file = await _company_and_file(db_session, slug=f"stale{uuid4().hex[:6]}")
+    need = await _need(
+        db_session,
+        loan_file,
+        status=NeedsItemStatus.REQUESTED,
+        requested_days_ago=10,
+    )
+
+    assert len(await build_suggestions(db_session, company_id=company.id)) == 1
+
+    dismissal = await snooze(
+        db_session,
+        loan_file=loan_file,
+        kind=ReminderKind.NEEDS_ITEM_PENDING,
+        subject_id=need.id,
+        until=None,
+    )
+    # BACKDATED so the fixture is chronological. The dismissal has to happen BEFORE the new request,
+    # or the scenario is one that cannot occur — and the first version of this test, which left it
+    # at `now`, failed against correct code for exactly that reason.
+    dismissal.created_at = utcnow() - timedelta(days=9)
+    await db_session.flush()
+    assert await build_suggestions(db_session, company_id=company.id) == []
+
+    # LP-819 unwinds the bounced request, then a new one is sent and goes unanswered.
+    need.status = NeedsItemStatus.PENDING
+    need.requested_at = None
+    await db_session.flush()
+    need.status = NeedsItemStatus.REQUESTED
+    need.requested_at = utcnow() - timedelta(days=4)
+    await db_session.flush()
+
+    again = await build_suggestions(db_session, company_id=company.id)
+    assert len(again) == 1
+    assert again[0].subject_id == need.id
+
+
+async def test_a_dismissal_still_silences_the_request_it_was_about(
+    db_session: AsyncSession,
+) -> None:
+    """The control, and the one that matters.
+
+    A fix that simply stopped suppressing would satisfy the test above while making dismissal do
+    nothing — every card a processor refused would come straight back, which is the failure the
+    feature exists to avoid.
+    """
+    company, loan_file = await _company_and_file(db_session, slug=f"held{uuid4().hex[:6]}")
+    need = await _need(
+        db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=10
+    )
+
+    await snooze(
+        db_session,
+        loan_file=loan_file,
+        kind=ReminderKind.NEEDS_ITEM_PENDING,
+        subject_id=need.id,
+        until=None,
+    )
+    await db_session.flush()
+
+    # Time passes; the SAME request is still outstanding.
+    assert await build_suggestions(db_session, company_id=company.id) == []
+
+
+async def test_a_timed_snooze_still_expires_on_its_own_terms(db_session: AsyncSession) -> None:
+    """The second control: the new comparison must not replace the date check.
+
+    A snooze with a past date has to stop suppressing even though its subject's event has not moved.
+    """
+    company, loan_file = await _company_and_file(db_session, slug=f"exp{uuid4().hex[:6]}")
+    need = await _need(
+        db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=10
+    )
+
+    row = await snooze(
+        db_session,
+        loan_file=loan_file,
+        kind=ReminderKind.NEEDS_ITEM_PENDING,
+        subject_id=need.id,
+        until=utcnow() + timedelta(days=1),
+    )
+    await db_session.flush()
+    assert await build_suggestions(db_session, company_id=company.id) == []
+
+    row.snoozed_until = utcnow() - timedelta(minutes=1)
+    await db_session.flush()
+
+    assert len(await build_suggestions(db_session, company_id=company.id)) == 1
