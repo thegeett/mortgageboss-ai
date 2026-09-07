@@ -57,6 +57,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
 }));
 
+const notifySuccessMock = vi.fn();
+const notifyErrorMock = vi.fn();
+vi.mock("@/lib/toast", () => ({
+  notifySuccess: (...args: unknown[]) => notifySuccessMock(...args),
+  notifyError: (...args: unknown[]) => notifyErrorMock(...args),
+}));
+
 import { VerificationPanel } from "./verification-panel";
 
 const CUTOFFS: Record<AggressionLevel, number> = {
@@ -698,5 +705,75 @@ describe("LP-647 §2 — the Run button while documents are still being read", (
     render(<VerificationPanel fileId="LF-1" />);
 
     expect(screen.queryByText(/still being read/)).toBeNull();
+  });
+});
+
+/**
+ * LP-809 review — THE GOVERNED ROWS CONFIRMED NOTHING.
+ *
+ * Every confirmation in this panel lived in `findings-list`, which renders the LEGACY AI-sweep
+ * findings. The §8 rule-finding rows — including the row-level Request button LP-809 wired to the
+ * borrower's email draft — called `mutate(action)` with no handlers at all, so a request that
+ * succeeded and one that failed looked exactly the same: nothing happened on screen either way.
+ *
+ * It matters more after the routing fix, not less. Requesting the appraisal, the title commitment or
+ * an employer's VOE now deliberately drafts NO email, because none of them are the borrower's to
+ * send — and a processor who is told nothing cannot tell that apart from a button that did nothing.
+ */
+describe("VerificationPanel — the governed rows say what happened", () => {
+  function ruleFinding(over: Record<string, unknown> = {}) {
+    return {
+      id: "rf-1",
+      rule_id: "IN-1",
+      rule_name: "Income documentation",
+      evaluation_outcome: "open",
+      status: "yellow",
+      category: "income",
+      message: "Stated monthly income is not supported by the pay stubs",
+      subject_key: "loan",
+      subject_label: "Loan-level",
+      guideline: null,
+      load_bearing_tags: [],
+      ratification_pending: false,
+      how_to_fix: null,
+      confidence: 1,
+      resolution_status: "open",
+      missing_documents: ["pay stub"],
+      can_apply: false,
+      source_documents: [],
+      ...over,
+    };
+  }
+
+  it("confirms a request, and reports one that failed", () => {
+    notifySuccessMock.mockClear();
+    notifyErrorMock.mockClear();
+    resolveMutate.mockClear();
+    mock({ data: { ...STATUS, rule_findings: [ruleFinding()] } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /request pay stub/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Request$/ }));
+
+    const [action, handlers] = resolveMutate.mock.calls[0] as [
+      { kind: string },
+      { onSuccess: () => void; onError: (e: unknown) => void },
+    ];
+    expect(action.kind).toBe("request-docs");
+
+    handlers.onSuccess();
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock.mock.calls[0]?.[0]).toMatchObject({
+      title: "Documents requested",
+      consequence: expect.stringContaining("email draft"),
+    });
+
+    // The other half: a failure has to say so too. Without this, a handler that only ever ran the
+    // success branch would satisfy everything above.
+    handlers.onError(new Error("boom"));
+    expect(notifyErrorMock).toHaveBeenCalledTimes(1);
+    expect(notifyErrorMock.mock.calls[0]?.[0]).toMatchObject({
+      title: "Couldn’t request the documents",
+    });
   });
 });

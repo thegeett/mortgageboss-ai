@@ -1670,3 +1670,137 @@ def test_the_stuck_window_stays_above_the_task_that_produces_it() -> None:
         f"is merely slow reads as wedged (window={_STUCK_DOCUMENT_AFTER_SECONDS}s, "
         f"hard limit={DOCUMENT_HARD_LIMIT_SECONDS}s)"
     )
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-809 review — the row-level request and WHO the documents belong to
+# --------------------------------------------------------------------------------------------- #
+from sqlalchemy import select  # noqa: E402
+
+
+async def _requestable_finding(db: AsyncSession, loan_file: LoanFile, *, rule_id: str) -> Finding:
+    """An open finding on a real rule, so `_missing_documents` resolves that rule's spec."""
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    finding.rule_id = rule_id
+    finding.message = "Stated monthly income is not supported by the pay stubs"
+    await db.commit()
+    return finding
+
+
+async def _request_docs(client: AsyncClient, loan_file: LoanFile, finding: Finding, token: str):
+    return await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+
+async def test_the_row_button_does_not_ask_the_borrower_for_the_lenders_documents(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-809 review, the finding that mattered: the button drafted an email asking the borrower to
+    send us their own credit report.
+
+    `create_needs_item` was called with no `needs_type`, and `_is_borrower_facing` counts an untyped
+    need as borrower-facing, so every request from this route went into the borrower's draft
+    regardless of whose document it was. Measured across the 67 rule specs that declare documents,
+    34 name ONLY documents the borrower cannot produce — the lender's appraisal and closing
+    disclosure, the title company's commitment, the employer's VOE, the agent's purchase agreement,
+    the condo insurer's master policy — and the bulk route skipped every one of them correctly while
+    this route emailed every one of them.
+
+    CR-6 wants the credit report and the closing disclosure; both are the lender's. The positive
+    control is the second half, on a rule whose document IS the borrower's: without it, a bug that
+    stopped drafting anything at all would pass the first assertion.
+    """
+    from app.services.email_draft import get_open_draft
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+
+    lender_file = await create_loan_file(db, company_id=company.id)
+    lender = await _requestable_finding(db, lender_file, rule_id="CR-6")
+    assert (await _request_docs(client, lender_file, lender, token)).status_code == 200
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == lender_file.id)))
+        .scalars()
+        .all()
+    )
+    assert sorted(n.title for n in needs) == ["closing disclosure", "credit report"], (
+        "the needs list should carry the documents themselves — this is also the work the "
+        "processor still has to do, so the items must exist even though no email is sent"
+    )
+    assert await get_open_draft(db, loan_file_id=lender_file.id) is None, (
+        "a draft was started asking the BORROWER for the lender's credit report and closing "
+        "disclosure — neither is theirs to send"
+    )
+
+    # The control: IN-1's document is the borrower's pay stub, and it must reach the draft.
+    borrower_file = await create_loan_file(db, company_id=company.id)
+    borrower = await _requestable_finding(db, borrower_file, rule_id="IN-1")
+    assert (await _request_docs(client, borrower_file, borrower, token)).status_code == 200
+
+    draft = await get_open_draft(db, loan_file_id=borrower_file.id)
+    assert draft is not None, "the borrower's own document did not reach a draft either"
+
+
+async def test_the_borrower_reads_the_document_not_the_findings_prose(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The email said "- Documents for: Stated monthly income is not supported by the pay stubs".
+
+    The need was titled from `finding.message` and left untyped, so `_document_line` fell through to
+    the title. `request_documents_in_bulk`'s own docstring rejects this — "The title is the DOCUMENT,
+    not the finding's prose" — and the two routes disagreed about it. Both assertions are needed:
+    the first alone would pass on an empty body.
+    """
+    from app.services.email_draft import get_open_draft
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _requestable_finding(db, loan_file, rule_id="IN-1")
+
+    assert (await _request_docs(client, loan_file, finding, token)).status_code == 200
+
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None
+    body = draft.body or ""
+    assert finding.message not in body, "the finding's internal prose reached the borrower's email"
+    assert "pay stub" in body.lower(), "the email does not name the document being asked for"
+
+
+async def test_a_second_click_does_not_ask_the_borrower_twice(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The row cannot gate itself — `RuleFindingPublic` carries no `docs_requested` field, so the
+    button stays live — and nothing else was stopping a second click either. It created a second
+    needs item with a new id, which `add_needs_to_draft` dedupes only by id, so the borrower's email
+    grew a second identical line.
+
+    The bulk route has guarded this since LP-801 (`_already_asked_key`); routing both through one
+    creation path is what extends it here, and it now spans the two routes rather than one.
+    """
+    from app.services.email_draft import get_open_draft
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _requestable_finding(db, loan_file, rule_id="IN-1")
+
+    assert (await _request_docs(client, loan_file, finding, token)).status_code == 200
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None
+    first_body = draft.body or ""
+    assert first_body.lower().count("pay stub") >= 1  # the control: it is there once to begin with
+
+    assert (await _request_docs(client, loan_file, finding, token)).status_code == 200
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert len(needs) == 1, (
+        f"a second click created a second needs item: {[n.title for n in needs]}"
+    )
+    await db.refresh(draft)
+    assert (draft.body or "") == first_body, "the borrower's email grew a second identical line"

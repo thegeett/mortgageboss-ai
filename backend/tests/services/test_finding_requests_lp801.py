@@ -146,7 +146,7 @@ async def test_both_paths_write_the_same_marker_keys(db_session: AsyncSession) -
     single = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
     bulk = await _finding(db_session, loan_file, rule_id="CR-13", subject="lia2")
 
-    item = await request_docs_for_finding(
+    [item] = await request_docs_for_finding(
         db_session, loan_file=loan_file, finding=single, actor_user_id=actor
     )
     created = await request_documents_in_bulk(
@@ -341,7 +341,7 @@ async def test_the_marker_reads_back_from_the_new_shape(db_session: AsyncSession
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    item = await request_docs_for_finding(
+    [item] = await request_docs_for_finding(
         db_session, loan_file=loan_file, finding=finding, actor_user_id=actor
     )
 

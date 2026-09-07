@@ -20,6 +20,7 @@ Both record the resolution trail (who / when) and an activity-log entry. Uses
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -479,7 +480,7 @@ def _already_asked_key(needs_type: str | None, title: str) -> str:
     return needs_type or f"title:{title.strip().lower()}"
 
 
-async def request_documents_in_bulk(
+async def _create_document_needs(
     db: AsyncSession,
     *,
     loan_file: LoanFile,
@@ -487,7 +488,21 @@ async def request_documents_in_bulk(
     actor_user_id: UUID,
     note: str | None = None,
 ) -> list[NeedsItem]:
-    """Create ONE needs item per DOCUMENT, from many findings at once (LP-562).
+    """Create ONE needs item per DOCUMENT, and put the borrower's share in the open draft.
+
+    THE SHARED CREATION PATH FOR BOTH REQUEST ROUTES (LP-809 review). It was the body of
+    ``request_documents_in_bulk`` alone, and the per-finding route grew its own shape beside it: one
+    untyped needs item titled with the finding's prose. That was survivable while a needs item was
+    all a request produced. LP-809 made a request produce an EMAIL, and the two shapes then routed
+    the same document to different people — measured across the 67 rule specs that declare documents,
+    34 of them name only documents the borrower cannot produce (their own credit report, the lender's
+    appraisal, the title company's commitment, the employer's VOE), and every one was correctly
+    skipped here and put in the borrower's draft by the other route, because ``_is_borrower_facing``
+    reads ``needs_type`` and the other route left it None.
+
+    One creation path is the fix rather than a second filter, because the decision then has one
+    place to be wrong. The caller supplies the documents; everything below — the type, the title,
+    the dedupe key, the draft — follows from them.
 
     ONE PER DOCUMENT, NOT ONE PER FINDING, and that is the whole reason this exists rather than a loop
     over `request_docs_for_finding`. On the file that prompted it, nine findings wanted five distinct
@@ -597,12 +612,37 @@ async def request_documents_in_bulk(
 
     if created:
         # LP-809 — the requested documents join the file's OPEN draft rather than each becoming its
-        # own email. Deliberately after the needs items exist and before the activity log: a draft
-        # that referenced a need not yet flushed would fail its foreign key, and a log line claiming
-        # a request was made should not precede the draft that will carry it.
+        # own email. Deliberately after the needs items exist and before the caller's activity log: a
+        # draft that referenced a need not yet flushed would fail its foreign key, and a log line
+        # claiming a request was made should not precede the draft that will carry it.
         await add_needs_to_draft(
             db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
         )
+    return created
+
+
+async def request_documents_in_bulk(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    by_document: dict[str, list[Finding]],
+    actor_user_id: UUID,
+    note: str | None = None,
+) -> list[NeedsItem]:
+    """ "Request all N" — the collection route, over many findings at once (LP-562).
+
+    ONE PER DOCUMENT, NOT ONE PER FINDING, and that is the whole reason this exists rather than a
+    loop over `request_docs_for_finding`. On the file that prompted it, nine findings wanted five
+    distinct documents — four CR-6 rows all want the same tri-merge credit report, and CR-13 wants it
+    again in different words. Requesting per finding would put nine items on the needs list for five
+    documents, five of them near-duplicate credit-report asks whose titles are whole finding messages.
+
+    The creation is `_create_document_needs`; what is left here is this route's own activity line.
+    """
+    created = await _create_document_needs(
+        db, loan_file=loan_file, by_document=by_document, actor_user_id=actor_user_id, note=note
+    )
+    if created:
         await log_activity(
             db,
             loan_file_id=loan_file.id,
@@ -626,70 +666,120 @@ async def request_docs_for_finding(
     *,
     loan_file: LoanFile,
     finding: Finding,
+    documents: Sequence[str] = (),
     actor_user_id: UUID,
     note: str | None = None,
-) -> NeedsItem:
-    """Create a needs-list item FROM a finding (LP-88) — the "request docs" action.
+) -> list[NeedsItem]:
+    """Request documents FROM ONE finding (LP-88) — the row-level button.
 
-    Generates a ``FINDING``-origin needs item (the doc request the borrower must satisfy)
-    with the priority derived from the finding severity, and records a note on the finding
-    that the docs were requested (so the tab shows the linkage). Does NOT resolve the
-    finding — it stays open until the request is satisfied. The needs item is the artifact
-    the needs list + Phase-4 communication act on. ``flush`` only.
+    Creates the needs items the borrower (or whoever owns the document) must satisfy, puts the
+    borrower's share in the file's open email draft, and records on the finding that documents were
+    requested so the tab shows the linkage. Does NOT resolve the finding — it stays open until the
+    request is met. ``flush`` only.
 
-    AND IT JOINS THE OPEN DRAFT, which it did not until now. `phase4.md` §1 states the chain as
-    *"processor clicks 'Request docs' on a finding -> the request is added to a pending draft ->
-    multiple requests accumulate into one email"*, and LP-809 wired `add_needs_to_draft` into
-    `request_documents_in_bulk` only — the function §1 called "the accumulation primitive". The
-    per-finding route is the other half of the same sentence and had no draft call at all, so a
-    processor who clicked the row-level button got a needs item, an activity line, and no email.
-    Reported on LF-JR4T (rule ID-3): activity read "Requested docs from finding ID-3" and the file
-    had no `communications` row of any kind.
+    ``documents`` IS WHAT THE ROW OFFERED, passed in rather than re-derived, because deriving it
+    needs the file's documents and loan purpose and the endpoint already holds both. It is the same
+    expression `RuleFindingPublic.missing_documents` renders and the same one the bulk endpoint
+    groups by, so the button and the card cannot disagree about what is outstanding.
 
-    ``loan_file`` is a parameter rather than a lookup from ``finding.loan_file_id`` because the only
-    caller already holds the tenant-scoped file — re-fetching it here would be a second, unscoped
-    read of the row the endpoint has already authorised.
+    THE SHAPE IS `_create_document_needs`', NOT THIS FUNCTION'S OWN — the LP-809 review's finding.
+    This route used to build one untyped needs item titled ``f"Documents for: {finding.message}"``,
+    which was adequate while a request produced only a needs item and became wrong the moment LP-809
+    made it produce an email:
+
+    * ``_is_borrower_facing`` reads ``needs_type``, and an untyped need counts as borrower-facing —
+      so all 34 rules whose documents are somebody else's (the lender's appraisal, the title
+      company's commitment, the employer's VOE) drafted a borrower email asking for them.
+    * ``_document_line`` falls back to the title for an untyped need, so the borrower read the
+      finding's internal prose: "- Documents for: Stated monthly income is not supported by the pay
+      stubs".
+    * ``_already_asked_key`` never saw these needs, so a second click added a second identical line
+      to the same email. The row cannot gate itself — ``RuleFindingPublic`` carries no
+      ``docs_requested`` field — so nothing else was stopping it.
+
+    All three are the same defect: a need built in a shape the draft machinery cannot reason about.
+    One creation path fixes all three, and the dedupe now spans both routes rather than one.
+
+    THE UNTYPED FALLBACK REMAINS, for a finding that names no document at all. That is not a gap: it
+    is LP-624's channel, where the evaluator records a SENTENCE ("One more source stating the date of
+    birth") that no catalog type can match, and it is the case ``_is_borrower_facing``'s
+    borrower-by-default is actually about — a request a processor composed, for something only the
+    borrower can answer. The row offers no button in that state (``missing_documents`` is empty), so
+    it is reachable only by calling the API directly.
     """
     if not requestable(finding):
         raise NotRequestable(
             f"Finding {finding.rule_id} cannot produce a document request — "
             "it is answered by identifying documents already in the file."
         )
-    title = f"Documents for: {finding.message}"[:200]
+
+    if documents:
+        created = await _create_document_needs(
+            db,
+            loan_file=loan_file,
+            by_document={document: [finding] for document in documents},
+            actor_user_id=actor_user_id,
+            note=note,
+        )
+    else:
+        created = [
+            await _create_needs_item_from_message(
+                db, loan_file=loan_file, finding=finding, actor_user_id=actor_user_id, note=note
+            )
+        ]
+
+    if created:
+        await log_activity(
+            db,
+            loan_file_id=finding.loan_file_id,
+            activity_type=ActivityType.NEEDS_ITEM_CREATED,
+            summary=f"Requested docs from finding {finding.rule_id}",
+            actor_user_id=actor_user_id,
+            detail={
+                "finding_id": str(finding.id),
+                "rule_id": finding.rule_id,
+                # PLURAL, because a finding can want more than one document and each is its own
+                # item. `finding_requests.requested_needs_item_id` still follows the marker on the
+                # finding, which names the first; this is the full list for the timeline.
+                "needs_item_ids": [str(item.id) for item in created],
+            },
+        )
+    await db.flush()
+    return created
+
+
+async def _create_needs_item_from_message(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    finding: Finding,
+    actor_user_id: UUID,
+    note: str | None,
+) -> NeedsItem:
+    """The one need a finding that names NO document produces — titled from the finding itself.
+
+    Untyped on purpose: there is no document label to resolve, and a type no document can match must
+    not be stored as one (LP-624). It joins the draft, because a request nobody but the borrower can
+    answer is exactly what the borrower-by-default in ``_is_borrower_facing`` is for.
+    """
     item = await create_needs_item(
         db,
         loan_file_id=finding.loan_file_id,
-        title=title,
+        title=f"Documents for: {finding.message}"[:200],
         origin=NeedsItemOrigin.FINDING,
         priority=_STATUS_TO_PRIORITY.get(finding.status, NeedsItemPriority.STANDARD),
         disposition=NeedsItemDisposition.CONFIRMED,  # a processor-requested need is real
         description=note,
+        # NOT `source_finding_id`: that column's foreign key points at `document_findings`, a
+        # different table, so it cannot reference a verification finding. The linkage a request can
+        # carry is therefore textual — the rule id in `reasoning`.
         reasoning=f"Requested from verification finding {finding.rule_id}",
     )
-    # Mark the finding so the tab shows docs were requested (without resolving it).
     finding.details = {
         **finding.details,
         "docs_requested": docs_requested_marker(actor_user_id=actor_user_id, needs_item_id=item.id),
     }
-
-    # LP-809 — same call, same order and the same reasons as the bulk route above: after the needs
-    # item exists (the join row's foreign key needs it flushed) and before the activity log (a line
-    # claiming a request was made should not precede the draft that will carry it).
     await add_needs_to_draft(db, loan_file=loan_file, needs=[item], actor_user_id=actor_user_id)
-
-    await log_activity(
-        db,
-        loan_file_id=finding.loan_file_id,
-        activity_type=ActivityType.NEEDS_ITEM_CREATED,
-        summary=f"Requested docs from finding {finding.rule_id}",
-        actor_user_id=actor_user_id,
-        detail={
-            "finding_id": str(finding.id),
-            "rule_id": finding.rule_id,
-            "needs_item_id": str(item.id),
-        },
-    )
-    await db.flush()
     return item
 
 

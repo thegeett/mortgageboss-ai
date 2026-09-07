@@ -9,6 +9,7 @@ import { apiClient } from "@/lib/api/client";
 import { outboundDraftQueryKey } from "@/lib/api/communications";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
+import { needsQueryKey } from "@/lib/api/needs";
 import type {
   AggressionLevel,
   FindingImpactPreview,
@@ -181,7 +182,12 @@ export function useResolveFinding(identifier: string) {
       queryClient.setQueryData(verificationQueryKey(identifier), status);
       void queryClient.invalidateQueries({ queryKey: dtiQueryKey(identifier) });
       void queryClient.invalidateQueries({ queryKey: ltvQueryKey(identifier) });
-      void queryClient.invalidateQueries({ queryKey: ["needs", identifier] });
+      // LP-809 review — `["needs", identifier]` matched NO query. The needs list is registered under
+      // `needsQueryKey` = ["loan-file-needs", id] (needs-dashboard, needs-summary, needs-completeness,
+      // verification-stats all read it), and TanStack prefix-matches element by element, so "needs"
+      // never matched "loan-file-needs". Requesting documents creates a need; the list showing it was
+      // the one thing this mutation was already trying to refresh, and had never once refreshed.
+      void queryClient.invalidateQueries({ queryKey: needsQueryKey(identifier) });
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
       // LP-809 — request-docs now JOINS the file's open draft (both routes), so the draft the
       // communication page reads is stale the moment this resolves. Without this, the backend

@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import CurrentUser
+from app.core.config import settings
 from app.core.database import DbSession
 from app.core.run_limits import rule_engine_limits
 from app.models.base import utcnow
@@ -868,36 +869,23 @@ async def bulk_request_docs_endpoint(
     if loan_file is None:
         raise _NOT_FOUND
 
-    doc_rows = (
-        await db.execute(
-            only_active(
-                select(Document.document_type).where(Document.loan_file_id == loan_file.id),
-                Document,
-            )
-        )
-    ).all()
-    on_file = {row.document_type for row in doc_rows if row.document_type}
-    purpose = loan_file.loan_purpose.value if loan_file.loan_purpose else None
+    on_file, purpose = await _documents_on_file(db, loan_file)
 
     by_document: dict[str, list[Finding]] = {}
     for finding_id in payload.finding_ids:
         finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
         if finding is None:
             continue
-        # LP-624 — THE SAME ANSWER THE CARD RENDERED. `RuleFindingPublic.from_model` prefers the
-        # evaluator's own `requested_documents` over the spec-derived list; this recomputed only the
-        # spec-derived one, so for ID-2/ID-3's single-source abstention — where the spec yields [] —
-        # the card showed a request and put the finding in the "request these" bucket, the processor
-        # clicked "Request all N", and nothing was created and nothing marked `docs_requested`. This
-        # endpoint's own docstring promises the button and the card can never disagree; it does now.
-        details = finding.details if isinstance(finding.details, Mapping) else {}
-        documents = _requested_documents(details) or _missing_documents(
-            _rule_spec(finding.rule_id), on_file, loan_purpose=purpose
-        )
-        for document in documents:
+        # LP-624 — THE SAME ANSWER THE CARD RENDERED, and now literally the same function the
+        # per-finding route calls. `RuleFindingPublic.from_model` prefers the evaluator's own
+        # `requested_documents` over the spec-derived list; this recomputed only the spec-derived
+        # one, so for ID-2/ID-3's single-source abstention — where the spec yields [] — the card
+        # showed a request and put the finding in the "request these" bucket, the processor clicked
+        # "Request all N", and nothing was created and nothing marked `docs_requested`.
+        for document in _documents_a_finding_wants(finding, on_file=on_file, loan_purpose=purpose):
             by_document.setdefault(document, []).append(finding)
 
-    await request_documents_in_bulk(
+    created = await request_documents_in_bulk(
         db,
         loan_file=loan_file,
         by_document=by_document,
@@ -905,6 +893,8 @@ async def bulk_request_docs_endpoint(
         note=payload.note,
     )
     await db.commit()
+    if created:
+        _enqueue_draft_composition(loan_file.id)
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)
 
@@ -1054,6 +1044,56 @@ async def accept_risk_endpoint(
     return await _build_status(db, loan_file=loan_file, user=current_user)
 
 
+async def _documents_on_file(db: DbSession, loan_file: LoanFile) -> tuple[set[str], str | None]:
+    """The document types this file already holds, and its loan purpose — `_missing_documents`' inputs."""
+    doc_rows = (
+        await db.execute(
+            only_active(
+                select(Document.document_type).where(Document.loan_file_id == loan_file.id),
+                Document,
+            )
+        )
+    ).all()
+    on_file = {row.document_type for row in doc_rows if row.document_type}
+    return on_file, loan_file.loan_purpose.value if loan_file.loan_purpose else None
+
+
+def _documents_a_finding_wants(
+    finding: Finding, *, on_file: set[str], loan_purpose: str | None
+) -> list[str]:
+    """What this finding is waiting on — THE ONE EXPRESSION, shared by both request routes.
+
+    LP-620 — THE FINDING'S OWN ANSWER WINS WHERE IT HAS ONE. `requires_documents` is a per-rule
+    presence test and cannot express "one more source than the file already has"; an evaluator that
+    knows what this subject is waiting on records it, and everything else keeps the spec-derived
+    list. `RuleFindingPublic.missing_documents` renders this same expression, which is what makes
+    the promise that the button and the card can never disagree checkable rather than a comment.
+
+    Written once because it was written twice: the bulk endpoint had it inline and the per-finding
+    endpoint had nothing, which is how one route came to type its needs and the other did not.
+    """
+    details = finding.details if isinstance(finding.details, Mapping) else {}
+    return _requested_documents(details) or _missing_documents(
+        _rule_spec(finding.rule_id), on_file, loan_purpose=loan_purpose
+    )
+
+
+def _enqueue_draft_composition(loan_file_id: UUID) -> None:
+    """Compose the draft's framing on a worker, AFTER the commit — never in the request.
+
+    Enqueued only when the flag is on, so this is a no-op in every environment today. The draft is a
+    complete email without it (the plain template carries v1's exact wording); a second enqueue for
+    one draft is harmless because the task returns without composing once the cache is warm.
+    """
+    if not settings.email_draft_enabled:
+        return
+    # Imported here, like the rule-engine enqueue below, so the API process does not pull the task
+    # graph in at module import.
+    from app.tasks.email_draft import compose_draft_prose
+
+    compose_draft_prose.delay(str(loan_file_id))
+
+
 @router.post(
     "/{identifier}/findings/{finding_id}/request-docs", response_model=VerificationStatusPublic
 )
@@ -1077,17 +1117,28 @@ async def request_docs_endpoint(
     if finding is None:
         raise _FINDING_NOT_FOUND
 
+    # LP-809 review — THE SAME DOCUMENTS THE ROW OFFERED, computed by the same expression as the
+    # bulk endpoint and `RuleFindingPublic.missing_documents`. The service used to derive nothing and
+    # create one untyped need titled with the finding's prose, which put 34 rules' worth of other
+    # people's documents (the lender's appraisal, the title commitment, the employer's VOE) into a
+    # borrower email. Types come from the document labels, so the responsible-party filter can act.
+    on_file, purpose = await _documents_on_file(db, loan_file)
+    documents = _documents_a_finding_wants(finding, on_file=on_file, loan_purpose=purpose)
+
     try:
-        await request_docs_for_finding(
+        created = await request_docs_for_finding(
             db,
             loan_file=loan_file,
             finding=finding,
+            documents=documents,
             actor_user_id=current_user.id,
             note=payload.note,
         )
     except NotRequestable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
+    if created:
+        _enqueue_draft_composition(loan_file.id)
     await db.refresh(loan_file)
     return await _build_status(db, loan_file=loan_file, user=current_user)
 

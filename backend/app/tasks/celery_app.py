@@ -28,6 +28,7 @@ _TASK_MODULES = [
     "app.tasks.cross_source",
     "app.tasks.verification_rules",  # LP-365 — the governed snapshot/rules pass
     "app.tasks.inbound",  # LP-803 — inbound mail ingest + the SQS poller
+    "app.tasks.email_draft",  # LP-809 review — draft prose, off the request path
 ]
 
 celery_app = Celery(

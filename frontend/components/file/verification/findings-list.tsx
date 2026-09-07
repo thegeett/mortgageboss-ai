@@ -160,7 +160,14 @@ export function FindingsList({
                   { kind: "request-docs", findingId: f.id, note },
                   {
                     title: "Documents requested",
-                    consequence: "A need is on the file; the finding stays open until it is met.",
+                    // LP-809 review — SAY THAT AN EMAIL WAS STARTED. A request now joins the file's
+                    // open draft, and this sentence described only the needs item, so the one thing
+                    // that changed on another page went unmentioned. "Whatever the borrower can
+                    // send" is doing real work: a request for the appraisal, the title commitment or
+                    // an employer's VOE is deliberately NOT in the draft, because none of them are
+                    // the borrower's to send.
+                    consequence:
+                      "On the needs list, and whatever the borrower can send is in the file's email draft. The finding stays open until it is met.",
                   },
                 )
               }

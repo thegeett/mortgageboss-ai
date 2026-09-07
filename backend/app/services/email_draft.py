@@ -65,9 +65,13 @@ class DraftUpdate:
     ``skipped_not_borrower`` is returned rather than swallowed. A processor who requested five
     documents and sees three in the draft is owed an answer, and the answer is not "an error" — the
     other two are somebody else's to chase. The needs list still carries them.
+
+    ``draft`` IS NONE when every need was somebody else's and no draft was already open. See the
+    guard in ``add_needs_to_draft``.
     """
 
-    draft: Communication
+    #: None when there was nothing for the borrower and no draft already open — see below.
+    draft: Communication | None
     added: tuple[UUID, ...] = ()
     already_present: tuple[UUID, ...] = ()
     skipped_not_borrower: tuple[UUID, ...] = ()
@@ -230,30 +234,61 @@ def _draft_facts(loan_file: LoanFile, needs: list[NeedsItem]) -> DraftFacts:
     )
 
 
-async def _composed_framing(
+async def _cached_framing(
     db: AsyncSession, *, loan_file: LoanFile, needs: list[NeedsItem]
 ) -> Framing | None:
-    """The model-written framing for this draft, from cache or a fresh call, or None.
+    """The model-written framing for this draft IF ONE IS ALREADY STORED. Never calls the model.
 
     None means "use the plain template", which is a complete email rather than a degraded one.
+
+    LP-809 REVIEW — THIS RUNS INSIDE A PROCESSOR'S CLICK, WHICH IS WHY IT CANNOT COMPOSE. `_regenerate`
+    is reached from `add_needs_to_draft`, and both request-docs routes call that synchronously inside
+    the HTTP request. A `compose()` here put an Anthropic round-trip in the button's response, against
+    CLAUDE.md's "long work runs on Celery, not in the request" — and it missed the cache every time,
+    because the key is built from `requested_labels` and every add changes them. The composition now
+    happens in `tasks.email_draft.compose_draft_prose`, enqueued after the commit; this reads what
+    that stored. Until it has, the draft carries the plain template, which is a whole email.
     """
     if not settings.email_draft_enabled or not needs:
         return None
     facts = _draft_facts(loan_file, needs)
-    key = facts.cache_key()
-    if (cached := await _cached_prose(db, key)) is not None:
-        # LP-601 — THE CACHE IS FILTERED THROUGH THE SAME VERDICT. `compose` runs only on a miss, so a
-        # composition stored before a guard existed would be served forever and the guard would never
-        # see it. Re-checking on the way OUT means a guard added later heals stored prose next run.
-        stored = _framing_from_body(cached)
-        if stored is not None and rejection_reason(facts, stored) is None:
-            return Framing(stored.opening, stored.bridge, stored.closing)
+    cached = await _cached_prose(db, facts.cache_key())
+    if cached is None:
         return None
+    # LP-601 — THE CACHE IS FILTERED THROUGH THE SAME VERDICT. `compose` runs only on a miss, so a
+    # composition stored before a guard existed would be served forever and the guard would never
+    # see it. Re-checking on the way OUT means a guard added later heals stored prose next run.
+    stored = _framing_from_body(cached)
+    if stored is not None and rejection_reason(facts, stored) is None:
+        return Framing(stored.opening, stored.bridge, stored.closing)
+    return None
+
+
+async def compose_open_draft_prose(db: AsyncSession, *, loan_file: LoanFile) -> bool:
+    """Compose the framing for this file's open draft and re-render it. Returns whether it changed.
+
+    The OFF-REQUEST half of `_cached_framing`: called only from `tasks.email_draft`, never from a
+    route. A miss composes, stores, and re-renders the draft body from the now-warm cache; a hit
+    re-renders nothing and returns False, which is what makes a duplicate enqueue harmless.
+    """
+    if not settings.email_draft_enabled:
+        return False
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    if draft is None:
+        return False
+    needs = await _needs_in_draft(db, draft=draft)
+    if not needs:
+        return False
+    facts = _draft_facts(loan_file, needs)
+    key = facts.cache_key()
+    if await _cached_prose(db, key) is not None:
+        return False
     composition = await compose(facts)
     if composition is None:
-        return None
+        return False
     await _store_prose(db, key=key, body=composition.message)
-    return Framing(composition.opening, composition.bridge, composition.closing)
+    await _regenerate(db, draft=draft, loan_file=loan_file)
+    return True
 
 
 def _framing_from_body(body: str) -> DraftComposition | None:
@@ -267,7 +302,7 @@ def _framing_from_body(body: str) -> DraftComposition | None:
 async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> None:
     """Rewrite the draft's subject and body from its current membership."""
     needs = await _needs_in_draft(db, draft=draft)
-    framing = await _composed_framing(db, loan_file=loan_file, needs=needs)
+    framing = await _cached_framing(db, loan_file=loan_file, needs=needs)
     rendered = render_draft_body(loan_file, needs, framing=framing)
     draft.subject = rendered.subject
     draft.body = rendered.body
@@ -296,6 +331,15 @@ async def add_needs_to_draft(
 
     draft = await get_open_draft(db, loan_file_id=loan_file.id)
     if draft is None:
+        if not borrower_facing:
+            # LP-809 REVIEW — DO NOT MINT AN EMPTY DRAFT FOR A REQUEST THE BORROWER HAS NO PART IN.
+            # This ran before the filter was consulted, so requesting the appraisal — or any of the
+            # 34 rules whose documents are only the lender's, the title company's or the employer's —
+            # created an OUTBOUND DRAFT with no documents in it. It occupies the file's one open-draft
+            # slot (`uq_communications_open_draft`), shows on the communication page as an email
+            # waiting to be sent, and LP-816 would send it: a real message to a real borrower listing
+            # nothing. An existing draft is left exactly as it is; only the minting is guarded.
+            return DraftUpdate(draft=None, skipped_not_borrower=skipped)
         draft = Communication(
             loan_file_id=loan_file.id,
             direction=CommunicationDirection.OUTBOUND,

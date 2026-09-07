@@ -15,7 +15,7 @@ from app.communications.templates import plain_framing
 from app.models import Company, LoanProgram
 from app.models.email_draft_prose import EmailDraftProse
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
-from app.services.email_draft import add_needs_to_draft
+from app.services.email_draft import add_needs_to_draft, compose_open_draft_prose
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,6 +97,10 @@ async def test_with_the_flag_on_the_composed_framing_reaches_the_draft(
     result = await add_needs_to_draft(
         db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
     )
+    # LP-809 review — THE ADD NO LONGER COMPOSES; the worker does, and this is that worker's call.
+    # The draft is a complete email in between, which the assertion below the composition checks.
+    assert plain_framing().opening in result.draft.body  # what the processor sees immediately
+    assert await compose_open_draft_prose(db_session, loan_file=loan_file) is True
 
     assert _COMPOSED.opening in result.draft.body
     assert plain_framing().opening not in result.draft.body
@@ -124,6 +128,7 @@ async def test_a_refused_composition_falls_back_to_a_complete_email(
     result = await add_needs_to_draft(
         db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
     )
+    assert await compose_open_draft_prose(db_session, loan_file=loan_file) is False
 
     framing = plain_framing()
     assert framing.opening in result.draft.body
@@ -155,7 +160,11 @@ async def test_a_second_regeneration_reuses_the_cache_rather_than_recomposing(
     loan_file, actor, need = await _setup(db_session)
 
     await add_needs_to_draft(db_session, loan_file=loan_file, needs=[need], actor_user_id=actor)
+    assert await compose_open_draft_prose(db_session, loan_file=loan_file) is True
     await add_needs_to_draft(db_session, loan_file=loan_file, needs=[need], actor_user_id=actor)
+    # The second enqueue for the same draft: it must find the cache warm and do nothing. This is
+    # what makes enqueueing on every request-docs click harmless.
+    assert await compose_open_draft_prose(db_session, loan_file=loan_file) is False
 
     assert calls == 1
     cached = await db_session.scalar(select(func.count()).select_from(EmailDraftProse))
@@ -200,3 +209,41 @@ async def test_a_cached_composition_is_re_checked_on_the_way_out(
 
     assert "approved" not in result.draft.body
     assert plain_framing().opening in result.draft.body
+
+
+async def test_the_add_itself_never_calls_the_model_even_with_the_flag_on(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-809 review — a processor's click must not carry an Anthropic round-trip.
+
+    `add_needs_to_draft` regenerates the body, and both request-docs routes call it synchronously
+    inside the HTTP request. While `_composed_framing` composed there, every click waited on the
+    model — and missed the cache every time, because the key is built from the requested labels and
+    every add changes them. CLAUDE.md: long work runs on Celery, not in the request.
+
+    Asserted by making `compose` fail the test if reached, not by timing: the flag is ON here, so a
+    version that composed in the request would be caught rather than merely be slow. The positive
+    control is the second half — the SAME `compose` is reached, and reached once, through the worker
+    path, so this cannot pass by the model having become unreachable.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "email_draft_enabled", True)
+    in_request = True
+
+    async def _guarded(*_args: object, **_kwargs: object) -> DraftComposition:
+        if in_request:
+            raise AssertionError("the model was called inside the request path")
+        return _COMPOSED
+
+    monkeypatch.setattr("app.services.email_draft.compose", _guarded)
+    loan_file, actor, need = await _setup(db_session)
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+    assert plain_framing().opening in result.draft.body
+
+    in_request = False
+    assert await compose_open_draft_prose(db_session, loan_file=loan_file) is True
+    assert _COMPOSED.opening in result.draft.body

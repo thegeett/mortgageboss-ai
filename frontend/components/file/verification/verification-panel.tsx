@@ -34,7 +34,9 @@ import {
   useVerification,
   verificationQueryKey,
 } from "@/lib/api/verification";
+import { getErrorMessage } from "@/lib/errors/api-error";
 import { humanize } from "@/lib/format";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { SnapshotFinding } from "@/lib/types/verification";
 import type {
   AggressionLevel,
@@ -452,7 +454,34 @@ function VerificationBody({
         crossSourceCount={
           (crossSource.data ?? []).filter((f: SnapshotFinding) => f.disposition === "open").length
         }
-        onAct={(action) => resolveRuleFinding.mutate(action)}
+        onAct={(action) =>
+          resolveRuleFinding.mutate(action, {
+            // LP-809 review — THE GOVERNED ROWS SAID NOTHING AT ALL. Every confirmation in this
+            // panel lived in `findings-list`, which renders the LEGACY AI-sweep findings; the §8
+            // rule-finding rows — including the row-level Request button LP-809 wired to the email
+            // draft — mutated silently, so a successful request and a failed one looked identical.
+            // Only the request is confirmed here: the other actions have their own on-screen
+            // consequence (a row moves, a preview closes, a verdict changes), where a request's
+            // whole effect is on two other pages.
+            onSuccess: () => {
+              if (action.kind !== "request-docs") return;
+              notifySuccess({
+                title: "Documents requested",
+                consequence:
+                  "On the needs list, and whatever the borrower can send is in the file's email draft. The finding stays open until it is met.",
+              });
+            },
+            onError: (error) => {
+              notifyError({
+                title:
+                  action.kind === "request-docs"
+                    ? "Couldn’t request the documents"
+                    : "Couldn’t update the finding",
+                whatToDo: getErrorMessage(error),
+              });
+            },
+          })
+        }
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
         ruleFindings={data.rule_findings ?? []}
