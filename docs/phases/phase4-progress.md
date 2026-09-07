@@ -161,6 +161,33 @@ Append one line per completed cycle. Newest last.
 | 2026-09-09 | LP-816 | 1f6369d6 | d097cebd | 2 | a durability guarantee the transaction boundary delivered in reverse, pinned by a test named after the property that asserted the mechanism destroying it |
 ```
 
+## Follow-ups from processor feedback (post-build)
+
+Reported 2026-09-07 against **LF-JR4T** on staging, by a processor using the built feature. Eight
+observations; one was a defect fixed on the spot, six are specified as tickets, and one is the
+standing M1 sequencing escalation arriving as a real question.
+
+| Ticket | What | Status |
+|---|---|---|
+| — | The row-level "Request docs" button never started a draft | **Fixed**, `4ee92d76` |
+| [LP-823](../tickets/LP-823.md) | The draft shows `$borrower_first_name`, `$processor_name` and an empty To: field, all of which the file already knows | Specified |
+| [LP-824](../tickets/LP-824.md) | The request asks for an attachment and then warns against sending one | Specified — needs a wording decision |
+| [LP-825](../tickets/LP-825.md) | The communication timeline carries the whole file's activity; ten of eleven rows were not about communication | Specified |
+| [LP-826](../tickets/LP-826.md) | Requesting a document says nothing about the draft it just wrote | Specified |
+| [LP-827](../tickets/LP-827.md) | The secure upload link points at `http://localhost:3000` — `UPLOAD_LINK_BASE_URL` is set in no environment | Specified — **cause identified** |
+| [LP-828](../tickets/LP-828.md) | The draft advertises an inbox address that receives nothing | **Needs a person** — `inbound_mail_enabled = false`, no DNS, no sandbox exit |
+
+**LP-828 is the one that can reach a borrower.** It is the same item the escalation table has carried
+since LP-817's review, and a processor has now read the sentence on a real draft and asked whether
+it is true. It is not.
+
+Two of these are the recurring pattern in a new form: **LP-827 is a configuration value with a
+local-development default and no deployed value** — the same shape as LP-802's `inbox_domain`
+finding — and **LP-825 is a deny-list whose effect is an allow-list**, where "everything except the
+duplicates" quietly means "all non-communication activity".
+
+---
+
 ## Blocked / escalations
 
 Anything a session could not resolve. One line each, with the ticket it belongs to. **Forty items,
