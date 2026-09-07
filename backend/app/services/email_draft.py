@@ -54,9 +54,10 @@ from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.email_draft_prose import EmailDraftProse
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
-from app.models.needs_item import NeedsItem
+from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
 from app.models.upload_link import UploadLink, hash_token
 from app.models.user import User
+from app.services.needs_items import create_needs_item
 from app.services.upload_links import mint_upload_link, revoke_link
 from app.verification.rule_engine.reasons import document_label
 
@@ -608,6 +609,78 @@ async def _revoke_link_in_url(db: AsyncSession, *, loan_file: LoanFile, url: str
     ).scalar_one_or_none()
     if previous is not None and previous.is_usable():
         await revoke_link(db, link=previous)
+
+
+@dataclass(frozen=True)
+class ComposedRequest:
+    """What a compose produced (LP-833)."""
+
+    update: DraftUpdate
+    #: Whether a MODEL wrote the framing, or the deterministic template did.
+    #:
+    #: RETURNED SO THE SCREEN CAN SAY WHICH, and that is not decoration. `email_draft_enabled` is
+    #: False by default and set in no environment, so today this is always False and a processor gets
+    #: LP-817's template — a complete email, not a degraded one. A flow that claimed "AI wrote this"
+    #: on a path nobody can reach would be the untrue half of its own headline.
+    composed_by_model: bool
+
+
+async def compose_request(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    document_types: list[str],
+    actor_user_id: UUID,
+) -> ComposedRequest:
+    """Turn a processor's document selection into needs and a draft. ``flush`` only.
+
+    THE ONLY WAY TO ASK FOR SOMETHING NO RULE ASKED FOR. Until this, a draft could come from a
+    FINDING and nothing else: a processor who knew they needed a document the engine had not flagged
+    could add a needs item by hand, and nothing drafted from it.
+
+    THE SELECTION BECOMES REAL NEEDS ITEMS, not a list of strings on an email. That is what puts them
+    on the needs list, what LP-811a's send moves to REQUESTED, and what starts LP-814's reminder
+    clock — a draft listing documents that are not needs would ask a borrower for things nothing is
+    tracking.
+
+    ORIGIN IS MANUAL, because that is what it is: a processor decided. `NeedsItemOrigin.FINDING`
+    would claim a rule asked for it and put a false provenance on the correction signal LP-70 reads.
+
+    ALREADY-OUTSTANDING TYPES ARE SKIPPED rather than duplicated. Requesting a bank statement that is
+    already in an unsent draft should not put it in the email twice, and `add_needs_to_draft` would
+    dedupe the membership anyway — this stops the redundant needs ROW, which the dedupe does not.
+    """
+    outstanding = {
+        need.needs_type for need in await _outstanding_needs(db, loan_file_id=loan_file.id)
+    }
+    created: list[NeedsItem] = []
+    for document_type in document_types:
+        if document_type in outstanding:
+            continue
+        created.append(
+            await create_needs_item(
+                db,
+                loan_file_id=loan_file.id,
+                title=document_label(document_type),
+                needs_type=document_type,
+                origin=NeedsItemOrigin.MANUAL,
+                disposition=NeedsItemDisposition.CONFIRMED,
+                reasoning="Requested by the processor from the document catalog",
+            )
+        )
+
+    update = await add_needs_to_draft(
+        db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+    )
+
+    # ON THE REQUEST, NOT ENQUEUED. Everything else in this codebase puts model work on a worker, and
+    # the reason is timeouts; this one is a processor waiting on purpose, which is a different case.
+    # `compose` never raises — every failure mode returns None — so a model that is slow, refused or
+    # switched off leaves the deterministic draft standing rather than failing the request.
+    composed = False
+    if update.draft is not None:
+        composed = await compose_open_draft_prose(db, loan_file=loan_file)
+    return ComposedRequest(update=update, composed_by_model=composed)
 
 
 async def attach_upload_link(

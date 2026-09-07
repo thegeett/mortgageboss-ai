@@ -1,5 +1,6 @@
 "use client";
 
+import { ComposeRequestButton } from "@/components/file/communication/compose-request-button";
 import { InboundMessagesPanel } from "@/components/file/communication/inbound-messages-panel";
 import { PartyRequestButton } from "@/components/file/communication/party-request-button";
 import { TimelinePanel } from "@/components/file/communication/timeline-panel";
@@ -37,6 +38,10 @@ export default function CommunicationPage() {
             is an occasional act on a mailbox rather than a permanent fixture of one — and because
             the drafts it makes belong in the list above, which is what LP-831 made possible and
             what the panel's own success message got wrong. */}
+        {/* LP-833 — asking for a document no rule flagged. Until this, a draft could come only
+            from a FINDING: a processor who knew what they needed could add a needs item by hand and
+            nothing drafted from it. */}
+        <ComposeRequestButton fileId={id} />
         <PartyRequestButton fileId={id} />
       </div>
       <TimelinePanel fileId={id} />

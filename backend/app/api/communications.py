@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
+from app.documents.catalog import CATALOG
 from app.models.communication import Communication
 from app.schemas.communication import (
     OutboundDraftPublic,
@@ -27,6 +28,7 @@ from app.schemas.communication import (
 from app.services.email_draft import (
     _needs_in_draft,
     attach_upload_link,
+    compose_request,
     draft_for_reading,
     get_open_draft,
 )
@@ -75,6 +77,60 @@ async def get_open_draft_endpoint(
         mailto_available=outbound.mailto_available,
         needs_item_count=len(needs),
         suggested_recipient=suggested_recipient,
+    )
+
+
+class ComposeRequestPayload(BaseModel):
+    """The document types a processor picked (LP-833)."""
+
+    #: At least one, and a bounded list. An empty selection is a click that meant nothing, and an
+    #: unbounded one is a way to put 166 documents in a borrower's inbox with one request.
+    document_types: list[str] = Field(min_length=1, max_length=40)
+
+
+class ComposedRequestPublic(BaseModel):
+    """What the compose produced."""
+
+    draft_id: UUID | None
+    needs_added: int
+    #: Whether a MODEL wrote the framing, or LP-817's template did. Served so the screen can say
+    #: which — `email_draft_enabled` is off in every environment, so today this is always False and
+    #: the processor gets the template. A flow claiming otherwise would be untrue about itself.
+    composed_by_model: bool
+
+
+@router.post("/compose", response_model=ComposedRequestPublic, status_code=status.HTTP_201_CREATED)
+async def compose_request_endpoint(
+    payload: ComposeRequestPayload,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ComposedRequestPublic:
+    """Ask for documents a processor picked, rather than ones a rule found (LP-833).
+
+    REFUSES A TYPE THE CATALOG DOES NOT KNOW. A needs item with an unrecognised `needs_type` has no
+    tier, no category and no extractor — LP-638 found the same defect on the correction control,
+    where two of eight hardcoded options were not catalog types at all. The picker is served FROM the
+    catalog, so an unknown value here is a caller that did not use it.
+    """
+    unknown = sorted(t for t in payload.document_types if t not in CATALOG)
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Not document types in the catalog: {unknown}",
+        )
+
+    composed = await compose_request(
+        db,
+        loan_file=loan_file,
+        document_types=payload.document_types,
+        actor_user_id=current_user.id,
+    )
+    await db.commit()
+    return ComposedRequestPublic(
+        draft_id=composed.update.draft.id if composed.update.draft else None,
+        needs_added=len(composed.update.added),
+        composed_by_model=composed.composed_by_model,
     )
 
 

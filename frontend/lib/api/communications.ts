@@ -52,6 +52,36 @@ export const messageQueryKey = (fileId: string, messageId: string) =>
  * listing them is stale the moment this resolves — and that panel is where a processor would go to
  * check what a borrower still has.
  */
+export interface ComposedRequest {
+  draft_id: string | null;
+  needs_added: number;
+  /** Whether a MODEL wrote the framing, or the deterministic template did. */
+  composed_by_model: boolean;
+}
+
+/**
+ * Ask for documents a processor picked, rather than ones a rule found (LP-833).
+ *
+ * Invalidates the needs list as well as the drafts: the selection becomes real needs items, which is
+ * what puts them on that list and what the send moves to REQUESTED.
+ */
+export function useComposeRequest(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (documentTypes: string[]) =>
+      (
+        await apiClient.post<ComposedRequest>(`${outboundPath(fileId)}/compose`, {
+          document_types: documentTypes,
+        })
+      ).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
+      void queryClient.invalidateQueries({ queryKey: needsQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: outboundDraftQueryKey(fileId) });
+    },
+  });
+}
+
 export function useAttachUploadLink(fileId: string, messageId: string) {
   const queryClient = useQueryClient();
   return useMutation({
