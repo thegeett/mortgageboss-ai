@@ -42,6 +42,7 @@ from app.communications.templates import (
 )
 from app.core.config import settings
 from app.documents.catalog import ResponsibleParty, get_guidance
+from app.models.borrower import Borrower
 from app.models.communication import (
     Communication,
     CommunicationDirection,
@@ -52,6 +53,7 @@ from app.models.email_draft_prose import EmailDraftProse
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
+from app.models.user import User
 from app.verification.rule_engine.reasons import document_label
 
 #: The template a document-request draft is rendered from, and the key its uniqueness is scoped to.
@@ -145,6 +147,72 @@ def render_draft_body(
             "closing": words.closing,
         },
     )
+
+
+#: What the greeting says when the file has no borrower name to put in it.
+#:
+#: A FALLBACK, NOT A DEFAULT. `$borrower_first_name` reaching a borrower is the defect this whole
+#: ticket is about, and "Hello there," is ordinary English where "Hello ," is not. It should be rare:
+#: a file with no borrower has nobody to email, and a borrower with no first name cannot be created
+#: (the column is NOT NULL). The case that reaches this is a draft on a file whose borrowers were
+#: all soft-deleted.
+BORROWER_NAME_FALLBACK = "there"
+
+
+async def primary_borrower(db: AsyncSession, *, loan_file_id: UUID) -> Borrower | None:
+    """The borrower a draft is addressed to.
+
+    `is_primary` FIRST, THEN POSITION. The model says exactly one borrower is flagged primary and
+    `services/borrowers.py` maintains that, but a file whose primary was soft-deleted has none — and
+    the answer there should be the next borrower on the file, not nobody. `schemas/loan_file.py`'s
+    `_primary_borrower_name` returns None in that case, which is right for a display name and wrong
+    for choosing who to write to.
+
+    ORDERED, NOT `.first()` OVER AN UNORDERED SET. Two borrowers must give the same answer on two
+    requests, because the answer decides which mailbox a document request goes to.
+    """
+    return (
+        (
+            await db.execute(
+                only_active(
+                    select(Borrower).where(Borrower.loan_file_id == loan_file_id),
+                    Borrower,
+                ).order_by(
+                    Borrower.is_primary.desc(),
+                    Borrower.borrower_position,
+                    Borrower.id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+async def draft_for_reading(
+    db: AsyncSession, *, draft: Communication, loan_file: LoanFile, reader: User
+) -> tuple[str, str | None]:
+    """The draft's body with its placeholders resolved, and the borrower's email.
+
+    WHY THIS EXISTS. `render_draft_body` stores `$borrower_first_name` and `$processor_name`
+    deliberately, so the send decides who signs. `finalise_draft_body` resolves them — and until
+    this function, NOTHING CALLED IT. Not the send, not the endpoint, not the panel. Since the
+    message leaves through "Copy message" or "Open in mail client", both of which take what the
+    screen shows, every document request went to the borrower reading `Hello $borrower_first_name,`.
+
+    THE READER IS THE PROSPECTIVE SIGNER, and that is the whole reconciliation. Whoever sends should
+    sign, which is why the stored body keeps the placeholder; whoever is LOOKING at it should see a
+    name, because a processor cannot tell a placeholder that will be filled from one that will not.
+    Resolving here rather than in `render_draft_body` keeps both true: the stored draft is still
+    unaddressed, and a colleague who opens the same draft sees their own name.
+    """
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+    body = finalise_draft_body(
+        draft.body or "",
+        borrower_first_name=(borrower.first_name if borrower else BORROWER_NAME_FALLBACK),
+        processor_name=reader.full_name,
+    )
+    return body, (borrower.email if borrower else None)
 
 
 def finalise_draft_body(body: str, *, borrower_first_name: str, processor_name: str) -> str:

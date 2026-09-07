@@ -31,9 +31,16 @@ from app.models.communication import (
 )
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
+from app.models.user import User
 from app.services.activity_log import log_activity
 from app.services.bounce_handling import is_suppressed
-from app.services.email_draft import _needs_in_draft, get_open_draft
+from app.services.email_draft import (
+    BORROWER_NAME_FALLBACK,
+    _needs_in_draft,
+    finalise_draft_body,
+    get_open_draft,
+    primary_borrower,
+)
 from app.services.needs_items import request_needs_item
 
 #: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
@@ -244,6 +251,21 @@ async def send_draft(
     # for the model draft, the human edit and the diff; for everything sent before LP-821 the first
     # is gone rather than unstored, and this is the line that stops that being true going forward.
     body_composed = draft.body
+    # LP-823 — THE LAST GUARD, and it has to be here rather than only in the endpoint. The panel
+    # already posts resolved text, so on the ordinary path this is a no-op (`safe_substitute` over a
+    # string with no placeholders left). It exists for the path that is not ordinary: any caller
+    # that posts the STORED body — a script, a retry, a future route — would otherwise record, and
+    # on a transport send actually deliver, `Hello $borrower_first_name,`.
+    #
+    # THE SIGNER IS THE APPROVER, not whoever composed it or whoever last previewed it. That is the
+    # distinction `render_draft_body` deferred the name for in the first place.
+    approver = await db.get(User, approver_user_id)
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+    body = finalise_draft_body(
+        body,
+        borrower_first_name=(borrower.first_name if borrower else BORROWER_NAME_FALLBACK),
+        processor_name=(approver.full_name if approver else ""),
+    )
     outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)
 
     draft.body = outbound.body

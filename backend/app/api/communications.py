@@ -23,7 +23,7 @@ from app.schemas.communication import (
     SendDraftRequest,
     SentCommunicationPublic,
 )
-from app.services.email_draft import _needs_in_draft, get_open_draft
+from app.services.email_draft import _needs_in_draft, draft_for_reading, get_open_draft
 from app.services.email_reply import (
     CannotReplyError,
     create_compose_draft,
@@ -51,7 +51,14 @@ async def get_open_draft_endpoint(
     if draft is None:
         raise _NO_DRAFT
     needs = await _needs_in_draft(db, draft=draft)
-    outbound = build_outbound(loan_file, subject=draft.subject or "", body=draft.body or "")
+    # LP-823 — RESOLVED FOR READING, and the stored body is untouched. The panel puts this text in
+    # the textarea, and the textarea is what "Copy message" and "Open in mail client" send, so an
+    # unresolved body here is not a display bug: it is what the borrower receives. The reader is the
+    # prospective signer; `send_draft` resolves again from whoever actually sends.
+    resolved, suggested_recipient = await draft_for_reading(
+        db, draft=draft, loan_file=loan_file, reader=current_user
+    )
+    outbound = build_outbound(loan_file, subject=draft.subject or "", body=resolved)
     return OutboundDraftPublic(
         id=draft.id,
         subject=outbound.subject,
@@ -60,6 +67,7 @@ async def get_open_draft_endpoint(
         suggested_bcc=outbound.suggested_bcc,
         mailto_available=outbound.mailto_available,
         needs_item_count=len(needs),
+        suggested_recipient=suggested_recipient,
     )
 
 

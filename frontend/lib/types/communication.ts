@@ -14,6 +14,8 @@ export interface OutboundDraft {
   mailto_available: boolean;
   mailto_max_chars: number;
   needs_item_count: number;
+  /** The primary borrower's email, or null when the file has none (LP-823). */
+  suggested_recipient: string | null;
 }
 
 export interface SentCommunication {

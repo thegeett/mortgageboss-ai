@@ -28,6 +28,15 @@ class OutboundDraftPublic(BaseModel):
     #: Included so the UI can explain WHY the link is unavailable rather than just disabling it.
     mailto_max_chars: int = Field(default=MAILTO_MAX_CHARS)
     needs_item_count: int
+    #: The primary borrower's email, or None when the file has no borrower with one (LP-823).
+    #:
+    #: SUGGESTED, NOT IMPOSED. The panel seeds its To: field from this and leaves it editable — a
+    #: co-borrower, a corrected address and a borrower who asked to be written to elsewhere are all
+    #: ordinary. Before this field the box started empty and every send was retyped by hand.
+    #:
+    #: NULLABLE FOR A REAL REASON: `borrowers.email` is nullable, so a file can have a borrower and
+    #: no address. The panel must render that as an empty box, never as a claim.
+    suggested_recipient: str | None = None
 
 
 class SendDraftRequest(BaseModel):

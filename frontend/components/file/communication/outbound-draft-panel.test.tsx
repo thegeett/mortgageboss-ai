@@ -50,6 +50,7 @@ const DRAFT = {
   mailto_available: true,
   mailto_max_chars: 1800,
   needs_item_count: 2,
+  suggested_recipient: "sarah@example.com" as string | null,
 };
 
 function draftState(overrides: Partial<typeof DRAFT> | null = {}) {
@@ -58,6 +59,12 @@ function draftState(overrides: Partial<typeof DRAFT> | null = {}) {
     isPending: false,
     isError: false,
   };
+}
+
+/** The To: input. Read through its value rather than a jest-dom matcher — this suite does not
+ * load one, and `toHaveValue` fails as an unknown Chai property rather than as a wrong value. */
+function toBox(): HTMLInputElement {
+  return screen.getByPlaceholderText("borrower@example.com") as HTMLInputElement;
 }
 
 afterEach(cleanup);
@@ -71,6 +78,39 @@ beforeEach(() => {
 });
 
 describe("OutboundDraftPanel", () => {
+  it("seeds the To: field from the borrower's address (LP-823)", () => {
+    // The box used to start empty and every send was retyped by hand. The address is on the
+    // application; the panel had no field to read it from.
+    mockUseOutboundDraft.mockReturnValue(draftState());
+    render(<OutboundDraftPanel fileId="LF-6T3N" />, { wrapper });
+
+    expect(toBox().value).toBe("sarah@example.com");
+  });
+
+  it("leaves To: empty when the file has no borrower address", () => {
+    // `borrowers.email` is nullable, so this file is ordinary rather than broken. An empty box is
+    // the honest render; anything else would be a suggestion that is not an address.
+    mockUseOutboundDraft.mockReturnValue(draftState({ suggested_recipient: null }));
+    render(<OutboundDraftPanel fileId="LF-6T3N" />, { wrapper });
+
+    expect(toBox().value).toBe("");
+  });
+
+  it("does not overwrite an address the processor corrected", () => {
+    // The seed is keyed on the draft's IDENTITY, like the body. A processor who types a
+    // co-borrower's address must not have it replaced under them when the draft regenerates.
+    mockUseOutboundDraft.mockReturnValue(draftState());
+    const { rerender } = render(<OutboundDraftPanel fileId="LF-6T3N" />, { wrapper });
+
+    fireEvent.change(toBox(), { target: { value: "cosigner@example.com" } });
+    mockUseOutboundDraft.mockReturnValue(
+      draftState({ body: "Hello,\n\nRegenerated.\n\n[LF-6T3N]" }),
+    );
+    rerender(<OutboundDraftPanel fileId="LF-6T3N" />);
+
+    expect(toBox().value).toBe("cosigner@example.com");
+  });
+
   it("shows the draft, the reply-to and the bcc suggestion", () => {
     mockUseOutboundDraft.mockReturnValue(draftState());
     render(<OutboundDraftPanel fileId="f1" />, { wrapper });
@@ -115,7 +155,10 @@ describe("OutboundDraftPanel", () => {
   });
 
   it("cannot be sent without a recipient", () => {
-    mockUseOutboundDraft.mockReturnValue(draftState());
+    // LP-823 — the file with NO borrower address, which is now the only way the box starts empty.
+    // Left as an explicit case rather than deleted: "send is refused with no recipient" is still
+    // the rule, and a seeded default must not be allowed to hide it.
+    mockUseOutboundDraft.mockReturnValue(draftState({ suggested_recipient: null }));
     render(<OutboundDraftPanel fileId="f1" />, { wrapper });
 
     expect(

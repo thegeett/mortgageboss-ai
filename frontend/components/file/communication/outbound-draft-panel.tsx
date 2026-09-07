@@ -25,6 +25,7 @@ export function OutboundDraftPanel({ fileId }: { fileId: string }) {
   const [copied, setCopied] = useState(false);
   const draftId = draft?.id;
   const draftBody = draft?.body;
+  const suggested = draft?.suggested_recipient;
 
   // THE DRAFT REGENERATES ON EVERY ADD AND REMOVE (LP-809), so re-seeding the textarea whenever the
   // body changes would throw away a processor's edits mid-sentence. Seeding is keyed on the draft's
@@ -35,6 +36,12 @@ export function OutboundDraftPanel({ fileId }: { fileId: string }) {
   if (draftId !== undefined && draftId !== seededFrom) {
     setSeededFrom(draftId);
     setBody(draftBody ?? "");
+    // LP-823 — the borrower's address is on the application, and this box used to start empty on
+    // every send. Seeded with the BODY, on the draft's identity, so a processor who has corrected
+    // the address does not have it replaced under them on the next regeneration. `?? ""` and not
+    // `?? recipient`: a file whose borrower has no email must render an empty box, never a stale
+    // one from a different draft.
+    setRecipient(suggested ?? "");
   }
 
   if (isPending) {
