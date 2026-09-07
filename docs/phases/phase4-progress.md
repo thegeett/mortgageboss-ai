@@ -69,7 +69,7 @@ Append one line per completed cycle. Newest last.
 ```
 | date | ticket | build SHA | review SHA | findings fixed | note |
 |------|--------|-----------|------------|----------------|------|
-| 2026-09-06 | LP-802 | bcf00b0a | REVIEW_SHA | 5 | first Phase 4 ticket; ADR-094 amended. Fixed: inbox_domain unset in every env, a false import rationale, a tautological address test, two token-length assertions the widening could not fail |
+| 2026-09-06 | LP-802 | bcf00b0a | b57b085f | 5 | first Phase 4 ticket; ADR-094 amended. Fixed: inbox_domain unset in every env, a false import rationale, a tautological address test, two token-length assertions the widening could not fail |
 ```
 
 ## Blocked / escalations
