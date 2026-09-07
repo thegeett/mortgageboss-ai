@@ -40,6 +40,7 @@ from app.services.email_draft import (
     _needs_in_draft,
     draft_for_reading,
 )
+from app.services.email_send import MAILTO_MAX_CHARS, build_outbound
 from app.services.timeline import TimelineAttachment, _attachment_manifest, _inbound_senders
 
 
@@ -77,6 +78,17 @@ class MessageDetail:
     #: draft; None once `recipient` is set, because a party draft carries its own address and a
     #: suggestion would be wrong there.
     suggested_recipient: str | None
+    #: LP-831 REVIEW — WHAT THE MESSAGE NEEDS IN ORDER TO ACTUALLY LEAVE.
+    #:
+    #: Nothing in this product transmits mail. "Mark as sent" records an outbound event, moves every
+    #: need to REQUESTED and starts LP-814's reminder clock; the message reaches a borrower only
+    #: because a processor copied it or opened it in their own mail client. Those two controls lived
+    #: on `OutboundDraftPanel`, which LP-831 took off the page — so the dialog that replaced it could
+    #: record a send with no way to perform one. These three carry `build_outbound`'s answer to the
+    #: editor, exactly as `OutboundDraftPublic` carries it to the panel that no longer renders.
+    suggested_bcc: str
+    mailto_available: bool
+    mailto_max_chars: int
 
 
 async def message_detail(
@@ -135,6 +147,10 @@ async def message_detail(
     else:
         body = message.body or ""
 
+    # LP-831 REVIEW — over the RESOLVED body, which is what a processor copies. Computing it from
+    # the stored one would answer about text nobody sees.
+    outbound = build_outbound(loan_file, subject=message.subject or "", body=body)
+
     documents: tuple[str, ...] = ()
     if message.direction is CommunicationDirection.OUTBOUND:
         documents = tuple(need.title for need in await _needs_in_draft(db, draft=message))
@@ -173,6 +189,9 @@ async def message_detail(
             and message.status is CommunicationStatus.DRAFT
         ),
         suggested_recipient=suggested_recipient,
+        suggested_bcc=outbound.suggested_bcc,
+        mailto_available=outbound.mailto_available,
+        mailto_max_chars=MAILTO_MAX_CHARS,
     )
 
 

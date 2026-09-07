@@ -12,7 +12,7 @@
  * to keep.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -390,6 +390,30 @@ describe("the ?draft deep link (LP-831)", () => {
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", "m-1"]);
+  });
+
+  it("stays closed after the processor dismisses the linked message", async () => {
+    // LP-831 REVIEW — RUN, NOT REASONED. The build found this by thinking about it and asked for it
+    // to be exercised, and it was the one behaviour of the deep link with no test.
+    //
+    // The URL parameter is tracked separately from the open state on purpose. Compared against
+    // `openMessage` instead, closing would set it to null, the parameter would still say "m-1", and
+    // the next render would re-open it — a dialog that cannot be dismissed while the link is in the
+    // address bar, which is where a processor lands from LP-837's popover.
+    mockSearchParams.mockReturnValue(new URLSearchParams("draft=m-1"));
+    loaded([{ ...MESSAGE, id: "m-1", summary: "Documents we need" }]);
+    mockMessageDetailArgs.length = 0;
+
+    const { rerender } = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", "m-1"]);
+
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" });
+    await waitFor(() => expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", null]));
+
+    // AND IT STAYS SHUT. The re-open would happen on the NEXT render, not on the close itself, so
+    // asserting only the line above would pass on the broken version.
+    rerender(<TimelinePanel fileId="LF-JR4T" />);
+    expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", null]);
   });
 
   it("renders normally with no parameter", () => {

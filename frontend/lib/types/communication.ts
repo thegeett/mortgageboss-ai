@@ -68,6 +68,11 @@ export interface MessageDetail {
    * reason no screen could send one — while `send_draft` has never cared which template rendered it.
    */
   is_editable: boolean;
+  /** LP-831 review — what a `mailto:` link and a copy need. Nothing here transmits mail, so these
+   * are how the message actually reaches anybody. */
+  suggested_bcc: string;
+  mailto_available: boolean;
+  mailto_max_chars: number;
   /** Who to address it to when nobody has yet. Null once a recipient is set. */
   suggested_recipient: string | null;
 }

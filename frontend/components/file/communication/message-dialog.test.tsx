@@ -14,7 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockUseMessageDetail = vi.fn();
 const mockSend = vi.fn();
 const sendState = { mutate: mockSend, isPending: false, isError: false };
-vi.mock("@/lib/api/communications", () => ({
+// LP-831 REVIEW — THE REAL `messageMailtoUrl`, not a stub. What the "Open in mail client" link
+// carries is the assertion; a mocked builder would let the button exist while the link was wrong.
+// Only the two hooks are replaced.
+vi.mock("@/lib/api/communications", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => sendState,
 }));
@@ -51,6 +55,9 @@ function detail(overrides: Partial<MessageDetail> = {}): { data: MessageDetail }
       attachments: [],
       is_open_draft: false,
       is_editable: false,
+      suggested_bcc: "lf-abc@imbox.example.test",
+      mailto_available: true,
+      mailto_max_chars: 1800,
       suggested_recipient: null,
       ...overrides,
     } as MessageDetail,
@@ -210,5 +217,75 @@ describe("MessageDialog", () => {
     render(<MessageDialog fileId="LF-JR4T" messageId={null} onClose={vi.fn()} />);
 
     expect(screen.queryByText(/Please send the bank statements/)).toBeNull();
+  });
+});
+
+/**
+ * LP-831 REVIEW — THE TWO CONTROLS THAT ACTUALLY SEND.
+ *
+ * `OutboundDraftPanel` carried "Copy message" and "Open in mail client", and this ticket took that
+ * panel off the page. Nothing in this product transmits mail — LP-828's own analysis says so, and
+ * `send_draft`'s docstring says it records rather than sends — so those two were the only ways a
+ * message reached anybody. The dialog that replaced the panel offered "Mark as sent" alone, which
+ * writes the evidence row, moves every need to REQUESTED and starts LP-814's reminder clock.
+ *
+ * A processor could therefore record that a borrower was emailed, start the clock on chasing them
+ * for a reply, and have had no way to send the message at all.
+ */
+describe("MessageDialog — a draft can actually be sent", () => {
+  it("offers both ways a message leaves, on the edited body", async () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    const textbox = screen.getByRole("textbox", { name: /message/i }) as HTMLTextAreaElement;
+    fireEvent.change(textbox, { target: { value: "Edited before sending." } });
+
+    fireEvent.click(screen.getByRole("button", { name: /copy message/i }));
+    expect(writeText).toHaveBeenCalledWith("Edited before sending.");
+
+    expect(textbox.value).toBe("Edited before sending.");
+    const href =
+      screen.getByRole("link", { name: /open in mail client/i }).getAttribute("href") ?? "";
+    // `encodeURIComponent` percent-encodes the `@`, as `mailtoUrl` has since LP-811a — assert what
+    // the link IS rather than what it reads like.
+    expect(href.slice(0, href.indexOf("?"))).toBe("mailto:sarah%40example.com");
+    // PARSED, NOT SUBSTRING-MATCHED. `URLSearchParams` encodes a space as `+`, which
+    // `decodeURIComponent` does not undo — so a naive `toContain("Edited before sending.")` fails on
+    // a link that is perfectly correct. Found by instrumenting; the first version of this assertion
+    // was wrong about the code rather than the other way round.
+    const params = new URLSearchParams(href.slice(href.indexOf("?") + 1));
+    // THE EDIT, not the stored body — the borrower must receive what the record stores.
+    expect(params.get("body")).toBe("Edited before sending.");
+    expect(params.get("bcc")).toBe("lf-abc@imbox.example.test");
+    expect(params.get("subject")).toBe("Documents we need");
+  });
+
+  it("does not offer them on a message that cannot be edited", () => {
+    // The control: a sent message has already gone, and offering to send it again would be a second
+    // email the record does not describe.
+    mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false, status: "sent" })));
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /copy message/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
+    // And the positive half: the message itself is still on screen.
+    expect(screen.getByText(/Please send the bank statements/)).toBeTruthy();
+  });
+
+  it("disables the mail link when the server says it will not carry", () => {
+    // `mailto:` does not fail when it is too long — it opens a compose window holding half a
+    // message. A disabled control is the honest answer; a link that truncates is not.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, status: "draft", mailto_available: false })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
+    const disabled = screen.getByRole("button", { name: /open in mail client/i });
+    expect((disabled as HTMLButtonElement).disabled).toBe(true);
   });
 });

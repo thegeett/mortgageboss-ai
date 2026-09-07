@@ -221,6 +221,11 @@ class MessageDetailPublic(BaseModel):
     #: request is a draft under its own template key, and that filter is why no screen could send one.
     is_editable: bool
     suggested_recipient: str | None
+    #: LP-831 review — what a `mailto:` link and a copy need. Nothing here transmits mail, so these
+    #: are how the message actually reaches anybody; see `MessageDetail`.
+    suggested_bcc: str
+    mailto_available: bool
+    mailto_max_chars: int
 
 
 @message_router.get("/{communication_id}", response_model=MessageDetailPublic)
@@ -268,6 +273,9 @@ async def read_message(
         is_open_draft=detail.is_open_draft,
         is_editable=detail.is_editable,
         suggested_recipient=detail.suggested_recipient,
+        suggested_bcc=detail.suggested_bcc,
+        mailto_available=detail.mailto_available,
+        mailto_max_chars=detail.mailto_max_chars,
     )
 
 

@@ -8,9 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useMessageDetail, useSendDraft } from "@/lib/api/communications";
+import { messageMailtoUrl, useMessageDetail, useSendDraft } from "@/lib/api/communications";
 import { format } from "date-fns";
-import { Send } from "lucide-react";
+import { Check, Copy, Mail, Send } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -59,6 +59,7 @@ export function MessageDialog({
 }) {
   const { data, isPending, isError } = useMessageDetail(fileId, messageId);
   const send = useSendDraft(fileId);
+  const [copied, setCopied] = useState(false);
   const open = messageId !== null;
 
   // SEEDED ON THE MESSAGE'S IDENTITY, not in an effect — the same pattern `OutboundDraftPanel` used
@@ -76,6 +77,8 @@ export function MessageDialog({
     setBody(data.body);
   }
   const canSend = recipient.trim().length > 0 && body.trim().length > 0 && !send.isPending;
+  // Built from the EDITED body and the typed recipient, so the link carries what is on screen.
+  const mailtoHref = data ? messageMailtoUrl(data, recipient, body) : null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -198,6 +201,42 @@ export function MessageDialog({
 
             {data.is_editable ? (
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                {/* LP-831 REVIEW — THE TWO CONTROLS THAT ACTUALLY SEND, restored.
+                    `OutboundDraftPanel` carried "Copy message" and "Open in mail client" and this
+                    ticket took it off the page, leaving "Mark as sent" alone. Nothing in this
+                    product transmits mail — LP-828's own analysis says so — so those two were the
+                    only ways a message reached anybody, and the one remaining button records an
+                    outbound event, moves every need to REQUESTED and starts LP-814's reminder
+                    clock. A processor could mark a message sent with no way to send it. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(body);
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 2000);
+                  }}
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  {copied ? "Copied" : "Copy message"}
+                </Button>
+
+                {/* THE EDITED BODY, not the stored one — the borrower must receive what the record
+                    stores. A null href is the length gate: `mailto:` does not fail when it is too
+                    long, it opens a compose window holding half a message. */}
+                {mailtoHref ? (
+                  <Button asChild variant="outline" className="gap-2">
+                    <a href={mailtoHref}>
+                      <Mail className="h-4 w-4" /> Open in mail client
+                    </a>
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" className="gap-2" disabled>
+                    <Mail className="h-4 w-4" /> Open in mail client
+                  </Button>
+                )}
+
                 <Button
                   type="button"
                   className="gap-2"

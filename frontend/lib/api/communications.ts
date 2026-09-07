@@ -126,6 +126,30 @@ export function useSendDraft(fileId: string) {
  * would otherwise still be offered a link that silently truncates. The server still owns the limit;
  * only the measurement moves to the text actually being sent.
  */
+/**
+ * The same link for a message opened from the list (LP-831 review).
+ *
+ * `mailtoUrl` takes an `OutboundDraft`, the payload of the panel this ticket took off the page.
+ * `MessageDetail` now carries the same three fields, for the same reason and with the same two
+ * gates: the server's verdict on the composed body, and a length check on the text actually being
+ * sent, because an edit can run past the limit after that verdict was formed.
+ *
+ * Kept as its own function rather than widening `mailtoUrl`'s parameter type: the two payloads are
+ * different shapes and a union would let a caller pass a draft where a message is meant and get an
+ * answer about the wrong body.
+ */
+export function messageMailtoUrl(
+  message: MessageDetail,
+  recipient: string,
+  body: string,
+): string | null {
+  if (!message.mailto_available) return null;
+  const subject = message.subject ?? "";
+  if (body.length + subject.length > message.mailto_max_chars) return null;
+  const params = new URLSearchParams({ subject, body, bcc: message.suggested_bcc });
+  return `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;
+}
+
 export function mailtoUrl(draft: OutboundDraft, recipient: string, body: string): string | null {
   // BOTH gates. `draft.mailto_available` is the server's verdict on the composed body and may
   // know things this side does not; the length check catches an EDIT that ran past the limit after
