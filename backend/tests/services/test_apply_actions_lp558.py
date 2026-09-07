@@ -314,12 +314,14 @@ async def test_four_findings_wanting_one_document_create_one_needs_item(
     # (file, rule, subject) is what makes that the only valid shape.
     findings = [await _judgment_finding(db_session, loan_file, subject=f"lia{n}") for n in range(4)]
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": findings},
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": findings},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert len(created) == 1
     # The title is the DOCUMENT, not the finding's prose — a needs list is read as a shopping list.
@@ -338,9 +340,14 @@ async def test_a_second_click_does_not_ask_the_borrower_twice(db_session: AsyncS
         db_session, loan_file=loan_file, by_document={"appraisal": [finding]}, actor_user_id=actor
     )
 
-    again = await request_documents_in_bulk(
-        db_session, loan_file=loan_file, by_document={"appraisal": [finding]}, actor_user_id=actor
-    )
+    again = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"appraisal": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert again == []
 
@@ -352,18 +359,20 @@ async def test_distinct_documents_each_get_their_own_item(db_session: AsyncSessi
     loan_file, actor = await _loan_file(db_session)
     finding = await _judgment_finding(db_session, loan_file)
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={
-            "credit report": [finding],
-            "appraisal": [finding],
-            "rate lock agreement": [finding],
-            "VOE": [finding],
-            "title commitment": [finding],
-        },
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={
+                "credit report": [finding],
+                "appraisal": [finding],
+                "rate lock agreement": [finding],
+                "VOE": [finding],
+                "title commitment": [finding],
+            },
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert len(created) == 5
 
@@ -418,12 +427,14 @@ async def test_a_bulk_request_marks_the_findings(db_session: AsyncSession) -> No
     loan_file, actor = await _loan_file(db_session)
     finding = await _judgment_finding(db_session, loan_file)
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": [finding]},
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     # LP-801 — the marker is the SAME object shape the per-finding path writes, not a bare `True`. A
     # bare truthy value marked the row correctly on screen and carried no link to what was requested.

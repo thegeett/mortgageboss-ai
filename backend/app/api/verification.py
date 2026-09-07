@@ -41,6 +41,7 @@ from app.schemas.verification import (
     AggressionPublic,
     AggressionUpdate,
     BulkRequestDocsRequest,
+    DocumentRequestOutcome,
     FindingPublic,
     NoteRequest,
     OverrideRequest,
@@ -885,7 +886,7 @@ async def bulk_request_docs_endpoint(
         for document in _documents_a_finding_wants(finding, on_file=on_file, loan_purpose=purpose):
             by_document.setdefault(document, []).append(finding)
 
-    created = await request_documents_in_bulk(
+    outcome = await request_documents_in_bulk(
         db,
         loan_file=loan_file,
         by_document=by_document,
@@ -893,10 +894,20 @@ async def bulk_request_docs_endpoint(
         note=payload.note,
     )
     await db.commit()
-    if created:
+    if outcome.needs:
         _enqueue_draft_composition(loan_file.id)
     await db.refresh(loan_file)
-    return await _build_status(db, loan_file=loan_file, user=current_user)
+    status_public = await _build_status(db, loan_file=loan_file, user=current_user)
+    # LP-826 — WHAT THIS CLICK DID, which the draft's contents cannot say afterwards. A request that
+    # went to the needs list instead of the email looks, on the draft count, exactly like a click
+    # that did nothing.
+    return status_public.model_copy(
+        update={
+            "document_request": DocumentRequestOutcome(
+                added_to_draft=outcome.added, not_borrower_facing=outcome.not_borrower
+            )
+        }
+    )
 
 
 @router.post("/{identifier}/findings/{finding_id}/ratify", response_model=VerificationStatusPublic)
@@ -1126,7 +1137,7 @@ async def request_docs_endpoint(
     documents = _documents_a_finding_wants(finding, on_file=on_file, loan_purpose=purpose)
 
     try:
-        created = await request_docs_for_finding(
+        outcome = await request_docs_for_finding(
             db,
             loan_file=loan_file,
             finding=finding,
@@ -1137,10 +1148,20 @@ async def request_docs_endpoint(
     except NotRequestable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
-    if created:
+    if outcome.needs:
         _enqueue_draft_composition(loan_file.id)
     await db.refresh(loan_file)
-    return await _build_status(db, loan_file=loan_file, user=current_user)
+    status_public = await _build_status(db, loan_file=loan_file, user=current_user)
+    # LP-826 — WHAT THIS CLICK DID, which the draft's contents cannot say afterwards. A request that
+    # went to the needs list instead of the email looks, on the draft count, exactly like a click
+    # that did nothing.
+    return status_public.model_copy(
+        update={
+            "document_request": DocumentRequestOutcome(
+                added_to_draft=outcome.added, not_borrower_facing=outcome.not_borrower
+            )
+        }
+    )
 
 
 # LP-592 — what "needs attention" means, matching the tab that bears the name: everything that is

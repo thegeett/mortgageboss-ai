@@ -186,6 +186,20 @@ export interface VerificationStatus {
    * work is in flight (the present). Served from the same helper the run endpoint refuses on, so a
    * disabled button and a 409 cannot disagree. */
   documents_processing: number;
+  /**
+   * LP-826 — what a "request documents" click did to the file's borrower draft. Present ONLY on
+   * the two request responses; undefined on every other action that returns this shape.
+   *
+   * The draft's own count says how many documents are waiting; it cannot say that THIS request was
+   * one of them. A processor who requests an appraisal and sees the count stay at three has no way
+   * to tell a request that went elsewhere from a click that did nothing.
+   */
+  document_request?: {
+    /** How many of this request's needs joined the borrower draft. */
+    added_to_draft: number;
+    /** How many did not, because they are not the borrower's to send. They are on the needs list. */
+    not_borrower_facing: number;
+  } | null;
   /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
   program: string | null;
   latest_run: VerificationRun | null;

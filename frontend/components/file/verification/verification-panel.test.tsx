@@ -55,6 +55,11 @@ vi.mock("@/lib/api/preferences", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
+  // LP-826 — `DraftBadge` renders on this screen and reads the file's open draft, so the mock has
+  // to answer `useQuery` as well. NO DRAFT is the right default here: these cases are about the
+  // findings panel, and a badge asserting itself into every one of them would be noise. The badge
+  // has its own tests.
+  useQuery: () => ({ data: null, isPending: false, isError: false }),
 }));
 
 const notifySuccessMock = vi.fn();

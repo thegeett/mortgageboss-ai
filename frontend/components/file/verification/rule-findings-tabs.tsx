@@ -10,6 +10,7 @@
  * structurally empty (those subjects aren't persisted) and says so honestly rather than being dropped.
  */
 
+import { DraftBadge } from "@/components/file/communication/draft-badge";
 import { Button } from "@/components/ui/button";
 import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { humanize } from "@/lib/format";
@@ -610,6 +611,11 @@ export function RuleFindingsTabs({
 
   return (
     <div className="space-y-4">
+      {/* LP-826 — HOW MANY DOCUMENTS ARE WAITING IN THE EMAIL, on the screen where they are
+          requested. LP-809's design is that requests accumulate into ONE email, which is invisible
+          at the only moment a processor is thinking about it. The badge is derived from the draft's
+          contents and renders nothing when there is no draft, so it never claims an email exists. */}
+      {fileId ? <DraftBadge fileId={fileId} /> : null}
       {ruleFindingsStale && ruleFindings.length > 0 && (
         // LP-377-C: the latest run did not complete (still running, or failed/killed), so these governed
         // findings may be from an EARLIER run (carry-forward, LP-322). Say so — a processor must not read a

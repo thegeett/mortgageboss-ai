@@ -574,6 +574,28 @@ class AggressionPublic(BaseModel):
     cutoffs: dict[str, float]
 
 
+class DocumentRequestOutcome(BaseModel):
+    """What a "request documents" click did to the file's borrower draft (LP-826).
+
+    THE CLICK'S OWN ANSWER, and it cannot be reconstructed afterwards. The draft's contents say how
+    many documents are waiting; they do not say that THIS request was one of them, or that it was
+    not. A processor who requests an appraisal and sees the draft count stay at three has no way to
+    tell a request that went elsewhere from a click that did nothing.
+
+    NOT A COUNT OF CLICKS. `added_to_draft` is how many of this request's needs the draft actually
+    took, which is `add_needs_to_draft`'s own answer — a request for a document that is not the
+    borrower's to send is deliberately left out of a draft addressed to them, and it lands on the
+    needs list instead. Reporting the ask rather than the outcome would tell a processor an email
+    contains something it does not.
+    """
+
+    #: How many of this request's needs joined the borrower draft.
+    added_to_draft: int
+    #: How many did NOT, because they are not the borrower's to send (LP-800's responsible party).
+    #: They are on the needs list; LP-820 owns the paths that chase the other parties.
+    not_borrower_facing: int
+
+
 class VerificationStatusPublic(BaseModel):
     """The file's verification status — staleness + run + findings + the dial (LP-79).
 
@@ -594,6 +616,10 @@ class VerificationStatusPublic(BaseModel):
     #: Served from the SAME helper the run endpoint refuses on, so a disabled button and a 409 can
     #: never disagree about whether the file is busy.
     documents_processing: int = 0
+    #: LP-826 — set ONLY by the two "request documents" routes; None on every other response that
+    #: carries this schema. A field that is always present would have to mean something on an
+    #: override or an apply, and there is nothing true for it to say there.
+    document_request: DocumentRequestOutcome | None = None
     program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
     # The LEGACY quarantine (Tab 5) — the AI cross-source sweep AND the retired xsrc deterministic findings

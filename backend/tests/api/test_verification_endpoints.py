@@ -1804,3 +1804,80 @@ async def test_a_second_click_does_not_ask_the_borrower_twice(
     )
     await db.refresh(draft)
     assert (draft.body or "") == first_body, "the borrower's email grew a second identical line"
+
+
+async def test_a_request_says_what_the_draft_took(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-826 — the click's own answer, which the draft's contents cannot give afterwards."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    finding.rule_id = "ID-3"
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["document_request"] == {"added_to_draft": 1, "not_borrower_facing": 0}
+
+
+async def test_a_non_borrower_request_is_reported_as_going_elsewhere(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CASE THE DRAFT COUNT CANNOT EXPRESS, and the one an obvious implementation gets wrong.
+
+    An appraisal is the lender's to order, so it is deliberately kept out of an email addressed to
+    the borrower — it goes on the needs list and LP-820 owns chasing the other party. On the draft's
+    count that is indistinguishable from a click that did nothing, which is why the outcome has to
+    say it rather than leaving a processor to infer it from a number that did not move.
+
+    A count of REQUESTS rather than of what the draft took would report 1 added here, telling a
+    processor an email contains an appraisal request it does not contain.
+    """
+    from app.documents.catalog import ResponsibleParty, get_guidance
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    # PR-3 wants exactly ONE document, the appraisal. PR-2 also wants a purchase agreement, and
+    # with two non-borrower documents the count would have been 2 — right for the wrong reason, and
+    # it would not have shown that each skipped need is counted once.
+    finding.rule_id = "PR-3"
+    await db.commit()
+    assert get_guidance("appraisal").responsible_party is not ResponsibleParty.BORROWER
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+    assert resp.status_code == 200
+    outcome = resp.json()["document_request"]
+    assert outcome["added_to_draft"] == 0, "an appraisal must not enter the borrower's email"
+    assert outcome["not_borrower_facing"] == 1
+
+
+async def test_an_ordinary_action_carries_no_request_outcome(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CONTROL ON THE FIELD ITSELF. Twenty-three endpoints return this schema; a field that was
+    always present would have to mean something on an override, and there is nothing true for it to
+    say there. Null is the honest answer, and asserting it stops the field drifting into a default
+    that reads as "nothing was added"."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/accept-risk",
+        headers=_auth(token),
+        json={"reason": "Compensating factor"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["document_request"] is None

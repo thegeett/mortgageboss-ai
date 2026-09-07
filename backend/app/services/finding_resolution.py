@@ -21,6 +21,7 @@ Both record the resolution trail (who / when) and an activity-log entry. Uses
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -49,7 +50,7 @@ from app.models.needs_item import (
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
-from app.services.email_draft import add_needs_to_draft
+from app.services.email_draft import DraftUpdate, add_needs_to_draft
 from app.services.finding_requests import (
     NotRequestable,
     docs_requested_marker,
@@ -487,8 +488,12 @@ async def _create_document_needs(
     by_document: dict[str, list[Finding]],
     actor_user_id: UUID,
     note: str | None = None,
-) -> list[NeedsItem]:
+) -> tuple[list[NeedsItem], list[DraftUpdate]]:
     """Create ONE needs item per DOCUMENT, and put the borrower's share in the open draft.
+
+    RETURNS THE DRAFT'S ANSWER TOO (LP-826). What the draft took, and what it left for the needs
+    list, is decided here and was previously discarded here — leaving the caller unable to tell a
+    processor whether the thing they just asked for is in an email or not.
 
     THE SHARED CREATION PATH FOR BOTH REQUEST ROUTES (LP-809 review). It was the body of
     ``request_documents_in_bulk`` alone, and the per-finding route grew its own shape beside it: one
@@ -610,15 +615,46 @@ async def _create_document_needs(
                 ),
             }
 
+    updates: list[DraftUpdate] = []
     if created:
         # LP-809 — the requested documents join the file's OPEN draft rather than each becoming its
         # own email. Deliberately after the needs items exist and before the caller's activity log: a
         # draft that referenced a need not yet flushed would fail its foreign key, and a log line
         # claiming a request was made should not precede the draft that will carry it.
-        await add_needs_to_draft(
-            db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+        updates.append(
+            await add_needs_to_draft(
+                db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+            )
         )
-    return created
+    return created, updates
+
+
+@dataclass(frozen=True)
+class RequestOutcome:
+    """What a "request documents" click produced (LP-826).
+
+    THE NEEDS AND WHAT THE DRAFT DID WITH THEM, together. `DraftUpdate.skipped_not_borrower` has
+    existed since LP-809 with nothing reading it, and it is the one fact a processor cannot work out
+    afterwards: a request that went to the needs list instead of the email looks, on the draft count,
+    exactly like a click that did nothing.
+
+    `added` and `not_borrower` are counted from `add_needs_to_draft`'s OWN answer rather than from
+    what was asked for. A count of clicks drifts the moment a line is removed from the draft, and a
+    count that included a non-borrower request would tell a processor an email contains something it
+    does not.
+    """
+
+    needs: list[NeedsItem]
+    added: int
+    not_borrower: int
+
+    @classmethod
+    def of(cls, needs: list[NeedsItem], updates: list[DraftUpdate]) -> RequestOutcome:
+        return cls(
+            needs=needs,
+            added=sum(len(update.added) for update in updates),
+            not_borrower=sum(len(update.skipped_not_borrower) for update in updates),
+        )
 
 
 async def request_documents_in_bulk(
@@ -628,7 +664,7 @@ async def request_documents_in_bulk(
     by_document: dict[str, list[Finding]],
     actor_user_id: UUID,
     note: str | None = None,
-) -> list[NeedsItem]:
+) -> RequestOutcome:
     """ "Request all N" — the collection route, over many findings at once (LP-562).
 
     ONE PER DOCUMENT, NOT ONE PER FINDING, and that is the whole reason this exists rather than a
@@ -639,7 +675,7 @@ async def request_documents_in_bulk(
 
     The creation is `_create_document_needs`; what is left here is this route's own activity line.
     """
-    created = await _create_document_needs(
+    created, updates = await _create_document_needs(
         db, loan_file=loan_file, by_document=by_document, actor_user_id=actor_user_id, note=note
     )
     if created:
@@ -658,7 +694,7 @@ async def request_documents_in_bulk(
             },
         )
     await db.flush()
-    return created
+    return RequestOutcome.of(created, updates)
 
 
 async def request_docs_for_finding(
@@ -669,7 +705,7 @@ async def request_docs_for_finding(
     documents: Sequence[str] = (),
     actor_user_id: UUID,
     note: str | None = None,
-) -> list[NeedsItem]:
+) -> RequestOutcome:
     """Request documents FROM ONE finding (LP-88) — the row-level button.
 
     Creates the needs items the borrower (or whoever owns the document) must satisfy, puts the
@@ -714,7 +750,7 @@ async def request_docs_for_finding(
         )
 
     if documents:
-        created = await _create_document_needs(
+        created, updates = await _create_document_needs(
             db,
             loan_file=loan_file,
             by_document={document: [finding] for document in documents},
@@ -722,11 +758,10 @@ async def request_docs_for_finding(
             note=note,
         )
     else:
-        created = [
-            await _create_needs_item_from_message(
-                db, loan_file=loan_file, finding=finding, actor_user_id=actor_user_id, note=note
-            )
-        ]
+        item, update = await _create_needs_item_from_message(
+            db, loan_file=loan_file, finding=finding, actor_user_id=actor_user_id, note=note
+        )
+        created, updates = [item], [update]
 
     if created:
         await log_activity(
@@ -745,7 +780,7 @@ async def request_docs_for_finding(
             },
         )
     await db.flush()
-    return created
+    return RequestOutcome.of(created, updates)
 
 
 async def _create_needs_item_from_message(
@@ -755,7 +790,7 @@ async def _create_needs_item_from_message(
     finding: Finding,
     actor_user_id: UUID,
     note: str | None,
-) -> NeedsItem:
+) -> tuple[NeedsItem, DraftUpdate]:
     """The one need a finding that names NO document produces — titled from the finding itself.
 
     Untyped on purpose: there is no document label to resolve, and a type no document can match must
@@ -779,8 +814,10 @@ async def _create_needs_item_from_message(
         **finding.details,
         "docs_requested": docs_requested_marker(actor_user_id=actor_user_id, needs_item_id=item.id),
     }
-    await add_needs_to_draft(db, loan_file=loan_file, needs=[item], actor_user_id=actor_user_id)
-    return item
+    update = await add_needs_to_draft(
+        db, loan_file=loan_file, needs=[item], actor_user_id=actor_user_id
+    )
+    return item, update
 
 
 async def mark_recompute_needed(db: AsyncSession, *, loan_file: LoanFile) -> None:

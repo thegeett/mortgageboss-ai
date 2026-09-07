@@ -124,12 +124,14 @@ async def test_the_bulk_route_drops_it_and_keeps_the_rest(db_session: AsyncSessi
     blocked = await _finding(db_session, loan_file, rule_id=UNIDENTIFIED_DOCUMENTS_RULE_ID)
     ordinary = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"identify these files": [blocked], "credit report": [ordinary]},
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"identify these files": [blocked], "credit report": [ordinary]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert [item.title for item in created] == ["credit report"]
     assert "docs_requested" not in blocked.details
@@ -146,15 +148,19 @@ async def test_both_paths_write_the_same_marker_keys(db_session: AsyncSession) -
     single = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
     bulk = await _finding(db_session, loan_file, rule_id="CR-13", subject="lia2")
 
-    [item] = await request_docs_for_finding(
-        db_session, loan_file=loan_file, finding=single, actor_user_id=actor
-    )
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"bank statement": [bulk]},
-        actor_user_id=actor,
-    )
+    [item] = (
+        await request_docs_for_finding(
+            db_session, loan_file=loan_file, finding=single, actor_user_id=actor
+        )
+    ).needs
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"bank statement": [bulk]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     single_marker = single.details["docs_requested"]
     bulk_marker = bulk.details["docs_requested"]
@@ -171,12 +177,14 @@ async def test_a_finding_wanting_two_documents_is_marked_once(db_session: AsyncS
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": [finding], "bank statement": [finding]},
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": [finding], "bank statement": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert len(created) == 2
     assert finding.details["docs_requested"]["needs_item_id"] == str(created[0].id)
@@ -194,12 +202,14 @@ async def test_a_bulk_request_is_logged_as_a_needs_item_not_a_resolution(
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": [finding]},
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     rows = (
         (
@@ -244,12 +254,16 @@ async def test_a_second_click_does_not_duplicate_an_UNTYPED_request(
     finding = await _finding(db_session, loan_file, rule_id="ID-2", subject="b1")
     document = "One more source stating the date of birth"
 
-    first = await request_documents_in_bulk(
-        db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
-    )
-    second = await request_documents_in_bulk(
-        db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
-    )
+    first = (
+        await request_documents_in_bulk(
+            db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
+        )
+    ).needs
+    second = (
+        await request_documents_in_bulk(
+            db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
+        )
+    ).needs
 
     assert [item.title for item in first] == [document]
     assert first[0].needs_type is None  # the condition that defeated the old key
@@ -271,18 +285,22 @@ async def test_a_second_click_does_not_duplicate_an_ALIASED_request(
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="IN-8", subject="emp1")
 
-    first = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"verification of employment": [finding]},
-        actor_user_id=actor,
-    )
-    second = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"verification of employment": [finding]},
-        actor_user_id=actor,
-    )
+    first = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"verification of employment": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
+    second = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"verification of employment": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert len(first) == 1
     assert first[0].needs_type != "verification_of_employment"  # it aliased
@@ -295,18 +313,22 @@ async def test_a_catalogued_label_still_dedupes(db_session: AsyncSession) -> Non
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    first = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": [finding]},
-        actor_user_id=actor,
-    )
-    second = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={"credit report": [finding]},
-        actor_user_id=actor,
-    )
+    first = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
+    second = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={"credit report": [finding]},
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert [item.needs_type for item in first] == ["credit_report"]
     assert second == []
@@ -319,15 +341,17 @@ async def test_two_different_documents_are_both_created(db_session: AsyncSession
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="ID-2", subject="b1")
 
-    created = await request_documents_in_bulk(
-        db_session,
-        loan_file=loan_file,
-        by_document={
-            "One more source stating the date of birth": [finding],
-            "One more source stating the current address": [finding],
-        },
-        actor_user_id=actor,
-    )
+    created = (
+        await request_documents_in_bulk(
+            db_session,
+            loan_file=loan_file,
+            by_document={
+                "One more source stating the date of birth": [finding],
+                "One more source stating the current address": [finding],
+            },
+            actor_user_id=actor,
+        )
+    ).needs
 
     assert len(created) == 2
     assert all(item.needs_type is None for item in created)
@@ -341,9 +365,11 @@ async def test_the_marker_reads_back_from_the_new_shape(db_session: AsyncSession
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    [item] = await request_docs_for_finding(
-        db_session, loan_file=loan_file, finding=finding, actor_user_id=actor
-    )
+    [item] = (
+        await request_docs_for_finding(
+            db_session, loan_file=loan_file, finding=finding, actor_user_id=actor
+        )
+    ).needs
 
     assert requested_needs_item_id(finding) == item.id
 
