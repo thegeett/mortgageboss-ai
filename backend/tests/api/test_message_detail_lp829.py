@@ -273,3 +273,71 @@ async def test_a_soft_deleted_message_is_gone(client: AsyncClient, db: AsyncSess
     )
 
     assert resp.status_code == 404
+
+
+async def test_a_party_request_resolves_its_placeholders_too(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-829 REVIEW — LP-823's DEFECT IN THE THIRD PLACE, which is what this module exists to stop.
+
+    Resolution was gated on `is_open_draft`, which additionally requires the BORROWER template key.
+    `party_requests` renders the SAME template for title, agent, lender, CPA, insurer and employer,
+    each under its own key, so a party request fell through to the raw stored body. And
+    `build_timeline` selects every Communication on the file with no template filter, so those
+    drafts are on the timeline and clickable.
+
+    Measured before the fix: opening one showed "Hello $borrower_first_name," signed
+    "$processor_name" — the exact words a processor reported on the panel in LP-823.
+
+    The greeting resolves to the generic form rather than the borrower's name, which is LP-823's
+    review fix doing its job one layer down: this message is addressed to the title company, and
+    Akash's name has no business in it. Both halves are asserted — no placeholder survives, and the
+    borrower is not named — because either alone passes on the other being wrong.
+    """
+    from app.documents.catalog import ResponsibleParty
+    from app.models.loan_file_participant import ParticipantRole
+    from app.models.needs_item import NeedsItemStatus
+    from app.services.party_requests import add_participant, build_party_draft
+
+    company, token = await _company_user_token(db, slug="party")
+    loan_file, _draft = await _file_with_draft(db, company, borrower="Akash")
+    db.add(
+        NeedsItem(
+            loan_file_id=loan_file.id,
+            title="Title commitment",
+            needs_type="title_commitment",
+            origin=NeedsItemOrigin.FINDING,
+            status=NeedsItemStatus.PENDING,
+        )
+    )
+    await db.flush()
+    await add_participant(
+        db, loan_file=loan_file, role=ParticipantRole.TITLE, email="t@title.example"
+    )
+    from app.models.user import User as U
+    from sqlalchemy import select as _select
+
+    actor = (await db.execute(_select(U).where(U.company_id == company.id))).scalars().first()
+    assert actor is not None
+    party = await build_party_draft(
+        db, loan_file=loan_file, party=ResponsibleParty.TITLE, actor_user_id=actor.id
+    )
+    assert "$borrower_first_name" in (party.body or ""), (
+        "the fixture must actually store a placeholder, or this test asserts nothing"
+    )
+    await db.commit()
+
+    resp = await client.get(
+        f"{API}/{loan_file.display_id}/messages/{party.id}", headers=_auth(token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()["body"]
+
+    assert "$borrower_first_name" not in body
+    assert "$processor_name" not in body
+    assert "Akash" not in body, (
+        "the borrower's name went into a message addressed to the title company"
+    )
+    assert "Hello there," in body
+    # `is_open_draft` still means what it says: the panel above is NOT editing this one.
+    assert resp.json()["is_open_draft"] is False

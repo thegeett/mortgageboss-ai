@@ -91,7 +91,26 @@ async def message_detail(
         and message.status is CommunicationStatus.DRAFT
         and message.template_key == DRAFT_TEMPLATE.value
     )
-    if is_open_draft:
+    # LP-829 REVIEW — RESOLUTION IS DECIDED BY THE BODY'S ORIGIN, NOT BY WHICH DRAFT THIS IS.
+    #
+    # It was gated on `is_open_draft`, which additionally requires the BORROWER template key — so a
+    # party request (`party_requests` renders the SAME template for title, agent, lender, CPA,
+    # insurer and employer, each under its own key) fell to the raw body. `build_timeline` selects
+    # every Communication on the file with no template filter, so those drafts are on the timeline
+    # and clickable. Measured: opening one showed "Hello $borrower_first_name," signed
+    # "$processor_name" — LP-823's defect in the third place this module's own docstring says it
+    # exists to prevent.
+    #
+    # `template_key is not None` is the honest test: a body rendered from a template HAS the
+    # placeholders by construction, and a reply or compose draft is text a processor typed, where a
+    # literal `$processor_name` is theirs and not ours to substitute. That is the same line the
+    # inbound case is drawn on, one direction over.
+    renders_from_a_template = (
+        message.direction is CommunicationDirection.OUTBOUND
+        and message.status is CommunicationStatus.DRAFT
+        and message.template_key is not None
+    )
+    if renders_from_a_template:
         # LP-823 — the same resolution the panel reads, so the dialog and the textarea show the same
         # words. Reading them apart is exactly how "Hello $borrower_first_name," survived.
         body, _suggested = await draft_for_reading(

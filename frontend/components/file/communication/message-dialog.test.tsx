@@ -62,6 +62,12 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(state(detail()));
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
+    // LP-829 REVIEW — THE POSITIVE HALF, IN THIS TEST. Both assertions below are absences, and a
+    // dialog that rendered nothing at all would satisfy them. "Renders nothing when no message is
+    // open" is a different state and cannot close this one: it proves the empty case is empty, not
+    // that THIS case is populated.
+    expect(screen.getByText(/Please send the bank statements/)).toBeTruthy();
+
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
   });
