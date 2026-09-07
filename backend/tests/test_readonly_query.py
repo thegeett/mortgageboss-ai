@@ -364,6 +364,25 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # this table holds the same content one step earlier. Scrubbing matches identifier shapes; an
     # email is prose, and a name has no shape.
     "email_draft_prose": frozenset({"body"}),
+    # LP-803 — a borrower's inbound message. `subject` is prose they wrote about their own loan;
+    # `from_address` and `to_addresses` identify people; `raw_storage_path` points at the whole
+    # message. Dropped rather than scrubbed, matching `communications`, whose subject/sender/
+    # recipient/body C7 dropped for the outbound direction with the same reasoning. The dedup and
+    # threading identifiers go too: `message_id` and `ingest_key` are per-message identifiers, and
+    # `ses_message_id` names one delivery to one person.
+    "inbound_messages": frozenset(
+        {
+            "subject",
+            "from_address",
+            "to_addresses",
+            "raw_storage_path",
+            "ingest_key",
+            "ses_message_id",
+            "message_id",
+            "in_reply_to",
+            "references",
+        }
+    ),
 }
 
 #: Columns that must NEVER appear in any view, whatever else changes. A belt-and-braces
@@ -386,6 +405,10 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # LP-810 — the same content one step earlier, and here for the same strong-form reason: an email
     # body is prose about a named person, which no scrub matches.
     ("email_draft_prose", "body"),
+    # LP-803, strong form: a subject line is free prose a borrower wrote, and a name has no shape a
+    # scrub can match. Same argument as `documents.document_name`.
+    ("inbound_messages", "subject"),
+    ("inbound_messages", "from_address"),
     # LP-822, and here for the strong-form reason rather than only to record the decision: an
     # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it

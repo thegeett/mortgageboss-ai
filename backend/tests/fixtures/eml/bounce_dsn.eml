@@ -1,0 +1,21 @@
+From: MAILER-DAEMON@mail.example.com
+To: bounces@bounces.example.com
+Subject: Undelivered Mail Returned to Sender
+Message-ID: <dsn-001@mail.example.com>
+Date: Mon, 07 Sep 2026 09:16:00 +0000
+Return-Path: <>
+Content-Type: multipart/report; report-type=delivery-status; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset="utf-8"
+
+The following message could not be delivered.
+
+--b1
+Content-Type: message/delivery-status
+
+Final-Recipient: rfc822; nobody@example.com
+Action: failed
+Status: 5.1.1
+
+--b1--

@@ -54,6 +54,7 @@ from app.models.finding import (
 from app.models.finding_event import FindingEvent, FindingEventType
 from app.models.finding_prose import FindingProse
 from app.models.helpers import only_active, scope_to_company
+from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
 from app.models.ltv_override import LtvOverride
@@ -135,6 +136,8 @@ __all__ = [
     "FindingResolutionStatus",
     "FindingStatus",
     "GraduationCandidate",
+    "InboundMessage",
+    "InboundRoutingState",
     "Lender",
     "LoanFile",
     "LoanFileStatus",

@@ -4,21 +4,28 @@ This router is mounted in ``main.py`` **only when** ``not settings.is_production
 so in production its routes are absent (404). Dev tools are still **auth'd and
 tenant-scoped** — touching real documents is no excuse to skip isolation.
 
-The one endpoint here runs the deterministic PDF text-layer extractor
+LP-803 adds a second: the raw-message injector (§H1). It takes an ``.eml`` and runs it through the
+same ingest the SQS consumer would, so everything downstream of ``inbound.ingest_message`` is
+testable on a laptop with no AWS at all. Without it LP-804 and LP-805 are written blind and debugged
+in staging.
+
+The first endpoint here runs the deterministic PDF text-layer extractor
 (``app/services/pdf_utils.py``) on a stored document so a developer can compare
 the text layer against the AI's reading (LP-38/39). It is an experiment harness,
 **not** a pipeline step: it does not modify the ``Document``, classify, extract,
 or route anything to review.
 """
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
 from app.services.documents import get_document_for_company
+from app.services.inbound_ingest import ingest_raw_message
 from app.services.pdf_utils import extract_text_from_pdf
 from app.storage import get_storage_backend
 
@@ -79,4 +86,61 @@ async def extract_text_layer(
         has_text=result.has_text,
         extraction_ok=result.extraction_ok,
         error_reason=result.error_reason,
+    )
+
+
+class InjectedMessageResponse(BaseModel):
+    """What the injector did with the `.eml` it was handed.
+
+    ``created`` is False when the message was already ingested — which is not an error and is the
+    behaviour the ticket's "Done when" turns on. Injecting the same file twice is the cheapest way to
+    check the dedup contract by hand.
+    """
+
+    inbound_message_id: str
+    created: bool
+    ingest_key: str
+
+
+@dev_router.post("/inbound/inject", response_model=InjectedMessageResponse)
+async def inject_raw_message(
+    db: DbSession,
+    current_user: CurrentUser,
+    file: Annotated[UploadFile, File(description="A raw RFC 5322 message (.eml)")],
+    ses_message_id: Annotated[str | None, Form()] = None,
+    dmarc_verdict: Annotated[str | None, Form()] = None,
+) -> InjectedMessageResponse:
+    """Ingest an `.eml` exactly as the SQS consumer would (LP-803, §H1). Dev only.
+
+    ``ses_message_id`` and ``dmarc_verdict`` stand in for the SES receipt, which does not exist off
+    AWS. They are FORM FIELDS rather than derived from the message, and that is the point: the
+    verdicts must come from the receipt and never from a header in the body, so the injector cannot
+    offer a shortcut that the real path does not have. Passing a `dmarcVerdict` of GRAY here is how
+    the GRAY-stays-GRAY behaviour is exercised without waiting for a real message to be graded.
+
+    ``raw_storage_path`` is None: nothing was stored in S3, because nothing came from S3. Recording a
+    path to an object that does not exist would be worse than recording none.
+
+    Mounted only when ``not settings.is_production`` (see `main.py`), and still auth'd — a dev tool
+    is not an excuse to skip the tenant gate, even one that writes an unrouted row belonging to
+    nobody yet.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="The uploaded file was empty"
+        )
+    receipt = {"dmarcVerdict": {"status": dmarc_verdict}} if dmarc_verdict else None
+    result = await ingest_raw_message(
+        db,
+        raw=raw,
+        raw_storage_path=None,
+        ses_message_id=ses_message_id,
+        receipt=receipt,
+    )
+    await db.commit()
+    return InjectedMessageResponse(
+        inbound_message_id=result.message_id,
+        created=result.created,
+        ingest_key=result.ingest_key,
     )
