@@ -10,7 +10,7 @@ You can reply to this message with them attached, or send them to:
 
   $inbox_address
 
-Anything sent to that address is filed against your loan automatically, so it reaches us even when we are away from our desks.
+Anything sent to that address reaches your loan file directly, so it does not get lost even when we are away from our desks.
 
 Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
 

@@ -10,6 +10,6 @@ You can reply with them attached, or send them to $inbox_address.
 
 Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
 
-Conditions like these are an ordinary part of underwriting. They are not a sign that anything is wrong with your application.
+Conditions are a normal part of underwriting, and most files have them.
 
 $processor_name

@@ -128,7 +128,7 @@ VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v1",
-    ): "4cc96e1944494bea4fdafba4137cb5a9eed795f2af2dac9981a1704c9ead9848",  # pragma: allowlist secret
+    ): "e90926229ef0223b380540d4bf4807851355947af818deca21bc0230727640cb",  # pragma: allowlist secret
     (
         TemplateKey.REMINDER_FOLLOW_UP,
         "v1",
@@ -136,11 +136,11 @@ VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
     (
         TemplateKey.STATUS_UPDATE,
         "v1",
-    ): "49afe64c2681be26acffbbe0635a48c91ed4ba726aa3441c77e2bd39a2b57601",  # pragma: allowlist secret
+    ): "834ac0d27a2270230c18d512457001029cb4d21325bee1a3bf5c9df0ff16688f",  # pragma: allowlist secret
     (
         TemplateKey.CONDITION_RESPONSE_REQUEST,
         "v1",
-    ): "4614888fc26945940e1e9f4b19a414c62c12f5ab1f3bfd45599e3c2cdcf5145d",  # pragma: allowlist secret
+    ): "22bbebc98fcd9f57ea358bf49a4e750bb9de03365318e3e4b73c5f039945d166",  # pragma: allowlist secret
     (
         TemplateKey.CUSTOM,
         "v1",

@@ -21,6 +21,7 @@ from app.communications.templates import (
     VERSION_FINGERPRINTS,
     TemplateError,
     TemplateKey,
+    _load,
     file_fingerprint,
     placeholders,
     render,
@@ -226,3 +227,49 @@ def test_an_empty_list_renders_empty_rather_than_raising() -> None:
     """A draft with nothing outstanding is a caller bug, but it is LP-810's to catch — failing here
     would turn it into a 500 in the middle of a send."""
     assert render_document_block(()) == ""
+
+
+# --------------------------------------------------------------------------------------------- #
+# Nothing scans this text — so the deny-list lives here (review finding)
+# --------------------------------------------------------------------------------------------- #
+#: Language a borrower-facing email must not carry. LP-810 builds a deterministic compliance scanner
+#: over MODEL output, and "the plain template" is what that scanner falls back TO — so template text
+#: is the one borrower-facing path nothing ever scans. With the drafting flag off by default it is
+#: also the only path M1 sends on. These are the phrase classes the scanner exists to stop, checked
+#: at the layer that would otherwise skip it.
+_MUST_NOT_APPEAR = (
+    # Statements about the application's standing — Reg B territory, and not a processor's to make.
+    "approved",
+    "denied",
+    "guaranteed",
+    # Both directions of the same claim. The phrasing that prompted this was "they are not a sign
+    # that anything is WRONG WITH YOUR application" — a reassurance about the borrower's own file,
+    # which is not a processor's to give and may not survive underwriting.
+    "wrong with your",
+    "nothing is wrong",
+    "no problem with your",
+    "on track",
+    "will close on",
+    # Claims about what the system does with what they send. An emailed document is TRIAGED by a
+    # person (`auto_accept_inbound` defaults to false, LP-806), so "automatically" overpromises.
+    "automatically",
+    "instantly",
+)
+
+
+@pytest.mark.parametrize("key", list(TemplateKey))
+def test_no_template_makes_a_claim_nothing_scans(key: TemplateKey) -> None:
+    """A borrower reads these verbatim and no guardrail sits between the file and their inbox."""
+    subject, body = _load(key, TEMPLATES[key].version)
+    text = f"{subject}\n{body}".lower()
+    hits = [phrase for phrase in _MUST_NOT_APPEAR if phrase in text]
+    assert not hits, f"{key.value} carries language nothing downstream will catch: {hits}"
+
+
+def test_the_status_update_does_not_ask_and_then_offer_a_route_out() -> None:
+    """It opens by saying nothing is needed. The security notice has to attach to the one thing it
+    DOES invite — a reply — or it reads as a request the borrower cannot find."""
+    _, body = _load(TemplateKey.STATUS_UPDATE, TEMPLATES[TemplateKey.STATUS_UPDATE].version)
+
+    assert "nothing is needed from you" in body
+    assert body.index("just reply here") < body.index(SECURITY_NOTICE)

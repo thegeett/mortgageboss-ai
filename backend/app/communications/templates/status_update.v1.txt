@@ -8,8 +8,8 @@ $status_summary
 
 $next_step
 
-Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
-
 If you have any questions, just reply here.
+
+Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
 
 $processor_name
