@@ -9,6 +9,7 @@ endpoint a borrower would reach, and the refusal is the assertion.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest_asyncio
@@ -26,7 +27,12 @@ API = "/api/v1/loan-files"
 PUBLIC = "/api/v1/upload"
 
 #: A one-page PDF, the smallest thing `assess` accepts.
-_PDF = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
+#: LP-835 REVIEW — THE REAL FIXTURE, because `assess` parses the PDF rather than sniffing its
+#: first bytes. The hand-written literal here was refused with "This PDF could not be read",
+#: which every existing test in this file tolerated: each of them expects a REFUSAL, so a
+#: fixture that can never be accepted satisfied them all. The first test to require an
+#: acceptance is the one that found it.
+_PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
 
 @pytest_asyncio.fixture
@@ -365,3 +371,42 @@ async def test_a_link_holder_is_told_a_reference_and_nothing_else(
     assert page.json()["reference"] == loan_file.display_id
     assert "Sarah" not in page.text
     assert "sarah@example.com" not in page.text
+
+
+async def test_the_upload_itself_says_nothing_about_the_file_either(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-835 REVIEW — THE OTHER PUBLIC ROUTE, PINNED THE SAME WAY.
+
+    `public_router` has two routes and the key set was asserted on one. The GET has a
+    `response_model` (`UploadPagePublic`), so a field added there is at least declared; the POST is
+    annotated `-> dict[str, str]` with no response model, so whatever the handler puts in the dict is
+    what a token holder receives. The less-constrained of the two was the unpinned one.
+
+    Its docstring already states the rule — "an acknowledgement and a refusal reason are the whole
+    vocabulary, because anything else is a read primitive on a write-only capability" — and the
+    reason to assert it is the same one given for the GET: a field added later has to be a decision
+    rather than a drift. A document id here would tell whoever forwarded the email that their upload
+    landed and what it was called.
+
+    The refusal is pinned too, and separately: a 400 carries OUR sentence for a person to act on, and
+    that sentence is about the file they sent rather than about the loan file it went to.
+    """
+    loan_file, draft, token = await _file_with_draft(db)
+    await db.commit()
+    body = (await _attach(client, loan_file, draft, token))["body"]
+    link_token = _token_from(next(word for word in body.split() if "/upload/" in word))
+
+    accepted = await client.post(
+        f"{PUBLIC}/{link_token}",
+        files={"file": ("statement.pdf", _PDF, "application/pdf")},
+    )
+
+    assert accepted.status_code == 201, accepted.text
+    assert set(accepted.json()) == {"status"}, (
+        "the upload response grew a field — anything beyond an acknowledgement is a read primitive "
+        "on a write-only capability"
+    )
+    # The control: it really did accept, so "says nothing" is not being satisfied by a refusal.
+    assert accepted.json()["status"] == "received"
+    assert loan_file.display_id not in accepted.text
