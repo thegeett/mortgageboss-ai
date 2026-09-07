@@ -80,3 +80,21 @@ variable "kms_deletion_window_days" {
     error_message = "kms_deletion_window_days must be between 7 and 30."
   }
 }
+
+variable "ses_receipt_rule_arns" {
+  description = <<-EOT
+    Receipt-rule ARNs allowed to encrypt with this key (INFRA-1), or empty.
+
+    SES writes inbound mail to an SSE-KMS bucket, and it cannot do that unless THE KEY POLICY lets
+    it — a bucket policy alone is not enough, and the failure is an opaque AccessDenied at receipt
+    time with the message already accepted and then lost. `kms:Decrypt` is required alongside
+    `GenerateDataKey*` specifically because the destination bucket has server-side encryption
+    enabled; without it the write fails even though the key grant looks complete.
+
+    Conditioned on the RULE ARN rather than on the service, so a different SES rule in this account
+    cannot encrypt with this key. Verified against the SES developer guide's "Giving permissions to
+    Amazon SES for email receiving" page on 2026-09-07.
+  EOT
+  type        = list(string)
+  default     = []
+}

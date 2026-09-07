@@ -167,6 +167,13 @@ module "secrets" {
   # Same variable drives the data module's auth setting, so the secret's existence
   # and the cache's auth requirement cannot drift apart.
   create_redis_url_secret = var.redis_auth_enabled
+
+  # INFRA-1 — SES cannot write to an SSE-KMS bucket unless THE KEY POLICY grants it. Constructed
+  # from the same pieces the module builds its rule ARN from rather than read back from the module,
+  # because taking it from `module.inbound_mail` would be a cycle: the module needs this key.
+  ses_receipt_rule_arns = var.inbound_mail_enabled ? [
+    "arn:aws:ses:${var.aws_region}:${var.aws_account_id}:receipt-rule-set/${var.inbound_rule_set_name}:receipt-rule/${var.name_prefix}-inbound"
+  ] : []
 }
 
 
@@ -637,4 +644,36 @@ module "scheduler" {
   start_days               = var.shutdown_start_days
   enabled                  = var.shutdown_enabled
   probe_at                 = var.shutdown_probe_at
+}
+
+
+# --------------------------------------------------------------------------- #
+# INFRA-1 — inbound borrower mail
+# --------------------------------------------------------------------------- #
+# STAGING NEEDS NO REGISTRAR STEP. `staging.mortgageboss.ai` is already a hosted zone here and is
+# authoritative for everything beneath it, so `inbox.staging.mortgageboss.ai` is one MX record
+# inside a zone Terraform already owns. Production is the one that waits on a human at the
+# registrar, and it reuses `modules/dns` with enable_tls = false — an inbound-only mail domain
+# serves no HTTPS and needs no certificate.
+#
+# COUNTED, NOT CONDITIONAL ON A HAND EDIT. `inbound_mail_enabled` defaults to false so this plans
+# as a no-op until somebody turns it on deliberately, and the same flag drives the KMS grant above —
+# so the key policy and the rule cannot come into existence separately.
+module "inbound_mail" {
+  count  = var.inbound_mail_enabled ? 1 : 0
+  source = "../../modules/inbound_mail"
+
+  name_prefix = var.name_prefix
+  tags        = local.tags
+
+  mail_domain     = "inbox.${var.domain_name}"
+  route53_zone_id = module.dns.zone_id
+  aws_region      = var.aws_region
+  aws_account_id  = var.aws_account_id
+
+  bucket_name = "${var.name_prefix}-inbound-mail"
+  kms_key_arn = module.secrets.kms_key_arn
+
+  rule_set_name   = var.inbound_rule_set_name
+  retention_years = var.inbound_retention_years
 }

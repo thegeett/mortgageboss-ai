@@ -391,3 +391,12 @@ rds_maintenance_window = "wed:15:30-wed:16:00" # 11:30 EDT / 10:30 EST
 # already-running instance -- so the universal target really does reach the RDS
 # API with that spelling. Left null; set it again if the target input ever changes.
 # shutdown_probe_at = "YYYY-MM-DDTHH:MM:SS"
+
+# --------------------------------------------------------------------------- #
+# INFRA-1 — inbound borrower mail
+# --------------------------------------------------------------------------- #
+# FALSE until the application can process what arrives. Turning this on publishes an MX record, and
+# from that moment the domain accepts mail from anyone with no path to route it — LP-803 (ingest)
+# and LP-805 (routing) are both in M2. The Terraform is written now because production's registrar
+# step has lead time, not because staging should start receiving early.
+inbound_mail_enabled = false

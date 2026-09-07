@@ -1,0 +1,24 @@
+$ terraform -chdir=infra/modules/inbound_mail init -backend=false && terraform validate
+Success! The configuration is valid.
+
+$ terraform -chdir=infra/modules/secrets init -backend=false && terraform validate
+Success! The configuration is valid.
+
+$ terraform validate   # root module, staging, with backend.tf removed so init can run offline
+Success! The configuration is valid.
+
+$ terraform fmt -recursive infra/
+(no files reformatted after the run below)
+
+$ terraform -chdir=infra/envs/staging init -backend=false
+Error: No valid credential sources found
+  Please see https://developer.hashicorp.com/terraform/language/backend/s3
+  Error: failed to refresh cached credentials, no EC2 IMDS role found ...
+
+  -- The S3 state backend is contacted even under -backend=false, so the root module
+     was validated from a copy with backend.tf removed. That copy is identical in every
+     other respect; the modules directory was copied whole.
+
+$ terraform -chdir=infra/envs/staging plan
+  NOT RUN. Requires AWS credentials and the remote state; none are available in this
+  session. See "The plan that has not been run" in ../INFRA-1.md.

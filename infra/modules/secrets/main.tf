@@ -75,7 +75,7 @@ resource "aws_kms_key_policy" "this" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid       = "EnableIAMUserPermissions"
         Effect    = "Allow"
@@ -101,7 +101,27 @@ resource "aws_kms_key_policy" "this" {
           }
         }
       },
-    ]
+      ],
+      # INFRA-1 — present only when an inbound-mail rule exists, so environments without one carry
+      # no SES grant at all rather than an inert statement naming nothing.
+      length(var.ses_receipt_rule_arns) == 0 ? [] : [
+        {
+          Sid       = "AllowSESInboundMailEncryption"
+          Effect    = "Allow"
+          Principal = { Service = "ses.amazonaws.com" }
+          Action = [
+            "kms:GenerateDataKey*",
+            "kms:Decrypt",
+          ]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
+              "AWS:SourceArn"     = var.ses_receipt_rule_arns
+            }
+          }
+        },
+    ])
   })
 }
 

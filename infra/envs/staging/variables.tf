@@ -655,3 +655,36 @@ variable "shutdown_probe_at" {
   type        = string
   default     = null
 }
+
+
+# --------------------------------------------------------------------------- #
+# INFRA-1 — inbound borrower mail
+# --------------------------------------------------------------------------- #
+variable "inbound_mail_enabled" {
+  description = <<-EOT
+    Whether to create the inbound-mail stack. Defaults to FALSE.
+
+    Off by default because turning it on publishes an MX record: from that moment the domain accepts
+    mail from anyone, and there is no application path to route it until LP-803/LP-805 land. The
+    plan sequences the Terraform onto day one for the production registrar lead time, not because
+    staging should start receiving before it can process.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "inbound_rule_set_name" {
+  description = <<-EOT
+    The SES receipt rule set. ONE IS ACTIVE per account per region — a second rule set does not
+    coexist with the first, it replaces it on activation, silently. Anything else in this account
+    that ever uses SES receipt adds a RULE to this set.
+  EOT
+  type        = string
+  default     = "mbai-inbound"
+}
+
+variable "inbound_retention_years" {
+  description = "How long a raw inbound message is kept. The execution protocol fixes this at 5."
+  type        = number
+  default     = 5
+}
