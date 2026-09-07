@@ -83,6 +83,7 @@ from app.models.needs_item import (
 from app.models.needs_prose import NeedProse
 from app.models.observation import GraduationCandidate, Observation
 from app.models.property import OccupancyType, Property, PropertyType
+from app.models.reminder_snooze import ReminderKind, ReminderSnooze
 from app.models.rule import Rule
 from app.models.saved_view import SavedView, SavedViewSort
 from app.models.snapshot_finding import SnapshotFinding, SnapshotFindingScan
@@ -190,6 +191,8 @@ __all__ = [
     "PropertyType",
     "RecordStatus",
     "RefinanceType",
+    "ReminderKind",
+    "ReminderSnooze",
     "Rule",
     "RuleTag",
     "SavedView",

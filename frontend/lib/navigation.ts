@@ -11,6 +11,7 @@
 import type { UserRole } from "@/lib/auth/types";
 import type { LucideIcon } from "lucide-react";
 import {
+  BellRing,
   Building2,
   ClipboardList,
   FileText,
@@ -56,6 +57,9 @@ export const NAV_ITEMS: NavItem[] = [
   // the one thing only this page can show — a message that matched no loan file — has nowhere else
   // to appear, because it has no company and so belongs to no file's tab.
   { label: "Inbox", href: "/inbound", icon: Inbox },
+  // LP-814 — company-wide, and it has to be: "this file has gone quiet" is about a file nobody is
+  // opening, so a per-file view could never surface it.
+  { label: "Reminders", href: "/reminders", icon: BellRing },
   { label: "Administration", href: "/admin", icon: ShieldCheck, requiredRole: "admin" },
 ];
 

@@ -337,6 +337,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # from the SSN field the processor was correcting, so it is exactly as sensitive as
     # the correction and is excluded for the same reason, not a weaker one.
     "field_reviews": frozenset({"corrected_value", "note", "replaced_value"}),
+    # LP-814 — free prose a processor typed about one borrower's file, which is where a name arrives
+    # in a shape no scrubber predicts. Everything else on the row — the rule, the subject id, the two
+    # timestamps — is exposed, and answers "how often is this suggestion put off" without naming
+    # anybody. Same argument as `dti_custom_lines.note` immediately below.
+    "reminder_snoozes": frozenset({"note"}),
     # LP-643 — a processor's own DTI line. The label and the note are typed by hand about one
     # borrower's file, which is where an identifier arrives in a shape no scrubber predicts. The
     # view answers which section, how much and how often, and reports the two as booleans.

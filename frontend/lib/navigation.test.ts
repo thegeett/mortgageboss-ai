@@ -14,7 +14,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 describe("visibleNavItems", () => {
-  it("shows processors the non-gated items (Dashboard, Inbox)", () => {
+  it("shows processors the non-gated items (Dashboard, Inbox, Reminders)", () => {
     const labels = visibleNavItems("processor").map((item) => item.label);
     // "Loan Files" was removed in LP-UI-011: it pointed at a stub, and the
     // dashboard is the list. /loan-files now redirects here.
@@ -22,7 +22,7 @@ describe("visibleNavItems", () => {
     // "Inbox" is LP-807's and is deliberately NOT admin-gated: triaging inbound
     // mail is a processor's job, and an unrouted message has no loan file to
     // appear on, so this page is the only place it can be seen at all.
-    expect(labels).toEqual(["Dashboard", "Inbox"]);
+    expect(labels).toEqual(["Dashboard", "Inbox", "Reminders"]);
     expect(labels).not.toContain("Loan Files");
     expect(labels).not.toContain("Administration");
   });
@@ -30,12 +30,12 @@ describe("visibleNavItems", () => {
   it("shows admins the admin-gated item too", () => {
     const labels = visibleNavItems("admin").map((item) => item.label);
     expect(labels).toContain("Administration");
-    expect(labels).toEqual(["Dashboard", "Inbox", "Administration"]);
+    expect(labels).toEqual(["Dashboard", "Inbox", "Reminders", "Administration"]);
   });
 
   it("hides role-gated items when the role is unknown", () => {
     const labels = visibleNavItems(undefined).map((item) => item.label);
-    expect(labels).toEqual(["Dashboard", "Inbox"]);
+    expect(labels).toEqual(["Dashboard", "Inbox", "Reminders"]);
   });
 });
 
