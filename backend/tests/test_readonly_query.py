@@ -35,6 +35,20 @@ import sqlalchemy as sa
 from app.models.base import Base
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+
+def _view_module(revision: str):
+    """Import a migration module by revision id, to reach its view DDL constants."""
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    root = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    (path,) = [p for p in root.glob("*.py") if f"_{revision}_" in p.name]
+    spec = spec_from_file_location(f"_mig_{revision}", path)
+    assert spec and spec.loader
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 _MIGRATION = (
     Path(__file__).resolve().parents[1]
     / "alembic"
@@ -340,7 +354,9 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # `dti_custom_lines.label` is excluded. `exemplars` is stronger than that: they are excerpts of
     # real borrower-request emails, so a borrower's NAME is the likeliest thing left in one, and a
     # name is not digit-shaped, so it would cross a scrubbing view intact. The view answers how many
-    # people have set up a voice, how many exemplars they gave and when it last changed.
+    # people have set up a voice and when it last changed — NOT how many exemplars they gave.
+    # `cardinality(exemplars)` would trip the NEVER_EXPOSED text check below, so the migration
+    # chose the guarantee over the metric; its docstring explains the trade.
     "style_profiles": frozenset({"greeting", "closing", "signature_block", "exemplars"}),
 }
 
@@ -820,3 +836,70 @@ def test_every_error_detail_in_the_readonly_schema_is_scrubbed() -> None:
         f"these views select error_detail without scrubbing it: {sorted(unscrubbed)}. It is a "
         "free-text column and free text is where identifiers hide."
     )
+
+
+# --------------------------------------------------------------------------------------------- #
+# Two things LP-822's review found were unguarded
+# --------------------------------------------------------------------------------------------- #
+def test_every_model_module_is_reachable_from_app_models() -> None:
+    """A model that `app.models` does not import is invisible to `Base.metadata`, and `env.py`
+    builds `target_metadata` from exactly that.
+
+    The consequence is not cosmetic. Autogenerate compares the live database against
+    `target_metadata`; a table that exists in one and not the other is a table autogenerate
+    proposes to DROP. Measured on LP-822 before this test existed: `style_profiles` was missing
+    from `app/models/__init__.py`, and `Base.metadata` held 42 tables with it absent, so the next
+    `--autogenerate` would have written a migration dropping a table that had just been created.
+
+    The suite did not notice because `create_all` builds the schema from whatever the test session
+    happened to import, and the LP-822 tests import the model directly.
+    """
+    import app.models as models_pkg
+
+    for path in sorted(Path(models_pkg.__file__).parent.glob("*.py")):
+        if path.stem in {"__init__", "base", "types", "mixins"}:
+            continue
+        module = import_module(f"app.models.{path.stem}")
+        for name, obj in vars(module).items():
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, Base)
+                and obj is not Base
+                and obj.__module__ == module.__name__
+                and hasattr(obj, "__tablename__")
+            ):
+                assert getattr(models_pkg, name, None) is obj, (
+                    f"{name} ({path.name}) is not importable from app.models — "
+                    f"alembic's target_metadata will not contain {obj.__tablename__}, and "
+                    f"--autogenerate will propose dropping that table"
+                )
+
+
+async def test_the_style_profiles_view_is_valid_sql(db_session: AsyncSession) -> None:
+    """LP-822's review — the view's DDL had nothing that ever RAN it.
+
+    `EXCLUDED` and `NEVER_EXPOSED` above match against the migration's TEXT, which catches a column
+    that should not be exposed but cannot catch a view that does not compile: a mistyped column or a
+    bad expression passes every check here and fails at `alembic upgrade head` on deploy. The
+    `readonly.saved_views` test above already executes its view for this reason; this does the same
+    for the view LP-822 added.
+    """
+    module = _view_module("e4a1c7d90b3f")
+    await db_session.execute(sa.text("CREATE SCHEMA IF NOT EXISTS readonly"))
+    await db_session.execute(sa.text("DROP VIEW IF EXISTS readonly.style_profiles"))
+    await db_session.execute(sa.text(module._VIEW))  # type: ignore[attr-defined]
+
+    columns = (
+        await db_session.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'readonly' AND table_name = 'style_profiles'"
+            )
+        )
+    ).scalars()
+    exposed = set(columns)
+
+    # It compiles, and it exposes what it claims to: identity and shape, no content.
+    assert exposed == {"id", "user_id", "has_signature_block", "created_at", "updated_at"}
+    for hidden in EXCLUDED["style_profiles"]:
+        assert hidden not in exposed

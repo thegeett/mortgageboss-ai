@@ -84,7 +84,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", name="uq_style_profiles_user_id"),
     )
-    op.create_index("ix_style_profiles_user_id", "style_profiles", ["user_id"])
+    # No separate index on user_id: the UNIQUE constraint above already creates a unique btree
+    # index on it. A second non-unique index on the same column costs a write on every insert and
+    # update and serves no query the first cannot.
     op.execute("DROP VIEW IF EXISTS readonly.style_profiles")
     op.execute(_VIEW)
     op.execute(_GRANT)
@@ -92,5 +94,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP VIEW IF EXISTS readonly.style_profiles")
-    op.drop_index("ix_style_profiles_user_id", table_name="style_profiles")
     op.drop_table("style_profiles")

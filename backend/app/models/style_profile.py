@@ -54,8 +54,10 @@ class StyleProfile(Base, UUIDMixin, TimestampMixin):
 
     #: One profile per user. UNIQUE, and CASCADE on delete: a voice with nobody to belong to is not
     #: a record worth keeping, and it holds nothing about a loan file that anyone would audit.
+    #: No separate `index=True`: `unique=True` already builds a unique btree index on this
+    #: column, and a second non-unique one on the same column is writes and storage for nothing.
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
 
     #: How they open. Contains ``$borrower_first_name`` where a name goes, matching the template
@@ -64,6 +66,12 @@ class StyleProfile(Base, UUIDMixin, TimestampMixin):
     #: How they sign off — "Thanks," / "Best regards," / "Kind regards,".
     closing: Mapped[MediumStr] = mapped_column(nullable=False)
     #: The block under the closing: name, title, company, phone. Multi-line, so Text.
+    #:
+    #: DELIBERATELY NOT PASSED THROUGH `validate_exemplars`, and the asymmetry is the point rather
+    #: than an oversight: a signature block is SUPPOSED to carry a phone number and an email address
+    #: — the processor's own. The exemplar guard exists to catch a THIRD PARTY's identifiers in
+    #: pasted text; running it here would refuse every real signature. Do not "fix" the
+    #: inconsistency by extending the guard to this column.
     signature_block: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     #: Two or three short excerpts showing how this person writes.

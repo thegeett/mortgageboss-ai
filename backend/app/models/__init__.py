@@ -50,6 +50,7 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.finding_event import FindingEvent, FindingEventType
+from app.models.finding_prose import FindingProse
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
@@ -72,9 +73,12 @@ from app.models.snapshot_record import SnapshotRecord
 from app.models.stated_financials import (
     StatedAsset,
     StatedEmployer,
+    StatedHousingExpense,
     StatedIncomeItem,
     StatedLiability,
+    StatedOwnedProperty,
 )
+from app.models.style_profile import StyleProfile
 from app.models.tag import RuleTag, Tag, TagDependency
 from app.models.tag_cache import TagCacheEntry, TagCacheKind
 from app.models.types import (
@@ -123,6 +127,7 @@ __all__ = [
     "FindingEvent",
     "FindingEventType",
     "FindingOrigin",
+    "FindingProse",
     "FindingResolutionStatus",
     "FindingStatus",
     "GraduationCandidate",
@@ -161,8 +166,11 @@ __all__ = [
     "SoftDeleteMixin",
     "StatedAsset",
     "StatedEmployer",
+    "StatedHousingExpense",
     "StatedIncomeItem",
     "StatedLiability",
+    "StatedOwnedProperty",
+    "StyleProfile",
     "Tag",
     "TagCacheEntry",
     "TagCacheKind",
