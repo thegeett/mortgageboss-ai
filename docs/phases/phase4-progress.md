@@ -92,7 +92,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-06 | LP-802 | bcf00b0a | b57b085f | 5 | first Phase 4 ticket; ADR-094 amended. Fixed: inbox_domain unset in every env, a false import rationale, a tautological address test, two token-length assertions the widening could not fail |
 | 2026-09-06 | LP-801 | 392b1469 | d3325a9b | 3 | duplicate borrower request from an untyped label; the marker's other shape and its reader |
 | 2026-09-06 | LP-800 | 6d71cb9d | 9d1cad77 | 2 | silent drop of a mistyped instruction key; the appraiser-prepared family split across two parties |
-| 2026-09-06 | LP-817 | 228b4c19 | REVIEW_SHA | 3 | three sentences a borrower reads; templates are the one path LP-810's scanner never sees |
+| 2026-09-06 | LP-817 | 228b4c19 | 7fd7f924 | 3 | three sentences a borrower reads; templates are the one path LP-810's scanner never sees |
 | 2026-09-06 | LP-817 | 228b4c19 |  |  | awaiting review. ADR-401 (version pinned by content hash). No "Done when" clause in the plan |
 | 2026-09-06 | LP-800 | 6d71cb9d |  |  | awaiting review. ADR-400. 166 types carry a party, 28 carry full instructions; Priya's pass outstanding and not blocking |
 | 2026-09-06 | LP-801 | 392b1469 |  |  | awaiting review. ADR-399: predicate over the consolidated rule id, no migration — the plan's preferred column would be True on exactly one row per file |
