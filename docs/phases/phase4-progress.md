@@ -96,6 +96,8 @@ Append one line per completed cycle. Newest last.
 | 2026-09-06 | LP-822 | bb203058 | 626547b2 | 4 | unregistered models autogenerate would drop (4 total, 3 pre-existing); an untested readonly view; a duplicate index; a comment contradicting the migration |
 | 2026-09-07 | LP-809 | c3d34471 | e238e6c7 | 1 | a dollar amount in a need title broke the send-time substitution; one predicted finding disproved by measuring it |
 | 2026-09-06 | LP-809 | c3d34471 |  |  | awaiting review. Migration b8d5e0a17c42; two provenance columns the plan did not ask for; LP-818 will need the draft uniqueness index revisited |
+| 2026-09-07 | LP-800a | f3f0e06c | 228ddc61 | 1 | sourcing pass, user-directed. Fannie Mae citations inline; no assignment wrong; found the party recorded twice with the wrong copy winning; review found one stale section number |
+| 2026-09-07 | LP-810 | ab89cddd |  |  | awaiting review. Migration c9f1a4b73e08; template v2; Reg Z §1026.24 read 2026-09-07 |
 | 2026-09-06 | LP-822 | bb203058 |  |  | awaiting review. Mechanism + neutral default; migration e4a1c7d90b3f. No "Done when" clause in the plan (3rd) |
 | 2026-09-06 | LP-817 | 228b4c19 |  |  | awaiting review. ADR-401 (version pinned by content hash). No "Done when" clause in the plan |
 | 2026-09-06 | LP-800 | 6d71cb9d |  |  | awaiting review. ADR-400. 166 types carry a party, 28 carry full instructions; Priya's pass outstanding and not blocking |
