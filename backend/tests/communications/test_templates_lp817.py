@@ -50,6 +50,10 @@ _CONTEXT = {
     "opening": "We are working through your file.",
     "bridge": "Here is what we still need:",
     "closing": "Ask us if anything is unclear.",
+    # LP-834 — the slot that carries the caution and, where a draft has one, a live upload link.
+    # Supplied here as the NO-LINK form, which is what `secure_upload_block(None)` renders and what
+    # every asking template must say when the processor has minted nothing.
+    "secure_upload_block": SECURITY_NOTICE,
     "subject_line": "About your loan",
     "message_body": "Just a note.",
 }
@@ -231,14 +235,14 @@ def test_the_non_asking_templates_do_not(key: TemplateKey) -> None:
 # --------------------------------------------------------------------------------------------- #
 # The plain framing, and the version that introduced its slots (LP-810)
 # --------------------------------------------------------------------------------------------- #
-def test_the_initial_request_is_at_v3_and_the_older_versions_still_resolve() -> None:
+def test_the_initial_request_is_at_v4_and_the_older_versions_still_resolve() -> None:
     """ADR-401's mechanism doing its job. LP-810 needed three framing slots, so the file changed —
     which means a NEW VERSION, not an edit. v1's fingerprint stays pinned and its file stays on disk,
     so an audit row naming v1 still resolves to the words it named.
 
     This is the first bump, and it is the case the pin exists for: an in-place edit here would have
     left every v1 audit row describing an email that no longer exists in that form."""
-    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v3"
+    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v4"
     assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1") in VERSION_FINGERPRINTS
     assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v2") in VERSION_FINGERPRINTS
 

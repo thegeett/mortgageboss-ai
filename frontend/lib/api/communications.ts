@@ -45,6 +45,30 @@ export const messageQueryKey = (fileId: string, messageId: string) =>
  * of them; loading every body to render a list would make this the fullest copy of a borrower's
  * prose in the browser, for messages nobody opened.
  */
+/**
+ * Put a secure upload link in this draft (LP-834).
+ *
+ * INVALIDATES THE LINKS LIST TOO. Minting expires every other live link on the file, so the panel
+ * listing them is stale the moment this resolves — and that panel is where a processor would go to
+ * check what a borrower still has.
+ */
+export function useAttachUploadLink(fileId: string, messageId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (
+        await apiClient.post<MessageDetail>(
+          `${API_V1}/loan-files/${fileId}/messages/${messageId}/upload-link`,
+        )
+      ).data,
+    onSuccess: (detail) => {
+      queryClient.setQueryData(messageQueryKey(fileId, messageId), detail);
+      void queryClient.invalidateQueries({ queryKey: ["upload-links", fileId] });
+      void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
+    },
+  });
+}
+
 export function useMessageDetail(fileId: string, messageId: string | null) {
   return useQuery({
     queryKey: messageQueryKey(fileId, messageId ?? ""),

@@ -32,6 +32,7 @@ from pathlib import Path
 from string import Template
 
 from app.documents.catalog import ResponsibleParty, get_guidance
+from app.models.upload_link import DEFAULT_TTL_HOURS
 from app.verification.rule_engine.reasons import document_label
 
 _TEMPLATES_DIR = (Path(__file__).parent / "templates").resolve()
@@ -69,6 +70,33 @@ SECURITY_NOTICE = (
     f"{SECURITY_CAUTION} If you would rather not send documents this way, reply and ask — "
     "we will send you a secure upload link instead."
 )
+
+
+#: How long a minted link lasts, in days, for the sentence a borrower reads. Derived from the one
+#: constant rather than typed again — LP-827 pinned the panel's copy to it for the same reason, and a
+#: duplicated number is wrong the first time somebody changes the original.
+_LINK_DAYS = DEFAULT_TTL_HOURS // 24
+
+
+def secure_upload_block(url: str | None) -> str:
+    """The security caution, and the route out of email — a live link where there is one (LP-834).
+
+    ONE SLOT, TWO SENTENCES, AND NEITHER IS OPTIONAL. `SECURITY_CAUTION` is a fixed decision in the
+    execution protocol: borrowers are told email is not secure. What follows it is what the file can
+    actually offer — a link the processor has minted, or LP-824's offer to send one on request, which
+    is a promise a person can keep.
+
+    THE URL IS PASSED IN, NEVER READ BACK. `MintedLink`'s token "exists HERE AND NOWHERE ELSE — the
+    row holds a hash", so there is no rebuilding this for an email composed later. That is why the
+    draft has to remember its own link rather than the renderer looking one up.
+    """
+    if url is None:
+        return SECURITY_NOTICE
+    return (
+        f"{SECURITY_CAUTION} If you would rather not send documents by email, you can upload them "
+        f"securely here instead:\n\n  {url}\n\n"
+        f"That link works for {_LINK_DAYS} days."
+    )
 
 
 class TemplateKey(StrEnum):
@@ -131,9 +159,20 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         # A VERSION BUMP RATHER THAN AN EDIT, which is what ADR-401 is for. v2's fingerprint stays
         # pinned below and its file stays on disk, so an audit row naming v2 still resolves to the
         # words it named.
-        version="v3",
+        # v4 (LP-834) — the security sentence becomes `$secure_upload_block`, so a draft can carry a
+        # live upload link where the processor has minted one, and LP-824's wording where they have
+        # not. The words are unchanged in the second case; the slot is what is new.
+        version="v4",
         variables=_COMMON
-        | {"loan_reference", "document_list", "inbox_address", "opening", "bridge", "closing"},
+        | {
+            "loan_reference",
+            "document_list",
+            "inbox_address",
+            "opening",
+            "bridge",
+            "closing",
+            "secure_upload_block",
+        },
     ),
     TemplateKey.REMINDER_FOLLOW_UP: TemplateSpec(
         key=TemplateKey.REMINDER_FOLLOW_UP,
@@ -170,6 +209,10 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
+        "v4",
+    ): "c14a7dbc4588095a0a898e2fb68868e845be7b1aa38f89a4c0c9a85ab46b5c1c",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v3",

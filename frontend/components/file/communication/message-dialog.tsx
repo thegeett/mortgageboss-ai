@@ -8,9 +8,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { messageMailtoUrl, useMessageDetail, useSendDraft } from "@/lib/api/communications";
+import {
+  messageMailtoUrl,
+  useAttachUploadLink,
+  useMessageDetail,
+  useSendDraft,
+} from "@/lib/api/communications";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
-import { Check, Copy, Mail, Send } from "lucide-react";
+import { Check, Copy, Link as LinkIcon, Mail, Send } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -51,6 +56,7 @@ export function MessageDialog({
 }) {
   const { data, isPending, isError } = useMessageDetail(fileId, messageId);
   const send = useSendDraft(fileId);
+  const attachLink = useAttachUploadLink(fileId, messageId ?? "");
   const [copied, setCopied] = useState(false);
   const open = messageId !== null;
 
@@ -250,6 +256,30 @@ export function MessageDialog({
                   }
                 >
                   <Send className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
+                </Button>
+                {/* LP-834 — THE LINK IS ADDED FROM INSIDE THE DRAFT, which is the gap this
+                    closes: it was minted on a panel below and pasted by hand.
+
+                    THE WARNING IS BEFORE THE CLICK, NOT AFTER. Minting expires every other live
+                    link on the file, so a borrower already sent one loses it — they click and are
+                    refused, with no explanation on their end. That is the right trade against two
+                    live credentials and it is not a thing to discover afterwards. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={attachLink.isPending}
+                  title={
+                    data.body.includes("/upload/")
+                      ? "Replaces the link in this draft. Any link already sent stops working."
+                      : "Any link already sent to this borrower stops working."
+                  }
+                  onClick={() => attachLink.mutate()}
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  {data.body.includes("/upload/")
+                    ? "Replace the secure link"
+                    : "Add a secure upload link"}
                 </Button>
                 {/* NOTHING HERE TRANSMITS, and the label says so rather than implying otherwise.
                     LP-816 shipped the transport seam with no provider, so the message still leaves

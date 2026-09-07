@@ -401,8 +401,17 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # analysis, and a second copy of the same class of identifier buys nothing. `is_important` and
     # `read_at` are NOT here — they are exposed, because how much a company flags and how long mail
     # sits unread are facts about how it works and name nobody.
+    # LP-834 adds `upload_link_url`: the plaintext upload token, a bearer credential, and the same
+    # secret already inside `body` one entry along.
     "communications": frozenset(
-        {"sender", "recipient", "subject", "body", "in_reply_to_message_id"}
+        {
+            "sender",
+            "recipient",
+            "subject",
+            "body",
+            "in_reply_to_message_id",
+            "upload_link_url",
+        }
     ),
     # LP-822 — a processor's writing voice. `greeting`, `closing` and `signature_block` are typed by
     # hand, which is where an identifier arrives in a form no scrubber predicts — the same reason
@@ -476,6 +485,11 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),
     ("communications", "body"),
+    # LP-834, strong form and the same reason one line up: this column holds the plaintext upload
+    # token, which is a BEARER CREDENTIAL. It is the same secret already inside `body` — the draft
+    # remembers it so regeneration is lossless — and a scrub cannot help, because a scrubbed token is
+    # either still usable or is not a token.
+    ("communications", "upload_link_url"),
     # LP-810 — the same content one step earlier, and here for the same strong-form reason: an email
     # body is prose about a named person, which no scrub matches.
     ("email_draft_prose", "body"),

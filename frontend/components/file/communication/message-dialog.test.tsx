@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockUseMessageDetail = vi.fn();
 const mockSend = vi.fn();
 const sendState = { mutate: mockSend, isPending: false, isError: false };
+const mockAttach = vi.fn();
+const attachState = { mutate: mockAttach, isPending: false, isError: false };
 // LP-831 REVIEW — THE REAL `messageMailtoUrl`, not a stub. What the "Open in mail client" link
 // carries is the assertion; a mocked builder would let the button exist while the link was wrong.
 // Only the two hooks are replaced.
@@ -21,6 +23,7 @@ vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => sendState,
+  useAttachUploadLink: () => attachState,
 }));
 
 afterEach(cleanup);
@@ -323,5 +326,49 @@ describe("MessageDialog — a draft can actually be sent", () => {
     expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
     const disabled = screen.getByRole("button", { name: /open in mail client/i });
     expect((disabled as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("the secure upload link (LP-834)", () => {
+  it("offers to add one, and warns before the click", () => {
+    // THE WARNING IS BEFORE, NOT AFTER. Minting expires every other live link on the file, so a
+    // borrower already sent one loses it — they click and are refused, with no explanation on their
+    // end. That is not a thing to discover afterwards.
+    mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: true, status: "draft" })));
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "Add a secure upload link" });
+    expect(button.getAttribute("title")).toContain("stops working");
+
+    fireEvent.click(button);
+    expect(mockAttach).toHaveBeenCalledTimes(1);
+  });
+
+  it("says REPLACE once the draft already carries one", () => {
+    // Two links in one email is the state this exists to prevent, and a button that still says
+    // "Add" is how a processor reaches it believing they are adding a second route rather than
+    // killing the first.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          status: "draft",
+          body: "Hello Sarah,\n\nUpload here: https://app.test/upload/tok123\n\nDana Reyes",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Replace the secure link" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a secure upload link" })).toBeNull();
+  });
+
+  it("offers nothing on a sent message", () => {
+    // LP-821 — the evidence record is what actually went out; a link added afterwards would make
+    // the stored message differ from the one the borrower received. The server refuses it too.
+    mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false })));
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /secure/i })).toBeNull();
   });
 });

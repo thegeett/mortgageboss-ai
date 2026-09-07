@@ -197,6 +197,22 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    #: LP-834 — the secure upload link this draft carries, as the borrower would click it.
+    #:
+    #: STORED, BECAUSE IT CANNOT BE READ BACK. `MintedLink`'s docstring: the plaintext token "exists
+    #: HERE AND NOWHERE ELSE — the row holds a hash". So a draft that regenerates — which it does on
+    #: every add and remove — would lose its link the first time anything changed, and there is no
+    #: rebuilding it from `upload_links`.
+    #:
+    #: THIS IS A BEARER CREDENTIAL IN A COLUMN, and it is stated rather than discovered. It is the
+    #: same secret already sitting in `body`, which is `NEVER_EXPOSED` in every readonly view for
+    #: exactly this reason, and this column is excluded there too. What it buys is that regeneration
+    #: is lossless: the renderer is handed the URL rather than parsing it back out of prose.
+    #:
+    #: NULL IS THE ORDINARY STATE. A draft without a link is a complete email — LP-824's wording
+    #: offers to send one on request, which is a promise a person can keep.
+    upload_link_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="communications")
     needs_item: Mapped["NeedsItem | None"] = relationship()

@@ -1,0 +1,21 @@
+Subject: Documents we need for your loan ($loan_reference)
+
+Hello $borrower_first_name,
+
+$opening
+
+$bridge
+
+$document_list
+
+You can reply to this message with them attached, or send them to:
+
+  $inbox_address
+
+Anything sent to that address reaches your loan file directly, so it does not get lost even when we are away from our desks.
+
+$closing
+
+$secure_upload_block
+
+$processor_name

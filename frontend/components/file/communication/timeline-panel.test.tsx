@@ -51,6 +51,9 @@ vi.mock("@/lib/api/communications", () => ({
     return mockMessageDetail();
   },
   useSendDraft: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // LP-834 — the dialog offers a secure link now. These cases are about the LIST; the dialog has
+  // its own file.
+  useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 const mockMessageDetailArgs: unknown[][] = [];
 

@@ -39,8 +39,10 @@ from app.communications.templates import (
     plain_framing,
     render,
     render_document_block,
+    secure_upload_block,
 )
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.documents.catalog import ResponsibleParty, get_guidance
 from app.models.borrower import Borrower
 from app.models.communication import (
@@ -54,7 +56,10 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
 from app.models.user import User
+from app.services.upload_links import list_links, mint_upload_link, revoke_link
 from app.verification.rule_engine.reasons import document_label
+
+logger = get_logger(__name__)
 
 #: The template a document-request draft is rendered from, and the key its uniqueness is scoped to.
 DRAFT_TEMPLATE = TemplateKey.INITIAL_DOCUMENTATION_REQUEST
@@ -116,7 +121,11 @@ def _borrower_label(need: NeedsItem) -> str:
 
 
 def render_draft_body(
-    loan_file: LoanFile, needs: list[NeedsItem], *, framing: Framing | None = None
+    loan_file: LoanFile,
+    needs: list[NeedsItem],
+    *,
+    framing: Framing | None = None,
+    upload_link_url: str | None = None,
 ) -> RenderedTemplate:
     """The rendered draft for ``needs`` — subject, body, template key and version together.
 
@@ -145,6 +154,10 @@ def render_draft_body(
             "opening": words.opening,
             "bridge": words.bridge,
             "closing": words.closing,
+            # LP-834 — the caution plus a live link where the draft has one, and LP-824's offer to
+            # send one where it does not. Passed in rather than looked up: the plaintext token is
+            # not in the database to look up.
+            "secure_upload_block": secure_upload_block(upload_link_url),
         },
     )
 
@@ -420,7 +433,13 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     """Rewrite the draft's subject and body from its current membership."""
     needs = await _needs_in_draft(db, draft=draft)
     framing = await _cached_framing(db, loan_file=loan_file, needs=needs)
-    rendered = render_draft_body(loan_file, needs, framing=framing)
+    # LP-834 — REGENERATION IS LOSSLESS BECAUSE THE DRAFT REMEMBERS. The body is rewritten from the
+    # template on every add and remove; a link that lived only in the prose would be wiped the first
+    # time a processor requested one more document, and could not be rebuilt because the token is
+    # hashed in `upload_links`.
+    rendered = render_draft_body(
+        loan_file, needs, framing=framing, upload_link_url=draft.upload_link_url
+    )
     draft.subject = rendered.subject
     draft.body = rendered.body
     # The version is stamped from what ACTUALLY rendered, not from the registry read separately.
@@ -563,6 +582,41 @@ async def add_needs_to_draft(
         already_present=already,
         skipped_not_borrower=skipped,
     )
+
+
+async def attach_upload_link(
+    db: AsyncSession, *, loan_file: LoanFile, draft: Communication
+) -> Communication:
+    """Mint a secure upload link for this draft, expiring any other live one. ``flush`` only.
+
+    ONE LIVE LINK PER FILE, AND THAT IS THE POINT RATHER THAN A TIDINESS RULE. A link is a bearer
+    credential: two live ones means two ways in, one of them in an email nobody is looking at any
+    more. Keeping one is also what makes "the link in this draft" a meaningful phrase — otherwise a
+    borrower holding an older message has a working link to a request that has moved on.
+
+    THE COST IS REAL AND FALLS ON SOMEBODY WHO CANNOT SEE IT. A borrower already sent a link loses
+    it, with no explanation on their end — they click and are refused. That is the correct trade
+    against two live credentials, and it is why the screen has to say what this does BEFORE it is
+    clicked rather than after.
+
+    ADDING A LINK TWICE REPLACES, NEVER APPENDS. The URL lives in a column and the body is rendered
+    from it, so a second call overwrites one value and re-renders one line. Two links in one email is
+    the state this exists to prevent, and appending is the obvious way to reach it.
+
+    NO RECIPIENT. `mint_upload_link`'s `recipient_email` is optional and stays unset here: the link
+    is for whoever the draft is addressed to, which the processor may not have typed yet, and a link
+    is not addressed in any way the redemption path checks.
+    """
+    for live in await list_links(db, loan_file=loan_file):
+        if live.is_usable():
+            await revoke_link(db, link=live)
+
+    minted = await mint_upload_link(db, loan_file=loan_file)
+    draft.upload_link_url = minted.url
+    await _regenerate(db, draft=draft, loan_file=loan_file)
+    # METADATA ONLY — never the URL, which is the credential itself, and never the recipient.
+    logger.info("draft_upload_link_attached", loan_file_id=str(loan_file.id))
+    return draft
 
 
 async def remove_need_from_draft(

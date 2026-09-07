@@ -24,7 +24,12 @@ from app.schemas.communication import (
     SendDraftRequest,
     SentCommunicationPublic,
 )
-from app.services.email_draft import _needs_in_draft, draft_for_reading, get_open_draft
+from app.services.email_draft import (
+    _needs_in_draft,
+    attach_upload_link,
+    draft_for_reading,
+    get_open_draft,
+)
 from app.services.email_reply import (
     CannotReplyError,
     create_compose_draft,
@@ -226,6 +231,39 @@ class MessageDetailPublic(BaseModel):
     suggested_bcc: str
     mailto_available: bool
     mailto_max_chars: int
+
+
+@message_router.post("/{communication_id}/upload-link", response_model=MessageDetailPublic)
+async def attach_upload_link_endpoint(
+    communication_id: UUID,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> MessageDetailPublic:
+    """Put a secure upload link in this draft, expiring any other live one on the file (LP-834).
+
+    ON THE DRAFT, NOT ON THE FILE, because "the link in this draft" is the phrase that has to be
+    true. A file-level mint would leave the processor to paste it, which is the gap this closes.
+
+    REFUSES ANYTHING THAT IS NOT AN EDITABLE DRAFT. A sent message must not gain a link — LP-821's
+    evidence record is what actually went out — and an inbound one is not ours to edit at all.
+    """
+    detail = await message_detail(
+        db, loan_file=loan_file, communication_id=communication_id, reader=current_user
+    )
+    if detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message on this loan file")
+    if not detail.is_editable:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="This message has already been sent and cannot be changed.",
+        )
+
+    draft = await db.get(Communication, communication_id)
+    assert draft is not None
+    await attach_upload_link(db, loan_file=loan_file, draft=draft)
+    await db.commit()
+    return await read_message(communication_id, loan_file, db, current_user)
 
 
 @message_router.get("/{communication_id}", response_model=MessageDetailPublic)
