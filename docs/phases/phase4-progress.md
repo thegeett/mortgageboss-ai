@@ -9,8 +9,21 @@ and `HUMAN_GATED` (Terraform written and planned; waiting on a person to apply).
 Protocol: [`phase4-execution-protocol.md`](phase4-execution-protocol.md) ·
 Plan: [`phase4-build-plan.md`](phase4-build-plan.md) · Design: [`phase4.md`](phase4.md)
 
-**Branch:** `phase4` (cut from the current staging branch). One branch for the whole phase; one
-commit per ticket plus one per review pass.
+**Branch:** `phase4-with-ui`, cut from `origin/mbai-ui-improvemet-merge` — NOT from the bedrock
+staging branch, and not named `phase4`. Corrected 2026-09-06 after both LP-802 and LP-801 were
+reported against the wrong branch for a whole session. Verify with `git rev-parse --abbrev-ref HEAD`
+rather than trusting this line or a session-start snapshot; the tree's branch has changed under a
+session at least once. One branch for the whole phase; one commit per ticket plus one per review pass.
+
+Because the branch descends from the UI merge, it carries that merge's schema: `alembic heads` is
+`a7c93e12f4b8`, and staging's current revision `d7e3a9b41f02` is its direct parent. A deploy from here
+applies one migration.
+
+**This worktree is shared.** `/Users/geetthaker/Geet/project/loan-processing/mbai-bedrock` has had at
+least three sessions committing into it. The protocol's concurrency rule guards the branch and the
+ticket; the resource actually shared is the TREE, so a checkout by one session moves files under
+another mid-review with nothing on screen to say so. A worktree per session is the fix, and it is the
+user's call.
 
 ---
 
