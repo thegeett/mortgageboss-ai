@@ -34,6 +34,7 @@ dependencies = [
     # sync boto3 in asyncio.to_thread would work but costs a thread per call under
     # Celery concurrency. See app/storage/s3.py and decisions.md ADR-356.
     "aioboto3>=15.5.0",
+    "pikepdf>=10.13.0.post1",
 ]
 
 [dependency-groups]

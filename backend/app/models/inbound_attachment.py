@@ -104,6 +104,13 @@ class InboundAttachment(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         default=AttachmentSafetyState.PENDING,
         nullable=False,
     )
+    #: Why it was refused, in words a processor can act on. Null when the state is SAFE.
+    #:
+    #: A STATE WITH NO REASON IS A DEAD END. "Quarantined" tells a processor nothing about whether to
+    #: ask the borrower again, ask for a different format, or ask for a password — and those are
+    #: three different conversations. This is prose written by US, not by a sender, so it is safe to
+    #: display and safe to expose.
+    safety_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The rasterised artefact LP-804b produces. The extraction path reads THIS, never the original.
     derived_storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
