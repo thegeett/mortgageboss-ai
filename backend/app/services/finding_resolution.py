@@ -481,6 +481,32 @@ def _already_asked_key(needs_type: str | None, title: str) -> str:
     return needs_type or f"title:{title.strip().lower()}"
 
 
+async def _already_asked(db: AsyncSession, *, loan_file_id: UUID) -> set[str]:
+    """The identities of everything still outstanding on this file, for the duplicate check.
+
+    ONE LOOKUP FOR BOTH REQUEST SHAPES (LP-826 review). It was inline in `_create_document_needs`,
+    which left `_create_needs_item_from_message` — the branch for a finding that names no document —
+    with no duplicate check at all. Measured on ID-3, the rule the original report came from: two
+    clicks produced two identical needs items and two identical lines in the borrower's email.
+    """
+    rows = (
+        (
+            await db.execute(
+                only_active(
+                    select(NeedsItem).where(
+                        NeedsItem.loan_file_id == loan_file_id,
+                        NeedsItem.status == NeedsItemStatus.PENDING,
+                    ),
+                    NeedsItem,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {_already_asked_key(row.needs_type, row.title) for row in rows}
+
+
 async def _create_document_needs(
     db: AsyncSession,
     *,
@@ -522,22 +548,7 @@ async def _create_document_needs(
     ALREADY-REQUESTED DOCUMENTS ARE SKIPPED. A second click must not produce a second copy — a
     duplicate request is worse than no button, because the borrower gets asked twice for one thing.
     """
-    open_needs = (
-        (
-            await db.execute(
-                only_active(
-                    select(NeedsItem).where(
-                        NeedsItem.loan_file_id == loan_file.id,
-                        NeedsItem.status == NeedsItemStatus.PENDING,
-                    ),
-                    NeedsItem,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    existing = {_already_asked_key(row.needs_type, row.title) for row in open_needs}
+    existing = await _already_asked(db, loan_file_id=loan_file.id)
 
     created: list[NeedsItem] = []
     # LP-801 — the finding -> needs-item link, written once per finding for the FIRST document it
@@ -783,6 +794,28 @@ async def request_docs_for_finding(
     return RequestOutcome.of(created, updates)
 
 
+async def _open_need_titled(
+    db: AsyncSession, *, loan_file_id: UUID, title: str
+) -> NeedsItem | None:
+    """The outstanding need already carrying this exact ask, or None."""
+    return (
+        (
+            await db.execute(
+                only_active(
+                    select(NeedsItem).where(
+                        NeedsItem.loan_file_id == loan_file_id,
+                        NeedsItem.status == NeedsItemStatus.PENDING,
+                        NeedsItem.title == title,
+                    ),
+                    NeedsItem,
+                ).order_by(NeedsItem.created_at, NeedsItem.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
 async def _create_needs_item_from_message(
     db: AsyncSession,
     *,
@@ -797,10 +830,37 @@ async def _create_needs_item_from_message(
     not be stored as one (LP-624). It joins the draft, because a request nobody but the borrower can
     answer is exactly what the borrower-by-default in ``_is_borrower_facing`` is for.
     """
+    title = f"Documents for: {finding.message}"[:200]
+    # LP-826 REVIEW — THE SAME DUPLICATE CHECK THE OTHER BRANCH HAS, and it was missing here.
+    #
+    # LP-809's review fixed "a second click asks the borrower twice" in `_create_document_needs` and
+    # left this branch untouched, because the test that proved it used a rule that DECLARES
+    # documents (IN-1) and so never reached here. Measured on ID-3 — the rule the original LF-JR4T
+    # report came from, and the one that declares none — two clicks produced two identical needs
+    # items and two identical lines in the borrower's email.
+    #
+    # An already-open ask is REUSED rather than refused: the finding still gets its marker, the
+    # draft membership is idempotent, and the caller sees an outcome with nothing added, which is
+    # the truth. Refusing would make a second click an error for something that is simply done.
+    if _already_asked_key(None, title) in await _already_asked(
+        db, loan_file_id=finding.loan_file_id
+    ):
+        existing_item = await _open_need_titled(db, loan_file_id=finding.loan_file_id, title=title)
+        if existing_item is not None:
+            finding.details = {
+                **finding.details,
+                "docs_requested": docs_requested_marker(
+                    actor_user_id=actor_user_id, needs_item_id=existing_item.id
+                ),
+            }
+            return existing_item, await add_needs_to_draft(
+                db, loan_file=loan_file, needs=[existing_item], actor_user_id=actor_user_id
+            )
+
     item = await create_needs_item(
         db,
         loan_file_id=finding.loan_file_id,
-        title=f"Documents for: {finding.message}"[:200],
+        title=title,
         origin=NeedsItemOrigin.FINDING,
         priority=_STATUS_TO_PRIORITY.get(finding.status, NeedsItemPriority.STANDARD),
         disposition=NeedsItemDisposition.CONFIRMED,  # a processor-requested need is real

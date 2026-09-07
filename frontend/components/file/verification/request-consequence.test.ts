@@ -54,6 +54,20 @@ describe("requestConsequence", () => {
     expect(message).not.toContain("were added");
   });
 
+  it("does not claim the draft holds it, because on this outcome it may not exist", () => {
+    // LP-826 REVIEW. This branch used to say "already on the needs list AND in the file's email
+    // draft". Measured on PR-3 — a rule whose only document is the lender's appraisal — the second
+    // click returns {added: 0, elsewhere: 0} on a file with NO draft at all, so the sentence
+    // asserted membership of an email that does not exist. It is the same confusion this ticket
+    // exists to remove, arriving one click later.
+    const message = requestConsequence(status(0, 0));
+
+    expect(message).not.toContain("draft");
+    // The control: the sentence still says something. An empty string would satisfy the line above.
+    expect(message.length).toBeGreaterThan(20);
+    expect(message).toContain("The finding stays open");
+  });
+
   it("falls back to the hedge when the server did not say", () => {
     // A version skew is not a reason to claim something specific and be wrong about it.
     const message = requestConsequence({} as unknown as VerificationStatus);

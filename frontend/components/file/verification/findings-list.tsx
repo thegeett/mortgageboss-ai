@@ -59,9 +59,15 @@ export function requestConsequence(status: VerificationStatus): string {
     );
   }
   if (parts.length === 0) {
-    // Already in the draft — a second click on the same row. Saying "added" would be false, and
-    // saying nothing would read as a button that did not work.
-    return "It was already on the needs list and in the file's email draft. The finding stays open until it is met.";
+    // A second click on a row that is already requested. LP-826 REVIEW — THIS MUST NOT CLAIM THE
+    // DRAFT. It used to say "already on the needs list AND in the file's email draft", and measured
+    // on PR-3 — a rule whose only document is the lender's appraisal — the second click returns
+    // {added: 0, elsewhere: 0} on a file that has NO draft at all. The sentence asserted membership
+    // of an email that does not exist, in exactly the case this ticket exists to distinguish.
+    //
+    // Where it went is already answered: it was said on the first click, and the badge shows what
+    // the draft holds now. This says only what this click did.
+    return "It had already been requested — nothing new was added. The finding stays open until it is met.";
   }
   return `${parts.join(". ")}. The finding stays open until it is met.`;
 }

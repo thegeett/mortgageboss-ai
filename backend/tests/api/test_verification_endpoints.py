@@ -1881,3 +1881,142 @@ async def test_an_ordinary_action_carries_no_request_outcome(
 
     assert resp.status_code == 200
     assert resp.json()["document_request"] is None
+
+
+async def test_a_second_click_on_a_finding_that_names_no_document_does_not_ask_twice(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-826 REVIEW — THE HALF LP-809's REVIEW MISSED, AND THE ONE THE REPORT CAME FROM.
+
+    LP-809's review fixed "a second click asks the borrower twice" in `_create_document_needs` and
+    proved it with IN-1 — a rule that DECLARES a document, so the test never reached the other
+    branch. A finding that declares none takes `_create_needs_item_from_message`, which had no
+    duplicate check at all.
+
+    Measured on ID-3, which is the rule LF-JR4T was reported against: two clicks produced two
+    identical needs items and two identical lines in the borrower's email. The fixture matters —
+    with a rule that declares documents this passes either way, which is exactly how it was missed.
+
+    The control is the first click: one need, one line. Without it, a route that stopped creating
+    anything at all would satisfy every assertion below.
+    """
+    from app.services.email_draft import get_open_draft
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    finding.rule_id = "ID-3"
+    finding.message = "One more source stating the date of birth"
+    await db.commit()
+    ask = "Documents for: One more source stating the date of birth"
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+    assert first.status_code == 200
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None
+    assert (draft.body or "").count(ask) == 1, "the control: the first click asks exactly once"
+
+    second = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+    assert second.status_code == 200
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert len(needs) == 1, (
+        f"a second click created a second needs item: {[n.title for n in needs]}"
+    )
+    await db.refresh(draft)
+    assert (draft.body or "").count(ask) == 1, "the borrower's email asks for the same thing twice"
+    # And the click says so rather than claiming an addition.
+    assert second.json()["document_request"] == {"added_to_draft": 0, "not_borrower_facing": 0}
+
+
+async def test_two_findings_that_name_no_document_get_their_own_asks(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The duplicate check must match THIS ask, not merely "something is outstanding".
+
+    Found by a surviving mutant: dropping the `title ==` filter from the reuse lookup left every
+    test above green. It is not cosmetic — two findings that each name their own sentence (LP-624's
+    channel: ID-2 and ID-3 both record what the subject is waiting on) would collapse onto one needs
+    item, the second finding's `docs_requested` would point at the first finding's need, and the
+    thing it actually asked for would never be requested at all.
+    """
+    from app.services.email_draft import get_open_draft
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+
+    # ORDER MATTERS AND IT IS NOT COSMETIC. The reuse lookup orders by `created_at`, so ID-2's need
+    # must be the OLDER one — otherwise a lookup that ignored the title would return ID-3's need by
+    # coincidence and this test would pass on a broken implementation. Measured: with ID-3 first,
+    # the mutant that drops the title filter survives; with ID-2 first, it dies.
+    asks = {
+        "ID-2": "One more source stating the current address",
+        "ID-3": "One more source stating the date of birth",
+    }
+    for rule_id, message in asks.items():
+        finding = await _add_finding(db, loan_file, confidence=0.9)
+        finding.rule_id = rule_id
+        finding.message = message
+        finding.subject_key = rule_id
+        await db.commit()
+        resp = await client.post(
+            f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+            headers=_auth(token),
+            json={"note": None},
+        )
+        assert resp.status_code == 200
+
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert sorted(n.title for n in needs) == sorted(f"Documents for: {m}" for m in asks.values()), (
+        "two different asks collapsed onto one needs item"
+    )
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None
+    for message in asks.values():
+        assert f"Documents for: {message}" in (draft.body or ""), (
+            f"the borrower's email never asks for {message!r}"
+        )
+
+    # AND THE REUSE MUST PICK THIS ASK'S NEED. Clicking ID-3 a second time takes the reuse path —
+    # its ask is already outstanding — and a lookup that matched merely "something open on this
+    # file" would hand back the EARLIER need, the one ID-2 created. The marker is where that shows:
+    # ID-3's finding would point at ID-2's needs item, and nothing on any screen would say so.
+    repeat = (
+        (
+            await db.execute(
+                select(Finding).where(
+                    Finding.loan_file_id == loan_file.id, Finding.rule_id == "ID-3"
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    again = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{repeat.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+    assert again.status_code == 200
+    await db.refresh(repeat)
+    reused = await db.get(NeedsItem, UUID(repeat.details["docs_requested"]["needs_item_id"]))
+    assert reused is not None
+    assert reused.title == f"Documents for: {asks['ID-3']}", (
+        "the second click reused another finding's needs item"
+    )
