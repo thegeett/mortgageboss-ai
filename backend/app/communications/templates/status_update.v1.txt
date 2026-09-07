@@ -1,0 +1,15 @@
+Subject: Where your loan stands ($loan_reference)
+
+Hello $borrower_first_name,
+
+A quick update on your file — nothing is needed from you in this message.
+
+$status_summary
+
+$next_step
+
+Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
+
+If you have any questions, just reply here.
+
+$processor_name

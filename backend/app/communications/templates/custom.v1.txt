@@ -1,0 +1,9 @@
+Subject: $subject_line
+
+Hello $borrower_first_name,
+
+$message_body
+
+Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
+
+$processor_name

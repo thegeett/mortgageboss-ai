@@ -16088,3 +16088,38 @@ prose in the same structure could never have been a DB enum, so splitting party 
 prose into code would have put one fact about a type in two stores.
 
 *Status.* Accepted (LP-800). Extends ADR-053 and ADR-167.
+
+---
+
+## ADR-401
+
+**A template version is pinned by a content hash, so wording cannot change without a version bump.**
+
+*Context.* `phase4.md` §6 requires the outbound audit record to capture *template + version* alongside
+the rendered body, and describes that record as evidence. LP-817 ships five templates at `v1`. The
+ordinary way to version content like this is a string in a registry and a convention that says "bump
+it when you edit the file".
+
+*Decision.* Each `(template, version)` carries a SHA-256 of the file as shipped
+(`VERSION_FINGERPRINTS`), and a test fails when a file's content no longer matches its pin. Changing
+the words means adding a version.
+
+*Rationale.* A convention enforced by nothing decays in the one direction that matters here. Someone
+softens a sentence in `reminder_follow_up.v1.txt`, leaves the version at `v1`, and every audit row
+ever written against `v1` now claims an email said something it did not. Nothing else in the system
+can detect it: the row stores the rendered body, so past sends stay accurate, but the *version* they
+name stops identifying the words it named at the time — and the version is what a later reader
+resolves to reconstruct what was sent. A hash makes the rule checkable rather than advisory.
+
+Fingerprints live in their own map rather than on `TemplateSpec` so a new version is an added row and
+the old hash stays readable. That is the whole point: reconstructing what `v1` said requires `v1`'s
+hash to survive `v2` shipping.
+
+*Consequences.* Editing a template is a two-line change — the file and its pin — and the test names
+which template drifted. Trivial edits (a typo, a comma) also require a version, which is the cost of
+the guarantee and is accepted: a typo fix is not a fix if a historical record silently changes with
+it. Templates are content and live as files under `app/communications/templates/`, on the same
+reasoning as prompts (LP-38); the version pin is the part that prompts do not need because a prompt
+is not evidence.
+
+*Status.* Accepted (LP-817).
