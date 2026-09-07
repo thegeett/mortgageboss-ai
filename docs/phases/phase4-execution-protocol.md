@@ -90,15 +90,29 @@ has no memory of the arguments the first one talked itself into.
      **Three places are allowed to invert the invariant, and they are named:**
      `services/inbound_routing.resolve_loan_file_by_address` (LP-805),
      `services/upload_links.resolve_link` (LP-815), and
-     `services/mailbox_connections.resolve_connection_by_address` (LP-808).
+     `services/mailbox_connections.resolve_connection_by_address` (LP-808) — **PROVISIONAL,
+     awaiting a human's ratification; see the escalation in `phase4-progress.md`**.
      A **fourth** is a blocking finding.
 
      This said "exactly one place" until LP-815's review and "two" until LP-808. It was written
      before the secure upload link existed, and by the time that shipped the rule named one of the
      two things it governed — so a reviewer applying it literally would have had to call correct
      code a blocking finding. A governing rule that no longer matches the code is worse than no
-     rule, because it is still obeyed. **If a fourth inversion is ever sanctioned, amend this line
-     in the same commit**, which is what LP-808 did.
+     rule, because it is still obeyed.
+
+     **WHO MAY SANCTION ONE — the part the last version left out, and the gap is mine.** LP-815's
+     review wrote "if a fourth is ever sanctioned, amend this line in the same commit" in the
+     passive voice and named no actor. LP-808's builder read that as a procedure it could carry out
+     itself, which is a fair reading of what was written, and flagged the problem anyway. But a rule
+     constraining builders that a builder may amend constrains nobody. So:
+
+     - A **builder** may not sanction an inversion. It implements what the ticket needs, amends this
+       line so the document does not go stale, and **escalates in the progress file for a human**.
+     - A **reviewer** may not sanction one either, for the same reason one level up.
+     - **A human ratifies it**, or the inversion comes out. Until then the line carries `PROVISIONAL`
+       and the escalation stays open.
+
+     The third entry below is `PROVISIONAL` on exactly those terms.
 
      What makes another one acceptable is not that it was needed. It is that it has the same
      shape: ONE function, every failure collapsing to ONE answer, and the row it resolves being the

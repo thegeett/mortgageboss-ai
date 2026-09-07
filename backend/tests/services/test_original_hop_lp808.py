@@ -111,13 +111,22 @@ def test_an_arc_chain_from_a_stranger_is_ignored() -> None:
 
 
 def test_an_arc_chain_from_an_allowlisted_sealer_is_read() -> None:
-    """THE CONTROL for the test above — otherwise it passes against code that ignores ARC entirely."""
+    """THE CONTROL for the test above — otherwise it passes against code that ignores ARC entirely.
+
+    It asserts the chain is READ, which is what it is for: `source`, `authority` and the parsed
+    verdicts all come from the ARC header. It used to assert `authenticated is True` as well, and
+    that stopped being right when the review narrowed ARC to its checkable half — an allowlist
+    matches a CLAIMED authserv-id and no seal is verified. See
+    `test_a_forged_arc_header_alone_does_not_authenticate`; the assertion moved rather than went.
+    """
     verdicts = evaluate_original_hop(
         _message("ARC-Authentication-Results: i=1; mx.google.com; dkim=pass; dmarc=pass")
     )
 
     assert verdicts.source == "arc"
-    assert verdicts.authenticated is True
+    assert verdicts.authority == "mx.google.com"
+    assert verdicts.dmarc == "pass"
+    assert verdicts.dkim == "pass"
 
 
 def test_arc_is_only_reached_when_there_is_no_authentication_results() -> None:
@@ -235,3 +244,74 @@ def test_the_recorded_keys_never_collide_with_ses_verdicts() -> None:
     assert all(key.startswith("originalHop") for key in recorded)
     assert "dmarcVerdict" not in recorded
     assert recorded["originalHopAuthenticated"] == "PASS"
+
+
+# --------------------------------------------------------------------------------------------- #
+# The allowlist matches a CLAIM, not a seal (review finding)
+# --------------------------------------------------------------------------------------------- #
+def test_a_forged_arc_header_alone_does_not_authenticate() -> None:
+    """`TRUSTED_ARC_SEALERS` matches the authserv-id a header CLAIMS. No `ARC-Seal` signature is
+    verified, so nothing establishes the named sealer sealed anything — anyone can type the name.
+
+    Measured before the fix: this exact message produced `authenticated=True` with
+    `dkim_aligned=False`. `authenticated` was `dmarc == pass OR dkim_aligned`, so a `dmarc=pass` an
+    attacker wrote satisfied it outright — and DMARC is the control that stops a spoofed `From:`,
+    which `is_trusted_sender` then matches on, and `_sender_authenticated` gates auto-accept.
+    """
+    forged = message_from_string(
+        "From: someone@borrower-domain.com\r\n"
+        "Subject: documents\r\n"
+        "ARC-Authentication-Results: i=1; google.com; dmarc=pass; dkim=pass\r\n"
+        "\r\nbody\r\n"
+    )
+
+    verdicts = evaluate_original_hop(forged)
+
+    assert verdicts.source == "arc"
+    assert verdicts.authority == "google.com"  # the allowlist did match the claim
+    assert verdicts.dmarc == "pass"  # and the claim says pass
+    assert verdicts.dkim_aligned is False  # but nothing checkable backs it
+    assert verdicts.authenticated is False
+
+
+def test_an_arc_chain_with_an_aligned_signature_does_authenticate() -> None:
+    """The control, and the reason this is a narrowing rather than a removal.
+
+    Collapsing ARC to `False` unconditionally would satisfy the test above while making every
+    genuinely forwarded message look unauthenticated — silence that reads as a working defence. The
+    half a forger cannot write is an aligned surviving signature: it needs the `From:` domain's key.
+    """
+    genuine = message_from_string(
+        "From: someone@borrower-domain.com\r\n"
+        "Subject: documents\r\n"
+        "ARC-Authentication-Results: i=1; google.com; dmarc=pass\r\n"
+        "DKIM-Signature: v=1; d=borrower-domain.com; b=abc\r\n"
+        "\r\nbody\r\n"
+    )
+
+    verdicts = evaluate_original_hop(genuine)
+
+    assert verdicts.source == "arc"
+    assert verdicts.dkim_aligned is True
+    assert verdicts.authenticated is True
+
+
+def test_a_real_authentication_results_still_authenticates_on_dmarc_alone() -> None:
+    """The second control: the narrowing must apply ONLY to ARC.
+
+    A forwarder's own `Authentication-Results` is added by the party that received the message, not
+    by the sender, so `dmarc=pass` there is an assertion by somebody in a position to check. That
+    disjunction stays.
+    """
+    forwarded = message_from_string(
+        "From: someone@borrower-domain.com\r\n"
+        "Subject: documents\r\n"
+        "Authentication-Results: mx.google.com; dmarc=pass\r\n"
+        "\r\nbody\r\n"
+    )
+
+    verdicts = evaluate_original_hop(forwarded)
+
+    assert verdicts.source == "authentication_results"
+    assert verdicts.dkim_aligned is False
+    assert verdicts.authenticated is True

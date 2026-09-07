@@ -84,7 +84,9 @@ class OriginalHopVerdicts:
     dkim_domain: str | None
     #: True when a `DKIM-Signature` survived the forward AND its `d=` aligns with `From:`.
     dkim_aligned: bool
-    #: Where the verdicts came from, for the triage card and the ticket. Never a decision input.
+    #: Where the verdicts came from. IT IS A DECISION INPUT — see :meth:`authenticated`. It said
+    #: "never a decision input" until this was reviewed, and that was precisely the hole: an
+    #: `arc`-sourced verdict was indistinguishable from a verified one at the point it mattered.
     source: str
 
     @property
@@ -98,7 +100,25 @@ class OriginalHopVerdicts:
 
         `PASS` IS COMPARED FOR EQUALITY, so `none`, `neutral`, `temperror` and anything unrecognised
         fail closed — the same rule §2.3 states for SES's `GRAY`.
+
+        **EXCEPT FROM AN ARC CHAIN, WHERE THE DISJUNCTION COLLAPSES TO ITS CHECKABLE HALF.** The
+        allowlist matches the authserv-id a header CLAIMS; no `ARC-Seal` signature is verified, so
+        nothing establishes that the named sealer sealed anything. Measured before this line
+        existed: a hand-written
+
+            ARC-Authentication-Results: i=1; google.com; dmarc=pass; dkim=pass
+
+        with no seal and no signature produced `authenticated=True` with `dkim_aligned=False`. A
+        `dmarc=pass` an attacker typed is not evidence, and DMARC is the exact control that stops a
+        spoofed `From:` — which `is_trusted_sender` then matches on.
+
+        So an ARC-sourced verdict must bring the half a forger cannot write: an aligned surviving
+        signature needs the `From:` domain's key. ARC still helps — it corroborates, and it drives
+        the triage card — it just cannot BE the authentication on its own. Verifying the seal is the
+        real fix and needs a DNS lookup on the ingest path; until then this is the honest bound.
         """
+        if self.source == "arc":
+            return self.dkim_aligned
         return (self.dmarc or "").lower() == "pass" or self.dkim_aligned
 
 
