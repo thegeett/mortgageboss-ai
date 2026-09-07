@@ -98,6 +98,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-809 | c3d34471 | e238e6c7 | 1 | a dollar amount in a need title broke the send-time substitution; one predicted finding disproved by measuring it |
 | 2026-09-07 | LP-810 | ab89cddd | f721148e | 3 | a sentence lost in the first real version bump; a house rule citing a regulation that does not require it; catalog prose past every guard |
 | 2026-09-07 | LP-811a | 748ace96 | d222da0f | 1 | a cross-tenant rate limit that leaked one company's contact with a borrower to another, asserted as correct by the existing test |
+| 2026-09-07 | LP-811b | 710ed72b |  |  | awaiting review. Frontend only. The navigation question answered itself — the Communication tab placeholder has existed since LP-33. **M1 complete pending this review** |
 | 2026-09-07 | LP-811a | 748ace96 |  |  | awaiting review. Split from LP-811; LP-811b (frontend) is row 8b. First write to `requested_at` in the system's life |
 | 2026-09-06 | LP-809 | c3d34471 |  |  | awaiting review. Migration b8d5e0a17c42; two provenance columns the plan did not ask for; LP-818 will need the draft uniqueness index revisited |
 | 2026-09-07 | LP-800a | f3f0e06c | 228ddc61 | 1 | sourcing pass, user-directed. Fannie Mae citations inline; no assignment wrong; found the party recorded twice with the wrong copy winning; review found one stale section number |
