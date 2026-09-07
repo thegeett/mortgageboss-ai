@@ -170,7 +170,7 @@ standing M1 sequencing escalation arriving as a real question.
 | Ticket | What | Status |
 |---|---|---|
 | — | The row-level "Request docs" button never started a draft | **Fixed**, `4ee92d76` |
-| [LP-823](../tickets/LP-823.md) | The draft shows `$borrower_first_name`, `$processor_name` and an empty To: field, all of which the file already knows | Specified |
+| [LP-823](../tickets/LP-823.md) | The draft shows `$borrower_first_name`, `$processor_name` and an empty To: field, all of which the file already knows. **Worse than reported** — `finalise_draft_body` had no caller, so the borrower read them too | **AWAITING_REVIEW** `ea4a1d03` |
 | [LP-824](../tickets/LP-824.md) | The request asks for an attachment and then warns against sending one | Specified — needs a wording decision |
 | [LP-825](../tickets/LP-825.md) | The communication timeline carries the whole file's activity; ten of eleven rows were not about communication | Specified |
 | [LP-826](../tickets/LP-826.md) | Requesting a document says nothing about the draft it just wrote | Specified |
