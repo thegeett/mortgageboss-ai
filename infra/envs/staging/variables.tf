@@ -705,3 +705,39 @@ variable "inbound_malware_scan_enabled" {
   type        = bool
   default     = false
 }
+
+
+# --------------------------------------------------------------------------- #
+# INFRA-3 — outbound sending identity
+# --------------------------------------------------------------------------- #
+variable "outbound_mail_enabled" {
+  description = <<-EOT
+    Whether to create the outbound sending identity and bounce path. Defaults to FALSE.
+
+    Off for the same reason inbound is: applying it publishes DNS that asserts this domain sends
+    mail, and nothing sends any until LP-811 and LP-816. Unlike inbound, though, applying this early
+    is comparatively harmless — a verified identity that never sends is inert — and PRODUCTION has an
+    AWS-side lead time on the sandbox exit that makes early application the right call there.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "dmarc_report_address" {
+  description = <<-EOT
+    Where DMARC aggregate reports go (`rua=`). A `p=none` policy with no reporting address neither
+    enforces nor informs, which is the one setting that is strictly worse than no DMARC record.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "dkim_signing_hosted_zone" {
+  description = <<-EOT
+    The suffix each DKIM CNAME points at, after the token. Varies by AWS Region and cell; the
+    authoritative value is `SigningHostedZone` from `GetEmailIdentity`, which the Terraform provider
+    does not expose. Default is the common form; override if DKIM does not verify after apply.
+  EOT
+  type        = string
+  default     = "dkim.amazonses.com"
+}

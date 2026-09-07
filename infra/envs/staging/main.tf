@@ -682,3 +682,26 @@ module "inbound_mail" {
   # attachments into the extraction pipeline.
   malware_scan_enabled = var.inbound_malware_scan_enabled
 }
+
+
+# --------------------------------------------------------------------------- #
+# INFRA-3 — outbound sending identity and the bounce path
+# --------------------------------------------------------------------------- #
+# Separate from `inbound_mail` and separately flagged. The two directions share a parent domain and
+# nothing else: mixing them is the documented cause of a mail loop, and each has its own apply, its
+# own DNS propagation wait, and — for production — its own AWS-side lead time on the sandbox exit.
+module "outbound_mail" {
+  count  = var.outbound_mail_enabled ? 1 : 0
+  source = "../../modules/outbound_mail"
+
+  name_prefix = var.name_prefix
+  tags        = local.tags
+
+  send_domain     = "mail.${var.domain_name}"
+  bounce_domain   = "bounces.${var.domain_name}"
+  route53_zone_id = module.dns.zone_id
+  aws_region      = var.aws_region
+
+  dmarc_report_address     = var.dmarc_report_address
+  dkim_signing_hosted_zone = var.dkim_signing_hosted_zone
+}

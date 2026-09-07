@@ -1,0 +1,30 @@
+$ terraform -chdir=infra/modules/outbound_mail init -backend=false && terraform validate
+Success! The configuration is valid.
+
+$ terraform validate   # root module, staging, from a scratch copy with backend.tf removed
+Success! The configuration is valid.
+
+$ terraform fmt -recursive infra/
+(clean)
+
+$ terraform providers schema -json   # aws ~> 5.0, resolved 5.100.0
+aws_ses_domain_dkim
+  domain: required
+  dkim_tokens: computed   list(string)
+aws_sesv2_email_identity
+  [dkim_signing_attributes]
+    tokens: computed      list(string)
+    ... no SigningHostedZone attribute on either resource
+aws_ses_domain_mail_from
+  domain: required
+  mail_from_domain: required
+  behavior_on_mx_failure: optional
+
+  -- The absence above is the finding. SES's guide says a DKIM CNAME's value is the token
+     followed by a hosted zone that "varies by AWS Region and cell", authoritative in
+     GetEmailIdentity's DkimAttributes.SigningHostedZone. No provider resource exposes it,
+     so the suffix is a module variable with the common form as its default.
+
+$ terraform -chdir=infra/envs/staging plan
+  NOT RUN. No AWS credentials in this session; the S3 state backend is contacted even
+  under -backend=false. Same blocker as INFRA-1 and INFRA-2.

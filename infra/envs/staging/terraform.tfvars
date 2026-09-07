@@ -405,3 +405,11 @@ inbound_mail_enabled = false
 # inbound_mail_enabled is false. Listed explicitly rather than left to the default so that turning
 # mail on without deciding about scanning is not something that can happen by omission.
 inbound_malware_scan_enabled = false
+
+# --------------------------------------------------------------------------- #
+# INFRA-3 — outbound sending identity and the bounce path
+# --------------------------------------------------------------------------- #
+# FALSE, and the address below is empty on purpose: DMARC reports name a real mailbox somebody has
+# to read, and picking one for them would create a report nobody receives. Set both together.
+outbound_mail_enabled = false
+dmarc_report_address  = ""
