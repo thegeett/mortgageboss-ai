@@ -2,13 +2,14 @@
 
 import { Spinner } from "@/components/ui/spinner";
 import { useUploadDocuments } from "@/lib/api/documents";
+import { useVerification } from "@/lib/api/verification";
 import { normalizeError } from "@/lib/errors/api-error";
 import { validateUploadFile } from "@/lib/loan-files/documents";
+import { notifyError, notifyStarted } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { CloudUpload } from "lucide-react";
 import { useCallback } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
-import { toast } from "sonner";
 
 /** Map a server upload failure to a friendly message (LP-36 server is authoritative). */
 function serverErrorMessage(error: unknown): string {
@@ -17,8 +18,11 @@ function serverErrorMessage(error: unknown): string {
   if (normalized.status === 413) return "A file exceeds the 50 MB limit.";
   if (normalized.status === 415) return "A file type isn't supported (use PDF, JPG, or PNG).";
   if (normalized.kind === "network") return normalized.message;
-  return normalized.message === "Something went wrong. Please try again."
-    ? "Upload failed. Please try again."
+  // `isGeneric` rather than a string comparison: matching on the fallback's
+  // WORDING silently stops working the moment the wording changes, which is
+  // exactly what LP-UI-034 did to it.
+  return normalized.isGeneric
+    ? "The upload didn't complete. Nothing was added to the file."
     : normalized.message;
 }
 
@@ -31,20 +35,37 @@ function serverErrorMessage(error: unknown): string {
  */
 export function DocumentDropzone({ fileId }: { fileId: string }) {
   const upload = useUploadDocuments(fileId);
+  // LP-647 §2 — THE OTHER DIRECTION, and it is NOT the same defect, which is worth saying because
+  // the symmetry is tempting.
+  //
+  // A document arriving mid-run does not corrupt anything: the snapshot was frozen at enqueue, the
+  // upload marks the file `verification_stale`, and `_document_count`'s own comment records the
+  // design — "a document arriving mid-run does not extend the window it is already inside; it is
+  // picked up by the NEXT run". So there is no race to lose here, only a confusion: a run completes
+  // minutes later without the document the processor just added, and nothing on the upload screen
+  // said it would not be included.
+  //
+  // Held rather than allowed-with-a-note because the user asked for it explicitly, and because the
+  // wait is bounded and visible. The cost is real and stated in the ticket: a processor who receives
+  // a document mid-run waits for the run rather than parking it immediately.
+  const verification = useVerification(fileId);
+  const verificationRunning = verification.data?.latest_run?.status === "running";
+  const blocked = upload.isPending || verificationRunning;
 
   const onDrop = useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
       // react-dropzone rejects by the accept map; add our size/type messages.
       for (const r of rejected) {
-        toast.error(`${r.file.name} can't be uploaded`, {
-          description: "Use a PDF, JPG, or PNG up to 50 MB.",
+        notifyError({
+          title: `${r.file.name} can’t be uploaded`,
+          whatToDo: "Use a PDF, JPG, or PNG up to 50 MB.",
         });
       }
       const valid: File[] = [];
       for (const file of accepted) {
         const problem = validateUploadFile(file);
         if (problem) {
-          toast.error(`${problem.file} can't be uploaded`, { description: problem.reason });
+          notifyError({ title: `${problem.file} can’t be uploaded`, whatToDo: problem.reason });
         } else {
           valid.push(file);
         }
@@ -54,12 +75,14 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
       upload.mutate(valid, {
         onSuccess: (created) => {
           const count = created.length;
-          toast.success(`Uploaded ${count} document${count === 1 ? "" : "s"}`, {
-            description: "Processing has started.",
+          notifyStarted({
+            title: `Uploaded ${count} document${count === 1 ? "" : "s"}`,
+            consequence:
+              "Each one is being read now; its fields appear on the file as it finishes.",
           });
         },
         onError: (error) => {
-          toast.error("Upload failed", { description: serverErrorMessage(error) });
+          notifyError({ title: "The upload didn’t finish", whatToDo: serverErrorMessage(error) });
         },
       });
     },
@@ -75,44 +98,59 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
     },
     maxSize: 50 * 1024 * 1024,
     noClick: true, // we wire an explicit button so the whole area isn't a click target
-    disabled: upload.isPending,
+    disabled: blocked,
   });
 
   return (
     <div
       {...getRootProps()}
       className={cn(
-        "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+        // LP-UI-019: a row, not a panel. At py-10 with a stacked icon, label,
+        // hint and button this stood ~290px tall — the first screen of the
+        // Documents tab was the invitation to add a document rather than the
+        // documents. Dropping is still the whole area; it just no longer
+        // outranks the eighteen files already on the file.
+        "group relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-lg border border-dashed px-4 py-3 text-center transition-colors",
         isDragActive
           ? "border-primary bg-primary/5"
-          : "border-gray-300 bg-gray-50/60 hover:border-gray-400",
-        upload.isPending && "pointer-events-none opacity-70",
+          : "border-input bg-muted/60 hover:border-foreground-2",
+        blocked && "pointer-events-none opacity-70",
       )}
     >
       <input {...getInputProps()} aria-label="Upload documents" />
       <span
         className={cn(
-          "flex h-11 w-11 items-center justify-center rounded-full transition-colors",
-          isDragActive ? "bg-primary/15 text-primary" : "bg-white text-gray-400 shadow-sm",
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
+          isDragActive ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground",
         )}
       >
         {upload.isPending ? (
-          <Spinner className="h-5 w-5" />
+          <Spinner className="h-3.5 w-3.5" />
         ) : (
-          <CloudUpload className="h-5 w-5" aria-hidden />
+          <CloudUpload className="h-3.5 w-3.5" aria-hidden />
         )}
       </span>
-      <p className="mt-3 text-sm font-medium text-gray-900">
-        {upload.isPending ? "Uploading…" : isDragActive ? "Drop to upload" : "Drag documents here"}
+      <p className="text-sm font-medium text-foreground">
+        {verificationRunning
+          ? "Verification is running"
+          : upload.isPending
+            ? "Uploading…"
+            : isDragActive
+              ? "Drop to upload"
+              : "Drag documents here"}
       </p>
-      <p className="mt-1 text-xs text-gray-500">
-        PDF, JPG, or PNG · up to 50 MB · multiple at once
+      {/* LP-647 §2 — SAYS WHEN IT COMES BACK, which is the difference between a control that is
+          waiting and one that is broken. A processor told only "disabled" reloads the page. */}
+      <p className="text-xs text-muted-foreground">
+        {verificationRunning
+          ? "Uploads are held until it finishes — a document added now would not be included in this run."
+          : "PDF, JPG, or PNG · up to 50 MB · multiple at once"}
       </p>
       <button
         type="button"
         onClick={open}
-        disabled={upload.isPending}
-        className="mt-4 inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
+        disabled={blocked}
+        className="inline-flex items-center rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Browse files
       </button>

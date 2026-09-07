@@ -3,14 +3,17 @@
  * Admin-only on the backend (require_role) + tenant-scoped; this layer just talks to it.
  */
 import { apiClient } from "@/lib/api/client";
-import type { LenderSummary } from "@/lib/types/lender";
-import type { LenderOverlayView, OverlayUpdateRequest } from "@/lib/types/overlay-admin";
+import type {
+  LenderOverlayView,
+  OverlayLenderSummary,
+  OverlayUpdateRequest,
+} from "@/lib/types/overlay-admin";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 const ADMIN_LENDERS = "/api/v1/admin/lenders";
 
-export async function fetchOverlayLenders(): Promise<LenderSummary[]> {
-  const res = await apiClient.get<LenderSummary[]>(ADMIN_LENDERS);
+export async function fetchOverlayLenders(): Promise<OverlayLenderSummary[]> {
+  const res = await apiClient.get<OverlayLenderSummary[]>(ADMIN_LENDERS);
   return res.data;
 }
 

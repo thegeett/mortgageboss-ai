@@ -14,11 +14,37 @@ export interface OverlayOverrideView {
   reason: string | null;
 }
 
+export interface OverlayAuditChange {
+  field: string;
+  /** The rule's description, or null for a rule the catalog no longer carries. */
+  field_label: string | null;
+  from: string | null;
+  to: string | null;
+}
+
 export interface OverlayAuditEntry {
   at: string;
   actor_user_id: string | null;
+  /** Resolved for display (LP-UI-026); null when the actor is unknown. */
+  actor_name: string | null;
   reason: string;
-  changes: { field: string; from: string | null; to: string | null }[];
+  changes: OverlayAuditChange[];
+}
+
+/**
+ * A lender in the admin list, led by its OVERLAY (LP-UI-025).
+ *
+ * An overlay is the highest-leverage thing an admin touches — one change moves
+ * every file at that lender — so the row answers "what is different here, and
+ * when did it last change" before "who do I call".
+ */
+export interface OverlayLenderSummary {
+  id: string;
+  name: string;
+  supported_programs: string[];
+  override_count: number;
+  /** Null when the overlay has never been edited — not the same as "long ago". */
+  last_changed_at: string | null;
 }
 
 export interface LenderOverlayView {

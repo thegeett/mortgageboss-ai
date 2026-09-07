@@ -5,8 +5,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { useReprocessDocuments } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { describeSkips, partitionSkips } from "@/lib/format-skip-reasons";
+import { notifyError, notifyPartial, notifySuccess } from "@/lib/toast";
 import { RefreshCw } from "lucide-react";
-import { toast } from "sonner";
 
 /**
  * Re-read the documents on this file that nothing could identify (LP-637).
@@ -46,8 +46,9 @@ export function ReprocessAll({
         const skipped = describeSkips(decided);
 
         if (failed > 0) {
-          toast.error(`Couldn’t queue ${failed} ${failed === 1 ? "document" : "documents"}`, {
-            description:
+          notifyError({
+            title: `Couldn’t queue ${failed} ${failed === 1 ? "document" : "documents"}`,
+            whatToDo:
               result.queued > 0
                 ? `${result.queued} started; the rest were left unchanged. Try again shortly.`
                 : "Nothing was started and nothing was changed. Try again shortly.",
@@ -55,25 +56,25 @@ export function ReprocessAll({
           return;
         }
         if (result.queued === 0) {
-          toast.info("Nothing to re-read", {
-            description: skipped
+          notifyPartial({
+            title: "Nothing to re-read",
+            consequence: skipped
               ? `Every document was skipped: ${skipped}.`
               : "No documents on this file need re-reading.",
           });
           return;
         }
-        toast.success(
-          `Re-reading ${result.queued} ${result.queued === 1 ? "document" : "documents"}`,
-          {
-            description: skipped
-              ? `Classifying in the background. Skipped: ${skipped}.`
-              : "Classifying and extracting in the background…",
-          },
-        );
+        notifySuccess({
+          title: `Re-reading ${result.queued} ${result.queued === 1 ? "document" : "documents"}`,
+          consequence: skipped
+            ? `Classifying in the background. Skipped: ${skipped}.`
+            : "Classifying and extracting in the background…",
+        });
       },
       onError: (error) =>
-        toast.error("Couldn’t reprocess these documents", {
-          description: getErrorMessage(error),
+        notifyError({
+          title: "Couldn’t reprocess these documents",
+          whatToDo: getErrorMessage(error),
         }),
     });
   }

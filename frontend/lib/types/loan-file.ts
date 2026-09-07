@@ -18,6 +18,16 @@ export type LoanProgram = "conventional" | "fha";
 export type LoanPurpose = "purchase" | "refinance";
 export type RefinanceType = "rate_term" | "cash_out";
 
+/** Why this file wants a processor's attention (LP-UI-013, derived server-side). */
+export type AttentionTone = "blocking" | "attention" | "verified" | "neutral";
+
+export interface FileAttention {
+  tone: AttentionTone;
+  label: string;
+  needs_total: number;
+  needs_satisfied: number;
+}
+
 export interface LoanFileSummary {
   id: string;
   display_id: string;
@@ -31,6 +41,8 @@ export interface LoanFileSummary {
   primary_borrower_name: string | null;
   created_at: string;
   updated_at: string;
+  /** Optional: a version-skewed backend may not send it. */
+  attention?: FileAttention | null;
 }
 
 export interface PaginatedLoanFiles {

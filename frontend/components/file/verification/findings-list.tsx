@@ -13,6 +13,7 @@ import { AGGRESSION_META } from "@/components/file/verification/aggression-dial"
 import { FindingCard } from "@/components/file/verification/finding-card";
 import { useResolveFinding } from "@/lib/api/verification";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type {
   AggressionLevel,
   VerificationFinding,
@@ -23,7 +24,6 @@ import {
   type FindingFilters,
   matchesFilters,
 } from "@/lib/verification/finding-filters";
-import { toast } from "sonner";
 
 export function FindingsList({
   fileId,
@@ -47,18 +47,61 @@ export function FindingsList({
   const filteredOut = inScopeOpen.length - shownOpen.length;
   const resolved = data.findings.filter((f) => f.resolution_status !== "open");
 
-  function act(action: Parameters<typeof resolve.mutate>[0], ok: string) {
+  /**
+   * Resolve a finding and say what it did.
+   *
+   * EVERY RESOLUTION CARRIES AN UNDO, because one already exists — `kind: "undo"`
+   * reverses any of them (LP-98), and the row has offered that button since. A
+   * toast is where a processor is looking the instant they realise they clicked
+   * the wrong row, and making them find the row again to undo it is the gap this
+   * closes. The undo itself is not undoable, so it gets none.
+   */
+  function act(
+    action: Parameters<typeof resolve.mutate>[0],
+    { title, consequence }: { title: string; consequence: string },
+  ) {
     resolve.mutate(action, {
-      onSuccess: () => toast.success(ok),
+      onSuccess: () =>
+        notifySuccess({
+          title,
+          consequence,
+          // A bulk action has no single finding to reverse, and `undo` is not
+          // itself undoable. Both fall through to no undo rather than to a
+          // button that would throw.
+          ...(action.kind === "undo" || !("findingId" in action)
+            ? {}
+            : {
+                undo: {
+                  onUndo: () =>
+                    act(
+                      { kind: "undo", findingId: action.findingId },
+                      {
+                        title: "Resolution undone",
+                        consequence: "The finding is open again and back in Needs attention.",
+                      },
+                    ),
+                },
+              }),
+        }),
       onError: (e) =>
-        toast.error("Couldn't resolve the finding", { description: getErrorMessage(e) }),
+        notifyError({
+          // NAMES WHAT THE PROCESSOR ACTUALLY DID. `act` serves both the
+          // resolutions and the undo, and a fixed "couldn't resolve" told someone
+          // who had just clicked Undo that a resolution failed — a false account
+          // of their own action, in the one message they get about it.
+          title:
+            action.kind === "undo"
+              ? "Couldn’t undo the resolution"
+              : "Couldn’t resolve the finding",
+          whatToDo: getErrorMessage(e),
+        }),
     });
   }
 
   return (
     <div className="space-y-4">
       {shownOpen.length === 0 ? (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-muted-foreground">
           {!data.latest_run
             ? "Not run yet — run verification to compare the stated data against the documents."
             : openAll.length === 0
@@ -75,16 +118,51 @@ export function FindingsList({
               finding={f}
               fileId={fileId}
               busy={resolve.isPending}
-              onApply={() => act({ kind: "apply", findingId: f.id }, "Finding applied")}
-              onOverride={(reason) =>
-                act({ kind: "override", findingId: f.id, reason }, "Marked not an issue")
+              onApply={() =>
+                act(
+                  { kind: "apply", findingId: f.id },
+                  {
+                    title: "Finding applied",
+                    consequence: "The fix is recorded on the file and the finding is closed.",
+                  },
+                )
               }
-              onNote={(note) => act({ kind: "note", findingId: f.id, note }, "Note added")}
+              onOverride={(reason) =>
+                act(
+                  { kind: "override", findingId: f.id, reason },
+                  {
+                    title: "Marked not an issue",
+                    consequence: "Your reason is on the file, and it no longer blocks submission.",
+                  },
+                )
+              }
+              onNote={(note) =>
+                act(
+                  { kind: "note", findingId: f.id, note },
+                  {
+                    title: "Note added",
+                    consequence: "It travels with the finding for whoever reads the file next.",
+                  },
+                )
+              }
               onAcceptRisk={(reason) =>
-                act({ kind: "accept-risk", findingId: f.id, reason }, "Finding accepted as risk")
+                act(
+                  { kind: "accept-risk", findingId: f.id, reason },
+                  {
+                    title: "Accepted as a risk",
+                    consequence:
+                      "It stops blocking submission and stays visible to the underwriter.",
+                  },
+                )
               }
               onRequestDocs={(note) =>
-                act({ kind: "request-docs", findingId: f.id, note }, "Documents requested")
+                act(
+                  { kind: "request-docs", findingId: f.id, note },
+                  {
+                    title: "Documents requested",
+                    consequence: "A need is on the file; the finding stays open until it is met.",
+                  },
+                )
               }
             />
           ))}
@@ -96,7 +174,15 @@ export function FindingsList({
           findings={resolved}
           fileId={fileId}
           busy={resolve.isPending}
-          onUndo={(id) => act({ kind: "undo", findingId: id }, "Resolution undone")}
+          onUndo={(id) =>
+            act(
+              { kind: "undo", findingId: id },
+              {
+                title: "Resolution undone",
+                consequence: "The finding is open again and back in Needs attention.",
+              },
+            )
+          }
         />
       )}
     </div>
@@ -118,7 +204,7 @@ function ResolvedGroup({
 }) {
   return (
     <section>
-      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Resolved · {findings.length}
       </h4>
       <ul className="space-y-2 opacity-80">

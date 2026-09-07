@@ -95,3 +95,7 @@ crash.log
 # human labeling round — it carries real borrower PII (names, addresses). NEVER commit it.
 # The generator's guard only writes outside the repo or under a calibration-local/ dir.
 calibration-local/
+
+# Per-developer Claude Code settings (permissions, local overrides). Personal to one
+# machine, so it must never be committed — .claude/settings.json is the team-wide file.
+.claude/settings.local.json

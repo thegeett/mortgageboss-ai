@@ -1,3 +1,4 @@
+import type { FindingBreakdown } from "@/lib/types/calculators";
 /**
  * LTV calculator types (LP-77) — the transparent, itemized calculation.
  *
@@ -14,6 +15,10 @@ export interface LtvLineItem {
   amount: string;
   source: string;
   overridden: boolean;
+  /** Who set the override and why (LP-UI-021). Null when the line is not overridden,
+   *  and `override_by` alone is null for an override with no recorded actor. */
+  override_by: string | null;
+  override_note: string | null;
 }
 
 export type LtvLimitStatus = "pass" | "over" | "unknown";
@@ -30,6 +35,7 @@ export interface LtvLimit {
 export interface LtvFindingsStatus {
   unresolved: boolean;
   open_in_scope_count: number;
+  breakdown: FindingBreakdown;
 }
 
 export interface LtvCalculation {

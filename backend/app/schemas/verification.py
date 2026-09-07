@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -21,15 +22,35 @@ from app.models.verification_progress import VerificationProgress
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rule_engine.reasons import document_label
-from app.verification.rules.specs import RuleSpec, load_rule_spec
+from app.verification.rules.specs import RuleSpec, RuleSpecError, load_rule_spec
+from app.verification.tag_materialization.declarations import (
+    ProductionMode,
+    TagDeclaration,
+    load_declarations,
+)
+
+
+@cache
+def _tag_declarations() -> dict[str, TagDeclaration]:
+    """The tag declarations, cached — this is a read path and the file does not change per request."""
+    return load_declarations()
 
 
 def _rule_spec(rule_id: str) -> RuleSpec | None:
     """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
-    rule_id with no spec file."""
+    rule_id with no spec file.
+
+    ⚠️ ``RuleSpecError`` IS THE ONE THAT ACTUALLY FIRES. ``load_rule_spec`` raises
+    :class:`RuleSpecNotFound` — a subclass of ``Exception``, NOT of ``OSError``/``KeyError``/
+    ``ValueError`` — so the tolerance this function's own docstring promised did not exist: a finding
+    whose rule has no spec file raised straight out of ``RuleFindingPublic.from_model`` and 500'd the
+    whole verification-status response. LP-640 made that reachable on ordinary files (its synthetic
+    ``UNIDENTIFIED-DOCUMENTS`` id carries no spec by design), and a genuinely retired rule id would
+    have done the same to every file still holding one of its findings.
+    """
     try:
         return load_rule_spec(rule_id)
-    except (OSError, KeyError, ValueError):
+    except (RuleSpecError, OSError, KeyError, ValueError):
         return None
 
 
@@ -310,6 +331,68 @@ def _missing_documents(
     return [document_label(group[0]) for group in groups if not set(group) & on_file]
 
 
+#: LP-647 — the subject key a LOAN-level rule carries. Its findings are about the file, not a page.
+_LOAN_SUBJECT_KEY = "loan"
+
+
+def _reads_an_ai_tag(finding: Finding) -> bool:
+    """Does any of this finding's load-bearing tags come from a MODEL rather than a computation?
+
+    Read from the tag DECLARATIONS, which is where the mode is stated, rather than from the rule's
+    `kind` — OC-1 is `structural` and still reads an AI tag, so kind is the wrong axis.
+    """
+    tag_ids: set[str] = {
+        tag_id
+        for tag in (finding.load_bearing_tags or [])
+        if isinstance(tag, dict) and isinstance(tag_id := tag.get("tag_id"), str)
+    }
+    if not tag_ids:
+        return False
+    declarations = _tag_declarations()
+    return any(
+        (decl := declarations.get(tag_id)) is not None and decl.mode is ProductionMode.AI
+        for tag_id in tag_ids
+    )
+
+
+def _source_statement(finding: Finding, source_documents: list[SourceDocument]) -> str | None:
+    """Why a finding names no document, where the reason is known (LP-647).
+
+    Only for a LOAN-subject rule with no documents. Those compute from the file's stated data — the
+    1003 / MISMO import — and from figures other rules derived, so there is genuinely no page to
+    open. Saying so is the difference a processor cannot otherwise see: "no document states this" is
+    a different instruction from "the document is missing", and an empty list reads as the second.
+
+    DELIBERATELY NOT PER RULE. Eight of the eleven loan-subject rules with no provenance read MISMO
+    directly (AS-4, ID-6, IN-2, MI-1, PE-1, PE-3, PR-2, and occupancy.stated); two do not — CL-1
+    reads other documents' tags and MI-4 computes from program constants. A per-rule claim would have
+    to be right about each, and a wrong attribution is the failure this whole area avoids. The wording
+    below is true of all of them: computed rather than read.
+
+    Returns None wherever the reason is NOT known — a per-document or per-borrower rule with no
+    provenance has a gap rather than an explanation, and inventing a sentence for it would paper over
+    exactly the thing worth finding.
+    """
+    if source_documents or (finding.subject_key or "") != _LOAN_SUBJECT_KEY:
+        return None
+    # LP-647 review — AND NOT WHERE AN AI READ THE DOCUMENTS. A loan-subject rule over an AI tag is
+    # not "computed from stated data": the group is handed the file's DOCUMENTS (`applies_to: all`,
+    # a cap of 60 — 44 of them on LF-ZE9N) and the model judges over them. Telling a processor the
+    # verdict came from the 1003 would be false, and a false provenance sentence is worse than none:
+    # they cannot tell which of the true ones to trust.
+    #
+    # Those rules (DT-7, OC-3, and the AI half of OC-1 / OC-2) get SILENCE, which is honest — "all 44
+    # documents" is not provenance either, and the only real answer is asking the model which drove
+    # the judgement. That is group D, a prompt change, and not something a read-layer sentence can
+    # stand in for.
+    if _reads_an_ai_tag(finding):
+        return None
+    return (
+        "No document states this — it is computed from the loan file's stated data "
+        "(the application / MISMO import)."
+    )
+
+
 def _requested_documents(details: Mapping[str, Any]) -> list[str]:
     """What the EVALUATOR recorded this finding is waiting on (LP-620), or empty.
 
@@ -393,6 +476,17 @@ class RuleFindingPublic(BaseModel):
     # point at, and a fabricated link is worse than none. Same shape as `FindingPublic.source_documents`
     # so the client renders both lists identically.
     source_documents: list[SourceDocument] = []
+    #: LP-647 — WHY there is no document, for a finding that has none.
+    #:
+    #: A loan-level rule computes from the file's STATED data — the 1003 / MISMO import — and from
+    #: figures other rules derived. There is no page to open, so `source_documents` is correctly
+    #: empty; the failure is that empty renders identically to "we looked and found nothing", and a
+    #: processor cannot tell a rule with no document from a rule whose document is missing.
+    #:
+    #: A STATEMENT, never a link. The MISMO import IS stored (`mismo_imports.raw_file_path`) but is
+    #: not a `Document` — `UploadSource.MISMO_IMPORT` exists in the enum with no writer anywhere — so
+    #: `document_id_by_content_id` can never resolve it and a link would dangle.
+    source_statement: str | None = None
 
     @classmethod
     def from_model(
@@ -442,11 +536,15 @@ class RuleFindingPublic(BaseModel):
             # LP-617 — resolved against the file's CURRENT documents, so a stored id whose document
             # was deleted or superseded is skipped rather than rendered as a broken link. Identical
             # resolution to FindingPublic's, one line above in spirit and in behaviour.
-            source_documents=[
-                SourceDocument(id=doc_id, filename=(document_names or {})[doc_id])
-                for raw_id in (finding.source_document_ids or [])
-                if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
-            ],
+            source_documents=(
+                resolved_documents := [
+                    SourceDocument(id=doc_id, filename=(document_names or {})[doc_id])
+                    for raw_id in (finding.source_document_ids or [])
+                    if (doc_id := _as_uuid(raw_id)) is not None and doc_id in (document_names or {})
+                ]
+            ),
+            # LP-647 — why there is NO document, where the reason is known. See `_source_statement`.
+            source_statement=_source_statement(finding, resolved_documents),
             # LP-620 — the FINDING's own answer wins where it has one. `requires_documents` is a
             # per-rule presence test and cannot express "one more source than the file already has";
             # an evaluator that knows what this subject is waiting on records it, and everything else
@@ -487,6 +585,15 @@ class VerificationStatusPublic(BaseModel):
     """
 
     stale: bool
+    #: LP-647 §2 — documents still classifying or extracting RIGHT NOW.
+    #:
+    #: Distinct from `stale`, and the distinction is the point: `stale` means the inputs changed
+    #: since the last run (the past), this means work is in flight (the present). A flag meaning
+    #: both is how LP-643's joined gate reason happened.
+    #:
+    #: Served from the SAME helper the run endpoint refuses on, so a disabled button and a 409 can
+    #: never disagree about whether the file is busy.
+    documents_processing: int = 0
     program: str | None  # the file's loan program (conventional / fha) — drives the rule set
     latest_run: VerificationRunPublic | None
     # The LEGACY quarantine (Tab 5) — the AI cross-source sweep AND the retired xsrc deterministic findings

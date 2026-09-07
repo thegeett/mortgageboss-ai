@@ -28,15 +28,25 @@ from sqlalchemy.orm import selectinload
 
 from app.documents.naming import standard_name
 from app.documents.period import document_period
+from app.documents.schema_fields import fields_for
 from app.documents.staleness import evaluate_staleness, package_fitness, package_qualification
 from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
+from app.models.field_review import FieldReview, FieldVerdict
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
-from app.schemas.document import DocumentDetailResponse, DocumentResponse, ExtractionPublic
+from app.schemas.document import (
+    DocumentDetailResponse,
+    DocumentResponse,
+    ExtractionPublic,
+    FieldScrutiny,
+)
 from app.services.document_versioning import version_count, version_counts_for_group_ids
+from app.services.field_reviews import list_reviews
 from app.services.verifications import mark_verification_stale
+from app.verification.field_criticality import is_critical, is_sensitive
+from app.verification.rules.distrust import load_distrusted_fields
 
 # --------------------------------------------------------------------------- #
 # Upload validation
@@ -279,6 +289,11 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
     """Build the enriched detail response (base + current extraction + generic analysis)."""
     extraction = await get_current_extraction(db, document=document)
     count = await version_count(db, document=document)
+    reviews = (
+        {r.field_key: r for r in await list_reviews(db, extraction_id=extraction.id)}
+        if extraction is not None
+        else {}
+    )
     base = _enrich(document, extraction, version_count=count)
     return DocumentDetailResponse(
         **base.model_dump(),
@@ -286,7 +301,81 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
             ExtractionPublic.model_validate(extraction) if extraction is not None else None
         ),
         generic_analysis=document.generic_analysis,
+        field_scrutiny=_field_scrutiny(document, extraction, reviews),
+        addable_fields=_addable_fields(document, extraction, reviews),
     )
+
+
+def _addable_fields(
+    document: Document,
+    extraction: Extraction | None,
+    reviews: dict[str, FieldReview],
+) -> list[str]:
+    """Field names a processor may ADD to this document (LP-703).
+
+    The document type's declared keys, minus the ones the extraction already
+    carries. Sent as a list rather than left to the client to compute, because the
+    SERVICE is what refuses an undeclared key and a second copy of that rule on the
+    screen is a second copy that can disagree — the client would offer a choice the
+    API then rejects, which reads as a bug in the save rather than in the list.
+
+    Empty for an untyped document: with no type there is no declared field set, and
+    a key added under none would be a key no rule reads.
+    """
+    data = extraction.extracted_data if extraction is not None else None
+    already = set(data) if isinstance(data, dict) else set()
+    # AND THE ONES A PROCESSOR HAS ALREADY SUPPLIED. An added field deliberately
+    # never enters `extracted_data`, so subtracting only the extraction's keys left
+    # it in the "Add a field the extraction missed" picker for ever — listed as
+    # missing while a populated row for it sat in the list above, and picking it
+    # again silently replaced the earlier review instead of being refused.
+    supplied = {key for key, review in reviews.items() if review.verdict is FieldVerdict.ADDED}
+    return sorted(fields_for(document.document_type) - already - supplied)
+
+
+def _field_scrutiny(
+    document: Document,
+    extraction: Extraction | None,
+    reviews: dict[str, FieldReview],
+) -> dict[str, FieldScrutiny]:
+    """Per-field criticality + distrust for the fields this extraction carries (LP-UI-032).
+
+    Also carries the processor's verdict on each field (LP-UI-033), so a reviewed
+    field is answered by the same call that says how much scrutiny it wanted.
+
+    Scoped to the extraction's own keys rather than the whole vocabulary: the answer
+    is about this document, and returning 156 critical field names to a screen
+    showing thirteen of them is noise the client would have to filter anyway.
+
+    A field with nothing to say is ABSENT. Present-and-false and absent would render
+    identically, and only one of them costs bytes on every document fetch.
+    """
+    data = extraction.extracted_data if extraction is not None else None
+    if not isinstance(data, dict):
+        return {}
+    distrusted = load_distrusted_fields()
+    doc_type = document.document_type or ""
+    out: dict[str, FieldScrutiny] = {}
+    # THE EXTRACTION'S KEYS *AND* THE REVIEWED ONES. An ADDED field (LP-703) is by
+    # definition a key the extraction does not carry, so walking `data` alone would
+    # leave the screen with no verdict for a field the processor had just put there
+    # — it would render as an ordinary value with no sign a person supplied it.
+    for field in sorted(set(data) | set(reviews)):
+        if field in ("additional_sections", "transactions"):
+            continue
+        critical = is_critical(field)
+        reason = distrusted.get((doc_type, field))
+        sensitive = is_sensitive(field)
+        review = reviews.get(field)
+        if critical or reason or sensitive or review is not None:
+            out[field] = FieldScrutiny(
+                critical=critical,
+                distrusted_reason=reason,
+                sensitive=sensitive,
+                verdict=review.verdict.value if review is not None else None,
+                corrected_value=review.corrected_value if review is not None else None,
+            )
+    return out
 
 
 async def build_document_responses(

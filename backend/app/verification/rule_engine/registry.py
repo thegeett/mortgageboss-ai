@@ -12,6 +12,7 @@ consistency body.
 from __future__ import annotations
 
 from app.ai.rule_judgment import Reasoner
+from app.ai.stage_metrics import StageMetrics
 from app.verification.rule_engine.consistency import evaluate_consistency_rule
 from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
 from app.verification.rule_engine.judgment import evaluate_judgment_rule
@@ -335,6 +336,9 @@ _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 # Both rules' RESEARCH landed in LP-495b: IN-13 now carries the per-type continuance table (it applied
 # one blanket 3-year test across every income type) and IN-14's 75%/25% factor is calibrated from the
 # verified primary instead of "pending Priya". Their stale B3-3.1-08 / B3-3.1-09 citations are corrected.
+# (LP-641 — and went stale AGAIN: SEL-2026-08 split that material into B3-3.8-01 / B3-3.8-02 on
+# 09/02/2026. The sentence above records what LP-495b did and is left as written; the current
+# citations live on the specs themselves. Third renumbering of this material in a year.)
 # LP-495b review — IN-13 AND IN-14 CARRY A DECLARED BELOW-BAR MEASUREMENT. Their shared income.continuance_3yr
 # scored 5/6 = 0.833 against Priya's labels (LP-427), under the 0.9 its sibling tag was validated at.
 # LP-495b activated them with `measured_accuracy` left null, which bypassed the ratify-pending guard that
@@ -490,9 +494,16 @@ _LP551_ACTIVATED: tuple[str, ...] = ("FR-5",)
 #   2. `reconcile_evaluation_findings` loads a file's prior findings for ACTIVE rules only, so an inert
 #      rule's row is invisible on the SECOND run and collides on uq_findings_loan_file_rule_subject.
 #
-# The second is UNFIXED and sits on the path that writes every finding, so it was not something to patch
-# under incident pressure. Reinstate AS-13 once that fix lands with its own tests — and it will still
-# need a real run before its bar's `validated` flips, which is what the hold always said.
+# The second is FIXED (bug-011, 2026-09-02): the reconciler's LOAD set is now derived from the run's own
+# results, so any rule that produces a finding has its prior row loaded whether or not it is active.
+# It sat unfixed for a while because it is on the path that writes every finding and was not something
+# to patch under incident pressure — then PC-5, another held rule, hit exactly this collision on
+# LF-ZE9N and restarted a thirteen-minute pass four times.
+#
+# So the blocker this hold names is gone. AS-13 is NOT reinstated here regardless: that is a rule
+# ACTIVATION decision, and it still needs a real run before its bar's `validated` flips, which is what
+# the hold always said. Recorded so the next reader weighs the remaining reason rather than one that
+# has already been dealt with.
 # The gate is the source of truth: test_activation_gate_lp389 asserts ACTIVE_RULE_IDS - _BASE_ACTIVE ==
 # eligible_rule_ids() — a rule CANNOT enter this set without meeting the eligibility gate (not a hand-list).
 # LP-573 — DT-8, the refinanced-lien double count. DETERMINISTIC and it can never `fire`: a mortgage
@@ -548,6 +559,7 @@ async def evaluate_rules(
     consistency_reasoners: dict[str, Reasoner] | None = None,
     confidence_floor: float | None = None,
     rule_ids: tuple[str, ...] = ACTIVE_RULE_IDS,
+    metrics: StageMetrics | None = None,
 ) -> tuple[list[RuleEvaluation], dict[str, dict[str, Tag]]]:
     """Evaluate every requested rule generically (by evaluation block, from its spec).
 
@@ -571,6 +583,7 @@ async def evaluate_rules(
                     snapshot,
                     reasoner=con_reasoners.get(rule_id),
                     confidence_floor=confidence_floor,
+                    metrics=metrics,
                 )
             )
         elif spec.deterministic is not None:
@@ -584,6 +597,7 @@ async def evaluate_rules(
                 snapshot,
                 reasoner=judge_reasoners.get(rule_id),
                 confidence_floor=confidence_floor,
+                metrics=metrics,
             ):
                 results.append(evaluation.evaluation)
                 if evaluation.judgment_tag is not None:

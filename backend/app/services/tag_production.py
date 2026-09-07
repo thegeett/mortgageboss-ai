@@ -30,19 +30,21 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
+from time import perf_counter
 
 import structlog
 
+from app.ai.concurrency import dispatch_bounded
 from app.ai.cost import estimate_cost
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_production import (
     APPARENT_CATEGORY_VALUES,
     IS_MONEY_IN_VALUES,
-    AIClientError,
     StageAResult,
     TagJudgment,
     reason_stage_a_transactions,
 )
-from app.core.config import resolve_model, settings
 from app.verification.snapshot.content_id import content_fingerprint
 from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import Snapshot, TagsSection, TransactionRecord
@@ -59,6 +61,13 @@ Reasoner = Callable[[str], Awaitable[StageAResult]]
 # The largest batch sent to one AI call. Kept small so a long statement can't degrade the
 # model's attention over its tail (§3D bounded batches). Within the ticket's 15-20 bound.
 _BATCH_SIZE = 15
+
+#: LP-644 §2 — how many of this stage's batches may be in flight at once. EIGHT, matching Stage B's
+#: `_MAX_CONCURRENT_JUDGMENTS` rather than picking a second number: the two stages draw on the same
+#: environment budget, they never overlap (Stage A completes before Stage B starts), and LP-644 §4
+#: is where the bound gets raised — for both at once, on measured TPM rather than on arithmetic.
+#: A stage inventing its own bound is how the ceiling stops being knowable.
+_MAX_CONCURRENT_BATCHES = 8
 
 # Tag ids (the vocabulary keys these tags are stored under in the tags layer).
 _TAG_AMOUNT = "txn.amount"
@@ -147,15 +156,21 @@ async def produce_stage_a_transaction_tags(
     reasoner: Reasoner | None = None,
     cache: TransactionTagCache | None = None,
     breaker: AiInfraBreaker | None = None,
+    metrics: StageMetrics | None = None,
 ) -> Snapshot:
     """Produce Stage-A transaction tags and write them into the snapshot's tags layer.
 
     Returns a NEW frozen snapshot with ``tags`` populated (the raw layer untouched). ``cache``
     (optional, mutated in place) reuses AI judgments across runs by content fingerprint — only
     successful judgments are stored, so a failed/truncated transaction retries next run.
+
+    ``metrics`` (LP-644 §1, optional, mutated in place) records call count, tokens and latency.
+    Instrumentation only — nothing here reads it back, so a caller passing None gets byte-identical
+    behaviour.
     """
     reason_fn = reasoner if reasoner is not None else reason_stage_a_transactions
     persistent = cache if cache is not None else {}
+    stage_started = perf_counter()
 
     transactions = _all_transactions(snapshot)
     if not transactions:
@@ -188,11 +203,48 @@ async def produce_stage_a_transaction_tags(
     # carries the completion's own resolved id — the authoritative answer.
     invoked_model: str | None = None
 
-    for batch in _chunks(representatives, _BATCH_SIZE):
-        context_json = json.dumps(_build_context([txn for _, txn in batch]))
-        try:
-            result = await reason_fn(context_json)
-        except AIClientError as err:
+    # LP-644 §2 — PLAN → DISPATCH → APPLY. The batches are settled as a set first, which is what
+    # lets them be asked concurrently and still applied in a fixed order below. The prompt, the
+    # context and the resolution logic are untouched, so a verdict cannot move (LP-644 §0); a test
+    # pins the serial and concurrent paths tag-for-tag.
+    batches = _chunks(representatives, _BATCH_SIZE)
+    # Contexts are built EAGERLY, before anything is dispatched, and bound with `partial` rather than
+    # captured in a lambda. A closure over the loop variable would hand every call the LAST batch's
+    # context — the classic way this refactor breaks silently, because the calls all succeed and
+    # every tag is simply attributed to the wrong transaction. `partial` makes that unexpressible.
+    contexts = [json.dumps(_build_context([txn for _, txn in batch])) for batch in batches]
+    outcomes = await dispatch_bounded(
+        [partial(reason_fn, context) for context in contexts],
+        concurrency=_MAX_CONCURRENT_BATCHES,
+        # The gate is the breaker's OWN threshold, handed down rather than chosen again here: not a
+        # second policy about when to give up, the same one applied where the calls are made.
+        stop_after_failures=None if breaker is None else breaker.threshold,
+        # The breaker's failure POLICY as well as its number: an oversized payload resets its
+        # counter, so it must not close this gate either (LP-644 §2 review).
+        counts_as_failure=None if breaker is None else breaker.counts_toward_trip,
+    )
+
+    # APPLY, IN THE ORIGINAL ORDER — deterministic on purpose. The cache, the token totals, the
+    # model attribution and the BREAKER all see the batches in the sequence they had when this loop
+    # was serial, so "consecutive failures" keeps the meaning it was given.
+    for batch, outcome in zip(batches, outcomes, strict=True):
+        if outcome.not_attempted:
+            # The gate closed before this batch was asked. Same fail-closed resolution as a failure
+            # — unknown-with-reason, uncached, retried next run — but the breaker is NOT fed: no
+            # call was made, so there is no failure to count, and counting one would let a single
+            # outage close the breaker twice as fast as its threshold says.
+            #
+            # LOGGED, because not feeding the breaker means this can be the ONLY trace it leaves.
+            # The gate counts failures in COMPLETION order and the breaker in INPUT order, so a
+            # degraded-but-working backend can close the gate on five failures that the breaker
+            # sees interleaved with successes and never trips on. Then the tail of the stage is
+            # resolved unknown without a call, and — before this line — without a word anywhere.
+            # Silence is the worse half of the two failures a stage can have (LP-635).
+            logger.warning("stage_a_batch_not_attempted", size=len(batch))
+            for fp, _ in batch:
+                resolved[fp] = _Judged(None, None, _REASON_FAILED)
+            continue
+        if outcome.error is not None:
             # Fail-closed: the whole batch's AI tags become unknown-with-reason (the
             # passthroughs still succeed). Not cached → retried on the next run.
             logger.warning("stage_a_batch_failed", size=len(batch))
@@ -201,15 +253,34 @@ async def produce_stage_a_transaction_tags(
             # LP-635 — see the identical guard in `tag_materialization.ai`. Stage A shares the run's
             # breaker, so an outage that starts here is counted with the ones that follow it rather
             # than each stage forgiving the backend separately.
+            # LP-644 §1 review — RECORDED AT THE ISSUE POINT, not on the success path. A failed
+            # call costs the same wall clock as a successful one, and `ai_calls` is the number the
+            # ticket's projections are checked against — so counting only successes means the run
+            # this instrumentation most needs to describe (LP-644's baseline was measured on a
+            # FAILING run) reports that it made no calls at all. Zero tokens, real seconds: nothing
+            # came back, but the time was spent.
+            #
+            # The not-attempted branch above deliberately records NOTHING: the gate closed before a
+            # call was made, so there is no call to count.
+            if metrics is not None:
+                metrics.record_call(input_tokens=0, output_tokens=0, seconds=outcome.seconds)
             if breaker is not None:
-                breaker.record_failure(err)
+                breaker.record_failure(outcome.error)
             continue
+        result = outcome.result
+        assert result is not None  # attempted, no error → a result (CallOutcome's contract)
         if breaker is not None:
             breaker.record_success()
 
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
         invoked_model = result.model
+        if metrics is not None:
+            metrics.record_call(
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                seconds=outcome.seconds,
+            )
         by_index = {j.index: j for j in result.judgments}
         # The batch addresses transactions by 1-based index (1..len(batch)); the model must
         # echo those. A returned index OUTSIDE that set (e.g. a 0-based echo) means the model
@@ -245,21 +316,38 @@ async def produce_stage_a_transaction_tags(
             if entry.is_money_in is not None and entry.apparent_category is not None:
                 persistent[fp] = entry
 
-    if input_tokens or output_tokens:
-        # invoked_model is set whenever a batch succeeded, and tokens are only accumulated
-        # on success — so the fallback is unreachable, and resolves rather than guessing.
-        logger.info(
-            "stage_a_production_done",
-            transactions=len(transactions),
-            unique=len(representatives),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_estimate=estimate_cost(
-                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            ),
-        )
+    # LP-644 §1 — set BEFORE the log line, so the stage's own wall time (fingerprinting and tag
+    # building included, not just the calls) is what gets reported and what the run subtracts.
+    if metrics is not None:
+        metrics.wall_seconds = perf_counter() - stage_started
+
+    # LP-644 §1 review — UNCONDITIONAL, and the gate that was here is the reason.
+    #
+    # `if input_tokens or output_tokens:` meant a stage whose every call FAILED logged nothing at
+    # all: tokens only accumulate on success. That is precisely the run this instrumentation most
+    # needs to describe — LP-644's entire baseline (591 calls at a 4.3s mean) was measured on a
+    # FAILING run — and it let a stage spend its whole budget on retries and report that it never
+    # ran. Carried forward from the branch's own §1 review, which found it and whose implementation
+    # this merge otherwise replaced.
+    #
+    # `cost_estimate` is None rather than 0 when nothing was invoked: there is no model to attribute
+    # a price to, and $0.00 reads as a free stage rather than an unsuccessful one.
+    logger.info(
+        "stage_a_production_done",
+        transactions=len(transactions),
+        unique=len(representatives),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_estimate=(
+            estimate_cost(
+                model=invoked_model, input_tokens=input_tokens, output_tokens=output_tokens
+            )
+            if invoked_model is not None
+            else None
+        ),
+        # LP-644 §1 — the measured stand-ins for the ticket's projected 12 calls at a 4.3s mean.
+        **(metrics.as_log_fields() if metrics is not None else {}),
+    )
 
     by_subject = {
         txn.content_id: _build_transaction_tags(txn, resolved[fp]) for fp, txn in fingerprinted
@@ -401,3 +489,74 @@ __all__ = [
     "TransactionTagCache",
     "produce_stage_a_transaction_tags",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this stage's cache
+# --------------------------------------------------------------------------- #
+# The SHAPE is owned here, by the module that produces it, rather than by the store: `_Judged` and
+# `TagJudgment` are this stage's business, and a store reaching into them would have to be edited
+# every time either changes. The store handles the row; these handle the value.
+#
+# Round-tripping is what makes persistence safe to add, so it is pinned by a test rather than
+# asserted: a value that does not survive dump→load is a wrong answer served from cache, which is
+# strictly worse than no cache at all.
+
+
+def _dump_judgment(judgment: TagJudgment | None) -> dict[str, object] | None:
+    if judgment is None:
+        return None
+    return {
+        "value": judgment.value,
+        "confidence": judgment.confidence,
+        "reasoning": judgment.reasoning,
+    }
+
+
+def _load_judgment(raw: object) -> TagJudgment | None:
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("value")
+    if not isinstance(value, str):
+        return None
+    confidence = raw.get("confidence")
+    reasoning = raw.get("reasoning")
+    return TagJudgment(
+        value=value,
+        confidence=confidence if isinstance(confidence, int | float) else None,
+        reasoning=reasoning if isinstance(reasoning, str) else None,
+    )
+
+
+def dump_stage_a_entry(entry: _Judged) -> dict[str, object]:
+    """One Stage-A cache value as JSON."""
+    return {
+        "is_money_in": _dump_judgment(entry.is_money_in),
+        "apparent_category": _dump_judgment(entry.apparent_category),
+        "counterparty": _dump_judgment(entry.counterparty),
+        "reason": entry.reason,
+    }
+
+
+def load_stage_a_entry(raw: dict[str, object]) -> _Judged | None:
+    """A Stage-A cache value from JSON, or None if the row cannot be trusted.
+
+    DEFENSIVE ON PURPOSE, and it returns None rather than raising. A cache is an optimisation: a row
+    written by an older shape, or corrupted, must cost a re-ask and nothing more. Raising here would
+    let a stale cache row fail a verification, which is the one outcome a cache must never cause.
+
+    ⚠️ Only a COMPLETE judgment is accepted, matching the in-memory rule at the write site: Stage A
+    caches an entry only when both AI tags resolved, so a partial retries next run. Accepting a
+    partial here would freeze a degraded answer into the file permanently.
+    """
+    is_money_in = _load_judgment(raw.get("is_money_in"))
+    apparent_category = _load_judgment(raw.get("apparent_category"))
+    if is_money_in is None or apparent_category is None:
+        return None
+    reason = raw.get("reason")
+    return _Judged(
+        is_money_in=is_money_in,
+        apparent_category=apparent_category,
+        reason=reason if isinstance(reason, str) else _REASON_MALFORMED,
+        counterparty=_load_judgment(raw.get("counterparty")),
+    )

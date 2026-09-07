@@ -1,0 +1,91 @@
+"use client";
+
+import { StatusToken } from "@/components/status-token";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { type FieldTier, TIER_LABEL, type TierInput, tierFor } from "@/lib/confidence";
+import type { Tone } from "@/lib/status";
+
+/**
+ * How much scrutiny one field asks for (LP-UI-032).
+ *
+ * A CONFIDENT FIELD RENDERS NOTHING. Not a green tick, not a quiet label —
+ * nothing. Chrome on the fields that are fine is chrome on almost every field, and
+ * a mark that appears everywhere stops being a mark. The ones worth a second look
+ * are the ones that get ink.
+ *
+ * `check` is `attention`, never `blocking`: the field is worth reading, not wrong.
+ * The system does not know it is wrong — if it did, that would be a finding.
+ */
+const TONE: Record<Exclude<FieldTier, "confident">, Tone> = {
+  verified: "verified",
+  check: "attention",
+  // BLOCKING, where `check` is only attention. The distinction is the one the tier
+  // exists to draw: `check` means the system does not know, a rejection means a
+  // person does — they read the document and this value is wrong.
+  rejected: "blocking",
+  // Neutral, deliberately. "Nobody rated this" is not a warning, and colouring it
+  // as one would put three-quarters of every document in amber.
+  unrated: "neutral",
+  // NEUTRAL TOO, and that is the argument rather than an omission. A removal is a
+  // processor doing their job — deciding a figure the model invented is not on the
+  // page — not an error state. Colouring it as a problem would tell them off for
+  // the correct action. It still gets ink, because the row goes on showing the
+  // extracted value and nothing else on it would say the checks no longer read it.
+  removed: "neutral",
+};
+
+/** Why this field is being flagged, in the processor's terms rather than the model's. */
+function reason(input: TierInput, tier: FieldTier): string | null {
+  if (tier === "verified") return "Confirmed by a person.";
+  if (input.distrustedReason) {
+    return `This extractor has read this field wrong before, so it is always checked. ${input.distrustedReason}`;
+  }
+  if (tier === "rejected") {
+    return "You marked this value wrong. The extraction still says what the model read.";
+  }
+  if (tier === "removed") {
+    // What this claims is exactly what the code does: `build_document_fields`
+    // omits the field, so the snapshot the checks read has no entry for it. It
+    // deliberately does NOT promise what any particular check will then report.
+    return "You said this is not on the document, so the checks no longer read it. The extraction still says what the model read, and this can be undone.";
+  }
+  if (tier === "check" && input.critical) {
+    return "A money figure, a rate or an identity — always checked, however sure the model is.";
+  }
+  if (tier === "check") return "The model was not confident in this value.";
+  if (tier === "unrated") return "The model reported no confidence for this field.";
+  return null;
+}
+
+export function ScrutinyMark({ input }: { input: TierInput }) {
+  const tier = tierFor(input);
+  // The whole point of the tier: the good case is invisible.
+  if (tier === "confident") return null;
+
+  const note = reason(input, tier);
+  const rating =
+    input.confidence === null
+      ? "No confidence reported"
+      : // The NUMBER lives here and only here. A column of decimals turns reviewing
+        // into arithmetic, and the decimal is the least useful thing on the row.
+        `Model confidence ${(input.confidence * 100).toFixed(0)}%`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* A BUTTON, not a span with a tabIndex. The reason a field is flagged
+            exists only inside this hover, so it has to be reachable — and putting
+            a tab stop on a non-interactive element announces something focusable
+            that answers nothing to a screen reader. */}
+        <button type="button" className="mt-1 inline-flex cursor-help rounded-sm">
+          <StatusToken meta={{ tone: TONE[tier], label: TIER_LABEL[tier] }} className="text-xs" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-64">
+        <p className="font-medium">{TIER_LABEL[tier]}</p>
+        {note ? <p className="mt-1 text-xs">{note}</p> : null}
+        <p className="mt-1 text-xs opacity-80">{rating}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}

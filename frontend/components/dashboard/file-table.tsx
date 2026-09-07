@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  ATTENTION_STRIPE,
+  AttentionCell,
+  NeedsProgress,
+} from "@/components/dashboard/attention-cell";
 import { DeleteFileDialog } from "@/components/file/delete-file-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -18,13 +24,181 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatMoney } from "@/lib/format";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { FolderPlus, MoreHorizontal, SearchX, Trash2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const COLUMNS = ["File ID", "Borrower", "Property", "Status", "Lender", "Last activity"] as const;
+/**
+ * The pipeline's columns, and the order they are given up in (LP-UI-037).
+ *
+ * THE DROP ORDER IS RECORDED, NOT EMERGENT. All nine used to render at every
+ * width; below a laptop they simply got narrower until the addresses were three
+ * words and an ellipsis. Truncating everything equally is a decision too — it is
+ * just one nobody made, and it degrades the columns a processor triages on at
+ * the same rate as the ones they do not.
+ *
+ * The ranking is what a processor needs to TRIAGE, which is what this screen is
+ * for (LP-UI-013 sorts by attention for the same reason):
+ *
+ *   File, Attention   what it is and whether it needs me — never dropped
+ *   Borrower, Stage   who and where in the process
+ *   Needs, Amount     progress and size
+ *   Property          identifying, but the borrower already identifies it
+ *   Lender            rarely the reason a file is opened from this screen
+ *   Touched           recency; the default sort already encodes it
+ *
+ * `hideBelow` is a Tailwind breakpoint the column is hidden BELOW. Nothing is
+ * hidden below `sm` because the narrow-width pass stops at the tablet: this app
+ * is desktop-first by intent (ADR-394) and a phone layout is not being claimed.
+ */
+export const COLUMNS = [
+  { label: "File", hideBelow: null },
+  { label: "Borrower", hideBelow: null },
+  { label: "Property", hideBelow: "xl" },
+  { label: "Amount", hideBelow: "lg" },
+  { label: "Stage", hideBelow: null },
+  { label: "Attention", hideBelow: null },
+  { label: "Needs", hideBelow: "lg" },
+  { label: "Lender", hideBelow: "xl" },
+  { label: "Touched", hideBelow: "2xl" },
+] as const;
+
+/** The class that hides a column below its breakpoint, or "" for one that stays. */
+/**
+ * The visibility class for column `index`, 1-based to match `aria-colindex`.
+ *
+ * The body cells restated the breakpoint — `columnClass("xl")` beside
+ * `aria-colindex={3}` — which is the ladder written twice: once in `COLUMNS` and
+ * once per cell. They agreed, and nothing made them agree. Moving a column's
+ * `hideBelow` moves the header and the skeleton (both map `COLUMNS`) and would
+ * have left the body behind, so a row would keep a column its header had dropped.
+ * One number per cell now, and it is the number already there.
+ */
+export function columnClassAt(index: number): string {
+  return columnClass(COLUMNS[index - 1]?.hideBelow ?? null);
+}
+
+export function columnClass(hideBelow: string | null): string {
+  // Written out rather than interpolated: Tailwind scans source text, and a
+  // template literal produces a class name that never reaches the stylesheet.
+  switch (hideBelow) {
+    case "lg":
+      return "hidden lg:table-cell";
+    case "xl":
+      return "hidden xl:table-cell";
+    case "2xl":
+      return "hidden 2xl:table-cell";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Roving tabindex over the rows (LP-UI-007).
+ *
+ * Every row used to carry `tabIndex={0}`, and each row's action button another,
+ * so a forty-file table was ~80 tab stops standing between the header and the
+ * page's real controls. The ARIA grid pattern says a grid is ONE tab stop and
+ * the arrow keys move within it — which is also how a processor expects a list
+ * of files to behave.
+ */
+function useRovingRows(count: number, onActivate: (index: number) => void) {
+  const [active, setActive] = useState(0);
+  const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  // Only steal focus when the move came from the keyboard. Re-focusing on a
+  // data refetch would yank the caret out of the search box mid-type.
+  const shouldFocus = useRef(false);
+
+  // Filtering can shrink the list under the cursor; clamp rather than leave the
+  // roving index pointing at a row that no longer exists.
+  useEffect(() => {
+    setActive((i) => (count === 0 ? 0 : Math.min(i, count - 1)));
+  }, [count]);
+
+  useEffect(() => {
+    if (!shouldFocus.current) return;
+    shouldFocus.current = false;
+    rowRefs.current[active]?.focus();
+  }, [active]);
+
+  const move = useCallback(
+    (to: number) => {
+      // Arm the focus steal ONLY when the index actually changes. React bails out
+      // of a same-value setState, so on ArrowUp at row 0 or ArrowDown/End at the
+      // last row — all reachable by holding a key — the `[active]` effect never
+      // ran to clear the flag. It stayed armed until the next unrelated `active`
+      // change, i.e. the `[count]` clamp on a refetch or a filter, which then
+      // pulled focus onto a row: exactly the yank the comment above forbids.
+      if (to === active) return;
+      shouldFocus.current = true;
+      setActive(to);
+    },
+    [active],
+  );
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTableRowElement>, index: number) => {
+      // Bound on the <tr>, so every keydown from inside a cell bubbles here.
+      // Without this check the row-actions button answered Enter by navigating to
+      // the loan file instead of opening its menu — and since that button is
+      // `tabIndex={-1}`, ArrowRight is the ONLY way to reach it, which made
+      // "Delete file" unreachable by keyboard entirely. Arrow/Home/End likewise
+      // moved the roving stop out from under the focused button.
+      if (event.target !== event.currentTarget) return;
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          move(Math.min(index + 1, count - 1));
+          break;
+        case "ArrowUp":
+          event.preventDefault();
+          move(Math.max(index - 1, 0));
+          break;
+        case "Home":
+          event.preventDefault();
+          move(0);
+          break;
+        case "End":
+          event.preventDefault();
+          move(count - 1);
+          break;
+        case "ArrowRight": {
+          // The row menu is tabIndex=-1 so it costs no tab stop; the grid
+          // pattern reaches a widget inside a cell with the arrow keys instead.
+          event.preventDefault();
+          const button = rowRefs.current[index]?.querySelector<HTMLButtonElement>("button");
+          button?.focus();
+          break;
+        }
+        case "Enter":
+        case " ":
+          event.preventDefault();
+          onActivate(index);
+          break;
+        default:
+          break;
+      }
+    },
+    [count, move, onActivate],
+  );
+
+  /** ArrowLeft or Escape inside a cell widget returns focus to its row. */
+  const onCellKeyDown = useCallback((event: React.KeyboardEvent, index: number) => {
+    if (event.key !== "ArrowLeft" && event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Focuses the row DIRECTLY rather than going through `move`. The row is
+    // almost always already the active one — you arrowed right from it — so a
+    // state-change-driven focus would be a no-op precisely when it is needed.
+    setActive(index);
+    rowRefs.current[index]?.focus();
+  }, []);
+
+  return { active, rowRefs, onKeyDown, onCellKeyDown, setActive };
+}
 
 function lastActivity(iso: string): string {
   try {
@@ -37,16 +211,20 @@ function lastActivity(iso: string): string {
 function HeaderRow() {
   return (
     <TableHeader>
-      <TableRow className="hover:bg-transparent">
-        {COLUMNS.map((col) => (
+      {/* Row 1 of the grid. `aria-colindex` is what lets a screen reader say
+          "column 3 of 7" from any cell, header or body. */}
+      <TableRow className="hover:bg-transparent" aria-rowindex={1}>
+        {COLUMNS.map((col, i) => (
           <TableHead
-            key={col}
-            className="text-xs font-medium uppercase tracking-wide text-gray-400"
+            key={col.label}
+            aria-colindex={i + 1}
+            scope="col"
+            className={columnClass(col.hideBelow)}
           >
-            {col}
+            {col.label}
           </TableHead>
         ))}
-        <TableHead className="w-12">
+        <TableHead className="w-10" aria-colindex={COLUMNS.length + 1} scope="col">
           <span className="sr-only">Actions</span>
         </TableHead>
       </TableRow>
@@ -62,14 +240,17 @@ function LoadingRows() {
   return (
     <TableBody>
       {Array.from({ length: 6 }, (_, i) => i).map((row) => (
-        <TableRow key={row}>
+        <TableRow key={row} aria-rowindex={row + 2}>
           {COLUMNS.map((col, i) => (
-            <TableCell key={col}>
-              <Skeleton className={cn("h-4", COLUMN_SKELETON_WIDTHS[i])} />
+            <TableCell key={col.label} aria-colindex={i + 1} className={columnClass(col.hideBelow)}>
+              {/* The CELL is --row-h; the bar inside it is deliberately shorter,
+                  so a skeleton row and a real row are the same height and the
+                  table does not jump when data arrives. */}
+              <Skeleton className={cn("h-3", COLUMN_SKELETON_WIDTHS[i])} />
             </TableCell>
           ))}
-          <TableCell>
-            <Skeleton className="h-4 w-4" />
+          <TableCell aria-colindex={COLUMNS.length + 1}>
+            <Skeleton className="h-3 w-3" />
           </TableCell>
         </TableRow>
       ))}
@@ -86,11 +267,38 @@ function StatePanel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * The filtered-empty sentence, naming what a processor can undo.
+ *
+ * Degrades honestly: with no summary it says the general thing rather than
+ * inventing a filter name, and it only promises a count when it has one — "see
+ * all four" is a claim, and a wrong one sends a processor looking for files that
+ * are not there.
+ */
+export function describeFilter(summary?: {
+  search: string;
+  statusLabel: string | null;
+  unfilteredTotal: number | null;
+}): string {
+  if (!summary) return "Nothing matches the filters on this list. Clear them to see every file.";
+  const { search, statusLabel, unfilteredTotal } = summary;
+  const query = search.trim();
+  const where = statusLabel ? `Nothing in ${statusLabel}` : "Nothing on this list";
+  const matching = query ? ` matches “${query}”` : "";
+  const back =
+    unfilteredTotal === null
+      ? " Clear the filters to see every file."
+      : ` Clear the filters to see ${unfilteredTotal === 1 ? "the one file" : `all ${unfilteredTotal}`}.`;
+  return `${where}${matching}.${back}`;
+}
+
 export function FileTable({
   files,
   isPending,
   isError,
   isFiltered,
+  filterSummary,
+  onClearFilters,
   onSelect,
   onNewFile,
 }: {
@@ -98,6 +306,13 @@ export function FileTable({
   isPending: boolean;
   isError: boolean;
   isFiltered: boolean;
+  /**
+   * What is actually hiding the rows (LP-UI-034). "No files match your current
+   * filters" tells a processor nothing they can undo; naming the filter, the
+   * query and how many would come back tells them exactly what to click.
+   */
+  filterSummary?: { search: string; statusLabel: string | null; unfilteredTotal: number | null };
+  onClearFilters?: () => void;
   onSelect: (file: LoanFileSummary) => void;
   onNewFile: () => void;
 }) {
@@ -105,13 +320,30 @@ export function FileTable({
   // the list query on success, so the deleted row simply drops out on the next render.
   const [pendingDelete, setPendingDelete] = useState<LoanFileSummary | null>(null);
 
+  // Hooks run before the early returns below — a conditional hook is a crash,
+  // and the loading/empty branches return before the grid renders.
+  const activate = useCallback(
+    (index: number) => {
+      const file = files[index];
+      if (file) onSelect(file);
+    },
+    [files, onSelect],
+  );
+  const { active, rowRefs, onKeyDown, onCellKeyDown, setActive } = useRovingRows(
+    files.length,
+    activate,
+  );
+
   if (isError) {
     return (
       <StatePanel>
         <TriangleAlert className="h-8 w-8 text-destructive" />
-        <h3 className="mt-3 text-sm font-semibold text-gray-900">Couldn&apos;t load loan files</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
-          Something went wrong fetching your files. Check your connection and try again.
+        <h3 className="mt-3 text-sm font-semibold text-foreground">
+          Couldn&apos;t load loan files
+        </h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          The list didn&apos;t come back. Your files are unaffected — check your connection and try
+          again.
         </p>
       </StatePanel>
     );
@@ -132,57 +364,120 @@ export function FileTable({
   if (files.length === 0) {
     return isFiltered ? (
       <StatePanel>
-        <SearchX className="h-8 w-8 text-gray-300" />
-        <h3 className="mt-3 text-sm font-semibold text-gray-900">No matching files</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
-          No loan files match your current filters. Try clearing the search or a different filter.
-        </p>
+        <EmptyState
+          kind="filtered"
+          title="No files match"
+          action={
+            onClearFilters ? (
+              <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
+                Clear the filters
+              </Button>
+            ) : null
+          }
+        >
+          {describeFilter(filterSummary)}
+        </EmptyState>
       </StatePanel>
     ) : (
       <StatePanel>
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <FolderPlus className="h-6 w-6" />
-        </span>
-        <h3 className="mt-4 text-sm font-semibold text-gray-900">No loan files yet</h3>
-        <p className="mt-1 max-w-sm text-sm text-gray-500">
-          Create your first loan file to start assembling documents and tracking requirements.
-        </p>
-        <Button type="button" onClick={onNewFile} className="mt-5 gap-2">
-          <FolderPlus className="h-4 w-4" />
-          Create your first file
-        </Button>
+        <EmptyState
+          kind="nothing-yet"
+          title="No loan files yet"
+          action={
+            <Button type="button" onClick={onNewFile} className="gap-2">
+              <FolderPlus className="h-4 w-4" />
+              Create your first file
+            </Button>
+          }
+        >
+          A file holds the documents, the extracted data and the conditions for one loan. Create one
+          and it starts assembling itself.
+        </EmptyState>
       </StatePanel>
     );
   }
 
   return (
     <>
-      <Table>
+      {/* biome-ignore lint/a11y/useSemanticElements: an ARIA *grid* is not a
+          static table. `role="grid"` is what tells assistive tech this is an
+          interactive widget with one tab stop and arrow-key navigation, and it
+          is what the WAI-ARIA APG data-grid pattern specifies on a <table>.
+          Dropping it would leave the roving tabindex below with no semantics. */}
+      <Table
+        role="grid"
+        aria-label="Loan files"
+        aria-rowcount={files.length + 1}
+        aria-colcount={COLUMNS.length + 1}
+      >
         <HeaderRow />
         <TableBody>
-          {files.map((file) => (
+          {files.map((file, index) => (
             <TableRow
               key={file.id}
-              onClick={() => onSelect(file)}
-              className="cursor-pointer"
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") onSelect(file);
+              ref={(node) => {
+                rowRefs.current[index] = node;
               }}
+              aria-rowindex={index + 2}
+              onClick={() => {
+                setActive(index);
+                onSelect(file);
+              }}
+              className="cursor-pointer"
+              // One tab stop for the whole grid: exactly one row is reachable
+              // by Tab, and the arrow keys move the stop between rows.
+              tabIndex={index === active ? 0 : -1}
+              onKeyDown={(event) => onKeyDown(event, index)}
             >
-              <TableCell className="font-medium text-gray-900">{file.display_id}</TableCell>
-              <TableCell className="text-gray-700">{file.primary_borrower_name ?? "—"}</TableCell>
-              <TableCell className="max-w-[16rem] truncate text-gray-700">
+              <TableCell
+                aria-colindex={1}
+                // The stripe says the same thing as the Attention column, so the
+                // row reads while scanning without stopping to read the words.
+                className={cn(
+                  "font-medium text-foreground",
+                  file.attention
+                    ? ATTENTION_STRIPE[file.attention.tone]
+                    : "border-l-2 border-l-transparent",
+                )}
+              >
+                {file.display_id}
+              </TableCell>
+              <TableCell aria-colindex={2} className="text-foreground-2">
+                {file.primary_borrower_name ?? "—"}
+              </TableCell>
+              <TableCell
+                aria-colindex={3}
+                className={cn("max-w-[16rem] truncate text-foreground-2", columnClassAt(3))}
+              >
                 {file.property_address ?? "—"}
               </TableCell>
-              <TableCell>
+              <TableCell
+                aria-colindex={4}
+                className={cn("tabular text-right text-foreground-2", columnClassAt(4))}
+              >
+                {file.loan_amount ? formatMoney(file.loan_amount) : "—"}
+              </TableCell>
+              <TableCell aria-colindex={5}>
                 <StatusBadge status={file.status} />
               </TableCell>
-              <TableCell className="text-gray-700">{file.lender_name ?? "—"}</TableCell>
-              <TableCell className="whitespace-nowrap text-gray-500">
+              <TableCell aria-colindex={6} className="max-w-[18rem] truncate">
+                <AttentionCell attention={file.attention} />
+              </TableCell>
+              <TableCell aria-colindex={7} className={cn("text-right", columnClassAt(7))}>
+                <NeedsProgress attention={file.attention} />
+              </TableCell>
+              <TableCell aria-colindex={8} className={cn("text-foreground-2", columnClassAt(8))}>
+                {file.lender_name ?? "—"}
+              </TableCell>
+              <TableCell
+                aria-colindex={9}
+                className={cn("whitespace-nowrap text-muted-foreground", columnClassAt(9))}
+              >
                 {lastActivity(file.updated_at)}
               </TableCell>
               <TableCell
+                aria-colindex={10}
+                onKeyDown={(event) => onCellKeyDown(event, index)}
                 className="text-right"
                 // The row navigates on click; the menu must not. Stop propagation for
                 // the trigger click AND any stray click the menu's close dispatches over
@@ -196,10 +491,11 @@ export function FileTable({
                   <DropdownMenuTrigger asChild>
                     <Button
                       type="button"
-                      size="icon"
+                      size="icon-sm"
                       variant="ghost"
-                      className="h-8 w-8 text-gray-400 hover:text-gray-700"
+                      className="text-muted-foreground hover:text-foreground-2"
                       aria-label={`Actions for ${file.display_id}`}
+                      tabIndex={-1}
                       onClick={(event) => event.stopPropagation()}
                     >
                       <MoreHorizontal className="h-4 w-4" />

@@ -42,6 +42,8 @@ from app.mismo.schema import (
     ParsedMismo,
     ParsedOwnedProperty,
     ParsedProperty,
+    ParseWarning,
+    WarningSubject,
 )
 
 logger = structlog.get_logger(__name__)
@@ -141,7 +143,7 @@ class _Ctx:
     def __init__(self, tree: etree._ElementTree) -> None:
         self._tree = tree
         self.consumed: set[str] = set()
-        self.warnings: list[str] = []
+        self.warnings: list[ParseWarning] = []
 
     def consume(self, el: etree._Element | None) -> None:
         """Mark an element's stable path as consumed (kept out of the catch-all)."""
@@ -329,22 +331,37 @@ def _parse_borrower(party: etree._Element, ctx: _Ctx) -> ParsedBorrower:
 def _parse_borrowers(deal: etree._Element, ctx: _Ctx) -> list[ParsedBorrower]:
     borrowers = [_parse_borrower(p, ctx) for p in deal.findall(".//m:PARTY", NS) if _is_borrower(p)]
     if not borrowers:
-        ctx.warnings.append("No borrower party found (PartyRoleType == Borrower).")
+        ctx.warnings.append(
+            ParseWarning(
+                message="No borrower party found (PartyRoleType == Borrower).",
+                subject=WarningSubject.BORROWERS,
+            )
+        )
     for i, b in enumerate(borrowers):
         if not (b.full_name or b.last_name):
-            ctx.warnings.append(f"Borrower #{i + 1} is missing a name.")
+            ctx.warnings.append(
+                ParseWarning(
+                    message=f"Borrower #{i + 1} is missing a name.",
+                    subject=WarningSubject.BORROWERS,
+                )
+            )
     # Needed-now: stated income drives DTI. A deal with no income for ANY borrower
     # is almost always an incomplete file or a parse gap — flag it (non-blocking),
     # rather than silently importing a file with no income at all.
     if borrowers and not any(b.income_items for b in borrowers):
-        ctx.warnings.append("No income was found for any borrower.")
+        ctx.warnings.append(
+            ParseWarning(
+                message="No income was found for any borrower.",
+                subject=WarningSubject.INCOME,
+            )
+        )
     return borrowers
 
 
 def _parse_loan(deal: etree._Element, ctx: _Ctx) -> ParsedLoan | None:
     loan = deal.find(".//m:LOANS/m:LOAN", NS)
     if loan is None:
-        ctx.warnings.append("No LOAN found.")
+        ctx.warnings.append(ParseWarning(message="No LOAN found.", subject=WarningSubject.LOAN))
         return None
     parsed = ParsedLoan(
         base_loan_amount=_to_decimal(ctx.text(loan, ".//m:TERMS_OF_LOAN/m:BaseLoanAmount")),
@@ -383,14 +400,18 @@ def _parse_loan(deal: etree._Element, ctx: _Ctx) -> ParsedLoan | None:
         ),
     )
     if parsed.base_loan_amount is None:
-        ctx.warnings.append("Loan is missing a base loan amount.")
+        ctx.warnings.append(
+            ParseWarning(message="Loan is missing a base loan amount.", subject=WarningSubject.LOAN)
+        )
     return parsed
 
 
 def _parse_property(deal: etree._Element, ctx: _Ctx) -> ParsedProperty | None:
     prop = deal.find(".//m:COLLATERALS/m:COLLATERAL/m:SUBJECT_PROPERTY", NS)
     if prop is None:
-        ctx.warnings.append("No SUBJECT_PROPERTY found.")
+        ctx.warnings.append(
+            ParseWarning(message="No SUBJECT_PROPERTY found.", subject=WarningSubject.PROPERTY)
+        )
         return None
     parsed = ParsedProperty(
         address_line=ctx.text(prop, ".//m:ADDRESS/m:AddressLineText"),
@@ -412,7 +433,12 @@ def _parse_property(deal: etree._Element, ctx: _Ctx) -> ParsedProperty | None:
         mixed_usage=_to_bool(ctx.text(prop, ".//m:PropertyMixedUsageIndicator")),
     )
     if parsed.estimated_value is None:
-        ctx.warnings.append("Subject property is missing an estimated value.")
+        ctx.warnings.append(
+            ParseWarning(
+                message="Subject property is missing an estimated value.",
+                subject=WarningSubject.PROPERTY,
+            )
+        )
     return parsed
 
 

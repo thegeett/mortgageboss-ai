@@ -5,10 +5,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { useReprocessDocument } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { isTerminalStatus } from "@/lib/loan-files/documents";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { DocumentResponse } from "@/lib/types/document";
 import { isAxiosError } from "axios";
 import { RefreshCw } from "lucide-react";
-import { toast } from "sonner";
 
 /**
  * Read this document again from scratch — classification included (LP-637).
@@ -27,12 +27,14 @@ export function ReprocessDocumentButton({
   function run(force: boolean) {
     reprocess.mutate(force, {
       onSuccess: () =>
-        toast.success("Reading this document again", {
-          description: "Classifying and extracting in the background…",
+        notifySuccess({
+          title: "Reading this document again",
+          consequence: "Classifying and extracting in the background…",
         }),
       onError: (error) =>
-        toast.error("Couldn’t reprocess this document", {
-          description: getErrorMessage(error),
+        notifyError({
+          title: "Couldn’t reprocess this document",
+          whatToDo: getErrorMessage(error),
           // A REFUSAL A PROCESSOR CAN ACT ON (LP-637 feature 3 review). The server refuses a
           // document whose type looks human-set, and until now nothing in the UI could ask again
           // with `force` — the drawer's own "Correct type" control sets that very signal, so
@@ -45,7 +47,7 @@ export function ReprocessDocumentButton({
           // returns the same clear reason, so the action never makes a claim that turns out false.
           ...(force || !isAxiosError(error) || error.response?.status !== 409
             ? {}
-            : { action: { label: "Re-read anyway", onClick: () => run(true) } }),
+            : { retry: { label: "Re-read anyway", onRetry: () => run(true) } }),
         }),
     });
   }
@@ -74,7 +76,7 @@ export function ReprocessDocumentButton({
         )}
         Re-read this document
       </Button>
-      <p className="mt-1.5 text-[11px] text-gray-400">
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
         {isTerminalStatus(summary.status)
           ? "Runs classification again, so the type may change. Use this when the type is wrong or unknown — not when you already know what it is."
           : "This document is being read now. You can re-read it again once it finishes."}

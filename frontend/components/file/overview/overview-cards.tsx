@@ -11,12 +11,12 @@ import { useCreateProperty } from "@/lib/api/overview-edit";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { formatMoney, humanize } from "@/lib/format";
 import { programLabel, purposeLabel } from "@/lib/loan-files/labels";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { BorrowerDetail } from "@/lib/types/borrower";
 import type { LoanFileDetail } from "@/lib/types/loan-file";
 import { Building2, Check, Landmark, Pencil, Plus, TriangleAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 function OverviewCard({
   title,
@@ -24,18 +24,23 @@ function OverviewCard({
   loading = false,
   action,
   children,
+  anchorId,
 }: {
   title: string;
   icon: LucideIcon;
   loading?: boolean;
   action?: React.ReactNode;
   children: React.ReactNode;
+  /** Link target for the MISMO warnings panel (LP-UI-024). */
+  anchorId?: string;
 }) {
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    // `scroll-mt` so a linked card clears the sticky topbar — the same reason
+    // `[data-row]` carries `scroll-margin-block` in globals.css.
+    <Card id={anchorId} className="scroll-mt-24 border-border/80">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <Icon className="h-4 w-4 text-gray-400" />
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Icon className="h-4 w-4 text-muted-foreground" />
           {title}
         </CardTitle>
         {action}
@@ -53,10 +58,9 @@ function EditToggle({ editing, onToggle }: { editing: boolean; onToggle: () => v
   return (
     <Button
       type="button"
-      size="sm"
       variant={editing ? "default" : "outline"}
       onClick={onToggle}
-      className="h-7 gap-1.5 text-xs"
+      className="gap-1.5 text-xs"
     >
       {editing ? <Check className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
       {editing ? "Done" : "Edit"}
@@ -66,9 +70,9 @@ function EditToggle({ editing, onToggle }: { editing: boolean; onToggle: () => v
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-t border-gray-100 py-1.5 text-sm first:border-t-0">
-      <span className="shrink-0 text-gray-500">{label}</span>
-      <span className="max-w-[62%] truncate text-right font-medium text-gray-900">{value}</span>
+    <div className="flex items-start justify-between gap-3 border-t border-border py-1.5 text-sm first:border-t-0">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="max-w-[62%] truncate text-right font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -79,12 +83,12 @@ function CardSkeleton() {
 }
 
 function CardEmpty({ message }: { message: string }) {
-  return <p className="py-4 text-sm text-gray-400">{message}</p>;
+  return <p className="py-4 text-sm text-muted-foreground">{message}</p>;
 }
 
 function CardError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="flex items-center gap-2 py-4 text-sm text-gray-500">
+    <div role="alert" className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
       <TriangleAlert className="h-4 w-4 shrink-0 text-destructive" />
       <span>{message}</span>
       {onRetry && (
@@ -113,7 +117,7 @@ export function BorrowerCard({
   onRetry,
 }: CardState & { borrowers: BorrowerDetail[] | undefined }) {
   return (
-    <OverviewCard title="Borrowers" icon={Users} loading={isPending}>
+    <OverviewCard title="Borrowers" icon={Users} loading={isPending} anchorId="card-borrowers">
       {isPending ? (
         <CardSkeleton />
       ) : isError ? (
@@ -122,9 +126,9 @@ export function BorrowerCard({
         <CardEmpty message="No borrower added yet." />
       ) : (
         borrowers.map((borrower, index) => (
-          <div key={borrower.id} className={index > 0 ? "mt-3 border-t border-gray-100 pt-3" : ""}>
+          <div key={borrower.id} className={index > 0 ? "mt-3 border-t border-border pt-3" : ""}>
             <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900">
+              <span className="font-medium text-foreground">
                 {borrower.first_name} {borrower.last_name}
               </span>
               {borrower.is_primary && (
@@ -159,6 +163,7 @@ export function PropertyCard({
 
   return (
     <OverviewCard
+      anchorId="card-property"
       title="Subject property"
       icon={Building2}
       loading={isPending}
@@ -187,12 +192,22 @@ export function PropertyCard({
                   {},
                   {
                     onSuccess: () => {
-                      toast.success("Property added");
+                      notifySuccess({
+                        title: "Property added",
+                        // The row created here is EMPTY (`mutate({})`), and LTV
+                        // reads a purchase price or an appraised value — with
+                        // neither it returns "unknown". Its siblings all say
+                        // "Fill it in and…" for exactly this reason; this one
+                        // claimed the end state at the moment the row was blank.
+                        consequence:
+                          "Fill in its value and LTV and the property rules can run on this file.",
+                      });
                       setEditing(true);
                     },
                     onError: (e) =>
-                      toast.error("Couldn't add the property", {
-                        description: getErrorMessage(e),
+                      notifyError({
+                        title: "Couldn’t add the property",
+                        whatToDo: getErrorMessage(e),
                       }),
                   },
                 )
@@ -239,6 +254,7 @@ export function LoanCard({
 
   return (
     <OverviewCard
+      anchorId="card-loan"
       title="Loan"
       icon={Landmark}
       loading={isPending}

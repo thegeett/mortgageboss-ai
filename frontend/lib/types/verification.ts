@@ -39,11 +39,21 @@ export interface VerificationRun {
   error_detail: string | null;
 }
 
+/**
+ * A finding's triage severity — how a processor sorts it, not what the rule
+ * decided. Named here so `FINDING_SEVERITY` in lib/status.ts is typed from the
+ * real union rather than a second copy of the three strings: `CalculatorStatus`
+ * was written from its display map instead of its producers and ended up
+ * exhaustive over the wrong set, which is how a screen reader came to read out
+ * "Binding:dti".
+ */
+export type FindingSeverity = "red" | "yellow" | "green";
+
 export interface VerificationFinding {
   id: string;
   rule_id: string;
   origin: string;
-  status: "red" | "yellow" | "green";
+  status: FindingSeverity;
   category: string;
   message: string;
   confidence: number;
@@ -116,7 +126,7 @@ export interface RuleFinding {
    *  it — the id is what a processor quotes when escalating and what every ticket calls the rule. */
   rule_name: string | null;
   evaluation_outcome: EvaluationOutcome;
-  status: "red" | "yellow" | "green";
+  status: FindingSeverity;
   category: string;
   /** The reason — every non-satisfied outcome carries one (§8's honesty contract). */
   message: string;
@@ -145,6 +155,10 @@ export interface RuleFinding {
    * processor opened all of them. Empty is honest, not a gap — a loan-level rule over a computed
    * value (DTI, reserves, LTV) has no document to point at. */
   source_documents: FindingSourceDocument[];
+  /** LP-647: why this finding names no document, when the reason is known — a loan-level rule
+   * computes from the file's stated data and has no page to open. Null when there ARE documents, and
+   * null when the absence is a GAP rather than an explanation. */
+  source_statement?: string | null;
 }
 
 /** The three aggression levels (LP-79) — confidence cutoffs, Conservative highest. */
@@ -166,6 +180,12 @@ export interface Aggression {
 
 export interface VerificationStatus {
   stale: boolean;
+  /** LP-647 §2 — documents still classifying or extracting RIGHT NOW.
+   *
+   * Distinct from `stale`: that means the inputs changed since the last run (the past), this means
+   * work is in flight (the present). Served from the same helper the run endpoint refuses on, so a
+   * disabled button and a 409 cannot disagree. */
+  documents_processing: number;
   /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
   program: string | null;
   latest_run: VerificationRun | null;

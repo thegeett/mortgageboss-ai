@@ -38,7 +38,26 @@ from app.verification.tag_materialization.subjects import (
 # unchanged (the regression canary, _app_required_fields_present).
 # A recipe returns ``(value, reasoning)``; a ``None`` value DECLINES the subject (LP-447 — the producer
 # materialises no tag), for a recipe scoped narrower than its subject type (e.g. one document_type).
-Recipe = Callable[[Snapshot, str, object], tuple[JsonValue | None, str]]
+#: LP-647 §1 — A RECIPE MAY NAME THE DOCUMENTS IT READ.
+#:
+#: The two-element form is unchanged and is what 77 of 79 recipes return. The optional third element
+#: is the content_ids the tag was computed FROM, and it exists because a LOAN-subject recipe had no
+#: way to say them: `produce_derived_tags` sets `source_facts=(subject_id,)`, which for a loan
+#: subject is the literal string "loan".
+#:
+#: That is what made AS-8 and AS-10 unable to name a document. `stmt.continuity` compares two
+#: specific statements — it knows the account and both balances and says so in its prose — and
+#: recorded "loan" as its source, so `_attach_document_provenance` had nothing to attach and the
+#: finding rendered with no documents. The processor is told the statements do not chain and not
+#: which statements.
+#:
+#: A UNION RATHER THAN A THIRD REQUIRED SLOT so the 77 recipes with nothing to add stay untouched.
+#: Empty is honest for them: a tag over a computed figure (DTI, reserves) has no document to point
+#: at, and inventing one would send a processor to the wrong page.
+Recipe = Callable[
+    [Snapshot, str, object],
+    tuple[JsonValue | None, str] | tuple[JsonValue | None, str, tuple[str, ...]],
+]
 
 _UNKNOWN = "unknown"
 
@@ -345,7 +364,7 @@ def _latest_ytd(
 
 def _income_ytd_annualized_shortfall(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.ytd_annualized_shortfall_pct — (documented - ytd_monthly) / documented, PER BORROWER.
 
     LP-509-A3 — THREE STACKED ARITHMETIC DEFECTS, all of which had to go together: fixing any one or
@@ -374,6 +393,15 @@ def _income_ytd_annualized_shortfall(
     )
     documented, d_present, d_unknown = _distinct_documented_monthly(snapshot, entries)
     ytd, pay_date, y_present, y_unknown = _latest_ytd(snapshot, entries)
+    # LP-647 §1 group A — the pay stubs and W-2s BOTH figures are read from. The verdict compares a
+    # year-to-date pace against a documented monthly income, so the finding is about the documents
+    # stating each side; naming one side would name half a comparison.
+    stating = _documents_stating(
+        snapshot,
+        "income.ytd_gross",
+        "income.pay_date",
+        "income.documented_monthly",
+    )
 
     if not y_present or y_unknown or pay_date is None:
         return _UNKNOWN, (
@@ -413,6 +441,7 @@ def _income_ytd_annualized_shortfall(
         f"year-to-date gross {ytd} through {pay_date.isoformat()} "
         f"({elapsed_months:.2f} months elapsed) = {ytd_monthly:.2f}/mo vs documented "
         f"{documented}/mo → shortfall {shortfall:.1%} (negative = ahead of pace, not a shortfall)",
+        stating,
     )
 
 
@@ -476,7 +505,7 @@ def _qualifying_income_monthly(
 
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.max_employment_gap_days — the largest gap (days) between consecutive employment records,
     computed PER BORROWER and NEVER across borrowers.
 
@@ -490,7 +519,11 @@ def _income_max_employment_gap(
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
     # (starts, ends) keyed by the document's borrower attribution — records only pair WITHIN a group,
     # so a gap is never spanned across two different borrowers' timelines.
-    groups: dict[object, tuple[list[date], list[date]]] = {}
+    # LP-647 §1 group A — each date carries the RECORD it was read from, so the gap can name the two
+    # documents it spans: the job that ended and the job that started after it. Those are the two a
+    # processor opens to check the claim; the borrower's other records are not what the sentence is
+    # about.
+    groups: dict[object, tuple[list[tuple[date, str]], list[tuple[date, str]]]] = {}
     for entry in snapshot.documents.entries:
         tags = snapshot.tags.by_subject.get(entry.content_id)
         if not tags:
@@ -510,22 +543,24 @@ def _income_max_employment_gap(
                 continue
             parsed = coerce_date(str(tag.value))
             if parsed is not None:
-                bucket.append(parsed)
+                bucket.append((parsed, entry.content_id))
     # Each end pairs with the NEXT start in its OWN group (the earliest start after it), NOT every later
     # start — else the max would span intervening jobs (end of job A → start of job C) and overstate a
     # gap that job B actually fills. The largest of those consecutive per-borrower gaps is the answer.
-    gaps: list[int] = []
+    gaps: list[tuple[int, str, str]] = []  # (days, ended-record, next-started-record)
     for starts, ends in groups.values():
-        for end in ends:
-            later_starts = [s for s in starts if s > end]
-            if later_starts:
-                gaps.append((min(later_starts) - end).days)
+        for end_date, end_cid in ends:
+            later = [(s, cid) for s, cid in starts if s > end_date]
+            if later:
+                next_start, start_cid = min(later, key=lambda pair: pair[0])
+                gaps.append(((next_start - end_date).days, end_cid, start_cid))
     if not gaps:
         return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
-    max_gap = max(gaps)
+    max_gap, ended_at, resumed_at = max(gaps, key=lambda g: g[0])
     return (
         str(max_gap),
         f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)",
+        tuple(dict.fromkeys((ended_at, resumed_at))),  # one record may state both
     )
 
 
@@ -1532,7 +1567,7 @@ def _stmt_nsf_count(
 
 def _stmt_min_account_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """stmt.min_account_months — the FEWEST distinct statement months any ONE account has (AS-10 recency).
     Groups statements per account via resolve_accounts (LP-336) and takes the MIN across accounts, so a
     single short account is never MASKED by a well-documented one (fire-if-any). Abstains when no
@@ -1551,6 +1586,11 @@ def _stmt_min_account_months(
         )
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     per_account: list[int] = []
+    # LP-647 §1 — the SHORTEST account's statements, so the finding can name what it counted. The tag
+    # reports one number ("the account with the fewest statements has 1 month"); the documents it
+    # names must be that account's, not every statement on the file, or the finding points at
+    # statements it is saying nothing about.
+    shortest: tuple[str, ...] = ()
     for content_ids in resolved.values():
         months = set()
         for cid in content_ids:
@@ -1572,9 +1612,15 @@ def _stmt_min_account_months(
                 "an account's statement period dates could not be parsed — cannot count its months "
                 "without reporting a false 0",
             )
+        if not per_account or len(months) < min(per_account):
+            shortest = tuple(content_ids)
         per_account.append(len(months))
     fewest = min(per_account)
-    return str(fewest), f"the account with the fewest statements has {fewest} distinct month(s)"
+    return (
+        str(fewest),
+        f"the account with the fewest statements has {fewest} distinct month(s)",
+        shortest,
+    )
 
 
 def _cash_to_close_shortfall(
@@ -1673,7 +1719,7 @@ def _loan_closing_date(
 
 def _loan_effective_date(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.loan_effective_date — the loan's single homeowners-insurance effective date, promoted to LOAN
     level from the document-subject ins.effective_date (LP-417; ins.effective_date stays a document fact,
     read from the homeowners_insurance binder's effective_date). Mirrors _loan_closing_date's promotion +
@@ -1694,6 +1740,7 @@ def _loan_effective_date(
     # ways is ONE value; >1 distinct date → the binders disagree (the multi-binder abstain). Scoped to
     # homeowners_insurance binders — never a divorce_decree that happens to carry an effective_date field.
     values: dict[object, str] = {}
+    read_from: dict[object, str] = {}  # LP-647 §1 group A — the binder each date came from
     for entry in snapshot.documents.entries:
         if entry.document_type != "homeowners_insurance":
             continue
@@ -1701,24 +1748,30 @@ def _loan_effective_date(
         if tag is None or str(tag.value) == _UNKNOWN:
             continue
         raw = str(tag.value)
-        values[coerce_date(raw) or raw] = raw
+        date_key = coerce_date(raw) or raw
+        values[date_key] = raw
+        read_from.setdefault(date_key, entry.content_id)
     if not values:
         return _UNKNOWN, "no homeowners insurance binder states an effective date in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        # EVERY binder, because the finding IS the disagreement between them.
+        return (
+            _UNKNOWN,
             f"the file's homeowners insurance binders disagree on the effective date "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            tuple(read_from.values()),
         )
-    effective = next(iter(values.values()))
+    chosen, effective = next(iter(values.items()))
     return (
         effective,
         f"the loan's insurance effective date {effective} (from the homeowners binder)",
+        (read_from[chosen],),  # the ONE binder this date came from
     )
 
 
 def _ins_policy_expired(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.policy_expired — has the homeowners policy already lapsed as at the file date? (LP-509-D1)
 
     ⚠️ COMPARED TO THE SNAPSHOT'S OWN BUILD DATE, NEVER THE CLOSING DATE, and that is the whole point.
@@ -1743,6 +1796,10 @@ def _ins_policy_expired(
 
     values: dict[date, str] = {}
     unparseable = False
+    # LP-647 §1 group A — the BINDERS this verdict rests on. The loop already visits each one; it
+    # discarded the entry after reading its tag, so the finding could name the expiry date and not
+    # the policy that states it.
+    read_from: dict[date, str] = {}
     for entry in snapshot.documents.entries:
         if entry.document_type != "homeowners_insurance":
             continue
@@ -1755,6 +1812,7 @@ def _ins_policy_expired(
             unparseable = True
             continue
         values[parsed] = raw
+        read_from.setdefault(parsed, entry.content_id)
 
     if unparseable and not values:
         return _UNKNOWN, (
@@ -1764,18 +1822,24 @@ def _ins_policy_expired(
     if not values:
         return _UNKNOWN, "no homeowners insurance binder states an expiration date in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        # EVERY binder, because the finding is about their DISAGREEMENT — a processor comparing them
+        # needs all the documents in the comparison, not one of them.
+        return (
+            _UNKNOWN,
             f"the file's homeowners insurance binders disagree on the expiration date "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            tuple(read_from[d] for d in sorted(read_from)),
         )
 
     expires_on, raw = next(iter(values.items()))
     as_at = snapshot.created_at.date()
     if expires_on < as_at:
         lapsed_days = (as_at - expires_on).days
-        return "yes", (
+        return (
+            "yes",
             f"the homeowners insurance policy expired {raw} — {lapsed_days} day(s) before the file "
-            f"date {as_at.isoformat()}, so the property is currently uninsured"
+            f"date {as_at.isoformat()}, so the property is currently uninsured",
+            (read_from[expires_on],),  # the ONE binder whose date this is
         )
     return "no", (
         f"the homeowners insurance policy runs to {raw}, which is on or after the file date "
@@ -2040,6 +2104,60 @@ def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
         return True
     shorter, longer = (clause, lender) if len(clause) < len(lender) else (lender, clause)
     return len(shorter) >= _IH2_MIN_PREFIX_TOKENS and longer[: len(shorter)] == shorter
+
+
+def _documents_stating(snapshot: Snapshot, *tag_ids: str) -> tuple[str, ...]:
+    """The DOCUMENT subjects carrying any of ``tag_ids`` with a real value (LP-647 §1 group A).
+
+    The companion to `_parsed_strings`, which gathers the VALUES across subjects and discards which
+    subject each came from — the discard that left a finding able to quote a figure and unable to
+    name the page it is on.
+
+    Document subjects only: a subject key is a content id, and `document_id_by_content_id` resolves
+    exactly those. A loan- or borrower-keyed tag contributes nothing rather than a link that would be
+    dropped downstream, so the caller does not have to filter.
+
+    Order follows subject order, which is the snapshot's document order — stable across runs, so a
+    finding's document list does not reshuffle between two runs that found the same thing.
+    """
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return ()
+    document_ids = {entry.content_id for entry in snapshot.documents.entries}
+    out: list[str] = []
+    for subject_id, tags in snapshot.tags.by_subject.items():
+        if subject_id not in document_ids:
+            continue
+        for tag_id in tag_ids:
+            tag = tags.get(tag_id)
+            if tag is not None and str(tag.value) != _UNKNOWN and str(tag.value).strip():
+                out.append(subject_id)
+                break
+    return tuple(out)
+
+
+def _documents_dated(snapshot: Snapshot, tag_id: str, wanted: date) -> tuple[str, ...]:
+    """The document subjects whose ``tag_id`` parses to ``wanted`` (LP-647 §1 group B).
+
+    `_age_in_months_at_closing` is handed a DATE by its `pick` policy, not the subject the date came
+    from, and the two callers pick differently (most-recent for a credit report, earliest elsewhere).
+    Rather than change a shared policy signature for provenance, the chosen date is matched back.
+
+    Names only the documents carrying THAT date — the sentence says "the credit report dated X is N
+    months old", which is about the document it aged, not every credit report on the file.
+    """
+    if snapshot.tags.absent or snapshot.documents.absent:
+        return ()
+    document_ids = {entry.content_id for entry in snapshot.documents.entries}
+    out: list[str] = []
+    for subject_id, tags in snapshot.tags.by_subject.items():
+        if subject_id not in document_ids:
+            continue
+        tag = tags.get(tag_id)
+        if tag is None or str(tag.value) == _UNKNOWN:
+            continue
+        if coerce_date(str(tag.value)) == wanted:
+            out.append(subject_id)
+    return tuple(out)
 
 
 def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
@@ -2447,7 +2565,7 @@ _CONDO_FIDELITY_EXEMPT_MAX_UNITS = 20
 
 def _condo_fidelity_coverage(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.condo_fidelity_coverage — does the project's master policy EVIDENCE fidelity/crime cover? (CO-3)
 
     ⚠️ THIS IS THE ONE CONDO-INSURANCE QUESTION NO LIVE RULE ASKS. IH-7's spec header excludes fidelity
@@ -2469,6 +2587,10 @@ def _condo_fidelity_coverage(
             else "the subject property is not a condominium — no project fidelity coverage is required"
         )
 
+    # LP-647 §1 group A — the policies this answer is read FROM. Every branch below except the
+    # no-policy one is a claim about what a master policy says, so each names the policies that say
+    # it; the no-policy branch names nothing because there is nothing to open.
+    stating = _documents_stating(snapshot, "condo.fidelity_present_raw")
     has_policy = any(
         entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
         for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
@@ -2519,19 +2641,23 @@ def _condo_fidelity_coverage(
         # fell to the unrecognised branch, and reported sorted(answers)[0]: "the indicator reads 'no',
         # which is not a recognised yes/no answer". 'no' IS recognised; the reason was false and it hid a
         # contradiction BETWEEN DOCUMENTS.
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's master policies disagree about fidelity/crime coverage "
-            f"({', '.join(sorted(answers))}) — abstaining rather than picking one"
+            f"({', '.join(sorted(answers))}) — abstaining rather than picking one",
+            stating,  # ALL of them — the finding is the disagreement
         )
-    return _UNKNOWN, (
+    return (
+        _UNKNOWN,
         f"the master policy's fidelity/crime indicator reads {sorted(answers)[0]!r}, which is not a "
-        "recognised yes/no answer — abstaining rather than reporting the project as uncovered"
+        "recognised yes/no answer — abstaining rather than reporting the project as uncovered",
+        stating,
     )
 
 
 def _condo_reserve_adequacy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.reserve_adequacy — do the HOA's budgeted replacement reserves meet the floor? (CO-4)
 
     ⚠️ THE FLOOR IS DATE-KEYED, and the date is the APPLICATION's, never today's. Fannie LL-2026-03 raises
@@ -2552,6 +2678,9 @@ def _condo_reserve_adequacy(
     # real data (6/59, four of them "10"); the condo questionnaire's is the same fact from the association's
     # own form. Read together so a disagreement ABSTAINS instead of one silently overriding the other —
     # IH-7's no-cross-document-pooling finding, applied across document TYPES rather than copies.
+    # LP-647 §1 group A — the HOA statement / questionnaire that STATES the percentage. Both verdicts
+    # quote that figure, so both name the documents it was read from.
+    stating = _documents_stating(snapshot, "condo.reserve_pct")
     reserve_pct, problem = _condo_decimal(snapshot, "condo.reserve_pct")
     if problem is not None:
         return _UNKNOWN, problem
@@ -2604,14 +2733,18 @@ def _condo_reserve_adequacy(
         else "Fannie Mae Selling Guide B4-2.2-02 (08/05/2026)"
     )
     if reserve_pct < floor:
-        return "inadequate", (
+        return (
+            "inadequate",
             f"the association budgets {reserve_pct}% of its annual assessment income to replacement "
             f"reserves, below the {floor}% required for an application dated {application_date} "
-            f"({citation})"
+            f"({citation})",
+            stating,
         )
-    return "adequate", (
+    return (
+        "adequate",
         f"the association budgets {reserve_pct}% of its annual assessment income to replacement reserves, "
-        f"at or above the {floor}% required for an application dated {application_date} ({citation})"
+        f"at or above the {floor}% required for an application dated {application_date} ({citation})",
+        stating,
     )
 
 
@@ -2772,7 +2905,7 @@ def _condo_project_eligibility(
 
 def _condo_master_policy(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.condo_master_policy — is the condo master policy present and adequate? (IH-7)
 
     LOAN-scoped, because ``absent`` is a statement about the FILE and no per-document tag can be
@@ -2797,15 +2930,23 @@ def _condo_master_policy(
     # number failed to extract reported "absent" and FIRED, telling a processor to request a document
     # already in front of them. That contradicts this recipe's own discipline two branches down, where an
     # unreadable basis abstains "rather than inferring". A present-but-unreadable document abstains.
-    has_document = any(
-        entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
+    # LP-647 §1 group A — the master-policy DOCUMENTS, not just whether one exists. Every branch
+    # below except "absent" is a claim ABOUT these documents ("no number could be read from it", "the
+    # documents state different bases"), so every one of them has a page a processor would open. The
+    # absent branch names nothing, correctly: there is no document.
+    policy_docs = tuple(
+        entry.content_id
         for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+        if entry.document_type in _CONDO_MASTER_POLICY_DOC_TYPES
     )
+    has_document = bool(policy_docs)
     if not _parsed_strings(snapshot, "condo.master_policy_number"):
         if has_document:
-            return _UNKNOWN, (
+            return (
+                _UNKNOWN,
                 "the file carries a condominium master-policy document but no policy number could be "
-                "read from it — abstaining rather than reporting the policy as missing"
+                "read from it — abstaining rather than reporting the policy as missing",
+                policy_docs,
             )
         return "absent", (
             "the property is a condominium but the file carries no master insurance policy stating a "
@@ -2814,13 +2955,15 @@ def _condo_master_policy(
 
     bases = _parsed_strings(snapshot, "condo.master_policy_basis_raw")
     if not bases:
-        return _UNKNOWN, "the master policy does not state a replacement-cost basis"
+        return _UNKNOWN, "the master policy does not state a replacement-cost basis", policy_docs
     normalised = {_master_policy_basis(b) for b in bases}
     if None in normalised:
         unrecognised = [b for b in bases if _master_policy_basis(b) is None]
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the master policy's coverage basis reads {unrecognised[0]!r}, which is not a recognised "
-            "replacement-cost or actual-cash-value term — abstaining rather than inferring"
+            "replacement-cost or actual-cash-value term — abstaining rather than inferring",
+            policy_docs,
         )
     # ⚠️ NO CROSS-DOCUMENT POOLING (reported finding). These values are gathered across EVERY master-policy
     # document with no pairing, so two certificates — a current one and a superseded one — were being
@@ -2829,36 +2972,44 @@ def _condo_master_policy(
     # Disagreement is not a finding, it is an unresolved subject: abstain, exactly as _file_lender_name
     # does directly above and as the two-binder housing.insurance_monthly rule does.
     if len(normalised) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's master-policy documents state different coverage bases "
             f"({', '.join(sorted(str(b) for b in normalised))}) — abstaining rather than judging one "
-            "policy by another's terms"
+            "policy by another's terms",
+            policy_docs,  # ALL of them — the finding is the disagreement between them
         )
     if normalised != {"replacement_cost"}:
-        return "present_inadequate", (
+        return (
+            "present_inadequate",
             "the condominium master policy is written on an actual-cash-value basis; Fannie Mae "
-            "B7-3-03 requires coverage equal to at least 100% of replacement cost"
+            "B7-3-03 requires coverage equal to at least 100% of replacement cost",
+            policy_docs,
         )
 
     limits = _parsed_strings(snapshot, "condo.master_liability_limit")
     if not limits:
-        return _UNKNOWN, "the master policy does not state a general liability limit"
+        return _UNKNOWN, "the master policy does not state a general liability limit", policy_docs
     parsed_limits: list[Decimal] = []
     for value in limits:
         try:
             parsed_limits.append(Decimal(value.replace(",", "").replace("$", "").strip()))
         except (InvalidOperation, ValueError):
-            return _UNKNOWN, (
+            return (
+                _UNKNOWN,
                 f"the master policy's general liability limit reads {value!r}, which is not a number — "
-                "abstaining rather than treating it as zero"
+                "abstaining rather than treating it as zero",
+                policy_docs,
             )
     # ⚠️ Same reasoning as the basis above: `min()` across unrelated certificates judged the CURRENT
     # policy by a SUPERSEDED one's limit — a live $2,000,000 certificate beside an old $500,000 one fired.
     if len({*parsed_limits}) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             "the file's master-policy documents state different general liability limits "
             f"({', '.join(f'${v:,}' for v in sorted(set(parsed_limits)))}) — abstaining rather than "
-            "judging the policy by the lowest figure on file"
+            "judging the policy by the lowest figure on file",
+            policy_docs,
         )
     lowest = min(parsed_limits)
     if lowest < _CONDO_MIN_LIABILITY_PER_OCCURRENCE:
@@ -2993,8 +3144,12 @@ def _credit_tradeline_monthly_payment_total(
     total = Decimal(0)
     seen = False
     for row in rows:
+        # bug-010 — a row field can be a `PiiField` where its list declares one (`ListSpec.pii`), and
+        # a masked field holds a display, not a value. `monthly_payment` is never declared sensitive —
+        # an amount is not an identifier — so the narrow is a type guard, not a behaviour change: it
+        # cannot skip a payment that exists.
         field = row.fields.get("monthly_payment")
-        if field is not None and field.is_present and field.value is not None:
+        if isinstance(field, Field) and field.is_present and field.value is not None:
             try:
                 total += Decimal(str(field.value))
                 seen = True
@@ -3100,7 +3255,7 @@ def _norm_address(raw: str) -> str:
 
 def _property_address_match(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """property.address_normalized_match — does the purchase contract's SUBJECT-PROPERTY address match the loan
     file's (1003/MISMO) subject-property address? Unblocks PC-3.
 
@@ -3126,19 +3281,28 @@ def _property_address_match(
             "no documents in the file — no purchase contract to read a property address from",
         )
     contract_addrs: dict[str, str] = {}  # normalized -> an original rendering (for the reason)
+    # LP-647 §1 group A — the CONTRACT each address came from. Every branch below is a claim about a
+    # purchase contract, so every branch has a document a processor would open to check it.
+    from_contract: dict[str, str] = {}
     for entry in snapshot.documents.entries:
         if entry.document_type != "purchase_agreement":
             continue
         field = entry.fields.get("property_address")
         if isinstance(field, Field) and field.is_present and str(field.value).strip():
             raw = str(field.value).strip()
-            contract_addrs[_norm_address(raw)] = raw
+            norm = _norm_address(raw)
+            contract_addrs[norm] = raw
+            from_contract.setdefault(norm, entry.content_id)
     if not contract_addrs:
         return _UNKNOWN, "no purchase contract states a property address"
     if len(contract_addrs) > 1:
-        return _UNKNOWN, (
+        # ALL of them: the finding IS the disagreement, so a processor reconciling it needs each
+        # contract, not one of them.
+        return (
+            _UNKNOWN,
             "the file's purchase contracts disagree on the property address "
-            f"({', '.join(sorted(contract_addrs.values()))}) — ambiguous"
+            f"({', '.join(sorted(contract_addrs.values()))}) — ambiguous",
+            tuple(from_contract.values()),
         )
     contract_norm, contract_raw = next(iter(contract_addrs.items()))
 
@@ -3148,19 +3312,27 @@ def _property_address_match(
         _mismo_str(snapshot, k) for k in _MISMO_PROPERTY_ADDRESS_KEYS
     )
     if not (line and city and state and postal):
-        return _UNKNOWN, (
+        # The MISMO side is what is missing, and MISMO is not a document in the catalog — but the
+        # contract IS what a processor would open to see the address that could not be compared.
+        return (
+            _UNKNOWN,
             "the loan file (1003/MISMO) does not state a complete subject-property address — cannot compare "
-            "(never a comparison against a partial or mailing address)"
+            "(never a comparison against a partial or mailing address)",
+            (from_contract[contract_norm],),
         )
     file_raw = " ".join(p for p in (line, line2, city, state, postal) if p)
     if contract_norm == _norm_address(file_raw):
-        return "yes", (
+        return (
+            "yes",
             f"the purchase contract's property address matches the loan file's subject property "
-            f"('{contract_raw}' vs the file's '{file_raw}')"
+            f"('{contract_raw}' vs the file's '{file_raw}')",
+            (from_contract[contract_norm],),
         )
-    return "no", (
+    return (
+        "no",
         f"the purchase contract is for '{contract_raw}' but the loan file states the subject property is "
-        f"'{file_raw}' — confirm they describe the same property"
+        f"'{file_raw}' — confirm they describe the same property",
+        (from_contract[contract_norm],),  # the contract whose address disagrees
     )
 
 
@@ -3177,7 +3349,7 @@ def _property_address_match(
 
 def _contract_days_until_closing(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """contract.days_until_closing — SIGNED days from the file (snapshot) date to the loan's closing date.
 
     Positive = the closing date is in the FUTURE; negative = it is in the PAST (a stale/past closing
@@ -3190,6 +3362,8 @@ def _contract_days_until_closing(
         return _UNKNOWN, "no tags materialized to read a closing date from"
     # Only PARSEABLE closing dates (a number needs a real date for the arithmetic), deduped by the parsed
     # date so one date rendered two ways is ONE value; >1 distinct parsed date → the documents disagree.
+    # LP-647 §1 group B — the documents stating the closing date; `by_subject`'s keys are content ids.
+    stating = _documents_stating(snapshot, "contract.closing_date")
     dates: dict[date, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("contract.closing_date")
@@ -3202,9 +3376,11 @@ def _contract_days_until_closing(
     if not dates:
         return _UNKNOWN, "no (parseable) closing date is stated in the file"
     if len(dates) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's documents disagree on the closing date "
-            f"({', '.join(sorted(dates.values()))}) — ambiguous"
+            f"({', '.join(sorted(dates.values()))}) — ambiguous",
+            stating,  # ALL of them — the finding is the disagreement
         )
     closing = next(iter(dates))
     days = (closing - snapshot.created_at.date()).days
@@ -3212,6 +3388,7 @@ def _contract_days_until_closing(
         str(days),
         f"the closing date {closing.isoformat()} is {days} day(s) from the file date "
         f"({'future' if days >= 0 else 'past'})",
+        stating,
     )
 
 
@@ -3386,7 +3563,7 @@ def _age_in_months_at_closing(
     label: str,
     *,
     pick: Callable[[Snapshot, str], tuple[date | None, str | None]],
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """Shared body for CR-13 / PR-6: COMPLETE calendar months from a document's date to the closing date.
 
     ⚠️ THE OPERAND SUBSTITUTION, stated where it happens: the guideline measures to the **note date**; the
@@ -3400,6 +3577,11 @@ def _age_in_months_at_closing(
     ORIGINAL effective date. Defaulting either way silently is how the 1004D regression happened.
     The CLOSING date stays abstain-on-disagreement: that is one fact restated, so a contradiction is real.
     """
+    # LP-647 §1 group B — the document whose date is being aged. `pick` returns a DATE, not which
+    # subject it came from, so the document is recovered by matching the chosen date back to the
+    # subjects stating this tag. That is exact where one document states it (the ordinary case) and
+    # names only those sharing the chosen date where several do — never every credit report on the
+    # file, because the sentence is about the one it aged.
     doc_date, why = pick(snapshot, document_date_tag)
     if doc_date is None:
         return _UNKNOWN, f"the {label} date is {why}"
@@ -3420,12 +3602,13 @@ def _age_in_months_at_closing(
         str(months),
         f"the {label} dated {doc_date.isoformat()} is {months} calendar month(s) old at the "
         f"closing date {closing.isoformat()} (a partial month counts as a full one)",
+        _documents_dated(snapshot, document_date_tag, doc_date),
     )
 
 
 def _credit_report_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """credit.report_age_months_at_closing — calendar months from the credit pull to closing (CR-13).
 
     MOST RECENT pull: B1-1-03 ages the credit documents from the newest report, so a re-pull resets it.
@@ -3437,7 +3620,7 @@ def _credit_report_age_months(
 
 def _appraisal_age_months(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """property.appraisal_age_months_at_closing — calendar months from the appraisal's EFFECTIVE date to
     closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date.
 
@@ -4125,7 +4308,7 @@ def _fha_ufmip_percent(
 
 def _condo_questionnaire_present(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.questionnaire_present — does the file carry a condo questionnaire? (CO-1, LP-488)
 
     ⚠️ A DOCUMENT-TYPE PRESENCE READ — the classifier's type label, never extracted fields (the
@@ -4140,9 +4323,23 @@ def _condo_questionnaire_present(
             _UNKNOWN,
             "the file carries no documents, so the questionnaire's absence cannot be read",
         )
-    types = {entry.document_type for entry in snapshot.documents.entries}
-    if types & _CONDO_QUESTIONNAIRE_DOC_TYPES:
-        return "yes", "the file carries a condo questionnaire"
+    # LP-647 §1 group A — the ENTRIES, not just their types. This built a set of type strings and
+    # discarded the documents, so a "yes" could say the file carries a questionnaire and not WHICH,
+    # and CO-1's finding rendered with nothing to open.
+    #
+    # DROPPING A `None` document_type here is inert ONLY because both sets below are CLOSED LITERALS
+    # ({"condo_questionnaire"}, {"hoa_certification"}), so `types & <set>` could never have selected
+    # None and the old set's None membership was dead. If either set ever becomes data-driven — a
+    # catalog lookup, a spec value — a None could enter it and these two versions diverge. The thing
+    # that would break is the SET's construction elsewhere, which is why this is a note here rather
+    # than a test.
+    by_type: dict[str, list[str]] = {}
+    for entry in snapshot.documents.entries:
+        if entry.document_type is not None:
+            by_type.setdefault(entry.document_type, []).append(entry.content_id)
+    types = set(by_type)
+    if found := [cid for t in sorted(types & _CONDO_QUESTIONNAIRE_DOC_TYPES) for cid in by_type[t]]:
+        return "yes", "the file carries a condo questionnaire", tuple(found)
     # ⚠️ ABSTAIN ON THE ADJACENT TYPE (reported finding). `hoa_certification` is a sibling Tier-1 type the
     # classifier is explicitly told is confusable with this one ("the project-eligibility certification,
     # distinct from ... condo_questionnaire"), and it carries the very facts CO-1's how_to_fix asks for —
@@ -4150,10 +4347,16 @@ def _condo_questionnaire_present(
     # holding one is the IH-7 defect again: telling a processor to fetch a document already in front of
     # them. Whether a certification SATISFIES the project review is a domain call, so this abstains rather
     # than answering "yes" — the safe half of the fix.
-    if types & _CONDO_PROJECT_ADJACENT_DOC_TYPES:
-        return _UNKNOWN, (
+    if adjacent := [
+        cid for t in sorted(types & _CONDO_PROJECT_ADJACENT_DOC_TYPES) for cid in by_type[t]
+    ]:
+        # The CERTIFICATION is what the human is being asked to look at, so it is what the finding
+        # names — this abstention exists precisely because a document is already in front of them.
+        return (
+            _UNKNOWN,
             "the file carries an HOA/condo project certification but no questionnaire — a human must "
-            "confirm whether the certification satisfies the project review"
+            "confirm whether the certification satisfies the project review",
+            tuple(adjacent),
         )
     return "no", "no document in the file is classified as a condo questionnaire"
 
@@ -5768,7 +5971,7 @@ def _stated_liabilities_all(snapshot: Snapshot) -> list[dict[str, str]]:
 
 def _stmt_continuity(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """stmt.continuity — do each account's consecutive statements CHAIN (statement N's ending balance ==
     statement N+1's beginning balance)? Unblocks AS-8.
 
@@ -5825,12 +6028,13 @@ def _stmt_continuity(
 
     by_subject = {} if snapshot.tags.absent else snapshot.tags.by_subject
     saw_break = saw_unknown = saw_chained = False
+    break_sources: tuple[str, ...] = ()  # LP-647 §1 — the two statements that disagree
     break_detail: str | None = (
         None  # the FIRST break's account + balances — an ACTIONABLE reason (AS-8 fires
     )
     # on this, and its finding carries this as provenance, so the processor knows WHICH account/gap to fix).
     for (account_key, _borrower), content_ids in groups.items():
-        stmts: list[tuple[date, Decimal | None, Decimal | None]] = []
+        stmts: list[tuple[date, Decimal | None, Decimal | None, str]] = []
         period_unreadable = False
         for cid in content_ids:
             tags = by_subject.get(cid, {})
@@ -5841,11 +6045,15 @@ def _stmt_continuity(
             if start is None:
                 period_unreadable = True
                 continue
+            # LP-647 §1 — the CONTENT_ID rides along. This recipe knows exactly which two statements
+            # disagree; without carrying their ids the finding could say the balances and not the
+            # documents, and a processor was told the chain breaks without being told where to look.
             stmts.append(
                 (
                     start,
                     _decimal_or_none(tags.get("stmt.beginning_balance")),
                     _decimal_or_none(tags.get("stmt.ending_balance")),
+                    cid,
                 )
             )
         if len(stmts) < 2:
@@ -5863,7 +6071,7 @@ def _stmt_continuity(
             continue
         stmts.sort(key=lambda s: s[0])
         account_result: str | None = None
-        for (_s0, _b0, end_n), (_s1, begin_n1, _e1) in pairwise(stmts):
+        for (_s0, _b0, end_n, cid_n), (_s1, begin_n1, _e1, cid_n1) in pairwise(stmts):
             if end_n is None or begin_n1 is None:
                 account_result = "unknown"  # a balance we could not read → cannot confirm the chain
                 break
@@ -5879,6 +6087,10 @@ def _stmt_continuity(
                         f"the {locator} account's statements do not chain — an ending balance of {end_n} "
                         f"does not carry into the next statement's opening balance of {begin_n1}"
                     )
+                    # The PAIR that disagrees, in order, and only the first break — the message names
+                    # one break, so naming more documents than the sentence explains would send a
+                    # processor to statements the finding says nothing about.
+                    break_sources = (cid_n, cid_n1)
                 break
         if account_result == "broken":
             saw_break = True
@@ -5895,6 +6107,7 @@ def _stmt_continuity(
                 or "an account's consecutive statements do not chain — an ending balance does not carry into "
                 "the next statement's opening balance"
             ),
+            break_sources,
         )
     if saw_unknown:
         return _UNKNOWN, (
@@ -6140,7 +6353,7 @@ def _income_has_rental_income(
 
 def _loan_sales_price(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """contract.loan_sales_price — the loan's single contract sales price, promoted to LOAN level from the
     document-subject contract.sales_price (contract.sales_price itself stays a document fact). Mirrors
     _loan_closing_date (LP-389-A): a loan-enumerated rule cannot read a per-document tag, so PC-2 reads THIS
@@ -6151,6 +6364,9 @@ def _loan_sales_price(
         return _UNKNOWN, "no tags materialized to read a contract sales price from"
     # Dedup by the parsed Decimal (Decimal("365000") == Decimal("365000.00")), so one price rendered two
     # ways is ONE value; >1 distinct value → the documents disagree.
+    # LP-647 §1 group B — the documents STATING the price. `by_subject`'s keys are content ids, so
+    # the answer was one lookup away and was being discarded with the loop variable.
+    stating = _documents_stating(snapshot, "contract.sales_price")
     values: dict[Decimal, str] = {}
     for tags in snapshot.tags.by_subject.values():
         tag = tags.get("contract.sales_price")
@@ -6160,12 +6376,18 @@ def _loan_sales_price(
     if not values:
         return _UNKNOWN, "no contract sales price is stated in the file"
     if len(values) > 1:
-        return _UNKNOWN, (
+        return (
+            _UNKNOWN,
             f"the file's documents disagree on the contract sales price "
-            f"({', '.join(sorted(values.values()))}) — ambiguous"
+            f"({', '.join(sorted(values.values()))}) — ambiguous",
+            stating,  # ALL of them — the finding is the disagreement
         )
     price = next(iter(values))
-    return str(price), f"the loan's contract sales price {price} (from the purchase agreement)"
+    return (
+        str(price),
+        f"the loan's contract sales price {price} (from the purchase agreement)",
+        stating,  # every document stating it: they agree, and each is a page that shows the figure
+    )
 
 
 def _housing_taxes_monthly(
@@ -6934,7 +7156,10 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
         raise KeyError(f"unknown derived recipe {decl.data!r} (known: {sorted(_RECIPES)})")
     out: dict[str, dict[str, Tag]] = {}
     for subject_id, subject_raw in subject_type(decl.subject).enumerate(snapshot):
-        value, reasoning = recipe(snapshot, subject_id, subject_raw)
+        produced = recipe(snapshot, subject_id, subject_raw)
+        # LP-647 §1 — the third element is optional; see the `Recipe` alias.
+        value, reasoning = produced[0], produced[1]
+        named_sources = produced[2] if len(produced) == 3 else ()
         if value is None:
             # A recipe returns ``None`` to DECLINE producing a tag for an out-of-scope subject (LP-447) —
             # e.g. a per-document recipe scoped to one document_type. Skip it, so a document-subject derived
@@ -6945,7 +7170,10 @@ def produce_derived_tags(decl: TagDeclaration, snapshot: Snapshot) -> dict[str, 
                 value=value,
                 confidence=None,
                 reasoning=reasoning,
-                source_facts=(subject_id,),
+                # LP-647 §1 — what the recipe READ, where it can say so; the subject otherwise.
+                # A loan-subject recipe's `subject_id` is the string "loan", which names no document,
+                # so a recipe that knows its documents must be able to say them or the finding cannot.
+                source_facts=named_sources or (subject_id,),
                 produced_by=TagProducedBy.DERIVED,
                 tag_role=TagRole.STRUCTURAL_FACT,
                 stage=TagStage.A,

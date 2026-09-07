@@ -123,6 +123,51 @@ def _scoped(company_id: UUID) -> Select[tuple[LoanFile]]:
     return stmt
 
 
+def _apply_filters(
+    base: Select[tuple[LoanFile]],
+    *,
+    statuses: list[LoanFileStatus] | None,
+    search: str | None,
+) -> Select[tuple[LoanFile]]:
+    """The pipeline's filter vocabulary, in one place.
+
+    Extracted so a COUNT for the same filters cannot drift from the LIST it
+    counts — a saved view showing "4" beside a list of six is worse than showing
+    no number at all.
+    """
+    if statuses:
+        base = base.where(LoanFile.status.in_(statuses))
+    if search:
+        pattern = f"%{search}%"
+        # Files whose display_id matches, OR that have an active borrower whose
+        # full name matches. The borrower subquery is joined by loan_file_id; the
+        # outer query stays company-scoped, so a cross-company match can't leak.
+        borrower_match = (
+            select(Borrower.loan_file_id)
+            .where(Borrower.deleted_at.is_(None))
+            .where((Borrower.first_name + " " + Borrower.last_name).ilike(pattern))
+        )
+        base = base.where(or_(LoanFile.display_id.ilike(pattern), LoanFile.id.in_(borrower_match)))
+    return base
+
+
+async def count_loan_files(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    statuses: list[LoanFileStatus] | None = None,
+    search: str | None = None,
+) -> int:
+    """How many files match these filters — the same predicate `list_loan_files` uses.
+
+    Exists for saved-view counts (LP-UI-014). Counting them in the browser would
+    mean one `pageSize: 1` request per view, which is exactly the StatsCards
+    pattern LP-UI-013 deleted.
+    """
+    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search)
+    return (await db.scalar(select(func.count()).select_from(base.subquery()))) or 0
+
+
 async def list_loan_files(
     db: AsyncSession,
     *,
@@ -143,20 +188,7 @@ async def list_loan_files(
     another company's files. Borrowers, lender, and property are eager-loaded so
     the summary fields are built without a lazy load.
     """
-    base = _scoped(company_id)
-    if statuses:
-        base = base.where(LoanFile.status.in_(statuses))
-    if search:
-        pattern = f"%{search}%"
-        # Files whose display_id matches, OR that have an active borrower whose
-        # full name matches. The borrower subquery is joined by loan_file_id; the
-        # outer query stays company-scoped, so a cross-company match can't leak.
-        borrower_match = (
-            select(Borrower.loan_file_id)
-            .where(Borrower.deleted_at.is_(None))
-            .where((Borrower.first_name + " " + Borrower.last_name).ilike(pattern))
-        )
-        base = base.where(or_(LoanFile.display_id.ilike(pattern), LoanFile.id.in_(borrower_match)))
+    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search)
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await db.scalar(count_stmt)) or 0

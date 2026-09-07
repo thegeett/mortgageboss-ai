@@ -3,7 +3,7 @@
  * self-maintaining checklist.
  *
  * Two orthogonal lifecycles drive the display: `status` (the arrival spine) is
- * made visual + ACTION-ORIENTED via {@link STATE_META} and grouped by
+ * made visual + ACTION-ORIENTED via `lib/status.ts` and grouped by
  * {@link groupNeeds} so "what needs action" sits apart from "in review" / "done" /
  * "set aside". `disposition` drives whether a need still awaits the processor's
  * confirmation (a PROPOSED need — the AI's suggestion). `origin` is shown as a
@@ -20,58 +20,21 @@ import type {
 /** The four action-oriented groups, in display order (chase first). */
 export type NeedsGroupKey = "needs_action" | "in_review" | "complete" | "set_aside";
 
-export interface StateMeta {
-  /** Short, human label for the state (what the processor reads). */
-  label: string;
-  /** Which action-oriented group the state rolls up into. */
-  group: NeedsGroupKey;
-  /** Tailwind classes for the status dot. */
-  dotClass: string;
-  /** Tailwind classes for the status pill. */
-  pillClass: string;
-}
-
-export const STATE_META: Record<NeedsItemStatus, StateMeta> = {
-  pending: {
-    label: "Pending",
-    group: "needs_action",
-    dotClass: "bg-warning",
-    pillClass: "bg-warning/10 text-warning border-warning/20",
-  },
-  requested: {
-    label: "Requested",
-    group: "needs_action",
-    dotClass: "bg-info",
-    pillClass: "bg-info/10 text-info border-info/20",
-  },
-  rejected: {
-    label: "Needs attention",
-    group: "needs_action",
-    dotClass: "bg-destructive",
-    pillClass: "bg-destructive/10 text-destructive border-destructive/20",
-  },
-  received: {
-    // LP-108: a persisting `received` means a graded need has documents attached but the full
-    // coverage (all accounts/months/years) is unverified — the processor confirms it (the card
-    // shows the honest note + a "Confirm coverage" action). A simple-presence need never lingers
-    // here; it auto-verifies.
-    label: "Documents attached",
-    group: "in_review",
-    dotClass: "bg-info",
-    pillClass: "bg-info/10 text-info border-info/20",
-  },
-  verified: {
-    label: "Verified",
-    group: "complete",
-    dotClass: "bg-success",
-    pillClass: "bg-success/10 text-success border-success/20",
-  },
-  waived: {
-    label: "Waived",
-    group: "set_aside",
-    dotClass: "bg-gray-300",
-    pillClass: "bg-gray-100 text-gray-500 border-gray-200",
-  },
+/**
+ * Status → the action-oriented group it rolls up into.
+ *
+ * LP-UI-005 moved the LABEL and the COLOURS to `lib/status.ts` (NEEDS_STATUS),
+ * so this map carries only what is genuinely a needs-list concern: which bucket
+ * a state belongs in. The LP-108 note that used to sit on `received` is on the
+ * status there.
+ */
+export const NEEDS_GROUP: Record<NeedsItemStatus, NeedsGroupKey> = {
+  pending: "needs_action",
+  requested: "needs_action",
+  rejected: "needs_action",
+  received: "in_review",
+  verified: "complete",
+  waived: "set_aside",
 };
 
 export interface GroupMeta {
@@ -87,15 +50,6 @@ export const GROUP_META: Record<NeedsGroupKey, GroupMeta> = {
   in_review: { label: "In review", hint: "Arrived, verifying" },
   complete: { label: "Complete", hint: "Satisfied" },
   set_aside: { label: "Set aside", hint: "Waived" },
-};
-
-export const PRIORITY_META: Record<NeedsItemPriority, { label: string; className: string }> = {
-  blocking: {
-    label: "Blocking",
-    className: "bg-destructive/10 text-destructive border-destructive/20",
-  },
-  standard: { label: "Standard", className: "bg-gray-100 text-gray-600 border-gray-200" },
-  low: { label: "Low", className: "bg-gray-50 text-gray-400 border-gray-200" },
 };
 
 const SOURCE_LABELS: Record<NeedsItemOrigin, string> = {
@@ -149,7 +103,14 @@ export function groupNeeds(needs: NeedsItemPublic[]): NeedsGroup[] {
     set_aside: [],
   };
   for (const need of needs) {
-    buckets[STATE_META[need.status].group].push(need);
+    // A status this build does not know lands in `needs_action` rather than
+    // throwing. `NEEDS_GROUP[status]` would be undefined, `buckets[undefined]`
+    // undefined, and `.push` a TypeError — and NeedsDashboard calls this before
+    // rendering any card, so ONE unrecognised need blanked the whole page,
+    // including the needs it did understand. `needs_action` matches the
+    // `attention` default in `resolveStatus`: an unrecognised need is work
+    // someone has to look at, and the chase pile is where they will see it.
+    buckets[NEEDS_GROUP[need.status] ?? "needs_action"].push(need);
   }
   return GROUP_ORDER.map((key) => ({ key, meta: GROUP_META[key], items: buckets[key] })).filter(
     (group) => group.items.length > 0,
@@ -158,7 +119,11 @@ export function groupNeeds(needs: NeedsItemPublic[]): NeedsGroup[] {
 
 /** Items still needing action — the chase pile (the headline count). */
 export function outstandingNeedsCount(needs: NeedsItemPublic[]): number {
-  return needs.filter((need) => STATE_META[need.status].group === "needs_action").length;
+  // Same fallback as `groupNeeds`, for the same reason: this is the headline
+  // count beside the group it counts, and the two disagreeing is worse than
+  // either being wrong. Unguarded, this silently under-counted instead.
+  return needs.filter((need) => (NEEDS_GROUP[need.status] ?? "needs_action") === "needs_action")
+    .length;
 }
 
 /** How many AI/suggested needs still await the processor's confirmation. */

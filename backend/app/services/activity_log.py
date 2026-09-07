@@ -39,7 +39,7 @@ def audit_value(value: Any) -> Any:
 
 
 def field_changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """``[{field, from, to}]`` for every key in ``after`` whose value changed.
+    """``[{field, from, to}]`` for every key in EITHER map whose value changed.
 
     Values are :func:`audit_value`-encoded. This is the field-level change history
     behind the LP-80.5 audit — a deliberate change that **supersedes the LP-56
@@ -48,8 +48,18 @@ def field_changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[d
     the activity log is displayed (auth + tenant scoped, same as the stated data).
     """
     changes: list[dict[str, Any]] = []
-    for field, new in after.items():
+    # BOTH key sets, not just `after`'s (LP-UI-026). Iterating `after` alone
+    # cannot see a REMOVAL — a key present before and absent after — so the
+    # overlay editor's audit recorded an admin deleting an override as "no
+    # threshold changes", and the trail held no record that it ever existed.
+    #
+    # No change for the other three callers: property, stated-financials and
+    # loan-file edits all build `before` from `after`'s own keys
+    # (`{f: getattr(row, f) for f in provided}`), so the two key sets are equal
+    # by construction there and the union is the same set.
+    for field in sorted({*before, *after}):
         old = before.get(field)
+        new = after.get(field)
         if old != new:
             changes.append({"field": field, "from": audit_value(old), "to": audit_value(new)})
     return changes

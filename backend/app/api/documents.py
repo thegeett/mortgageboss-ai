@@ -17,16 +17,19 @@ picks them up). The stored ``storage_path`` is internal — never in a response;
 bytes are returned only through the auth'd ``/download`` route.
 """
 
+from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.ai.extraction import EXTRACTORS
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
-from app.documents.catalog import get_category, get_tier
+from app.documents.catalog import CATALOG, get_category, get_tier
 from app.models.activity_log import ActivityType
 from app.models.document import (
     PIPELINE_IN_FLIGHT_STATUSES,
@@ -34,6 +37,7 @@ from app.models.document import (
     DocumentStatus,
     is_pipeline_in_flight,
 )
+from app.models.field_review import FieldVerdict
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     BulkReprocessRequest,
@@ -41,6 +45,7 @@ from app.schemas.document import (
     DocumentDetailResponse,
     DocumentReprocessRequest,
     DocumentResponse,
+    DocumentTypeOption,
     DocumentTypeOverrideRequest,
     StalenessResolveRequest,
 )
@@ -53,12 +58,26 @@ from app.services.documents import (
     build_document_response,
     build_document_responses,
     create_document,
+    get_current_extraction,
     get_document_for_company,
     get_version_group_documents,
     list_documents,
     resolve_staleness,
     soft_delete_document,
     validate_upload,
+)
+from app.services.field_boxes import BoxRequest, find_all_field_boxes
+from app.services.field_reviews import (
+    FieldReviewError,
+    list_reviews,
+    record_review,
+    revert_review,
+)
+from app.services.page_render import (
+    DEFAULT_ZOOM,
+    RENDERABLE_TYPES,
+    TEXT_SEARCHABLE_TYPES,
+    render_page,
 )
 from app.services.verifications import mark_verification_stale
 from app.storage import get_storage_backend
@@ -78,6 +97,54 @@ nested_router = APIRouter(prefix="/loan-files/{file_identifier}/documents", tags
 flat_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+#: Slugs whose humanised form reads badly or wrongly. Everything else is derived, so this stays
+#: short by construction rather than becoming a second catalog.
+#:
+#: NOT THE SAME THING AS ``naming.NAME_RULES[...].label``, though they overlap and look like
+#: duplication (LP-638 review). These are DISPLAY names for a picker — spaces, slashes and
+#: parentheses are fine, because "Verification of employment (VOE)" is what a processor is looking
+#: for. Those are FILENAME components, assembled into ``{Type}_{Identifier}_{Date}``, so they must
+#: stay free of spaces and separators: the same type is "VOE" there and reads correctly in both
+#: places. ``w2`` → "W-2" agreeing in both is a coincidence of that slug being punctuation-only.
+#:
+#: So do not "fix" one to match the other. `tests/documents/test_label_vocabularies.py` pins the
+#: property that keeps them separate.
+_TYPE_LABEL_OVERRIDES: dict[str, str] = {
+    "w2": "W-2",
+    "form_1098": "Form 1098",
+    "form_4506c": "Form 4506-C",
+    "k1_statement": "K-1 statement",
+    "voe": "Verification of employment (VOE)",
+    "verification_of_deposit": "Verification of deposit (VOD)",
+    "ira_401k": "IRA / 401(k) statement",
+    "uniform_residential_loan_application": "Uniform residential loan application (1003)",
+}
+
+#: Words that are acronyms, not words, and that `capitalize` would flatten. Applied per WORD, so
+#: this covers every slug containing one instead of needing an entry per slug — which is what keeps
+#: the override map above from growing into the second catalog this ticket exists to abolish.
+_LABEL_ACRONYMS = frozenset(
+    {"aus", "cd", "cpa", "ead", "emd", "hoa", "id", "ira", "loe", "ltr", "ssa", "voe", "vod"}
+)
+
+
+def _type_label(slug: str) -> str:
+    """A human label for a catalog slug — the override, else derived word by word.
+
+    `capitalize()` alone lowercased everything after the first letter, so a processor picked from
+    "Hoa statement", "Aus findings" and "E consent disclosure" (LP-638 review). Deriving per word
+    with an acronym set fixes a dozen-plus labels without one entry each.
+    """
+    if slug in _TYPE_LABEL_OVERRIDES:
+        return _TYPE_LABEL_OVERRIDES[slug]
+    words = [word.upper() if word in _LABEL_ACRONYMS else word for word in slug.split("_") if word]
+    if not words:
+        return slug
+    first = words[0]
+    rest = words[1:]
+    return " ".join([first if first.isupper() else first.capitalize(), *rest])
+
 
 #: What the type-override endpoint writes to mean "a person chose this type" (LP-44). Named rather
 #: than spelled 1.0 inline, because it is a PROXY and readers need to see that it is one — the model
@@ -456,6 +523,37 @@ async def reprocess_documents(
     )
 
 
+@flat_router.get("/types/catalog", response_model=list[DocumentTypeOption])
+async def list_document_types(_current_user: CurrentUser) -> list[DocumentTypeOption]:
+    """Every document type a processor may correct a document to (LP-638).
+
+    THE CATALOG, NOT A COPY OF IT. The control this feeds offered eight hardcoded options written
+    when the catalog had three types. It now has 164 — so `closing_disclosure`,
+    `purchase_agreement`, `mortgage_statement` and 150-odd others could not be chosen at all, and a
+    misclassified document had no manual remedy. Two of the eight were not catalog types either, so
+    picking them set a document to a string with no tier, no category and no extractor.
+
+    Serving it from `CATALOG` is what stops that recurring: a type added to the catalog is
+    selectable the same day, and a list that cannot drift cannot go stale again.
+
+    Sorted by label within category so the picker groups the way a processor thinks. Reference data
+    with no loan content — authenticated, but not company-scoped, because it is the same for
+    everyone.
+    """
+    return sorted(
+        (
+            DocumentTypeOption(
+                value=slug,
+                label=_type_label(slug),
+                category=category.value,
+                extracts=slug in EXTRACTORS,
+            )
+            for slug, (_tier, category) in CATALOG.items()
+        ),
+        key=lambda option: (option.category, option.label),
+    )
+
+
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def retrieve(
     document_id: UUID, current_user: CurrentUser, db: DbSession
@@ -520,6 +618,23 @@ async def override_document_type(
         )
 
     new_type = body.document_type.strip()
+    if new_type not in CATALOG:
+        # LP-638 — THE HOLE THAT PRODUCED THE PROBLEM THIS FIXES. This endpoint accepted any string,
+        # and the control feeding it offered `tax_return_1040` and `other`, neither a catalog type.
+        # Choosing one set a document to a slug with no tier, no category and no extractor — and
+        # because satisfaction matches `needs_type == document_type` exactly, a document corrected
+        # to `tax_return_1040` could never satisfy a `tax_return` need. Correcting the type made the
+        # file quietly worse, which is the opposite of what the control is for.
+        #
+        # Rejecting here rather than only fixing the dropdown: the list was one caller, and the next
+        # one would have had the same freedom. `list_document_types` serves the same CATALOG, so
+        # anything the picker can offer, this accepts.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            # No repr: this reaches a processor through the error envelope, and
+            # "'tax_return_1040' is not a known document type" reads better without Python quoting.
+            detail=f"{new_type} is not a known document type.",
+        )
     document.document_type = new_type
     # Catalog-driven (LP-58): re-derive both tier and category from the new type.
     document.tier = get_tier(new_type)
@@ -791,6 +906,285 @@ async def resolve_staleness_endpoint(
     )
     await db.commit()
     return await build_document_response(db, document=document)
+
+
+class FieldBoxPublic(BaseModel):
+    """One field's location on the page, normalised 0..1 (LP-UI-031)."""
+
+    field_key: str
+    page: int
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+class FieldBoxesResponse(BaseModel):
+    """Where each extracted field's value sits on the document.
+
+    A field is ABSENT from `boxes` when its text could not be located — measured
+    at roughly a quarter of real fields (no text layer, snippet not present, or a
+    citation naming a page the document does not have). The reviewer's no-box
+    state is ordinary, so absence here is a result rather than a failure.
+    """
+
+    boxes: list[FieldBoxPublic]
+    #: Fields whose extraction cited a page the document does not have. Surfaced
+    #: rather than silently corrected: the box may have been found elsewhere, and
+    #: a screen that quietly substitutes a better page stops being a provenance
+    #: trail. Measured at 4.3% of fields, and never an off-by-one — not one field
+    #: cites a wrong-but-existing page.
+    fabricated_pages: list[str]
+    #: Fields whose text was found on a page other than the one cited.
+    relocated: list[str]
+
+
+class FieldReviewRequest(BaseModel):
+    """Record a verdict on one extracted field (LP-UI-033, LP-703)."""
+
+    field_key: str = Field(min_length=1, max_length=100)
+    verdict: FieldVerdict
+    #: Required for CORRECTED and ADDED, forbidden otherwise.
+    corrected_value: str | None = Field(default=None, max_length=1000)
+    #: Required for REJECTED and REMOVED — an unverifiable field with no reason tells
+    #: the next processor nothing, and a field taken OUT with no reason leaves them an
+    #: absence with no account of who made it.
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class FieldReviewPublic(BaseModel):
+    """One live verdict."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    field_key: str
+    verdict: FieldVerdict
+    corrected_value: str | None
+    note: str | None
+    reviewed_by_user_id: UUID | None
+    created_at: datetime
+
+    #: `replaced_value` is NOT here. It holds the extracted value a correction
+    #: overruled — as sensitive as the correction itself, and dropped from the
+    #: readonly views for that reason. The screen already shows what the model read,
+    #: beside the correction, from the extraction; a second copy on this response
+    #: would be the same identifier travelling a second path for no new information.
+
+
+@flat_router.get("/{document_id}/reviews", response_model=list[FieldReviewPublic])
+async def list_field_reviews(
+    document_id: UUID, current_user: CurrentUser, db: DbSession
+) -> list[FieldReviewPublic]:
+    """Every live verdict on this document's CURRENT extraction (LP-UI-033).
+
+    Scoped to the current version deliberately: a verdict on a superseded
+    extraction described a value that may no longer be there.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is None:
+        return []
+    reviews = await list_reviews(db, extraction_id=extraction.id)
+    return [FieldReviewPublic.model_validate(r) for r in reviews]
+
+
+@flat_router.put("/{document_id}/reviews", response_model=FieldReviewPublic)
+async def record_field_review(
+    document_id: UUID, body: FieldReviewRequest, current_user: CurrentUser, db: DbSession
+) -> FieldReviewPublic:
+    """Decide about one field: accept, correct, reject, remove or add (LP-UI-033, LP-703).
+
+    PUT rather than POST: a field has at most one live verdict, and re-deciding is
+    replacing it, not adding a second.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This document has no extraction to review yet.",
+        )
+    # A verdict on a field the extraction does not carry is a client bug, and
+    # storing it would put a row in the table that no screen can ever show.
+    #
+    # EXCEPT `added`, which is the operation for exactly that case (LP-703): the
+    # model missed a field and a processor is supplying it, so the key being absent
+    # here is the precondition rather than the error. The service checks the harder
+    # question — that the key is one the DOCUMENT TYPE declares — because a key no
+    # schema names is data no rule can read, and this endpoint has no business
+    # holding a second copy of that rule.
+    data = extraction.extracted_data if isinstance(extraction.extracted_data, dict) else {}
+    if body.verdict is not FieldVerdict.ADDED and body.field_key not in data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This extraction has no field {body.field_key!r}.",
+        )
+    try:
+        review = await record_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key=body.field_key,
+            verdict=body.verdict,
+            corrected_value=body.corrected_value,
+            note=body.note,
+            actor_user_id=current_user.id,
+        )
+    except FieldReviewError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await db.commit()
+    await db.refresh(review)
+    return FieldReviewPublic.model_validate(review)
+
+
+@flat_router.delete("/{document_id}/reviews/{field_key}", status_code=status.HTTP_204_NO_CONTENT)
+async def revert_field_review(
+    document_id: UUID, field_key: str, current_user: CurrentUser, db: DbSession
+) -> Response:
+    """Withdraw the verdict on one field. Idempotent — 204 whether or not there was one."""
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    if extraction is not None:
+        await revert_review(
+            db,
+            document=document,
+            extraction=extraction,
+            field_key=field_key,
+            actor_user_id=current_user.id,
+        )
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@flat_router.get("/{document_id}/boxes", response_model=FieldBoxesResponse)
+async def field_boxes(
+    document_id: UUID, current_user: CurrentUser, db: DbSession
+) -> FieldBoxesResponse:
+    """Locate every extracted field's snippet in the document (LP-UI-031).
+
+    Read-only, and behind the same tenant gate as the bytes — a box is derived
+    from the document's own text, so it is as sensitive as the page it describes.
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    extraction = await get_current_extraction(db, document=document)
+    fields = (extraction.extracted_data or {}) if extraction is not None else {}
+    if document.mime_type not in TEXT_SEARCHABLE_TYPES or not isinstance(fields, dict):
+        return FieldBoxesResponse(boxes=[], fabricated_pages=[], relocated=[])
+
+    storage = get_storage_backend()
+    content = await storage.read(document.storage_path)
+
+    requests: dict[str, BoxRequest] = {}
+    for key, field in fields.items():
+        if not isinstance(field, dict) or field.get("value") is None:
+            continue
+        source = field.get("source") or {}
+        snippet, page = source.get("snippet"), source.get("page")
+        if not isinstance(snippet, str) or not isinstance(page, int):
+            continue
+        # The VALUE travels with the request (LP-706/709): it is the last-resort
+        # needle when the quoted text is nowhere on the page, and a value-tier match
+        # is held to a stricter rule than a quoted-text one.
+        requests[key] = BoxRequest(snippet=snippet, value=str(field["value"]), cited_page=page)
+
+    # One open for the whole document, not one per field (see the service).
+    lookups = await find_all_field_boxes(content, requests)
+
+    boxes: list[FieldBoxPublic] = []
+    fabricated: list[str] = []
+    relocated: list[str] = []
+    for key, found in lookups.items():
+        if not found.cited_page_exists:
+            fabricated.append(key)
+        if found.found_elsewhere:
+            relocated.append(key)
+        boxes.extend(
+            FieldBoxPublic(field_key=key, page=box.page, x0=box.x0, y0=box.y0, x1=box.x1, y1=box.y1)
+            for box in found.boxes
+        )
+    return FieldBoxesResponse(boxes=boxes, fabricated_pages=fabricated, relocated=relocated)
+
+
+@flat_router.get("/{document_id}/page/{page_number}")
+async def page_image(
+    document_id: UUID,
+    page_number: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    zoom: float = DEFAULT_ZOOM,
+) -> Response:
+    """One page of the document, rendered to PNG (LP-UI-030).
+
+    Behind the same tenant gate as `/download` — a rendered page is the document's
+    content, so it is exactly as sensitive as the bytes and gets the same 404 for
+    another company's file.
+
+    PDFs AND IMAGES. Uploads have accepted image/jpeg and image/png since LP-36
+    while this endpoint refused them, so a photographed pay stub uploaded happily
+    and then showed the no-page state for ever — which reads as "still loading",
+    not as "cannot show this" (LP-704). MuPDF opens an image as a one-page
+    document, so it travels the same path with the same headers.
+
+    `404` for a page the document does not have, and for a type MuPDF cannot open:
+    the reviewer has a designed no-page state, and it is reachable often enough to
+    matter — 12 of 105 stored PDFs are scans with no text layer, and a model-cited
+    page is out of range on ~4% of extracted fields.
+
+    The page geometry travels in headers rather than a second request, because a
+    caller placing a highlight needs the image AND the point-space it was rendered
+    from, and fetching those separately is how the two drift. `X-Page-Zoom` is the
+    zoom that was APPLIED, which is not always the one asked for: a page larger
+    than the render budget is scaled down (`MAX_RENDERED_EDGE`).
+    """
+    document = await get_document_for_company(
+        db, document_id=document_id, company_id=current_user.company_id
+    )
+    if document is None:
+        raise _NOT_FOUND
+    if document.mime_type not in RENDERABLE_TYPES:
+        raise _NOT_FOUND
+    storage = get_storage_backend()
+    content = await storage.read(document.storage_path)
+    rendered = await render_page(
+        content, page_number=page_number, zoom=zoom, mime_type=document.mime_type
+    )
+    if rendered is None:
+        raise _NOT_FOUND
+    return Response(
+        content=rendered.content,
+        # The renderer chooses: PNG for a PDF page, JPEG for a photograph, which
+        # is smaller than the source rather than larger than it.
+        media_type=rendered.media_type,
+        headers={
+            "X-Page-Width-Points": str(rendered.width_points),
+            "X-Page-Height-Points": str(rendered.height_points),
+            "X-Page-Zoom": str(rendered.zoom),
+            # So the reviewer can say "Page 1 of 5" and stop at the last page,
+            # rather than offering a Next that renders nothing.
+            "X-Page-Count": str(rendered.page_count),
+            # A rendered page is borrower content: it must not sit in a shared
+            # cache, and the browser may keep it only for this session.
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 @flat_router.get("/{document_id}/download")

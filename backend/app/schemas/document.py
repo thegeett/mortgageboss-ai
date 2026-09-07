@@ -72,6 +72,28 @@ class BulkReprocessResponse(BaseModel):
     skipped: dict[str, int]
 
 
+class DocumentTypeOption(BaseModel):
+    """One selectable document type for the manual-correction control (LP-638).
+
+    Served from the catalog rather than hardcoded in the frontend. The list it replaces was eight
+    entries written when there were three document types; the catalog now has 164, so a processor
+    could not correct a document to `closing_disclosure`, `purchase_agreement` or `mortgage_statement`
+    at all — and two of the eight (`tax_return_1040`, `other`) were not catalog types, so choosing
+    them set a document to a string nothing recognises.
+    """
+
+    value: str
+    label: str
+    category: str
+    #: Does choosing this type re-run structured extraction, or only relabel the document?
+    #:
+    #: Served rather than inferred, because the frontend's own answer was a three-item set
+    #: (`pay_stub`, `w2`, `bank_statement`) written in Phase 1 while the registry grew to 121. So
+    #: correcting a document to `closing_disclosure` told a processor "recorded only — no data is
+    #: extracted" while the pipeline extracted it. The registry is the only thing that knows.
+    extracts: bool
+
+
 class StalenessResolveRequest(BaseModel):
     """Resolve a flagged-stale document (LP-71): waive or accept (replace is its own flow)."""
 
@@ -186,9 +208,47 @@ class ExtractionPublic(BaseModel):
     created_at: datetime
 
 
+class FieldScrutiny(BaseModel):
+    """How much scrutiny one extracted field deserves, independent of the model's confidence (LP-UI-032).
+
+    Both signals are BACKEND knowledge — the critical list lives beside the schema
+    specs and the distrust list beside the rule engine — so they are resolved here
+    rather than reimplemented on a screen where they would drift from the specs.
+    """
+
+    #: Checked whatever the confidence says: money, a rate, or an identity.
+    critical: bool = False
+    #: Why this (document type, field) has a confirmed wrong value in the corpus, or
+    #: ``None``. A REASON rather than a flag, because a screen that says "distrusted"
+    #: without saying why is asking the processor to distrust it on faith.
+    distrusted_reason: str | None = None
+    #: The processor's verdict on this field, if any (LP-UI-033) — "accepted",
+    #: "corrected" or "rejected". Absent means nobody has decided yet, which is not
+    #: the same as accepted and must not render as it.
+    verdict: str | None = None
+    #: The value the processor says is right (CORRECTED only). Shown INSTEAD of the
+    #: extracted value, with the model's own value still available beneath it: the
+    #: extraction is never rewritten, so both are always answerable.
+    corrected_value: str | None = None
+    #: An identifier — an SSN or ITIN. A screen must not render it in the clear.
+    #: Answered here because the identity list already lives beside the schema specs;
+    #: the frontend keeps its own masking set as a floor rather than relying on this.
+    sensitive: bool = False
+
+
 class DocumentDetailResponse(DocumentResponse):
     """A document plus its current extraction (``None`` until extraction runs)."""
 
     current_extraction: ExtractionPublic | None
+    #: ``{field: scrutiny}``, for the fields this document's extraction actually
+    #: carries. Only fields with something to say appear — an ordinary field is
+    #: absent rather than present-and-false, so the payload does not grow with the
+    #: 1,603-key spec vocabulary.
+    field_scrutiny: dict[str, FieldScrutiny] = {}
+    #: Field names a processor may ADD (LP-703) — the document type's declared keys
+    #: minus the ones already extracted. Computed here rather than on the screen: the
+    #: service is what refuses an undeclared key, and a second copy of that rule in
+    #: the client is one that can offer a choice the API then rejects.
+    addable_fields: list[str] = []
     # The Tier 3 generic-analyzer output (LP-66), if any — for the LP-72 detail view.
     generic_analysis: dict[str, Any] | None = None

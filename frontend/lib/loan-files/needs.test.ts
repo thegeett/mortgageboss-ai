@@ -1,5 +1,4 @@
 import {
-  PRIORITY_META,
   categoryLabel,
   groupNeeds,
   isProposed,
@@ -7,9 +6,11 @@ import {
   proposedNeedsCount,
   sourceLabel,
 } from "@/lib/loan-files/needs";
+import { NEEDS_PRIORITY } from "@/lib/status";
 import type {
   NeedsItemDisposition,
   NeedsItemOrigin,
+  NeedsItemPriority,
   NeedsItemPublic,
   NeedsItemStatus,
 } from "@/lib/types/needs-item";
@@ -124,11 +125,43 @@ describe("categoryLabel", () => {
   });
 });
 
-describe("PRIORITY_META", () => {
-  it("has a label + classes for each priority", () => {
-    for (const priority of ["blocking", "standard", "low"] as const) {
-      expect(PRIORITY_META[priority].label).toBeTruthy();
-      expect(PRIORITY_META[priority].className).toContain("border");
+describe("an unrecognised needs status", () => {
+  // NeedsDashboard calls groupNeeds before rendering any card, so the unguarded
+  // `buckets[NEEDS_GROUP[need.status]].push(...)` threw a TypeError and blanked
+  // the whole page — including the needs it did understand. The casts are the
+  // point: this is a value the backend shipped before the frontend knew its name.
+  const unknown = need("escalated" as NeedsItemStatus);
+  const known = need("pending");
+
+  it("does not take the dashboard down, and does not hide the needs around it", () => {
+    const groups = groupNeeds([known, unknown]);
+    expect(groups.flatMap((g) => g.items)).toHaveLength(2);
+  });
+
+  it("lands in the chase pile, where someone will see it", () => {
+    const groups = groupNeeds([unknown]);
+    expect(groups.map((g) => g.key)).toEqual(["needs_action"]);
+  });
+
+  it("is counted by outstandingNeedsCount, which must agree with the group", () => {
+    expect(outstandingNeedsCount([unknown])).toBe(1);
+  });
+});
+
+describe("NEEDS_PRIORITY", () => {
+  const ALL_PRIORITIES: NeedsItemPriority[] = ["blocking", "standard", "low"];
+
+  it("has an entry for every priority", () => {
+    for (const priority of ALL_PRIORITIES) {
+      // Directly, not via `resolveStatus` — see the note in status.test.ts: the
+      // fallback makes the same assertion hold for any string at all.
+      const meta = NEEDS_PRIORITY[priority];
+      expect(meta, `NEEDS_PRIORITY has no entry for "${priority}"`).toBeDefined();
+      expect(meta?.label.trim()).toBeTruthy();
     }
+  });
+
+  it("ALL_PRIORITIES is the whole union", () => {
+    expect(new Set(Object.keys(NEEDS_PRIORITY))).toEqual(new Set(ALL_PRIORITIES));
   });
 });

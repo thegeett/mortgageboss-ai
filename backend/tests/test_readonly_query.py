@@ -26,12 +26,14 @@ WHAT IS NOT TESTED HERE, AND WHY
 from __future__ import annotations
 
 import re
+from importlib import import_module
 from pathlib import Path
 
+import app.models as app_models
 import pytest
 import sqlalchemy as sa
 from app.models.base import Base
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 _MIGRATION = (
     Path(__file__).resolve().parents[1]
@@ -96,6 +98,71 @@ async def test_scrub_redacts_identifier_shapes_and_keeps_the_rest(
             else:
                 assert value not in (got or ""), f"{label}: {value!r} survived the scrub"
                 assert "[REDACTED-ID]" in (got or ""), f"{label}: no redaction marker"
+
+
+@pytest.mark.asyncio
+async def test_the_saved_views_view_actually_scrubs_its_filter_payload(
+    db_session: AsyncSession,
+) -> None:
+    """`readonly.saved_views` runs `scrub_json` over `filters`, not merely selects it.
+
+    Every other assertion about a view checks that a column is MENTIONED before
+    the FROM. An unscrubbed `SELECT filters` mentions it too, so "exposed" and
+    "safe" are different claims and only one was being made. A saved view's
+    filter payload is user-authored — a search string is whatever someone typed,
+    which is exactly where an identifier ends up.
+
+    Built end to end against the real table and the shipped view SQL, rather than
+    against an extracted fragment: a test of a restatement proves nothing about
+    what runs.
+    """
+    from app.core.security import hash_password
+    from app.models import Company, User, UserRole
+    from app.models.saved_view import SavedView
+
+    module = _migration_module()
+    company = Company(name="Acme", slug="acme-scrub")
+    db_session.add(company)
+    await db_session.flush()
+    user = User(
+        company_id=company.id,
+        email="scrub@acme.com",
+        hashed_password=hash_password("x"),  # pragma: allowlist secret
+        first_name="T",
+        last_name="U",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        SavedView(
+            company_id=company.id,
+            owner_user_id=user.id,
+            name="Scrub probe",
+            filters={"search": "SSN 123-45-6789"},
+        )
+    )
+    await db_session.flush()
+
+    await db_session.execute(sa.text("CREATE SCHEMA IF NOT EXISTS readonly"))
+    await db_session.execute(sa.text(module._SCRUB_FN))  # type: ignore[attr-defined]
+    await db_session.execute(sa.text(module._SCRUB_JSON_FN))  # type: ignore[attr-defined]
+    await db_session.execute(sa.text("DROP VIEW IF EXISTS readonly.saved_views"))
+    # `_view_bodies` returns the SELECT BODY of the shipped view, read from the
+    # migration as text — so the schema is still a literal placeholder, and there
+    # is no CREATE around it. Both are why the drift guard can read migrations
+    # without importing `alembic.op`. Restored here so what runs is the shipped
+    # projection rather than a restatement of it.
+    body = _view_bodies()["saved_views"].replace("{_SCHEMA}", "readonly")
+    await db_session.execute(sa.text(f"CREATE VIEW readonly.saved_views AS {body}"))
+
+    seen = await db_session.scalar(
+        sa.text("SELECT filters::text FROM readonly.saved_views WHERE name = 'Scrub probe'")
+    )
+
+    assert "123-45-6789" not in (seen or ""), "the filter payload reached the view unscrubbed"
+    assert "[REDACTED-ID]" in (seen or "")
 
 
 @pytest.mark.asyncio
@@ -221,6 +288,25 @@ def test_scrub_patterns_match_the_at_rest_guard() -> None:
 #: The reason for each is in the migration next to the view.
 EXCLUDED: dict[str, frozenset[str]] = {
     "loan_files": frozenset({"inbox_token", "loan_officer_name", "loan_officer_email"}),
+    # A correction is whatever a processor typed, on whatever field they were correcting —
+    # correct an SSN field and the correction IS an SSN. The note is free prose about one
+    # borrower's document. Both are dropped rather than scrubbed: scrubbing catches the
+    # shapes it knows, and a hand-typed value is the one place a raw identifier arrives in
+    # a shape nobody predicted. The view answers "was there a correction?" with a boolean.
+    #
+    # `replaced_value` (LP-703) is the EXTRACTED value a correction overruled, kept so a
+    # re-extraction can ask whether the model still says the same thing. It is the value
+    # from the SSN field the processor was correcting, so it is exactly as sensitive as
+    # the correction and is excluded for the same reason, not a weaker one.
+    "field_reviews": frozenset({"corrected_value", "note", "replaced_value"}),
+    # LP-643 — a processor's own DTI line. The label and the note are typed by hand about one
+    # borrower's file, which is where an identifier arrives in a shape no scrubber predicts. The
+    # view answers which section, how much and how often, and reports the two as booleans.
+    "dti_custom_lines": frozenset({"label", "note"}),
+    # LP-644 — the AI tag cache. `cache_key` fingerprints raw transaction fields and `value` is
+    # the model's judgment about one transaction. The operational question is whether the cache
+    # is earning its keep, which `cache_kind` and `hit_count` answer without either.
+    "tag_cache_entries": frozenset({"cache_key", "value"}),
     "borrowers": frozenset(
         {
             "first_name",
@@ -242,7 +328,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     "mismo_imports": frozenset({"catch_all", "raw_file_path"}),
     "findings": frozenset({"source_snippet"}),
     "companies": frozenset({"settings"}),
-    "users": frozenset({"hashed_password", "email", "first_name", "last_name"}),
+    # `reviewer_pane_split` is a UI preference, not data anyone queries staging for
+    # (LP-UI-030) — kept out for noise, not for privacy. Reason in that migration.
+    "users": frozenset(
+        {"hashed_password", "email", "first_name", "last_name", "reviewer_pane_split"}
+    ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
     "communications": frozenset({"sender", "recipient", "subject", "body"}),
 }
@@ -349,9 +439,99 @@ def _view_bodies() -> dict[str, str]:
 
 
 def test_every_view_targets_a_real_table() -> None:
-    tables = set(Base.metadata.tables)
+    # `_all_tables()`, not `Base.metadata.tables`: the latter knows only the
+    # models something has imported, so this test's answer depended on what else
+    # was in the session — it would have called a perfectly real table unknown.
+    tables = _all_tables()
     for table in _view_bodies():
         assert table in tables, f"readonly view over unknown table {table!r}"
+
+
+# A table may legitimately have no readonly view; each one needs a reason here.
+# Empty today, and that is the point: every application table is exposed. Alembic's
+# own bookkeeping table is not in `Base.metadata`, so it never reaches this check.
+EXCLUDED_TABLES: dict[str, str] = {}
+
+
+def _all_tables() -> set[str]:
+    """Every mapped table, with every model module imported first.
+
+    `Base.metadata` only knows the models something has imported, and
+    `app.models.__init__` does not export all of them — `finding_prose` is
+    registered only when a test that uses it runs. So this check silently
+    under-reported depending on what else was in the session: green alone, red in
+    the full suite. Importing the package's modules makes the answer the same
+    either way, which a guard has to be to be worth anything.
+    """
+    for path in sorted(Path(app_models.__file__).parent.glob("*.py")):
+        if path.stem != "__init__":
+            import_module(f"app.models.{path.stem}")
+    return set(Base.metadata.tables)
+
+
+def test_every_table_has_a_view_or_is_excluded() -> None:
+    """A whole TABLE must be exposed or excluded — never simply forgotten.
+
+    The column check below walks views and asks what they are missing, which
+    cannot see a table that has no view at all. Two shipped that way —
+    `needs_prose` and `finding_prose` — and `saved_views` would have been the
+    third. Same decide-it-while-it-is-cheap discipline, one level up.
+    """
+    missing = sorted(_all_tables() - set(_view_bodies()) - set(EXCLUDED_TABLES))
+    assert not missing, (
+        "These tables have no readonly view and are not listed in EXCLUDED_TABLES. "
+        "Decide for each: add a view (scrubbing any free text), or exclude it and "
+        "say why.\n  " + "\n  ".join(missing)
+    )
+
+
+def test_excluded_tables_are_real() -> None:
+    """An entry that names a table that no longer exists is a stale excuse."""
+    unknown = sorted(set(EXCLUDED_TABLES) - _all_tables())
+    assert not unknown, f"EXCLUDED_TABLES names tables that do not exist: {unknown}"
+
+
+def _output_columns(view_sql: str) -> set[str]:
+    """The names a view actually RETURNS, not the names that appear in its text.
+
+    Substring-matching the select list is not the same question, and LP-UI-033's
+    view is where the difference showed: `(corrected_value IS NOT NULL) AS
+    has_corrected_value` contains the string `corrected_value`, so a `\bname\b`
+    search called that column exposed while the view deliberately drops its VALUE
+    and returns only a boolean. The check meant to force a decision was satisfied
+    by a column being *mentioned in a predicate about itself*.
+
+    So each select item is reduced to the name it comes out as: its alias if it has
+    one, otherwise the bare column name. `scrub(x) AS x` still counts as exposing
+    `x` — scrubbed is exposed, just not in the raw.
+    """
+    select_part = view_sql.split("FROM")[0]
+    select_part = select_part[select_part.upper().rindex("SELECT") + len("SELECT") :]
+
+    items, depth, current = [], 0, ""
+    for char in select_part:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            items.append(current)
+            current = ""
+        else:
+            current += char
+    items.append(current)
+
+    names: set[str] = set()
+    for item in items:
+        item = " ".join(item.split())
+        if not item:
+            continue
+        alias = re.search(r"\bAS\s+(\w+)$", item, re.IGNORECASE)
+        if alias:
+            names.add(alias.group(1))
+        elif re.fullmatch(r"\w+", item):
+            names.add(item)
+    return names
 
 
 def test_no_model_column_drifts() -> None:
@@ -366,12 +546,10 @@ def test_no_model_column_drifts() -> None:
     for table_name, view_sql in bodies.items():
         table = Base.metadata.tables[table_name]
         excluded = EXCLUDED.get(table_name, frozenset())
-        # The column list is everything before FROM; a bare name or one inside scrub(...).
-        select_part = view_sql.split("FROM")[0]
+        exposed = _output_columns(view_sql)
         for column in table.columns:
             name = column.name
-            mentioned = re.search(rf"\b{re.escape(name)}\b", select_part) is not None
-            if not mentioned and name not in excluded:
+            if name not in exposed and name not in excluded:
                 problems.append(f"{table_name}.{name}")
 
     assert not problems, (

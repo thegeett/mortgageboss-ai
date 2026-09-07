@@ -8,8 +8,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
  * Top-level React error boundary (LP-46) — the no-white-screen guarantee.
  *
  * A render-time throw anywhere in the subtree is caught here and replaced with a
- * clean, friendly fallback ("Something went wrong" + a Retry) instead of an
- * unmounted, blank page. Retry bumps a key to remount the subtree (recovering
+ * fallback that says what happened instead of an unmounted, blank page. Retry bumps a key to remount the subtree (recovering
  * from transient render errors without a full page reload); the fallback also
  * offers a hard reload as a last resort.
  *
@@ -23,6 +22,12 @@ interface ErrorBoundaryProps {
   fallback?: (reset: () => void) => ReactNode;
   /** Called when the user retries, before the subtree remounts. */
   onReset?: () => void;
+  /**
+   * Heading level for the default fallback. `1` at the app root, where this is
+   * the only thing on the page; `2` inside the shell, where the breadcrumb has
+   * already rendered the page's `h1` and it stays on screen behind the failure.
+   */
+  headingLevel?: 1 | 2;
 }
 
 interface ErrorBoundaryState {
@@ -53,7 +58,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   override render(): ReactNode {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback(this.reset);
-      return <DefaultErrorFallback onRetry={this.reset} />;
+      return <DefaultErrorFallback onRetry={this.reset} headingLevel={this.props.headingLevel} />;
     }
     // Keying on resetKey forces a clean remount of the subtree on retry.
     return <div key={this.state.resetKey}>{this.props.children}</div>;
@@ -61,7 +66,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 }
 
 /** The default friendly fallback — centered, on-brand, with recovery actions. */
-export function DefaultErrorFallback({ onRetry }: { onRetry: () => void }) {
+export function DefaultErrorFallback({
+  onRetry,
+  headingLevel = 1,
+}: {
+  onRetry: () => void;
+  headingLevel?: 1 | 2;
+}) {
+  // TWO h1s ON EVERY CRASHED SCREEN, before this. `AppShell` renders `<Header/>`
+  // — whose breadcrumb is the page's `h1` — ABOVE the boundary, so a crash added
+  // a second one rather than replacing the first. It could not be found by
+  // visiting routes, because the crashed state is not a route.
+  //
+  // The trail is still correct about where the user is, so it keeps the `h1` and
+  // the failure becomes a section heading beneath it. At the app ROOT the shell
+  // has not rendered at all and this is the only heading on the page, so it stays
+  // an `h1` there — a page whose first heading is an `h2` is its own violation.
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <div
       role="alert"
@@ -70,10 +91,17 @@ export function DefaultErrorFallback({ onRetry }: { onRetry: () => void }) {
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <TriangleAlert className="h-7 w-7" />
       </span>
-      <h1 className="mt-5 text-xl font-semibold text-gray-900">Something went wrong</h1>
-      <p className="mt-2 max-w-md text-sm text-gray-500">
-        An unexpected error interrupted this view. You can try again — if it keeps happening, reload
-        the page.
+      {/* NAMES WHAT FAILED AND WHAT IS SAFE (LP-UI-034). The old copy was
+          "Something went wrong" over "An unexpected error interrupted this view"
+          — an apology and a restatement, and nothing a processor could act on.
+          The thing they actually need to know after a screen dies mid-edit is
+          whether their work survived. */}
+      <Heading className="mt-5 text-xl font-semibold text-foreground">
+        This screen stopped working
+      </Heading>
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">
+        The page failed to draw. Nothing you have entered has been sent or changed. Try again — if
+        it keeps happening, reload.
       </p>
       <div className="mt-6 flex items-center gap-3">
         <Button type="button" onClick={onRetry} className="gap-1.5">

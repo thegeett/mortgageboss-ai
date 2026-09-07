@@ -438,7 +438,8 @@ def test_a_superseded_master_policy_does_not_condemn_the_current_one() -> None:
             "condo.master_liability_limit": _tag("500000"),
         },
     )
-    value, why = _condo_master_policy(snap, "loan", None)
+    produced = _condo_master_policy(snap, "loan", None)
+    value, why = produced[0], produced[1]
     assert value == "unknown", why
     assert "different general liability limits" in why
 
@@ -458,7 +459,8 @@ def test_mixed_bases_across_documents_abstain_rather_than_asserting_acv() -> Non
             "condo.master_policy_basis_raw": _tag("actual cash value"),
         },
     )
-    value, why = _condo_master_policy(snap, "loan", None)
+    produced = _condo_master_policy(snap, "loan", None)
+    value, why = produced[0], produced[1]
     assert value == "unknown", why
     assert "different coverage bases" in why
 
@@ -468,7 +470,8 @@ def test_a_present_policy_with_no_readable_number_abstains_never_absent() -> Non
     THE FILE whose number failed to extract reported absent and FIRED — telling a processor to request a
     document already in front of them, against this recipe's own abstain-rather-than-infer discipline."""
     snap = _snap([_condo_doc("m1")], loan={"property.type": _tag("condo")})
-    value, why = _condo_master_policy(snap, "loan", None)
+    produced = _condo_master_policy(snap, "loan", None)
+    value, why = produced[0], produced[1]
     assert value == "unknown", why
     assert "no policy number could be read" in why
 
@@ -476,7 +479,8 @@ def test_a_present_policy_with_no_readable_number_abstains_never_absent() -> Non
 def test_a_condo_with_no_master_policy_document_still_reports_absent() -> None:
     """The genuine gap must still fire — the fix narrows the false one, not the real one."""
     snap = _snap([], loan={"property.type": _tag("condo")})
-    value, why = _condo_master_policy(snap, "loan", None)
+    produced = _condo_master_policy(snap, "loan", None)
+    value, why = produced[0], produced[1]
     assert value == "absent", why
 
 
@@ -518,3 +522,56 @@ def test_the_acronym_rule_is_strict() -> None:
     spelled = _normalise_lender_name("United Wholesale Mortgage")
     for wrong in ("UW", "UWMC", "UMW", "AWM"):
         assert not _lender_names_agree(_normalise_lender_name(wrong), spelled), wrong
+
+
+def test_ih7_names_the_master_policy_documents_it_read() -> None:
+    """LP-647 §1 group A — IH-7 could say the master policy is inadequate and not which policy.
+
+    Every branch here except "absent" is a claim ABOUT the master-policy documents — "no number could
+    be read from it", "the documents state different bases" — so each names them. The absent branch
+    names nothing, correctly: there is no document to open, and that is the one case where an empty
+    list is the true answer rather than a missing one.
+    """
+    snap = _snap([_condo_doc("m1")], loan={"property.type": _tag("condo")})
+
+    produced = _condo_master_policy(snap, "loan", None)
+
+    assert produced[0] == "unknown"
+    assert "no policy number could be read" in produced[1]
+    assert produced[2] == ("m1",), (
+        "the abstention exists BECAUSE a document is in front of the human — it must name that "
+        f"document, got {produced[2] if len(produced) > 2 else '(nothing)'}"
+    )
+
+
+def test_ih7_names_only_the_policies_not_every_document_on_the_file() -> None:
+    """THE OVER-NAMING GUARD, and it was missing until a mutation went green.
+
+    Replacing the master-policy filter with "every document" passed clean, because the fixture above
+    holds ONE document and it is the policy. So the failure this whole section is written against —
+    a finding pointing at documents it did not come from — had no test.
+
+    A file carries a W-2 and a pay stub alongside the policy. IH-7 says nothing about either, so
+    naming them would send a processor to pages the finding does not discuss. That is the same harm
+    as naming the wrong document, reached by naming everything.
+    """
+    unrelated = DocumentEntry(content_id="w2-1", document_type="w2", belongs_to=None, fields={})
+    snap = _snap([_condo_doc("m1"), unrelated], loan={"property.type": _tag("condo")})
+
+    produced = _condo_master_policy(snap, "loan", None)
+
+    assert produced[2] == ("m1",), (
+        f"only the master policy — the W-2 is not what this finding is about, got {produced[2]}"
+    )
+
+
+def test_ih7_absent_names_nothing_because_there_is_nothing_to_open() -> None:
+    """THE POSITIVE CONTROL, and it guards the distinction the whole section rests on: absent is not
+    the same as unnamed. A condo with no master policy at all has no document to point at, and
+    inventing one would send a processor to the wrong page."""
+    snap = _snap([], loan={"property.type": _tag("condo")})
+
+    produced = _condo_master_policy(snap, "loan", None)
+
+    assert produced[0] == "absent"
+    assert len(produced) == 2 or produced[2] == (), "nothing on file, nothing named"

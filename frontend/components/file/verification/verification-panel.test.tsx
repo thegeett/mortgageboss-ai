@@ -20,6 +20,18 @@ const useVerificationMock = vi.fn();
 const useNeedsMock = vi.fn(() => ({ data: [] }));
 const invalidateQueries = vi.fn();
 
+// The panel now renders the calculator strip between the run controls and the
+// outcomes (LP-UI-046). It has its own tests and its own hooks; stubbing it here
+// keeps this file about the panel.
+vi.mock("@/components/file/calculators/calculators-section", () => ({
+  // A MARKER, not `() => null`. A stub that renders nothing cannot be asserted
+  // on, so deleting <CalculatorsSection/> from the panel left every test green —
+  // and the whole point of LP-UI-046 was moving it INTO the panel.
+  CalculatorsSection: ({ fileId }: { fileId: string }) => (
+    <div data-testid="calculators-section" data-file-id={fileId} />
+  ),
+}));
+
 vi.mock("@/lib/api/verification", () => ({
   useVerification: () => useVerificationMock(),
   useRunVerification: () => useRunVerificationMock(),
@@ -76,6 +88,7 @@ function finding(over: Partial<VerificationFinding> & { id: string }): Verificat
 
 const STATUS: VerificationStatus = {
   stale: false,
+  documents_processing: 0,
   program: "conventional",
   latest_run: {
     id: "run-1",
@@ -435,7 +448,9 @@ describe("VerificationPanel", () => {
     render(<VerificationPanel fileId="LF-1" />);
     openLegacy();
     fireEvent.click(screen.getByRole("button", { name: /set thorough as my default/i }));
-    expect(updatePreferencesMutate.mock.calls[0]?.[0]).toBe("thorough");
+    expect(updatePreferencesMutate.mock.calls[0]?.[0]).toEqual({
+      default_aggression_level: "thorough",
+    });
   });
 
   it("shows the blocked submit status with the active thoroughness", () => {
@@ -464,6 +479,28 @@ describe("VerificationPanel", () => {
       render(<VerificationPanel fileId="LF-1" />);
       expect(screen.getByRole("alert").textContent).toContain("AI cross-source pass failed");
       expect(screen.getByText(/Verification didn't complete/)).toBeDefined();
+    });
+
+    it("is styled as a failure, not as neutral text", () => {
+      // LP-UI-002. The banner carried `border-danger/40 bg-danger/5 text-danger`
+      // against a colour tailwind.config.ts never defined, so the classes compiled
+      // to nothing and a dead six-minute run announced itself in grey. This pins
+      // the markup; `tailwind.config.test.ts` pins the token those classes need,
+      // which is the half a DOM test cannot see.
+      //
+      // LP-UI-020 moved the state from a tinted box to a LEFT RAIL — state goes
+      // on the rail and the glyph, never on a fill. The property is unchanged and
+      // is the one that mattered: a failed run must not read as neutral text. Only
+      // the channel carrying the colour moved, so the assertion moved with it.
+      mock({
+        data: { ...STATUS, latest_run: { ...baseRun(), status: "failed", error_detail: "boom" } },
+      });
+      render(<VerificationPanel fileId="LF-1" />);
+      const banner = screen.getByRole("alert");
+      expect(banner.className).toContain("border-l-destructive");
+      expect(banner.querySelector(".text-danger")).not.toBeNull();
+      // And NOT neutral: the rail must carry a colour, not the default border.
+      expect(banner.className).not.toContain("border-l-border");
     });
 
     it("falls back to a generic reason when the run carries no detail", () => {
@@ -543,5 +580,123 @@ describe("VerificationPanel", () => {
       render(<VerificationPanel fileId="LF-1" />);
       expect(screen.queryByText(/Verification didn't complete/)).toBeNull();
     });
+  });
+});
+
+describe("the calculators live inside the panel", () => {
+  /**
+   * LP-UI-046 moved `CalculatorsSection` out of the route and into the panel, so
+   * the run controls and the thoroughness dial sit above the fold instead of
+   * ~1,400px down. That move is the ticket, and nothing asserted it: the stub
+   * rendered `null`, so removing the component from the panel changed no test.
+   */
+  it("renders the calculators, with the file id passed through", () => {
+    mock();
+    render(<VerificationPanel fileId="LF-1" />);
+    const section = screen.getByTestId("calculators-section");
+    expect(section).toBeDefined();
+    expect(section.getAttribute("data-file-id")).toBe("LF-1");
+  });
+
+  it("puts them ABOVE the outcomes, which is the reason for the move", () => {
+    // Order is the point. Below the outcomes it would be back under the fold.
+    mock();
+    const { container } = render(<VerificationPanel fileId="LF-1" />);
+    const section = screen.getByTestId("calculators-section");
+    const outcomes = container.querySelector("[aria-busy]");
+    expect(outcomes).not.toBeNull();
+    expect(section.compareDocumentPosition(outcomes as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+});
+
+describe("the last-run line", () => {
+  it("tells a processor when the last pass ran and what it cost", () => {
+    // The panel's own report: pressing Run was a gamble because nothing on screen said whether a
+    // pass takes one minute or fifteen on THIS file. The duration is the half with no other source.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: {
+          ...baseRun(),
+          status: "completed",
+          started_at: "2026-09-04T00:08:47Z",
+          completed_at: "2026-09-04T00:23:25Z",
+        },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/Last run .*took 14m 38s/)).toBeDefined();
+  });
+
+  it("is absent while a pass is running, where it would describe the run being watched", () => {
+    // `latest_run` IS the running pass, and its phase and estimate are already on screen.
+    mock({
+      data: {
+        ...STATUS,
+        latest_run: { ...baseRun(), status: "running", completed_at: null },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.queryByText(/Last run/)).toBeNull();
+  });
+});
+
+describe("LP-647 §2 — the Run button while documents are still being read", () => {
+  /** THE HARMFUL DIRECTION, and the reason it is a server guard with a UI half rather than UI only.
+   *
+   *  `build_documents_section` selects the file's current documents with NO status filter, so a
+   *  document mid-extraction is frozen into the snapshot with empty fields and, before its
+   *  classification lands, no type. Every rule needing a typed field from it abstains, and those
+   *  findings persist under the reconcile identity — LP-640 measured one unidentified document
+   *  costing 22 queue rows. The processor is handed a list generated from a document that was
+   *  seconds from answering the question itself. */
+  it("disables Run and says why, naming the count", () => {
+    mock({ data: { ...STATUS, documents_processing: 2, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    const button = screen.getByRole("button", { name: /run verification/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText(/2 documents are still being read/)).toBeTruthy();
+  });
+
+  /** The count is in the sentence because "1 document" and "9 documents" are different waits, and a
+   *  processor deciding whether to sit and watch needs to know which. Singular gets its own grammar
+   *  — "1 documents are" is the tell that a count was interpolated without being read. */
+  it("uses singular grammar for one document", () => {
+    mock({ data: { ...STATUS, documents_processing: 1, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.getByText(/1 document is still being read/)).toBeTruthy();
+  });
+
+  /** THE POSITIVE CONTROL: a guard that disables unconditionally would pass both tests above while
+   *  making verification unreachable. */
+  it("enables Run when nothing is processing", () => {
+    mock({ data: { ...STATUS, documents_processing: 0, latest_run: null } });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    const button = screen.getByRole("button", { name: /run verification/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(screen.queryByText(/still being read/)).toBeNull();
+  });
+
+  /** A RUNNING verification already disables the button, and its own "Running…" label explains it.
+   *  Showing the document message on top would be a second reason for one disabled control, and the
+   *  processor cannot act on either — the run has to finish first regardless. */
+  it("does not stack the document message onto a running verification", () => {
+    mock({
+      data: {
+        ...STATUS,
+        documents_processing: 2,
+        latest_run: { ...baseRun(), status: "running" },
+      },
+    });
+    render(<VerificationPanel fileId="LF-1" />);
+
+    expect(screen.queryByText(/still being read/)).toBeNull();
   });
 });

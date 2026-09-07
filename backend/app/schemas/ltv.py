@@ -13,6 +13,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.services.finding_blocking import FindingBreakdown
+
 
 class LtvLineItem(BaseModel):
     """One itemized input line — auto value, override (if any), and the effective."""
@@ -24,6 +26,11 @@ class LtvLineItem(BaseModel):
     amount: Decimal
     source: str  # stated / computed / extracted / manual / override
     overridden: bool
+    #: Who set the override and why (LP-UI-021). Both `None` when the line is not
+    #: overridden; `override_by` alone may be `None` for an override with no
+    #: recorded actor, which is different from one nobody has looked at.
+    override_by: str | None = None
+    override_note: str | None = None
     # LP-568 — a line SHOWN in the breakdown but not summed into the totals. Only the DTI
     # back-end sets it today (an obligation that does not survive closing); it lives on the
     # shared line shape so the snapshot mapper's protocol holds for every calculator.
@@ -47,6 +54,10 @@ class LtvFindingsStatus(BaseModel):
 
     unresolved: bool
     open_in_scope_count: int
+    #: The same findings split by the system that produced them (LP-UI-021), so
+    #: the alert's number reconciles with the verification screen instead of
+    #: merging three generators into one figure a processor cannot place.
+    breakdown: FindingBreakdown = FindingBreakdown()
 
 
 class LtvCalculation(BaseModel):

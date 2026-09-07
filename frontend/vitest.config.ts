@@ -9,6 +9,9 @@ export default defineConfig({
     // Default to node (fast) for lib/unit tests; component tests opt into jsdom
     // per-file via a `// @vitest-environment jsdom` docblock (LP-46).
     environment: "node",
+    // Shims for what jsdom does not implement (ResizeObserver, pointer capture).
+    // Harmless under the node environment, which never touches them.
+    setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", ".next"],
   },

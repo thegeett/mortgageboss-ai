@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import type { DocumentResponse } from "@/lib/types/document";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocumentList } from "./document-list";
+import { DOCUMENT_COLUMNS, DocumentList, DocumentRow, DocumentTableHeader } from "./document-list";
 
 afterEach(cleanup);
 
@@ -42,7 +42,13 @@ function doc(overrides: Partial<DocumentResponse> = {}): DocumentResponse {
 describe("DocumentList — loading → content | empty | error", () => {
   it("shows a loading cue (and no rows) while pending", () => {
     const { container } = render(
-      <DocumentList documents={undefined} isPending isError={false} onSelect={vi.fn()} />,
+      <DocumentList
+        documents={undefined}
+        isPending
+        isError={false}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+      />,
     );
     expect(screen.getByText("Loading documents")).toBeDefined(); // sr-only status
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
@@ -52,14 +58,28 @@ describe("DocumentList — loading → content | empty | error", () => {
 
   it("shows the documents once loaded", () => {
     render(
-      <DocumentList documents={[doc()]} isPending={false} isError={false} onSelect={vi.fn()} />,
+      <DocumentList
+        documents={[doc()]}
+        isPending={false}
+        isError={false}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+      />,
     );
     expect(screen.getByText("paystub.pdf")).toBeDefined();
     expect(screen.queryByText("Loading documents")).toBeNull();
   });
 
   it("shows the empty state when loaded with no documents", () => {
-    render(<DocumentList documents={[]} isPending={false} isError={false} onSelect={vi.fn()} />);
+    render(
+      <DocumentList
+        documents={[]}
+        isPending={false}
+        isError={false}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+      />,
+    );
     expect(screen.getByText("No documents yet")).toBeDefined();
   });
 
@@ -70,7 +90,8 @@ describe("DocumentList — loading → content | empty | error", () => {
         documents={[doc({ tier: "tier_2", document_type: "credit_report", summary: gist })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText(gist)).toBeDefined();
@@ -82,7 +103,8 @@ describe("DocumentList — loading → content | empty | error", () => {
         documents={[doc({ summary: null })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("paystub.pdf")).toBeDefined(); // row renders; no summary line
@@ -96,7 +118,8 @@ describe("DocumentList — loading → content | empty | error", () => {
         isPending={false}
         isError
         onRetry={onRetry}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("Couldn’t load your documents")).toBeDefined();
@@ -110,7 +133,8 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         documents={[doc({ version: 2, version_count: 2 })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("v2 of 2")).toBeDefined();
@@ -132,7 +156,8 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("May be stale")).toBeDefined();
@@ -147,14 +172,20 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("current.pdf")).toBeDefined();
     expect(screen.queryByText("old.pdf")).toBeNull(); // reached via version history, not the list
   });
 
-  it("gently surfaces other current documents of the same type", () => {
+  it("no longer repeats the duplicate cue on every row (LP-UI-019)", () => {
+    // This cue used to read "1 other pay stub" under each of two rows — the same
+    // fact told twice, once per document, and noticed one row at a time. It moved
+    // to the context rail's Duplicates block, where it is one answer for the
+    // whole file; file-context-rail.test.tsx pins it there. The signal is not
+    // gone, so this asserts WHERE it is not, rather than deleting the property.
     render(
       <DocumentList
         documents={[
@@ -163,11 +194,52 @@ describe("DocumentList — versioning + staleness (LP-71)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
-    // Each row notes the other same-type document (informational, not blocking).
-    expect(screen.getAllByText(/1 other/i).length).toBe(2);
+    // Asserted alongside a POSITIVE. A bare `toBeNull` passes just as well when
+    // the list rendered nothing at all — the same shape as a mutation run that
+    // finds no tests, which is indistinguishable from one that finds no failures.
+    expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
+    expect(screen.queryByText(/1 other/i)).toBeNull();
+  });
+
+  it("keeps in-flight documents out of the table (LP-UI-019)", () => {
+    // They are in the ProcessingStrip above. A classifying document holding a
+    // row it changes every few seconds is what moves the settled list.
+    render(
+      <DocumentList
+        documents={[
+          doc({ id: "a", standard_name: "Settled W-2", status: "completed" }),
+          doc({ id: "b", standard_name: "Arriving now", status: "extracting" }),
+        ]}
+        isPending={false}
+        isError={false}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Settled W-2")).toBeTruthy();
+    expect(screen.queryByText("Arriving now")).toBeNull();
+  });
+
+  it("opens a document from the keyboard, not only the mouse", () => {
+    // LP-UI-007 shipped a row whose Enter key did something other than what its
+    // click did, and made an action reachable only with a pointer.
+    const onOpen = vi.fn();
+    render(
+      <DocumentList
+        documents={[doc({ id: "a", standard_name: "Kapadiya pay stub — Feb" })]}
+        isPending={false}
+        isError={false}
+        onOpen={onOpen}
+        onOpenDetails={vi.fn()}
+      />,
+    );
+    const row = screen.getByText("Kapadiya pay stub — Feb").closest("tr") as HTMLElement;
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -178,7 +250,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         documents={[doc({ standard_name: "Pay-Stub_Thermofisher-PPD_2026-05-22" })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("Pay-Stub_Thermofisher-PPD_2026-05-22")).toBeDefined();
@@ -191,7 +264,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         documents={[doc({ package_qualification: { qualified: true, reason: null } })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByLabelText("Package-ready")).toBeDefined();
@@ -203,7 +277,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         documents={[doc({ package_qualification: { qualified: false, reason: "stale" } })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.queryByLabelText("Package-ready")).toBeNull();
@@ -216,7 +291,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         documents={[doc({ period: { label: "Period", value: "Jun 1 - Jun 15, 2026" } })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
@@ -228,7 +304,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         documents={[doc({ period: null })]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(container.textContent).not.toContain("Period:");
@@ -243,7 +320,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("Period: Jun 1 - Jun 15, 2026")).toBeDefined();
@@ -264,7 +342,8 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("Akash W2 Wells 2024.pdf")).toBeDefined(); // the real, identifiable name
@@ -280,10 +359,90 @@ describe("DocumentList — standard naming + package-ready (LP-72)", () => {
         ]}
         isPending={false}
         isError={false}
-        onSelect={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
       />,
     );
     expect(screen.getByText("EMD wire receipt.pdf")).toBeDefined();
     expect(screen.getByText("Home Value estimate.pdf")).toBeDefined();
+  });
+});
+
+describe("the real row against the declared columns", () => {
+  /**
+   * The half `DOCUMENT_COLUMNS` does not cover.
+   *
+   * The header and the skeleton both map that list; the real row hand-writes its
+   * five cells. So the shared list keeps the header and the skeleton in step and
+   * says nothing about the rows — while `list-skeleton.test.tsx` describes what it
+   * prevents as "a new column reaching the rows and not the skeleton". Add a sixth
+   * column today and the header and skeleton grow, the row does not, and the table
+   * jumps sideways exactly as that comment describes.
+   */
+  it("renders one cell per declared column, as the skeleton does", () => {
+    const { container } = render(
+      <table>
+        <tbody>
+          <DocumentRow document={doc()} onOpen={() => {}} onOpenDetails={() => {}} />
+        </tbody>
+      </table>,
+    );
+    // +1 for the details control, which is a column with no header label — the
+    // same shape as the pipeline's actions column. It is deliberately not in
+    // DOCUMENT_COLUMNS: that list drives visible headers and skeleton widths,
+    // and a nameless control has neither.
+    expect(container.querySelector("tr")?.querySelectorAll("td")).toHaveLength(
+      DOCUMENT_COLUMNS.length + 1,
+    );
+  });
+
+  it("renders exactly as many cells as the HEADER renders columns", () => {
+    // The comparison LP-UI-037 added for the pipeline, brought here. Both the row
+    // and the skeleton are checked against `DOCUMENT_COLUMNS.length + 1`, which
+    // is the same derived number twice — so they agree with each other and
+    // neither is compared to the thing they must line up WITH. If the header ever
+    // stops rendering its nameless Details cell, both would still pass and every
+    // row would sit one column off its header.
+    const { container } = render(
+      <table>
+        <DocumentTableHeader />
+        <tbody>
+          <DocumentRow document={doc()} onOpen={() => {}} onOpenDetails={() => {}} />
+        </tbody>
+      </table>,
+    );
+    const head = container.querySelectorAll("thead th");
+    const row = container.querySelector("tbody tr");
+    expect(head.length, "no header rendered — the comparison would be vacuous").toBeGreaterThan(0);
+    expect(row?.querySelectorAll("td")).toHaveLength(head.length);
+  });
+
+  it("opens the DOCUMENT from the row and the DRAWER from the details button", () => {
+    // The two answer different questions. A row that did both had to pick one,
+    // and it had picked the drawer — so clicking a pay stub showed metadata
+    // about the pay stub rather than the pay stub.
+    const onOpen = vi.fn();
+    const onOpenDetails = vi.fn();
+    render(
+      <table>
+        <tbody>
+          <DocumentRow
+            document={doc({ standard_name: "Kapadiya pay stub" })}
+            onOpen={onOpen}
+            onOpenDetails={onOpenDetails}
+          />
+        </tbody>
+      </table>,
+    );
+
+    fireEvent.click(screen.getByText("Kapadiya pay stub"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpenDetails).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /details for/i }));
+    expect(onOpenDetails).toHaveBeenCalledTimes(1);
+    // The row is a button too: without stopPropagation the drawer opens AND the
+    // reviewer navigates underneath it.
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

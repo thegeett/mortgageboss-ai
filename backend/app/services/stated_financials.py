@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mismo.schema import ParseWarning
 from app.models.borrower import Borrower
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
@@ -143,7 +144,7 @@ async def get_stated_financials(
         MismoImportSummary(
             source_format=latest_import.source_format,
             status=latest_import.status.value,
-            warnings=latest_import.parse_warnings or [],
+            warnings=[ParseWarning.coerce(w) for w in latest_import.parse_warnings or []],
             imported_at=latest_import.created_at,
         )
         if latest_import is not None

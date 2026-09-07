@@ -13,7 +13,7 @@ import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import structlog
@@ -87,7 +87,11 @@ def _snapshot(accounts: list[tuple[str, list[dict[str, Any]]]]) -> Snapshot:
             content_id=doc_id,
             document_type="bank_statement",
             transactions=build_transactions(
-                transaction_field_sets({"transactions": raw}, "bank_statement"),
+                transaction_field_sets(
+                    {"transactions": raw},
+                    "bank_statement",
+                    loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+                ),
                 document_content_id=doc_id,
             ),
         )

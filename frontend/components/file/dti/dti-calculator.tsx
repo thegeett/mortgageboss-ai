@@ -1,5 +1,8 @@
 "use client";
 
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "@/components/file/calculators/layout";
+import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
+
 /**
  * The DTI calculator (LP-76) — the headline "replace ChatGPT" surface.
  *
@@ -12,6 +15,8 @@
  * shows the work.
  */
 
+import { DtiAddLine } from "@/components/file/dti/dti-add-line";
+import { DtiUngateDialog } from "@/components/file/dti/dti-ungate-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,20 +24,36 @@ import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useClearDtiOverride, useDti, useSetDtiOverride } from "@/lib/api/dti";
+import { useClearDtiOverride, useDti, useRemoveDtiLine, useSetDtiOverride } from "@/lib/api/dti";
 import { formatMoneyPrecise, formatPercent, humanize } from "@/lib/format";
-import type { DtiCalculation, DtiLimit, DtiLineItem, UnverifiedInput } from "@/lib/types/dti";
+import type {
+  DtiCalculation,
+  DtiCustomLineInput,
+  DtiLimit,
+  DtiLineItem,
+  UnverifiedInput,
+} from "@/lib/types/dti";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calculator, Check, Info, Lock, Pencil, RotateCcw, X } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertTriangle,
+  Calculator,
+  Check,
+  Info,
+  Lock,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 
 export function DtiCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useDti(fileId);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Calculator className="h-4 w-4" />
           </span>
@@ -43,7 +64,7 @@ export function DtiCalculator({ fileId }: { fileId: string }) {
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Deterministic math · auto-populated from the file · every input shown and override-able.
         </p>
       </CardHeader>
@@ -70,14 +91,46 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   const setOverride = useSetDtiOverride(fileId);
   const clearOverride = useClearDtiOverride(fileId);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — THE DRAFTS LIVE HERE, NOT IN THE ROW, and that is the whole fix.
+  //
+  // `editingKey` is single, so opening another row closed this one and its local `draft` went with
+  // it — silently, and re-entering ran `setDraft(item.amount)` so even a surviving draft would have
+  // been clobbered. A processor correcting two housing lines in a row (the ordinary case: both came
+  // from the same document set) lost the first one every time.
+  //
+  // Keyed by field, so a switch is a PAUSE rather than a discard. Only an explicit Save or Cancel
+  // removes an entry — see `onCancel`.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const isMutating = setOverride.isPending || clearOverride.isPending;
+
+  // LP-647 §3 — the LAST exit, and it is a partial guard stated as one rather than sold as complete.
+  //
+  // Catches closing the tab, a reload, and following a link out of the app. It does NOT catch Next's
+  // client-side navigation — clicking to another tab of this file fires no `beforeunload` — so the
+  // in-panel "unsaved" caption remains the primary signal and this is the backstop for the case where
+  // the panel is about to stop existing. A router-level guard is the follow-up if that gap bites.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
+
+  const discardDraft = (fieldKey: string) =>
+    setDrafts((current) => {
+      const { [fieldKey]: _dropped, ...rest } = current;
+      return rest;
+    });
 
   const onSave = (fieldKey: string, amount: string) => {
     setOverride.mutate({ fieldKey, input: { amount } });
+    discardDraft(fieldKey);
     setEditingKey(null);
   };
   const onClear = (fieldKey: string) => {
     clearOverride.mutate(fieldKey);
+    discardDraft(fieldKey);
     setEditingKey(null);
   };
   // bug-001 — accepting a stated estimate is an ordinary override, deliberately: it carries the
@@ -90,9 +143,15 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   const rowProps = {
     editingKey,
     onEdit: setEditingKey,
-    onCancel: () => setEditingKey(null),
+    onCancel: (fieldKey: string) => {
+      discardDraft(fieldKey);
+      setEditingKey(null);
+    },
     onSave,
     onClear,
+    drafts,
+    onDraftChange: (fieldKey: string, value: string) =>
+      setDrafts((current) => ({ ...current, [fieldKey]: value })),
     disabled: isMutating,
     // bug-001 — offered ON THE LINE that reads "unknown", which is where a processor is looking when
     // they need it. The gate banner keeps the REASON (the backend already appends the sentence to
@@ -102,47 +161,76 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   };
 
   return (
-    <div className="space-y-6">
-      {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
-      {data.gated && <GatedBanner reason={data.gate_reason} />}
+    <div className="space-y-4">
+      {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
+      {data.gated && <GatedBanner reason={data.gate_reason} fileId={fileId} />}
 
-      <HeroRatios data={data} />
+      {/* THE MATH ON THE LEFT, THE RESULT ON THE RIGHT — the mockup's
+          arrangement (LP-UI-045). It ran down the page before: ratios, then
+          three sections, then the formula, so the answer was above the working
+          and the arithmetic that produces it was a screen below. Reading it
+          meant scrolling between the number and the numbers it came from.
 
-      <BreakdownSection
-        title="Gross monthly income"
-        items={data.income_items}
-        subtotal={data.gross_monthly_income}
-        emptyHint="No income on file yet — add stated income or override below."
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Housing payment (PITI + MI + HOA)"
-        items={data.housing_items}
-        subtotal={data.housing_payment}
-        {...rowProps}
-      />
-      <BreakdownSection
-        title="Monthly debts"
-        items={data.debt_items}
-        subtotal={data.monthly_debts}
-        emptyHint="No other monthly debts on file."
-        {...rowProps}
-      />
+          Single column below `lg`, where two would make each too narrow to hold
+          a label, a figure and its source on one line. */}
+      <div className={CALCULATOR_GRID}>
+        <div className="min-w-0 space-y-4">
+          <BreakdownSection
+            title="Gross monthly income"
+            items={data.income_items}
+            subtotal={data.gross_monthly_income}
+            emptyHint="No income on file yet — add stated income or override below."
+            fileId={fileId}
+            section="income"
+            {...rowProps}
+          />
+          <BreakdownSection
+            title="Housing payment (PITI + MI + HOA)"
+            items={data.housing_items}
+            subtotal={data.housing_payment}
+            fileId={fileId}
+            section="housing"
+            {...rowProps}
+          />
+          <BreakdownSection
+            title="Monthly debts"
+            items={data.debt_items}
+            subtotal={data.monthly_debts}
+            emptyHint="No other monthly debts on file."
+            fileId={fileId}
+            section="debt"
+            {...rowProps}
+          />
+        </div>
 
-      <FormulaReceipt data={data} />
+        <ResultPanel data={data} />
+      </div>
     </div>
   );
 }
 
 // --------------------------------------------------------------------------- //
-// The headline ratios + the limit side-by-side
+// The result, beside the math that produced it
 // --------------------------------------------------------------------------- //
 
-function HeroRatios({ data }: { data: DtiCalculation }) {
+/**
+ * The answer, the arithmetic that reached it, and where it sits against the cap.
+ *
+ * One panel rather than three stacked pieces (a ratio tile, a limit bar and a
+ * formula receipt a screen apart): the figure means nothing without the division
+ * that produced it, and the division means nothing without the limit it is being
+ * judged against. The mockup puts all three together for that reason.
+ *
+ * STICKY on a wide screen, so the answer stays on screen while a processor reads
+ * down the twenty-odd lines that feed it. That is the whole point of putting it
+ * beside the math instead of after it.
+ */
+function ResultPanel({ data }: { data: DtiCalculation }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />
+    <div className={CALCULATOR_RESULT_COLUMN}>
       <BackEndTile back={data.back_end_dti} limit={data.limit} />
+      <FormulaReceipt data={data} />
+      <RatioTile label="Front-end DTI" value={data.front_end_dti} hint="housing ÷ income" />
     </div>
   );
 }
@@ -157,12 +245,14 @@ function RatioTile({
   hint: string;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">
+    <div className="rounded-lg border border-border bg-muted/60 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
         {formatPercent(value)}
       </div>
-      <div className="mt-0.5 text-xs text-gray-400">{hint}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -182,7 +272,7 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Back-end DTI
         </span>
         {known && (
@@ -200,33 +290,33 @@ function BackEndTile({ back, limit }: { back: string | null; limit: DtiLimit }) 
         <span
           className={cn(
             "text-3xl font-semibold tabular-nums",
-            over ? "text-destructive" : "text-gray-900",
+            over ? "text-destructive" : "text-foreground",
           )}
         >
           {formatPercent(back)}
         </span>
         {limit.back_end_max !== null && (
-          <span className="whitespace-nowrap text-sm text-gray-400">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
             / {formatPercent(limit.back_end_max)} limit
           </span>
         )}
       </div>
       {cap ? (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className={cn("h-full rounded-full", over ? "bg-destructive" : "bg-success")}
               style={{ width: `${fill}%` }}
             />
           </div>
-          <div className="mt-1 text-[11px] text-gray-400">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {limit.source === "overlay"
               ? `Lender overlay${limit.lender_slug ? ` · ${limit.lender_slug}` : ""}`
               : "Program default"}
           </div>
         </div>
       ) : (
-        <div className="mt-1 text-xs text-gray-400">No program limit set</div>
+        <div className="mt-1 text-xs text-muted-foreground">No program limit set</div>
       )}
     </div>
   );
@@ -244,9 +334,13 @@ interface RowControls {
   onUseEstimate?: (fieldKey: string, amount: string, note: string) => void;
   editingKey: string | null;
   onEdit: (key: string) => void;
-  onCancel: () => void;
+  /** LP-647 §3 — discards this row's draft. The ONLY discard besides Save, and both are deliberate. */
+  onCancel: (key: string) => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — unsaved edits by field key, held by the parent so a row switch does not lose one. */
+  drafts: Record<string, string>;
+  onDraftChange: (key: string, value: string) => void;
   disabled: boolean;
 }
 
@@ -255,27 +349,40 @@ function BreakdownSection({
   items,
   subtotal,
   emptyHint,
+  fileId,
+  section,
   ...controls
 }: {
   title: string;
   items: DtiLineItem[];
   subtotal: string;
   emptyHint?: string;
+  // LP-643 — present means this section accepts processor-added lines. Passed rather than derived
+  // from the title, which is display text and would silently stop matching if it were reworded.
+  fileId?: string;
+  section?: DtiCustomLineInput["section"];
 } & RowControls) {
   return (
     <section>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
-      <div className="rounded-lg border border-gray-200">
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      <div className="rounded-lg border border-border">
         {items.length === 0 && emptyHint ? (
-          <p className="px-3 py-2.5 text-sm text-gray-400">{emptyHint}</p>
+          <p className="px-3 py-2.5 text-sm text-muted-foreground">{emptyHint}</p>
         ) : (
-          items.map((item) => <LineRow key={item.key} item={item} {...controls} />)
+          items.map((item) => <LineRow key={item.key} item={item} fileId={fileId} {...controls} />)
         )}
-        <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50/60 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {fileId && section && (
+          <div className="border-t border-border px-3 pb-2">
+            <DtiAddLine fileId={fileId} section={section} />
+          </div>
+        )}
+        <div className="flex items-center justify-between border-t border-border bg-muted/60 px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Subtotal
           </span>
-          <span className="text-sm font-semibold tabular-nums text-gray-900">
+          <span className="text-sm font-semibold tabular-nums text-foreground">
             {formatMoneyPrecise(subtotal)}
           </span>
         </div>
@@ -284,18 +391,37 @@ function BreakdownSection({
   );
 }
 
+/** LP-643 review — the processor-added line's ID, from a key the SERVER decided is removable.
+ *
+ *  This file used to retype the server's `custom.` prefix and test for it. One constant, two
+ *  producers: change it server-side and the trash icon silently disappears from removable lines, or
+ *  appears on engine lines where the API then 404s in the processor's face. `item.removable` is the
+ *  server's own answer now, and the id needs no shared literal — it is whatever follows the first
+ *  separator in the namespaced key.
+ *
+ *  Only custom lines are removable at all: an engine line that should not count is an EXCLUSION,
+ *  which already renders struck through with its reason. A vanished row cannot be argued with, and
+ *  the API has no route to delete one. */
+function customLineId(key: string): string {
+  return key.slice(key.indexOf(".") + 1);
+}
+
 function LineRow({
   item,
+  fileId,
   editingKey,
   onEdit,
   onCancel,
   onSave,
   onClear,
+  drafts,
+  onDraftChange,
   disabled,
   unverified,
   onUseEstimate,
-}: { item: DtiLineItem } & RowControls) {
+}: { item: DtiLineItem; fileId?: string } & RowControls) {
   const editing = editingKey === item.key;
+  const custom = item.removable;
   // LP-627 (corrected) — EVERY offer for this line, not the first.
   //
   // The backend emits one per SOURCE and, since LP-627, property taxes can have two: the application's
@@ -305,13 +431,18 @@ function LineRow({
   // self-report. That is the opposite of what the backend comment says it is offering, and it
   // mislabels a self-report as an estimate.
   const suggestions = unverified?.filter((u) => u.field_key === item.key) ?? [];
-  const [draft, setDraft] = useState<string>(item.amount);
+  // LP-647 §3 — the draft comes from the PARENT now. A row that is not being edited but still holds
+  // one is UNSAVED, and says so below: an unsaved edit and a never-started edit used to render
+  // identically, which is why the loss was invisible rather than merely annoying.
+  const draft = drafts[item.key] ?? item.amount;
+  const unsaved = drafts[item.key] !== undefined && drafts[item.key] !== item.amount;
+  const setDraft = (value: string) => onDraftChange(item.key, value);
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
           {/* LP-569 review — this chain and the amount-styling chain below MUST test in the same
               order. They disagreed (overridden→excluded→unknown here, unknown→excluded→overridden
               there), so a row that was both rendered struck through with a caption reading
@@ -319,13 +450,28 @@ function LineRow({
               exclusion was built to prevent. An override now re-includes the line, so the two are
               mutually exclusive at the source; keeping the order identical stops a future change
               from re-opening the gap. */}
-          {item.excluded ? (
-            <span className="text-gray-500">
+          {/* LP-647 §3 — FIRST IN THE CHAIN, deliberately. An unsaved edit is the only caption
+              describing something the processor must still DO; every other one describes the file.
+              It also has to beat `overridden`, or a second edit to an already-overridden line would
+              render as saved while holding an unsaved figure — the exact confusion this closes. */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${drafts[item.key]}
+            </span>
+          ) : item.excluded ? (
+            <span className="text-muted-foreground">
               not counted — {item.excluded_reason ?? "excluded"}
             </span>
           ) : item.overridden ? (
             <span className="text-primary">
-              overridden · auto {formatMoneyPrecise(item.auto_amount)}
+              {/* WHO, not just that. "Someone changed this number" and "Priya
+                  changed this number" are different statements on a compliance
+                  file, and the actor was already recorded — it was dropped on
+                  the way out of the service (LP-UI-021). No actor recorded is
+                  left as a bare "overridden": inventing "unknown" would read as
+                  a name nobody checked. */}
+              overridden{item.override_by ? ` by ${item.override_by}` : ""} · auto{" "}
+              {formatMoneyPrecise(item.auto_amount)}
             </span>
           ) : item.unknown ? (
             <span className="text-warning">
@@ -350,7 +496,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -359,14 +505,14 @@ function LineRow({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onSave(item.key, draft);
-              if (e.key === "Escape") onCancel();
+              if (e.key === "Escape") onCancel(item.key);
             }}
-            className="h-8 w-28 text-right text-sm tabular-nums"
+            className="h-8 w-28 text-right tabular-nums"
           />
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-success"
+            className="text-success"
             aria-label="Save override"
             disabled={disabled}
             onClick={() => onSave(item.key, draft)}
@@ -376,9 +522,9 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="text-muted-foreground"
             aria-label="Cancel"
-            onClick={onCancel}
+            onClick={() => onCancel(item.key)}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -388,29 +534,32 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET. `setDraft(item.amount)` here is what made a paused edit unrecoverable even
+              // after the draft survived the switch — re-entering the row overwrote it with the saved
+              // figure. The parent seeds from `item.amount` on read, so a first edit still starts
+              // from the current value.
               onEdit(item.key);
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
               // Same order as the caption chain above — see the note there.
               item.excluded
-                ? "font-medium text-gray-400 line-through"
+                ? "font-medium text-muted-foreground line-through"
                 : item.overridden
                   ? "font-semibold text-primary"
                   : item.unknown
                     ? "font-medium text-warning"
-                    : "font-medium text-gray-900",
+                    : "font-medium text-foreground",
             )}
           >
             {item.unknown && !item.excluded ? "Unknown" : formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -418,9 +567,29 @@ function LineRow({
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
           )}
+          {custom && fileId && <RemoveCustomLine fileId={fileId} item={item} />}
         </div>
       )}
     </div>
+  );
+}
+
+/** LP-643 — remove a line the PROCESSOR added. Rendered only for those: an engine line that should
+ *  not count is an EXCLUSION, not a deletion — it already renders struck through with its reason,
+ *  and the API has no route to delete one. A vanished row cannot be argued with. */
+function RemoveCustomLine({ fileId, item }: { fileId: string; item: DtiLineItem }) {
+  const remove = useRemoveDtiLine(fileId);
+  return (
+    <Button
+      size="icon"
+      variant="ghost"
+      className="h-7 w-7 text-muted-foreground hover:text-danger"
+      aria-label={`Remove ${item.label}`}
+      disabled={remove.isPending}
+      onClick={() => remove.mutate(customLineId(item.key))}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
@@ -430,20 +599,34 @@ function LineRow({
 
 /** LP-375: the DTI is FAIL-CLOSED — a required housing input is unknown, so no confident ratio is shown
  * (a $0 there would read confidently too-low). The display agrees with the engine's gate. */
-function GatedBanner({ reason }: { reason?: string | null }) {
+function GatedBanner({ reason, fileId }: { reason?: string | null; fileId: string }) {
+  // LP-643 — the ungate sits ON the banner, because that is where the problem is stated. Its dialog
+  // is an itemised consent rather than a confirmation; everything it shows comes from the server.
+  const [ungating, setUngating] = useState(false);
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-foreground-2"
     >
       <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="space-y-2">
         <span>
-          <span className="font-medium text-gray-900">The DTI can't be computed yet</span> —{" "}
+          <span className="font-medium text-foreground">The DTI can't be computed yet</span> —{" "}
           {reason?.replace(/^calculation gated \(fail-closed\):\s*/, "") ??
             "a required housing input is unknown"}
           . It's shown as gated rather than a confident ratio resting on a missing value.
         </span>
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setUngating(true)}
+          >
+            Record unknown inputs as $0.00…
+          </Button>
+          <DtiUngateDialog fileId={fileId} open={ungating} onOpenChange={setUngating} />
+        </div>
       </div>
     </div>
   );
@@ -481,7 +664,7 @@ function UseEstimateButton({
             disabled={disabled}
             onClick={() => onUse(suggestion.field_key, suggestion.monthly_amount, note)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-warning/10 disabled:opacity-50",
+              "inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-card px-2.5 py-1 text-xs font-medium text-foreground-2 hover:bg-warning/10 disabled:opacity-50",
               className,
             )}
           >
@@ -495,7 +678,7 @@ function UseEstimateButton({
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">
           <p>{suggestion.sentence}</p>
-          <p className="mt-1.5 text-gray-300">
+          <p className="mt-1.5 text-background/75">
             Using it records an override in your name — the file will still show this figure is an
             estimate, and the tax bill is still outstanding.
           </p>
@@ -507,35 +690,18 @@ function UseEstimateButton({
 
 function FormulaReceipt({ data }: { data: DtiCalculation }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+    <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         The formula
       </div>
-      <p className="mt-1.5 font-mono text-xs leading-relaxed text-gray-600">
+      <p className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
         {data.back_end_formula}
       </p>
-      <p className="mt-1 font-mono text-xs leading-relaxed text-gray-900">
+      <p className="mt-1 font-mono text-xs leading-relaxed text-foreground">
         = ({formatMoneyPrecise(data.housing_payment)} + {formatMoneyPrecise(data.monthly_debts)}) ÷{" "}
         {formatMoneyPrecise(data.gross_monthly_income)} ={" "}
         <span className="font-semibold">{formatPercent(data.back_end_dti)}</span>
       </p>
-    </div>
-  );
-}
-
-function UnresolvedAlert({ count }: { count: number }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
-    >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-      <span>
-        <span className="font-medium text-gray-900">
-          {count} unresolved finding{count === 1 ? "" : "s"}
-        </span>{" "}
-        — this calculation may be incomplete until they're applied or overridden.
-      </span>
     </div>
   );
 }

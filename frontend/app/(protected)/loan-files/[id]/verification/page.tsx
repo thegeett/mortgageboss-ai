@@ -1,6 +1,5 @@
 "use client";
 
-import { CalculatorsSection } from "@/components/file/calculators/calculators-section";
 import { VerificationPanel } from "@/components/file/verification/verification-panel";
 import { useParams } from "next/navigation";
 
@@ -17,9 +16,9 @@ export default function VerificationPage() {
   const { id } = useParams<{ id: string }>();
 
   return (
-    <div className="space-y-6">
-      <CalculatorsSection fileId={id} />
-      <VerificationPanel fileId={id} />
-    </div>
+    // The panel renders the calculators itself, between the run controls and the
+    // outcomes (LP-UI-046). Rendering them here put the run controls and the
+    // thoroughness dial below the fold.
+    <VerificationPanel fileId={id} />
   );
 }

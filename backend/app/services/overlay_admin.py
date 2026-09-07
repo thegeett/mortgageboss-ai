@@ -13,6 +13,7 @@ at the API layer (:func:`require_role`). The persisted JSON shape is
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -26,11 +27,14 @@ from app.models.helpers import only_active, scope_to_company
 from app.models.lender import Lender
 from app.schemas.overlay_admin import (
     LenderOverlayView,
+    OverlayAuditChange,
     OverlayAuditEntry,
+    OverlayLenderSummary,
     OverlayOverrideView,
     OverlayUpdateRequest,
 )
 from app.services.activity_log import audit_value, field_changes
+from app.services.override_attribution import resolve_user_names
 from app.verification.rules.schema import VerificationRule
 
 
@@ -67,6 +71,92 @@ def _stored_audit(lender: Lender) -> list[dict[str, Any]]:
     return [a for a in audit if isinstance(a, dict)]
 
 
+def build_lender_summary(lender: Lender) -> OverlayLenderSummary:
+    """The admin list's row: what is different at this lender, and when it changed.
+
+    Both come off the `lender_overlays` blob already on the row, through the same
+    two tolerant accessors `build_overlay_view` uses — so the list's count and the
+    editor's list cannot disagree about what an override is.
+    """
+    audit = _stored_audit(lender)
+    stamps = [_audit_timestamp(entry) for entry in audit]
+    return OverlayLenderSummary(
+        id=lender.id,
+        name=lender.name,
+        supported_programs=lender.supported_programs or [],
+        override_count=len(_stored_overrides(lender)),
+        # The audit is append-ordered, but `max` rather than `[-1]`: a blob edited
+        # by hand (which is how overlays were maintained before LP-87) has no
+        # ordering guarantee, and "most recent" must not depend on one.
+        last_changed_at=max((s for s in stamps if s is not None), default=None),
+    )
+
+
+def _audit_timestamp(entry: dict[str, Any]) -> datetime | None:
+    """One audit entry's `at`, or None if it is missing or unparseable.
+
+    Hand-edited JSON is the reason this is defensive rather than `entry["at"]`:
+    a malformed timestamp must cost the "last changed" line, not the whole list.
+    """
+    raw = entry.get("at")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+async def attach_actor_names(db: AsyncSession, view: LenderOverlayView) -> LenderOverlayView:
+    """Fill each audit entry's `actor_name` (LP-UI-026).
+
+    Separate from `build_overlay_view`, which is sync and touches no database —
+    the composition of base against effective is pure and worth keeping that way.
+    One query for every actor in the trail, through the same resolver the
+    calculator lines use, so one person cannot end up with two names.
+    """
+    ids: set[UUID] = set()
+    for entry in view.audit:
+        if entry.actor_user_id:
+            try:
+                ids.add(UUID(entry.actor_user_id))
+            except ValueError:
+                # Hand-edited JSON again: a malformed actor costs the name, not
+                # the trail. The entry is still true without it.
+                continue
+    names = await resolve_user_names(db, ids)
+    for entry in view.audit:
+        if entry.actor_user_id:
+            try:
+                entry.actor_name = names.get(UUID(entry.actor_user_id))
+            except ValueError:
+                entry.actor_name = None
+    return view
+
+
+def _audit_change(stored: dict[str, Any], base: dict[str, VerificationRule]) -> OverlayAuditChange:
+    """One stored `{field, from, to}` plus the words to say it (LP-UI-026).
+
+    The stored shape is untouched; the label is resolved on the way out. A rule
+    the catalog no longer carries yields `None` rather than a guess — an audit
+    outlives the rule it refers to, and "(unknown rule)" in a history is worse
+    than the id, which at least identifies what moved.
+    """
+    rule = base.get(str(stored.get("field", "")))
+    return OverlayAuditChange(
+        field=str(stored.get("field", "")),
+        field_label=rule.description if rule is not None else None,
+        **{
+            "from": _optional_str(stored.get("from")),
+            "to": _optional_str(stored.get("to")),
+        },
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
 def build_overlay_view(lender: Lender) -> LenderOverlayView:
     """Compose the lender's stored overlay into the effect-legible view (base → effective)."""
     base = _base_rule_index()
@@ -93,7 +183,7 @@ def build_overlay_view(lender: Lender) -> LenderOverlayView:
             at=str(a.get("at", "")),
             actor_user_id=a.get("actor_user_id"),
             reason=str(a.get("reason", "")),
-            changes=list(a.get("changes", [])),
+            changes=[_audit_change(c, base) for c in a.get("changes", []) if isinstance(c, dict)],
         )
         for a in _stored_audit(lender)
     ]

@@ -32,11 +32,13 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from time import perf_counter
 
 import structlog
 
 from app.ai.cost import estimate_cost
 from app.ai.extraction.parsing import coerce_decimal
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_correlation import (
     HAS_IDENTIFIED_SOURCE_VALUES,
     AIClientError,
@@ -464,6 +466,7 @@ async def _judge_concurrently(
     *,
     concurrency: int,
     stop_after_failures: int | None = None,
+    metrics: StageMetrics | None = None,
 ) -> dict[str, SourcingResult | AIClientError]:
     """Run every outstanding judgement at once, bounded, returning ``{cache key: outcome}``.
 
@@ -515,17 +518,36 @@ async def _judge_concurrently(
         async with semaphore:
             if gate_closed:
                 return key, _NotAttempted(_NOT_ATTEMPTED_DETAIL)
+            # LP-644 §1 — timed INSIDE the semaphore, so a coroutine's wait for a slot is not
+            # charged to the model. Under concurrency the queueing time can dwarf the call, and
+            # billing it here would inflate the per-call mean that §2's and §5's sizing rests on.
+            call_started = perf_counter()
             try:
                 result = await reason_fn(json.dumps(context))
             except AIClientError as err:
                 consecutive_failures += 1
                 if stop_after_failures is not None and consecutive_failures >= stop_after_failures:
                     gate_closed = True
+                # LP-644 §1 review — COUNTED, like the successes. A failed call costs the same wall
+                # clock, and `ai_calls` is what the ticket's projections are checked against — so
+                # recording only the success path means an outage reports a stage that made no
+                # calls. Zero tokens, real seconds. The gate-closed return above records nothing,
+                # deliberately: no call was made there.
+                if metrics is not None:
+                    metrics.record_call(
+                        input_tokens=0, output_tokens=0, seconds=perf_counter() - call_started
+                    )
                 return key, err
             except Exception:
                 gate_closed = True  # a bug, not an outage — stop spending on a discarded result
                 raise
             consecutive_failures = 0
+            if metrics is not None:
+                metrics.record_call(
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    seconds=perf_counter() - call_started,
+                )
             return key, result
 
     collected = await asyncio.gather(
@@ -550,6 +572,7 @@ async def produce_stage_b_sourcing_tags(
     source_lookahead_days: int = _SOURCE_LOOKAHEAD_DAYS,
     amount_tolerance: Decimal = _AMOUNT_TOLERANCE,
     concurrency: int = _MAX_CONCURRENT_JUDGMENTS,
+    metrics: StageMetrics | None = None,
 ) -> Snapshot:
     """Produce ``txn.has_identified_source`` for each money-in deposit (candidate-then-judge).
 
@@ -557,7 +580,12 @@ async def produce_stage_b_sourcing_tags(
     layer in place. Returns a new frozen snapshot; the raw layer is untouched. ``cache`` (optional,
     mutated in place) reuses judgments across runs by (deposit + candidate-set) content — only
     successful judgments are stored, so a failed/truncated deposit retries next run.
+
+    ``metrics`` (LP-644 §1, optional, mutated in place) records call count, tokens and latency.
+    This is the stage LP-644 believes makes ~551 of the run's 591 calls — a figure it derives as a
+    REMAINDER and explicitly flags as the first thing to check once measurement lands.
     """
+    stage_started = perf_counter()
     if snapshot.tags.absent:
         # Stage A never ran / failed — there is no is_money_in to consume; leave it absent.
         return snapshot
@@ -653,6 +681,7 @@ async def produce_stage_b_sourcing_tags(
         reason_fn,
         concurrency=concurrency,
         stop_after_failures=None if breaker is None else breaker.threshold,
+        metrics=metrics,
     )
 
     # PHASE 3 — APPLY, IN THE ORIGINAL ORDER. Deterministic on purpose: the tags, the token totals
@@ -732,20 +761,39 @@ async def produce_stage_b_sourcing_tags(
                 produced_by=TagProducedBy.DERIVED,
             )
 
-    if input_tokens or output_tokens:
-        logger.info(
-            "stage_b_production_done",
-            deposits_judged=deposits_judged,
+    # LP-644 §1 — before the log line, so the reported wall time covers the whole stage (candidate
+    # matching and tag building included), not only the concurrent dispatch.
+    if metrics is not None:
+        metrics.wall_seconds = perf_counter() - stage_started
+
+    # LP-644 §1 review — UNCONDITIONAL, and the gate that was here is the reason.
+    #
+    # `if input_tokens or output_tokens:` meant a stage whose every call FAILED logged nothing at
+    # all: tokens only accumulate on success. That is precisely the run this instrumentation most
+    # needs to describe — LP-644's entire baseline (591 calls at a 4.3s mean) was measured on a
+    # FAILING run — and it let a stage spend its whole budget on retries and report that it never
+    # ran. Carried forward from the branch's own §1 review, which found it and whose implementation
+    # this merge otherwise replaced.
+    #
+    # `cost_estimate` is None rather than 0 when nothing was invoked: there is no model to attribute
+    # a price to, and $0.00 reads as a free stage rather than an unsuccessful one.
+    logger.info(
+        "stage_b_production_done",
+        deposits_judged=deposits_judged,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_estimate=estimate_cost(
+            # Unreachable fallback: tokens only accumulate on a successful judgment,
+            # which is exactly when invoked_model is set.
+            model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_estimate=estimate_cost(
-                # Unreachable fallback: tokens only accumulate on a successful judgment,
-                # which is exactly when invoked_model is set.
-                model=invoked_model or resolve_model(settings.anthropic_model_reasoning),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            ),
-        )
+        ),
+        # LP-644 §1 — the stage running at concurrency 8, so `ai_latency_seconds` (cumulative)
+        # and `ai_wall_seconds` diverge here by roughly the concurrency factor. That gap is the
+        # measurement, not an inconsistency.
+        **(metrics.as_log_fields() if metrics is not None else {}),
+    )
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
@@ -757,3 +805,56 @@ __all__ = [
     "find_source_candidates",
     "produce_stage_b_sourcing_tags",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-644 §3 — cross-run persistence of this stage's cache
+# --------------------------------------------------------------------------- #
+# Owned here for the same reason Stage A's is owned there: `_Sourced` and `SourceStrength` are this
+# module's shapes.
+
+
+def dump_stage_b_entry(entry: _Sourced) -> dict[str, object]:
+    """One Stage-B sourcing verdict as JSON."""
+    return {
+        "value": entry.value,
+        "source_content_id": entry.source_content_id,
+        "confidence": entry.confidence,
+        "reasoning": entry.reasoning,
+        "strength": entry.strength.value if entry.strength is not None else None,
+    }
+
+
+def load_stage_b_entry(raw: dict[str, object]) -> _Sourced | None:
+    """A Stage-B verdict from JSON, or None if the row cannot be trusted.
+
+    ⚠️ `cacheable` is NOT round-tripped, and that is deliberate rather than an omission. It is the
+    flag that decided whether this entry was allowed to persist at all, so every row that exists was
+    written with ``cacheable=True`` and is reconstructed that way. Storing it would create a row that
+    says "do not reuse me" — a value that can only ever be wrong, since an uncacheable verdict should
+    never have reached the table.
+
+    A value outside the judged vocabulary is rejected rather than repaired: it can only come from a
+    shape change or corruption, and re-asking costs one call.
+    """
+    value = raw.get("value")
+    if not isinstance(value, str) or value not in HAS_IDENTIFIED_SOURCE_VALUES:
+        return None
+    raw_strength = raw.get("strength")
+    strength: SourceStrength | None = None
+    if isinstance(raw_strength, str):
+        try:
+            strength = SourceStrength(raw_strength)
+        except ValueError:
+            return None  # an unknown strength is a shape change, not something to guess at
+    source_content_id = raw.get("source_content_id")
+    confidence = raw.get("confidence")
+    reasoning = raw.get("reasoning")
+    return _Sourced(
+        value=value,
+        source_content_id=source_content_id if isinstance(source_content_id, str) else None,
+        confidence=confidence if isinstance(confidence, int | float) else None,
+        reasoning=reasoning if isinstance(reasoning, str) else None,
+        cacheable=True,
+        strength=strength,
+    )

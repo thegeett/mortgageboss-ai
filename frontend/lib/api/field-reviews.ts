@@ -1,0 +1,68 @@
+import { apiClient } from "@/lib/api/client";
+import { documentDetailQueryKey } from "@/lib/api/documents";
+import type { FieldVerdict } from "@/lib/types/document";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+/**
+ * A processor's verdict on one extracted field (LP-UI-033, LP-703).
+ *
+ * The verdict lives beside the extracted value, never on top of it: a correction
+ * records what the processor says is right without rewriting what the model read,
+ * so "what did the model actually say?" stays answerable.
+ *
+ * SINCE LP-703 THE RULE ENGINE READS THEM. A correction, a removal and an
+ * addition all change what a verification run computes from — which is what the
+ * feature was for, and what it did not do for its first two months: the screen
+ * showed the correction and the DTI was still built from the model's figure.
+ * Every mutation here therefore invalidates the document, and the run on the file
+ * is marked stale by the API.
+ */
+export type { FieldVerdict } from "@/lib/types/document";
+
+export interface FieldReviewInput {
+  fieldKey: string;
+  verdict: FieldVerdict;
+  /** Required for `corrected` and `added`. */
+  correctedValue?: string;
+  /**
+   * Required for `rejected` and `removed`. A field nobody could verify, with no
+   * reason why, tells the next processor nothing — and a field taken OUT with no
+   * reason leaves them an absence with no account of who made it.
+   */
+  note?: string;
+}
+
+export function useRecordFieldReview(documentId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: FieldReviewInput) => {
+      await apiClient.put(`/api/v1/documents/${documentId}/reviews`, {
+        field_key: input.fieldKey,
+        verdict: input.verdict,
+        corrected_value: input.correctedValue ?? null,
+        note: input.note ?? null,
+      });
+    },
+    onSuccess: () => {
+      // The detail response carries the verdict beside the scrutiny, so one
+      // invalidation refreshes both rather than leaving them a tick apart.
+      if (documentId) {
+        void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      }
+    },
+  });
+}
+
+export function useRevertFieldReview(documentId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (fieldKey: string) => {
+      await apiClient.delete(`/api/v1/documents/${documentId}/reviews/${fieldKey}`);
+    },
+    onSuccess: () => {
+      if (documentId) {
+        void queryClient.invalidateQueries({ queryKey: documentDetailQueryKey(documentId) });
+      }
+    },
+  });
+}

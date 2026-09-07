@@ -44,15 +44,35 @@ def test_no_hardcoded_model_string_outside_the_config_home() -> None:
     )
 
 
+def _default(field: str) -> str:
+    """The DECLARED default for a model setting, not the value this machine resolved.
+
+    THE TEST SAYS "DEFAULT" AND WAS READING THE ENVIRONMENT. `settings` is the live
+    singleton, so these assertions ran against whatever the developer's `.env`
+    happens to pin — and a developer pinning `ANTHROPIC_MODEL_ANALYSIS` to Sonnet
+    failed two of them on a tree with nothing wrong in it. CI has no `.env`, so it
+    read the defaults and passed, which is what let a machine-dependent test sit
+    here: it was diagnosed as an environment quirk three separate times in one
+    session before anyone read what it asserted.
+
+    Overriding a model by environment is a deliberate operator act, not a
+    violation. The invariant this file is for is the SHIPPED calibration, and that
+    lives in the field declarations.
+    """
+    value = type(settings).model_fields[field].default
+    assert isinstance(value, str) and value, f"{field} has no declared default to check"
+    return value
+
+
 def test_four_model_tiers_exist_and_default_correctly() -> None:
     # The four purposes. Extraction is Haiku (LP-457 switch); reasoning STAYS Sonnet (the live rules were
     # calibrated on Sonnet reasoning — moving it invalidates every activation bar); classification is Haiku;
     # analysis (Tier-3 generic analyzer) is Haiku as of LP-628, still on its OWN knob (LP-457 review —
     # decoupled from reasoning, so cheapening Tier 3 cannot drag calibrated reasoning with it).
-    assert settings.anthropic_model_classification == "claude-haiku-4-5"
-    assert settings.anthropic_model_extraction == "claude-haiku-4-5"
-    assert settings.anthropic_model_reasoning == "claude-sonnet-4-5"
-    assert settings.anthropic_model_analysis == "claude-haiku-4-5"
+    assert _default("anthropic_model_classification") == "claude-haiku-4-5"
+    assert _default("anthropic_model_extraction") == "claude-haiku-4-5"
+    assert _default("anthropic_model_reasoning") == "claude-sonnet-4-5"
+    assert _default("anthropic_model_analysis") == "claude-haiku-4-5"
 
 
 def test_the_analysis_tier_resolves_under_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,7 +93,10 @@ def test_the_analysis_tier_resolves_under_bedrock(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings, "bedrock_model_extraction", "us.anthropic.claude-haiku-4-5-x")
     monkeypatch.setattr(settings, "bedrock_model_reasoning", "us.anthropic.claude-sonnet-4-5-x")
 
-    assert resolve_model(settings.anthropic_model_analysis) == "us.anthropic.claude-haiku-4-5-x"
+    # THE DEFAULT, for the same reason as above: this asks whether the tier as
+    # SHIPPED resolves, and reading the singleton made the answer depend on the
+    # reader's `.env` rather than on the configuration being tested.
+    assert resolve_model(_default("anthropic_model_analysis")) == "us.anthropic.claude-haiku-4-5-x"
 
 
 def test_reasoning_and_extraction_and_analysis_are_independently_configurable() -> None:

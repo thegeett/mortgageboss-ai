@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { type StatedKind, useStatedFinancialsEdit } from "@/lib/api/mismo";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { StatedFinancials } from "@/lib/types/stated-financials";
 import { Check, Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 
 const LIABILITY_FIELDS: FieldDef[] = [
   { key: "liability_type", label: "Type", kind: "text" },
@@ -44,7 +44,9 @@ function Group({
   return (
     <section className="mt-5 first:mt-0">
       <div className="mb-1.5 flex items-center justify-between">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h4>
         <button
           type="button"
           onClick={onAdd}
@@ -55,7 +57,7 @@ function Group({
         </button>
       </div>
       {empty ? (
-        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2.5 text-xs text-gray-400">
+        <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
           None imported — use “Add” if any apply.
         </p>
       ) : (
@@ -82,13 +84,28 @@ export function StatedFinancialsEditor({
   const termsId = useId();
 
   const onError = (error: unknown) =>
-    toast.error("Couldn't save the change", { description: getErrorMessage(error) });
-  const saved = () => toast.success("Saved");
+    notifyError({ title: "Couldn’t save the change", whatToDo: getErrorMessage(error) });
+  const saved = () =>
+    notifySuccess({
+      title: "Saved",
+      consequence:
+        "The stated figure is updated; the rules that read it run again on the next verification.",
+    });
 
   const updateRow = (kind: StatedKind, id: string, body: Record<string, unknown>) =>
     edit.updateRow.mutate({ kind, id, body }, { onSuccess: saved, onError });
   const removeRow = (kind: StatedKind, id: string) =>
-    edit.deleteRow.mutate({ kind, id }, { onSuccess: () => toast.success("Removed"), onError });
+    edit.deleteRow.mutate(
+      { kind, id },
+      {
+        onSuccess: () =>
+          notifySuccess({
+            title: "Row removed",
+            consequence: "It no longer counts towards the stated totals.",
+          }),
+        onError,
+      },
+    );
 
   const busy = edit.updateRow.isPending || edit.deleteRow.isPending;
 
@@ -122,7 +139,14 @@ export function StatedFinancialsEditor({
           onAdd={() =>
             edit.addIncome.mutate(
               { borrowerId: b.id, body: {} },
-              { onSuccess: () => toast.success("Income row added"), onError },
+              {
+                onSuccess: () =>
+                  notifySuccess({
+                    title: "Income row added",
+                    consequence: "Fill it in and it counts towards the stated income.",
+                  }),
+                onError,
+              },
             )
           }
         >
@@ -160,7 +184,23 @@ export function StatedFinancialsEditor({
         onAdd={() =>
           edit.addLiability.mutate(
             {},
-            { onSuccess: () => toast.success("Liability added"), onError },
+            {
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Liability added",
+                  // NOT an unconditional "counts towards the back-end DTI". A
+                  // liability marked paid off at closing is EXCLUDED from the
+                  // back-end ratio (LP-568, `_auto_debt_lines`) — and on a
+                  // refinance the mortgage being replaced is exactly that, which
+                  // is the single most common liability a processor adds here.
+                  // Telling them it counts is a confident false statement about
+                  // the one field where getting it wrong moved a real file's DTI
+                  // from 34% to 59%.
+                  consequence:
+                    "Fill it in and its payment counts towards the back-end DTI, unless it is paid off at closing.",
+                }),
+              onError,
+            },
           )
         }
       >
@@ -186,7 +226,22 @@ export function StatedFinancialsEditor({
         title="Assets"
         empty={data.assets.length === 0}
         onAdd={() =>
-          edit.addAsset.mutate({}, { onSuccess: () => toast.success("Asset added"), onError })
+          edit.addAsset.mutate(
+            {},
+            {
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Asset added",
+                  // Reserves do not take every asset at face value
+                  // (`build_reserves_view`): gifts and borrowed funds are
+                  // excluded outright, and retirement counts at a factor — 0.60
+                  // on FHA. "Its value counts" overstates both.
+                  consequence:
+                    "Fill it in and it counts towards reserves — gifts and borrowed funds do not, and retirement counts at a discount.",
+                }),
+              onError,
+            },
+          )
         }
       >
         {data.assets.map((a) => (
@@ -207,10 +262,10 @@ export function StatedFinancialsEditor({
 
       {/* Stated loan terms — a single PATCH on the file. */}
       <section className="mt-5">
-        <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+        <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Loan terms
         </h4>
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200/80 p-2.5">
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border/80 p-2.5">
           {(
             [
               ["note_rate_percent", "Note rate %"],
@@ -222,14 +277,14 @@ export function StatedFinancialsEditor({
             <label
               key={key}
               htmlFor={`${termsId}-${key}`}
-              className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-gray-500"
+              className="flex min-w-[7rem] flex-1 flex-col gap-1 text-xs text-muted-foreground"
             >
               {label}
               <Input
                 id={`${termsId}-${key}`}
                 value={terms[key]}
                 onChange={(e) => setTerms((t) => ({ ...t, [key]: e.target.value }))}
-                className="h-8 text-sm"
+                className="h-8"
               />
             </label>
           ))}
@@ -252,7 +307,9 @@ export function StatedFinancialsEditor({
       </section>
 
       {primaryBorrowerId === undefined && (
-        <p className="mt-3 text-xs text-gray-400">Add a borrower to record income or employers.</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Add a borrower to record income or employers.
+        </p>
       )}
     </div>
   );

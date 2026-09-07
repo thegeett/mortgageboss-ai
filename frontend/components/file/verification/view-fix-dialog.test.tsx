@@ -36,6 +36,8 @@ function dti(over: Partial<DtiCalculation>): DtiCalculation {
         amount: "2000",
         source: "stated",
         overridden: false,
+        override_by: null,
+        override_note: null,
       },
     ],
     front_end_formula: "",
@@ -74,6 +76,8 @@ function preview(over: Partial<FindingImpactPreview> = {}): FindingImpactPreview
           amount: "2000",
           source: "stated",
           overridden: false,
+          override_by: null,
+          override_note: null,
         },
         {
           key: "debt.new",
@@ -83,6 +87,8 @@ function preview(over: Partial<FindingImpactPreview> = {}): FindingImpactPreview
           amount: "6000",
           source: "stated",
           overridden: false,
+          override_by: null,
+          override_note: null,
         },
       ],
       limit: {

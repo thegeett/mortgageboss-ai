@@ -170,7 +170,10 @@ async def test_zero_income_variant_imports_with_warning(
 ) -> None:
     body = await _import(auth_client, synthetic.zero_income_variant(raw_bytes))
     # Still created (import-directly), with the non-blocking needed-now warning.
-    assert any("no income" in w.lower() for w in body["warnings"])
+    # LP-UI-024 — a warning is now `{message, subject}`, so the panel can link
+    # it to the section it concerns instead of recognising its own prose.
+    assert any("no income" in w["message"].lower() for w in body["warnings"])
+    assert any(w["subject"] == "income" for w in body["warnings"])
     file_id = body["loan_file"]["id"]
     fin = (await auth_client.get(f"/api/v1/loan-files/{file_id}/stated-financials")).json()
     assert fin["borrowers"][0]["income_items"] == []

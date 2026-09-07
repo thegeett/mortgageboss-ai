@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Ledger Build Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root {
+  --paper:   #FBFCFC;
+  --surface: #FFFFFF;
+  --sunken:  #F3F5F5;
+  --ink:     #101617;
+  --ink-2:   #3D4746;
+  --ink-3:   #6C7674;
+  --line:    #E3E7E6;
+  --line-2:  #CDD3D2;
+  --accent:  #12545E;
+  --accent-hi: #17707D;
+  --accent-soft: #E4EFF0;
+  --crit:    #B23A2A;
+  --crit-soft: #FAEDEA;
+  --att:     #8F5D08;
+  --att-soft:#FAF2E1;
+  --ver:     #1B6E52;
+  --ver-soft:#E6F2EC;
+  --ai:      #5B4FA8;
+  --ai-soft: #EEECF9;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #0C1011;
+    --surface: #121818;
+    --sunken:  #182020;
+    --ink:     #E9EEED;
+    --ink-2:   #BAC4C2;
+    --ink-3:   #8B9592;
+    --line:    #222B2B;
+    --line-2:  #2E3838;
+    --accent:  #4FB3C0;
+    --accent-hi: #6DC9D5;
+    --accent-soft: #122B2E;
+    --crit:    #EC8375;
+    --crit-soft: #2B1815;
+    --att:     #D9A03E;
+    --att-soft:#2A2113;
+    --ver:     #52C093;
+    --ver-soft:#12241C;
+    --ai:      #A99BEE;
+    --ai-soft: #1E1B2E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:   #0C1011;
+  --surface: #121818;
+  --sunken:  #182020;
+  --ink:     #E9EEED;
+  --ink-2:   #BAC4C2;
+  --ink-3:   #8B9592;
+  --line:    #222B2B;
+  --line-2:  #2E3838;
+  --accent:  #4FB3C0;
+  --accent-hi: #6DC9D5;
+  --accent-soft: #122B2E;
+  --crit:    #EC8375;
+  --crit-soft: #2B1815;
+  --att:     #D9A03E;
+  --att-soft:#2A2113;
+  --ver:     #52C093;
+  --ver-soft:#12241C;
+  --ai:      #A99BEE;
+  --ai-soft: #1E1B2E;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1024px; margin: 0 auto; padding: 0 28px 96px; }
+.col  { max-width: 70ch; }
+.wide { max-width: 100%; }
+
+/* ---- masthead ---- */
+header.mast { padding: 62px 0 34px; border-bottom: 1px solid var(--line-2); margin-bottom: 34px; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--accent); font-weight: 500; margin: 0 0 14px;
+}
+h1 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: clamp(34px, 5.2vw, 52px); line-height: 1.06; letter-spacing: -.022em;
+  margin: 0; color: var(--ink); text-wrap: balance; max-width: 17ch;
+}
+.standfirst { font-size: 17.5px; line-height: 1.58; color: var(--ink-3); margin: 18px 0 0; max-width: 62ch; }
+.byline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin: 22px 0 0; }
+
+/* ---- structure ---- */
+h2 {
+  font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+  font-size: 27px; line-height: 1.2; letter-spacing: -.016em; color: var(--ink);
+  margin: 62px 0 6px; text-wrap: balance;
+}
+h2 .n {
+  display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
+  font-weight: 500; margin-bottom: 9px;
+}
+h3 { font-size: 16px; font-weight: 600; color: var(--ink); margin: 34px 0 6px; letter-spacing: -.008em; }
+h4 { font-size: 14px; font-weight: 600; color: var(--ink); margin: 22px 0 4px; }
+p { margin: 0 0 15px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .88em; }
+p code, li code, td code { background: var(--sunken); border: 1px solid var(--line); border-radius: 3px; padding: .5px 4px; color: var(--ink); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0 0 15px; padding-left: 20px; }
+li { margin-bottom: 7px; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 46px 0; }
+
+/* ---- findings list: numbering encodes a real audit sequence ---- */
+.finding { max-width: 76ch; display: grid; grid-template-columns: 36px 1fr; gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
+.finding:last-of-type { border-bottom: 1px solid var(--line); }
+.fn { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.fh { font-size: 15.5px; font-weight: 600; color: var(--ink); margin: 0 0 4px; letter-spacing: -.008em; }
+.fw { margin: 0; font-size: 14.5px; }
+.where { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin-top: 7px; }
+.sev { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; vertical-align: 2px; margin-left: 7px; font-weight: 500; }
+.sev.bug { background: var(--crit-soft); color: var(--crit); }
+.sev.friction { background: var(--att-soft); color: var(--att); }
+.sev.absent { background: var(--ai-soft); color: var(--ai); }
+
+/* ---- pull box ---- */
+.rule { max-width: 68ch; border-left: 3px solid var(--accent); padding: 4px 0 4px 20px; margin: 26px 0; }
+.rule p { font-family: "IBM Plex Serif", Georgia, serif; font-size: 19px; line-height: 1.45; color: var(--ink); margin: 0; }
+
+.callout { max-width: 74ch; border: 1px solid var(--line); border-left: 3px solid var(--att); background: var(--surface); border-radius: 0 6px 6px 0; padding: 14px 18px; margin: 24px 0; font-size: 14.5px; }
+.callout.acc { border-left-color: var(--accent); }
+.callout .lab { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+
+/* ---- code ---- */
+pre {
+  max-width: 100%;
+  background: var(--sunken); border: 1px solid var(--line); border-radius: 7px;
+  padding: 16px 18px; overflow-x: auto; margin: 20px 0;
+  font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.62; color: var(--ink-2);
+}
+pre .c { color: var(--ink-3); font-style: italic; }
+pre .k { color: var(--accent); }
+pre .v { color: var(--ink); }
+
+/* ---- tables ---- */
+.tw { overflow-x: auto; margin: 22px 0; border: 1px solid var(--line); border-radius: 7px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; background: var(--surface); }
+th {
+  text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600; padding: 9px 14px; background: var(--sunken);
+  border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.now { color: var(--ink-3); }
+td.next { color: var(--ink); }
+td strong { font-weight: 500; }
+
+/* ---- phase list ---- */
+.phase { max-width: 76ch; border-top: 1px solid var(--line); padding: 20px 0; display: grid; grid-template-columns: 122px 1fr; gap: 20px; }
+.phase:last-child { border-bottom: 1px solid var(--line); }
+.phase .tag { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent); font-weight: 500; }
+.phase .tag em { display: block; font-style: normal; color: var(--ink-3); margin-top: 3px; font-size: 11px; }
+.phase h4 { margin: 0 0 5px; }
+.phase p { margin: 0; font-size: 14.5px; }
+
+/* ---- question block ---- */
+.q { max-width: 76ch; border-top: 1px solid var(--line); padding: 16px 0; }
+.q:last-child { border-bottom: 1px solid var(--line); }
+.q h4 { margin: 0 0 3px; }
+.q p { margin: 0; font-size: 14.5px; }
+.q .rec { color: var(--accent); font-weight: 500; }
+
+footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line-2); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); }
+@media (max-width: 640px) {
+  .finding, .phase { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<style>
+.who { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin: 24px 0; }
+.who > div { background: var(--surface); padding: 16px 18px; }
+.who h4 { margin: 0 0 3px; font-size: 14px; }
+.who .sub2 { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+.who ul { margin: 0; padding-left: 18px; font-size: 13.5px; }
+.who li { margin-bottom: 5px; }
+.step { max-width: 76ch; display: grid; grid-template-columns: 74px 1fr; gap: 18px; padding: 18px 0; border-top: 1px solid var(--line); }
+.step:last-of-type { border-bottom: 1px solid var(--line); }
+.step .lbl { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent); font-weight: 500; }
+.step .lbl em { display: block; font-style: normal; color: var(--ink-3); font-size: 11px; margin-top: 3px; }
+.step h4 { margin: 0 0 5px; }
+.step p { margin: 0 0 8px; font-size: 14.5px; }
+.files { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); line-height: 1.75; }
+.files b { color: var(--ink-2); font-weight: 400; }
+.gap { max-width: 76ch; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--line); }
+.gap:last-of-type { border-bottom: 1px solid var(--line); }
+.gap .g1 { font-size: 14px; color: var(--ink); }
+.gap .g2 { font-size: 13px; color: var(--ink-3); }
+.gap .when2 { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+</style>
+
+<div class="wrap">
+<header class="mast">
+  <p class="eyebrow">Build plan · mortgageboss-ai frontend</p>
+  <h1>Sixteen screens, four pull requests, and one clear division of labour.</h1>
+  <p class="standfirst">What is designed now, what is deliberately still open, the order it gets built in, and which Claude does which half of the work.</p>
+  <p class="byline">Companion to the design direction · 16 screens in both themes</p>
+</header>
+
+<div class="col">
+
+<h2><span class="n">01 — Who builds it</span>Design here, implement there</h2>
+
+<p>You asked who implements. The honest split follows from what each environment can actually do.</p>
+</div>
+
+<div class="who">
+  <div>
+    <p class="sub2">This session</p>
+    <h4>Design and specification</h4>
+    <ul>
+      <li>Renders and screenshots every screen in both themes, so a change is visible in seconds rather than after a build</li>
+      <li>Reads the whole repo through the bridge, so the mockups stay grounded in real routes, statuses and fields</li>
+      <li>Writes the token file, the <code>StatusToken</code> component and the codemod script as <em>proposed</em> files under <code>docs/design/ledger/</code> — nothing wired in, nothing that can break a build</li>
+      <li>Cannot run <code>pnpm dev</code> or look at the running app: the browser here can't reach a localhost server. Writing app code from here means coding blind.</li>
+    </ul>
+  </div>
+  <div>
+    <p class="sub2">Local Claude Code</p>
+    <h4>Implementation</h4>
+    <ul>
+      <li>Runs the dev server and sees the real app change as it edits</li>
+      <li>Runs <code>biome</code>, <code>tsc</code>, <code>pnpm test</code> and the pre-commit hooks — the loop your CI already enforces</li>
+      <li>Runs the codemod and reviews the 67-file diff before it goes anywhere near a commit</li>
+      <li>Works ticket by ticket in the <code>docs/tickets/LP-XXX.md</code> convention this repo already has</li>
+    </ul>
+  </div>
+</div>
+
+<div class="col">
+<div class="callout acc">
+  <span class="lab">The handoff</span>
+  Everything in <code>docs/design/ledger/</code> is the contract: the mockups, the screenshots, the token file, and a <code>SPEC.md</code> local Claude Code reads at the start of each ticket. It never has to guess what a screen should look like — it opens the mockup for that screen and matches it.
+</div>
+
+<h2><span class="n">02 — What is designed now</span>Sixteen screens, and the six that aren't</h2>
+
+<p>Every route that exists in the app is now drawn, plus the three file tabs that are still <code>TabPlaceholder</code> stubs, plus the state gallery that decides whether the app feels solid. That is the whole processor day: sign in, pick up the worklist, open or create a file, upload documents, review what the AI read, run verification, chase what's missing, and assemble the package.</p>
+
+<p>Six secondary surfaces are still undrawn. They are listed rather than quietly skipped, because "all pages" should mean all pages:</p>
+</div>
+
+<div class="gap"><div><div class="g1">MISMO import warnings</div><div class="g2">The "imported with 6 fields to review" state — today a toast, and it deserves a screen</div></div><span class="when2">Before Phase B</span></div>
+<div class="gap"><div><div class="g1">Document version history</div><div class="g2">The drawer behind "v2 supersedes v1" — which version is current, and why</div></div><span class="when2">With Documents</span></div>
+<div class="gap"><div><div class="g1">Apply-impact preview</div><div class="g2">The dry-run before/after already built as <code>ViewFixDialog</code> — it has a real shape and needs a real design</div></div><span class="when2">With Verification</span></div>
+<div class="gap"><div><div class="g1">Borrower inbox settings</div><div class="g2">The per-file email address, who may send to it, and what happens to unmatched attachments</div></div><span class="when2">With Communication</span></div>
+<div class="gap"><div><div class="g1">Profile and settings</div><div class="g2">Disabled placeholders in the user menu today; density and thoroughness defaults belong here</div></div><span class="when2">With Phase B</span></div>
+<div class="gap"><div><div class="g1">Narrow widths</div><div class="g2">The design is desktop-first by intent. A processor on a 13-inch laptop needs the context rail to collapse; a tablet pass needs deciding, not assuming</div></div><span class="when2">Phase E</span></div>
+
+<div class="col">
+<h2><span class="n">03 — Getting to "finalized"</span>Four review passes, not one sign-off</h2>
+</div>
+
+<div class="step">
+  <div class="lbl">Pass 1<em>you, now</em></div>
+  <div>
+    <h4>Walk the sixteen screens and mark what's wrong</h4>
+    <p>Not "do you like it" — specifically: does a screen show a processor something they don't need, or hide something they do? You and your domain expert will catch things in the Verification and Needs screens that no amount of code reading would surface. Anything vocabulary-related matters most; the wrong word on a status is worse than the wrong colour.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">Pass 2<em>me</em></div>
+  <div>
+    <h4>Revise, then draw the six that are missing</h4>
+    <p>Your notes go back into the same kit, and the six secondary surfaces above get drawn so nothing is left to be improvised during implementation. This is also where the four open decisions from the direction doc get resolved into the tokens.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">Pass 3<em>me</em></div>
+  <div>
+    <h4>Extract the pattern library</h4>
+    <p>Once the screens are locked, every repeated element is pulled out into one page: buttons, inputs, tables, status tokens, rail-coded rows, banners, empty and error states, dialogs, toasts — each with the React snippet beside it. This is the artefact local Claude Code actually builds from, and it is what keeps screen twelve consistent with screen one.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">Pass 4<em>local Claude Code</em></div>
+  <div>
+    <h4>Build, screen by screen, against the mockups</h4>
+    <p>Each ticket opens its mockup, matches it, and runs the CI loop. The design stops being a proposal at this point and starts being the app.</p>
+  </div>
+</div>
+
+<div class="col">
+<h2><span class="n">04 — The four pull requests</span>Only the last one is per-screen</h2>
+
+<p>The leverage argument, restated as work: 95 non-test components, but the look lives in eight primitives and one token file. Roughly 80% of the visual change lands before anyone opens a page component.</p>
+</div>
+
+<div class="step">
+  <div class="lbl">PR 1<em>~2 days</em></div>
+  <div>
+    <h4>Tokens, fonts, and the bug</h4>
+    <p>Land the Ledger token block and the dark palette the config has always promised. Add IBM Plex via <code>next/font</code>. Fix the <code>danger</code> colour that is silently disarming the failed-run banner. Nothing looks different yet — this PR only makes the foundation real.</p>
+    <div class="files"><b>app/globals.css</b> · <b>tailwind.config.ts</b> · <b>app/layout.tsx</b> · 20 <code>danger</code> call sites</div>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">PR 2<em>~1 day</em></div>
+  <div>
+    <h4>The codemod</h4>
+    <p>784 hardcoded <code>gray-*</code> classes across 67 of 95 components bypass the token layer entirely — that is why dark mode has never been switchable, and why a token swap alone would only half-work. Twenty-one class names cover 780 of them, so this is a scripted find-and-replace with a reviewable diff, not a rewrite. It also fixes a real accessibility failure on the way through: <code>text-gray-400</code>, used 178 times, sits at 2.54:1 on white and fails AA for text and the 3:1 bar for icons.</p>
+    <div class="files"><b>67 component files</b> — mechanical, reviewed as one diff</div>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">PR 3<em>~2 days</em></div>
+  <div>
+    <h4>Primitives and one status component</h4>
+    <p>Density retune on the shadcn primitives — 53px rows to 28px, radius to 5px, the type scale. Then one <code>StatusToken</code> component that takes a semantic state and renders rail, glyph and word, replacing the six competing status maps. After this PR the five screens nobody designed already look like Ledger.</p>
+    <div class="files"><b>components/ui/</b> — button, card, table, badge, input, select, dialog, skeleton · <b>components/status-token.tsx</b> (new) · retire <code>STATUS_META</code>, <code>DOCUMENT_STATUS_META</code>, <code>STATE_META</code>, <code>PRIORITY_META</code> and the two calculator maps</div>
+  </div>
+</div>
+<div class="step">
+  <div class="lbl">PR 4+<em>per screen</em></div>
+  <div>
+    <h4>Shell first, then screens in flow order</h4>
+    <p>Drop <code>max-w-6xl</code>, build the icon rail with <code>⌘B</code> and cookie persistence, add the context rail on file routes, delete the <code>/loan-files</code> stub. Then the screens, in the order a processor meets them.</p>
+    <div class="files"><b>components/layout/</b> app-shell, sidebar, header · then dashboard → file overview → documents → verification → needs</div>
+  </div>
+</div>
+
+<div class="col">
+
+<h3>Build order, and why this order</h3>
+
+<p>Flow order, not difficulty order. Each screen a processor meets earlier sets the vocabulary for the ones after it, so building in the order they are encountered means the language settles once rather than being retrofitted.</p>
+</div>
+
+<div class="tw wide">
+<table>
+  <thead><tr><th style="width:26%">Screen</th><th style="width:16%">Effort</th><th>Depends on</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Login</strong></td><td>half a day</td><td class="now">PR 1 only. The smallest real test of the token set.</td></tr>
+    <tr><td><strong>Pipeline</strong></td><td>3 days</td><td class="now">Saved views need a backend endpoint — filters that persist per user and per company. Everything else is client-side.</td></tr>
+    <tr><td><strong>File overview</strong></td><td>4 days</td><td class="now">The reconciliation ledger needs stated and extracted values joined per field. The data exists; nothing joins it yet. This is the one screen that needs a new read model.</td></tr>
+    <tr><td><strong>Documents</strong></td><td>2 days</td><td class="now">Nothing new. Freshness, qualification and versioning are already computed on <code>DocumentResponse</code>.</td></tr>
+    <tr><td><strong>Verification</strong></td><td>4 days</td><td class="now">Nothing new. Every field is already on <code>RuleFinding</code> — including <code>missing_documents</code>, which is what makes the batched request possible.</td></tr>
+    <tr><td><strong>Needs</strong></td><td>2 days</td><td class="now">A route move plus the existing needs components restyled.</td></tr>
+    <tr><td><strong>New file</strong></td><td>2 days</td><td class="now">Nothing new. The MISMO warnings screen should land with it.</td></tr>
+    <tr><td><strong>Admin ×3</strong></td><td>3 days</td><td class="now">The overlay blast-radius panel needs one endpoint: which open files would change verdict under a proposed override.</td></tr>
+    <tr><td><strong>Document reviewer</strong></td><td>2 weeks</td><td class="now"><strong>Blocked</strong> on bounding-box coordinates in the extraction pipeline. Snippet-matching against the text layer is a workable interim.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="col">
+<p>Roughly five weeks of frontend work for everything except the reviewer, and the reviewer is its own project.</p>
+
+<h2><span class="n">05 — What I need from you</span>Three answers, one of them blocking</h2>
+
+<p><strong>1. Walk the sixteen screens.</strong> Mark what's wrong — especially the wording on statuses and findings, where your domain expert will see things I can't.</p>
+
+<p><strong>2. Confirm the four direction decisions</strong> — petrol over the default blue, dark mode now, staying on Radix, and whether Needs really deserves its own route.</p>
+
+<p><strong>3. Does the extraction pipeline store bounding-box coordinates?</strong> <code>SourceLocation</code> carries <code>page</code> and <code>snippet</code> today. If there are no rectangles, the document reviewer starts in the backend rather than the frontend, and that changes the shape of the whole last phase. This is the only answer that moves the plan.</p>
+
+</div>
+
+<footer>
+  16 screens · 2 themes · 4 pull requests · 9 screens to build · 1 blocking question
+</footer>
+</div>
+
+</body>
+</html>

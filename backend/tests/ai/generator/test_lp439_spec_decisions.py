@@ -30,7 +30,10 @@ def test_there_are_120_specs() -> None:
     # added one (compensation_statement) → 117. LP-469 added one (form_1098) → 118. LP-470 promoted closing_disclosure + loan_estimate to Tier 1 with specs → 120.
     # LP-472 added the passport spec (121) — the one identity-family type that had no extractor;
     # 038/071/108 were rewritten onto the shared identity core, not added, so the count grew by one.
-    assert len(_ALL) == 121
+    # LP-642 step 2 added 122 (comparable_rent_schedule) and 123
+    # (small_residential_income_appraisal) — the Form 1007 / 1025 rent schedules that B3-3.8-02 makes
+    # mandatory where rental income qualifies the loan.
+    assert len(_ALL) == 123
 
 
 @pytest.mark.parametrize("path", _ALL, ids=lambda p: p.stem)

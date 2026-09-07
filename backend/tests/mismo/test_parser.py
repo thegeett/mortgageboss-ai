@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import structlog
 from app.mismo.parser import NS, MismoParseError, parse_mismo
+from app.mismo.schema import WarningSubject
 from lxml import etree
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "mismo" / "MISMO16940192.xml"
@@ -203,7 +204,8 @@ def test_tolerance_missing_property_value(fixture_bytes: bytes) -> None:
     result = parse_mismo(etree.tostring(root))
     assert result.property is not None
     assert result.property.estimated_value is None  # tolerated → None
-    assert any("estimated value" in w for w in result.parse_warnings)
+    assert any("estimated value" in w.message for w in result.parse_warnings)
+    assert any(w.subject is WarningSubject.PROPERTY for w in result.parse_warnings)
     # The rest still parsed fine (no crash).
     assert result.loan is not None and result.loan.base_loan_amount == Decimal("1104000.00")
 

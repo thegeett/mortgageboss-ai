@@ -11,9 +11,11 @@ preserving the stored bytes.
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
 
+import pymupdf
 import pytest
 import pytest_asyncio
 from app.api import documents as documents_api
@@ -30,7 +32,9 @@ from app.models.document import (
     Document,
     DocumentStatus,
 )
+from app.models.extraction import ExtractionStatus
 from app.services.loan_files import create_loan_file
+from app.services.page_render import DEFAULT_ZOOM, MAX_RENDERED_EDGE
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -298,6 +302,147 @@ async def test_get_document_detail_has_null_extraction(
     assert "storage_path" not in body
 
 
+async def test_field_scrutiny_reaches_the_endpoint(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Criticality and distrust arrive on the response, not just in the helper (LP-UI-032).
+
+    Tested at the API because a guarded helper with unguarded wiring is exactly the
+    shape the last review found — the screen reads this response, not the module.
+    """
+    from app.services.extractions import create_extraction_version
+
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    document = await db_session.get(Document, UUID(doc["id"]))
+    assert document is not None
+    document.document_type = "credit_report"
+    await create_extraction_version(
+        db_session,
+        document_id=document.id,
+        extracted_data={
+            # Critical (money) and sensitive (identity) and ordinary and distrusted.
+            "gross_pay": {"value": "4200.00", "confidence": 0.99},
+            "borrower_ssn": {"value": "035-98-0128"},
+            "employer_name": {"value": "ACME Corp"},
+            "report_date": {"value": "2026-07-17"},
+        },
+        extraction_status=ExtractionStatus.SUCCEEDED,
+    )
+    await db_session.commit()
+
+    body = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    scrutiny = body["field_scrutiny"]
+
+    assert scrutiny["gross_pay"]["critical"] is True
+    assert scrutiny["gross_pay"]["sensitive"] is False
+    assert scrutiny["borrower_ssn"]["sensitive"] is True
+    # A confirmed-wrong extractor field on THIS document type, with its reason.
+    assert scrutiny["report_date"]["distrusted_reason"]
+    # An ordinary field is ABSENT rather than present-and-false — the payload must
+    # not grow with the 1,603-key spec vocabulary.
+    assert "employer_name" not in scrutiny
+
+
+async def _reviewable(client: AsyncClient, db_session: AsyncSession, slug: str = "acme"):
+    from app.services.extractions import create_extraction_version
+
+    company, _user, token = await _make_user(db_session, slug=slug)
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+    document = await db_session.get(Document, UUID(doc["id"]))
+    assert document is not None
+    await create_extraction_version(
+        db_session,
+        document_id=document.id,
+        extracted_data={"gross_pay": {"value": "4200.00"}, "net_pay": {"value": "3100.00"}},
+        extraction_status=ExtractionStatus.SUCCEEDED,
+    )
+    await db_session.commit()
+    return doc, token
+
+
+async def test_a_field_can_be_accepted_and_withdrawn(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+
+    put = await client.put(
+        url, json={"field_key": "gross_pay", "verdict": "accepted"}, headers=_auth(token)
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["verdict"] == "accepted"
+
+    listed = (await client.get(url, headers=_auth(token))).json()
+    assert [r["field_key"] for r in listed] == ["gross_pay"]
+
+    # The verdict also reaches the screen's own call, beside the scrutiny.
+    detail = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    assert detail["field_scrutiny"]["gross_pay"]["verdict"] == "accepted"
+
+    gone = await client.delete(f"{url}/gross_pay", headers=_auth(token))
+    assert gone.status_code == 204
+    assert (await client.get(url, headers=_auth(token))).json() == []
+    # Idempotent: withdrawing nothing is not an error.
+    assert (await client.delete(f"{url}/gross_pay", headers=_auth(token))).status_code == 204
+
+
+async def test_a_correction_shows_beside_the_model_value_not_instead_of_it(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+    body = {"field_key": "gross_pay", "verdict": "corrected", "corrected_value": "4250.00"}
+    assert (await client.put(url, json=body, headers=_auth(token))).status_code == 200
+
+    detail = (await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))).json()
+    assert detail["field_scrutiny"]["gross_pay"]["corrected_value"] == "4250.00"
+    # The extraction still says what the model read.
+    assert detail["current_extraction"]["extracted_data"]["gross_pay"]["value"] == "4200.00"
+
+
+async def test_a_rejection_without_a_reason_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    doc, token = await _reviewable(client, db_session)
+    res = await client.put(
+        f"/api/v1/documents/{doc['id']}/reviews",
+        json={"field_key": "gross_pay", "verdict": "rejected"},
+        headers=_auth(token),
+    )
+    assert res.status_code == 422
+
+
+async def test_a_verdict_on_a_field_the_extraction_lacks_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Storing it would put a row in the table that no screen can ever show.
+    doc, token = await _reviewable(client, db_session)
+    res = await client.put(
+        f"/api/v1/documents/{doc['id']}/reviews",
+        json={"field_key": "not_a_field", "verdict": "accepted"},
+        headers=_auth(token),
+    )
+    assert res.status_code == 422
+
+
+async def test_reviews_are_tenant_scoped(client: AsyncClient, db_session: AsyncSession) -> None:
+    doc, _token = await _reviewable(client, db_session, slug="acme")
+    _other_doc, other_token = await _reviewable(client, db_session, slug="rival")
+    url = f"/api/v1/documents/{doc['id']}/reviews"
+    for call in (
+        client.get(url, headers=_auth(other_token)),
+        client.put(
+            url, json={"field_key": "gross_pay", "verdict": "accepted"}, headers=_auth(other_token)
+        ),
+        client.delete(f"{url}/gross_pay", headers=_auth(other_token)),
+    ):
+        assert (await call).status_code == 404
+
+
 async def test_download_returns_exact_bytes(client: AsyncClient, db_session: AsyncSession) -> None:
     company, _user, token = await _make_user(db_session, slug="acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
@@ -476,6 +621,225 @@ async def test_unauthenticated_is_401(client: AsyncClient, db_session: AsyncSess
     assert (
         await client.post(_docs_url(loan_file.display_id), files=[_pdf_part()])
     ).status_code == 401
+
+
+def _real_pdf(pages: int = 1) -> bytes:
+    """An actually-renderable PDF.
+
+    `PDF_BYTES` above is a header and a comment — enough for upload and download,
+    which move bytes, and not enough for anything that OPENS the file. The page
+    endpoint renders, so it needs a real one; asserting a render against a stub
+    would be asserting a 404 and calling it success.
+    """
+    doc = pymupdf.open()
+    for i in range(pages):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), f"page {i + 1}")
+    return bytes(doc.tobytes())
+
+
+async def _upload_real_pdf(client: AsyncClient, ident: str, token: str) -> dict[str, Any]:
+    resp = await client.post(
+        _docs_url(ident),
+        headers=_auth(token),
+        files=[("files", ("paystub.pdf", _real_pdf(), "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    return dict(resp.json()[0])
+
+
+# --------------------------------------------------------------------------- #
+# Page image (LP-UI-030) — the reviewer's canvas
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_page_endpoint_reports_the_document_length(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The reviewer says "Page 1 of 3" and stops at the last page.
+
+    The count rides with the page because the renderer already has the document
+    open; a second endpoint would reopen the same file to answer a question this
+    one already knows.
+    """
+    company, _user, token = await _make_user(db_session, slug="pagecount")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("three.pdf", _real_pdf(pages=3), "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    doc = resp.json()[0]
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200
+    assert page.headers["X-Page-Count"] == "3"
+
+    # A page the document does not have is absent, not a lie about the length.
+    beyond = await client.get(f"/api/v1/documents/{doc['id']}/page/4", headers=_auth(token))
+    assert beyond.status_code == 404
+
+
+async def test_page_image_renders_and_carries_its_geometry(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Tested at the API, not only the renderer — the layer a caller meets."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content.startswith(b"\x89PNG\r\n\x1a\n")
+    # The point-space a highlight rectangle is expressed in travels WITH the
+    # image; fetching it separately is how the two drift.
+    assert float(resp.headers["X-Page-Width-Points"]) > 0
+    assert float(resp.headers["X-Page-Height-Points"]) > 0
+    assert float(resp.headers["X-Page-Zoom"]) >= 1.0
+    # A rendered page is borrower content: never a shared cache.
+    assert "private" in resp.headers["cache-control"]
+
+
+async def test_a_page_the_document_does_not_have_is_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Measured on real data: a model-cited page is out of range on ~4% of
+    # extracted fields, so this is a designed state rather than an edge case.
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/99", headers=_auth(token))
+    assert resp.status_code == 404
+
+
+def _real_png(width: int = 400, height: int = 300) -> bytes:
+    """An actual image, the way a photographed document arrives."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.insert_text((20, 40), "photographed pay stub")
+    data: bytes = page.get_pixmap().tobytes("png")  # type: ignore[no-untyped-call]
+    doc.close()
+    return data
+
+
+async def test_an_image_document_previews(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Uploads accept image/png; this endpoint used to refuse it (LP-704).
+
+    AT THE ENDPOINT, because that is where the refusal was — a service-level test
+    would have passed against the old code, which rendered images perfectly well
+    and was never asked to. The processor's symptom was a document that uploaded
+    happily and then showed "No page image for this document" for ever, which
+    reads as "still loading", not as "cannot show this".
+    """
+    company, _user, token = await _make_user(db_session, slug="imgpreview")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("paystub.png", _real_png(), "image/png"))],
+    )
+    assert resp.status_code == 201, resp.text
+    doc = resp.json()[0]
+    assert doc["mime_type"] == "image/png"
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200, page.text
+    assert page.content.startswith(b"\x89PNG\r\n\x1a\n")
+    # One page, so the reviewer offers no Next that renders nothing.
+    assert page.headers["X-Page-Count"] == "1"
+    assert float(page.headers["X-Page-Width-Points"]) > 0
+
+    beyond = await client.get(f"/api/v1/documents/{doc['id']}/page/2", headers=_auth(token))
+    assert beyond.status_code == 404
+
+
+async def test_a_page_larger_than_the_budget_is_scaled_down(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A 56-by-69-inch survey shipped 69.3 MB in 4.9 s at the default zoom.
+
+    MEASURED on a stored document, not reasoned. `MAX_ZOOM` never applied — 2.0
+    is already under it — because it caps a MULTIPLIER and the page it multiplies
+    is unbounded. The response has to say the zoom it actually used, or every box
+    the client places is off by the reduction.
+    """
+    company, _user, token = await _make_user(db_session, slug="bigpage")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = pymupdf.open()
+    doc.new_page(width=4047, height=4998)
+    huge = bytes(doc.tobytes())
+    doc.close()
+    resp = await client.post(
+        _docs_url(loan_file.display_id),
+        headers=_auth(token),
+        files=[("files", ("survey.pdf", huge, "application/pdf"))],
+    )
+    assert resp.status_code == 201, resp.text
+    document = resp.json()[0]
+    await db_session.commit()
+
+    page = await client.get(f"/api/v1/documents/{document['id']}/page/1", headers=_auth(token))
+    assert page.status_code == 200
+    applied = float(page.headers["X-Page-Zoom"])
+    assert applied < DEFAULT_ZOOM
+    # The point space is the PAGE's, unchanged — only the pixels were reduced.
+    assert float(page.headers["X-Page-Width-Points"]) == 4047.0
+    assert max(4047.0, 4998.0) * applied <= MAX_RENDERED_EDGE + 1
+
+
+async def test_another_companys_page_is_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # A rendered page IS the document's content, so it gets the same gate as the
+    # bytes. This is the assertion that stops the reviewer becoming a way around
+    # the download endpoint's tenant scoping.
+    company_a, _ua, token_a = await _make_user(db_session, slug="acme")
+    _company_b, _ub, token_b = await _make_user(db_session, slug="beta")
+    loan_file = await create_loan_file(db_session, company_id=company_a.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token_a)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/page/1", headers=_auth(token_b))
+    assert resp.status_code == 404
+
+
+async def test_field_boxes_locate_values_and_flag_a_fabricated_page(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Boxes at the API, including the flag that stops a silent correction.
+
+    Measured on real data: 4.3% of fields cite a page the document does not have,
+    and NOT ONE cites a wrong-but-existing page. So the box may come from another
+    page, and the response says so rather than quietly substituting a better one.
+    """
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/boxes", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    # No extraction on a freshly uploaded document — an empty result, not a 500.
+    assert body["boxes"] == []
+    assert body["fabricated_pages"] == []
+    assert body["relocated"] == []
+
+
+async def test_another_companys_boxes_are_a_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # A box is derived from the document's own text, so it is exactly as
+    # sensitive as the page it describes.
+    company_a, _ua, token_a = await _make_user(db_session, slug="acme")
+    _company_b, _ub, token_b = await _make_user(db_session, slug="beta")
+    loan_file = await create_loan_file(db_session, company_id=company_a.id)
+    doc = await _upload_real_pdf(client, loan_file.display_id, token_a)
+
+    resp = await client.get(f"/api/v1/documents/{doc['id']}/boxes", headers=_auth(token_b))
+    assert resp.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
@@ -1464,3 +1828,80 @@ async def test_the_reason_a_document_failed_reaches_the_response(
     detail = await client.get(f"/api/v1/documents/{doc['id']}", headers=_auth(token))
     assert detail.status_code == 200
     assert detail.json()["processing_error"] == PAYLOAD_TOO_LARGE_MESSAGE
+
+
+# --------------------------------------------------------------------------- #
+# LP-638 — the type-correction control offers the catalog, and only the catalog
+# --------------------------------------------------------------------------- #
+async def test_the_type_list_is_the_whole_catalog(client: AsyncClient, db_session) -> None:
+    """THE REPORTED PROBLEM. The control offered eight hardcoded options written when the catalog
+    had three types. It now has 164, so a processor could not correct a document to
+    `closing_disclosure` at all — which is exactly what LF-ZE9N needed and could not do."""
+    from app.documents.catalog import CATALOG
+
+    _company, _user, token = await _make_user(db_session, slug="acme")
+
+    resp = await client.get("/api/v1/documents/types/catalog", headers=_auth(token))
+
+    assert resp.status_code == 200
+    values = {option["value"] for option in resp.json()}
+    assert values == set(CATALOG), "the list and the catalog have drifted"
+    for needed in ("closing_disclosure", "purchase_agreement", "mortgage_statement"):
+        assert needed in values
+
+
+async def test_every_offered_type_is_one_the_override_accepts(
+    client: AsyncClient, db_session
+) -> None:
+    """The two halves must agree. A picker offering a type the PATCH rejects would be the same
+    defect wearing the other face — and both now read the same CATALOG, so this is a guard against
+    someone giving one of them its own list again."""
+    from app.documents.catalog import CATALOG
+
+    _company, _user, token = await _make_user(db_session, slug="acme")
+    resp = await client.get("/api/v1/documents/types/catalog", headers=_auth(token))
+
+    for option in resp.json():
+        assert option["value"] in CATALOG
+        assert option["label"], f"{option['value']} has no label to show"
+
+
+async def test_the_override_refuses_a_type_the_catalog_does_not_know(
+    client: AsyncClient, db_session, _mock_reprocess: MagicMock
+) -> None:
+    """THE HOLE THAT CAUSED THE ORIGINAL DAMAGE. The old dropdown offered `tax_return_1040` and
+    `other`, neither a catalog type, and this endpoint accepted them. The document got no tier, no
+    category and no extractor — and since satisfaction matches `needs_type == document_type`
+    exactly, a document corrected to `tax_return_1040` could never satisfy a `tax_return` need.
+    Correcting the type made the file quietly worse."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]), headers=_auth(token), json={"document_type": "tax_return_1040"}
+    )
+
+    assert resp.status_code == 422
+    _mock_reprocess.assert_not_called()
+
+
+async def test_a_real_catalog_type_still_applies(
+    client: AsyncClient, db_session, _mock_reprocess: MagicMock
+) -> None:
+    """The positive control. A validation that rejected everything would pass the test above."""
+    company, _user, token = await _make_user(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    doc = await _upload_one(client, loan_file.display_id, token)
+
+    resp = await client.patch(
+        _override_url(doc["id"]),
+        headers=_auth(token),
+        json={"document_type": "closing_disclosure"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_type"] == "closing_disclosure"
+    # Tier and category are re-derived from the catalog, which is what the invalid types could not do.
+    assert body["category"] == "disclosures"

@@ -10,8 +10,11 @@ transparency that makes the DTI trustworthy. Money is serialized as ``Decimal``
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app.services.finding_blocking import FindingBreakdown
 
 
 class DtiLineItem(BaseModel):
@@ -24,6 +27,11 @@ class DtiLineItem(BaseModel):
     amount: Decimal  # the effective value used in the math (override ?? auto ?? 0)
     source: str  # stated / computed / extracted / manual / override
     overridden: bool
+    #: Who set the override and why (LP-UI-021). Both `None` when the line is not
+    #: overridden; `override_by` alone may be `None` for an override with no
+    #: recorded actor, which is different from one nobody has looked at.
+    override_by: str | None = None
+    override_note: str | None = None
     # LP-375: a REQUIRED input (taxes/insurance) that could NOT be derived and was NOT overridden — i.e.
     # its ``amount`` of 0 is a FAIL-CLOSED placeholder, NOT an extracted $0.00 (absent≠0). The display must
     # render this as "unknown", never "$0.00 Extracted". False for a legitimately-zero input (HOA/MI).
@@ -32,6 +40,14 @@ class DtiLineItem(BaseModel):
     # not survive closing (a refinanced mortgage, a departing residence, a debt cleared to
     # qualify). Distinct from ``unknown``: the amount is known, it just stops existing. The
     # display must render it struck-through with the reason, never omit the row.
+    #: LP-643 review — WHETHER A PROCESSOR CAN REMOVE THIS LINE, decided by the server that enforces
+    #: it. The UI gated its trash icon on `key.startsWith("custom.")`, with the prefix retyped in the
+    #: frontend: one constant, two producers, and drift in either direction is a bug a processor sees
+    #: — removal silently missing from lines that have it, or offered on engine lines where the API
+    #: then 404s in their face. The key is the right SIGNAL (it survives an override, where `source`
+    #: does not — an overridden custom line reports `source="override"`), so this carries the answer
+    #: rather than the raw material for it.
+    removable: bool = False
     excluded: bool = False
     excluded_reason: str | None = None
     # LP-621 review — the arithmetic behind a COMPUTED line, carried with it. The net rental figure is
@@ -57,6 +73,10 @@ class DtiFindingsStatus(BaseModel):
 
     unresolved: bool  # any open in-scope finding → the calc may be incomplete
     open_in_scope_count: int
+    #: The same findings split by the system that produced them (LP-UI-021), so
+    #: the alert's number reconciles with the verification screen instead of
+    #: merging three generators into one figure a processor cannot place.
+    breakdown: FindingBreakdown = FindingBreakdown()
 
 
 class UnverifiedInput(BaseModel):
@@ -99,6 +119,16 @@ class DtiCalculation(BaseModel):
     # already did this; the display path used to collapse the absent input to 0 and show a confident ratio.
     gated: bool = False
     gate_reason: str | None = None
+    #: LP-643 review — THE SAME REASONS, UNJOINED, because the ungate has to tell them apart.
+    #:
+    #: `gate_reason` is a join of two independently-produced halves: the fail-closed HOUSING reason
+    #: (a required input is unknown) and calculation-level reasons like the rental gate. The ungate
+    #: resolves the first and cannot resolve the second, so a consent screen reporting the joined
+    #: string listed the very inputs it was about to fix as "unresolved" — the same two labels in
+    #: both halves of one dialog. Carried structurally for the reason `unverified_inputs` above is:
+    #: a string that folds two facts together cannot be un-folded by its reader.
+    housing_gate_reason: str | None = None
+    other_gate_reasons: tuple[str, ...] = ()
     #: bug-001 — a figure the FILE STATES for a gated input, which is not acceptable verification.
     #:
     #: A real submission gated on "Property taxes is unknown" while two documents in it stated the
@@ -140,3 +170,47 @@ class DtiOverrideInput(BaseModel):
 
     amount: Decimal = Field(ge=0)
     note: str | None = None
+
+
+class DtiCustomLineInput(BaseModel):
+    """A line a PROCESSOR adds to the DTI, that the calculator did not produce (LP-643)."""
+
+    #: Which side of the ratio it lands on. Constrained here rather than in the DB: the calculator's
+    #: three sections are its own vocabulary, and a fourth would be a calculator change.
+    section: Literal["income", "housing", "debt"]
+    label: str = Field(min_length=1, max_length=256)
+    amount: Decimal = Field(ge=0)
+    #: WHY. Optional in the schema and expected in practice — a DTI is the number a loan qualifies on,
+    #: and a figure with no document behind it should at least have an author's reason.
+    note: str | None = None
+
+
+class DtiUngateLine(BaseModel):
+    """One line an ungate would set to zero, and what that asserts (LP-643)."""
+
+    key: str
+    label: str
+    #: What the processor is agreeing to, in their terms — not "set to 0" but what a zero MEANS on
+    #: this line. The number is the mechanism; this is the half they can judge as true or false.
+    assertion: str
+
+
+class DtiUngatePreview(BaseModel):
+    """What an ungate would do, itemised — the popup's whole content (LP-643).
+
+    AN ITEMISED CONSENT, NOT A CONFIRMATION. "Are you sure" tells a processor nothing they can weigh,
+    and a warning a reader skims is a warning that does nothing. Every line by NAME, what each zero
+    asserts, the ratio before and after, and what will NOT move.
+    """
+
+    #: The lines that would be zeroed, each with what it asserts.
+    lines: list[DtiUngateLine]
+    #: Gates a zero cannot answer, with the reason. A processor who ungates and finds the file still
+    #: gated, with nothing saying which part did not move, has been told less than before they clicked.
+    unresolved: list[str]
+    front_end_before: Decimal | None = None
+    back_end_before: Decimal | None = None
+    #: The ratios the file WOULD show. Computed by running the calculator with these overrides applied
+    #: and not persisted — a preview that diverges from what Apply produces is worse than no preview.
+    front_end_after: Decimal | None = None
+    back_end_after: Decimal | None = None

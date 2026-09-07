@@ -398,6 +398,7 @@ either — modifying a stopped instance can fail mid-apply.
 | `up` says `'stopping'` and refuses | A stop takes a few minutes. AWS rejects a start until it reads `stopped`. Wait and re-run — `up` is idempotent and changes nothing when it refuses. |
 | `down` refuses over a one-off task | A `migrate`, `query`, `backfill` or `verify` task is still running. Scaling services to zero does not stop those. Let it finish. |
 | Seven days stopped | AWS force-starts an instance left stopped that long so it does not miss maintenance. On a long shutdown, re-run `down` within the week. |
+| `up` says Terraform is not initialised | The local `.terraform/` directory is missing. It is gitignored, so a fresh clone, a second machine or a `git clean -xdf` removes it while the remote state and every resource stay intact. Nothing was destroyed and `phase1` is the wrong answer. Run `AWS_PROFILE=mbai-staging-admin terraform -chdir=infra/envs/staging init` and re-run. The same applies to any bare `terraform output` in this section. |
 | Only `staging` and `dev` | `SHUTDOWN_ENVIRONMENTS` in `scripts/deploy` is a fixed list. Any other environment is refused, `--yes` or not. |
 | Changing a task count | Edit the tfvar **and** run `up`. Terraform no longer writes `desired_count` (LP-630 Phase A), but the tfvar still feeds the Bedrock rate limiter — see [`../../infra/modules/compute/README.md`](../../infra/modules/compute/README.md). |
 

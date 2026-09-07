@@ -56,7 +56,12 @@ from app.ai.extraction.consistency import run_consistency_checks
 from app.ai.extraction.parsing import document_confidence_provenance, failure_detail
 from app.ai.generic_analyzer import analyze_document
 from app.core.config import resolve_model, settings
-from app.documents.catalog import get_category, get_tier, match_catalog_type
+from app.documents.catalog import (
+    explain_catalog_match,
+    get_category,
+    get_tier,
+    match_catalog_type,
+)
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.document import (
@@ -422,9 +427,42 @@ async def _process_document(db: AsyncSession, document_id: str) -> None:
             # document already takes — read via Tier 3, terminal NEEDS_REVIEW, needs NOT advanced —
             # and a human applies the type through the LP-44 override. A false positive costs one
             # review; applying one would cost wrong data.
+            # THE DECISION COMES FROM THE MATCHER, the explanation only from the explainer
+            # (LP-639 review). Both existed, but the flag was being taken from
+            # `explain_catalog_match(...).matched` — so `match_catalog_type` had no production
+            # caller at all, and the design note justifying the second pass ("observability must not
+            # sit on the path that decides whether a processor sees a flag") described something
+            # that was no longer true. An edit to an early return in the explainer would have
+            # silently changed who gets flagged.
             missed_catalog_type = match_catalog_type(classification.document_name)
             if missed_catalog_type is not None:
                 review_reason = "unknown_names_catalog_type"
+            # LP-639 — SAY WHY THIS DOCUMENT IS UNEXPLAINED, without saying what it is.
+            #
+            # A confident `unknown` was the one outcome nobody could account for after the fact. The
+            # only surviving evidence is the model's own `document_name`, and that is free text that
+            # can quote borrower details, so it is never logged or stored. So "why is this
+            # uncategorised?" could only be answered by inference — and on LF-ZE9N the inference was
+            # wrong twice: once from `has_full_text=False`, a field LP-463 stopped populating so it
+            # reads False for every document, and once by assuming a scan.
+            #
+            # Every value here is a count, a boolean or a catalog SLUG. The name never appears.
+            # `near_miss` with `rejected_by=coverage` is the answer that pays for the whole line: it
+            # means the model DID name a catalog type and this matcher turned it away, which is a
+            # different bug from the model not recognising the document, and they need opposite
+            # fixes.
+            explanation = explain_catalog_match(classification.document_name)
+            logger.info(
+                "classification_unknown_explained",
+                document_id=str(document.id),
+                confidence=classification.confidence,
+                name_present=explanation.name_present,
+                name_words=explanation.name_words,
+                matched=explanation.matched,
+                near_miss=explanation.near_miss,
+                near_miss_coverage=explanation.near_miss_coverage,
+                rejected_by=explanation.rejected_by,
+            )
 
         if review_reason is not None:
             logger.info(

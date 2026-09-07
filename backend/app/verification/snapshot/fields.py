@@ -39,6 +39,12 @@ class FieldSource(StrEnum):
     PARSED = "parsed"  # deterministic MISMO / 1003 parse
     EXTRACTED = "extracted"  # an AI document extraction
     DERIVED = "derived"  # COMPUTED from other fields (e.g. transaction direction), not read as-is
+    # A PERSON supplied this value, overruling or supplementing what the model read
+    # (LP-703). Not a shade of `extracted`: the stated-versus-verified separation this
+    # codebase is built on says a human-supplied fact and a machine-read one must be
+    # distinguishable, and a finding that cites a corrected figure should be able to
+    # say who put it there.
+    CORRECTED = "corrected"
 
 
 class Field(BaseModel):

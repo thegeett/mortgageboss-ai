@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
+import pytest
 from app.verification.snapshot.fields import Field, FieldSource
 from app.verification.snapshot.model import (
     BorrowerRef,
@@ -81,14 +82,16 @@ def _closing_snap(closing: str | None, *, created: datetime = _FILE_DATE) -> Sna
 
 
 def test_days_until_closing_future_is_a_positive_number() -> None:
-    value, _ = _contract_days_until_closing(_closing_snap("2026-07-24"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-24"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "10"  # 2026-07-24 minus 2026-07-14
 
 
 def test_days_until_closing_past_is_a_negative_number() -> None:
     # A past closing date is a MEANINGFUL observation (PC-7 decides it's stale) — the tag emits it, never
     # abstains to "unknown" the way a future-dated PAYSTUB does.
-    value, reason = _contract_days_until_closing(_closing_snap("2026-07-04"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-04"), "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == "-10" and "past" in reason
 
 
@@ -96,12 +99,14 @@ def test_days_until_closing_is_deterministic_no_wall_clock() -> None:
     # Same closing date, a fixed snapshot date → the SAME number every run (recency is against
     # snapshot.created_at, never datetime.now()).
     for _ in range(3):
-        value, _ = _contract_days_until_closing(_closing_snap("2026-08-13"), "loan", None)
+        _p = _contract_days_until_closing(_closing_snap("2026-08-13"), "loan", None)
+        value, _ = _p[0], _p[1]
         assert value == "30"
 
 
 def test_days_until_closing_absent_is_unknown() -> None:
-    value, _ = _contract_days_until_closing(_closing_snap(None), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap(None), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "unknown"
 
 
@@ -115,7 +120,8 @@ def test_days_until_closing_disagreement_is_unknown() -> None:
             "b": {"contract.closing_date": _tag("2026-08-24")},  # a different date
         },
     )
-    value, reason = _contract_days_until_closing(snap, "loan", None)
+    _p = _contract_days_until_closing(snap, "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == "unknown" and "disagree" in reason
 
 
@@ -162,11 +168,20 @@ def test_continuity_broken_when_balances_do_not_carry() -> None:
         **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
         **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
     }
-    value, reason = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    produced = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    value, reason = produced[0], produced[1]
     assert value == "broken" and "carry" in reason
     # LP-406-2b review: the reason must LOCATE the break (account + the two mismatched balances) so AS-8's
     # fired finding is actionable — not a generic "some account doesn't chain".
     assert "****1" in reason and "1200" in reason and "1250" in reason
+    # LP-647 §1 — AND IT MUST NAME THE TWO STATEMENTS, in order.
+    #
+    # Locating the break in PROSE was half the job: `produce_derived_tags` sets
+    # `source_facts=(subject_id,)`, which for a loan-subject recipe is the literal "loan", so the
+    # finding could say the balances and not the documents. A processor was told the chain breaks
+    # and not which statements to open.
+    assert len(produced) == 3, "the broken path must carry the statements it compared"
+    assert produced[2] == ("s1", "s2"), "the PAIR that disagrees, in order"
 
 
 def test_continuity_single_statement_is_nothing_to_chain_not_couldnt_check() -> None:
@@ -233,8 +248,11 @@ def test_continuity_break_in_one_account_is_surfaced_fire_if_any() -> None:
         **_stmt_tags("w1", start="2026-01-01", begin="5000", end="5100"),
         **_stmt_tags("w2", start="2026-02-01", begin="6000", end="6100"),  # 5100 ≠ 6000
     }
-    value, _ = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
-    assert value == "broken"
+    produced = _stmt_continuity(_snap(docs=docs, tags=tags), "loan", None)
+    assert produced[0] == "broken"
+    # LP-647 §1 — the WELLS pair, not the Chase one that chains cleanly. Naming every statement on
+    # the file would point a processor at documents the finding says nothing about.
+    assert produced[2] == ("w1", "w2")
 
 
 def test_continuity_per_borrower_isolation_colliding_last4_not_merged() -> None:
@@ -423,6 +441,143 @@ def test_the_three_tags_are_registered_derived_recipes() -> None:
 
 def test_days_until_closing_uses_the_snapshot_date_object() -> None:
     # Guards against a wall-clock regression: a snapshot dated 2026-07-14 with closing 2026-07-14 is 0.
-    value, _ = _contract_days_until_closing(_closing_snap("2026-07-14"), "loan", None)
+    _p = _contract_days_until_closing(_closing_snap("2026-07-14"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "0"
     assert _FILE_DATE.date() == date(2026, 7, 14)
+
+
+def test_the_tag_carries_its_statements_all_the_way_into_source_facts() -> None:
+    """LP-647 §1 — AT THE LAYER THE DEFECT WAS SEEN, not at the recipe that returns the ids.
+
+    The recipe returning `("s1", "s2")` proves nothing on its own: the value has to survive
+    `produce_derived_tags`, which is the function that was overwriting it. It sets
+    `source_facts=(subject_id,)`, and a loan-subject recipe's subject_id is the literal string
+    "loan" — which is exactly what LF-JR4T's AS-8 finding carried, and why
+    `_attach_document_provenance` had nothing to attach and the finding rendered with no documents.
+
+    A test that stopped at the recipe would have passed against the shipped defect.
+    """
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1250", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
+    }
+    decl = load_declarations()["stmt.continuity"]
+
+    produced = produce_derived_tags(decl, _snap(docs=docs, tags=tags))
+
+    tag = produced["loan"]["stmt.continuity"]
+    assert tag.value == "broken"
+    assert tag.source_facts == ("s1", "s2"), (
+        "the tag reached the snapshot naming the loan instead of the statements — the shipped "
+        f"behaviour this closes, got {tag.source_facts}"
+    )
+
+
+def test_a_recipe_with_nothing_to_name_still_falls_back_to_its_subject() -> None:
+    """THE POSITIVE CONTROL, and it guards a real regression: 77 of 79 recipes return two elements
+    and must keep their subject as their source. A tag over a computed figure — DTI, reserves — has
+    no document to point at, and `_attach_document_provenance`'s own rule is that inventing one
+    "would send a processor to the wrong page with the system's confidence behind it".
+
+    The chained path is the same recipe with nothing to name, which makes it the cheapest proof that
+    the fallback survives.
+    """
+    from app.verification.tag_materialization.declarations import load_declarations
+    from app.verification.tag_materialization.derived import produce_derived_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1200", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1200", end="1300"),  # chains
+    }
+    decl = load_declarations()["stmt.continuity"]
+
+    tag = produce_derived_tags(decl, _snap(docs=docs, tags=tags))["loan"]["stmt.continuity"]
+
+    assert tag.value == "chained"
+    assert tag.source_facts == ("loan",), "no break, nothing to name — the subject stands"
+
+
+@pytest.mark.asyncio
+async def test_as8_end_to_end_names_the_statements_on_the_evaluation() -> None:
+    """LP-647 §1 review — THROUGH THE REAL EVALUATOR, which is the only version that proves the fix.
+
+    This repo has a standing rule for exactly this reason (LP-487): a verdict assertion runs through
+    `materialize_tags` then `evaluate_rules`, "never by calling a recipe or the gate directly",
+    because LP-508 shipped a guard whose own test called the mechanism directly — the mechanism
+    worked and the WIRING did not.
+
+    My first attempt at this test broke that rule in a subtler way: it hand-built the
+    `RuleEvaluation` with `source_content_ids` already set, so it asserted the field the bridge is
+    supposed to POPULATE. Removing the bridge entirely left it green. The unit test below is a
+    supplement to this one, never a substitute.
+    """
+    from app.verification.rule_engine.registry import evaluate_rules
+    from app.verification.tag_materialization.producer import materialize_tags
+
+    docs = [
+        _stmt("s1", bank="Chase", masked="****1", start="2026-01-01", begin="1000", end="1200"),
+        _stmt("s2", bank="Chase", masked="****1", start="2026-02-01", begin="1250", end="1300"),
+    ]
+    tags = {
+        **_stmt_tags("s1", start="2026-01-01", begin="1000", end="1200"),
+        **_stmt_tags("s2", start="2026-02-01", begin="1250", end="1300"),  # 1200 ≠ 1250
+    }
+    snapshot = await materialize_tags(_snap(docs=docs, tags=tags), only_groups=frozenset())
+
+    evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("AS-8",))
+
+    assert evaluations, "AS-8 produced no evaluation — the fixture does not reach the rule"
+    result = evaluations[0]
+    assert result.source_content_ids == ("s1", "s2"), (
+        "the statements the recipe compared must reach `source_content_ids` — the ONLY field "
+        f"`_source_document_ids` reads, and therefore the only one a processor sees. Got "
+        f"{result.source_content_ids}"
+    )
+
+
+def test_the_statements_reach_the_evaluation_that_becomes_the_finding() -> None:
+    """LP-647 §1 review — THE LAYER THE DEFECT IS ACTUALLY SEEN AT, one further out again.
+
+    Asserting the tag's `source_facts` proved the recipe's ids survived `produce_derived_tags`. It did
+    NOT prove they reach a processor: a finding's document links come from `_source_document_ids`,
+    which reads `result.source_content_ids` and nothing else, and only `consistency.py` was setting
+    that field. So AS-8 carried its two statements in the provenance JSON and still rendered with no
+    documents — the exact symptom §1 exists to fix, surviving §1's first version.
+
+    That is the same reasoning as the last layer, applied once more: the tag carrying ids proves
+    nothing if the FINDING is built from a different field. This asserts the field the finding is
+    built from.
+    """
+    from app.verification.rule_engine.deterministic import _named_documents
+    from app.verification.rule_engine.result import LoadBearingTag
+
+    def _lb(tag_id: str, sources: tuple[str, ...]) -> LoadBearingTag:
+        return LoadBearingTag(tag_id, "broken", None, "because", sources)
+
+    named = _named_documents((_lb("stmt.continuity", ("s1", "s2")),))
+    assert named == ("s1", "s2"), "what the recipe named must reach source_content_ids"
+
+    # DEDUPED AND ORDER-PRESERVING across several tags: two tags naming the same statement produce
+    # one link, and the order a processor reads them in is the order the rule declared.
+    deduped = _named_documents(
+        (_lb("stmt.continuity", ("s1", "s2")), _lb("stmt.min_account_months", ("s2", "s3")))
+    )
+    assert deduped == ("s1", "s2", "s3")
+
+    # A TAG THAT NAMED NOTHING contributes nothing. The 77 untouched recipes fall back to their
+    # subject, which for a loan-level rule is the string "loan" — it reaches here and is dropped
+    # downstream by `document_id_by_content_id`, never written as a dangling link.
+    assert _named_documents((_lb("dti.back_end", ("loan",)),)) == ("loan",)
+    assert _named_documents(()) == ()

@@ -1,22 +1,12 @@
-import { STATUS_META } from "@/lib/loan-files/status";
+import { LOAN_FILE_STATUS, resolveStatus } from "@/lib/status";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
-import { cn } from "@/lib/utils";
+import { StatusToken } from "./status-token";
 
 /**
- * A calm, color-meaningful loan-file status pill. Colours and labels come from
- * the single `STATUS_META` map (LP-31), so every surface — dashboard table, file
- * header (LP-33), … — shows a status the same way.
+ * A loan-file status pill. One vocabulary, one rendering: colour + glyph + word
+ * (LP-UI-005). `resolveStatus` means a status the backend grew shows up visibly
+ * instead of crashing the row.
  */
 export function StatusBadge({ status }: { status: LoanFileStatus }) {
-  const meta = STATUS_META[status];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium",
-        meta.className,
-      )}
-    >
-      {meta.label}
-    </span>
-  );
+  return <StatusToken meta={resolveStatus(LOAN_FILE_STATUS, status)} variant="chip" />;
 }

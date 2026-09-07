@@ -24,6 +24,7 @@ from app.verification.rule_engine.applicability import (
     absent_document_couldnt_check,
     missing_document_subject_id,
     resolve_applicabilities,
+    undetermined_by_document_type,
 )
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT, enumerate_subjects
 from app.verification.rule_engine.gate import GateResult, GateStatus, evaluate_gate
@@ -104,6 +105,31 @@ def _load_bearing(
     )
 
 
+def _named_documents(load_bearing: tuple[LoadBearingTag, ...]) -> tuple[str, ...]:
+    """Content ids the rule's tags NAMED, for `source_content_ids` (LP-647 §1 review).
+
+    THE BRIDGE THAT WAS MISSING, and without it the rest of §1 changed nothing a processor sees.
+    A recipe can now return the documents it read and `produce_derived_tags` puts them on the tag —
+    but a finding's document links come from `_source_document_ids`, which reads
+    `result.source_content_ids` and NOTHING else, and only `consistency.py` was setting that. So AS-8
+    carried its two statements in `load_bearing_tags` JSON and still rendered with no documents.
+
+    SAFE BY CONSTRUCTION, WHICH IS WHY THE UNION IS UNFILTERED HERE. `_source_document_ids` keeps
+    only ids present in `document_id_by_content_id`, so anything that is not a current document on
+    this file is DROPPED rather than written as a dangling or wrong link. The two vocabularies cannot
+    collide either: content ids are prefixed (`doc` / `txn`), so a transaction id can never resolve
+    as a document.
+
+    AND IT SURFACES ONLY WHAT A RECIPE DELIBERATELY NAMED. The 77 recipes that return two elements
+    fall back to `(subject_id,)`, which for a loan subject is the string "loan" and resolves to
+    nothing; for a per-document subject it is that document's own id, which the subject path already
+    supplies. So this adds links exactly where a producer chose to name them.
+    """
+    return tuple(
+        dict.fromkeys(cid for tag in load_bearing for cid in tag.source_facts)  # order-preserving
+    )
+
+
 def _ratifies_every_finding(rule_id: str) -> bool:
     """Is this rule activated on a self-consistency rate (LP-490a / ADR-378)?
 
@@ -126,6 +152,7 @@ def _result(
     threshold_used: Decimal | None = None,
     how_to_fix: str | None = None,
     ratification_pending: bool = False,
+    unidentified_document: bool = False,
 ) -> RuleEvaluation:
     assert spec.deterministic is not None
     return RuleEvaluation(
@@ -133,7 +160,10 @@ def _result(
         subject_id=subject_id,
         verdict=verdict,
         verdict_confidence=verdict_confidence,
-        load_bearing_tags=_load_bearing(spec.deterministic, subject_tags),
+        load_bearing_tags=(_lb := _load_bearing(spec.deterministic, subject_tags)),
+        # LP-647 §1 review — see `_named_documents`. `_attach_document_provenance` never overwrites a
+        # rule's own answer, so naming them here is what reaches the finding.
+        source_content_ids=_named_documents(_lb),
         # LP-564 — NOT ON EVERY OUTCOME. `_result` is the single constructor for all eight paths, so
         # resolving unconditionally put an apply block on every one. CR-1's DEFAULT outcome is a
         # couldnt_check reading "this debt could not be matched against the application's stated
@@ -191,6 +221,9 @@ def _result(
         # ai_fuzzy_match rule (CR-1, CR-4, CR-5, OC-1, …) would have shipped an unmeasured AI judgment as
         # an AUTO verdict with NO HUMAN IN THE LOOP — the hole that had to close before anything activated.
         ratification_pending=ratification_pending or _ratifies_every_finding(spec.rule_id),
+        # LP-640 — set only by the applicability path, and only when the DOCUMENT-TYPE predicate is what
+        # abstained. Every other construction site leaves it False.
+        unidentified_document=unidentified_document,
     )
 
 
@@ -428,9 +461,8 @@ def evaluate_deterministic_rule(
     for subject_id, subject_tags in subjects:
         # 1. Applicability (from a declared tag predicate — the SHARED §8 resolver, LP-329).
         if det.applicability is not None:
-            terminal = resolve_applicabilities(
-                _as_conditions(det.applicability), subject_tags, _loan_tags(snapshot)
-            )
+            conditions = _as_conditions(det.applicability)
+            terminal = resolve_applicabilities(conditions, subject_tags, _loan_tags(snapshot))
             if terminal is not None:
                 verdict, reason = terminal
                 results.append(
@@ -440,6 +472,14 @@ def evaluate_deterministic_rule(
                         verdict,
                         reason,
                         subject_tags,
+                        # LP-640 — consolidatable only when the DOCUMENT TYPE is what we could not
+                        # determine; an abstention on any other predicate keeps its own finding.
+                        unidentified_document=(
+                            verdict is Verdict.COULDNT_CHECK
+                            and undetermined_by_document_type(
+                                conditions, subject_tags, _loan_tags(snapshot)
+                            )
+                        ),
                         # LP-526 — only a COULDNT_CHECK gets a fix. A not_applicable subject is out of
                         # scope and is never persisted, so asking for a document there would be noise.
                         how_to_fix=(

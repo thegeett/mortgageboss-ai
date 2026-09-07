@@ -23,6 +23,7 @@ import pytest
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
 from app.verification.rules.specs import load_rule_spec
 from app.verification.snapshot.model import (
+    DocumentEntry,
     DocumentsSection,
     MismoSection,
     Snapshot,
@@ -166,14 +167,14 @@ def test_no_closing_date_abstains() -> None:
 # CR-13 — credit report age
 # --------------------------------------------------------------------------- #
 def test_credit_report_age_in_months() -> None:
-    value, _ = _credit_report_age_months(
-        _with(credit="2026-04-01", closing="2026-08-01"), "loan", None
-    )
+    _p = _credit_report_age_months(_with(credit="2026-04-01", closing="2026-08-01"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "4"
 
 
 def test_no_credit_report_abstains_never_zero() -> None:
-    value, reason = _credit_report_age_months(_with(closing="2026-08-01"), "loan", None)
+    _p = _credit_report_age_months(_with(closing="2026-08-01"), "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == _UNKNOWN and "credit report" in reason
 
 
@@ -181,14 +182,14 @@ def test_no_credit_report_abstains_never_zero() -> None:
 # PR-6 — appraisal age
 # --------------------------------------------------------------------------- #
 def test_appraisal_age_in_months() -> None:
-    value, _ = _appraisal_age_months(
-        _with(appraisal="2025-08-01", closing="2026-08-01"), "loan", None
-    )
+    _p = _appraisal_age_months(_with(appraisal="2025-08-01", closing="2026-08-01"), "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "12"
 
 
 def test_no_appraisal_abstains_never_zero() -> None:
-    value, reason = _appraisal_age_months(_with(closing="2026-08-01"), "loan", None)
+    _p = _appraisal_age_months(_with(closing="2026-08-01"), "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == _UNKNOWN and "appraisal" in reason
 
 
@@ -314,7 +315,8 @@ def test_an_appraisal_update_does_not_reset_the_twelve_month_clock() -> None:
             "doc-contract": {"contract.closing_date": _tag("2026-08-01")},
         }
     )
-    value, reason = _appraisal_age_months(snap, "loan", None)
+    _p = _appraisal_age_months(snap, "loan", None)
+    value, reason = _p[0], _p[1]
     assert value == "15", reason  # aged from the ORIGINAL, not the update
     assert int(value) > 12  # PR-6's "new appraisal required" band
 
@@ -344,5 +346,77 @@ def test_a_credit_re_pull_DOES_reset_the_clock() -> None:
             "doc-contract": {"contract.closing_date": _tag("2026-08-01")},
         }
     )
-    value, _ = _credit_report_age_months(snap, "loan", None)
+    _p = _credit_report_age_months(snap, "loan", None)
+    value, _ = _p[0], _p[1]
     assert value == "1"  # the fresh pull governs, not the stale one
+
+
+def _dated_docs(**by_subject: dict[str, Tag]) -> Snapshot:
+    """A snapshot whose tag subjects are REAL document entries (LP-647 §1 group B).
+
+    `_snapshot` above builds `DocumentsSection.present([])` — tags keyed by a subject id with no
+    document behind them, which production never has. Provenance requires the entry to exist, so
+    these tests build the shape the runtime actually produces rather than asserting against a
+    fixture that could not occur.
+    """
+    return Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 8, 1, tzinfo=UTC),
+        documents=DocumentsSection.present(
+            [
+                DocumentEntry(content_id=cid, document_type="credit_report", fields={})
+                for cid in by_subject
+            ]
+        ),
+        mismo=MismoSection.present({}),
+        tags=TagsSection.present(dict(by_subject)),
+    )
+
+
+def test_the_aged_document_is_named_and_only_the_aged_one() -> None:
+    """LP-647 §1 group B — CR-13 could say the credit report is N months old and not WHICH report.
+
+    `_age_in_months_at_closing` is handed a DATE by its `pick` policy, never the subject it came
+    from, and its two callers pick differently (most-recent for a credit pull, earliest for an
+    appraisal). The chosen date is matched back to the documents carrying it rather than changing a
+    shared policy signature for provenance.
+
+    AND ONLY THE AGED ONE. The sentence says "the credit report dated X is N months old" — that is
+    about the document it aged, not every credit report on the file. A re-pull is the fixture that
+    tells the two apart: two reports, two dates, one of them aged.
+    """
+    two_reports = _dated_docs(
+        **{
+            "doc-old": {"credit.report_date": _tag("2026-01-01")},
+            "doc-new": {"credit.report_date": _tag("2026-06-01")},
+            "doc-closing": {"contract.closing_date": _tag("2026-08-01")},
+        }  # type: ignore[arg-type]
+    )
+
+    produced = _credit_report_age_months(two_reports, "loan", None)
+
+    assert produced[0] == "2", "most-recent pull: June to August is two calendar months"
+    assert produced[2] == ("doc-new",), (
+        "only the report whose date was aged — naming the superseded one sends a processor to a "
+        f"document the finding is not about, got {produced[2]}"
+    )
+
+
+def test_the_appraisal_names_the_original_not_the_update() -> None:
+    """The mirror, and it proves the naming follows the POLICY rather than a fixed rule: PR-6 picks
+    the EARLIEST appraisal deliberately (a 1004D update must not restart the twelve-month clock), so
+    the document it names is the original — the opposite end from CR-13's."""
+    updated = _dated_docs(
+        **{
+            "doc-original": {"property.appraisal_date": _tag("2025-08-01")},
+            "doc-update": {"property.appraisal_date": _tag("2026-06-01")},
+            "doc-closing": {"contract.closing_date": _tag("2026-08-01")},
+        }  # type: ignore[arg-type]
+    )
+
+    produced = _appraisal_age_months(updated, "loan", None)
+
+    assert produced[2] == ("doc-original",), (
+        f"the clock runs from the original appraisal, so that is the document named, got {produced[2]}"
+    )

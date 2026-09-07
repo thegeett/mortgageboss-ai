@@ -1,5 +1,8 @@
 "use client";
 
+import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "./layout";
+
 /**
  * The generic transparent calculator card (LP-87) — one component, four calculators.
  *
@@ -11,6 +14,7 @@
  * only shows the work.
  */
 
+import { figureToneClass, railClass } from "@/components/status-token";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,20 +27,12 @@ import {
   useSetCalculatorOverride,
 } from "@/lib/api/calculators";
 import { formatMoneyPrecise, humanize } from "@/lib/format";
+import { CALCULATOR_STATUS, resolveStatus } from "@/lib/status";
+import type { FindingBreakdown } from "@/lib/types/calculators";
 import type { CalcLine, CalculatorName, CalculatorView } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
-import { useState } from "react";
-
-const STATUS_TONE: Record<string, string> = {
-  required: "text-warning",
-  not_required: "text-gray-500",
-  sufficient: "text-success",
-  insufficient: "text-danger",
-  declining: "text-warning",
-  over: "text-danger",
-  pass: "text-success",
-};
+import { useEffect, useState } from "react";
 
 export function CalculatorCard({
   fileId,
@@ -48,9 +44,9 @@ export function CalculatorCard({
   const { data, isPending, isError, refetch } = useCalculator(fileId, calculator);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Calculator className="h-4 w-4" />
           </span>
@@ -61,7 +57,7 @@ export function CalculatorCard({
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Deterministic math · auto-populated from the file · every input shown and override-able.
         </p>
       </CardHeader>
@@ -96,110 +92,167 @@ function CalculatorBody({
   const setOverride = useSetCalculatorOverride(fileId, calculator);
   const clearOverride = useClearCalculatorOverride(fileId, calculator);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — the same fix as the DTI calculator's, because this is the same defect. `editingKey`
+  // is single, so opening another input closed this one and its local draft went with it, silently.
+  // Held by the parent and keyed by field, a switch is a PAUSE rather than a discard.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const busy = setOverride.isPending || clearOverride.isPending;
+
+  const discardDraft = (key: string) =>
+    setDrafts((current) => {
+      const { [key]: _dropped, ...rest } = current;
+      return rest;
+    });
 
   const onSave = (key: string, amount: string) => {
     setOverride.mutate(
       { fieldKey: key, input: { amount } },
-      { onSuccess: () => setEditingKey(null) },
+      {
+        onSuccess: () => {
+          discardDraft(key);
+          setEditingKey(null);
+        },
+      },
     );
   };
 
-  const tone = (data.status && STATUS_TONE[data.status]) || "text-gray-900";
+  // Partial by design, and the same limit as the DTI panel's: catches a tab close or reload, not
+  // Next's client-side navigation. The in-row "unsaved" caption is the primary signal.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
+
+  // Falls back to `neutral`, not the default `attention`: a calculator status
+  // this build does not recognise is not evidence of a problem, and the default
+  // would paint an amber warning across a DTI/LTV figure that is perfectly fine.
+  // `neutral` also covers the no-status case, so no ternary is needed.
+  const status = resolveStatus(CALCULATOR_STATUS, data.status, "neutral");
+  const tone = figureToneClass(status.tone);
 
   return (
-    <div className="space-y-5">
-      {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
+    <div className="space-y-4">
+      {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
 
-      {/* Headline number */}
-      <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-          {data.headline_label}
-        </div>
-        <div className={cn("mt-0.5 text-2xl font-semibold tabular-nums", tone)}>
-          {data.headline ?? "—"}
-        </div>
-      </div>
-
-      {/* Overrideable inputs */}
-      {data.inputs.length > 0 && (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Inputs
-          </h4>
-          <div className="rounded-lg border border-gray-200">
-            {data.inputs.map((item) => (
-              <LineRow
-                key={item.key}
-                item={item}
-                editing={editingKey === item.key}
-                disabled={busy}
-                onEdit={() => setEditingKey(item.key)}
-                onCancel={() => setEditingKey(null)}
-                onSave={onSave}
-                onClear={(key) => clearOverride.mutate(key)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* The transparent derivation steps */}
-      {data.steps.length > 0 && (
-        <section>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            The math
-          </h4>
-          <div className="rounded-lg border border-gray-200">
-            {data.steps.map((step, i) => (
-              <div
-                key={`${step.label}-${i}`}
-                className={cn(
-                  "flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0",
-                  step.emphasis && "bg-gray-50/70",
-                )}
-              >
-                <span
-                  className={cn("text-gray-600", step.emphasis && "font-semibold text-gray-900")}
-                >
-                  {step.label}
-                </span>
-                <span
-                  className={cn(
-                    "tabular-nums text-gray-700",
-                    step.emphasis && "font-semibold text-gray-900",
-                  )}
-                >
-                  {step.value}
-                </span>
+      {/* The math on the left, the result beside it (LP-UI-045) — the same
+          arrangement as the DTI and LTV panels. These four calculators show
+          inputs, then derivation steps, then a formula, and the answer was above
+          all of it with the arithmetic that reaches it at the bottom. */}
+      <div className={CALCULATOR_GRID}>
+        <div className="min-w-0 space-y-4">
+          {/* Overrideable inputs */}
+          {data.inputs.length > 0 && (
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Inputs
+              </h4>
+              <div className="rounded-lg border border-border">
+                {data.inputs.map((item) => (
+                  <LineRow
+                    key={item.key}
+                    item={item}
+                    editing={editingKey === item.key}
+                    disabled={busy}
+                    onEdit={() => setEditingKey(item.key)}
+                    // LP-647 §3 — a row switch PAUSES an edit; only Cancel, Save or
+                    // Clear discards one. Merged onto LP-UI-045's two-column layout:
+                    // the drafts are behaviour and the grid is presentation, and the
+                    // conflict between them was textual rather than real.
+                    onCancel={() => {
+                      discardDraft(item.key);
+                      setEditingKey(null);
+                    }}
+                    onSave={onSave}
+                    onClear={(key) => {
+                      discardDraft(key);
+                      clearOverride.mutate(key);
+                    }}
+                    draft={drafts[item.key]}
+                    onDraftChange={(value: string) =>
+                      setDrafts((current) => ({ ...current, [item.key]: value }))
+                    }
+                  />
+                ))}
               </div>
+            </section>
+          )}
+
+          {/* The transparent derivation steps */}
+          {data.steps.length > 0 && (
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                The math
+              </h4>
+              <div className="rounded-lg border border-border">
+                {data.steps.map((step, i) => (
+                  <div
+                    key={`${step.label}-${i}`}
+                    className={cn(
+                      "flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0",
+                      step.emphasis && "bg-muted/70",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "text-foreground-2",
+                        step.emphasis && "font-semibold text-foreground",
+                      )}
+                    >
+                      {step.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "tabular-nums text-foreground-2",
+                        step.emphasis && "font-semibold text-foreground",
+                      )}
+                    >
+                      {step.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className={CALCULATOR_RESULT_COLUMN}>
+          {/* Headline number */}
+          <div className="rounded-lg border border-border bg-muted/50 px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {data.headline_label}
+            </div>
+            <div className={cn("mt-0.5 text-2xl font-semibold tabular-nums", tone)}>
+              {data.headline ?? "—"}
+            </div>
+          </div>
+
+          {/* The formula(s) */}
+          <div className="rounded-lg border border-dashed border-input bg-muted/80 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              The formula
+            </div>
+            {data.formulas.map((f) => (
+              <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-foreground-2">
+                {f}
+              </p>
             ))}
           </div>
-        </section>
-      )}
 
-      {/* The formula(s) */}
-      <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-          The formula
+          {/* The grounded-starter methodology note */}
+          {data.methodology.starter && (
+            <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-foreground-2">
+              <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                <span className="font-semibold text-primary">Methodology — starter.</span>{" "}
+                {data.methodology.text}
+              </span>
+            </div>
+          )}
         </div>
-        {data.formulas.map((f) => (
-          <p key={f} className="mt-1.5 font-mono text-xs leading-relaxed text-gray-600">
-            {f}
-          </p>
-        ))}
       </div>
-
-      {/* The grounded-starter methodology note */}
-      {data.methodology.starter && (
-        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs text-gray-600">
-          <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-          <span>
-            <span className="font-semibold text-primary">Methodology — starter.</span>{" "}
-            {data.methodology.text}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -212,6 +265,8 @@ function LineRow({
   onCancel,
   onSave,
   onClear,
+  draft: draftValue,
+  onDraftChange,
 }: {
   item: CalcLine;
   editing: boolean;
@@ -220,17 +275,37 @@ function LineRow({
   onCancel: () => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — the parent's unsaved value for this row, or undefined when there is none. */
+  draft?: string;
+  onDraftChange: (value: string) => void;
 }) {
-  const [draft, setDraft] = useState<string>(item.amount);
+  // A row that is NOT being edited but still holds a draft is UNSAVED and says so — an unsaved edit
+  // and a never-started edit used to render identically, which is what made the loss invisible.
+  const draft = draftValue ?? item.amount;
+  const unsaved = draftValue !== undefined && draftValue !== item.amount;
+  const setDraft = onDraftChange;
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
-          {item.overridden ? (
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {/* Unsaved first: it is the only caption describing something the processor must still do,
+              and it must beat `overridden` or a second edit to an overridden line reads as saved. */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${draftValue}
+            </span>
+          ) : item.overridden ? (
             <span className="text-primary">
-              overridden · auto {formatMoneyPrecise(item.auto_amount)}
+              {/* WHO, not just that. "Someone changed this number" and "Priya
+                  changed this number" are different statements on a compliance
+                  file, and the actor was already recorded — it was dropped on
+                  the way out of the service (LP-UI-021). No actor recorded is
+                  left as a bare "overridden": inventing "unknown" would read as
+                  a name nobody checked. */}
+              overridden{item.override_by ? ` by ${item.override_by}` : ""} · auto{" "}
+              {formatMoneyPrecise(item.auto_amount)}
             </span>
           ) : (
             humanize(item.source)
@@ -240,7 +315,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -251,12 +326,12 @@ function LineRow({
               if (e.key === "Enter") onSave(item.key, draft);
               if (e.key === "Escape") onCancel();
             }}
-            className="h-8 w-28 text-right text-sm tabular-nums"
+            className="h-8 w-28 text-right tabular-nums"
           />
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-success"
+            className="text-success"
             aria-label="Save override"
             disabled={disabled}
             onClick={() => onSave(item.key, draft)}
@@ -266,7 +341,7 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="text-muted-foreground"
             aria-label="Cancel"
             onClick={onCancel}
           >
@@ -278,22 +353,24 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET — the twin of the DTI panel's. This line is what made a paused edit
+              // unrecoverable even once the draft survived the switch: re-entering the row
+              // overwrote it with the saved figure. The row seeds from `item.amount` on read.
               onEdit();
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.overridden ? "font-semibold text-primary" : "font-medium text-gray-900",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
+              item.overridden ? "font-semibold text-primary" : "font-medium text-foreground",
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -303,23 +380,6 @@ function LineRow({
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function UnresolvedAlert({ count }: { count: number }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
-    >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-      <span>
-        <span className="font-medium">
-          {count} unresolved finding{count === 1 ? "" : "s"}
-        </span>{" "}
-        — this calculation may be incomplete until they're applied or overridden.
-      </span>
     </div>
   );
 }

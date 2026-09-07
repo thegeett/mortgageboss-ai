@@ -18,12 +18,14 @@ and findings are reachable only via that file.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finding import Finding, FindingResolutionStatus, FindingStatus
+from app.models.finding import Finding, FindingOrigin, FindingResolutionStatus, FindingStatus
 from app.models.helpers import only_active
 from app.verification.confidence import DEFAULT_CONFIDENCE_CUTOFF
 
@@ -48,6 +50,51 @@ async def open_in_scope_findings(
         Finding,
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+class FindingBreakdown(BaseModel):
+    """The in-scope findings split by the system that produced them (LP-UI-021).
+
+    A single total merges three generators into one number. LP-375 keeps the
+    governed rule engine and the legacy AI sweep structurally separate, and a
+    banner reading "91 unresolved findings" is that separation collapsed into a
+    figure a processor cannot reconcile with anything on screen — on LF-96SV the
+    tabs show 75 governed and 13 legacy, and the missing 3 appear nowhere at all.
+
+    Counted PER SYSTEM, never as a remainder. `other` exists so a generator this
+    split does not know about gets its own visible number rather than being
+    absorbed into whichever bucket happens to be computed last: a labelled count
+    derived by subtraction cannot be wrong about its label, so nothing looks like
+    a claim (LP-UI-020 review).
+    """
+
+    #: The governed rule engine — findings that carry an `evaluation_outcome`.
+    governed: int = 0
+    #: Deterministic cross-source rules (`xsrc.*`), which carry no outcome.
+    cross_source: int = 0
+    #: The legacy AI sweep (LP-375's quarantine).
+    legacy: int = 0
+    #: Any generator the three above do not describe. Never silently folded in.
+    other: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.governed + self.cross_source + self.legacy + self.other
+
+
+def breakdown_by_system(findings: Sequence[Finding]) -> FindingBreakdown:
+    """Split findings by the generator that produced them. See `FindingBreakdown`."""
+    counts = FindingBreakdown()
+    for finding in findings:
+        if finding.evaluation_outcome is not None:
+            counts.governed += 1
+        elif finding.origin is FindingOrigin.DETERMINISTIC_RULE:
+            counts.cross_source += 1
+        elif finding.origin is FindingOrigin.AI_CROSS_SOURCE:
+            counts.legacy += 1
+        else:
+            counts.other += 1
+    return counts
 
 
 async def is_file_blocked(

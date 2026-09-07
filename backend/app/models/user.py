@@ -10,13 +10,30 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
 from app.models.types import MediumStr, ShortStr
 from app.verification.confidence import DEFAULT_AGGRESSION, AggressionLevel
+
+
+class RowDensity(StrEnum):
+    """How tall a table row is for this user (LP-UI-010).
+
+    An ergonomic preference, not view state: a processor decides once and every
+    dense surface follows. Compact is the default because the product is a
+    worklist — at 28px rows a processor scanning forty files sees twenty-four of
+    them rather than fifteen.
+    """
+
+    COMPACT = "compact"
+    COMFORTABLE = "comfortable"
+    RELAXED = "relaxed"
+
+
+DEFAULT_DENSITY = RowDensity.COMPACT
 
 if TYPE_CHECKING:
     from app.models.company import Company
@@ -62,6 +79,20 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         server_default=DEFAULT_AGGRESSION.value,
         nullable=False,
     )
+    # The user's row density (LP-UI-010). Per USER, deliberately — not per view
+    # and not per screen. See RowDensity.
+    density: Mapped[RowDensity] = mapped_column(
+        str_enum(RowDensity),
+        default=DEFAULT_DENSITY,
+        server_default=DEFAULT_DENSITY.value,
+        nullable=False,
+    )
+
+    # Where this user put the document reviewer's two dividers (LP-UI-030), as
+    # `[list_pct, canvas_pct]`; the fields pane takes the remainder. NULL means
+    # never adjusted, which is deliberately different from "adjusted back to the
+    # default" — the UI shows its own default rather than writing one on load.
+    reviewer_pane_split: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
 
     # Relationships
     company: Mapped["Company"] = relationship(back_populates="users")

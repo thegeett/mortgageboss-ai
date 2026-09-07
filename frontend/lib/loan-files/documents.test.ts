@@ -2,7 +2,6 @@ import {
   OVERRIDE_TYPE_OPTIONS,
   catchAllSections,
   extractionFields,
-  extractionTransactions,
   formatFileSize,
   formatSource,
   groupDocumentsByCategory,
@@ -63,6 +62,14 @@ describe("isTerminalStatus / polling", () => {
   it("treats settled statuses as terminal", () => {
     const terminal: DocumentStatus[] = ["completed", "needs_review", "failed"];
     for (const s of terminal) expect(isTerminalStatus(s)).toBe(true);
+  });
+
+  it("keeps polling a status this build has never heard of", () => {
+    // The cast is the point: a backend that grows an in-flight status ships it
+    // before the frontend knows the name. Guessing "terminal" strands the
+    // document at a non-terminal state until someone reloads by hand; guessing
+    // "in flight" costs one more request and corrects itself on the next deploy.
+    expect(isTerminalStatus("ocr_pending" as DocumentStatus)).toBe(false);
   });
 
   it("polls while ANY document is in-progress", () => {
@@ -127,6 +134,50 @@ describe("validateUploadFile", () => {
   });
 });
 
+describe("extractionFields — identifiers never render in the clear (LP-UI-032)", () => {
+  const ssnEntry = { borrower_ssn: { value: "035-98-0128", confidence: 0.99 } };
+
+  it("masks a field the backend flags as an identifier", () => {
+    const [field] = extractionFields(ssnEntry, new Set(["borrower_ssn"]));
+    expect(field?.value).toBe("•••-••-0128");
+    expect(field?.value).not.toContain("035");
+  });
+
+  it("masks any ssn/itin key with the SSN format, not just last-4", () => {
+    const fields = extractionFields(
+      { co_borrower_ssn: { value: "111-22-3333" }, taxpayer_ssn_masked: { value: "444-55-6666" } },
+      new Set(["co_borrower_ssn", "taxpayer_ssn_masked"]),
+    );
+    for (const field of fields) expect(field.value).toMatch(/^•••-••-\d{4}$/);
+  });
+
+  it("still masks the built-in set when the backend says nothing", () => {
+    // The floor. A backend that stops answering must not be able to un-mask a
+    // field that is masked today.
+    const [field] = extractionFields({ employee_ssn: { value: "035-98-0128" } });
+    expect(field?.value).toBe("•••-••-0128");
+  });
+
+  it("leaves an ordinary field alone", () => {
+    const [field] = extractionFields({ employer_name: { value: "ACME Corp" } }, new Set());
+    expect(field?.value).toBe("ACME Corp");
+  });
+
+  it("carries a per-field confidence through, and null when there is none", () => {
+    const fields = extractionFields({
+      a: { value: "1", confidence: 0.42 },
+      b: { value: "2" },
+      c: { value: "3", confidence: "not a number" },
+    });
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f.confidence]));
+    expect(byKey.a).toBe(0.42);
+    // Absent and unparseable both become null — never a fabricated 1.0, which
+    // would read as the model being certain about a value it never rated.
+    expect(byKey.b).toBeNull();
+    expect(byKey.c).toBeNull();
+  });
+});
+
 describe("extractionFields (LP-39a typed core)", () => {
   it("reads {value, source}, orders known fields, formats money, nulls as —", () => {
     const fields = extractionFields({
@@ -186,22 +237,124 @@ describe("extractionFields masks the account number (LP-39c)", () => {
     const fields = extractionFields({
       account_number_masked: { value: "****1234", source: null },
       ending_balance: { value: "5230.18", source: null },
-      transactions: [{ amount: "1" }], // excluded from typed-core rows
     });
     expect(fields.find((f) => f.key === "account_number_masked")?.value).toBe("••••1234");
     expect(fields.find((f) => f.key === "ending_balance")?.value).toBe("$5,230.18");
-    expect(fields.some((f) => f.key === "transactions")).toBe(false);
   });
 });
 
-describe("extractionTransactions", () => {
-  it("returns the transaction rows, ignoring non-objects/absent", () => {
-    expect(
-      extractionTransactions({
-        transactions: [{ date: "2024-06-03", amount: "100" }, null, "nope"],
-      }),
-    ).toHaveLength(1);
-    expect(extractionTransactions({ ending_balance: { value: "1" } })).toEqual([]);
+describe("list-valued fields (LP-702)", () => {
+  const LEDGER = {
+    payment_ledger: [
+      { date: "2026-01-05", description: "Monthly dues", charge: "450.00", page: 2 },
+      { date: "2026-01-20", description: "Payment received", paid: "450.00", page: 2 },
+    ],
+  };
+
+  it("NEVER stringifies an object — the bug this exists to stop", () => {
+    const [field] = extractionFields(LEDGER);
+    expect(field?.value).not.toContain("[object Object]");
+    expect(field?.rows.flat().join(" ")).not.toContain("[object Object]");
+  });
+
+  it("summarises the field as a count and puts the detail in rows", () => {
+    const [field] = extractionFields(LEDGER);
+    expect(field?.kind).toBe("list");
+    expect(field?.value).toBe("2 rows");
+    expect(field?.rows).toHaveLength(2);
+  });
+
+  it("takes the UNION of the rows' keys, so a key missing from row 1 keeps its column", () => {
+    // `charge` is on the first row only and `paid` on the second. Reading columns
+    // off the first item drops `paid` — and with it the payment half of a ledger.
+    const [field] = extractionFields(LEDGER);
+    expect(field?.columns.map((c) => c.label)).toEqual([
+      "Date",
+      "Description",
+      "Charge",
+      "Paid",
+      "Page",
+    ]);
+    expect(field?.rows[0]).toEqual(["2026-01-05", "Monthly dues", "450.00", "—", "2"]);
+    expect(field?.rows[1]).toEqual(["2026-01-20", "Payment received", "—", "450.00", "2"]);
+  });
+
+  it("sorts page and snippet to the end — they say where, not what", () => {
+    const [field] = extractionFields({
+      earnings_lines: [{ page: 1, snippet: "Regular 40.00", earning_type: "Regular" }],
+    });
+    expect(field?.columns.map((c) => c.label)).toEqual(["Earning type", "Page", "Read from"]);
+  });
+
+  it("renders a list of plain values as rows with no columns", () => {
+    const [field] = extractionFields({ forms_and_endorsements: ["HO-3", "HO-15"] });
+    expect(field?.columns).toEqual([]);
+    expect(field?.rows).toEqual([["HO-3"], ["HO-15"]]);
+  });
+
+  it("treats an empty list as an empty field, not a table with no rows", () => {
+    const [field] = extractionFields({ special_assessment_items: [] });
+    expect(field?.kind).toBe("scalar");
+    expect(field?.value).toBe("—");
+  });
+
+  it("treats JSON null as absent — `schedule_e` arrives that way", () => {
+    const [field] = extractionFields({ schedule_e: null });
+    expect(field?.value).toBe("—");
+    expect(field?.kind).toBe("scalar");
+  });
+
+  it("renders a bare nested object as a one-row record", () => {
+    const [field] = extractionFields({
+      schedule_c: { gross_receipts: "88000", net_profit: "41200" },
+    });
+    expect(field?.kind).toBe("record");
+    expect(field?.value).toBe("2 fields");
+    expect(field?.rows).toEqual([["88000", "41200"]]);
+  });
+
+  it("flattens a nested object inside a row instead of stringifying it", () => {
+    const [field] = extractionFields({
+      tradelines: [{ creditor: "Chase", source: { page: 3, snippet: "Chase 1234" } }],
+    });
+    expect(field?.rows[0]?.join(" ")).not.toContain("[object Object]");
+    expect(field?.rows[0]?.[1]).toContain("Page: 3");
+  });
+
+  it("unwraps a list that arrived inside a {value} wrapper", () => {
+    const [field] = extractionFields({
+      box_12_items: {
+        value: [{ code: "D", amount: "6000" }],
+        source: { page: 1, snippet: "D 6000" },
+      },
+    });
+    expect(field?.kind).toBe("list");
+    expect(field?.source).toEqual({ page: 1, snippet: "D 6000" });
+  });
+
+  it("masks an identifier inside a row, where the backend key list cannot reach", () => {
+    const [field] = extractionFields({
+      tradelines: [{ creditor: "Chase", account_number: "123456789" }],
+    });
+    expect(field?.rows[0]?.[1]).toBe("•••-••-6789");
+  });
+
+  it("does NOT mask a money cell for having digits in it", () => {
+    const [field] = extractionFields({
+      payment_ledger: [{ description: "Dues", charge: "450.00", running_balance: "1350.00" }],
+    });
+    expect(field?.rows[0]).toEqual(["Dues", "450.00", "1350.00"]);
+  });
+
+  it("never expands a field the backend calls an identifier, whatever shape it is", () => {
+    // A masked field rendered as rows would leak through every cell.
+    const [field] = extractionFields(
+      { borrower_ssns: [{ value: "123-45-6789" }] },
+      new Set(["borrower_ssns"]),
+    );
+    expect(field?.kind).toBe("scalar");
+    expect(field?.rows).toEqual([]);
+    expect(field?.value).toBe("•••");
   });
 });
 
@@ -290,7 +443,9 @@ describe("stalenessBadge", () => {
   it("shows a muted note once resolved", () => {
     const badge = stalenessBadge(doc({ staleness: staleness({ resolution: "waived" }) }));
     expect(badge?.label).toBe("Staleness waived");
-    expect(badge?.className).toContain("gray");
+    // LP-UI-004: was `toContain("gray")`. The assertion's intent is "this note is
+    // muted, not a status" — it just happened to be spelled in the old palette.
+    expect(badge?.className).toContain("text-muted-foreground");
   });
 
   it("is null for a fresh document", () => {

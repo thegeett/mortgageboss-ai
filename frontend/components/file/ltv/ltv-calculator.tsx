@@ -1,5 +1,8 @@
 "use client";
 
+import { CALCULATOR_GRID, CALCULATOR_RESULT_COLUMN } from "@/components/file/calculators/layout";
+import { UnresolvedAlert } from "@/components/file/calculators/unresolved-alert";
+
 /**
  * The LTV calculator (LP-77) — the second qualification pillar (equity / risk),
  * the parallel to the DTI calculator (LP-76). Same transparent, auto-populated,
@@ -33,7 +36,7 @@ import {
   Scale,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /** The subject-property line whose basis source we make explicit (LP-90 / LP-90.1). */
 const LTV_APPRAISED_VALUE_KEY = "ltv.appraised_value";
@@ -42,9 +45,9 @@ export function LtvCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useLtv(fileId);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="space-y-1 pb-4">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-gray-900">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-foreground">
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Building2 className="h-4 w-4" />
           </span>
@@ -55,12 +58,12 @@ export function LtvCalculator({ fileId }: { fileId: string }) {
             </Badge>
           )}
           {data?.purpose && (
-            <Badge variant="outline" className="font-medium text-gray-600">
+            <Badge variant="outline" className="font-medium text-foreground-2">
               {humanize(data.purpose)}
             </Badge>
           )}
         </CardTitle>
-        <p className="pl-9 text-xs text-gray-500">
+        <p className="pl-9 text-xs text-muted-foreground">
           Equity vs. risk — LTV / CLTV / HCLTV, deterministic and itemized.
         </p>
       </CardHeader>
@@ -87,18 +90,49 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
   const setOverride = useSetLtvOverride(fileId);
   const clearOverride = useClearLtvOverride(fileId);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — THE THIRD COMPONENT WITH THIS DEFECT, and the one the first fix missed.
+  //
+  // Same shape as the DTI panel and the calculator card: `editingKey` single at the parent, the
+  // draft local to the row, and a reset on the edit trigger. Opening a second row closed the first
+  // and took its draft with it, silently. An LTV override is audited under its own `ltv_overridden`
+  // activity type, so this is not a lesser surface than the other two.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const isMutating = setOverride.isPending || clearOverride.isPending;
+
+  const discardDraft = (fieldKey: string) =>
+    setDrafts((current) => {
+      const { [fieldKey]: _dropped, ...rest } = current;
+      return rest;
+    });
+
+  // Partial by design, the same limit as its two siblings: a tab close or reload, not Next's
+  // client-side navigation. The in-row caption is the primary signal.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
 
   const rowProps = {
     editingKey,
     onEdit: setEditingKey,
-    onCancel: () => setEditingKey(null),
+    onCancel: (fieldKey: string) => {
+      discardDraft(fieldKey);
+      setEditingKey(null);
+    },
+    drafts,
+    onDraftChange: (fieldKey: string, value: string) =>
+      setDrafts((current) => ({ ...current, [fieldKey]: value })),
     onSave: (fieldKey: string, amount: string) => {
       setOverride.mutate({ fieldKey, input: { amount } });
+      discardDraft(fieldKey);
       setEditingKey(null);
     },
     onClear: (fieldKey: string) => {
       clearOverride.mutate(fieldKey);
+      discardDraft(fieldKey);
       setEditingKey(null);
     },
     disabled: isMutating,
@@ -106,26 +140,34 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="space-y-6">
-        {data.findings.unresolved && <UnresolvedAlert count={data.findings.open_in_scope_count} />}
+      <div className="space-y-4">
+        {data.findings.unresolved && <UnresolvedAlert breakdown={data.findings.breakdown} />}
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <LtvHeroTile ltv={data.ltv} limit={data.limit} />
-          <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
-          <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+        {/* The math on the left, the result beside it (LP-UI-045) — the same
+            arrangement as the DTI panel, for the same reason: the ratio and the
+            two figures that produce it belong on one screen. */}
+        <div className={CALCULATOR_GRID}>
+          <div className="min-w-0 space-y-4">
+            <ValueBasisCallout data={data} />
+            <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
+            <BreakdownSection
+              title="Property value"
+              items={data.value_items}
+              appraisedValueSource={data.appraised_value_source}
+              {...rowProps}
+            />
+          </div>
+
+          <div className={CALCULATOR_RESULT_COLUMN}>
+            <LtvHeroTile ltv={data.ltv} limit={data.limit} />
+            <FormulaReceipt data={data} />
+            {/* CLTV and HCLTV are the same ratio with more of the debt stack in
+                the numerator; they read as variants of the headline, not as
+                three peers across the top. */}
+            <RatioTile label="CLTV" value={data.cltv} hint="+ second & HELOC drawn" />
+            <RatioTile label="HCLTV" value={data.hcltv} hint="+ full HELOC credit line" />
+          </div>
         </div>
-
-        <ValueBasisCallout data={data} />
-
-        <BreakdownSection title="Loan amounts" items={data.loan_items} {...rowProps} />
-        <BreakdownSection
-          title="Property value"
-          items={data.value_items}
-          appraisedValueSource={data.appraised_value_source}
-          {...rowProps}
-        />
-
-        <FormulaReceipt data={data} />
       </div>
     </TooltipProvider>
   );
@@ -137,12 +179,14 @@ function LtvBody({ fileId, data }: { fileId: string; data: LtvCalculation }) {
 
 function RatioTile({ label, value, hint }: { label: string; value: string | null; hint: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">
+    <div className="rounded-lg border border-border bg-muted/60 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
         {formatPercent(value)}
       </div>
-      <div className="mt-0.5 text-xs text-gray-400">{hint}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -162,7 +206,9 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">LTV</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          LTV
+        </span>
         {known && (
           <span
             className={cn(
@@ -178,26 +224,26 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
         <span
           className={cn(
             "text-3xl font-semibold tabular-nums",
-            over ? "text-destructive" : "text-gray-900",
+            over ? "text-destructive" : "text-foreground",
           )}
         >
           {formatPercent(ltv)}
         </span>
         {limit.ltv_max !== null && (
-          <span className="whitespace-nowrap text-sm text-gray-400">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
             / {formatPercent(limit.ltv_max)} limit
           </span>
         )}
       </div>
       {cap ? (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
             <div
               className={cn("h-full rounded-full", over ? "bg-destructive" : "bg-success")}
               style={{ width: `${fill}%` }}
             />
           </div>
-          <div className="mt-1 text-[11px] text-gray-400">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {limit.source === "overlay"
               ? `Lender overlay${limit.lender_slug ? ` · ${limit.lender_slug}` : ""}`
               : "Program default"}
@@ -205,7 +251,7 @@ function LtvHeroTile({ ltv, limit }: { ltv: string | null; limit: LtvLimit }) {
           </div>
         </div>
       ) : (
-        <div className="mt-1 text-xs text-gray-400">No program limit set</div>
+        <div className="mt-1 text-xs text-muted-foreground">No program limit set</div>
       )}
     </div>
   );
@@ -231,16 +277,16 @@ function AppraisedSourceTooltip() {
         <button
           type="button"
           aria-label="How the appraised value is determined"
-          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <HelpCircle className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        <p className="font-mono text-[11px] text-gray-200">
+        <p className="font-mono text-[11px] text-background">
           appraised = valuation_amount or estimated_value
         </p>
-        <p className="mt-1 leading-relaxed text-gray-300">
+        <p className="mt-1 leading-relaxed text-background/75">
           The appraised value basis uses the property valuation amount; if absent, it falls back to
           the estimated value. No appraisal document is on file yet.
         </p>
@@ -255,17 +301,17 @@ function ValueBasisCallout({ data }: { data: LtvCalculation }) {
   // sees WHICH value drives the basis (no hidden field). The literal logic is in the tooltip.
   const sourceLabel = appraisedSourceLabel(data.appraised_value_source);
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+    <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
-        <Scale className="h-4 w-4 shrink-0 text-gray-400" />
-        <span className="text-gray-500">Value basis · {data.value_basis_label}</span>
-        <span className="ml-auto font-semibold tabular-nums text-gray-900">
+        <Scale className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">Value basis · {data.value_basis_label}</span>
+        <span className="ml-auto font-semibold tabular-nums text-foreground">
           {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)}
         </span>
       </div>
       {sourceLabel && (
-        <div className="mt-1 flex items-center gap-1 pl-6 text-[11px] text-gray-400">
-          Appraised value <span className="font-medium text-gray-500">{sourceLabel}</span>
+        <div className="mt-1 flex items-center gap-1 pl-6 text-[11px] text-muted-foreground">
+          Appraised value <span className="font-medium text-muted-foreground">{sourceLabel}</span>
           <AppraisedSourceTooltip />
         </div>
       )}
@@ -280,9 +326,13 @@ function ValueBasisCallout({ data }: { data: LtvCalculation }) {
 interface RowControls {
   editingKey: string | null;
   onEdit: (key: string) => void;
-  onCancel: () => void;
+  /** LP-647 §3 — discards this row's draft. The only discard besides Save, and both are deliberate. */
+  onCancel: (key: string) => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — unsaved edits by field key, held by the parent so a row switch does not lose one. */
+  drafts: Record<string, string>;
+  onDraftChange: (key: string, value: string) => void;
   disabled: boolean;
 }
 
@@ -298,8 +348,10 @@ function BreakdownSection({
 } & RowControls) {
   return (
     <section>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h4>
-      <div className="rounded-lg border border-gray-200">
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      <div className="rounded-lg border border-border">
         {items.map((item) => (
           <LineRow
             key={item.key}
@@ -321,10 +373,17 @@ function LineRow({
   onCancel,
   onSave,
   onClear,
+  drafts,
+  onDraftChange,
   disabled,
 }: { item: LtvLineItem; appraisedValueSource: string | null } & RowControls) {
   const editing = editingKey === item.key;
-  const [draft, setDraft] = useState<string>(item.amount);
+  // LP-647 §3 — from the PARENT, so a row switch pauses rather than discards. A row not being
+  // edited but still holding a draft is UNSAVED and says so: an unsaved edit and a never-started
+  // edit rendered identically, which is what made the loss invisible.
+  const draft = drafts[item.key] ?? item.amount;
+  const unsaved = drafts[item.key] !== undefined && drafts[item.key] !== item.amount;
+  const setDraft = (value: string) => onDraftChange(item.key, value);
 
   // The appraised-value row is sourced from valuation_amount / estimated_value — NOT
   // borrower-stated. Show the real provenance + a working tooltip, correcting the old
@@ -333,13 +392,27 @@ function LineRow({
   const sourceLabel = isAppraised ? appraisedSourceLabel(appraisedValueSource) : null;
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-sm first:border-t-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-gray-700">{item.label}</span>
-        <span className="text-[11px] text-gray-400">
-          {item.overridden ? (
+        <span className="truncate text-foreground-2">{item.label}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {/* FIRST in the chain, ahead of `overridden` — a second edit to an already-overridden
+              row would otherwise read as saved while holding an unsaved figure. Same ordering as
+              the DTI panel's, and for the same reason (LP-569's chain-order defect). */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${drafts[item.key]}
+            </span>
+          ) : item.overridden ? (
             <span className="text-primary">
-              overridden · auto {formatMoneyPrecise(item.auto_amount)}
+              {/* WHO, not just that. "Someone changed this number" and "Priya
+                  changed this number" are different statements on a compliance
+                  file, and the actor was already recorded — it was dropped on
+                  the way out of the service (LP-UI-021). No actor recorded is
+                  left as a bare "overridden": inventing "unknown" would read as
+                  a name nobody checked. */}
+              overridden{item.override_by ? ` by ${item.override_by}` : ""} · auto{" "}
+              {formatMoneyPrecise(item.auto_amount)}
             </span>
           ) : sourceLabel ? (
             <span className="inline-flex items-center gap-1">
@@ -354,7 +427,7 @@ function LineRow({
 
       {editing ? (
         <div className="flex items-center gap-1">
-          <span className="text-gray-400">$</span>
+          <span className="text-muted-foreground">$</span>
           <Input
             autoFocus
             value={draft}
@@ -363,14 +436,14 @@ function LineRow({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onSave(item.key, draft);
-              if (e.key === "Escape") onCancel();
+              if (e.key === "Escape") onCancel(item.key);
             }}
-            className="h-8 w-32 text-right text-sm tabular-nums"
+            className="h-8 w-32 text-right tabular-nums"
           />
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-success"
+            className="text-success"
             aria-label="Save override"
             disabled={disabled}
             onClick={() => onSave(item.key, draft)}
@@ -380,9 +453,9 @@ function LineRow({
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400"
+            className="text-muted-foreground"
             aria-label="Cancel"
-            onClick={onCancel}
+            onClick={() => onCancel(item.key)}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -392,22 +465,23 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET — this line is what made a paused edit unrecoverable even once the draft
+              // survived the switch. The row seeds from `item.amount` on read.
               onEdit(item.key);
             }}
             className={cn(
-              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-gray-100",
-              item.overridden ? "font-semibold text-primary" : "font-medium text-gray-900",
+              "group inline-flex items-center gap-1.5 rounded px-1 py-0.5 tabular-nums hover:bg-muted",
+              item.overridden ? "font-semibold text-primary" : "font-medium text-foreground",
             )}
           >
             {formatMoneyPrecise(item.amount)}
-            <Pencil className="h-3 w-3 text-gray-300 group-hover:text-gray-500" />
+            <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
           </button>
           {item.overridden && (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-gray-400 hover:text-gray-700"
+              className="text-muted-foreground hover:text-foreground-2"
               aria-label={`Revert ${item.label} to auto`}
               disabled={disabled}
               onClick={() => onClear(item.key)}
@@ -428,35 +502,18 @@ function LineRow({
 function FormulaReceipt({ data }: { data: LtvCalculation }) {
   const firstLoan = data.loan_items.find((i) => i.key === "ltv.first_loan")?.amount ?? null;
   return (
-    <div className="space-y-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+    <div className="space-y-1.5 rounded-lg border border-dashed border-input bg-muted/80 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         The formulas
       </div>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.ltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.cltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-600">{data.hcltv_formula}</p>
-      <p className="font-mono text-xs leading-relaxed text-gray-900">
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.ltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.cltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground-2">{data.hcltv_formula}</p>
+      <p className="font-mono text-xs leading-relaxed text-foreground">
         LTV = {formatMoneyPrecise(firstLoan)} ÷{" "}
         {data.value_basis === null ? "—" : formatMoneyPrecise(data.value_basis)} ={" "}
         <span className="font-semibold">{formatPercent(data.ltv)}</span>
       </p>
-    </div>
-  );
-}
-
-function UnresolvedAlert({ count }: { count: number }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
-    >
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-      <span>
-        <span className="font-medium text-gray-900">
-          {count} unresolved finding{count === 1 ? "" : "s"}
-        </span>{" "}
-        — this calculation may be incomplete until they're applied or overridden.
-      </span>
     </div>
   );
 }

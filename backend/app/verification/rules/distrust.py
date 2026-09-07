@@ -21,18 +21,15 @@ from pathlib import Path
 
 import yaml
 
-from app.schema_specs import SPECS_DIR
-
 _PATH = Path(__file__).with_name("distrusted_fields.yaml")
 
-# The specs live INSIDE the package. This used to be ``parents[4] / "docs" / "schema-specs"``, which
-# counted on a ``backend/`` directory that exists in the repo and NOT in the image: the container's
-# package root is ``/app``, so the walk landed on ``/docs/schema-specs``. The backend image is built
-# with ``backend/`` as its context, so a repo-root ``docs/`` was never shipped either — every
-# containerised rule-engine run raised DistrustError on the first ``fields:`` entry because the spec
-# set came back EMPTY. Import the location instead of re-deriving it; ``_schema_fields`` now fails
-# loud, naming the directory, if it is ever unreadable again.
-_SPECS_DIR = SPECS_DIR
+# WHERE THE SPECS LIVE is now `app.documents.schema_fields`' problem, and the history is worth
+# keeping because it is why that module raises instead of returning empty. This file used to derive
+# the directory as ``parents[4] / "docs" / "schema-specs"``, which counted on a ``backend/``
+# directory that exists in the repo and NOT in the image: the container's package root is ``/app``,
+# so the walk landed on ``/docs/schema-specs``, the spec set came back EMPTY, and every
+# containerised rule-engine run raised DistrustError on the first ``fields:`` entry — a packaging
+# problem reported as a rename of the first-listed field, for the whole life of the image.
 
 
 class DistrustError(Exception):
@@ -63,42 +60,20 @@ def _schema_fields() -> set[tuple[str, str]]:
     rather than from parsed declarations, because a distrusted field is a property of the DOCUMENT, and
     the tag that reads it may be derived (IH-1's case) or not exist yet.
 
-    An unreadable spec directory raises HERE, naming the directory. Falling through with an empty set
-    made every ``fields:`` entry look like a typo, so a packaging problem was reported as a rename of
-    the first-listed field — the message that hid this bug in staging for the whole life of the image.
+    DELEGATES to :mod:`app.documents.schema_fields` (LP-703), which grew a second caller when a
+    processor became able to ADD a field by hand and that key had to be checked against the same
+    universe. Two copies of this walk is how they come to disagree about what a type declares.
+
+    An unreadable spec directory still raises HERE, as ``DistrustError``, naming the directory —
+    falling through with an empty set made every ``fields:`` entry look like a typo, so a packaging
+    problem was reported as a rename of the first-listed field.
     """
-    import json
+    from app.documents.schema_fields import SchemaSpecsUnreadable, schema_field_pairs
 
-    specs = sorted(_SPECS_DIR.glob("*.json"))
-    if not specs:
-        raise DistrustError(
-            f"no schema specs found at {_SPECS_DIR} — the spec set is the universe every distrusted "
-            "field is validated against, so an empty one fails EVERY entry. The directory ships "
-            "inside the package; check that it was not dropped from the build or the wheel."
-        )
-    pairs: set[tuple[str, str]] = set()
-    for path in specs:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        doc_type = payload.get("document_type")
-        if not isinstance(doc_type, str) or not doc_type:
-            continue
-        # ``typed_core`` is a LIST of {name, type, why} objects in every shipped spec; a mapping is
-        # accepted too so a future shape change degrades to "field not found" rather than a crash.
-        for entry in _field_names(payload.get("typed_core")):
-            pairs.add((doc_type, entry))
-        for nested in payload.get("nested_lists") or []:
-            for entry in _field_names((nested or {}).get("fields")):
-                pairs.add((doc_type, entry))
-    return pairs
-
-
-def _field_names(block: object) -> list[str]:
-    """The field names in a spec block, whether it is a list of objects or a name-keyed mapping."""
-    if isinstance(block, dict):
-        return [str(k) for k in block]
-    if isinstance(block, list):
-        return [str(item["name"]) for item in block if isinstance(item, dict) and item.get("name")]
-    return []
+    try:
+        return schema_field_pairs()
+    except SchemaSpecsUnreadable as exc:
+        raise DistrustError(str(exc)) from exc
 
 
 @cache

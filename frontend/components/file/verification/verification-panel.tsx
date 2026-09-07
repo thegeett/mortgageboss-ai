@@ -10,15 +10,16 @@
  * wording / source location). The DTI/LTV calculators sit alongside it on the tab.
  */
 
+import { CalculatorsSection } from "@/components/file/calculators/calculators-section";
 import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
 import { RuleFindingsTabs } from "@/components/file/verification/rule-findings-tabs";
 import { VerificationStats } from "@/components/file/verification/verification-stats";
 import { VersionSelector } from "@/components/file/verification/version-selector";
+import { railClass } from "@/components/status-token";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
@@ -42,11 +43,13 @@ import type {
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
-import { phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
+import { lastRunLabel, phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import { AlertTriangle, CheckCircle2, Lock, Play, ScanSearch, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGGRESSION_META, AggressionDial } from "./aggression-dial";
+import { ThoroughnessControl } from "./thoroughness-control";
 
 /** The legible consequence of moving the dial (the in-scope/clear↔blocked change). */
 interface Consequence {
@@ -56,6 +59,18 @@ interface Consequence {
 
 /** A run that did not produce findings — either the trigger request never landed (`request`) or the
  * run reached the worker and failed there (`run`, carrying the run's own reason). */
+/** The house relative-time shape (see `file-header.tsx`): never throw on a bad date, show "—".
+ *
+ * Passed INTO `lastRunLabel` rather than called inside it, so the label is a pure function of its
+ * inputs — testable without freezing the clock or stubbing date-fns. */
+function fmtRelative(iso: string): string {
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true });
+  } catch {
+    return "—";
+  }
+}
+
 type FailedRun = { kind: "request" } | { kind: "run"; detail: string | null };
 
 /** Count of findings shown (in-scope for display) at a given level's cutoff. */
@@ -105,6 +120,12 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   const setAggression = useSetAggression(fileId);
   const updatePreferences = useUpdatePreferences();
   const running = data?.latest_run?.status === "running" || run.isPending;
+  // LP-647 §2 — a run started over a document mid-extraction freezes it into the snapshot with no
+  // fields and, before classification lands, no type; every rule needing a typed field from it then
+  // abstains, and those findings persist. The server refuses this with a 409 — this is the half that
+  // stops a processor reaching the refusal, and says why rather than greying out silently.
+  const documentsProcessing = data?.documents_processing ?? 0;
+  const blockedByDocuments = documentsProcessing > 0 && !running;
 
   // The dial re-filters instantly: track the picked level optimistically so the
   // displayed in-scope set updates with zero latency while the server confirms the
@@ -156,6 +177,21 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   // was created and nothing about the cache is suspect, so a network blip must not buy a full AI pass.
   const triggerRun = useCallback(() => run.mutate(failedRun?.kind === "run"), [run, failedRun]);
 
+  /**
+   * The ONE write for the thoroughness level, shared by both controls.
+   *
+   * There are two: the compact control in the header (LP-UI-046) and the
+   * `AggressionDial` on the Old findings tab. That is deliberate rather than
+   * duplication, and the split is by JOB — the header sets the level, which is
+   * the frequent action and belongs where the file is being read; the dial also
+   * owns the two rarer ones, "reset to default" and "set as my default", which
+   * need the explanation that sits around them.
+   *
+   * They cannot disagree about the value, because both go through this. Recorded
+   * because a future reader will see two controls for one setting and reach for
+   * the delete key; what is genuinely undecided is whether the header should
+   * eventually carry the defaults too, and that is a product call, not a tidy-up.
+   */
   const pickLevel = useCallback(
     (level: AggressionLevel) => {
       if (!data || level === activeLevel) return;
@@ -198,49 +234,86 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   }, [data, activeLevel, setAggression]);
 
   const setAsDefault = useCallback(() => {
-    updatePreferences.mutate(activeLevel, {
-      // The verification status carries the (server-derived) default — refetch it.
-      onSuccess: () =>
-        void queryClient.invalidateQueries({ queryKey: verificationQueryKey(fileId) }),
-    });
+    updatePreferences.mutate(
+      { default_aggression_level: activeLevel },
+      {
+        // The verification status carries the (server-derived) default — refetch it.
+        onSuccess: () =>
+          void queryClient.invalidateQueries({ queryKey: verificationQueryKey(fileId) }),
+      },
+    );
   }, [activeLevel, updatePreferences, queryClient, fileId]);
 
   return (
-    <Card className="border-gray-200/80 shadow-sm">
-      <CardHeader className="flex-row items-start justify-between space-y-0 pb-4">
-        <div className="space-y-1">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <ScanSearch className="h-4 w-4" />
-            </span>
-            Verification
+    // LP-UI-020: a section, not a Card. This was Card > CardContent > tab panel >
+    // finding card — four rounded borders and four shadows to reach one
+    // sentence. The heading, the program, the version selector and both run
+    // controls all survive; only the box around them is gone.
+    <section aria-labelledby="verification-heading" className="space-y-4">
+      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 id="verification-heading" className="text-label uppercase text-muted-foreground">
+              Verification
+            </h2>
             {data?.program && (
               <Badge variant="secondary" className="font-medium">
                 {humanize(data.program)}
               </Badge>
             )}
-          </CardTitle>
-          <p className="pl-9 text-xs text-gray-500">
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
             The full rule set + the AI cross-source pass, against the documents — program- and
             lender-specific.
           </p>
           {data && (
-            <div className="pl-9 pt-1">
+            <div className="pt-1.5">
               <VersionSelector fileId={fileId} currentRunId={data.latest_run?.id ?? null} />
             </div>
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button size="sm" className="gap-1.5" disabled={running} onClick={triggerRun}>
-            {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-            {running ? "Running…" : "Run verification"}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Beside Run verification, where the mockup puts it (LP-UI-046).
+                It was only inside the Old findings tab — the one tab a processor
+                has no reason to open. */}
+            {data && (
+              <ThoroughnessControl
+                aggression={data.aggression}
+                activeLevel={activeLevel}
+                shownAt={(level) => shownCount(data, level)}
+                onPick={pickLevel}
+                busy={dialBusy}
+              />
+            )}
+            {/* LP-647 §2 — WHY, not just greyed out. A disabled control with no reason reads as
+                broken, and a processor who cannot tell the difference between "not yet" and
+                "never" reloads the page. Naming the count separates them: this one ends by
+                itself. Kept beside the button rather than under it, so the reason and the thing
+                it explains are read together in the LP-UI-046 header. */}
+            {blockedByDocuments && (
+              <span className="max-w-[15rem] text-right text-[11px] text-warning">
+                {documentsProcessing === 1
+                  ? "1 document is still being read — verification will run once it finishes."
+                  : `${documentsProcessing} documents are still being read — verification will run once they finish.`}
+              </span>
+            )}
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={running || blockedByDocuments}
+              onClick={triggerRun}
+            >
+              {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {running ? "Running…" : "Run verification"}
+            </Button>
+          </div>
           {/* LP-590 — WHICH phase, and where it sits in the sequence. A run takes about six and a
               half minutes; a bare spinner for that long is indistinguishable from a hung worker.
               A position rather than a percentage, deliberately: stage A scales with the file's
               transaction count, so the phases are not evenly sized and a bar would visibly stall. */}
           {running && data?.latest_run?.phase && (
-            <span className="text-[11px] tabular-nums text-gray-500">
+            <span className="text-[11px] tabular-nums text-muted-foreground">
               {phaseLabel(data.latest_run.phase)}
               {data.latest_run.phase_index && data.latest_run.phase_total
                 ? ` (${data.latest_run.phase_index} of ${data.latest_run.phase_total})`
@@ -259,18 +332,42 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
               exactly when you need it (the default button caches against the last COMPLETED run, so a failed
               or stale run leaves no other way to force). Gating this on status === "completed" hid the hatch
               after a failure — the bug this restores. The cache being blind to engine changes is LP-377. */}
+          {/* WHEN IT LAST RAN, AND WHAT IT COST. Beside the escape hatch because they answer the
+              same question in sequence: is this stale enough to re-run, and what does re-running
+              cost me? The duration is the half a processor has no other way to find — a pass takes
+              anywhere from one minute to fifteen depending on the file, and pressing Run with no
+              idea which is why the button felt like a gamble.
+
+              Same gate as the hatch (`latest_run != null && !running`), and deliberately so: while
+              a pass is in flight `latest_run` IS that pass, so a "last run" line there would be
+              describing the run being watched, with the phase and estimate already two lines up. */}
           {data?.latest_run != null && !running && (
-            <button
-              type="button"
-              onClick={() => run.mutate(true)}
-              className="text-[11px] text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
-            >
-              Re-run anyway
-            </button>
+            <div className="flex flex-col items-end gap-0.5">
+              {(() => {
+                const label = lastRunLabel(data.latest_run, fmtRelative);
+                return label ? (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">{label}</span>
+                ) : null;
+              })()}
+              <button
+                type="button"
+                onClick={() => run.mutate(true)}
+                className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground-2 hover:underline"
+              >
+                Re-run anyway
+              </button>
+            </div>
           )}
         </div>
-      </CardHeader>
-      <CardContent aria-busy={isPending}>
+      </header>
+
+      {/* The calculators sit between the run controls and the outcomes, as the
+          mockup has them (LP-UI-046). They used to be rendered by the ROUTE
+          above this whole section, which put the run controls and the
+          thoroughness dial ~1,400px down the page — below the fold on a laptop,
+          which is the same as not having them. */}
+      <CalculatorsSection fileId={fileId} />
+      <div aria-busy={isPending}>
         {isPending ? (
           <>
             <output className="sr-only">Loading verification</output>
@@ -297,8 +394,8 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
             onRetry={triggerRun}
           />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -472,7 +569,7 @@ function ConsequenceBanner({
   return (
     <output
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm text-gray-700",
+        "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm text-foreground-2",
         tone.border,
         tone.bg,
       )}
@@ -483,7 +580,7 @@ function ConsequenceBanner({
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="shrink-0 text-gray-400 hover:text-gray-600"
+        className="shrink-0 text-muted-foreground hover:text-foreground-2"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -504,8 +601,8 @@ function SubmitStatus({
     return (
       <div className="flex items-center gap-2 text-xs text-warning">
         <Lock className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-gray-600">
-          <span className="font-medium text-gray-800">
+        <span className="text-foreground-2">
+          <span className="font-medium text-foreground">
             {data.in_scope_open_count} open finding{data.in_scope_open_count === 1 ? "" : "s"}
           </span>{" "}
           must be resolved to submit (at {label} thoroughness).
@@ -516,7 +613,7 @@ function SubmitStatus({
   return (
     <div className="flex items-center gap-2 text-xs text-success">
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-      <span className="text-gray-600">Clear to submit at {label} thoroughness.</span>
+      <span className="text-foreground-2">Clear to submit at {label} thoroughness.</span>
     </div>
   );
 }
@@ -548,17 +645,25 @@ function FailedRunBanner({
       : (run.detail ?? "The verification pass failed on the worker. No findings were produced.");
 
   return (
+    // LP-UI-020 — a RAIL, not a tinted box. State lives on the left rule and the
+    // glyph; a fill costs text contrast and stacks badly against hover and
+    // focus. `danger` resolves because LP-UI-002 defined it as an alias of
+    // `destructive` — before that, twenty class names across four files named a
+    // colour that did not exist, and this banner drew no border at all.
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2.5 text-sm text-gray-700"
+      className={cn(
+        railClass("blocking"),
+        "flex items-start gap-2 py-1.5 pl-3 text-sm text-foreground-2",
+      )}
     >
       <X className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
       <div className="flex-1 space-y-1.5">
         <p>
-          <span className="font-medium text-gray-900">Verification didn't complete</span> —{" "}
+          <span className="font-medium text-foreground">Verification didn't complete</span> —{" "}
           {message}
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           The findings below, if any, are from an earlier run.
         </p>
       </div>
@@ -579,11 +684,14 @@ function StaleBanner() {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-sm text-gray-700"
+      className={cn(
+        railClass("attention"),
+        "flex items-start gap-2 py-1.5 pl-3 text-sm text-foreground-2",
+      )}
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <span>
-        <span className="font-medium text-gray-900">The file changed</span> — this verification is
+        <span className="font-medium text-foreground">The file changed</span> — this verification is
         out of date. Re-run it to compare against the current data.
       </span>
     </div>
@@ -601,7 +709,7 @@ function RunSummary({
 }) {
   if (running) {
     return (
-      <div className="flex items-center gap-2 text-sm text-gray-500">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="h-3.5 w-3.5" />
         Comparing the stated data against the documents…
       </div>
@@ -617,8 +725,8 @@ function RunSummary({
   const red = shown.filter((f) => f.status === "red").length;
   const yellow = shown.filter((f) => f.status === "yellow").length;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-      <span className="inline-flex items-center gap-1 font-medium text-gray-700">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1 font-medium text-foreground-2">
         <Sparkles className="h-3.5 w-3.5 text-primary" /> AI cross-source
       </span>
       <span>

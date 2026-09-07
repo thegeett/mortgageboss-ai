@@ -20,11 +20,11 @@ export function NeedsCompleteness({ fileId }: { fileId: string }) {
   if (outstanding === 0) return null;
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2.5 text-sm text-gray-600">
+    <div className="flex items-start gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2.5 text-sm text-foreground-2">
       <FileText className="mt-0.5 h-4 w-4 shrink-0 text-info" />
       <span>
         Verification compares the documents against the stated application. This file has{" "}
-        <span className="font-medium text-gray-800">
+        <span className="font-medium text-foreground">
           {outstanding} outstanding document need{outstanding === 1 ? "" : "s"}
         </span>{" "}
         — results may be incomplete until they&rsquo;re collected.

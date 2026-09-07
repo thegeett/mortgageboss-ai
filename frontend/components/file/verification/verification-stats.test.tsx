@@ -14,6 +14,7 @@ const CUTOFFS: Record<AggressionLevel, number> = { conservative: 0.8, balanced: 
 function status(): VerificationStatus {
   return {
     stale: false,
+    documents_processing: 0,
     program: "fha",
     latest_run: null,
     findings: [

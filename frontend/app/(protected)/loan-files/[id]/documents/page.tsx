@@ -3,9 +3,11 @@
 import { DocumentDrawer } from "@/components/file/documents/document-drawer";
 import { DocumentDropzone } from "@/components/file/documents/document-dropzone";
 import { DocumentList } from "@/components/file/documents/document-list";
+import { ProcessingStrip } from "@/components/file/documents/processing-strip";
 import { ReprocessAll } from "@/components/file/documents/reprocess-all";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { DocumentResponse } from "@/lib/types/document";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
@@ -38,15 +40,15 @@ function DocumentsWorkspace() {
   // drawer can be closed (and a refetch doesn't reopen it).
   const searchParams = useSearchParams();
   const router = useRouter();
+  // `?doc=` is a PROVENANCE link — it arrives from a finding, a ledger row or a
+  // snippet, and it means "show me the document this came from". It used to open
+  // the details drawer, which answers a different question. It goes to the
+  // document itself now.
   const docParam = searchParams.get("doc");
   useEffect(() => {
-    if (!docParam || !documents) return;
-    const match = documents.find((doc) => doc.id === docParam);
-    if (match) {
-      setSelected(match);
-      router.replace(`/loan-files/${id}/documents`, { scroll: false });
-    }
-  }, [docParam, documents, id, router]);
+    if (!docParam) return;
+    router.replace(`/loan-files/${id}/review?doc=${docParam}`, { scroll: false });
+  }, [docParam, id, router]);
 
   // THE DRAWER MUST SEE THE REFRESHED DOCUMENT (LP-637 feature 3 review). `selected` is a
   // snapshot taken when the row was clicked and never re-derived, so invalidating the list updated
@@ -59,14 +61,33 @@ function DocumentsWorkspace() {
 
   return (
     <div className="space-y-6">
+      {/* The way into the reviewer (LP-UI-030). Without an entry point the route
+          is reachable only by typing a URL, which is the LP-UI-016 rule facing
+          the other way: a screen nobody can get to is not shipped. */}
+      <div className="flex justify-end">
+        <Link
+          href={`/loan-files/${id}/review`}
+          className="text-sm text-muted-foreground hover:text-primary hover:underline"
+        >
+          Open the document reviewer
+        </Link>
+      </div>
+
       <DocumentDropzone fileId={id} />
+      {/* Above the list on purpose (LP-UI-019): watching uploads land must not
+          move the documents already settled underneath them. */}
+      <ProcessingStrip documents={documents ?? []} />
       <ReprocessAll fileId={id} documentCount={documents?.length ?? 0} isLoading={isPending} />
       <DocumentList
         documents={documents}
         isPending={isPending}
         isError={isError}
         onRetry={() => void refetch()}
-        onSelect={setSelected}
+        // A row opens the DOCUMENT (LP-UI-030's reviewer: the page beside its
+        // extracted fields). The drawer is still one click away on each row, for
+        // the questions it answers — type, versions, freshness, replace, delete.
+        onOpen={(doc) => router.push(`/loan-files/${id}/review?doc=${doc.id}`)}
+        onOpenDetails={setSelected}
       />
       <DocumentDrawer document={live} fileId={id} onClose={() => setSelected(null)} />
     </div>

@@ -52,9 +52,13 @@ reference_values:
   threshold_needs_signoff: false  # must equal rule_kinds.csv — no numeric threshold in this rule
   values: {}
   guideline_text: >-
-    Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) names the acceptable rental-income
-    documentation: current lease agreements, or market rents reported on Form 1007 (one-unit) or Form
-    1025 (two- to four-unit). A lease must itself be supported by two months of consecutive bank
+    Fannie Mae Selling Guide, both topics dated 09/02/2026. B3-3.8-02 (subject property) names the
+    rental-income documentation and makes it MANDATORY where the income is used to qualify: "a
+    Single-Family Comparable Rent Schedule (Form 1007) or Small Residential Income Property Appraisal
+    Report (Form 1025), as applicable, and a copy of the fully executed lease agreement(s) when a lease
+    is being transferred to the borrower" — the conjunction is AND, so a lease does not stand in for
+    the form. B3-3.8-01 (general) carries the lease-in-effect evidence: a lease must itself be
+    supported by two months of consecutive bank
     statements or electronic transfers for an existing lease, or by the security deposit and first full
     month's rent check with proof of deposit for a newly executed one. An investment property whose
     rental income has none of this behind it is not supportable.
@@ -74,7 +78,7 @@ evidence_required: >-
   Which rental-support documents the file carries and which the judgment found missing, inline on the
   finding, so a processor knows what to request rather than being told support is inadequate.
 
-guideline_reference: "Fannie Mae Selling Guide B3-3.8-01 (page dated 10/08/2025) — acceptable rental income documentation: leases, Form 1007 / 1025 market rents, and the lease-support requirement."
+guideline_reference: "Fannie Mae Selling Guide B3-3.8-02 (subject-property documentation: Form 1007 / 1025, mandatory where rental income qualifies) and B3-3.8-01 (general: the lease-in-effect evidence), both pages dated 09/02/2026. SEL-2026-08 split what was one B3-3.8-01 citation."
 
 # LP-541 — the documents this rule's inputs come from, for read-time grouping of a couldnt_check
 # into "request this" vs "read what is already here". Each entry is a group of ALTERNATIVES (any

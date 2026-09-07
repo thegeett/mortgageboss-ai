@@ -7,10 +7,21 @@ const setMutate = vi.fn();
 const clearMutate = vi.fn();
 const useDtiMock = vi.fn();
 
+const addMutate = vi.fn();
+const removeMutate = vi.fn();
+const ungateMutate = vi.fn();
+const useUngatePreviewMock = vi.fn(() => ({ data: undefined, isPending: false }));
+
 vi.mock("@/lib/api/dti", () => ({
   useDti: () => useDtiMock(),
   useSetDtiOverride: () => ({ mutate: setMutate, isPending: false }),
   useClearDtiOverride: () => ({ mutate: clearMutate, isPending: false }),
+  // LP-643 — the module is mocked WHOLE, so every hook the component reaches for has to be here or
+  // it throws at import. Stubbed rather than exercised: these are covered by their own tests below.
+  useAddDtiLine: () => ({ mutate: addMutate, isPending: false }),
+  useRemoveDtiLine: () => ({ mutate: removeMutate, isPending: false }),
+  useDtiUngatePreview: () => useUngatePreviewMock(),
+  useApplyDtiUngate: () => ({ mutate: ungateMutate, isPending: false }),
 }));
 
 import { DtiCalculator } from "./dti-calculator";
@@ -31,6 +42,8 @@ const CALC: DtiCalculation = {
       amount: "10000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   housing_items: [
@@ -42,6 +55,8 @@ const CALC: DtiCalculation = {
       amount: "277.78",
       source: "computed",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   debt_items: [
@@ -53,6 +68,8 @@ const CALC: DtiCalculation = {
       amount: "2000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   front_end_formula: "Front-end DTI = housing payment ÷ gross monthly income",
@@ -65,7 +82,11 @@ const CALC: DtiCalculation = {
     rule_id: "conv.dti.back_end_max",
     status: "pass",
   },
-  findings: { unresolved: false, open_in_scope_count: 0 },
+  findings: {
+    unresolved: false,
+    open_in_scope_count: 0,
+    breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+  },
 };
 
 function mockDti(overrides: Partial<ReturnType<typeof useDtiMock>> = {}) {
@@ -103,6 +124,8 @@ describe("DtiCalculator", () => {
             amount: "3186.00",
             source: "stated",
             overridden: false,
+            override_by: null,
+            override_note: null,
             excluded: true,
             excluded_reason: "paid off at closing",
           },
@@ -117,6 +140,28 @@ describe("DtiCalculator", () => {
     // Its own figure is still shown — struck through, not hidden and not zeroed.
     const amount = screen.getByText("$3,186.00");
     expect(amount.className).toContain("line-through");
+  });
+
+  it("puts the result BESIDE the math, not after it (LP-UI-045)", () => {
+    // It ran down the page: ratios, three sections, then the formula — so the
+    // answer was above the working and the arithmetic that produces it a screen
+    // below. Reading it meant scrolling between the number and the numbers it
+    // came from.
+    mockDti();
+    const { container } = render(<DtiCalculator fileId="LF-1" />);
+    const split = container.querySelector("div.grid.gap-4");
+    expect(split?.className).toContain("lg:grid-cols-[minmax(0,1fr)_19rem]");
+    // And it stays put while the math scrolls, which is the point of the split.
+    expect(container.querySelector(".lg\\:sticky")).toBeTruthy();
+  });
+
+  it("keeps a single column below lg, where two would be too narrow", () => {
+    // A line is a label, a figure and its source; at half a laptop's width that
+    // wraps three times.
+    mockDti();
+    const { container } = render(<DtiCalculator fileId="LF-1" />);
+    const split = container.querySelector("div.grid.gap-4");
+    expect(split?.className).not.toMatch(/(?<!lg:)grid-cols-2/);
   });
 
   it("renders the two ratios, the breakdown, the formula and the limit", () => {
@@ -141,12 +186,20 @@ describe("DtiCalculator", () => {
 
   it("shows the unresolved-findings alert when findings are open", () => {
     mockDti({
-      data: { ...CALC, findings: { unresolved: true, open_in_scope_count: 2 } },
+      data: {
+        ...CALC,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 2,
+          breakdown: { governed: 2, cross_source: 0, legacy: 0, other: 0 },
+        },
+      },
     });
     render(<DtiCalculator fileId="LF-1" />);
 
     expect(screen.getByRole("alert")).toBeDefined();
-    expect(screen.getByText(/2 unresolved findings/)).toBeDefined();
+    // LP-UI-021: named by system rather than one merged total.
+    expect(screen.getByText(/2 rule findings unresolved/)).toBeDefined();
   });
 
   it("flags over-limit in red", () => {
@@ -221,6 +274,8 @@ describe("bug-001 — using a stated estimate", () => {
         amount: "0.00",
         source: "extracted",
         overridden: false,
+        override_by: null,
+        override_note: null,
         unknown: true,
       },
     ],
@@ -293,7 +348,14 @@ describe("bug-001 — using a stated estimate", () => {
       ...gated,
       housing_items: gated.housing_items.map((i) =>
         i.key === "housing.taxes"
-          ? { ...i, overridden: true, unknown: false, override_amount: "464.92" }
+          ? {
+              ...i,
+              overridden: true,
+              override_by: null,
+              override_note: null,
+              unknown: false,
+              override_amount: "464.92",
+            }
           : i,
       ),
     };
@@ -301,5 +363,294 @@ describe("bug-001 — using a stated estimate", () => {
     render(<DtiCalculator fileId="LF-ABRS" />);
 
     expect(screen.queryByRole("button", { name: /figure \(\$/ })).toBeNull();
+  });
+
+  it("names who set an override, not just that one exists (LP-UI-021)", () => {
+    // The actor was already recorded on DtiOverride and dropped on the way out
+    // of the service. On a compliance file "someone changed this number" and
+    // "Priya changed this number" are different statements.
+    mockDti({
+      data: {
+        ...CALC,
+        income_items: [
+          {
+            key: "income.bonus",
+            label: "Bonus — Pat",
+            auto_amount: "583.33",
+            override_amount: "0.00",
+            amount: "0.00",
+            source: "override",
+            overridden: true,
+            override_by: "Priya Desai",
+            override_note: null,
+          },
+        ],
+      },
+    });
+    render(<DtiCalculator fileId="LF-1" />);
+    expect(screen.getByText(/overridden by Priya Desai/)).toBeDefined();
+  });
+
+  it("stays silent about an actor it does not have", () => {
+    // An override written before the column existed, or by a process rather than
+    // a person. A placeholder name in an audit trail reads as one nobody checked,
+    // so the line says "overridden" and stops there.
+    mockDti({
+      data: {
+        ...CALC,
+        income_items: [
+          {
+            key: "income.bonus",
+            label: "Bonus — Pat",
+            auto_amount: "583.33",
+            override_amount: "0.00",
+            amount: "0.00",
+            source: "override",
+            overridden: true,
+            override_by: null,
+            override_note: null,
+          },
+        ],
+      },
+    });
+    render(<DtiCalculator fileId="LF-1" />);
+    expect(screen.getByText(/overridden · auto/)).toBeDefined();
+    expect(screen.queryByText(/overridden by/)).toBeNull();
+  });
+});
+
+describe("LP-643 review — the remove control", () => {
+  afterEach(cleanup);
+
+  /** The trash icon used to render on `item.key.startsWith("custom.")`, with the server's prefix
+   *  retyped in this component. It now renders on `item.removable`, which the server decides — and
+   *  NOTHING covered either version, so this is the first test that touches the control at all. */
+  it("offers removal on a processor-added line and not on an engine line", () => {
+    useDtiMock.mockReturnValue({
+      data: {
+        ...CALC,
+        debt_items: [
+          {
+            key: "debt.1",
+            label: "Installment",
+            auto_amount: "2000.00",
+            override_amount: null,
+            amount: "2000.00",
+            source: "stated",
+            overridden: false,
+            removable: false,
+          },
+          {
+            key: "custom.6f1c9b3e-0000-4000-8000-000000000001",
+            label: "Child support",
+            auto_amount: "450.00",
+            override_amount: null,
+            amount: "450.00",
+            source: "manual",
+            overridden: false,
+            removable: true,
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+
+    expect(screen.getByLabelText("Remove Child support")).toBeTruthy();
+    expect(screen.queryByLabelText("Remove Installment")).toBeNull();
+  });
+
+  /** And it must send the ID, not the namespaced key — the endpoint takes a UUID. */
+  it("removes by id rather than by the namespaced key", () => {
+    const id = "6f1c9b3e-0000-4000-8000-000000000001";
+    useDtiMock.mockReturnValue({
+      data: {
+        ...CALC,
+        debt_items: [
+          {
+            key: `custom.${id}`,
+            label: "Child support",
+            auto_amount: "450.00",
+            override_amount: null,
+            amount: "450.00",
+            source: "manual",
+            overridden: false,
+            removable: true,
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+    fireEvent.click(screen.getByLabelText("Remove Child support"));
+
+    expect(removeMutate).toHaveBeenCalledWith(id);
+  });
+
+  /** LP-643 (c) — THE WHOLE-MODULE MOCK IS THIS REPO'S PATTERN (22 files use it), so the fix is not
+   *  to fork the style. The hazard is real though: the module is replaced wholly, so a hook added to
+   *  it throws at IMPORT here, and nothing fails until someone happens to touch this component.
+   *  This turns that into an explicit failure naming the missing hook. */
+  it("stubs every hook the api module exports", async () => {
+    const real = await vi.importActual<Record<string, unknown>>("@/lib/api/dti");
+    const stubbed = await import("@/lib/api/dti");
+    // HOOKS ONLY, and the narrowing is the point. A first version asserted over EVERY export and
+    // failed on `fetchDti`, `dtiQueryKey` and the raw mutators — none of which a component calls, so
+    // none of which can throw here. A guard that refuses more than its reason justifies gets deleted
+    // by the next person who hits it. The reason is that a HOOK missing from the mock throws when
+    // the component renders; that is the class, and it is exactly the `use` prefix.
+    const missing = Object.keys(real).filter(
+      (name) => name.startsWith("use") && !(name in stubbed),
+    );
+
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
+  afterEach(cleanup);
+
+  const twoHousingLines = {
+    ...CALC,
+    housing_items: [
+      {
+        key: "housing.property_taxes",
+        label: "Property taxes",
+        auto_amount: "300.00",
+        override_amount: null,
+        amount: "300.00",
+        source: "computed",
+        overridden: false,
+      },
+      {
+        key: "housing.homeowners_insurance",
+        label: "Homeowners insurance",
+        auto_amount: "120.00",
+        override_amount: null,
+        amount: "120.00",
+        source: "computed",
+        overridden: false,
+      },
+    ],
+  };
+
+  /** THE DEFECT. `editingKey` is single, so opening a second row closed the first and its LOCAL
+   *  draft went with it. A processor correcting two housing lines in a row — the ordinary case,
+   *  since both come from the same document set — lost the first one every time, with no signal. */
+  it("keeps a draft when the processor opens another row", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+
+    // Switch to the other row WITHOUT saving — the step that used to throw the edit away.
+    fireEvent.click(screen.getByText("$300.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$155\.40/)).toBeTruthy();
+  });
+
+  /** And the caption is the half that makes it VISIBLE. An unsaved edit and a never-started edit
+   *  rendered identically, so the processor's own memory was the only record a number was typed. */
+  /** THE RELOAD GUARD, WHICH NOTHING HELD on either branch. `beforeunload` is in this panel, the
+   *  LTV panel and the calculator card, and in no test anywhere — deleting the listener passed the
+   *  whole suite. Partial by design (a tab close or reload, not Next's client-side navigation), and
+   *  a partial guarantee with no test is the one a hand-merge drops with nothing going red. */
+  it("warns before a reload while an edit is still held", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    // The control FIRST: with nothing typed, a reload must not be interrupted.
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented, "warned with no unsaved edit").toBe(false);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+
+    const held = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(held);
+    expect(held.defaultPrevented, "a held edit was not defended").toBe(true);
+  });
+
+  it("does not claim an unsaved edit on a row that was never edited", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
+  });
+
+  /** Re-entering must not clobber it either — `setDraft(item.amount)` on the edit button was what
+   *  made a paused edit unrecoverable even once the draft survived the switch. */
+  it("restores the paused draft when the processor comes back to the row", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    const insuranceEdit = () => screen.getByText("$120.00");
+
+    fireEvent.click(insuranceEdit());
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+    fireEvent.click(screen.getByText("$300.00"));
+    fireEvent.click(insuranceEdit());
+
+    expect((screen.getByLabelText("Override Homeowners insurance") as HTMLInputElement).value).toBe(
+      "155.40",
+    );
+  });
+
+  /** THE CAPTION ORDER, which only a comment defended. `unsaved` must beat `overridden` in the
+   *  mutually-exclusive chain, or a second edit to an already-overridden line reads as saved while
+   *  holding an unapplied figure — saved-looking and unsaved at once. LP-569's chain-order defect
+   *  in a new place. Pinned in all three calculators, not just the one where it was noticed. */
+  it("reports an overridden line as unsaved while it holds a pending edit", () => {
+    useDtiMock.mockReturnValue({
+      data: {
+        ...twoHousingLines,
+        housing_items: [
+          {
+            ...twoHousingLines.housing_items[0],
+            override_amount: "300.00",
+            auto_amount: "275.00",
+            overridden: true,
+          },
+          twoHousingLines.housing_items[1],
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$300.00"));
+    fireEvent.change(screen.getByLabelText("Override Property taxes"), {
+      target: { value: "312.50" },
+    });
+    fireEvent.click(screen.getByText("$120.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312\.50/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+
+  /** Cancel stays an explicit discard — the ONLY one besides saving. If it stopped discarding, the
+   *  X would leave a permanent "unsaved" caption a processor cannot clear. */
+  it("discards the draft on Cancel", () => {
+    useDtiMock.mockReturnValue({ data: twoHousingLines, isPending: false, isError: false });
+    render(<DtiCalculator fileId="f1" />);
+
+    fireEvent.click(screen.getByText("$120.00"));
+    fireEvent.change(screen.getByLabelText("Override Homeowners insurance"), {
+      target: { value: "155.40" },
+    });
+    fireEvent.click(screen.getByLabelText("Cancel"));
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
   });
 });

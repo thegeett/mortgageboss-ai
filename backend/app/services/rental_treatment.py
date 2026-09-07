@@ -8,9 +8,10 @@ investment refinance that is wrong in BOTH directions at once:
     arrives. LF-ABRS charges the borrower $5,067.13 for a property tenants pay for.
   * TOO LOW  — the borrower lives somewhere, and that housing cost appears nowhere in the file.
 
-Fannie B3-3.1-08 / B3-6-06 compute it as ``(gross monthly rent x 75%) - full PITIA``: a positive result
-is added to gross monthly income, a negative one is carried as a monthly obligation. The 25% absorbs
-vacancy and maintenance. The borrower's OWN housing expense is what belongs on the housing side,
+Fannie B3-3.8-02 / B3-6-06 compute it as ``(gross monthly rent x 75%) - full PITIA``: the guide calls
+the result ADJUSTED NET RENTAL INCOME. A positive result was added to gross monthly income and a
+negative one carried as a monthly obligation — bug-012 conditions the positive half on 12 months of
+property-management experience. The borrower's OWN housing expense is what belongs on the housing side,
 because they do not occupy the subject.
 
 WHAT THIS MODULE DOES, AND DELIBERATELY DOES NOT DO. It computes that treatment when the inputs exist
@@ -33,6 +34,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.document import Document
+from app.models.extraction import Extraction
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.property import OccupancyType, Property
@@ -40,9 +43,28 @@ from app.models.stated_financials import StatedHousingExpense, StatedOwnedProper
 
 _CENTS = Decimal("0.01")
 
-#: Fannie B3-3.8-01, verbatim: "the lender must calculate the rental income by multiplying the gross
-#: monthly rent(s) by 75%". The remaining 25% is absorbed by vacancy and ongoing maintenance. Cited
-#: rather than chosen — ADR-361 forbids inventing a threshold, and this one has a primary.
+#: Fannie Mae Selling Guide **B3-3.8-02**, Rental Income from the Subject Property (page dated
+#: 09/02/2026), verbatim: "the lender must multiply monthly gross rent by 75% for the net rental
+#: income amount, then subtract the PITIA of the subject property from the net rental income."
+#: Cited rather than chosen — ADR-361 forbids inventing a threshold, and this one has a primary.
+#:
+#: LP-641 — RE-VERIFIED, NOT RENUMBERED. SEL-2026-08 moved this material out of B3-3.8-01 (which now
+#: holds general rental-income information) and the wording changed with it, so the quotation above is
+#: read from the new topic rather than carried across with the number swapped.
+#:
+#: TWO THINGS THAT CHANGED, AND ARE NOT SILENTLY CARRIED FORWARD:
+#:
+#:   * The old page explained the factor — "the remaining 25% … absorbed by vacancy losses and ongoing
+#:     maintenance expenses". That sentence could not be located in the restructured topic. The FACTOR
+#:     is still cited; the EXPLANATION is no longer claimed as verbatim. Stated as "could not locate"
+#:     rather than "the guide dropped it": one read of a page is weaker evidence of absence than of
+#:     presence.
+#:   * The factor is PATH-SPECIFIC. It applies to a gross rent documented by a lease (and to the gross
+#:     a Form 1007 / 1025 supports). It does NOT apply to the Schedule E path, which the guide computes
+#:     as a cash-flow analysis — adding back depreciation, interest, HOA dues, taxes and insurance.
+#:     `_subject_gross_rent` reads only the MISMO owned-property schedule today, so no Schedule E figure
+#:     can reach this constant; LP-642 proposes widening exactly that lookup, and 75% applied to a
+#:     Schedule E figure would be wrong arithmetic. Written down before the lookup widens, not after.
 QUALIFYING_FACTOR = Decimal("0.75")
 
 
@@ -60,6 +82,23 @@ class RentalTreatment:
     net_monthly: Decimal | None = None
     gate_reason: str | None = None
     derivation: str | None = None
+    #: bug-012 — whether the borrower has the 12 months of property-management experience that
+    #: SEL-2026-08 (02 September 2026) makes the condition for ADDING positive rental income to
+    #: qualifying income. Without it the guide permits the income only to OFFSET the subject's PITIA:
+    #:
+    #:   "Lenders may only use positive rental income for qualifying income if the borrower(s) has at
+    #:    least 12 months of property management experience. The lender may only use qualifying rental
+    #:    income to offset the PITIA when the borrower(s) has no prior property management experience,
+    #:    or less than 12 months of experience."
+    #:
+    #: FALSE MEANS NOT ESTABLISHED — never "the borrower has none". One of the guide's four routes is
+    #: implemented (the most recent 1040's Schedule E showing Fair Rental Days of 365); Form 8825 has
+    #: no extractor, and the lease-supplementing-a-1040 and two-years-of-returns compositions are not
+    #: built. A borrower who qualifies only through those reads as not-established and is treated as
+    #: inexperienced — under-qualified, which is the safe direction, and visible because the derivation
+    #: says "not established" rather than asserting a fact about them. See
+    #: `_management_experience_established` for the routes and why the gap is stated rather than hidden.
+    experience_established: bool = False
     #: The borrower's OWN monthly housing cost — what belongs on the housing side, because they do not
     #: occupy the subject. Set only alongside `net_monthly`: the caller substitutes the two together or
     #: neither, since adding the net to income while leaving the subject's PITIA in housing counts that
@@ -73,7 +112,11 @@ _NOT_APPLICABLE = RentalTreatment(applies=False)
 
 
 async def subject_rental_treatment(
-    db: AsyncSession, *, loan_file: LoanFile, subject_pitia: Decimal | None
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    subject_pitia: Decimal | None,
+    gross_rent_override: Decimal | None = None,
 ) -> RentalTreatment:
     """Fannie's net-rental figure for the subject, or the reason it cannot be computed.
 
@@ -93,11 +136,32 @@ async def subject_rental_treatment(
         return _NOT_APPLICABLE
 
     missing: list[str] = []
-    gross = await _subject_gross_rent(db, loan_file.id)
+    # LP-643 (revised) — A PROCESSOR'S FIGURE WINS, and it is the only source that skips the
+    # lesser-of rule. That rule exists to reconcile two DOCUMENTED sources that disagree; an override
+    # is not a third document, it is a person saying which number is right after looking at the file.
+    # Taking the lesser of their figure and a stale schedule row would quietly ignore the correction,
+    # which is the defect LP-569 fixed for every other line.
+    gross = (
+        gross_rent_override
+        if gross_rent_override is not None and gross_rent_override > 0
+        else await _subject_gross_rent(db, loan_file.id)
+    )
     if gross is None or gross <= 0:
+        # LP-642/LP-643 — NAME THE DOCUMENT TO GET, NOT THE FIELD THAT CAME BACK EMPTY.
+        #
+        # This read "the application states no GROSS monthly rent for the subject", which sent a
+        # processor to the 1003 to look for a number that was never going to be there: MISMO does not
+        # repeat the subject in the owned-property schedule, which is the only place this looks. So the
+        # sentence described OUR LOOKUP rather than the file's problem, and did it in a warning banner
+        # that reads as authoritative.
+        #
+        # A gate reason is written by whichever code could not proceed, so it naturally describes the
+        # lookup that failed. What a processor needs is the document to go and get. Those are different
+        # sentences and the second is the useful one.
         missing.append(
-            "the application states no GROSS monthly rent for the subject (a net figure cannot be "
-            "run through the 75% vacancy factor)"
+            "no document on the file states what the subject will rent for — a comparable rent "
+            "schedule (Form 1007 for one unit, Form 1025 for two-to-four) or a lease for the subject "
+            "establishes it, and a net figure cannot substitute for gross"
         )
     own_housing = await borrower_present_housing(db, loan_file.id)
     if own_housing is None:
@@ -121,20 +185,160 @@ async def subject_rental_treatment(
     assert own_housing is not None  # guarded above (a missing figure lands in `missing`)
     qualifying = (gross * QUALIFYING_FACTOR).quantize(_CENTS, rounding=ROUND_HALF_UP)
     net = (qualifying - subject_pitia).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    experience_established = await _management_experience_established(db, loan_file.id)
+    if net > 0 and not experience_established:
+        outcome = (
+            f"${net:,.2f}, which offsets the subject's PITIA but is NOT added to qualifying "
+            "income: 12 months of property-management experience is not established on this file "
+            "(Fannie Mae SEL-2026-08)."
+        )
+    elif net > 0:
+        outcome = f"${net:,.2f} added to income."
+    else:
+        outcome = f"${abs(net):,.2f} carried as a monthly obligation."
     return RentalTreatment(
         applies=True,
         net_monthly=net,
         present_housing=own_housing,
+        experience_established=experience_established,
         derivation=(
             f"75% of ${gross:,.2f} gross rent is ${qualifying:,.2f}, less the subject's "
-            f"${subject_pitia:,.2f} PITIA — "
-            + (
-                f"${net:,.2f} added to income."
-                if net > 0
-                else f"${abs(net):,.2f} carried as a monthly obligation."
-            )
+            f"${subject_pitia:,.2f} PITIA — " + outcome
         ),
     )
+
+
+#: Fannie B3-3.8-01 (09/02/2026), verbatim: experience is evidenced by "the borrower's most recent
+#: signed federal income tax return, including Schedules 1 and E … reflecting rental income received
+#: for any property with Fair Rental Days of 365".
+#:
+#: `>=`, NOT `== 365`. A leap year is 366 days and a property rented throughout it reports 366, which
+#: an equality test would read as failing the 365-day bar it exceeds. The guide states the number, not
+#: the comparison; taking it as a floor is the reading that does not punish a borrower for the
+#: calendar. Anything below it is a shortfall the guide answers with routes we do not implement (see
+#: `_management_experience_established`).
+_FULL_YEAR_RENTAL_DAYS = 365
+
+#: The two document types carrying an appraiser's opinion of market rent — Form 1007 (one unit) and
+#: Form 1025 (two-to-four). Both are read by one extractor and both answer the same question.
+_RENT_SCHEDULE_DOC_TYPES = ("comparable_rent_schedule", "small_residential_income_appraisal")
+
+
+async def _management_experience_established(db: AsyncSession, loan_file_id: UUID) -> bool:
+    """Has the borrower 12 months of property-management experience? (bug-012)
+
+    THE ONE ROUTE OF FOUR THAT IS BUILDABLE TODAY, and the gap is deliberate rather than hidden. The
+    guide accepts any of:
+
+      1. the most recent 1040 with Schedules 1 and E showing Fair Rental Days of 365   <- THIS ONE
+      2. a business return with Form 8825                                              -- no extractor
+      3. a 12-month lease supplementing a 1040 that shows fewer than 365 days          -- not composed
+      4. two years of returns showing the property in service for the full year        -- not composed
+
+    So a borrower who qualifies ONLY through 2-4 reads as not-established and is treated as
+    inexperienced: their rental income offsets the PITIA and is not added to income. That
+    UNDER-qualifies them, which is the safe direction and a visible one — the derivation says the
+    experience is "not established", not that they lack it, so a processor reading the line can tell
+    the difference between a borrower who failed the test and one the test could not see.
+
+    ANY PROPERTY, NOT THE SUBJECT AND NOT ONE STILL OWNED. The guide's words are "for any property",
+    so the experience attaches to the BORROWER — a rental since sold still counts, which is the
+    sensible reading (selling a property does not un-acquire the skill of having managed one) and the
+    one the wording supports. Recorded as resting on those two words rather than on an explicit rule
+    about disposal, which the guide does not give.
+
+    THE MOST RECENT RETURN, keyed on the TAX YEAR rather than on upload order: a borrower who uploads
+    2024 after 2025 has not made 2024 their most recent return. A return whose year cannot be read
+    among others makes the ordering undeterminable, so
+    the check ABSTAINS rather than guessing — see the block above the ordering for the measurement.
+
+    ONE RETURN, WHICHEVER IS MOST RECENT — so "a rental since sold still counts" holds only while the
+    sale post-dates that return. A property sold during the most recent tax year appears there with
+    partial days, or not at all, and reads as not-established. That is route 4 (two years of returns),
+    which is not composed, so it is the same acknowledged gap rather than a separate defect.
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(Extraction)
+                .join(Document, Extraction.document_id == Document.id)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.document_type == "tax_return",
+                    Extraction.is_current.is_(True),
+                ),
+                Document,
+            ).order_by(Document.created_at.desc())
+        )
+    ).all()
+    if not rows:
+        return False
+
+    # A SENTINEL CANNOT BE RIGHT IN BOTH DIRECTIONS, so this abstains rather than picking one.
+    #
+    # The first version sorted an undateable return OLDEST (-1). Review measured that it then lost to
+    # every dateable return behind it, so a 2023 return showing 365 days could qualify a file whose
+    # own newest return shows 200 — over-qualifying, the one direction this check exists to prevent.
+    #
+    # The proposed fix sorted it NEWEST. That closes the measured case and opens its mirror: an
+    # undateable return showing 365 then beats a genuinely newer 2025 return showing 200, and
+    # over-qualifies from the other side. Measured, both sentinels, both shapes:
+    #
+    #     sentinel   undateable=200d, 2025=365d   undateable=365d, 2025=200d
+    #     oldest     ESTABLISHED  (wrong)          not established
+    #     newest     not established               ESTABLISHED  (wrong)
+    #
+    # Neither is safe, because both answer a question the FILE does not: which return is most recent.
+    # The guide's test is specifically about the most recent return, so where we cannot identify it we
+    # cannot run the test — and the honest outcome is the one every other unbuilt route already takes,
+    # NOT ESTABLISHED. That under-qualifies, says so in the reason, and is the direction this whole
+    # check is built to fail in.
+    #
+    # A SINGLE undateable return is not this case: it is trivially the most recent, so it is used.
+    # NEITHER IS A FILE WHOSE RETURNS AGREE — see the unanimity check below. "We cannot identify the
+    # most recent return" only decides the outcome when the candidates give different answers; where
+    # they all give the same one, no ordering had to be identified to reach it.
+
+    def _year(extraction: Extraction) -> int | None:
+        """The return's tax year, or None when it cannot be read — NOT a sentinel year."""
+        node = (extraction.extracted_data or {}).get("tax_year")
+        raw = node.get("value") if isinstance(node, dict) else None
+        try:
+            return int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    def _shows_full_year(extraction: Extraction) -> bool:
+        """Does this return's Schedule E carry any property rented a full year?"""
+        schedule_e = (extraction.extracted_data or {}).get("schedule_e")
+        if not isinstance(schedule_e, dict):
+            return False
+        for prop in schedule_e.get("properties") or ():
+            if not isinstance(prop, dict):
+                continue
+            node = prop.get("fair_rental_days")
+            raw = node.get("value") if isinstance(node, dict) else None
+            try:
+                days = int(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue  # unreadable is not zero — it is one property that cannot answer
+            if days >= _FULL_YEAR_RENTAL_DAYS:
+                return True
+        return False
+
+    if len(rows) > 1 and any(_year(row) is None for row in rows):
+        # ABSTAIN ONLY WHERE THE ORDERING CHANGES THE ANSWER, which is a narrower case than "an
+        # undateable year is present". Abstaining outright also refused files where every return on
+        # the borrower's file shows a full rented year: whichever of them is most recent, the guide's
+        # test passes, so no ordering had to be invented — and a borrower with nothing but qualifying
+        # returns was under-qualified because one of them would not OCR a four-digit year.
+        #
+        # Unanimity is the whole condition, and it reads in both directions: all full-year -> the
+        # answer is established whichever return is most recent; none -> not established, same either
+        # way; MIXED -> the ordering decides, the file cannot supply it, and this abstains.
+        return all(_shows_full_year(row) for row in rows)
+    most_recent = rows[0] if len(rows) == 1 else max(rows, key=lambda r: _year(r) or 0)
+    return _shows_full_year(most_recent)
 
 
 async def _subject_occupancy(
@@ -177,7 +381,58 @@ async def _subject_occupancy(
     return occupancy, None
 
 
-async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+async def _rent_schedule_market_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+    """The appraiser's opinion of monthly market rent, from a Form 1007 / 1025 (LP-642 step 3).
+
+    THE MANDATORY SOURCE. B3-3.8-02 (09/02/2026): "The lender must obtain the following: a
+    Single-Family Comparable Rent Schedule (Form 1007) or Small Residential Income Property Appraisal
+    Report (Form 1025), as applicable" — required where the subject's rental income is used to
+    qualify, not merely acceptable.
+
+    Reads `opinion_of_monthly_market_rent` and nothing else, and the review checked that against the
+    real forms rather than against the field names. It holds, for a sharper reason than "they are
+    different fields": on a 1025 `total_gross_monthly_income` is the form's "Total Estimated Monthly
+    Income", which is the rent total PLUS "Other Monthly Income (itemize)" — parking, laundry,
+    storage. Substituting it would put non-rent income into a qualifying ratio.
+
+    THE PROPERTY-LEVEL FIGURE IS THE ONE THING THIS DEPENDS ON. A 1025 states an opinion PER UNIT and
+    prints "Total Gross Monthly Rent" as the property total, so a per-unit figure arriving in
+    `opinion_of_monthly_market_rent` would qualify a four-unit subject on a quarter of its rent. The
+    extraction prompt names that neighbour and the others explicitly; nothing downstream can detect
+    it, because one unit's rent is a perfectly plausible whole-property rent.
+
+    A NON-POSITIVE OPINION IS NOT A RENT. Zero or negative means the field was misread, not that the
+    property rents for nothing — the same absent-is-not-zero discipline the housing inputs use.
+    """
+    rows = (
+        await db.scalars(
+            only_active(
+                select(Extraction)
+                .join(Document, Extraction.document_id == Document.id)
+                .where(
+                    Document.loan_file_id == loan_file_id,
+                    Document.document_type.in_(_RENT_SCHEDULE_DOC_TYPES),
+                    Extraction.is_current.is_(True),
+                ),
+                Document,
+            ).order_by(Document.created_at.desc())
+        )
+    ).all()
+    for extraction in rows:
+        node = (extraction.extracted_data or {}).get("opinion_of_monthly_market_rent")
+        raw = node.get("value") if isinstance(node, dict) else None
+        if raw is None:
+            continue
+        try:
+            rent = Decimal(str(raw))
+        except (ArithmeticError, ValueError):
+            continue
+        if rent > 0:
+            return rent
+    return None
+
+
+async def _stated_subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
     """GROSS monthly rent for the SUBJECT row of the real-estate-owned schedule.
 
     Gross only. `rental_income_net` is deliberately not consulted — see the module note: the factor
@@ -197,6 +452,37 @@ async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal |
     if len(rows) != 1:
         return None  # no subject row, or a contradictory schedule — neither states a rent
     return rows[0].rental_income_gross
+
+
+async def _subject_gross_rent(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:
+    """The subject's gross monthly rent, across the sources the guide permits (LP-642 step 3).
+
+    THE LOOKUP USED TO BE ONE PLACE, AND IT WAS THE WRONG ONE. It read only the MISMO owned-property
+    schedule's subject row — and MISMO does not repeat the subject there. `mismo/parser.py` says so
+    outright: a file where nothing is marked subject means "the schedule lists other properties", NOT
+    "this loan has no subject property". So on every MISMO-imported investment file it found nothing,
+    and the DTI gated for want of a rent no export was ever going to put in that field. LF-ZE9N is the
+    file that surfaced it.
+
+    WHERE THE TWO SOURCES DISAGREE, THE LESSER WINS, and that is the guide's own answer rather than a
+    convention. B3-3.8-02: "If the current market rents do not reasonably support the gross rents
+    reported on the lease agreement, the lender must: determine if additional documentation is
+    necessary … provide a written analysis explaining the discrepancy … **or use the lesser amount.**"
+
+    An `or`, so taking the lesser is a route the lender may simply take — no judgement call, no
+    stalled file. The other branch needs a processor's written analysis attached to the file, which is
+    a condition/audit feature and not something a calculator can supply, so it is deliberately not
+    implemented here: the conservative half of a rule the guide states in full.
+
+    THE LEASE PATH IS NOT HERE YET. B3-3.8-02 requires the form AND, where a lease transfers to the
+    borrower, the lease — and lease ELIGIBILITY (interested party, the 45-day rule, evidence the terms
+    took effect) is step 4, which is blocked on three questions the guide is silent about. Reading a
+    lease's rent before those are settled would use a source we cannot yet establish is permitted.
+    """
+    market = await _rent_schedule_market_rent(db, loan_file_id)
+    stated = await _stated_subject_gross_rent(db, loan_file_id)
+    candidates = [rent for rent in (market, stated) if rent is not None and rent > 0]
+    return min(candidates) if candidates else None
 
 
 async def borrower_present_housing(db: AsyncSession, loan_file_id: UUID) -> Decimal | None:

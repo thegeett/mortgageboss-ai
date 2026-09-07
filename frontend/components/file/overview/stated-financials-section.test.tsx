@@ -74,13 +74,21 @@ describe("StatedFinancialsSection", () => {
     expect(screen.getByText("GiftOfCash · Relative")).toBeDefined();
   });
 
-  it("surfaces parse warnings honestly + non-blocking when present", () => {
+  it("no longer renders the parse warnings itself (LP-UI-024)", () => {
+    // They were here — inside the section a reader opens only if they already
+    // suspect something — and they could not link anywhere, because a warning
+    // was a bare sentence. `MismoWarnings` renders them at the top of the
+    // Overview with a link per subject, and mismo-warnings.test.tsx pins them
+    // there. Two renderings of one list is how they drift; this asserts where
+    // they are NOT, so the move stays visible.
     useStatedFinancials.mockReturnValue({
       data: financials({
         mismo_import: {
           source_format: "xml",
           status: "partial",
-          warnings: ["Subject property is missing an estimated value."],
+          warnings: [
+            { message: "Subject property is missing an estimated value.", subject: "property" },
+          ],
           imported_at: "2026-06-12T00:00:00Z",
         },
       }),
@@ -88,9 +96,9 @@ describe("StatedFinancialsSection", () => {
       isError: false,
     });
     render(<StatedFinancialsSection fileId="LF-1" />);
-    expect(screen.getByText(/need your attention/i)).toBeDefined();
-    expect(screen.getByText("Subject property is missing an estimated value.")).toBeDefined();
-    expect(screen.getByText(/fill these in/i)).toBeDefined();
+    expect(screen.queryByText("Subject property is missing an estimated value.")).toBeNull();
+    // Positive control: the section rendered, so the absence above is real.
+    expect(screen.getByText(/Application data/i)).toBeDefined();
   });
 
   it("renders nothing for a file with no stated data (e.g. manual creation)", () => {

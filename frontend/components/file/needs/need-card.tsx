@@ -3,10 +3,12 @@ import {
   NeedCoverageFlag,
   NeedDuplicateFlag,
 } from "@/components/file/needs/need-actions";
-import { PRIORITY_META, STATE_META, isProposed, sourceLabel } from "@/lib/loan-files/needs";
+import { StatusToken, railClass } from "@/components/status-token";
+import { isProposed, sourceLabel } from "@/lib/loan-files/needs";
+import { NEEDS_PRIORITY, NEEDS_STATUS, resolveStatus } from "@/lib/status";
 import type { NeedsItemPublic } from "@/lib/types/needs-item";
 import { cn } from "@/lib/utils";
-import { FileCheck2, Sparkles } from "lucide-react";
+import { FileCheck2, Info, Sparkles } from "lucide-react";
 
 /**
  * One need on the dashboard (LP-70). Shows its state (a colored dot + pill), its
@@ -15,59 +17,46 @@ import { FileCheck2, Sparkles } from "lucide-react";
  * A proposed need gets a quiet left accent: it's awaiting the processor's review.
  */
 export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPublic }) {
-  const state = STATE_META[need.status];
+  const state = resolveStatus(NEEDS_STATUS, need.status);
   const proposed = isProposed(need);
   const showPriority = need.priority !== "standard";
+  // Whether the REASONING below is the AI's. Read straight off the origin, which is
+  // where it has always come from — the merge dropped this line with the source
+  // block it sat beside, and the two uses below outlived it.
+  const isAi = need.origin === "ai_reasoning" || need.origin === "suggestion";
 
   return (
     <li
       className={cn(
-        "rounded-lg border border-gray-200/80 bg-white px-3.5 py-3 transition-colors",
-        proposed && "border-l-[3px] border-l-primary",
+        "rounded-lg border border-border/80 bg-card px-3.5 py-3 transition-colors",
+        // State reads on the left rail, not a fill (SPEC rule 5). `proposed` is
+        // provenance rather than state, so it keeps the accent and wins the rail.
+        proposed ? "border-l-[3px] border-l-primary" : railClass(state.tone),
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            {/* Dot nudged down to sit on the first line now that the title can wrap. */}
-            <span
-              className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", state.dotClass)}
-              aria-hidden
-            />
             {/* AI-generated titles are long descriptive sentences — wrap in full (no truncate),
                 so the processor reads the whole need. The Confirm button + menu stay top-aligned. */}
-            <p className="min-w-0 text-sm font-semibold text-gray-900">{need.title}</p>
+            <p className="min-w-0 text-sm font-semibold text-foreground">{need.title}</p>
           </div>
 
           {need.description && (
-            <p className="mt-1 pl-4 text-xs text-gray-500">{need.description}</p>
+            <p className="mt-1 pl-4 text-xs text-muted-foreground">{need.description}</p>
           )}
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-4">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                state.pillClass,
-              )}
-            >
-              {state.label}
-            </span>
+            <StatusToken meta={state} variant="chip" />
             {proposed && (
               <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                 Proposed — review
               </span>
             )}
             {showPriority && (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                  PRIORITY_META[need.priority].className,
-                )}
-              >
-                {PRIORITY_META[need.priority].label}
-              </span>
+              <StatusToken meta={resolveStatus(NEEDS_PRIORITY, need.priority)} variant="chip" />
             )}
-            <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {sourceLabel(need.origin)}
             </span>
           </div>
@@ -88,10 +77,28 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
           PIPELINE when what makes a claim checkable is the CLAIM. "The application states a $438/month
           lease with Ally Financial" is verifiable in one glance at the 1003; `Revolving liability`
           plus a trust pill asked the reader to audit us instead of the file. */}
+      {/* PROVENANCE, not status. `--info` aliases `--primary`, so painting this
+          panel `primary` made it identical to the "Documents attached" info panel
+          below — on a `received` need the two sat one above the other in the same
+          colour, meaning different things. The `ai` token exists for exactly this
+          and `isAi` was already computed here. A need whose reasoning is NOT the
+          AI's gets the neutral inset and the neutral glyph: Sparkles is the `ai`
+          tone's glyph in StatusToken, and claiming it for a floor need would put
+          the wrong provenance on the row. The PROSE is untouched either way — one
+          voice, per LP-634. */}
       {(need.explanation ?? need.reasoning) && (
-        <div className="mt-2.5 ml-4 flex gap-2 rounded-md bg-primary/[0.04] px-3 py-2">
-          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/70" aria-hidden />
-          <p className="text-xs leading-relaxed text-gray-600">
+        <div
+          className={cn(
+            "mt-2.5 ml-4 flex gap-2 rounded-md px-3 py-2",
+            isAi ? "bg-ai/[0.06]" : "bg-muted/60",
+          )}
+        >
+          {isAi ? (
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ai" aria-hidden />
+          ) : (
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          )}
+          <p className="text-xs leading-relaxed text-foreground-2">
             <span className="sr-only">Why this is needed: </span>
             {need.explanation ?? need.reasoning}
           </p>
@@ -115,7 +122,7 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
       {need.status === "received" && (
         <div className="mt-2.5 ml-4 flex gap-2 rounded-md border border-info/20 bg-info/[0.06] px-3 py-2">
           <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-          <p className="text-xs leading-relaxed text-gray-600">
+          <p className="text-xs leading-relaxed text-foreground-2">
             Documents attached — confirm this covers the full requirement (all accounts / months /
             years). The system verified a document is present, not the complete coverage.
           </p>
@@ -127,22 +134,22 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
           need shows its single satisfying document. */}
       {need.matching_documents.length > 0 ? (
         <div className="mt-2 ml-4">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {need.matching_documents.length} matching document
             {need.matching_documents.length === 1 ? "" : "s"}
           </p>
           <ul className="mt-1 space-y-0.5">
             {need.matching_documents.map((doc) => (
-              <li key={doc.id} className="flex items-center gap-1.5 text-xs text-gray-600">
+              <li key={doc.id} className="flex items-center gap-1.5 text-xs text-foreground-2">
                 <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-                <span className="truncate font-medium text-gray-700">{doc.filename}</span>
+                <span className="truncate font-medium text-foreground-2">{doc.filename}</span>
               </li>
             ))}
           </ul>
         </div>
       ) : (
         need.satisfied_by_document_filename && (
-          <div className="mt-2 ml-4 flex items-center gap-1.5 text-xs text-gray-500">
+          <div className="mt-2 ml-4 flex items-center gap-1.5 text-xs text-muted-foreground">
             <FileCheck2
               className={cn(
                 "h-3.5 w-3.5 shrink-0",
@@ -152,7 +159,7 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
             />
             <span className="truncate">
               {need.status === "verified" ? "Satisfied by " : "Attached: "}
-              <span className="font-medium text-gray-700">
+              <span className="font-medium text-foreground-2">
                 {need.satisfied_by_document_filename}
               </span>
             </span>
@@ -161,7 +168,9 @@ export function NeedCard({ fileId, need }: { fileId: string; need: NeedsItemPubl
       )}
 
       {/* The reason a need was waived or rejected. */}
-      {need.reason && <p className="mt-2 ml-4 text-xs italic text-gray-500">{need.reason}</p>}
+      {need.reason && (
+        <p className="mt-2 ml-4 text-xs italic text-muted-foreground">{need.reason}</p>
+      )}
     </li>
   );
 }

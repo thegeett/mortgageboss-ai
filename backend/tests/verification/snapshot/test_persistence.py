@@ -6,6 +6,7 @@ unchanged), append-only history (two runs → two rows, both loadable), and the
 PII-clean-at-rest write guard (raw PII rejected, not stored).
 """
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -265,6 +266,129 @@ def test_a_uuid_whose_last_group_is_all_digits_does_not_refuse_the_snapshot() ->
         _assert_no_raw_pii('{"note": "3f2504e0-4f89-41d3-9a0c-030405060708 ssn 123-45-6789"}')
 
 
+#: A uuid4 whose last group is twelve decimal digits — CONSTRUCTED, not searched for.
+#:
+#: Searching ("generate uuids until one has a 9+ digit run") is the shape the LP-705 ticket
+#: reached for first, and the loop is lumpier than it looks: median 202 iterations, p95 852,
+#: p99 1,402, and 2,291 observed in 2,000 trials. Unbounded it will occasionally read as a
+#: hang; bounded at a comfortable-sounding 500 it fails spuriously about one run in twenty —
+#: worse than the bug, because a flaky test gets deleted rather than read. This is a valid
+#: RFC 4122 version-4 uuid and it says what it is testing.
+_UUID_WITH_A_DIGIT_RUN = "12345678-9012-4345-8678-901234567890"
+
+
+def test_a_uuid_INSIDE_a_key_does_not_refuse_the_snapshot() -> None:
+    """LP-705 — one stated liability in 283 permanently refused its loan file's snapshot.
+
+    LP-509-C1 skipped a value that IS a uuid. It anchored the match, so a value that CONTAINS
+    one was still scanned — and a DTI line key is ``f"debt.{liab.id}"``, a prefix plus a uuid.
+    The uuid's own twelve-character tail was then read as an unmasked account number and the
+    whole write was refused: no snapshot, no tag values, no findings, on every subsequent run
+    until that row was edited.
+
+    Measured over 2,000,000 samples, 0.354% of uuid4s carry a 9+ digit run (95% CI
+    0.3457-0.3622%), so about one stated liability in 283. Nothing about the file predicts it —
+    the trigger is which uuid a row happened to draw, which is why LP-565/bug-001 recorded
+    "22 completed runs, 0 persisted" with no pattern anyone could see.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    # The two real shapes, from services/dti.py.
+    for key in (f"debt.{_UUID_WITH_A_DIGIT_RUN}", f"income.{_UUID_WITH_A_DIGIT_RUN}"):
+        _assert_no_raw_pii(json.dumps({"calculations": {"dti": {"breakdown": [{"key": key}]}}}))
+    # And a uuid anywhere inside a longer string, since the fix is by shape not by prefix.
+    _assert_no_raw_pii(json.dumps({"note": f"line for {_UUID_WITH_A_DIGIT_RUN}, stated"}))
+
+
+def test_the_constructed_uuid_really_is_the_case_under_test() -> None:
+    """The positive control for the constant above.
+
+    Without this, ``_UUID_WITH_A_DIGIT_RUN`` could be edited into a uuid with no digit run and
+    every assertion above would go on passing while testing nothing — the exact way a guard goes
+    green by construction. Asserted from both sides: it is a real version-4 uuid, and its digits
+    are what the guard would otherwise refuse.
+    """
+    import uuid as uuid_module
+
+    from app.verification.snapshot.persistence import _LONG_DIGITS, _assert_no_raw_pii
+
+    parsed = uuid_module.UUID(_UUID_WITH_A_DIGIT_RUN)
+    assert parsed.version == 4
+    assert _LONG_DIGITS.search(_UUID_WITH_A_DIGIT_RUN) is not None
+
+    # The same digits, NOT in uuid shape, are still refused — so the test above passes
+    # because of the fix and not because the value was harmless all along.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"asset.account": "901234567890"}))
+
+
+def test_removing_a_uuid_is_not_a_hiding_place() -> None:
+    """The safety argument for matching a uuid ANYWHERE, asserted rather than reasoned.
+
+    Widening a skip is the kind of change that can quietly turn a guard off, so each way it
+    could is checked. Removal deletes exactly 36 characters of canonical uuid, and neither an
+    SSN (hyphens at 3 and 6) nor a bare account number (no hyphens) can be contained by that
+    shape.
+
+    THE REPLACEMENT IS A SPACE, and the case that needs it is narrower than it first looks. A
+    leak at the START of a value survives either way — the string edge is already a word
+    boundary — so a test using ``"<uuid>123456789"`` passes with the uuid replaced by nothing
+    at all, and an earlier draft of this test proved only that. The case that separates them is
+    a WORD CHARACTER immediately before the uuid: with an empty replacement ``"debt"`` joins the
+    digits, ``\b`` never opens, and the leak walks straight through.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii
+
+    # THIS WAS the distinguishing case for `sub(" ")` versus `sub("")`, and it no
+    # longer distinguishes — worth saying rather than leaving a comment that has
+    # quietly stopped being true. Requiring the uuid to be DELIMITED (LP-705
+    # review) means digits can never sit against one that is removed: both
+    # lookarounds reject an alphanumeric neighbour, so `debt<uuid>123456789` is not
+    # a uuid match at all and the run survives whatever the replacement is.
+    #
+    # The space is kept as defence in depth — if the delimiters are ever loosened
+    # it starts mattering again — but the delimiters are what carries this now, and
+    # `TestAUuidMustBeDelimitedToBeSkipped` is where that is actually tested.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"note": f"debt{_UUID_WITH_A_DIGIT_RUN}123456789"}))
+    # A leak written flush against a uuid at either end.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"note": f"{_UUID_WITH_A_DIGIT_RUN}123456789"}))
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"note": f"123456789{_UUID_WITH_A_DIGIT_RUN}"}))
+    # A dashed SSN beside a uuid.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"note": f"debt.{_UUID_WITH_A_DIGIT_RUN} ssn 123-45-6789"}))
+    # A near-uuid that is NOT canonical (wrong group lengths) buys nothing.
+    with pytest.raises(RawPiiAtRestError):
+        _assert_no_raw_pii(json.dumps({"note": "1234567-8901-2345-8678-901234567890"}))
+
+
+def test_the_door_and_the_end_of_the_run_agree() -> None:
+    """``refuses_at_rest`` and the persist guard are ONE decision, not two copies of it.
+
+    They were two, and they disagreed: the guard skipped uuids and the door did not, so a value
+    the reviewer would have refused was one the snapshot accepted. The direction happens to be
+    the harmless one — but a rule stated twice is a rule that will differ the other way
+    eventually, and LP-703's whole reason for exporting this was that the two must not.
+    """
+    from app.verification.snapshot.persistence import _assert_no_raw_pii, refuses_at_rest
+
+    for value in (
+        f"debt.{_UUID_WITH_A_DIGIT_RUN}",
+        _UUID_WITH_A_DIGIT_RUN,
+        "123456789.00",
+        "docABC0000000000",
+    ):
+        assert refuses_at_rest(value) is None, value
+        _assert_no_raw_pii(json.dumps({"v": value}))
+
+    for value in ("123456789", "123-45-6789", "901234567890"):
+        assert refuses_at_rest(value) is not None, value
+        with pytest.raises(RawPiiAtRestError):
+            _assert_no_raw_pii(json.dumps({"v": value}))
+
+
 def test_guard_exempts_no_other_key_because_the_derived_ids_do_not_need_it() -> None:
     """LP-509-C1 — why the structural walk added no allowlist.
 
@@ -350,3 +474,56 @@ async def test_build_persist_load_end_to_end(db_session: AsyncSession) -> None:
     await persist_snapshot(db_session, built)
     loaded = await load_snapshot(db_session, run_id)
     assert loaded == built
+
+
+class TestAUuidMustBeDelimitedToBeSkipped:
+    """The skip may only exempt a uuid that STANDS ALONE.
+
+    The argument for removing uuids was that neither leak pattern can be CONTAINED
+    by an 8-4-4-4-12 run. That is true and it is not sufficient: a leak does not
+    need to be contained, only to OVERLAP. The final group is exactly twelve hex,
+    so an undelimited match eats the first twelve digits of a longer run and leaves
+    a remainder too short to report.
+
+    Every one of these values was REFUSED before the uuid skip existed. A skip that
+    makes the guard accept them is a regression in a PII-at-rest check, which is
+    the one direction this file must never move in.
+    """
+
+    @staticmethod
+    def _refuses(value: str) -> str | None:
+        from app.verification.snapshot.persistence import refuses_at_rest
+
+        return refuses_at_rest(value)
+
+    @pytest.mark.parametrize(
+        ("value", "digits"),
+        [
+            # 8-4-4-4 of hex, then a card number: the first twelve digits complete a
+            # uuid-shaped match and "1111" is left behind.
+            ("aaaaaaaa-aaaa-aaaa-aaaa-4111111111111111", 16),
+            ("aaaaaaaa-aaaa-aaaa-aaaa-12345678901234567890", 20),
+            # And the mirror: digits leading into uuid-shaped hex.
+            ("41111111111111119012-4345-8678-9012-345678901234", 20),
+        ],
+    )
+    def test_a_leak_touching_uuid_shaped_hex_is_still_refused(
+        self, value: str, digits: int
+    ) -> None:
+        assert self._refuses(value) is not None, (
+            f"a {digits}-digit run was refused before the uuid skip and is accepted now"
+        )
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            f"debt.{_UUID_WITH_A_DIGIT_RUN}",
+            f"income.{_UUID_WITH_A_DIGIT_RUN}",
+            str(_UUID_WITH_A_DIGIT_RUN),
+            f"run {_UUID_WITH_A_DIGIT_RUN} completed",
+        ],
+    )
+    def test_a_delimited_uuid_is_still_skipped(self, value: str) -> None:
+        # The control. Tightening the skip must not undo what LP-705 fixed — these
+        # are the shapes that were costing a loan file its whole snapshot.
+        assert self._refuses(value) is None

@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 from app.mismo.parser import parse_mismo
+from app.mismo.schema import WarningSubject
 from tests.mismo import synthetic
 
 
@@ -84,7 +85,10 @@ def test_missing_sections_degrade_gracefully(base: bytes) -> None:
     assert result.borrowers[0].full_name == "Mahesh Chhotala"
     assert result.loan is not None and result.loan.base_loan_amount == Decimal("1104000.00")
     # The needed-now property value is flagged.
-    assert any("estimated value" in w for w in result.parse_warnings)
+    assert any("estimated value" in w.message for w in result.parse_warnings)
+    # LP-UI-024 — the parser knows WHICH section it gave up on, and says so, so
+    # the warnings panel can link there instead of recognising its own prose.
+    assert any(w.subject is WarningSubject.PROPERTY for w in result.parse_warnings)
 
 
 # --------------------------------------------------------------------------- #
@@ -95,7 +99,8 @@ def test_missing_sections_degrade_gracefully(base: bytes) -> None:
 def test_zero_income_deal_warns(base: bytes) -> None:
     result = parse_mismo(synthetic.zero_income_variant(base))
     assert all(b.income_items == [] for b in result.borrowers)
-    assert any("no income" in w.lower() for w in result.parse_warnings)
+    assert any("no income" in w.message.lower() for w in result.parse_warnings)
+    assert any(w.subject is WarningSubject.INCOME for w in result.parse_warnings)
     # Still a usable parse (file would still be created — non-blocking warning).
     assert result.loan is not None and result.borrowers
 

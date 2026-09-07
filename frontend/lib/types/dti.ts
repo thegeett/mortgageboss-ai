@@ -1,3 +1,4 @@
+import type { FindingBreakdown } from "@/lib/types/calculators";
 /**
  * DTI calculator types (LP-76) — the transparent, itemized calculation.
  *
@@ -14,6 +15,10 @@ export interface DtiLineItem {
   amount: string;
   source: string;
   overridden: boolean;
+  /** Who set the override and why (LP-UI-021). Null when the line is not overridden,
+   *  and `override_by` alone is null for an override with no recorded actor. */
+  override_by: string | null;
+  override_note: string | null;
   /** LP-375: a REQUIRED input (taxes/insurance) that could not be derived and was not overridden — its
    * `amount` of 0 is a fail-closed placeholder, NOT an extracted $0.00 (absent≠0). Render as "Unknown". */
   unknown?: boolean;
@@ -22,6 +27,9 @@ export interface DtiLineItem {
    * qualify). Distinct from `unknown`: the amount is real and known, it simply stops existing.
    * Render struck-through WITH the reason — never hide the row, or the processor cannot tell a
    * debt was considered at all. */
+  /** LP-643 review: whether a processor can REMOVE this line — the server's answer, not a prefix
+   * test retyped here. Only processor-added lines are removable. */
+  removable?: boolean;
   excluded?: boolean;
   excluded_reason?: string | null;
 }
@@ -39,6 +47,7 @@ export interface DtiLimit {
 export interface DtiFindingsStatus {
   unresolved: boolean;
   open_in_scope_count: number;
+  breakdown: FindingBreakdown;
 }
 
 export interface DtiCalculation {
@@ -83,4 +92,41 @@ export interface UnverifiedInput {
 export interface DtiOverrideInput {
   amount: string;
   note?: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* LP-643 — processor-added lines, and the ungate                             */
+/* -------------------------------------------------------------------------- */
+
+/** A line a PROCESSOR adds, that the calculator did not produce. */
+export interface DtiCustomLineInput {
+  section: "income" | "housing" | "debt";
+  label: string;
+  amount: string;
+  note?: string | null;
+}
+
+/** One line an ungate would set to zero, and what that ASSERTS. */
+export interface DtiUngateLine {
+  key: string;
+  label: string;
+  /** What the processor is agreeing to, in their terms. The number is the mechanism; this is the
+   * claim, and the claim is the half they can judge as true or false. */
+  assertion: string;
+}
+
+/** What an ungate WOULD do, itemised — the dialog's entire content (LP-643).
+ *
+ * AN ITEMISED CONSENT, NOT A CONFIRMATION. "Are you sure" tells a processor nothing they can weigh.
+ * Every line by NAME (they recognise "Property taxes"; they cannot act on "3 values"), what each
+ * zero asserts, the ratios before and after, and what will NOT move — a processor who ungates and
+ * finds the file still gated, with nothing saying which part did not, has been told less than before
+ * they clicked. */
+export interface DtiUngatePreview {
+  lines: DtiUngateLine[];
+  unresolved: string[];
+  front_end_before: string | null;
+  back_end_before: string | null;
+  front_end_after: string | null;
+  back_end_after: string | null;
 }

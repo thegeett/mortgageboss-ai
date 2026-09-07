@@ -88,12 +88,22 @@ function redirectToLogin(): void {
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    if (process.env.NODE_ENV === "development") {
-      console.error("API error:", error.message, error.response?.data);
-    }
-
     const original = error.config as RetryableRequestConfig | undefined;
     const status = error.response?.status;
+
+    if (process.env.NODE_ENV === "development") {
+      // A 401 from the REFRESH endpoint is the signed-out case, not a failure:
+      // every anonymous page load probes for a session and correctly finds
+      // none, so /login logged an error on every visit. A console that always
+      // has a red line in it on the app's first screen is a console developers
+      // stop reading, which is where a real error most needs to be seen.
+      // Narrow on purpose — a 401 from /login is a wrong password, which is a
+      // real event, and every other status still logs.
+      const expectedSignedOut = status === 401 && original?.url?.includes(AUTH_REFRESH_PATH);
+      if (!expectedSignedOut) {
+        console.error("API error:", error.message, error.response?.data);
+      }
+    }
 
     const shouldRefresh =
       status === 401 &&

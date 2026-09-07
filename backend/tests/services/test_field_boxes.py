@@ -1,0 +1,926 @@
+"""Locating a field's value on the page (LP-UI-031).
+
+The measured backdrop, over 105 stored PDFs / 752 valued fields: a box is
+absent for roughly a quarter of them — 11.8% whose snippet is not in the text
+layer, 11.0% on scans, 4.3% citing a page the document does not have. So the
+no-box path is ordinary, and these tests treat it as a result rather than an
+error case.
+"""
+
+import pymupdf
+import pytest
+from app.services.field_boxes import (
+    MAX_MATCHES,
+    BoxRequest,
+    MatchKind,
+    _index_page,
+    _runs,
+    find_all_field_boxes,
+    find_field_boxes,
+    fold,
+)
+
+
+def _pdf(pages: list[str], width: float = 612, height: float = 792) -> bytes:
+    doc = pymupdf.open()
+    for text in pages:
+        page = doc.new_page(width=width, height=height)
+        page.insert_text((72, 100), text)
+    return bytes(doc.tobytes())
+
+
+class TestFindingTheBox:
+    async def test_finds_the_snippet_on_the_cited_page(self) -> None:
+        result = await find_field_boxes(
+            _pdf(["Gross pay 4,812.55"]), snippet="Gross pay 4,812.55", cited_page=1
+        )
+        assert len(result.boxes) == 1
+        assert result.cited_page_exists is True
+        assert result.found_elsewhere is False
+
+    async def test_the_box_is_normalised_to_the_page(self) -> None:
+        # 0..1 against the page box, so a client can overlay it on an image
+        # rendered at any zoom without knowing which zoom that was.
+        result = await find_field_boxes(_pdf(["Gross pay"]), snippet="Gross pay", cited_page=1)
+        box = result.boxes[0]
+        assert 0.0 <= box.x0 < box.x1 <= 1.0
+        assert 0.0 <= box.y0 < box.y1 <= 1.0
+
+    async def test_a_snippet_that_is_not_there_yields_no_box(self) -> None:
+        # 11.8% of real fields. Absent, not an error.
+        result = await find_field_boxes(
+            _pdf(["Gross pay"]), snippet="Employer address", cited_page=1
+        )
+        assert result.boxes == ()
+        assert result.cited_page_exists is True
+
+    async def test_a_scan_with_no_text_layer_yields_no_box(self) -> None:
+        # 11.0% of real fields — a page with no extractable text.
+        blank = pymupdf.open()
+        blank.new_page(width=612, height=792)
+        result = await find_field_boxes(
+            bytes(blank.tobytes()), snippet="anything at all", cited_page=1
+        )
+        assert result.boxes == ()
+
+    async def test_unreadable_bytes_yield_no_box(self) -> None:
+        result = await find_field_boxes(b"not a pdf", snippet="x", cited_page=1)
+        assert result.boxes == ()
+
+
+class TestAFabricatedCitation:
+    """4.3% of real fields cite a page the document does not have.
+
+    Measured, and it is not an off-by-one: NOT ONE field cites a
+    wrong-but-existing page. Every one names a page beyond the document's length
+    — "p.7" of a three-page letter. So there is no cited page to render, and
+    searching the rest is the only way to show the processor anything.
+    """
+
+    async def test_finds_the_text_and_says_the_citation_was_wrong(self) -> None:
+        result = await find_field_boxes(
+            _pdf(["first page", "Gross pay 4,812.55"]),
+            snippet="Gross pay 4,812.55",
+            cited_page=7,
+        )
+        assert len(result.boxes) == 1
+        assert result.boxes[0].page == 2
+        # THE POINT: it does not quietly substitute a better page. Correcting the
+        # model silently is how a provenance trail stops being one.
+        assert result.cited_page_exists is False
+        assert result.found_elsewhere is True
+
+    async def test_a_real_page_that_simply_does_not_hold_the_text(self) -> None:
+        # The other shape: the citation is in range, the text is on another page.
+        result = await find_field_boxes(
+            _pdf(["first page", "Gross pay 4,812.55"]),
+            snippet="Gross pay 4,812.55",
+            cited_page=1,
+        )
+        assert result.boxes[0].page == 2
+        assert result.cited_page_exists is True
+        assert result.found_elsewhere is True
+
+    async def test_a_bad_citation_with_no_text_anywhere_is_still_flagged(self) -> None:
+        result = await find_field_boxes(
+            _pdf(["first page"]), snippet="nowhere at all", cited_page=9
+        )
+        assert result.boxes == ()
+        assert result.cited_page_exists is False
+
+
+class TestNotIdentifyingAnything:
+    async def test_a_snippet_matching_everywhere_yields_no_box(self) -> None:
+        # A bare "Total" appears forty times on a bank statement. Painting the
+        # page and calling it provenance is worse than showing none.
+        many = _pdf([" ".join(["Total"] * (MAX_MATCHES + 4))])
+        result = await find_field_boxes(many, snippet="Total", cited_page=1)
+        assert result.boxes == ()
+
+    async def test_a_handful_of_matches_is_still_useful(self) -> None:
+        few = _pdf(["Total Total"])
+        result = await find_field_boxes(few, snippet="Total", cited_page=1)
+        assert len(result.boxes) == 2
+
+    @pytest.mark.parametrize("snippet", ["", "   "])
+    async def test_an_empty_snippet_is_not_a_search(self, snippet: str) -> None:
+        result = await find_field_boxes(_pdf(["anything"]), snippet=snippet, cited_page=1)
+        assert result.boxes == ()
+
+
+class TestManyFieldsAtOnce:
+    """The batch path, which is the one the endpoint actually uses."""
+
+    async def test_each_field_keeps_its_own_answer(self) -> None:
+        content = _pdf(["Gross pay 4,200.00", "Employer Northwind Trading"])
+        found = await find_all_field_boxes(
+            content,
+            {
+                "gross_pay": BoxRequest("Gross pay 4,200.00", "4200.00", 1),
+                "employer": BoxRequest("Employer Northwind Trading", "Northwind Trading", 2),
+                "cited_wrong": BoxRequest("Employer Northwind Trading", "Northwind Trading", 1),
+                "absent": BoxRequest("nothing like this", "nothing like this", 1),
+                "fabricated": BoxRequest("Gross pay 4,200.00", "4200.00", 9),
+            },
+        )
+        # Found where it was cited.
+        assert found["gross_pay"].boxes and found["gross_pay"].found_elsewhere is False
+        assert found["employer"].boxes and found["employer"].found_elsewhere is False
+        # Cited page 1, the text is on page 2 — shown, and flagged as relocated.
+        assert found["cited_wrong"].found_elsewhere is True
+        assert found["cited_wrong"].boxes[0].page == 2
+        # Not in the document at all — no box, no false flag.
+        assert found["absent"].boxes == ()
+        assert found["absent"].cited_page_exists is True
+        # A page the document does not have: located elsewhere, citation flagged.
+        assert found["fabricated"].cited_page_exists is False
+        assert found["fabricated"].found_elsewhere is True
+
+    async def test_a_document_that_will_not_open_answers_every_field(self) -> None:
+        # A screen whose job is to show a page must not 500 because one file is
+        # unreadable — every field gets an empty answer instead.
+        found = await find_all_field_boxes(
+            b"not a pdf",
+            {
+                # BoxRequest, not the tuple this took before LP-706. It passed
+                # either way because the document fails to open before a request is
+                # touched — and CI runs mypy over app/ only, so nothing flagged it.
+                "a": BoxRequest(snippet="x", value="", cited_page=1),
+                "b": BoxRequest(snippet="y", value="", cited_page=2),
+            },
+        )
+        assert set(found) == {"a", "b"}
+        assert all(lookup.boxes == () for lookup in found.values())
+
+    async def test_no_fields_is_no_work(self) -> None:
+        assert await find_all_field_boxes(_pdf(["anything"]), {}) == {}
+
+
+# --- LP-706: folding, and LP-709: the guard that ships with it -------------- #
+
+
+def _table_pdf() -> bytes:
+    """A page whose figure is split the way a table splits one, plus a repeat of it."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "Gross  Total")  # doubled space
+    page.insert_text((300, 100), "15,000.00")  # the figure, its own text run
+    page.insert_text((72, 200), "Net pay 9,706.69")
+    page.insert_text((72, 300), "Prior balance 15,000.00")  # the SAME figure again
+    return bytes(doc.tobytes())
+
+
+class TestFolding:
+    """LP-706 — the 11.8% whose text IS on the page, written differently."""
+
+    async def test_whitespace_was_never_the_problem(self) -> None:
+        """MEASURED, and it corrects this ticket's own first premise.
+
+        `search_for` is already tolerant of doubled spaces, of case, and of text
+        split across separate runs — so none of those was ever a cause of a missing
+        box. Asserted here so nobody rebuilds folding to solve a problem the exact
+        tier had already solved.
+        """
+        found = await find_field_boxes(
+            _table_pdf(), snippet="Gross Total", value="Gross Total", cited_page=1
+        )
+        assert found.boxes
+        assert found.match_kind is MatchKind.EXACT
+
+    async def test_a_thousands_separator_does_not_matter(self) -> None:
+        found = await find_field_boxes(
+            _table_pdf(), snippet="15000.00", value="15000.00", cited_page=1
+        )
+        assert found.boxes
+
+    @pytest.mark.parametrize("written", ["15000.00", "$15,000.00", "15 000,00"])
+    async def test_notation_IS_what_folding_solves(self, written: str) -> None:
+        """What `search_for` genuinely cannot do: the same figure written another way.
+
+        The first assertion is the control. Without it this test would pass for any
+        needle the exact tier already handles, and would go on passing if folding
+        were deleted.
+        """
+        doc = pymupdf.open(stream=_table_pdf(), filetype="pdf")
+        assert doc[0].search_for(written) == [], f"{written} never reaches the folded tier"
+        doc.close()
+
+        found = await find_field_boxes(_table_pdf(), snippet=written, value=written, cited_page=1)
+        assert found.boxes
+        assert found.match_kind is MatchKind.NORMALISED
+
+    async def test_the_exact_tier_still_runs_first(self) -> None:
+        # The guarantee that lets this ship: a box that was correct before LP-706
+        # is found by the SAME call it was found by then, and never reaches the
+        # folding. If this ever reports NORMALISED, the old path has been lost.
+        found = await find_field_boxes(
+            _pdf(["Gross pay 4,200.00"]),
+            snippet="Gross pay 4,200.00",
+            value="4200.00",
+            cited_page=1,
+        )
+        assert found.match_kind is MatchKind.EXACT
+
+
+class TestTheGuard:
+    """LP-709 — folding buys coverage by giving up certainty. This is the price."""
+
+    async def test_a_figure_is_not_found_inside_a_bigger_one(self) -> None:
+        """THE FAILURE FOLDING CREATES. `1500` is a substring of `21,500.00` once
+        the separators are gone, and an unaligned search would draw a confident box
+        over the wrong figure. The match has to start where a word starts and end
+        where one ends."""
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), "Subtotal 21,500.00")
+        content = bytes(doc.tobytes())
+
+        found = await find_field_boxes(content, snippet="1500", value="1500", cited_page=1)
+        assert found.boxes == ()
+
+    async def test_a_very_short_FOLDED_needle_locates_nothing(self) -> None:
+        """The floor applies to the folded tiers, and only to them.
+
+        `search_for("15")` already returns two hits inside `15,000.00` — substring
+        matching that predates this ticket and is not changed by it. What the floor
+        stops is folding making that worse, since folding removes the separators
+        that would otherwise break such a run up. The needle here is one the exact
+        tier cannot match at all, so only the floor can be what refuses it.
+        """
+        doc = pymupdf.open(stream=_table_pdf(), filetype="pdf")
+        assert doc[0].search_for("net,") == [], "must fail the exact tier to reach the floor"
+        doc.close()
+
+        # `net,` folds to `net` — three characters, and it WOULD match the page's
+        # own word `Net` at both boundaries. So the floor is the only thing that
+        # can refuse it, which is what makes this a test of the floor rather than
+        # of the boundary check beside it.
+        assert fold("net,") == "net"
+        found = await find_field_boxes(_table_pdf(), snippet="net,", value="net,", cited_page=1)
+        assert found.boxes == ()
+
+    async def test_the_value_tier_refuses_an_ambiguous_page(self) -> None:
+        """The strictest rule, on the weakest tier.
+
+        `15,000.00` appears twice on this page — once as the gross total and once as
+        a prior balance. With the quoted text unfindable, nothing distinguishes
+        them, and drawing both invites a processor to verify against whichever they
+        look at first.
+        """
+        found = await find_field_boxes(
+            _table_pdf(),
+            snippet="a quoted line that is nowhere on this page",
+            value="15,000.00",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_the_value_tier_is_used_when_it_is_unambiguous(self) -> None:
+        # The positive control for the test above. Same path, same page, a value
+        # that appears once — so the refusal above is the ambiguity and not the
+        # tier being dead code.
+        found = await find_field_boxes(
+            _table_pdf(),
+            snippet="a quoted line that is nowhere on this page",
+            value="9,706.69",
+            cited_page=1,
+        )
+        assert found.boxes
+        assert found.match_kind is MatchKind.VALUE
+
+    async def test_the_kind_says_which_claim_the_box_is(self) -> None:
+        # A box found by the model's quoted text and a box found by its bare value
+        # are different claims. The caller is entitled to tell them apart.
+        by_text = await find_field_boxes(
+            _table_pdf(), snippet="Net pay 9,706.69", value="9,706.69", cited_page=1
+        )
+        by_value = await find_field_boxes(
+            _table_pdf(), snippet="nowhere on this page at all", value="9,706.69", cited_page=1
+        )
+        assert by_text.match_kind is MatchKind.EXACT
+        assert by_value.match_kind is MatchKind.VALUE
+
+    async def test_no_boxes_means_no_kind(self) -> None:
+        found = await find_field_boxes(
+            _pdf(["Gross pay"]), snippet="absent", value="absent", cited_page=1
+        )
+        assert found.boxes == ()
+        assert found.match_kind is None
+
+
+class TestFold:
+    """The folding function itself, which every tier above depends on."""
+
+    @pytest.mark.parametrize(
+        ("written", "expected"),
+        [
+            ("Gross Total 15,000.00", "grosstotal15000"),
+            ("15 000,00", "15000"),
+            ("$15,000.00", "15000"),
+            ("  spaced  out  ", "spacedout"),
+            ("Caf\u00e9", "cafe"),
+            ("\ufb01nal", "final"),  # the ligature a PDF text layer really holds
+            ("1/1/2025", "112025"),
+            ("", ""),
+        ],
+    )
+    def test_folds_formatting_away(self, written: str, expected: str) -> None:
+        assert fold(written) == expected
+
+    def test_two_notations_of_one_figure_fold_alike(self) -> None:
+        # The property the whole ticket rests on, asserted as a property rather
+        # than as a list of examples.
+        assert fold("15,000.00") == fold("15 000,00") == fold("$15,000.00")
+
+    def test_two_different_figures_do_not(self) -> None:
+        # The control. Without it, a fold that returned "" for everything would
+        # pass every assertion above.
+        assert fold("15,000.00") != fold("16,000.00")
+        assert fold("Gross") != fold("Net")
+
+
+class TestTheFoldJoinsWordsThePageKeptApart:
+    """The word-boundary rule is necessary and not sufficient (LP-706/709 review).
+
+    `index.text` is the page's words concatenated with NOTHING between them, so a
+    needle can span two words the page kept far apart and still begin and end on
+    word boundaries. It is true that a real match is always a whole run of the
+    page's words; it is false that a whole run of the page's words is always
+    something the page says.
+
+    A pay stub showing ``40`` and ``00`` in adjacent table CELLS matched a needle
+    of ``4000`` — a figure not on the page at all, boxed confidently across two
+    unrelated cells, and reported as a VALUE match with no ambiguity detected
+    because the spurious run was the only occurrence.
+    """
+
+    @staticmethod
+    def _page(text: str) -> pymupdf.Page:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), text, fontsize=11)
+        return doc[0]
+
+    @pytest.mark.parametrize(
+        ("text", "needle"),
+        [
+            ("40" + " " * 12 + "00", "4000"),
+            ("15" + " " * 20 + "000", "15000"),
+        ],
+    )
+    def test_two_table_cells_do_not_concatenate_into_a_value(self, text: str, needle: str) -> None:
+        assert _runs(_index_page(self._page(text)), fold(needle)) == []
+
+    @staticmethod
+    def _two(a: str, ax: float, ay: float, b: str, bx: float, by: float) -> pymupdf.Page:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((ax, ay), a, fontsize=11)
+        page.insert_text((bx, by), b, fontsize=11)
+        return doc[0]
+
+    @pytest.mark.parametrize(
+        ("placement", "a", "ax", "ay", "b", "bx", "by"),
+        [
+            # Rejected by the reading-order check: the continuation is to the RIGHT.
+            ("opposite corners of the page", "40", 72.0, 100.0, "00", 500.0, 700.0),
+            ("next line but far to the right", "40", 72.0, 100.0, "00", 500.0, 118.0),
+            # THE CASE ONLY THE DROP BOUND CAN REJECT — down AND to the left, which
+            # is the shape of a genuine wrap in every respect except distance. The
+            # two above pass the drop check on their x-ordering alone, so without
+            # this one the bound could be deleted with every test still green.
+            ("far down the page, back at the margin", "40", 500.0, 100.0, "00", 72.0, 700.0),
+        ],
+    )
+    def test_a_run_crossing_a_line_is_bounded_too(
+        self, placement: str, a: str, ax: float, ay: float, b: str, bx: float, by: float
+    ) -> None:
+        # A first version of this guard skipped every pair not sharing a line, so a
+        # run crossing ANY line had no distance bound: two words at opposite corners
+        # joined into one box spanning most of the page.
+        page = self._two(a, ax, ay, b, bx, by)
+        assert _runs(_index_page(page), fold("4000")) == [], placement
+
+    def test_a_genuine_wrap_is_still_found(self) -> None:
+        # The control, and the reason the cross-line case cannot simply be refused:
+        # a wrap goes to the NEXT line and back towards the margin.
+        page = self._two("15", 520.0, 100.0, "000,00", 72.0, 118.0)
+        assert _runs(_index_page(page), fold("15000.00")) != []
+
+    @pytest.mark.parametrize(
+        ("text", "needle"),
+        [
+            # A number split by a thin space is one run and must still be found —
+            # this is the case the fold exists for.
+            ("15 000,00", "15000"),
+            # A snippet legitimately spans words.
+            ("Gross Pay 4,200.00", "grosspay"),
+            # And a single word is untouched.
+            ("15,000.00", "15000"),
+        ],
+    )
+    def test_a_real_run_is_still_found(self, text: str, needle: str) -> None:
+        # The control. A guard that rejected every multi-word run would pass the
+        # two tests above and quietly delete the tier's entire gain.
+        assert _runs(_index_page(self._page(text)), fold(needle)) != []
+
+
+class TestTheFoldComparesMagnitude:
+    """Separators are CONTENT in a number, formatting only between renderings of one.
+
+    The fold deleted every `.` `,` and `-`, so `fold("1,500.00")` and
+    `fold("150,000")` were both `"150000"`. A field worth 1,500.00 drew a confident
+    NORMALISED box over a page's $150,000 — the precise failure LP-709 exists to
+    prevent, reached by a different route, and one the word-boundary rule cannot
+    catch because both sides are whole words.
+    """
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("15,000.00", "15000.00"),  # grouping only
+            ("15 000,00", "15,000.00"),  # European against US
+            ("1500.0", "1500.00"),  # trailing precision
+            ("1500", "1500.00"),
+        ],
+    )
+    def test_the_same_figure_folds_the_same(self, a: str, b: str) -> None:
+        assert fold(a) == fold(b)
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("1,500.00", "150,000"),  # a hundred times apart
+            ("1500.0", "15,000"),  # ten times apart
+            ("15,000.00", "150000.0"),
+        ],
+    )
+    def test_different_figures_do_not(self, a: str, b: str) -> None:
+        assert fold(a) != fold(b)
+
+    async def test_no_box_is_drawn_over_a_figure_a_hundred_times_larger(self) -> None:
+        # At the layer the bug would have been seen.
+        pdf = _pdf(["Purchase price $150,000"])
+        found = await find_field_boxes(pdf, snippet="1,500.00", value="1500.00", cited_page=1)
+        assert found.boxes == ()
+
+
+class TestTierBeatsPage:
+    """The strongest tier wins across the DOCUMENT, not within a page.
+
+    Trying all three tiers on the cited page and then all three on every other page
+    let a bare VALUE guess on page 1 beat a verbatim EXACT match on page 3 — moving
+    a box that was correct before LP-706, against the guarantee that running the
+    exact tier first means none can move.
+    """
+
+    async def test_an_exact_match_later_beats_a_value_guess_earlier(self) -> None:
+        pdf = _pdf(["Deposit 9706.69", "nothing", "Gross monthly income 9,706.69"])
+        found = await find_field_boxes(
+            pdf, snippet="Gross monthly income 9,706.69", value="9706.69", cited_page=2
+        )
+        assert found.match_kind is MatchKind.EXACT
+        assert {b.page for b in found.boxes} == {3}
+
+    async def test_the_cited_page_still_wins_within_a_tier(self) -> None:
+        # The control: tier-major must not stop a good citation beating an
+        # identical match elsewhere.
+        pdf = _pdf(["Gross Pay 4,200.00", "Gross Pay 4,200.00"])
+        found = await find_field_boxes(
+            pdf, snippet="Gross Pay 4,200.00", value="4200.00", cited_page=2
+        )
+        assert {b.page for b in found.boxes} == {2}
+        assert found.found_elsewhere is False
+
+
+class TestAmbiguityIsCountedAcrossTheDocument:
+    """One occurrence, or none — over the whole document, because the search is.
+
+    The rule was applied per page while the walk was document-wide, so the case it
+    exists for was invisible: the same figure once on page 1 and once on page 2 is
+    exactly as unresolvable as twice on one page, and page-local counting called it
+    unambiguous and drew a confident box.
+    """
+
+    async def test_the_same_value_on_two_pages_yields_no_box(self) -> None:
+        pdf = _pdf(["Prior balance 9,706.69", "Payoff 9,706.69"])
+        found = await find_field_boxes(
+            pdf, snippet="text that is not there", value="9706.69", cited_page=1
+        )
+        assert found.boxes == ()
+        assert found.match_kind is None
+
+    async def test_a_single_occurrence_still_yields_one(self) -> None:
+        # The control. Counting document-wide must not refuse the unambiguous case.
+        pdf = _pdf(["Prior balance 1,234.56", "nothing here"])
+        found = await find_field_boxes(
+            pdf, snippet="text that is not there", value="1234.56", cited_page=1
+        )
+        assert found.match_kind is MatchKind.VALUE
+        assert {b.page for b in found.boxes} == {1}
+
+
+# --- LP-707: the snippet is often a synthesis, not a quotation --------------- #
+
+
+def _synthesis_pdf() -> bytes:
+    """A page whose figures live in three places, as a real pay stub's do."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "Total Taxes 3,663.31")
+    page.insert_text((72, 140), "Total Pre-Tax 1,410.00")
+    page.insert_text((72, 180), "Total Post-Tax 335.00")
+    page.insert_text((72, 260), "Net pay 9,706.69")
+    return bytes(doc.tobytes())
+
+
+class TestThePartialTier:
+    """MEASURED, and the measurement is what replaced LP-707's plan.
+
+    That ticket proposed rewriting the JSON contract in 119 extraction prompts so
+    the model would return neighbouring words as anchors. Measuring first — which
+    the ticket required — showed the rewrite is not needed: of the 72 fields the
+    earlier tiers cannot place on typed documents, EVERY ONE already has its
+    snippet's words on the page. The snippet is a synthesis spanning places the
+    page keeps apart, and the matcher was demanding all of it in one run.
+    """
+
+    async def test_a_synthesised_snippet_is_placed_on_the_part_that_is_real(self) -> None:
+        # The real shape, from the corpus: three figures from three places joined
+        # by the model's arithmetic. No contiguous run of the whole thing exists.
+        found = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="Total Taxes 3,663.31 + Total Pre-Tax 1,410.00 + Total Post-Tax 335.00",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert found.boxes
+        assert found.match_kind is MatchKind.PARTIAL
+
+    async def test_the_earlier_tiers_really_do_fail_on_it(self) -> None:
+        # The control. Without it this class would pass for any snippet the exact
+        # or normalised tier already handles, and would go on passing if the
+        # partial tier were deleted.
+        doc = pymupdf.open(stream=_synthesis_pdf(), filetype="pdf")
+        whole = "Total Taxes 3,663.31 + Total Pre-Tax 1,410.00 + Total Post-Tax 335.00"
+        assert doc[0].search_for(whole) == []
+        assert _runs(_index_page(doc[0]), fold(whole)) == []
+        doc.close()
+
+    async def test_a_run_that_does_NOT_contain_the_value_is_refused(self) -> None:
+        """The anchor rule, and the whole reason this tier is not a licence.
+
+        Taking the longest run that merely OCCURS recovers all 72 measured fields —
+        at a median of half the snippet and a minimum of 3% of it, which is one
+        word in thirty. Requiring the run to contain the extracted value recovers
+        26, and each is a box over text that demonstrably includes the figure cited.
+        """
+        found = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="Total Taxes 3,663.31 and some other words entirely",
+            # A value that is nowhere in the snippet AND nowhere on the page, so
+            # neither this tier nor the value tier below it can fire.
+            value="88,888.88",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_it_ranks_below_the_quoted_tiers_and_above_the_bare_value(self) -> None:
+        # A snippet the page holds verbatim must still report EXACT — the partial
+        # tier must not be reached for it, or a box that was correct before LP-707
+        # would be re-derived by a weaker rule.
+        found = await find_field_boxes(
+            _synthesis_pdf(), snippet="Net pay 9,706.69", value="9,706.69", cited_page=1
+        )
+        assert found.match_kind is MatchKind.EXACT
+
+    async def test_the_longest_confirmable_run_is_what_gets_boxed(self) -> None:
+        # Longest first, so the box carries as much confirmed context as the page
+        # will support rather than the bare figure.
+        by_partial = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="nonsense prefix Total Pre-Tax 1,410.00 nonsense suffix",
+            value="1,410.00",
+            cited_page=1,
+        )
+        by_value_only = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="a quoted line that is nowhere on this page",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert by_partial.match_kind is MatchKind.PARTIAL
+        assert by_value_only.match_kind is MatchKind.VALUE
+        # "Total Pre-Tax 1,410.00" is wider than "1,410.00" alone.
+        assert (by_partial.boxes[0].x1 - by_partial.boxes[0].x0) > (
+            by_value_only.boxes[0].x1 - by_value_only.boxes[0].x0
+        )
+
+
+def _repeats_pdf() -> bytes:
+    """A page whose figure appears twice, as a subtotal and again as a total."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "Federal withholding 3,663.31")
+    page.insert_text((72, 160), "Year to date total 3,663.31")
+    return bytes(doc.tobytes())
+
+
+class TestThePartialTierMustAddSomethingToTheValue:
+    """The rule that stops this tier being the value tier with the guard removed.
+
+    MEASURED over the stored corpus, and it is the whole of this class's case: of
+    45 fields the partial tier placed, 45 were placed on a run whose fold IS the
+    value's — no context at all — and for 44 of them no run carrying context
+    existed on the page. 38 of the 45 were figures the document repeats, which is
+    exactly what LP-709's document-wide ambiguity rule refuses. Ranking a bare
+    value above the tier that counts it does not make it a stronger claim; it
+    only skips the counting.
+    """
+
+    async def test_a_run_that_is_only_the_value_is_not_this_tier(self) -> None:
+        # The figure appears twice, so the value tier refuses it document-wide.
+        # Before the anchor rule the partial tier returned BOTH boxes, one tier
+        # earlier, because the longest run it could confirm was the figure itself.
+        found = await find_field_boxes(
+            _repeats_pdf(),
+            snippet="Total Taxes 3,663.31 + Total Pre-Tax 1,410.00",
+            value="3,663.31",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_the_control_the_value_tier_refuses_the_same_field(self) -> None:
+        # Without this the class above would pass for a field nothing can place.
+        # The identical value, with a snippet the partial tier cannot use at all,
+        # must reach the same answer by the rule that was being skipped.
+        found = await find_field_boxes(
+            _repeats_pdf(),
+            snippet="a quoted line that is nowhere on this page",
+            value="3,663.31",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_an_unrepeated_value_is_still_placed_but_labelled_VALUE(self) -> None:
+        # The other side of it: dropping to the value tier is not dropping the box.
+        # A figure the document holds once is still found — and reported as the
+        # weaker claim it is, rather than as a partial quotation it never was.
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), "Federal withholding 3,663.31")
+        content = bytes(doc.tobytes())
+        doc.close()
+        found = await find_field_boxes(
+            content,
+            snippet="Total Taxes 3,663.31 + Total Pre-Tax 1,410.00",
+            value="3,663.31",
+            cited_page=1,
+        )
+        assert found.boxes
+        assert found.match_kind is MatchKind.VALUE
+
+
+class TestTheAnchorIsCheckedOnThePageNotOnTheSnippet:
+    """`1500` is a substring of `21,500.00` and `Smith` of `Blacksmith`.
+
+    Asking whether the model's own snippet text contains the value is an unaligned
+    substring test — the exact failure `_runs` carries a word-boundary rule to
+    prevent. Both cases below pass that test and neither page says the value.
+    """
+
+    @staticmethod
+    def _page(line: str) -> bytes:
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), line)
+        page.insert_text((72, 160), "Statement of account")
+        return bytes(doc.tobytes())
+
+    async def test_a_value_inside_a_larger_number_does_not_anchor_a_box(self) -> None:
+        assert fold("1,500.00") in fold("Escrow balance 21,500.00"), (
+            "the premise: the snippet-side check this replaces would pass"
+        )
+        found = await find_field_boxes(
+            self._page("Escrow balance 21,500.00"),
+            snippet="Escrow balance 21,500.00 carried forward from the prior period",
+            value="1,500.00",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_a_value_inside_a_longer_word_does_not_anchor_a_box(self) -> None:
+        assert fold("Smith") in fold("Blacksmith Holdings LLC")
+        found = await find_field_boxes(
+            self._page("Blacksmith Holdings LLC"),
+            snippet="Blacksmith Holdings LLC of record",
+            value="Smith",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_the_value_elsewhere_on_the_page_does_not_vouch_for_this_run(self) -> None:
+        """The case that separates the two guards, and neither had one.
+
+        Both illusions above are answered by resolving the value first: it is
+        nowhere on those pages, so the search never starts and the containment
+        filter could be deleted with every test still green. Here the page DOES
+        hold the value — on its own line — while the run the snippet matches holds
+        only a larger number that contains its digits. Only containment can refuse
+        this, and refusing it is the point: a box is a claim about the text under
+        it, not about the page it is on.
+        """
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 100), "Escrow balance 21,500.00 carried forward")
+        page.insert_text((72, 200), "Monthly escrow 1,500.00")
+        content = bytes(doc.tobytes())
+        doc.close()
+        found = await find_field_boxes(
+            content,
+            snippet="Escrow balance 21,500.00 carried forward from the prior period",
+            value="1,500.00",
+            cited_page=1,
+        )
+        # The value tier finds the line that really says it; the partial tier must
+        # not have claimed the line that only appears to.
+        assert found.match_kind is MatchKind.VALUE
+        assert found.boxes[0].y0 > 0.2, "boxed the 21,500.00 line rather than the 1,500.00 one"
+
+    async def test_a_phrase_the_page_repeats_too_often_identifies_nothing(self) -> None:
+        """`MAX_MATCHES` applies here too, and nothing was checking that it did.
+
+        A run that occurs nine times is not provenance however much context it
+        carries — it is the module's "better to show none and let the processor
+        read" rule, and the partial tier is the one most likely to reach it,
+        because it is free to fall back on ever shorter and commoner runs.
+        """
+        doc = pymupdf.open()
+        page = doc.new_page(width=612, height=792)
+        for i in range(MAX_MATCHES + 1):
+            page.insert_text((72, 80 + i * 40), "Pre-Tax 1,410.00")
+        content = bytes(doc.tobytes())
+        doc.close()
+        found = await find_field_boxes(
+            content,
+            snippet="nonsense prefix Pre-Tax 1,410.00 nonsense suffix",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert found.boxes == ()
+
+    async def test_longest_first_still_means_longest(self) -> None:
+        """LP-707's own test for this no longer fails when the order is reversed.
+
+        It compared the partial box against a bare-value box, and the shortest
+        candidate used to BE the bare value — so reversing the walk changed the
+        answer. Requiring a run to add context removes that candidate, and the
+        shortest surviving run is now a shorter phrase whose box is still wider
+        than the value's. The comparison has to be against the shorter PHRASE.
+        """
+        widest = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="nonsense prefix Total Pre-Tax 1,410.00 nonsense suffix",
+            value="1,410.00",
+            cited_page=1,
+        )
+        shorter = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="nonsense Pre-Tax 1,410.00 nonsense",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert widest.match_kind is MatchKind.PARTIAL
+        assert shorter.match_kind is MatchKind.PARTIAL
+        assert (widest.boxes[0].x1 - widest.boxes[0].x0) > (
+            shorter.boxes[0].x1 - shorter.boxes[0].x0
+        ), "the shortest confirmable run won, not the longest"
+
+    async def test_a_value_the_page_really_holds_still_anchors(self) -> None:
+        # The positive control, or the two above would pass with the tier deleted.
+        found = await find_field_boxes(
+            _synthesis_pdf(),
+            snippet="nonsense prefix Total Pre-Tax 1,410.00 nonsense suffix",
+            value="1,410.00",
+            cited_page=1,
+        )
+        assert found.match_kind is MatchKind.PARTIAL
+
+    async def test_a_page_without_the_value_costs_one_search(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cost bound, which is the same rule read as performance.
+
+        The candidate loop is quadratic in the snippet's words — a forty-word
+        snippet is 820 folds and 820 searches, per page, per field, measured at
+        8 ms per page per field — and it ran in full on every page, including the
+        great majority a value is nowhere on. Resolving the value first means such
+        a page is one search.
+        """
+        import app.services.field_boxes as module
+
+        calls = {"n": 0}
+        original = module._runs
+
+        def counted(index: object, needle: str) -> object:
+            calls["n"] += 1
+            return original(index, needle)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(module, "_runs", counted)
+        doc = pymupdf.open(stream=_synthesis_pdf(), filetype="pdf")
+        index = module._index_page(doc[0])
+        # THE VALUE IS IN THE SNIPPET AND NOT ON THE PAGE, which is the only shape
+        # that exercises this. A value absent from the snippet too is refused by the
+        # containment check before the search, so the walk never runs and the count
+        # stays at one however the early return behaves — a green that means nothing.
+        request = BoxRequest(
+            snippet="Component 88,888.88 " + " ".join(f"filler{i} word{i}" for i in range(19)),
+            value="88,888.88",
+            cited_page=1,
+        )
+        assert module._partial(index, doc[0], request, 1) == ()
+        doc.close()
+        assert len(request.snippet.split()) >= 39, "the snippet has to be big enough to matter"
+        assert calls["n"] == 1, f"the quadratic walk ran on a page with no anchor ({calls['n']})"
+
+
+class TestTheOcrBudgetSurvivesTheRequest:
+    """The cap is only worth having where a request can actually reach it.
+
+    `MAX_OCR_PAGES_PER_REQUEST` was threaded from `_lookup_many_sync` down to
+    `_index_page` and then DROPPED — `_page_words` was called without it, so
+    `words_for` always saw `None` and the cap bounded nothing. The budget's own
+    test called `words_for` directly and passed throughout, which is the reason it
+    went unnoticed: it tested the layer the rule was written at, not the layer a
+    request meets it at.
+    """
+
+    @staticmethod
+    def _blank_pages(count: int) -> bytes:
+        doc = pymupdf.open()
+        for _ in range(count):
+            doc.new_page(width=612, height=792)
+        return bytes(doc.tobytes())
+
+    async def test_a_long_scan_stops_at_the_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.services import page_ocr
+
+        calls = {"n": 0}
+
+        def counted(page: object) -> list[tuple[float, float, float, float, str]]:
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(page_ocr, "ocr_words", counted)
+        monkeypatch.setattr(page_ocr, "ocr_available", lambda: True)
+        pages = page_ocr.MAX_OCR_PAGES_PER_REQUEST + 8
+        await find_all_field_boxes(
+            self._blank_pages(pages),
+            {"f": BoxRequest(snippet="nowhere at all", value="nothing here", cited_page=1)},
+        )
+        assert calls["n"] == page_ocr.MAX_OCR_PAGES_PER_REQUEST, (
+            f"{calls['n']} pages OCR'd against a cap of {page_ocr.MAX_OCR_PAGES_PER_REQUEST}"
+        )
+
+    async def test_the_walk_really_would_visit_them_all(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The positive control. Without it the assertion above would pass if the
+        # document walk stopped early for some unrelated reason, and would go on
+        # passing if OCR were never attempted at all.
+        from app.services import page_ocr
+
+        calls = {"n": 0}
+
+        def counted(page: object) -> list[tuple[float, float, float, float, str]]:
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(page_ocr, "ocr_words", counted)
+        monkeypatch.setattr(page_ocr, "ocr_available", lambda: True)
+        under = page_ocr.MAX_OCR_PAGES_PER_REQUEST - 4
+        await find_all_field_boxes(
+            self._blank_pages(under),
+            {"f": BoxRequest(snippet="nowhere at all", value="nothing here", cited_page=1)},
+        )
+        assert calls["n"] == under

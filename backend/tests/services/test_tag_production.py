@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from app.ai.stage_metrics import StageMetrics
 from app.ai.tag_production import AIClientError, StageAResult, TagJudgment, TransactionJudgment
 from app.services.tag_production import (
     TransactionTagCache,
@@ -92,7 +93,11 @@ def _txn(**kw: Any) -> dict[str, Any]:
 
 
 def _snapshot(raw_txns: list[dict[str, Any]], *, doc_id: str = "docstmt0000000000") -> Snapshot:
-    field_sets = transaction_field_sets({"transactions": raw_txns}, "bank_statement")
+    field_sets = transaction_field_sets(
+        {"transactions": raw_txns},
+        "bank_statement",
+        loan_file_id=UUID("00000000-0000-0000-0000-00000000f1e0"),
+    )
     txns = build_transactions(field_sets, document_content_id=doc_id)
     entry = DocumentEntry(content_id=doc_id, document_type="bank_statement", transactions=txns)
     return Snapshot(
@@ -334,3 +339,65 @@ async def test_returned_but_malformed_tag_uses_the_accurate_reason() -> None:
     cat = tags["txn.apparent_category"]
     assert cat.value == "unknown"
     assert cat.reasoning == "tag value missing or malformed in structuring response"
+
+
+async def test_stage_a_reports_its_elapsed_time_and_call_count() -> None:
+    """LP-644 §1 — the completion line has to CARRY the timing, not merely have it available.
+
+    The helper is unit-tested separately; this is the other half, and the half that has been wrong
+    before in this repo: a value computed correctly and written somewhere nobody reads. Every
+    projection in LP-644 is a call count times a stale mean, so a `stage_a_production_done` line
+    without these fields leaves the ticket exactly as evidence-free as it was while looking
+    instrumented.
+    """
+    import structlog
+
+    snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
+    with structlog.testing.capture_logs() as logs:
+        await produce_stage_a_transaction_tags(
+            snap, reasoner=StubReasoner(), metrics=StageMetrics()
+        )
+
+    done = [line for line in logs if line.get("event") == "stage_a_production_done"]
+    assert done, "the stage did not log its completion at all"
+    entry = done[0]
+    assert {"ai_calls", "ai_wall_seconds", "ai_latency_seconds"} <= set(entry), (
+        f"the completion line is missing timing fields: {sorted(entry)}"
+    )
+    assert entry["ai_calls"] >= 1, "a stage that issued a model call reported zero calls"
+    assert entry["ai_wall_seconds"] >= 0
+
+
+async def test_a_stage_whose_every_call_failed_still_reports_its_timing() -> None:
+    """LP-644 §1 review — two defects met here, and the second was found by the first's test.
+
+    `calls` is documented as counting failures, because a failed call costs the same wall clock as a
+    successful one. The first version recorded after the token totals accumulated, which only happens
+    on success — a comment describing a distinction the code did not make.
+
+    Fixing that exposed the larger one: the completion line was gated on `if input_tokens or
+    output_tokens`, so a stage whose every call failed logged NOTHING. That is exactly the run the
+    4.3s baseline was measured on, and the run whose wall clock this instrumentation most needs to
+    describe. A stage could spend its entire budget on retries and report that it never ran.
+
+    Cost is None rather than 0 here: there is no model to attribute one to, and a $0 estimate reads
+    as a free stage rather than an unsuccessful one.
+    """
+    import structlog
+    from app.ai.client import AIClientError
+
+    async def _always_fails(_context: str) -> object:
+        raise AIClientError("backend down")
+
+    snap = _snapshot([_txn(), _txn(amount="100.00", description="RENT")])
+    with structlog.testing.capture_logs() as logs:
+        await produce_stage_a_transaction_tags(snap, reasoner=_always_fails, metrics=StageMetrics())
+
+    done = [line for line in logs if line.get("event") == "stage_a_production_done"]
+    assert done, "a stage that issued calls and failed them all reported nothing at all"
+    entry = done[0]
+    assert entry["ai_calls"] >= 1, "the failed call was not counted"
+    assert entry["input_tokens"] == 0 and entry["output_tokens"] == 0
+    assert entry["cost_estimate"] is None, (
+        "a $0 cost reads as a free stage; there is no model to attribute one to"
+    )

@@ -59,6 +59,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Tesseract, because without it the OCR tests SKIP rather than fail and the
+      # coordinate-space assertion — the one whose failure mode would otherwise be
+      # an invisibly misplaced box — is green by never running. The Dockerfile
+      # installs the same two packages; this is CI's copy of that dependency.
+      - name: Install Tesseract (OCR tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:

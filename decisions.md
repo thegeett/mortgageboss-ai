@@ -15572,3 +15572,342 @@ graded need at RECEIVED rather than claiming a coverage it cannot verify.
 **Related:** LP-631, LP-632, LP-633, ADR-069 (a need survives its document), LP-108 (honest satisfaction;
 never over-claim), LP-111 (flag the duplicate, let the processor merge), LP-625 (`_refreshable` — an untouched
 proposal is the model's, a touched one is the processor's).
+
+## ADR-389
+
+**Colour, weight and radius have exactly one source: the token layer in `globals.css`.**
+
+*Context.* The LP-5 palette was a stock shadcn install — Tailwind blue at `217 91% 60%`, one
+border token, no `.dark` block — and the app never actually used it. LP-UI-001 measured 808
+`gray-*` classes across 67 of 95 components, which is why `darkMode: ["class"]` has sat in the
+config since LP-5 without ever being switchable: there was nothing for the class to switch. The
+same bypass hid two real failures. `text-gray-400`, the most-used text colour in the app, is
+2.54:1 on white and fails AA outright. And `text-danger` / `bg-danger/5` / `border-danger/40`
+appear at twenty call sites against a `danger` colour that the config never defined, so
+`FailedRunBanner` — the banner that reports a dead verification run — has been rendering grey
+(LP-UI-002).
+
+*Decision.* Every colour, font weight and radius in the frontend resolves through a CSS variable
+declared in `app/globals.css` and exposed as a Tailwind token in `tailwind.config.ts`. A component
+may not name a colour any other way: no `gray-*`, no other Tailwind palette scale, no hex, no
+`hsl()` inside an arbitrary value. Two consequences are load-bearing rather than cosmetic. Values
+stay as **space-separated HSL triples**, because the config wraps them in `hsl()` and that is the
+only form under which `bg-warning/10` and the ~200 other opacity modifiers keep working — a
+conversion to hex would silently break all of them. And **`border` and `input` are two different
+tokens on purpose**: `border` is the decorative hairline that carries no meaning, `input` is the
+control border and is held to WCAG 1.4.11's 3:1, so a control is never allowed to inherit a
+hairline that a user cannot see.
+
+*Consequences.* Dark mode becomes a token swap with no component work, which is what makes it
+shippable at all; the cost is that it only works once LP-UI-004 has removed the hardcoded greys,
+so LP-UI-001 through 003 leave the app visibly worse than they found it. Contrast becomes a
+property of the palette rather than of each screen — it is checked once, numerically, in both
+themes, and a screen cannot regress it without leaving the token set. That check has to be run
+and not assumed: LP-UI-001 found `muted-foreground` on `muted` at 4.29:1 in light, under the floor
+the spec claims, and the LP-UI-004 codemod will route 24 existing elements onto exactly that pair.
+The rule also has a blind spot worth naming — a colour written as an arbitrary value
+(`bg-[radial-gradient(...hsl(217_91%_60%...))]`, still present on the login and landing pages)
+satisfies a `gray-*` grep while violating this ADR, so the lint rule that enforces it must match
+arbitrary values too, not just the palette scales.
+
+*Applies to.* Everything under `frontend/app`, `frontend/components` and `frontend/lib`. It does
+not apply to `docs/design/ledger/`, where the mockups are deliberately standalone HTML and carry
+their own copy of the palette.
+
+**Related:** LP-UI-001, LP-UI-002 (the undefined `danger`), LP-UI-004 (the codemod that makes the
+rule true), LP-UI-005 (one status vocabulary on top of these tokens), LP-5 (the palette this
+replaces), `docs/design/ledger/SPEC.md` rules 1, 2, 3 and 8.
+
+## ADR-390
+
+**A route that exists only to say "not built yet" is deleted, not decorated; `/` and
+`/loan-files` redirect to the dashboard.**
+
+*Context.* Two routes in the product were placeholders that had outlived their purpose. `/loan-files`
+was a stub whose empty state read "Loan-file management arrives in the next phase (Epic 4). This is
+where your files will live" — written when that was true, and still shipping long after Epic 4
+delivered the dashboard, its search, its filters and its pipeline table. So the rail offered two
+destinations, one of which was the real list and one of which was a promise that the real list was
+coming. And `/`, the first URL anyone types, was a 199-line developer splash: a backend health
+check, dependency rows for Postgres and Redis, and a link onward. It was never a processor screen
+and was deliberately never designed, so the first thing a user saw on opening the product was
+diagnostics about the product.
+
+*Decision.* Neither route keeps a page. `/loan-files` redirects to `/dashboard`, because the
+dashboard *is* the loan-file list and a bookmark from before should still land somewhere useful.
+`/` redirects to `/dashboard` as well, and the "Loan Files" rail item is gone. The health page is
+**moved rather than deleted** — it is genuinely useful — to `/dev/health`, beside
+`/dev/extraction-bench`, which is already where developer-only surfaces live.
+
+Sending `/` to `/dashboard` rather than to `/login` is deliberate and keeps one rule rather than
+two: the protected layout is the only thing that decides who is allowed in, and it already sends an
+unauthenticated visitor to `/login` once the silent refresh settles. Routing `/` straight to
+`/login` would duplicate that judgement in a second place and would bounce an already-signed-in
+user through a login screen they do not need.
+
+*Consequences.* Every entry point converges on one screen, which is the screen a processor actually
+starts their day on. The cost is that `/dev/health` now requires a session, where the splash did
+not — a developer checking whether the stack is up has to be signed in, or use the API's own
+unauthenticated `/health`, which is the better tool for that anyway. The dashboard also loses its
+context column for now: it held exactly one link, to the screen you were already on, and an empty
+216px column is worse than none. Its real contents are the saved views in LP-UI-012.
+
+*Applies to.* Any future route added before the feature behind it exists. The rule the two
+placeholders broke is the same one: a navigation item that leads to a description of unbuilt work
+costs a click and returns nothing, and it ages badly precisely because nobody revisits it once the
+work ships.
+
+**Related:** LP-UI-011, LP-UI-008 (the rail and context column these feed), LP-UI-012 (the saved
+views that give the dashboard its column back), LP-27 (which added both placeholders, correctly at
+the time), `docs/design/ledger/AMENDMENTS.md`.
+
+## ADR-391
+
+**What counts as agreement in the reconciliation ledger — and where each rule came from.**
+
+*Context.* LP-UI-017 adds the read model the redesign is built around: for one loan file, the fields
+that have both a *stated* value (the 1003 / MISMO application) and a *found* value (what an
+extraction read out of a document), with per-row agreement and provenance. The data all existed;
+the join did not. The risk in building it is not the join — it is that "these two numbers disagree"
+is a judgement the rule engine **already makes**, and a ledger answering that question differently
+from the finding shown beside it would be worse than no ledger. LP-UI-013 made exactly that mistake
+one ticket earlier: a dashboard count derived from the enums rather than from `finding_blocking.py`,
+which disagreed with the file screen in both directions.
+
+*Decision.* Every comparison rule is either imported from where the concept already lives, or —
+where it does not exist — is recorded here as new.
+
+**Income: the engine's 10% variance, reused.** `abs(stated − documented) / documented × 100 ≤ 10`,
+the threshold `_VARIANCE_10` in `app/verification/cross_source/rules.py`. The boundary is `≤`,
+matching the rule's `Operator.LE`; a ledger that called 10.0% a disagreement while the finding
+called it a pass would be the same defect in miniature.
+
+**Income units: a documented monthly figure, or none.** The found side prefers a W-2's annual wages
+divided by twelve, because annual is annual and that conversion assumes nothing. A pay stub's
+`gross_pay` is **one pay period**, and ADR-328 already forbids converting it without a known
+frequency — "an assumed [frequency] is a silent 12x miscalculation". Where only a pay-period figure
+exists, the row shows it, keeps its provenance, and reports `missing` with the reason, rather than
+claiming a disagreement that is really a unit error. The first implementation of this row did claim
+one: stated $28,168.80/month against a $8,076.93 pay stub, marked `differs`.
+
+**Money elsewhere: exact to the cent, no tolerance.** A valuation or a balance is a number both
+sides copied from the same source; if they differ at all, someone transcribed one of them. A
+tolerance here would hide the only kind of error the row can find.
+
+**Employer names: new, and recorded as new.** The engine has no employer matcher.
+`normalize_name` (`app/services/borrower_name_matching.py`) is reused for tokenising, casing and
+accents, but it is a PERSON-name normaliser and stops there — measured,
+`normalize_name("Cascade Robotics Inc.") != normalize_name("Cascade Robotics")`, and using it alone
+reported the same employer as a disagreement on real seed data. So legal-form and trading tokens
+(`inc`, `llc`, `dba`, `co`, `na`, …) are dropped and the smaller token set must be **contained in**
+the larger. Subset rather than equality because the two sources genuinely carry different amounts of
+the name, and requiring equality would make the fuller spelling a defect. Two names that reduce to
+nothing identifying are `differs`, never `match` — agreeing from emptiness is agreeing that two
+unknowns are the same company.
+
+**Four agreement states, not three.** `match | differs | missing | not_stated`. The last two are
+kept apart deliberately: a value the application claimed with no document behind it is a *gap to
+chase*, while a value a document shows that the application never mentioned is a *disclosure
+problem*. They are different work for different people, and collapsing them into "mismatch" loses
+which one a processor is looking at.
+
+**Every row carries provenance or an explicit reason it has none.** `source` (document id, filename,
+page, snippet) or `source_note`, never both null. A blank cell in an audit surface is
+indistinguishable from an unanswered question.
+
+*Consequences.* The ledger cannot drift from the findings on income, because both read one
+threshold; it can drift on employer names, because only the ledger has that rule — the day the
+engine grows an employer check, it must import this one rather than write a second. The exact-cents
+rule will produce `differs` on rounding differences between systems, which is intended and will look
+noisy the first time a lender's export rounds to the dollar; that is a real disagreement to see, not
+one to hide. And the income row will read `missing` for a file whose only income document is a pay
+stub, which understates what is known — the honest cost of refusing to guess a pay frequency, and
+the reason a W-2 is worth chasing.
+
+*Applies to.* Any comparison added to the reconciliation ledger. Before adding one, look for the
+concept in `app/verification/` first; if it exists, import it, and if it does not, add a clause here.
+
+**Related:** LP-UI-017, LP-UI-018 (the ledger UI), ADR-328 (an assumed pay frequency is a silent
+12x miscalculation), `_VARIANCE_10` in the cross-source rules, `borrower_name_matching.py`,
+LP-UI-013 (the dashboard that disagreed with the screen it links to).
+
+---
+
+## ADR-392
+
+**Where the rule engine has ruled, a read model defers to it rather than answering again.**
+
+*Context.* ADR-391 settled what counts as agreement inside the reconciliation ledger, and did it the
+right way: every comparison is imported from where the concept already lives, so the ledger and the
+findings beside it agree by construction. That holds only as far as the import goes. LP-80 makes the
+income variance **overlay-overrideable per lender by `rule_id`**, and the read model does not resolve
+overlays — so for a file under a lender that widened or narrowed the variance, the ledger compares
+against the default while the engine compares against the lender's number. Both are correct about
+the number they were given, and they disagree about the same two figures on the same screen.
+
+The 017 review found the sharper version of this: importing a threshold is not the same as reusing a
+rule. The engine quantizes the variance to 0.1 before comparing, so 10.04% is `satisfied` to the
+engine and was `differs` to the ledger — the same two numbers, one screen, two answers, from code
+that had correctly imported the constant. Sharing a number is not sharing a comparison.
+
+*Decision.* A read model that restates a question the rule engine already answers **carries the
+engine's verdict and presents its own comparison as the evidence beneath it.** Where a finding
+exists, the finding is the authority; the row's two columns are what the reader checks it against,
+never a competing answer. Rows the engine has no rule for keep their own verdict — which is where a
+read model earns its keep, since the `not_stated` direction (a document shows what the application
+never claimed) has no finding anywhere in the product.
+
+The correspondence is an **explicit map**, not a naming convention: `_ROW_RULE` in
+`app/services/reconciliation.py`. Only rules asking the same question of the same two quantities
+belong in it. Two were considered and left out, and the reasons generalise:
+`xsrc.asset.stated_missing_document` asks whether a stated asset has a supporting document *at all*,
+which is the ledger's `missing` case rather than its value comparison — mapping it would make a row
+reporting two different balances defer to a rule about presence; and
+`xsrc.income.employer_count_matches_items` counts employers where the row compares names.
+
+Two filters are part of the decision, not implementation detail:
+
+- **Origin.** The `Finding` table also holds the legacy AI cross-source sweep. Those two are never
+  merged or summed (LP-375), so only `DETERMINISTIC_RULE` findings can become a row's verdict. A row
+  deferring to an AI finding would put that structural separation inside the feature the redesign is
+  named for.
+- **Resolution.** A finding that was APPLIED or OVERRIDDEN has been answered by a processor, and the
+  row returns to reporting its own comparison rather than re-asking.
+
+*Consequences.* A ledger row can show a verdict its own two columns do not obviously justify, and
+that is the intended behaviour — the columns are evidence, not the ruling. The map is the extension
+point: a new row with a corresponding rule adds one entry, and a row without one is not a gap to be
+filled by the nearest-looking rule. The alternative considered was resolving overlays inside the read
+model, which would have given it a second copy of the engine's threshold resolution — the drift ADR-391
+was written to prevent, one level up.
+
+*Status.* Accepted (LP-UI-018, design amendment A20).
+
+---
+
+## ADR-393
+
+**A processor's verdict on an extracted field is recorded beside the value and keyed on the
+extraction version, so a re-extraction retires it rather than inheriting it.**
+
+*Context.* LP-UI-033 gives the reviewer a keyboard loop whose three verbs are accept, correct and
+reject. Each is a claim by a named person about a specific value, and until this ticket the product
+had nowhere to put one: `create_extraction_version` is written by the extraction task and the seed
+script and by nothing else, so no human correction of an extracted value existed anywhere.
+
+Two designs were available and the obvious one is wrong. Writing the correction into
+`extracted_data` makes every downstream reader — the rule engine, the snapshot, the calculators —
+see the corrected figure with no further work, which is exactly the appeal. It also destroys the
+extraction. "What did the model actually say?" is the question every accuracy investigation starts
+from; the LP-508 distrust ledger is *entirely* that question, and each of its entries names a
+document and the value the extractor read. An extraction that has been edited by hand cannot answer
+it, and nothing on the row would say it had been.
+
+The second question is what a verdict means after the document is extracted again. A re-extraction
+produces a new version whose values may differ — a better model, a corrected document type, a
+re-uploaded page. A verdict that carried forward would be a person's name attached to a figure they
+never saw.
+
+*Decision.* A verdict is a row in `field_reviews`, **beside** the extraction and never inside it. A
+correction records what the processor says is right; `extracted_data` continues to say what the
+model read; the display resolves the two and both stay answerable.
+
+The row is keyed on `extraction_id`, so **a new version has no verdicts of its own** and its
+fields return to unreviewed. This is the conservative direction on purpose: re-reviewing costs a
+processor a second pass, while inheriting costs an underwriter a file that carries a human
+confirmation nobody gave.
+
+*Corrected in review.* An earlier draft of this ADR said the retirement happened through the
+`ON DELETE CASCADE` on `extractions` — "a superseded extraction's verdicts go with it". **That
+cascade never fires on this path.** Re-extraction deletes nothing: `create_extraction_version`
+demotes the current row to `is_current = False` and inserts a new one, because prior versions are
+kept for audit, and no code path deletes an `Extraction`. The behaviour above is correct, but the
+mechanism is the KEY, not the cascade — the superseded version keeps its verdicts as history, which
+is what an accuracy investigation needs, since "someone accepted THIS value" is only answerable
+while both the value and the verdict still exist.
+
+The difference is not pedantic. The cascade is a guarantee about *deletion*; keying is a guarantee
+about *identity*. Anyone who changed re-extraction to update a row **in place** would keep every
+verdict attached to values nobody reviewed, and the cascade this ADR pointed at would not save
+them. `TestReExtraction` in `tests/integration/test_field_reviews.py` pins all three facts: the new
+version is unreviewed, the old version's verdict survives, and the cascade does work on an actual
+delete.
+
+Lifecycle is the LP-76/77/87 override pattern unchanged — one live row per (extraction, field) via a
+partial unique index, soft-delete to revert, the activity log as the immutable trail. Replacing a
+verdict soft-deletes the previous one rather than mutating it: a processor who accepts and then
+rejects has made two decisions, and an audit showing only the second cannot say what they thought
+first.
+
+*Consequences.* The one that matters and is not yet resolved: **nothing consumes a correction.** The
+rule engine reads `extracted_data`, which a correction deliberately does not touch, so a processor
+can fix a wrong gross pay and the DTI will still be computed from the model's figure. Closing that
+is a verification-layer decision with its own questions — does a correction re-trigger a run, does
+it invalidate findings that cited the old value, does a corrected value need its own provenance in
+the snapshot — and it is recorded in design amendment A28 rather than settled here. Until it is,
+a correction is a note to the next human, not a fix.
+
+*Status.* Accepted (LP-UI-033).
+
+---
+
+## ADR-394
+
+**Desktop-first, down to a 1280px laptop and a landscape tablet. Below that the app is
+usable rather than designed, and no phone layout is claimed.**
+
+*Context.* LP-UI-037 asked for the 13-inch laptop and tablet behaviour to be decided rather
+than assumed. Measured first: horizontal page overflow is **zero** at 1280 and at 1024 on
+every route, so the literal AC already passed. That is not the same as usable, and the
+screenshot said so — at 1280 the reviewer showed **six** vertical bands and squeezed the
+page canvas, the thing being read, to about 550px while the context rail spent 450 on loan
+facts nobody needs while reading a pay stub.
+
+The rail is `hidden xl:block`, so below 1280 it did not collapse — it **vanished**, taking
+the file's status, its three ratios and its activity with it and offering nothing to open.
+A 13-inch laptop is 1280 logical pixels at its widest common setting and fewer at any
+scaling above 100%, so that was the ordinary case rather than an edge one.
+
+*Decision.* Three commitments, in descending confidence.
+
+**1280 and above is designed.** Every screen is laid out for it, and the pipeline shows the
+columns that fit at each step of a recorded ladder rather than shrinking all nine equally.
+Shrinking equally is a decision too; it is just one nobody made, and it degrades the columns
+a processor triages on at the same rate as the ones they do not. The order — Touched, then
+Property and Lender, then Amount and Needs, with File, Borrower, Stage and Attention never
+dropped — is data in `COLUMNS`, with a test.
+
+**1024 to 1280 — a landscape tablet — is supported, on the evidence stated.** The context
+rail is a drawer reached from the file header, so nothing becomes unreachable; the reviewer's
+three panes keep their side-by-side arrangement, which measurement says still works at 1100
+once the rail is out of the way.
+
+*Scoped in review.* "Supported" here rests on two things and it is worth saying which:
+horizontal overflow measured at zero on the pipeline and the reviewer, and the reviewer read
+at 1100. **Every other screen in this band is inferred, not observed** — the conditions,
+needs, communication, lender-package and admin screens were not visited between 1024 and
+1280. Nothing structural contradicts the claim (the largest fixed content min-width in the
+tree is 8rem, the reviewer's pane minimum is a percentage rather than a pixel count, and the
+column ladder drops four of the pipeline's nine columns before 1280), so the arithmetic
+leaves ~724px of content at 1024 after the icon rail, the nav column and the shell padding.
+But arithmetic is not a reading of the screen. If one of those screens turns out to be
+unusable in this band, **the fix is to narrow this claim to the screens that were measured,
+not to patch the screen** — the ADR is a promise about what a processor can rely on, and a
+promise made from an inference is the thing to correct.
+
+**Below 1024 is neither designed nor blocked.** It does not overflow and it does not lie,
+and that is the whole claim. A processor assembling a loan file is reading a document beside
+its extracted values, and two things side by side is the product.
+
+*What was NOT done, and why.* The ticket proposed that the reviewer stacks. It does not.
+Once the rail collapses, the three panes have more room at 1100 than they had at 1280 with
+the rail in place, so stacking would cost the side-by-side comparison that is the reviewer's
+entire purpose in order to solve a problem the drawer already solved. The proposal was a
+reasonable guess about what would be needed; the measurement disagreed with it.
+
+*Consequences.* A width below 1024 will eventually be reported as broken by someone, and the
+honest answer is that it is out of scope rather than that it is a bug. If phone support is
+ever wanted, the reviewer is the screen that has to be redesigned rather than reflowed —
+everything else already degrades acceptably.
+
+*Status.* Accepted (LP-UI-037).

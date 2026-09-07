@@ -451,6 +451,7 @@ path. After Cognito lands, every response is a 302 and this becomes impossible.
 | **Nothing in the logs at all** | The container died before logging. With ECS Exec off, run the same image locally with the same environment. |
 | **ACM stuck in `PENDING_VALIDATION`** | Delegation. `dig +short NS <domain>` — you need four `awsdns` answers. |
 | **`No valid credential sources found`** | `AWS_PROFILE` missing on a bare `terraform` command. |
+| **`Terraform is not initialised` / no outputs** | The gitignored `.terraform/` directory is absent — a fresh clone, another machine, or `git clean -xdf`. The remote state is untouched, so this is not an un-applied environment and must not be answered with `phase1`. `terraform -chdir=infra/envs/<env> init`. |
 | **`Inconsistent dependency lock file`** | An `init` ran between plan and apply. Regenerate the plan. |
 | **Apply fails partway** | Re-run. Terraform plans only the difference. |
 

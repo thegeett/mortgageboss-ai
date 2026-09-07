@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { mutate, state, toasts } = vi.hoisted(() => ({
   mutate: vi.fn(),
   state: { isPending: false },
-  toasts: { success: vi.fn(), info: vi.fn(), error: vi.fn() },
+  // `warning` since the wrapper migration — `notifyPartial` uses it. The mock has
+  // to carry every method the wrapper can reach, or a tone change reads as a crash.
+  toasts: { success: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("@/lib/api/documents", () => ({
@@ -68,8 +70,10 @@ describe("ReprocessAll", () => {
     pressAndResolve({ queued: 0, queued_document_ids: [], skipped: { already_classified: 3 } });
 
     expect(toasts.success).not.toHaveBeenCalled();
-    expect(toasts.info).toHaveBeenCalledTimes(1);
-    const info = toasts.info.mock.calls[0];
+    // The WARNING tone, since the wrapper migration: `notifyPartial` is the one
+    // that means "nothing failed and nothing ran", which is what happened here.
+    expect(toasts.warning).toHaveBeenCalledTimes(1);
+    const info = toasts.warning.mock.calls[0];
     expect(info).toBeDefined();
     expect(info?.[1].description).toContain("3 already identified");
   });

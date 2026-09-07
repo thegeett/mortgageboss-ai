@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { type BorrowerPayload, type PropertyPayload, submitIntake } from "@/lib/api/intake";
 import { useLenders } from "@/lib/api/lenders";
 import { normalizeError } from "@/lib/errors/api-error";
+import { notifyPartial, notifySuccess } from "@/lib/toast";
 import {
   INTAKE_DEFAULTS,
   type IntakeFormValues,
@@ -33,7 +34,6 @@ import { AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { type Control, type FieldPath, useForm } from "react-hook-form";
-import { toast } from "sonner";
 
 /** Drop empty-string fields so we only send what was actually entered. */
 function clean(values: Record<string, string>): Record<string, string> {
@@ -124,9 +124,9 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="border-gray-200/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader>
-        <CardTitle className="text-base font-semibold text-gray-900">{title}</CardTitle>
+        <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2">{children}</CardContent>
@@ -201,13 +201,17 @@ export function IntakeForm() {
     // The file now exists; refresh the dashboard list and head to the file.
     queryClient.invalidateQueries({ queryKey: ["loan-files"] });
     if (result.warnings.length > 0) {
-      toast.warning(
-        `File ${result.file.display_id} created, but the ${result.warnings.join(
-          " and ",
-        )} couldn't be saved — you can add it on the file.`,
-      );
+      // A partial success is neither: the file exists, and something the
+      // processor entered did not survive. It says both, and names what to fix.
+      notifyPartial({
+        title: `${result.file.display_id} created, with something missing`,
+        consequence: `The ${result.warnings.join(" and ")} couldn’t be saved. Add it on the file.`,
+      });
     } else {
-      toast.success(`Loan file ${result.file.display_id} created.`);
+      notifySuccess({
+        title: `${result.file.display_id} created`,
+        consequence: "Opening it now — add documents and its checklist builds itself.",
+      });
     }
     router.push(`/loan-files/${result.file.display_id}`);
   };

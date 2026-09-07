@@ -29,6 +29,7 @@ from app.models.loan_file import (
     RefinanceType,
 )
 from app.models.property import OccupancyType, PropertyType
+from app.services.attention import FileAttention
 
 
 class LoanFileCreate(BaseModel):
@@ -115,7 +116,13 @@ def _primary_borrower_name(loan_file: LoanFile, borrowers: list[Borrower]) -> st
 
 
 class LoanFileSummary(BaseModel):
-    """Lean list item. No ``inbox_token``. ``primary_borrower_name`` is derived."""
+    """Lean list item. No ``inbox_token``. ``primary_borrower_name`` is derived.
+
+    ``attention`` is derived server-side (LP-UI-013) because it reads four
+    domains — findings, documents, staleness and needs — and deriving it in the
+    browser would mean those queries per ROW. It is optional so that a caller
+    that does not need it (or a version-skewed client) is unaffected.
+    """
 
     id: UUID
     display_id: str
@@ -129,6 +136,17 @@ class LoanFileSummary(BaseModel):
     primary_borrower_name: str | None
     created_at: datetime
     updated_at: datetime
+    attention: FileAttention | None = None
+
+    @classmethod
+    def list_item(cls, loan_file: LoanFile, attention: "FileAttention | None") -> Self:
+        """Build a LIST row: a summary plus its derived attention (LP-UI-013).
+
+        Separate from `from_model` on purpose. `LoanFileDetail` subclasses this
+        schema, so widening `from_model` would both break its override and give
+        the detail screen an `attention` field it always reports as null.
+        """
+        return cls.from_model(loan_file).model_copy(update={"attention": attention})
 
     @classmethod
     def from_model(cls, loan_file: LoanFile) -> Self:

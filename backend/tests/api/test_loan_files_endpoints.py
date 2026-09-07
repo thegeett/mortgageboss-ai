@@ -23,6 +23,7 @@ from app.models import Borrower, Company, Lender, Property, User, UserRole
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
+from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -477,3 +478,46 @@ async def test_ready_to_submit_blocked_by_open_finding(
         headers=_auth(token),
     )
     assert ok.status_code == 200
+
+
+# --- LP-UI-017 review: the reconciliation route's own tenant boundary -------- #
+
+
+async def test_reconciliation_is_scoped_to_the_callers_company(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Another company's file is a 404 here, not a ledger.
+
+    The endpoint inherits scoping from `get_loan_file`, and inheriting it is the
+    right design — but nothing asserted it on THIS route, and a route that grew
+    its own query later would break the boundary silently. The ledger is the
+    densest disclosure surface in the product: stated income, balances, employer
+    names and the documents behind them, all in one response.
+    """
+    _acme, _user_a, token_a = await _user_and_token(db, slug="acme", email="a@acme.com")
+    beta, _user_b, _token_b = await _user_and_token(db, slug="beta", email="b@beta.com")
+    theirs = await create_loan_file(db, company_id=beta.id)
+    await db.commit()
+
+    resp = await client.get(
+        f"{LOAN_FILES_URL}/{theirs.display_id}/reconciliation", headers=_auth(token_a)
+    )
+
+    assert resp.status_code == 404
+    assert "stated" not in resp.text.lower(), "a 404 must not leak the shape of the ledger"
+
+
+async def test_reconciliation_returns_rows_for_your_own_file(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The positive control — without it the test above passes on a broken route."""
+    company, _user, token = await _user_and_token(db, slug="acme2", email="a@acme2.com")
+    mine = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    resp = await client.get(
+        f"{LOAN_FILES_URL}/{mine.display_id}/reconciliation", headers=_auth(token)
+    )
+
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

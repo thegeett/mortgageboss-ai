@@ -22,6 +22,7 @@ from app.api.needs import router as needs_router
 from app.api.overlay_admin import router as overlay_admin_router
 from app.api.preferences import router as preferences_router
 from app.api.property import router as property_router
+from app.api.saved_views import router as saved_views_router
 from app.api.stated_financials import router as stated_financials_router
 from app.api.validation_aid import router as validation_aid_router
 from app.api.verification import router as verification_router
@@ -111,12 +112,25 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    # A browser can read only the CORS-safelisted response headers unless they
+    # are named here — `allow_headers` is about the REQUEST and does not help.
+    # The reviewer's page endpoint returns its geometry and page count in
+    # headers, and without this they arrive at the client as absent: the width
+    # and height read back as 0 and nothing complained, because nothing was
+    # using them yet. The page count would have been the first thing to break.
+    expose_headers=[
+        "X-Page-Width-Points",
+        "X-Page-Height-Points",
+        "X-Page-Zoom",
+        "X-Page-Count",
+    ],
 )
 
 # Feature routers. Each router carries its own resource prefix under /api/v1, so
 # login lives at "/api/v1/auth/login" and loan files at "/api/v1/loan-files".
 app.include_router(auth_router, prefix=API_V1_PREFIX)
 app.include_router(loan_files_router, prefix=API_V1_PREFIX)
+app.include_router(saved_views_router, prefix=API_V1_PREFIX)
 app.include_router(borrowers_router, prefix=API_V1_PREFIX)
 app.include_router(property_router, prefix=API_V1_PREFIX)
 app.include_router(lenders_router, prefix=API_V1_PREFIX)

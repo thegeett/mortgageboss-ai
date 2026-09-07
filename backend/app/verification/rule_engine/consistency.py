@@ -28,11 +28,13 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Protocol
 
 from app.ai.client import AIClientError
 from app.ai.extraction.parsing import coerce_date
 from app.ai.rule_judgment import Reasoner, RuleJudgmentResult, reason_rule_judgment
+from app.ai.stage_metrics import StageMetrics
 from app.core.logging import get_logger
 from app.verification.rule_engine.enumerators import enumerate_subjects
 from app.verification.rule_engine.gate import GateStatus, evaluate_gate
@@ -415,7 +417,10 @@ def _outcome_result(
 
 
 async def _judge_residue(
-    con: ConsistencyEval, gathered: list[_Gathered], reason_fn: Reasoner
+    con: ConsistencyEval,
+    gathered: list[_Gathered],
+    reason_fn: Reasoner,
+    metrics: StageMetrics | None = None,
 ) -> tuple[str, float | None]:
     """Ask the AI about the DIFFERING residue only (values + sources — never the file). Returns a
     (signal, confidence) where signal is 'agree' / 'disagree' / 'cannot_tell'."""
@@ -428,11 +433,20 @@ async def _judge_residue(
     context = {
         "values": [{"value": value, "sources": sources} for value, sources in by_value.items()]
     }
+    # LP-644 §1 review — a consistency rule calls the model too, so the rules pass is measured
+    # rather than assumed deterministic.
+    call_started = perf_counter()
     try:
         result = await reason_fn(json.dumps(context))
     except AIClientError:
         logger.warning("consistency_ai_failed", rule=con.gather_tag)
         return "ai_failed", None
+    if metrics is not None:
+        metrics.record_call(
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            seconds=perf_counter() - call_started,
+        )
     if result.truncated:
         return "truncated", None
     judgment = result.judgment
@@ -454,6 +468,7 @@ async def evaluate_consistency_rule(
     *,
     reasoner: Reasoner | None = None,
     confidence_floor: float | None = None,
+    metrics: StageMetrics | None = None,
 ) -> list[RuleEvaluation]:
     """Evaluate a cross-source consistency rule over its subjects, entirely from ``spec.consistency``."""
     con = spec.consistency
@@ -634,7 +649,7 @@ async def evaluate_consistency_rule(
             continue
 
         reason_fn = reasoner if reasoner is not None else _bind_prompt(con)
-        signal, ai_confidence = await _judge_residue(con, gathered, reason_fn)
+        signal, ai_confidence = await _judge_residue(con, gathered, reason_fn, metrics)
         conf = ai_confidence if ai_confidence is not None else gate.verdict_confidence
         if signal == "agree":
             results.append(

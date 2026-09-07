@@ -34,6 +34,7 @@ import {
 } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { isProposed } from "@/lib/loan-files/needs";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { NeedsItemPriority, NeedsItemPublic } from "@/lib/types/needs-item";
 import {
   Check,
@@ -45,7 +46,6 @@ import {
   XCircle,
 } from "lucide-react";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 
 /**
  * The possible-duplicate flag (LP-111). When the AI FLAGGED this proposed need as a likely
@@ -62,21 +62,28 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
     <div className="mt-2.5 ml-4 rounded-md border border-warning/30 bg-warning/[0.06] px-3 py-2">
       <div className="flex items-start gap-2">
         <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-        <p className="text-xs leading-relaxed text-gray-600">
+        <p className="text-xs leading-relaxed text-foreground-2">
           Possible duplicate — the AI thinks this may already be requested by another need. Merge
           them, or keep both if they're different.
         </p>
       </div>
       <div className="mt-2 flex gap-1.5 pl-5">
         <Button
-          size="sm"
           variant="outline"
-          className="h-7 gap-1.5 text-xs"
+          className="gap-1.5 text-xs"
           disabled={pending}
           onClick={() =>
             merge.mutate(need.id, {
-              onSuccess: () => toast.success("Merged duplicate"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Merged duplicate",
+                  consequence: "One need remains, carrying both documents' requirements.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t merge the needs",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -84,14 +91,19 @@ export function NeedDuplicateFlag({ fileId, need }: { fileId: string; need: Need
           Merge
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 text-xs text-gray-500"
+          className="text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keepBoth.mutate(need.id, {
-              onSuccess: () => toast.success("Kept both"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Kept both",
+                  consequence:
+                    "They stay as separate needs and won't be offered as a duplicate again.",
+                }),
+              onError: (error) =>
+                notifyError({ title: "Couldn’t keep both", whatToDo: getErrorMessage(error) }),
             })
           }
         >
@@ -120,15 +132,17 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
     <div className="mt-2.5 ml-4 rounded-md border border-info/30 bg-info/[0.06] px-3 py-2">
       <div className="flex items-start gap-2">
         <FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-        <div className="text-xs leading-relaxed text-gray-600">
+        <div className="text-xs leading-relaxed text-foreground-2">
           <p>
-            <span className="font-medium text-gray-700">The file may already answer this.</span>{" "}
+            <span className="font-medium text-foreground-2">The file may already answer this.</span>{" "}
             {need.coverage_note}
           </p>
           {need.possibly_covered_by && (
-            <p className="mt-1 text-gray-500">
+            <p className="mt-1 text-muted-foreground">
               Checked against{" "}
-              <span className="font-medium text-gray-700">{need.possibly_covered_by.filename}</span>
+              <span className="font-medium text-foreground-2">
+                {need.possibly_covered_by.filename}
+              </span>
               .
             </p>
           )}
@@ -136,16 +150,23 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
       </div>
       <div className="mt-2 flex gap-1.5 pl-5">
         <Button
-          size="sm"
           variant="outline"
-          className="h-7 gap-1.5 text-xs"
+          className="gap-1.5 text-xs"
           disabled={pending}
           onClick={() =>
             dismiss.mutate(
               { needId: need.id },
               {
-                onSuccess: () => toast.success("Need dismissed"),
-                onError: (error) => toast.error(getErrorMessage(error)),
+                onSuccess: () =>
+                  notifySuccess({
+                    title: "Need dismissed",
+                    consequence: "It has left the checklist and no longer counts against the file.",
+                  }),
+                onError: (error) =>
+                  notifyError({
+                    title: "Couldn’t dismiss the need",
+                    whatToDo: getErrorMessage(error),
+                  }),
               },
             )
           }
@@ -154,14 +175,18 @@ export function NeedCoverageFlag({ fileId, need }: { fileId: string; need: Needs
           Dismiss need
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 text-xs text-gray-500"
+          className="text-xs text-muted-foreground"
           disabled={pending}
           onClick={() =>
             keep.mutate(need.id, {
-              onSuccess: () => toast.success("Kept — we won't ask again"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Kept",
+                  consequence: "The need stays on the checklist and we won't ask about it again.",
+                }),
+              onError: (error) =>
+                notifyError({ title: "Couldn’t keep the need", whatToDo: getErrorMessage(error) }),
             })
           }
         >
@@ -193,13 +218,20 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
     <div className="flex shrink-0 items-center gap-1.5">
       {attachedGraded && (
         <Button
-          size="sm"
-          className="h-8 gap-1.5"
+          className="gap-1.5"
           disabled={coverage.isPending}
           onClick={() =>
             coverage.mutate(need.id, {
-              onSuccess: () => toast.success("Coverage confirmed"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Coverage confirmed",
+                  consequence: "The need is satisfied by the document you named.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t confirm the coverage",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -213,13 +245,20 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
       )}
       {proposed && !attachedGraded && (
         <Button
-          size="sm"
-          className="h-8 gap-1.5"
+          className="gap-1.5"
           disabled={confirm.isPending}
           onClick={() =>
             confirm.mutate(need.id, {
-              onSuccess: () => toast.success("Need confirmed"),
-              onError: (error) => toast.error(getErrorMessage(error)),
+              onSuccess: () =>
+                notifySuccess({
+                  title: "Need confirmed",
+                  consequence: "It has moved from proposed onto the working checklist.",
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Couldn’t confirm the need",
+                  whatToDo: getErrorMessage(error),
+                }),
             })
           }
         >
@@ -237,7 +276,7 @@ export function NeedActions({ fileId, need }: { fileId: string; need: NeedsItemP
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 text-gray-400 hover:text-gray-600"
+            className="text-muted-foreground hover:text-foreground-2"
             aria-label={`Actions for ${need.title}`}
           >
             <MoreHorizontal className="h-4 w-4" />
@@ -308,10 +347,14 @@ function AdjustDialog({
       { needId: need.id, input },
       {
         onSuccess: () => {
-          toast.success("Need updated");
+          notifySuccess({
+            title: "Need updated",
+            consequence: "The checklist now shows your wording.",
+          });
           onClose();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) =>
+          notifyError({ title: "Couldn’t update the need", whatToDo: getErrorMessage(error) }),
       },
     );
   }
@@ -406,10 +449,21 @@ function ReasonDialog({
       { needId: need.id, reason: reason.trim() || undefined },
       {
         onSuccess: () => {
-          toast.success(kind === "dismiss" ? "Need dismissed" : "Need waived");
+          notifySuccess(
+            kind === "dismiss"
+              ? {
+                  title: "Need dismissed",
+                  consequence: "It has left the checklist and no longer counts against the file.",
+                }
+              : {
+                  title: "Need waived",
+                  consequence: "It stays visible as waived, with your reason, and stops blocking.",
+                },
+          );
           onClose();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) =>
+          notifyError({ title: "Couldn’t record that", whatToDo: getErrorMessage(error) }),
       },
     );
   }

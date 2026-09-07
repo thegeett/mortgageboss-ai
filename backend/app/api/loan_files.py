@@ -31,6 +31,7 @@ from app.schemas.loan_file import (
 )
 from app.schemas.mismo import MismoImportResponse
 from app.schemas.stated_financials import StatedFinancialsResponse
+from app.services.attention import attention_for_files
 from app.services.loan_files import (
     FileBlockedError,
     create_loan_file_with_setup,
@@ -39,6 +40,7 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
+from app.services.reconciliation import ReconciliationRow, reconcile_loan_file
 from app.services.stated_financials import get_stated_financials
 from app.tasks.needs import propose_ai_needs
 
@@ -224,8 +226,12 @@ async def list_files(
         statuses=status,
         search=search,
     )
+    # One derivation for the whole page — three aggregates, not three per row.
+    # The user is what fixes the confidence cutoff each file's blocking count is
+    # measured against, so the dashboard agrees with the file screen it links to.
+    attention = await attention_for_files(db, items, user=current_user)
     return PaginatedLoanFiles(
-        items=[LoanFileSummary.from_model(item) for item in items],
+        items=[LoanFileSummary.list_item(item, attention.get(item.id)) for item in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -299,3 +305,18 @@ async def delete(identifier: str, db: DbSession, current_user: CurrentUser) -> N
         db, loan_file=loan_file, actor_user_id=current_user.id
     )
     await db.commit()
+
+
+@router.get("/{identifier}/reconciliation", response_model=list[ReconciliationRow])
+async def get_reconciliation(
+    identifier: str, db: DbSession, current_user: CurrentUser
+) -> list[ReconciliationRow]:
+    """The file's reconciliation ledger — stated against found, with provenance.
+
+    Tenant-scoped through the same `get_loan_file` gate every other file route
+    uses, so an id from another company is a 404 before any row is built.
+    """
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    if loan_file is None:
+        raise _NOT_FOUND
+    return await reconcile_loan_file(db, loan_file)

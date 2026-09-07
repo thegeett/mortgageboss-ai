@@ -278,14 +278,27 @@ tf_plan() {
 
 TF_OUTPUT_CACHE=""
 
+# Why the last load_outputs() failed. An uninitialised directory and an un-applied
+# environment both leave us with no outputs, and they need opposite fixes -- one is
+# a local `init`, the other re-applies infrastructure. Terraform distinguishes them
+# on stderr, so stderr is kept rather than discarded.
+TF_OUTPUT_STDERR=""
+
 load_outputs() {
-  local dir="$1"
+  local dir="$1" errfile
   [ -n "$TF_OUTPUT_CACHE" ] && [ -f "$TF_OUTPUT_CACHE" ] && return 0
   TF_OUTPUT_CACHE=$(mktemp "${TMPDIR:-/tmp}/deploy-outputs.XXXXXX")
-  if ! tf "$dir" output -json >"$TF_OUTPUT_CACHE" 2>/dev/null; then
-    rm -f "$TF_OUTPUT_CACHE"; TF_OUTPUT_CACHE=""
+  errfile=$(mktemp "${TMPDIR:-/tmp}/deploy-outputs-err.XXXXXX")
+  # -no-color so an error quoted back to the user carries no ANSI escapes.
+  if ! tf "$dir" output -json -no-color >"$TF_OUTPUT_CACHE" 2>"$errfile"; then
+    TF_OUTPUT_STDERR=$(cat "$errfile")
+    rm -f "$TF_OUTPUT_CACHE" "$errfile"; TF_OUTPUT_CACHE=""
     return 1
   fi
+  rm -f "$errfile"
+  # Terraform ran and answered. An empty result is the genuine un-applied case, and
+  # an empty TF_OUTPUT_STDERR is what tells require_outputs so.
+  TF_OUTPUT_STDERR=""
   # An un-applied environment yields `{}` -- valid JSON, no outputs.
   [ "$(jq -r 'length' "$TF_OUTPUT_CACHE")" = "0" ] && return 1
   return 0
@@ -293,10 +306,30 @@ load_outputs() {
 
 require_outputs() {
   local dir="$1"
-  load_outputs "$dir" || die \
+  load_outputs "$dir" && return 0
+
+  # `.terraform/` is gitignored -- correctly, it is a provider cache and not source
+  # -- so it never arrives with a clone. A fresh checkout, a second machine or a
+  # `git clean -xdf` leaves the directory uninitialised while the remote state, and
+  # every resource it describes, is untouched. Telling that user to run `phase1`
+  # points them at an apply against live infrastructure to fix a missing local
+  # cache. Terraform names the real problem on stderr; say what it said.
+  if printf '%s' "$TF_OUTPUT_STDERR" | grep -qi 'terraform init'; then
+    die "Terraform is not initialised in $dir." \
+      "This is the local .terraform/ directory, which is gitignored and so never" \
+      "arrives with a clone. The remote state is untouched and the environment has" \
+      "NOT been destroyed -- nothing needs re-applying. Restore the cache with:" \
+      "" \
+      "  AWS_PROFILE=$AWS_PROFILE terraform -chdir=$dir init" \
+      "" \
+      "Terraform reported:" \
+      "$(printf '%s' "$TF_OUTPUT_STDERR" | grep -i 'Error:' | head -1)"
+  fi
+
+  die \
     "No Terraform outputs for environment '$ENV_NAME'." \
-    "The environment has not been applied yet, or this directory has not been" \
-    "initialised. Run:  ./scripts/deploy $ENV_NAME phase1"
+    "Terraform ran and returned no outputs, so this environment has not been" \
+    "applied yet. Run:  ./scripts/deploy $ENV_NAME phase1"
 }
 
 # Scalar output. Dies when absent, because every caller needs a real value and a

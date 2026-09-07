@@ -12,9 +12,15 @@
  * ratification-pending judgment is not a violation) — same tab, the detail says which.
  */
 import { humanize } from "@/lib/format";
+import { EVALUATION_OUTCOME, type Tone, resolveStatus } from "@/lib/status";
 import type { EvaluationOutcome, RuleFinding } from "@/lib/types/verification";
 
-export type GovernedTabId = "attention" | "satisfied" | "no_longer_applies" | "not_applicable";
+export type GovernedTabId =
+  | "attention"
+  | "couldnt_check"
+  | "satisfied"
+  | "no_longer_applies"
+  | "not_applicable";
 // LP-586 — `cross_source` is neither governed nor legacy: a separate AI pass over the SNAPSHOT,
 // with its own stability contract and no apply. It gets its own id rather than being folded
 // into either family, because it answers a different question from both.
@@ -23,7 +29,11 @@ export type TabId = GovernedTabId | "legacy" | "cross_source";
 /** The §8 outcomes → their governed tab. */
 const OUTCOME_TAB: Record<EvaluationOutcome, GovernedTabId> = {
   open: "attention",
-  couldnt_check: "attention",
+  // LP-UI-020 — ITS OWN TAB. "We could not check this" is a different job from
+  // "this is wrong": one is chased with a document request, the other with a
+  // correction. On LF-96SV there are 62 of them against 10 real violations, so
+  // sharing a tab was the exact drowning LP-333 warned about, one layer up.
+  couldnt_check: "couldnt_check",
   needs_review: "attention",
   pending_automation: "attention", // LP-391 — a manual-review flag lives where the work is (Tab 1)
   satisfied: "satisfied",
@@ -45,82 +55,66 @@ export function tabForOutcome(outcome: EvaluationOutcome): GovernedTabId {
  * of `couldnt_check` (LP-333's warning, one layer up). */
 export const ATTENTION_ORDER: readonly EvaluationOutcome[] = [
   "open",
-  "couldnt_check",
   "needs_review",
   "pending_automation",
 ] as const;
-
-export type OutcomeTone = "danger" | "warning" | "info" | "success" | "muted";
 
 export interface OutcomeMeta {
   /** The short label a processor triages on. */
   label: string;
   /** One line: what THIS outcome means (so `couldnt_check` reads as a gap, not a violation). */
   blurb: string;
-  tone: OutcomeTone;
+  tone: Tone;
 }
+
+/**
+ * The prose. LP-UI-005 moved the LABEL and the TONE to `lib/status.ts`
+ * (EVALUATION_OUTCOME) so every domain shares one colour vocabulary; what stays
+ * here is the domain writing, which is not presentation and was argued out in
+ * LP-583 and LP-581.
+ *
+ * Two outcomes changed TONE and neither changed wording: `needs_review` and
+ * `pending_automation` were `info` and are now `attention`. Both mean a human
+ * must look — which is what `attention` means, and which is the tab they were
+ * already bucketed into by ATTENTION_ORDER.
+ */
+const OUTCOME_BLURB: Record<EvaluationOutcome, string> = {
+  // LP-583 — "Violation" is not vocabulary at any stage of the loan: processors and underwriters
+  // say "condition", post-close QC says "defect" (Fannie's and FHA's taxonomies are both Defect
+  // Taxonomies). It was also the only severity NOUN in a set of action phrases — "Needs review",
+  // "Couldn't check". "Must fix" matches the register and says what to do.
+  open: "A rule fired — a real finding that needs action.",
+  couldnt_check:
+    "The rule applies and the thing might exist, but a required input is missing — a gap, not a pass.",
+  // LP-581 — plain English: "ratification" is the engine's word (ADR-336), not a processor's.
+  needs_review: "A judgment awaiting your sign-off — not a violation.",
+  pending_automation:
+    "This file has something in scope, but the automated check isn't active yet — a human must review it. The system has NOT judged it (not a pass/fail).",
+  satisfied: "The rule ran and passed — with evidence.",
+  no_longer_applies: "The subject left the file since a prior run.",
+  not_applicable: "The rule is irrelevant to this subject's nature — not a pass, and not a gap.",
+};
 
 /** Shown for an outcome outside this union (a backend enum that grew) — surfaced, never crashed on. */
 const FALLBACK_META: OutcomeMeta = {
   label: "Unknown outcome",
   blurb:
     "An outcome this view doesn't recognise yet — surfaced here so it is never silently dropped.",
-  tone: "warning",
+  tone: "attention",
 };
 
-/** OUTCOME_META lookup that never returns undefined: an outcome outside the union → a safe fallback, so
- *  one unexpected value degrades a single row instead of crashing the whole tabs render. */
+/** Never returns undefined: an outcome outside the union → a safe fallback, so one unexpected value
+ *  degrades a single row instead of crashing the whole tabs render. */
 export function outcomeMeta(outcome: EvaluationOutcome): OutcomeMeta {
-  return OUTCOME_META[outcome] ?? FALLBACK_META;
+  const blurb = OUTCOME_BLURB[outcome];
+  if (!blurb) return FALLBACK_META;
+  const { label, tone } = resolveStatus(EVALUATION_OUTCOME, outcome);
+  return { label, blurb, tone };
 }
-
-export const OUTCOME_META: Record<EvaluationOutcome, OutcomeMeta> = {
-  open: {
-    // LP-583 — "Violation" is not vocabulary at any stage of the loan: processors and underwriters
-    // say "condition", post-close QC says "defect" (Fannie's and FHA's taxonomies are both Defect
-    // Taxonomies). It was also the only severity NOUN in a set of action phrases — "Needs review",
-    // "Couldn't check". "Must fix" matches the register and says what to do.
-    label: "Must fix",
-    blurb: "A rule fired — a real finding that needs action.",
-    tone: "danger",
-  },
-  couldnt_check: {
-    label: "Couldn't check",
-    blurb:
-      "The rule applies and the thing might exist, but a required input is missing — a gap, not a pass.",
-    tone: "warning",
-  },
-  needs_review: {
-    label: "Needs review",
-    // LP-581 — plain English: "ratification" is the engine's word (ADR-336), not a processor's.
-    blurb: "A judgment awaiting your sign-off — not a violation.",
-    tone: "info",
-  },
-  pending_automation: {
-    label: "Manual review",
-    blurb:
-      "This file has something in scope, but the automated check isn't active yet — a human must review it. The system has NOT judged it (not a pass/fail).",
-    tone: "info",
-  },
-  satisfied: {
-    label: "Satisfied",
-    blurb: "The rule ran and passed — with evidence.",
-    tone: "success",
-  },
-  no_longer_applies: {
-    label: "No longer applies",
-    blurb: "The subject left the file since a prior run.",
-    tone: "muted",
-  },
-  not_applicable: {
-    label: "Not applicable",
-    blurb: "The rule is irrelevant to this subject's nature — not a pass, and not a gap.",
-    tone: "muted",
-  },
-};
 
 export interface GovernedBuckets {
   attention: RuleFinding[];
+  couldnt_check: RuleFinding[];
   satisfied: RuleFinding[];
   no_longer_applies: RuleFinding[];
   not_applicable: RuleFinding[];
@@ -130,6 +124,7 @@ export interface GovernedBuckets {
 export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
   const buckets: GovernedBuckets = {
     attention: [],
+    couldnt_check: [],
     satisfied: [],
     no_longer_applies: [],
     not_applicable: [],
@@ -314,6 +309,57 @@ const PHASE_LABELS: Record<string, string> = {
 
 export function phaseLabel(phase: string): string {
   return PHASE_LABELS[phase] ?? "Working";
+}
+
+/** A finished run's duration in whole seconds, or null when it cannot be known. */
+export function runDurationSeconds(run: {
+  started_at: string | null;
+  completed_at: string | null;
+}): number | null {
+  if (!run.started_at || !run.completed_at) return null;
+  const seconds = (Date.parse(run.completed_at) - Date.parse(run.started_at)) / 1000;
+  // NaN from an unparseable date, and negatives from clock skew between the two writes, both mean
+  // "no honest answer" — better nothing than a duration of -3 seconds on screen.
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
+}
+
+/** `938` -> `"15m 38s"`, `47` -> `"47s"`. Compact enough for a secondary line. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+/**
+ * What the last run was and how long it took — the line beside "Re-run anyway".
+ *
+ * TO THE SECOND, unlike `remainingLabel` below, and the difference is the point. That one rounds to
+ * the minute because it renders an ESTIMATE with about half a minute of spread, and a ticking
+ * countdown would claim a precision it does not have. This renders a MEASUREMENT of a run that has
+ * already finished: the duration is exactly known, so rounding it away would discard real
+ * information — including the thing a processor most wants from it, which is whether a re-run costs
+ * them one minute or fifteen.
+ *
+ * Returns null for a RUNNING run rather than a placeholder. While a pass is in flight `latest_run`
+ * IS that pass, so it has no duration yet, and the panel is already showing its phase and estimate
+ * two lines up. A "last run" line there would describe the run the processor is watching.
+ */
+export function lastRunLabel(
+  run: {
+    status: "running" | "completed" | "failed";
+    started_at: string | null;
+    completed_at: string | null;
+  } | null,
+  relative: (iso: string) => string,
+): string | null {
+  if (!run || run.status === "running" || !run.completed_at) return null;
+  const when = relative(run.completed_at);
+  const seconds = runDurationSeconds(run);
+  const verb = run.status === "failed" ? "Last run failed" : "Last run";
+  return seconds === null ? `${verb} ${when}` : `${verb} ${when} · took ${formatDuration(seconds)}`;
 }
 
 /** LP-591 — remaining time, in a processor's words, or null when there is nothing honest to say.

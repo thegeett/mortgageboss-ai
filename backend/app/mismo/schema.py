@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 class ParsedIncomeItem(BaseModel):
@@ -237,6 +238,57 @@ class CatchAllSection(BaseModel):
     fields: list[CatchAllField] = Field(default_factory=list)
 
 
+class WarningSubject(StrEnum):
+    """Which part of the file a parse warning is about (LP-UI-024).
+
+    The parser knows exactly what it was looking for when it gave up, and threw
+    that away: every warning was a bare sentence, so a screen wanting to link one
+    to the field it concerns had to recognise its own prose. The subject is
+    recorded where it is known rather than recovered later by matching strings.
+
+    Deliberately coarse — these name the sections a reader can be sent to, not
+    MISMO paths. `OTHER` is a real member rather than a fallback for a subject
+    nobody thought of: a warning belonging to no section still has to appear.
+    """
+
+    BORROWERS = "borrowers"
+    INCOME = "income"
+    LOAN = "loan"
+    PROPERTY = "property"
+    OTHER = "other"
+
+
+class ParseWarning(BaseModel):
+    """One needed-now field that was missing or odd. Never carries a PII value."""
+
+    message: str
+    subject: WarningSubject = WarningSubject.OTHER
+
+    @classmethod
+    def coerce(cls, raw: object) -> ParseWarning:
+        """Read a stored warning, which may predate the subject (LP-UI-024).
+
+        `parse_warnings` is JSON and rows written before this change hold bare
+        strings. They are still true and still worth showing, so they read as
+        `OTHER` rather than being dropped or crashing the response.
+        """
+        if isinstance(raw, str):
+            return cls(message=raw)
+        if isinstance(raw, dict):
+            try:
+                return cls.model_validate(raw)
+            except ValidationError:
+                # A SUBJECT this build does not know — the mirror of the case
+                # above, and the one a rollback produces: a newer version writes
+                # a subject that is later read by an older one. Handling only the
+                # backward direction is half a guarantee, and the failure is a
+                # 500 on the response rather than a missing link. The message is
+                # still true and still worth showing.
+                message = raw.get("message")
+                return cls(message=message if isinstance(message, str) else str(raw))
+        return cls(message=str(raw))
+
+
 class ParsedMismo(BaseModel):
     """The full deterministic parse: typed core + catch-all + parse metadata."""
 
@@ -249,5 +301,5 @@ class ParsedMismo(BaseModel):
     owned_properties: list[ParsedOwnedProperty] = Field(default_factory=list)
     catch_all: list[CatchAllSection] = Field(default_factory=list)
     # Needed-now fields that were missing / odd (never includes PII values).
-    parse_warnings: list[str] = Field(default_factory=list)
+    parse_warnings: list[ParseWarning] = Field(default_factory=list)
     source_format: str = "xml"  # "xml" | "html"

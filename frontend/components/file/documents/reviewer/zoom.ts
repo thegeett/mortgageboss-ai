@@ -1,0 +1,97 @@
+/**
+ * The reviewer's zoom (LP-UI-042).
+ *
+ * SCALED IN CSS, not re-rendered on the server. The page arrives at 2× its point
+ * size — a 612pt page is ~1224px of image in a ~736px column — so there is real
+ * oversampling to spend. Zooming OUT is always sharp, and zooming in stays sharp
+ * to roughly 165% before the browser starts inventing pixels.
+ *
+ * The alternative is asking the server for a bigger render at each step. That
+ * costs a round trip per zoom, and it buys sharpness only above the range most
+ * of this one covers. It is the right trade the other way round if a processor
+ * ever needs to read a signature at 400%, and the endpoint already takes a
+ * `zoom` parameter for that day.
+ *
+ * The highlight boxes need no adjustment: they are normalised 0..1 against the
+ * page and positioned as percentages of the image's own box, so they scale with
+ * it exactly (LP-UI-031).
+ */
+
+/** The steps, smallest first. `FIT` is the one a document opens at. */
+export const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+export const FIT: number = 1;
+
+/**
+ * The zoom above which CSS scaling outruns the render and the text softens.
+ *
+ * IT IS NOT A CONSTANT, which is what the previous `SHARP_TO = 1.65` said it was.
+ * Sharpness holds while the displayed width stays inside the rendered width, so
+ * the threshold is a RATIO of the two — and the displayed width is the canvas
+ * pane, which a processor drags. The server renders at `DEFAULT_ZOOM = 2.0`
+ * (`page_render.py`), so a 612pt US Letter page arrives as 1224px:
+ *
+ * | pane   | sharp up to |
+ * |--------|-------------|
+ * | 560px  | 2.19x       |
+ * | 736px  | 1.66x       |
+ * | 1024px | 1.20x       |
+ * | 1440px | 0.85x       |
+ *
+ * 1.65 was the 736px row, written down as though it held everywhere. At a
+ * 1440px pane even FIT is already soft — the case a single number cannot say.
+ *
+ * Both widths are available now: the rendered width comes from
+ * `X-Page-Width-Points` (readable since LP-UI-041's CORS fix) and the displayed
+ * width from the pane. Nothing calls this yet; it is here so the arithmetic is
+ * written where it can be used, rather than as a number that looks measured.
+ */
+export function sharpUpTo(renderedWidthPx: number, displayedWidthPx: number): number {
+  if (displayedWidthPx <= 0) return Number.POSITIVE_INFINITY;
+  return renderedWidthPx / displayedWidthPx;
+}
+
+export function zoomIn(current: number): number {
+  return ZOOM_STEPS.find((step) => step > current) ?? current;
+}
+
+export function zoomOut(current: number): number {
+  return [...ZOOM_STEPS].reverse().find((step) => step < current) ?? current;
+}
+
+export function canZoomIn(current: number): boolean {
+  return zoomIn(current) !== current;
+}
+
+export function canZoomOut(current: number): boolean {
+  return zoomOut(current) !== current;
+}
+
+/** "125%" — the readout, and the accessible name of the reset control. */
+export function zoomLabel(current: number): string {
+  return `${Math.round(current * 100)}%`;
+}
+
+/**
+ * The image's width at this zoom.
+ *
+ * `min(100%, 46rem)` is the unzoomed column: fit the pane, but never wider than
+ * a comfortable reading measure. Multiplying THAT keeps zoom-out proportional on
+ * a narrow pane, where a fixed 46rem base would make 50% wider than the pane it
+ * is meant to fit inside.
+ */
+/**
+ * The unzoomed page column, in rem.
+ *
+ * NAMED BECAUSE THE BACKEND DEPENDS ON IT. `MAX_RENDERED_EDGE` in
+ * `services/page_render.py` is derived from this number times the largest zoom
+ * step times a 2x device pixel ratio — pixels past that are shipped, decoded and
+ * never seen. Nothing connected the two, so widening this column would have
+ * silently started costing sharpness instead of showing more page.
+ * `page-budget.test.ts` does that arithmetic against the Python source.
+ */
+export const PAGE_COLUMN_REM = 46;
+
+export function zoomWidth(current: number): string {
+  return `calc(min(100%, ${PAGE_COLUMN_REM}rem) * ${current})`;
+}

@@ -2,6 +2,9 @@ import { AxiosError, AxiosHeaders } from "axios";
 import { describe, expect, it } from "vitest";
 import { getErrorMessage, normalizeError } from "./api-error";
 
+/** The fallback wording, asserted in one place so a copy change is one edit. */
+const GENERIC = "The request didn't complete, and nothing was saved. Try again.";
+
 /** Build an AxiosError carrying a given response (status + data), like the client sees. */
 function axiosErrorWith(status: number, data: unknown): AxiosError {
   const err = new AxiosError("Request failed");
@@ -63,7 +66,7 @@ describe("normalizeError", () => {
 
   it("uses a safe generic message when the body has none", () => {
     const result = normalizeError(axiosErrorWith(500, {}));
-    expect(result.message).toBe("Something went wrong. Please try again.");
+    expect(result.message).toBe(GENERIC);
   });
 
   it("never throws on a non-axios value", () => {
@@ -71,8 +74,44 @@ describe("normalizeError", () => {
     expect(result.kind).toBe("unknown");
     expect(result.status).toBeNull();
     // Safe generic — never the raw internal text.
-    expect(result.message).toBe("Something went wrong. Please try again.");
+    expect(result.message).toBe(GENERIC);
     expect(result.message).not.toContain("/internal/path");
+  });
+});
+
+describe("isGeneric — did the server actually say anything? (LP-UI-034)", () => {
+  /**
+   * Two call sites replace the fallback with something better ("The upload didn't
+   * complete", "This file couldn't be read as a MISMO file"). Both used to decide
+   * by comparing against the fallback's WORDING, which this ticket changed. The
+   * flag is what they branch on now, so getting it backwards means either always
+   * overriding a real server message, or never replacing the blank.
+   */
+  it("is false when the server sent a message", () => {
+    const result = normalizeError(axiosErrorWith(422, { error: { message: "Not a MISMO file." } }));
+    expect(result.isGeneric).toBe(false);
+    expect(result.message).toBe("Not a MISMO file.");
+  });
+
+  it("is false for the legacy `detail` shape too", () => {
+    const result = normalizeError(axiosErrorWith(400, { detail: "Bad request." }));
+    expect(result.isGeneric).toBe(false);
+  });
+
+  it("is true when the body carried nothing usable", () => {
+    expect(normalizeError(axiosErrorWith(500, {})).isGeneric).toBe(true);
+  });
+
+  it("is true for a non-axios throw", () => {
+    expect(normalizeError(new Error("render bug")).isGeneric).toBe(true);
+  });
+
+  it("is false for a network failure, which has its own real message", () => {
+    // A caller must not overwrite "Couldn't connect" with an upload-specific
+    // guess: the connection is the finding, and it is more useful than the guess.
+    const offline = normalizeError(Object.assign(new Error("net"), { isAxiosError: true }));
+    expect(offline.kind).toBe("network");
+    expect(offline.isGeneric).toBe(false);
   });
 });
 
@@ -81,6 +120,6 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(axiosErrorWith(404, { error: { message: "Not found" } }))).toBe(
       "Not found",
     );
-    expect(getErrorMessage("a bare string")).toBe("Something went wrong. Please try again.");
+    expect(getErrorMessage("a bare string")).toBe(GENERIC);
   });
 });

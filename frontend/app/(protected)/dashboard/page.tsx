@@ -1,19 +1,19 @@
 "use client";
 
 import { FileTable } from "@/components/dashboard/file-table";
-import { FilterPills } from "@/components/dashboard/filter-pills";
 import { SearchInput } from "@/components/dashboard/search-input";
-import { StatsCards } from "@/components/dashboard/stats-cards";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
-import { type FilterKey, statusesForFilter } from "@/lib/loan-files/status";
+import { byAttention } from "@/lib/loan-files/attention";
+import { isFiltered, usePipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
+import { LOAN_FILE_STATUS } from "@/lib/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 const PAGE_SIZE = 20;
 
@@ -27,23 +27,47 @@ export default function DashboardPage() {
   const router = useRouter();
   const firstName = useAuthStore((state) => state.user?.first_name);
 
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [searchInput, setSearchInput] = useState("");
+  // Filter state lives in the URL (LP-UI-014), not in component state, so a
+  // processor can paste what they are looking at to a colleague. The search box
+  // keeps local state only for what has been typed but not yet committed —
+  // pushing a route on every keystroke would fill the history with fragments.
+  const urlState = usePipelineUrl();
+
+  const [searchInput, setSearchInput] = useState(urlState.search);
   const [page, setPage] = useState(1);
-  const search = useDebouncedValue(searchInput.trim(), 300);
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
 
-  const statuses = useMemo(() => statusesForFilter(filter), [filter]);
+  // The URL is the source of truth; the typed value catches up to it.
+  useEffect(() => {
+    setSearchInput(urlState.search);
+  }, [urlState.search]);
 
-  // Changing a filter or the search resets to the first page (done in the
-  // handlers rather than an effect, so there's no extra render/refetch).
-  const handleFilter = (next: FilterKey) => {
-    setFilter(next);
+  // Page 1 whenever the FILTER changes — any part of it, not just the search.
+  // Keyed on the serialised state so statuses and the selected view count too:
+  // switching from "All files" on page 3 to a view with two matches left `page`
+  // at 3, and the table came back empty under "Showing 41–60 of 2".
+  //
+  // Adjusted DURING RENDER rather than in an effect. React documents this for
+  // exactly this case, and it is not a style preference here: an effect resets
+  // after a paint, so the wrong page is fetched and rendered first and the
+  // corrected one arrives behind it. It also keeps this off the effect graph —
+  // the search sync below is then the only effect writing state, so the two
+  // cannot feed each other.
+  const filterKey = writePipelineUrl(urlState);
+  const [pagedFilter, setPagedFilter] = useState(filterKey);
+  if (pagedFilter !== filterKey) {
+    setPagedFilter(filterKey);
     setPage(1);
-  };
-  const handleSearch = (next: string) => {
-    setSearchInput(next);
-    setPage(1);
-  };
+  }
+
+  // ...and it catches up the other way once typing settles.
+  useEffect(() => {
+    if (debouncedSearch === urlState.search) return;
+    router.replace(`/dashboard${writePipelineUrl({ ...urlState, search: debouncedSearch })}`);
+  }, [debouncedSearch, urlState, router]);
+
+  const statuses = urlState.statuses;
+  const search = urlState.search;
 
   const { data, isPending, isError } = useLoanFiles({
     page,
@@ -51,8 +75,33 @@ export default function DashboardPage() {
     statuses,
     search,
   });
+  // Default order is "what needs me first" (LP-UI-013), not most-recently-
+  // touched. Memoised so the table is not handed a new array every render.
+  const sorted = useMemo(() => byAttention(data?.items ?? []), [data?.items]);
 
-  const isFiltered = filter !== "all" || search !== "";
+  const filtered = isFiltered(urlState);
+
+  // How many files exist with NOTHING filtered — fetched only when the processor
+  // is already looking at an empty filtered list, so the extra request happens in
+  // the one state where the answer is worth a round trip. `page_size: 1` because
+  // only `total` is read.
+  const { data: unfiltered } = useLoanFiles(
+    { page: 1, pageSize: 1, statuses: [], search: "" },
+    { enabled: filtered && !isPending && (data?.items.length ?? 0) === 0 },
+  );
+
+  const filterSummary = {
+    search,
+    statusLabel:
+      statuses.length === 1 && statuses[0]
+        ? LOAN_FILE_STATUS[statuses[0]].label
+        : statuses.length > 1
+          ? `${statuses.length} statuses`
+          : null,
+    unfilteredTotal: unfiltered?.total ?? null,
+  };
+
+  const clearFilters = () => router.replace("/dashboard");
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -65,10 +114,14 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          {/* h2, not h1: the topbar breadcrumb already carries the page's h1
+              ("Dashboard"), and it is the only h1 on every other route. Two h1s
+              on one page gives a screen reader two answers to "where am I". This
+              is a greeting under that heading, not a second title. */}
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
             {firstName ? `Welcome back, ${firstName}.` : "Dashboard"}
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">Your loan file worklist.</p>
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">Your loan file worklist.</p>
         </div>
         <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">
           <Plus className="h-4 w-4" />
@@ -76,29 +129,35 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <StatsCards />
-
-      <Card className="overflow-hidden border-gray-200/80 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <FilterPills value={filter} onChange={handleFilter} />
-          <SearchInput value={searchInput} onChange={handleSearch} />
+      <Card className="border-border/80">
+        <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+          {/* The four hard-coded pills are gone (LP-UI-014) — saved views in
+              the context column replace them. What is left here is the search,
+              and the name of the view you are looking at. */}
+          <p className="text-sm text-muted-foreground">
+            {total} {total === 1 ? "file" : "files"}
+            {filtered ? " matching" : ""}
+          </p>
+          <SearchInput value={searchInput} onChange={setSearchInput} />
         </div>
 
         <FileTable
-          files={data?.items ?? []}
+          files={sorted}
           isPending={isPending}
           isError={isError}
-          isFiltered={isFiltered}
+          isFiltered={filtered}
+          filterSummary={filterSummary}
+          onClearFilters={clearFilters}
           onSelect={goToFile}
           onNewFile={newFile}
         />
 
         {!isError && total > 0 && (
-          <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm text-gray-500">
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
             <span>
-              Showing <span className="font-medium text-gray-700">{rangeStart}</span>–
-              <span className="font-medium text-gray-700">{rangeEnd}</span> of{" "}
-              <span className="font-medium text-gray-700">{total}</span>
+              Showing <span className="font-medium text-foreground-2">{rangeStart}</span>–
+              <span className="font-medium text-foreground-2">{rangeEnd}</span> of{" "}
+              <span className="font-medium text-foreground-2">{total}</span>
             </span>
             <div className="flex items-center gap-2">
               <Button

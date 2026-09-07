@@ -31,6 +31,8 @@ const VIEW: CalculatorView = {
       amount: "300000.00",
       source: "stated",
       overridden: false,
+      override_by: null,
+      override_note: null,
     },
   ],
   steps: [
@@ -40,7 +42,11 @@ const VIEW: CalculatorView = {
   ],
   formulas: ["Upfront MIP = base loan amount x UFMIP rate (financed into the loan)"],
   methodology: { starter: true, text: "UFMIP is consumed from LP-84's rule." },
-  findings: { unresolved: false, open_in_scope_count: 0 },
+  findings: {
+    unresolved: false,
+    open_in_scope_count: 0,
+    breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 0 },
+  },
 };
 
 function mockCalc(overrides: Partial<ReturnType<typeof useCalcMock>> = {}) {
@@ -90,10 +96,78 @@ describe("CalculatorCard", () => {
   });
 
   it("shows the unresolved-findings alert", () => {
-    mockCalc({ data: { ...VIEW, findings: { unresolved: true, open_in_scope_count: 1 } } });
+    mockCalc({
+      data: {
+        ...VIEW,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 1,
+          breakdown: { governed: 1, cross_source: 0, legacy: 0, other: 0 },
+        },
+      },
+    });
     render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
     expect(screen.getByRole("alert")).toBeDefined();
-    expect(screen.getByText(/1 unresolved finding/)).toBeDefined();
+    expect(screen.getByText(/1 rule finding unresolved/)).toBeDefined();
+  });
+
+  it("names each system rather than one merged total (LP-UI-021)", () => {
+    // This read "91 unresolved findings", which reconciled with nothing on the
+    // screen: the verification tabs showed 75 governed and 13 legacy, and the
+    // remaining 3 cross-checks appeared nowhere at all. One number over three
+    // generators is also LP-375's separation collapsed — the governed engine and
+    // the legacy sweep are never summed.
+    mockCalc({
+      data: {
+        ...VIEW,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 91,
+          breakdown: { governed: 75, cross_source: 3, legacy: 13, other: 0 },
+        },
+      },
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("75 rule findings");
+    expect(alert.textContent).toContain("3 cross-checks");
+    expect(alert.textContent).toContain("13 old findings");
+    // And NEVER the sum.
+    expect(alert.textContent).not.toContain("91");
+  });
+
+  it("omits a system with nothing outstanding", () => {
+    mockCalc({
+      data: {
+        ...VIEW,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 4,
+          breakdown: { governed: 4, cross_source: 0, legacy: 0, other: 0 },
+        },
+      },
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("4 rule findings");
+    expect(alert.textContent).not.toContain("old findings");
+  });
+
+  it("gives an unknown generator its own clause instead of hiding it", () => {
+    // `other` is counted server-side, never inferred. A generator this split does
+    // not know about must appear rather than inflate one of the three named ones.
+    mockCalc({
+      data: {
+        ...VIEW,
+        findings: {
+          unresolved: true,
+          open_in_scope_count: 2,
+          breakdown: { governed: 0, cross_source: 0, legacy: 0, other: 2 },
+        },
+      },
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+    expect(screen.getByRole("alert").textContent).toContain("2 other");
   });
 
   it("renders an error with retry", () => {
@@ -102,5 +176,129 @@ describe("CalculatorCard", () => {
     render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(refetch).toHaveBeenCalled();
+  });
+});
+
+describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
+  afterEach(cleanup);
+
+  const TWO_INPUTS: CalculatorView = {
+    ...VIEW,
+    inputs: [
+      ...VIEW.inputs,
+      {
+        key: "mi.ltv",
+        label: "LTV",
+        auto_amount: "96.50",
+        override_amount: null,
+        amount: "96.50",
+        source: "computed",
+        overridden: false,
+        // Added by the merge: this fixture predates the two fields our branch put
+        // on `CalcLine`, so it typechecked on its own branch and not against ours.
+        override_by: null,
+        override_note: null,
+      },
+    ],
+  };
+
+  /** THE SAME DEFECT AS THE DTI PANEL'S, in the same shape, which is why it is fixed in both. A
+   *  single `editingKey` at the parent plus a draft local to the row meant opening a second input
+   *  discarded the first, silently. Fixing one component and leaving its twin is the failure this
+   *  repo keeps repeating. */
+  it("keeps a draft when the processor opens another input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    // The read-only trigger is the amount itself, not a labelled control.
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312500/)).toBeTruthy();
+  });
+
+  /** The reset-on-re-entry, pinned. Removing `setDraft(item.amount)` from the trigger was part of
+   *  this fix and NOTHING covered it — a mutation re-introducing it passed clean until this existed.
+   *  Without it a paused edit survives the switch and is then overwritten the moment the processor
+   *  returns to correct it, which is the same loss one step later. */
+  /** THE RELOAD GUARD, WHICH NOTHING HELD. `beforeunload` appears in three components — this
+   *  card, the DTI panel and the LTV panel — and in no test on either branch, so deleting the
+   *  listener passed the whole suite. It is a partial guarantee by design (a tab close or reload,
+   *  not Next's client-side navigation), and a partial guarantee with no test is the one that
+   *  disappears in the next hand-merge with nothing going red. */
+  it("warns before a reload while an edit is still held", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    // The control FIRST: with nothing typed, a reload must not be interrupted.
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented, "warned with no unsaved edit").toBe(false);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+
+    const held = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(held);
+    expect(held.defaultPrevented, "a held edit was not defended").toBe(true);
+  });
+
+  it("restores the paused draft when the processor comes back to the input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+    // Back to the first input — its trigger now shows the SAVED amount, not the draft.
+    fireEvent.click(screen.getByText("$300,000.00"));
+
+    expect((screen.getByLabelText("Override Base loan amount") as HTMLInputElement).value).toBe(
+      "312500",
+    );
+  });
+
+  /** The same chain-order guard as its two siblings — see the DTI panel's for the reasoning. */
+  it("reports an overridden input as unsaved while it holds a pending edit", () => {
+    useCalcMock.mockReturnValue({
+      data: {
+        ...TWO_INPUTS,
+        inputs: [
+          {
+            ...TWO_INPUTS.inputs[0],
+            override_amount: "300000.00",
+            auto_amount: "290000.00",
+            overridden: true,
+          },
+          TWO_INPUTS.inputs[1],
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312500/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+
+  it("does not claim an unsaved edit on an untouched input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
   });
 });
