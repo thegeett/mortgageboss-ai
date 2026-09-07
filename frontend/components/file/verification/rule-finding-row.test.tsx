@@ -80,3 +80,43 @@ describe("LP-617 — a finding names the documents it is about", () => {
     expect(screen.getByText("W2-2023.pdf")).toBeDefined();
   });
 });
+
+describe("LP-647 — why a finding names no document", () => {
+  /** An empty document list rendered NOTHING, so a finding computed from the file's stated data
+   *  looked identical to one whose document is missing. Those are opposite instructions: one says
+   *  read the application, the other says go and get a document. */
+  it("states the source when a loan-level finding has no documents", () => {
+    renderExpanded(
+      finding({
+        source_documents: [],
+        source_statement:
+          "No document states this — it is computed from the loan file's stated data (the application / MISMO import).",
+      }),
+    );
+
+    expect(screen.getByText(/computed from the loan file's stated data/)).toBeTruthy();
+  });
+
+  /** THE SILENCE THAT MUST SURVIVE. A finding whose absence is a GAP rather than an explanation
+   *  carries no statement, and the row must render nothing rather than inventing a reason — that
+   *  gap is the thing worth finding, and a friendly sentence would hide it. */
+  it("renders nothing when there is no statement and no documents", () => {
+    renderExpanded(finding({ source_documents: [], source_statement: null }));
+
+    expect(screen.queryByText(/computed from/)).toBeNull();
+    expect(screen.queryByText(/Document:/)).toBeNull();
+  });
+
+  /** And a statement must never displace real documents — with a list to show, the list wins. */
+  it("prefers the documents when there are any", () => {
+    renderExpanded(
+      finding({
+        source_documents: [{ id: "d1", filename: "1003.pdf" }],
+        source_statement: "should not be rendered",
+      }),
+    );
+
+    expect(screen.getByText("1003.pdf")).toBeTruthy();
+    expect(screen.queryByText("should not be rendered")).toBeNull();
+  });
+});

@@ -45,7 +45,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function DtiCalculator({ fileId }: { fileId: string }) {
   const { data, isPending, isError, refetch } = useDti(fileId);
@@ -91,14 +91,46 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   const setOverride = useSetDtiOverride(fileId);
   const clearOverride = useClearDtiOverride(fileId);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — THE DRAFTS LIVE HERE, NOT IN THE ROW, and that is the whole fix.
+  //
+  // `editingKey` is single, so opening another row closed this one and its local `draft` went with
+  // it — silently, and re-entering ran `setDraft(item.amount)` so even a surviving draft would have
+  // been clobbered. A processor correcting two housing lines in a row (the ordinary case: both came
+  // from the same document set) lost the first one every time.
+  //
+  // Keyed by field, so a switch is a PAUSE rather than a discard. Only an explicit Save or Cancel
+  // removes an entry — see `onCancel`.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const isMutating = setOverride.isPending || clearOverride.isPending;
+
+  // LP-647 §3 — the LAST exit, and it is a partial guard stated as one rather than sold as complete.
+  //
+  // Catches closing the tab, a reload, and following a link out of the app. It does NOT catch Next's
+  // client-side navigation — clicking to another tab of this file fires no `beforeunload` — so the
+  // in-panel "unsaved" caption remains the primary signal and this is the backstop for the case where
+  // the panel is about to stop existing. A router-level guard is the follow-up if that gap bites.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
+
+  const discardDraft = (fieldKey: string) =>
+    setDrafts((current) => {
+      const { [fieldKey]: _dropped, ...rest } = current;
+      return rest;
+    });
 
   const onSave = (fieldKey: string, amount: string) => {
     setOverride.mutate({ fieldKey, input: { amount } });
+    discardDraft(fieldKey);
     setEditingKey(null);
   };
   const onClear = (fieldKey: string) => {
     clearOverride.mutate(fieldKey);
+    discardDraft(fieldKey);
     setEditingKey(null);
   };
   // bug-001 — accepting a stated estimate is an ordinary override, deliberately: it carries the
@@ -111,9 +143,15 @@ function DtiBody({ fileId, data }: { fileId: string; data: DtiCalculation }) {
   const rowProps = {
     editingKey,
     onEdit: setEditingKey,
-    onCancel: () => setEditingKey(null),
+    onCancel: (fieldKey: string) => {
+      discardDraft(fieldKey);
+      setEditingKey(null);
+    },
     onSave,
     onClear,
+    drafts,
+    onDraftChange: (fieldKey: string, value: string) =>
+      setDrafts((current) => ({ ...current, [fieldKey]: value })),
     disabled: isMutating,
     // bug-001 — offered ON THE LINE that reads "unknown", which is where a processor is looking when
     // they need it. The gate banner keeps the REASON (the backend already appends the sentence to
@@ -296,9 +334,13 @@ interface RowControls {
   onUseEstimate?: (fieldKey: string, amount: string, note: string) => void;
   editingKey: string | null;
   onEdit: (key: string) => void;
-  onCancel: () => void;
+  /** LP-647 §3 — discards this row's draft. The ONLY discard besides Save, and both are deliberate. */
+  onCancel: (key: string) => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — unsaved edits by field key, held by the parent so a row switch does not lose one. */
+  drafts: Record<string, string>;
+  onDraftChange: (key: string, value: string) => void;
   disabled: boolean;
 }
 
@@ -372,6 +414,8 @@ function LineRow({
   onCancel,
   onSave,
   onClear,
+  drafts,
+  onDraftChange,
   disabled,
   unverified,
   onUseEstimate,
@@ -387,7 +431,12 @@ function LineRow({
   // self-report. That is the opposite of what the backend comment says it is offering, and it
   // mislabels a self-report as an estimate.
   const suggestions = unverified?.filter((u) => u.field_key === item.key) ?? [];
-  const [draft, setDraft] = useState<string>(item.amount);
+  // LP-647 §3 — the draft comes from the PARENT now. A row that is not being edited but still holds
+  // one is UNSAVED, and says so below: an unsaved edit and a never-started edit used to render
+  // identically, which is why the loss was invisible rather than merely annoying.
+  const draft = drafts[item.key] ?? item.amount;
+  const unsaved = drafts[item.key] !== undefined && drafts[item.key] !== item.amount;
+  const setDraft = (value: string) => onDraftChange(item.key, value);
 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
@@ -401,7 +450,15 @@ function LineRow({
               exclusion was built to prevent. An override now re-includes the line, so the two are
               mutually exclusive at the source; keeping the order identical stops a future change
               from re-opening the gap. */}
-          {item.excluded ? (
+          {/* LP-647 §3 — FIRST IN THE CHAIN, deliberately. An unsaved edit is the only caption
+              describing something the processor must still DO; every other one describes the file.
+              It also has to beat `overridden`, or a second edit to an already-overridden line would
+              render as saved while holding an unsaved figure — the exact confusion this closes. */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${drafts[item.key]}
+            </span>
+          ) : item.excluded ? (
             <span className="text-muted-foreground">
               not counted — {item.excluded_reason ?? "excluded"}
             </span>
@@ -448,7 +505,7 @@ function LineRow({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onSave(item.key, draft);
-              if (e.key === "Escape") onCancel();
+              if (e.key === "Escape") onCancel(item.key);
             }}
             className="h-8 w-28 text-right tabular-nums"
           />
@@ -467,7 +524,7 @@ function LineRow({
             variant="ghost"
             className="text-muted-foreground"
             aria-label="Cancel"
-            onClick={onCancel}
+            onClick={() => onCancel(item.key)}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -477,7 +534,10 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET. `setDraft(item.amount)` here is what made a paused edit unrecoverable even
+              // after the draft survived the switch — re-entering the row overwrote it with the saved
+              // figure. The parent seeds from `item.amount` on read, so a first edit still starts
+              // from the current value.
               onEdit(item.key);
             }}
             className={cn(

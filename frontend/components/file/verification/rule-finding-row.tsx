@@ -152,11 +152,28 @@ export function RuleLabel({ finding }: { finding: RuleFinding }) {
 function SourceDocuments({
   fileId,
   documents,
+  statement,
 }: {
   fileId?: string;
   documents: RuleFinding["source_documents"];
+  statement?: string | null;
 }) {
-  if (documents.length === 0) return null;
+  // LP-647 — WHY there is no document, where the reason is known. An empty list rendered nothing,
+  // so a finding computed from the file's stated data looked identical to one whose document is
+  // missing — and those are opposite instructions to a processor. Still nothing when the absence is
+  // a GAP rather than an explanation: inventing a sentence there would hide the thing worth finding.
+  if (documents.length === 0) {
+    return statement ? (
+      // Merged onto the new UI: this block arrived with `text-gray-400`, which the
+      // design-token guard refuses because a palette colour does not flip in dark
+      // mode. `text-muted-foreground` is the token the sibling branch below already
+      // uses for the same caption, so the two now agree.
+      <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
+        <FileText className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+        <span>{statement}</span>
+      </p>
+    ) : null;
+  }
   return (
     <p className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted-foreground">
       <FileText className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
@@ -315,7 +332,11 @@ export function RuleFindingRow({
             </p>
           )}
 
-          <SourceDocuments fileId={fileId} documents={finding.source_documents} />
+          <SourceDocuments
+            fileId={fileId}
+            documents={finding.source_documents}
+            statement={finding.source_statement}
+          />
         </div>
       )}
 

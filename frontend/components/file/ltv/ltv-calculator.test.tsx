@@ -237,3 +237,69 @@ describe("LtvCalculator", () => {
     expect(refetch).toHaveBeenCalled();
   });
 });
+
+describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
+  afterEach(cleanup);
+
+  /** THE THIRD COMPONENT, and the one the first pass of this fix missed. Two were corrected by
+   *  opening the files already in hand; the enumeration that finds this one is by PROPERTY —
+   *  "holds an editable draft" — which returns exactly three components, not two.
+   *
+   *  Same weight as the others: an LTV override is persisted and audited under its own
+   *  `ltv_overridden` activity type. */
+  it("keeps a draft when the processor opens another row", () => {
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+
+    fireEvent.click(screen.getByText("$180,000.00"));
+    fireEvent.change(screen.getByLabelText("Override First mortgage"), {
+      target: { value: "175000" },
+    });
+    fireEvent.click(screen.getByText("$20,000.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$175000/)).toBeTruthy();
+  });
+
+  it("restores the paused draft when the processor comes back to the row", () => {
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+
+    fireEvent.click(screen.getByText("$180,000.00"));
+    fireEvent.change(screen.getByLabelText("Override First mortgage"), {
+      target: { value: "175000" },
+    });
+    fireEvent.click(screen.getByText("$20,000.00"));
+    fireEvent.click(screen.getByText("$180,000.00"));
+
+    expect((screen.getByLabelText("Override First mortgage") as HTMLInputElement).value).toBe(
+      "175000",
+    );
+  });
+
+  it("does not claim an unsaved edit on an untouched row", () => {
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+    expect(screen.queryByText(/unsaved/)).toBeNull();
+  });
+
+  /** THE CAPTION ORDER, which only a comment defended in all three components until now.
+   *
+   *  `unsaved` must beat `overridden` in the mutually-exclusive chain. The HELOC row is ALREADY
+   *  overridden ($20,000 with a null auto), so a pending edit on it is the exact fixture: if the
+   *  order were wrong the row would read "overridden · auto …" while holding an unapplied figure —
+   *  saved-looking and unsaved, which is the confusion this whole section exists to remove. This is
+   *  LP-569's chain-order defect in a new place. */
+  it("reports an overridden row as unsaved while it holds a pending edit", () => {
+    mockLtv();
+    render(<LtvCalculator fileId="LF-1" />);
+
+    fireEvent.click(screen.getByText("$20,000.00"));
+    fireEvent.change(screen.getByLabelText("Override HELOC credit limit"), {
+      target: { value: "25000" },
+    });
+    fireEvent.click(screen.getByText("$180,000.00"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$25000/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+});

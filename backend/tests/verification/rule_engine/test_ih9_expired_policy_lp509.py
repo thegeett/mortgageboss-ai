@@ -134,3 +134,99 @@ def test_ih9_does_not_depend_on_the_closing_date_tag() -> None:
     tags = set(_IH9.deterministic.load_bearing_tags) | set(_IH9.deterministic.gated_tags)
     assert tags == {"ins.policy_expired"}
     assert not any("closing" in t for t in tags)
+
+
+async def test_the_expired_policy_finding_names_the_binder_it_read() -> None:
+    """LP-647 §1 group A — IH-9 could say WHEN the policy expired and not WHICH policy.
+
+    `produce_derived_tags` stamps `source_facts=(subject_id,)`, and IH-9 is loan-subject, so the
+    subject is the literal string "loan" — it names no document, `_source_document_ids` resolves
+    nothing, and the finding renders with no way to open the binder whose date it just quoted.
+
+    The recipe's loop already visits each homeowners binder to read its expiry tag; it discarded the
+    entry afterwards. Asserted THROUGH the evaluation, not on the recipe, because the evaluation is
+    what becomes the finding — a recipe returning ids proves nothing if the caller drops them.
+    """
+    mat = await _materialize(build_insurance_expired_snapshot())
+
+    tag = mat.tags.by_subject[_LOAN]["ins.policy_expired"]
+    assert tag.source_facts != ("loan",), (
+        "the tag named the loan instead of the binder — the shipped behaviour this closes"
+    )
+    assert len(tag.source_facts) == 1, "one binder states this date; naming more would over-claim"
+
+    (result,) = evaluate_deterministic_rule(_IH9, mat)
+    assert result.source_content_ids == tag.source_facts, (
+        "the binder must reach `source_content_ids` — the only field the finding's document links "
+        f"are built from. Got {result.source_content_ids}"
+    )
+
+
+async def test_the_effective_date_finding_names_its_binder_too() -> None:
+    """IH-3's half of the same fix. Both tags on that rule are loan-subject and both were anonymous;
+    fixing one and leaving the other is the asymmetry this ticket keeps re-learning."""
+    mat = await _materialize(build_insurance_expired_snapshot())
+
+    tag = mat.tags.by_subject[_LOAN]["ins.loan_effective_date"]
+    assert tag.source_facts != ("loan",), "IH-3's effective-date tag must name its binder"
+    assert len(tag.source_facts) == 1
+
+
+async def test_the_binder_naming_ignores_a_flood_policy_that_also_states_an_expiry() -> None:
+    """LP-647 §1 review — the PROVENANCE half of a property `test_the_expiry_tag_reads_only_homeowners
+    _binders` already covers for the value. Kept because it asserts a different thing, and written up
+    honestly because the investigation behind it corrected two of my own claims.
+
+    WHAT I GOT WRONG FIRST. I said the earlier fixture had no decoy. It has two documents — a binder
+    and a purchase contract — so it looked guarded. It is not, but not for the reason I gave: the
+    contract carries no `ins.expiration_date`, so dropping IH-9's document-type filter changes
+    nothing and that mutation passes clean. A decoy only guards if the rule could plausibly name it.
+
+    THEN THE FLOOD POLICY DID NOT GUARD IT EITHER, and that is the useful part. `ins.expiration_date`
+    is DECLARED `document_type: homeowners_insurance`, so the parsed layer never puts it on a flood
+    policy — the recipe's own filter is redundant with the declaration. Measured: removing either one
+    alone leaves every test green; removing BOTH fails this test and the value one above.
+
+    So IH-9 has no single-mutation over-naming to catch, because two independent defences guard it.
+    That is a stronger position than a test, and worth knowing rather than assuming — the danger is
+    reading redundancy as a missing guard and deleting one of the two.
+
+    WHICH SINGLE REMOVAL IS SAFE TODAY, AND WHY THAT IS NOT PERMISSION. Removing the recipe's
+    `document_type != "homeowners_insurance"` filter is safe RIGHT NOW: the declaration's
+    `document_type: homeowners_insurance` already keeps the tag off a flood policy, so every test
+    stays green. A reader who does that has not found dead code — they have SPENT THE REDUNDANCY.
+    The next person to touch the declaration's scoping for an unrelated reason then has nothing
+    between a flood policy and IH-9's provenance, and this test is what fails at that second step.
+
+    That is the split: this docstring is what should stop the FIRST deletion, because a test cannot;
+    this test is what catches the SECOND, because a comment cannot.
+    """
+    from app.verification.eval.fire_path_scenarios import (
+        _LOAN_INS_EXPIRED,
+        _binder,
+        _doc,
+        _snapshot,
+    )
+
+    flood = _doc(
+        "95-flood-current",
+        "flood_insurance_policy",
+        carrier_name="Rivertown Mutual",
+        policy_number="FL-0001",
+        effective_date="2026-06-01",
+        expiration_date="2027-06-01",  # in force, and NOT the hazard policy
+    )
+    snap = _snapshot(
+        _LOAN_INS_EXPIRED,
+        [_binder("95-binder-expired", "2024-06-25", expiration_date="2025-06-25"), flood],
+    )
+    mat = await _materialize(snap)
+
+    tag = mat.tags.by_subject[_LOAN]["ins.policy_expired"]
+    assert str(tag.value) == "yes", (
+        "the hazard policy lapsed — a current flood policy must not mask it"
+    )
+    assert tag.source_facts == ("95-binder-expired",), (
+        "the finding must name the hazard binder and NOT the flood policy — naming it would send a "
+        f"processor to a document this finding says nothing about, got {tag.source_facts}"
+    )

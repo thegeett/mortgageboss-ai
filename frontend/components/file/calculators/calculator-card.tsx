@@ -32,7 +32,7 @@ import type { FindingBreakdown } from "@/lib/types/calculators";
 import type { CalcLine, CalculatorName, CalculatorView } from "@/lib/types/calculators";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Calculator, Check, FlaskConical, Pencil, RotateCcw, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function CalculatorCard({
   fileId,
@@ -92,14 +92,39 @@ function CalculatorBody({
   const setOverride = useSetCalculatorOverride(fileId, calculator);
   const clearOverride = useClearCalculatorOverride(fileId, calculator);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // LP-647 §3 — the same fix as the DTI calculator's, because this is the same defect. `editingKey`
+  // is single, so opening another input closed this one and its local draft went with it, silently.
+  // Held by the parent and keyed by field, a switch is a PAUSE rather than a discard.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const busy = setOverride.isPending || clearOverride.isPending;
+
+  const discardDraft = (key: string) =>
+    setDrafts((current) => {
+      const { [key]: _dropped, ...rest } = current;
+      return rest;
+    });
 
   const onSave = (key: string, amount: string) => {
     setOverride.mutate(
       { fieldKey: key, input: { amount } },
-      { onSuccess: () => setEditingKey(null) },
+      {
+        onSuccess: () => {
+          discardDraft(key);
+          setEditingKey(null);
+        },
+      },
     );
   };
+
+  // Partial by design, and the same limit as the DTI panel's: catches a tab close or reload, not
+  // Next's client-side navigation. The in-row "unsaved" caption is the primary signal.
+  const hasUnsavedDrafts = Object.keys(drafts).length > 0;
+  useEffect(() => {
+    if (!hasUnsavedDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedDrafts]);
 
   // Falls back to `neutral`, not the default `attention`: a calculator status
   // this build does not recognise is not evidence of a problem, and the default
@@ -132,9 +157,23 @@ function CalculatorBody({
                     editing={editingKey === item.key}
                     disabled={busy}
                     onEdit={() => setEditingKey(item.key)}
-                    onCancel={() => setEditingKey(null)}
+                    // LP-647 §3 — a row switch PAUSES an edit; only Cancel, Save or
+                    // Clear discards one. Merged onto LP-UI-045's two-column layout:
+                    // the drafts are behaviour and the grid is presentation, and the
+                    // conflict between them was textual rather than real.
+                    onCancel={() => {
+                      discardDraft(item.key);
+                      setEditingKey(null);
+                    }}
                     onSave={onSave}
-                    onClear={(key) => clearOverride.mutate(key)}
+                    onClear={(key) => {
+                      discardDraft(key);
+                      clearOverride.mutate(key);
+                    }}
+                    draft={drafts[item.key]}
+                    onDraftChange={(value: string) =>
+                      setDrafts((current) => ({ ...current, [item.key]: value }))
+                    }
                   />
                 ))}
               </div>
@@ -226,6 +265,8 @@ function LineRow({
   onCancel,
   onSave,
   onClear,
+  draft: draftValue,
+  onDraftChange,
 }: {
   item: CalcLine;
   editing: boolean;
@@ -234,15 +275,28 @@ function LineRow({
   onCancel: () => void;
   onSave: (key: string, amount: string) => void;
   onClear: (key: string) => void;
+  /** LP-647 §3 — the parent's unsaved value for this row, or undefined when there is none. */
+  draft?: string;
+  onDraftChange: (value: string) => void;
 }) {
-  const [draft, setDraft] = useState<string>(item.amount);
+  // A row that is NOT being edited but still holds a draft is UNSAVED and says so — an unsaved edit
+  // and a never-started edit used to render identically, which is what made the loss invisible.
+  const draft = draftValue ?? item.amount;
+  const unsaved = draftValue !== undefined && draftValue !== item.amount;
+  const setDraft = onDraftChange;
 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-sm first:border-t-0">
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-foreground-2">{item.label}</span>
         <span className="text-[11px] text-muted-foreground">
-          {item.overridden ? (
+          {/* Unsaved first: it is the only caption describing something the processor must still do,
+              and it must beat `overridden` or a second edit to an overridden line reads as saved. */}
+          {unsaved ? (
+            <span className="font-medium text-warning">
+              unsaved — press Enter or ✓ to apply ${draftValue}
+            </span>
+          ) : item.overridden ? (
             <span className="text-primary">
               {/* WHO, not just that. "Someone changed this number" and "Priya
                   changed this number" are different statements on a compliance
@@ -299,7 +353,9 @@ function LineRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(item.amount);
+              // NO RESET — the twin of the DTI panel's. This line is what made a paused edit
+              // unrecoverable even once the draft survived the switch: re-entering the row
+              // overwrote it with the saved figure. The row seeds from `item.amount` on read.
               onEdit();
             }}
             className={cn(

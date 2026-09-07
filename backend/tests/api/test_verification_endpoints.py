@@ -10,7 +10,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest_asyncio
-from app.api.verification import _WATCHDOG_SLACK_SECONDS
+from app.api.verification import _STUCK_DOCUMENT_AFTER_SECONDS, _WATCHDOG_SLACK_SECONDS
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
@@ -27,6 +27,7 @@ from app.models import (
     UserRole,
 )
 from app.models.base import utcnow
+from app.models.document import DocumentStatus
 from app.models.finding import EvaluationOutcome
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
@@ -1336,3 +1337,172 @@ async def test_a_stuck_run_does_not_block_a_new_one(
     assert second.json()["status"] == "running"
     await db.refresh(stale_run)
     assert stale_run.status is VerificationStatus.FAILED
+
+
+async def test_run_is_refused_while_a_document_is_still_being_read(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """LP-647 §2 — a verification must not start over a document mid-extraction.
+
+    `build_documents_section` selects the file's current documents with NO status filter, so a
+    document that has not finished extracting is frozen into the snapshot with an empty `fields` map
+    and, before classification lands, no `document_type`. Every rule needing a typed field from it
+    then abstains on the document-type predicate, and those findings PERSIST under the reconcile
+    identity — LP-640 measured one unidentified document costing 22 queue rows.
+
+    So the processor is handed a list generated from a document that was seconds away from answering
+    the question itself. Refused server-side rather than only in the UI: a disabled button leaves the
+    race reachable through the API, which is LP-643's "the server is the enforcement" point.
+    """
+    enqueued: dict[str, object] = {}
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *_a, **kw: enqueued.setdefault("args", kw.get("args")),
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    document = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="w2-2023.pdf"
+    )
+    document.status = DocumentStatus.EXTRACTING
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 409, resp.text
+    # The app wraps errors as {error: {type, message}} — asserting FastAPI's raw `detail` would have
+    # passed on the status code alone while never reading the sentence the processor is shown.
+    body = resp.json()["error"]
+    assert body["type"] == "conflict"
+    assert "still being read" in body["message"]
+    assert "1 document is" in body["message"], "the count and its grammar reach the processor"
+    assert not enqueued, "a refused run must not enqueue the pass"
+
+
+async def test_a_finished_document_does_not_block_a_run(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """THE POSITIVE CONTROL, and it is not ceremony: a guard that blocks every run would pass the
+    test above while making verification unreachable.
+
+    FAILED is included deliberately. A failed document is FINISHED — it will never gain fields, so
+    treating it as in-flight would block the file's verification forever. It is a reason to
+    re-process (LP-637's button), not a reason to refuse.
+    """
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *_a, **_kw: None,
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    for index, terminal in enumerate(
+        (DocumentStatus.COMPLETED, DocumentStatus.NEEDS_REVIEW, DocumentStatus.FAILED)
+    ):
+        document = await factories.make_document(
+            db, loan_file=loan_file, company=company, document_type="w2", filename=f"w2-{index}.pdf"
+        )
+        document.status = terminal
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 200, resp.text
+
+
+async def test_the_status_response_reports_what_the_guard_refuses_on(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """One helper, two readers. The UI disables its button from `documents_processing`; the endpoint
+    refuses on the same count. Two producers of the same fact would drift, and the visible failure
+    would be a button that is enabled onto a 409."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    for index, in_flight in enumerate((DocumentStatus.CLASSIFYING, DocumentStatus.EXTRACTING)):
+        document = await factories.make_document(
+            db, loan_file=loan_file, company=company, document_type="w2", filename=f"w2-{index}.pdf"
+        )
+        document.status = in_flight
+    await db.commit()
+
+    resp = await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+
+    assert resp.status_code == 200
+    assert resp.json()["documents_processing"] == 2
+
+
+async def test_a_document_wedged_in_extracting_does_not_block_forever(
+    client: AsyncClient, db: AsyncSession, monkeypatch
+) -> None:
+    """LP-647 §2 review — the guard's own reason for excluding FAILED applies here too.
+
+    A failed document is excluded because it will never gain fields, so holding a file for it would
+    block that file's verification forever. A document WEDGED in `extracting` is the same thing and
+    does not say so in its status: `document_processing` reaches a terminal status on every HANDLED
+    path, and a SIGKILL at the hard limit or an OOM taking the worker is not one. There is no sweep.
+
+    It is not hypothetical — three documents on staging have sat in `extracting` since 2026-08-23.
+    They are harmless only because they were soft-deleted, which `only_active` already excludes; the
+    next one may not be.
+    """
+    monkeypatch.setattr(
+        "app.tasks.verification_rules.run_rule_engine_pass.apply_async",
+        lambda *_a, **_kw: None,
+        raising=True,
+    )
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    document = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="wedged.pdf"
+    )
+    document.status = DocumentStatus.EXTRACTING
+    await db.flush()
+    # Past the window, by the same clock the guard reads.
+    document.updated_at = utcnow() - timedelta(seconds=_STUCK_DOCUMENT_AFTER_SECONDS + 60)
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 200, resp.text
+
+
+async def test_a_document_that_only_just_started_still_blocks(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE POSITIVE CONTROL for the age bound. A window that treated everything as stuck would pass
+    the test above while removing the guard entirely — and the guard is the point."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    document = await factories.make_document(
+        db, loan_file=loan_file, company=company, document_type="w2", filename="fresh.pdf"
+    )
+    document.status = DocumentStatus.EXTRACTING
+    await db.commit()
+
+    resp = await client.post(f"{API}/{loan_file.display_id}/verification/run", headers=_auth(token))
+
+    assert resp.status_code == 409, resp.text
+
+
+def test_the_stuck_window_stays_above_the_task_that_produces_it() -> None:
+    """The dependency the constant rests on, pinned rather than commented.
+
+    The window is derived from `DOCUMENT_HARD_LIMIT_SECONDS` — the SIGKILL ceiling for one attempt —
+    but it is written as a literal in `api/verification.py` so that module does not import the Celery
+    task and drag its dependencies into the API's import graph (the LP-635 lesson that moved
+    `run_limits` to a leaf). A literal and its source can drift; this is what stops them.
+
+    Raising the task's limit past the window would make a legitimately-running document read as
+    stuck, which is the failure this asserts against.
+    """
+    from app.tasks.document_processing import DOCUMENT_HARD_LIMIT_SECONDS
+
+    assert _STUCK_DOCUMENT_AFTER_SECONDS >= DOCUMENT_HARD_LIMIT_SECONDS * 4, (
+        "the stuck window must stay comfortably above one attempt's hard limit, or a document that "
+        f"is merely slow reads as wedged (window={_STUCK_DOCUMENT_AFTER_SECONDS}s, "
+        f"hard limit={DOCUMENT_HARD_LIMIT_SECONDS}s)"
+    )

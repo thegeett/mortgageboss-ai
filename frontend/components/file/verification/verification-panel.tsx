@@ -120,6 +120,12 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
   const setAggression = useSetAggression(fileId);
   const updatePreferences = useUpdatePreferences();
   const running = data?.latest_run?.status === "running" || run.isPending;
+  // LP-647 §2 — a run started over a document mid-extraction freezes it into the snapshot with no
+  // fields and, before classification lands, no type; every rule needing a typed field from it then
+  // abstains, and those findings persist. The server refuses this with a 409 — this is the half that
+  // stops a processor reaching the refusal, and says why rather than greying out silently.
+  const documentsProcessing = data?.documents_processing ?? 0;
+  const blockedByDocuments = documentsProcessing > 0 && !running;
 
   // The dial re-filters instantly: track the picked level optimistically so the
   // displayed in-scope set updates with zero latency while the server confirms the
@@ -267,7 +273,7 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Beside Run verification, where the mockup puts it (LP-UI-046).
                 It was only inside the Old findings tab — the one tab a processor
                 has no reason to open. */}
@@ -280,7 +286,24 @@ export function VerificationPanel({ fileId }: { fileId: string }) {
                 busy={dialBusy}
               />
             )}
-            <Button size="sm" className="gap-1.5" disabled={running} onClick={triggerRun}>
+            {/* LP-647 §2 — WHY, not just greyed out. A disabled control with no reason reads as
+                broken, and a processor who cannot tell the difference between "not yet" and
+                "never" reloads the page. Naming the count separates them: this one ends by
+                itself. Kept beside the button rather than under it, so the reason and the thing
+                it explains are read together in the LP-UI-046 header. */}
+            {blockedByDocuments && (
+              <span className="max-w-[15rem] text-right text-[11px] text-warning">
+                {documentsProcessing === 1
+                  ? "1 document is still being read — verification will run once it finishes."
+                  : `${documentsProcessing} documents are still being read — verification will run once they finish.`}
+              </span>
+            )}
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={running || blockedByDocuments}
+              onClick={triggerRun}
+            >
               {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
               {running ? "Running…" : "Run verification"}
             </Button>

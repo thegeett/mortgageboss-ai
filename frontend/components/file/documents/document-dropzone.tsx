@@ -2,6 +2,7 @@
 
 import { Spinner } from "@/components/ui/spinner";
 import { useUploadDocuments } from "@/lib/api/documents";
+import { useVerification } from "@/lib/api/verification";
 import { normalizeError } from "@/lib/errors/api-error";
 import { validateUploadFile } from "@/lib/loan-files/documents";
 import { notifyError, notifyStarted } from "@/lib/toast";
@@ -34,6 +35,22 @@ function serverErrorMessage(error: unknown): string {
  */
 export function DocumentDropzone({ fileId }: { fileId: string }) {
   const upload = useUploadDocuments(fileId);
+  // LP-647 §2 — THE OTHER DIRECTION, and it is NOT the same defect, which is worth saying because
+  // the symmetry is tempting.
+  //
+  // A document arriving mid-run does not corrupt anything: the snapshot was frozen at enqueue, the
+  // upload marks the file `verification_stale`, and `_document_count`'s own comment records the
+  // design — "a document arriving mid-run does not extend the window it is already inside; it is
+  // picked up by the NEXT run". So there is no race to lose here, only a confusion: a run completes
+  // minutes later without the document the processor just added, and nothing on the upload screen
+  // said it would not be included.
+  //
+  // Held rather than allowed-with-a-note because the user asked for it explicitly, and because the
+  // wait is bounded and visible. The cost is real and stated in the ticket: a processor who receives
+  // a document mid-run waits for the run rather than parking it immediately.
+  const verification = useVerification(fileId);
+  const verificationRunning = verification.data?.latest_run?.status === "running";
+  const blocked = upload.isPending || verificationRunning;
 
   const onDrop = useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
@@ -81,7 +98,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
     },
     maxSize: 50 * 1024 * 1024,
     noClick: true, // we wire an explicit button so the whole area isn't a click target
-    disabled: upload.isPending,
+    disabled: blocked,
   });
 
   return (
@@ -97,7 +114,7 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         isDragActive
           ? "border-primary bg-primary/5"
           : "border-input bg-muted/60 hover:border-foreground-2",
-        upload.isPending && "pointer-events-none opacity-70",
+        blocked && "pointer-events-none opacity-70",
       )}
     >
       <input {...getInputProps()} aria-label="Upload documents" />
@@ -114,15 +131,25 @@ export function DocumentDropzone({ fileId }: { fileId: string }) {
         )}
       </span>
       <p className="text-sm font-medium text-foreground">
-        {upload.isPending ? "Uploading…" : isDragActive ? "Drop to upload" : "Drag documents here"}
+        {verificationRunning
+          ? "Verification is running"
+          : upload.isPending
+            ? "Uploading…"
+            : isDragActive
+              ? "Drop to upload"
+              : "Drag documents here"}
       </p>
+      {/* LP-647 §2 — SAYS WHEN IT COMES BACK, which is the difference between a control that is
+          waiting and one that is broken. A processor told only "disabled" reloads the page. */}
       <p className="text-xs text-muted-foreground">
-        PDF, JPG, or PNG · up to 50 MB · multiple at once
+        {verificationRunning
+          ? "Uploads are held until it finishes — a document added now would not be included in this run."
+          : "PDF, JPG, or PNG · up to 50 MB · multiple at once"}
       </p>
       <button
         type="button"
         onClick={open}
-        disabled={upload.isPending}
+        disabled={blocked}
         className="inline-flex items-center rounded-md border border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Browse files

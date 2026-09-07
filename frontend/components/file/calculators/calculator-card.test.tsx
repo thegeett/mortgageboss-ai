@@ -178,3 +178,103 @@ describe("CalculatorCard", () => {
     expect(refetch).toHaveBeenCalled();
   });
 });
+
+describe("LP-647 §3 — an abandoned edit is not discarded silently", () => {
+  afterEach(cleanup);
+
+  const TWO_INPUTS: CalculatorView = {
+    ...VIEW,
+    inputs: [
+      ...VIEW.inputs,
+      {
+        key: "mi.ltv",
+        label: "LTV",
+        auto_amount: "96.50",
+        override_amount: null,
+        amount: "96.50",
+        source: "computed",
+        overridden: false,
+        // Added by the merge: this fixture predates the two fields our branch put
+        // on `CalcLine`, so it typechecked on its own branch and not against ours.
+        override_by: null,
+        override_note: null,
+      },
+    ],
+  };
+
+  /** THE SAME DEFECT AS THE DTI PANEL'S, in the same shape, which is why it is fixed in both. A
+   *  single `editingKey` at the parent plus a draft local to the row meant opening a second input
+   *  discarded the first, silently. Fixing one component and leaving its twin is the failure this
+   *  repo keeps repeating. */
+  it("keeps a draft when the processor opens another input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    // The read-only trigger is the amount itself, not a labelled control.
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312500/)).toBeTruthy();
+  });
+
+  /** The reset-on-re-entry, pinned. Removing `setDraft(item.amount)` from the trigger was part of
+   *  this fix and NOTHING covered it — a mutation re-introducing it passed clean until this existed.
+   *  Without it a paused edit survives the switch and is then overwritten the moment the processor
+   *  returns to correct it, which is the same loss one step later. */
+  it("restores the paused draft when the processor comes back to the input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+    // Back to the first input — its trigger now shows the SAVED amount, not the draft.
+    fireEvent.click(screen.getByText("$300,000.00"));
+
+    expect((screen.getByLabelText("Override Base loan amount") as HTMLInputElement).value).toBe(
+      "312500",
+    );
+  });
+
+  /** The same chain-order guard as its two siblings — see the DTI panel's for the reasoning. */
+  it("reports an overridden input as unsaved while it holds a pending edit", () => {
+    useCalcMock.mockReturnValue({
+      data: {
+        ...TWO_INPUTS,
+        inputs: [
+          {
+            ...TWO_INPUTS.inputs[0],
+            override_amount: "300000.00",
+            auto_amount: "290000.00",
+            overridden: true,
+          },
+          TWO_INPUTS.inputs[1],
+        ],
+      },
+      isPending: false,
+      isError: false,
+    });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    fireEvent.click(screen.getByText("$300,000.00"));
+    fireEvent.change(screen.getByLabelText("Override Base loan amount"), {
+      target: { value: "312500" },
+    });
+    fireEvent.click(screen.getByText("$96.50"));
+
+    expect(screen.getByText(/unsaved — press Enter or ✓ to apply \$312500/)).toBeTruthy();
+    expect(screen.queryByText(/overridden · auto/)).toBeNull();
+  });
+
+  it("does not claim an unsaved edit on an untouched input", () => {
+    useCalcMock.mockReturnValue({ data: TWO_INPUTS, isPending: false, isError: false });
+    render(<CalculatorCard fileId="LF-1" calculator="mortgage_insurance" />);
+
+    expect(screen.queryByText(/unsaved/)).toBeNull();
+  });
+});
