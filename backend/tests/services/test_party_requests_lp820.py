@@ -20,6 +20,7 @@ import pytest
 from app.documents.catalog import ResponsibleParty, get_guidance
 from app.models import Company, LoanProgram, User, UserRole
 from app.models.communication import Communication, CommunicationStatus
+from app.models.lender import Lender
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
 from app.services.party_requests import (
@@ -537,3 +538,89 @@ async def test_the_draft_body_names_what_is_being_asked_for(
 
     assert draft.body
     assert "Title commitment" in draft.body
+
+
+# --------------------------------------------------------------------------------------------- #
+# The lender's own desk, when no underwriter is assigned (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def _lender_on(db: AsyncSession, loan_file, *, email: str | None) -> Lender:
+    lender = Lender(
+        company_id=loan_file.company_id,
+        name="Bank of Example",
+        slug=f"boe-{uuid4().hex[:8]}",
+        contact_email=email,
+    )
+    db.add(lender)
+    await db.flush()
+    loan_file.lender_id = lender.id
+    await db.flush()
+    return lender
+
+
+async def test_a_lender_contact_makes_the_lender_party_reachable(
+    db_session: AsyncSession,
+) -> None:
+    """Measured before the fix: it did not.
+
+    `PARTY_ROLE` sends the lender party to `UNDERWRITER`, and LP-805 seeds `lenders.contact_email`
+    as a participant under `OTHER` because the enum has no generic lender role. So the address was
+    on the file and trusted for inbound, and this reported the sixteen lender-party document types
+    as UNREACHABLE — "nothing to do" — with a usable address sitting there.
+
+    LP-813 built the write path for that column precisely because it had none. Declaring it
+    unreachable one ticket later would have made that ticket deliver nothing.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"lend{uuid4().hex[:6]}")
+    await _lender_on(db_session, loan_file, email="underwriting@bankofexample.test")
+    await _need(db_session, loan_file, needs_type="appraisal")
+
+    requests = await open_requests(db_session, loan_file=loan_file)
+    lender_request = next(r for r in requests if r.party is ResponsibleParty.LENDER)
+
+    assert lender_request.reachable
+    assert lender_request.address == "underwriting@bankofexample.test"
+
+
+async def test_an_assigned_underwriter_still_wins_over_the_lender_desk(
+    db_session: AsyncSession,
+) -> None:
+    """The control, and the one that keeps the builder's judgement intact.
+
+    The underwriter is who a processor corresponds with when there is one; the lender's desk is the
+    fallback, not the preference. A fix that read the column unconditionally would satisfy the test
+    above while sending to the switchboard instead of the person handling the file.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"uw{uuid4().hex[:6]}")
+    await _lender_on(db_session, loan_file, email="switchboard@bankofexample.test")
+    db_session.add(
+        LoanFileParticipant(
+            loan_file_id=loan_file.id,
+            role=ParticipantRole.UNDERWRITER,
+            name="Dana Underwriter",
+            email="dana@bankofexample.test",
+        )
+    )
+    await db_session.flush()
+    await _need(db_session, loan_file, needs_type="appraisal")
+
+    requests = await open_requests(db_session, loan_file=loan_file)
+    lender_request = next(r for r in requests if r.party is ResponsibleParty.LENDER)
+
+    assert lender_request.address == "dana@bankofexample.test"
+
+
+async def test_a_lender_with_no_contact_is_still_unreachable(db_session: AsyncSession) -> None:
+    """The second control: the fallback must not invent reachability.
+
+    An unreachable row is listed rather than dropped so a file with outstanding lender documents
+    does not read as having nothing to do — that is the plan's "invisible to LP-814", rendered.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug=f"nolend{uuid4().hex[:6]}")
+    await _lender_on(db_session, loan_file, email=None)
+    await _need(db_session, loan_file, needs_type="appraisal")
+
+    requests = await open_requests(db_session, loan_file=loan_file)
+    lender_request = next(r for r in requests if r.party is ResponsibleParty.LENDER)
+
+    assert not lender_request.reachable
+    assert lender_request.address is None

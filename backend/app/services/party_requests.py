@@ -118,7 +118,12 @@ async def _addresses(
                 only_active(
                     select(LoanFileParticipant)
                     .where(LoanFileParticipant.loan_file_id == loan_file.id)
-                    .order_by(LoanFileParticipant.created_at),
+                    # `id` BREAKS THE TIE. `created_at` is a Python-side default, so two rows
+                    # written in one flush differ by microseconds and the order is stable in
+                    # practice — measured. It is not TOTAL, though, and "first wins" is a claim
+                    # about a total order. A tie makes the choice undefined, which is exactly the
+                    # "problem nobody sees" this docstring is about.
+                    .order_by(LoanFileParticipant.created_at, LoanFileParticipant.id),
                     LoanFileParticipant,
                 )
             )
@@ -130,6 +135,26 @@ async def _addresses(
     for row in rows:
         if row.email and row.role not in found:
             found[row.role] = (row.email, row.name)
+
+    # THE LENDER'S OWN DESK, WHEN NO UNDERWRITER IS ASSIGNED.
+    #
+    # `PARTY_ROLE` sends the lender party to `UNDERWRITER`, which is right when one is assigned —
+    # the underwriter is who a processor corresponds with. But `lenders.contact_email` exists, LP-813
+    # built the write path for it precisely because it had none, its docstring says it is "for direct
+    # underwriter communication", and LP-805 seeds it as a participant under `OTHER` because the enum
+    # has no generic lender role. So the address was on the file, trusted for inbound, and invisible
+    # here: a file with a lender contact and no assigned underwriter reported its sixteen
+    # lender-party document types as UNREACHABLE — "nothing to do" — with a usable address sitting on
+    # it.
+    #
+    # Read from `Lender` rather than by hunting for the `OTHER` row it was seeded into: which `OTHER`
+    # came from the lender is a guess, and the column is not.
+    if ParticipantRole.UNDERWRITER not in found and loan_file.lender_id is not None:
+        from app.models.lender import Lender
+
+        lender = await db.get(Lender, loan_file.lender_id)
+        if lender is not None and lender.deleted_at is None and lender.contact_email:
+            found[ParticipantRole.UNDERWRITER] = (lender.contact_email, lender.name)
     return found
 
 
