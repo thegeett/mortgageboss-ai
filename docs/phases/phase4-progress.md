@@ -209,6 +209,8 @@ would have meant rebuilding:
 | [LP-834](../tickets/LP-834.md) | The secure link is added from inside the draft; minting expires the previous one | Specified |
 | [LP-835](../tickets/LP-835.md) | Writing to the other parties, from the same list and the same send path | Specified |
 | [LP-836](../tickets/LP-836.md) | One inbox domain per environment, including a local one that does not exist today | Specified |
+| [LP-837](../tickets/LP-837.md) | A drafts indicator in the file header, on every page of a file, deep-linking into the modal | Specified |
+| [LP-838](../tickets/LP-838.md) | Every surface that lists or opens a message says when — including the popover, which was not named | Specified |
 
 **Two of these close the escalated LP-820 defect** — a party draft is built today and no screen can
 send it, while the party panel tells a processor to send it from the borrower's draft. LP-831's list
