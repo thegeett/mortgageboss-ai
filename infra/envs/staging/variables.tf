@@ -688,3 +688,20 @@ variable "inbound_retention_years" {
   type        = number
   default     = 5
 }
+
+variable "inbound_malware_scan_enabled" {
+  description = <<-EOT
+    INFRA-2 — GuardDuty Malware Protection for S3 over the inbound bucket.
+
+    Independent of `inbound_mail_enabled` so the scan can be applied and observed FIRST: GuardDuty
+    writes a validation object and publishes a resource-status event, so the plan proves itself
+    healthy before any borrower mail exists to be scanned. Turning mail on first would be the wrong
+    order — the failure mode is silent, and "no threats found" and "nothing was ever scanned" arrive
+    identically as no message at all.
+
+    Both flags gate resources inside the same module, so this one does nothing while the module
+    itself is off.
+  EOT
+  type        = bool
+  default     = false
+}

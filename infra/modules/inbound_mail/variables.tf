@@ -87,3 +87,16 @@ variable "max_receive_count" {
   type        = number
   default     = 5
 }
+
+variable "malware_scan_enabled" {
+  description = <<-EOT
+    INFRA-2 — whether to enable GuardDuty Malware Protection for S3 over the inbound bucket.
+
+    Its own flag rather than riding on `inbound_mail_enabled`, because it is its own HUMAN_GATED
+    apply and its own cost line. Enabling it on a bucket that receives nothing costs nothing and
+    proves the wiring; enabling mail without it would put unscanned borrower attachments into the
+    extraction pipeline.
+  EOT
+  type        = bool
+  default     = false
+}

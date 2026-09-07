@@ -38,3 +38,17 @@ output "mail_domain" {
   description = "Becomes settings.inbox_domain (LP-802)."
   value       = var.mail_domain
 }
+
+output "scan_results_queue_url" {
+  description = "SQS queue carrying GuardDuty scan results and plan-health events, or null."
+  value       = var.malware_scan_enabled ? aws_sqs_queue.scan_results[0].id : null
+}
+
+output "scan_results_queue_arn" {
+  value = var.malware_scan_enabled ? aws_sqs_queue.scan_results[0].arn : null
+}
+
+output "malware_scan_role_arn" {
+  description = "The role GuardDuty assumes to read and tag objects in the inbound bucket."
+  value       = var.malware_scan_enabled ? aws_iam_role.malware_scan[0].arn : null
+}

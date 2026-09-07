@@ -400,3 +400,8 @@ rds_maintenance_window = "wed:15:30-wed:16:00" # 11:30 EDT / 10:30 EST
 # and LP-805 (routing) are both in M2. The Terraform is written now because production's registrar
 # step has lead time, not because staging should start receiving early.
 inbound_mail_enabled = false
+
+# INFRA-2 — the malware scan. Gated inside the same module, so this is inert while
+# inbound_mail_enabled is false. Listed explicitly rather than left to the default so that turning
+# mail on without deciding about scanning is not something that can happen by omission.
+inbound_malware_scan_enabled = false

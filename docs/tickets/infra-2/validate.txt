@@ -1,0 +1,26 @@
+$ terraform -chdir=infra/modules/inbound_mail init -backend=false && terraform validate
+Success! The configuration is valid.
+
+$ terraform validate   # root module, staging, from a copy with backend.tf removed
+Success! The configuration is valid.
+
+$ terraform fmt -recursive infra/
+(clean)
+
+$ terraform providers schema -json   # aws ~> 5.0, resolved 5.100.0
+aws_guardduty_malware_protection_plan
+  role: required
+  actions: optional        list(object({ tagging = list(object({ status = string })) }))
+  status: computed
+  arn / created_at / id: computed
+  [protected_resource] list
+    [s3_bucket] list
+      bucket_name: required
+      object_prefixes: optional
+
+  -- Read from the provider's own schema rather than the registry web page, which is
+     JS-rendered and returned no content. This is what the installed provider will accept.
+
+$ terraform -chdir=infra/envs/staging plan
+  NOT RUN. No AWS credentials in this session; the S3 state backend is contacted even
+  under -backend=false. Same blocker as INFRA-1 — see ../INFRA-1.md.
