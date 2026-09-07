@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import pytest
 from app.models import Company, LoanProgram
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -608,3 +609,36 @@ async def test_a_participant_on_one_file_is_not_a_participant_on_another(
     assert not await is_participant(
         db_session, loan_file_id=my_file.id, address="akash@example.com"
     )
+
+
+# --------------------------------------------------------------------------------------------- #
+# The token lookup has to be able to use an index (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_the_token_lookup_uses_an_index(db_session: AsyncSession) -> None:
+    """`resolve_loan_file_by_address` compares `lower(inbox_token)`, and a plain btree index on the
+    raw column cannot serve an expression.
+
+    Asserted through the PLANNER rather than by checking the index exists, because the index
+    existing and the query using it are different claims — a differently-spelled expression, or an
+    index built on the wrong one, would leave this scanning while `pg_indexes` still looked right.
+    `enable_seqscan = off` makes a sequential scan cost ten billion, so a Seq Scan in this plan
+    means no index could serve the query at all rather than that the planner merely preferred not
+    to. Measured before the index existed: Seq Scan even under that setting.
+
+    It matters because this is the hottest path in inbound routing — every message resolves a token
+    — and it is also the path an attacker probes by mailing guessed addresses, which LP-805 records
+    as having no rate limit. A full table scan per guess is the wrong cost to hand them.
+    """
+    await db_session.execute(sa_text("SET enable_seqscan = off"))
+    plan = (
+        (
+            await db_session.execute(
+                sa_text("EXPLAIN SELECT id FROM loan_files WHERE lower(inbox_token) = 'abc'")
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert "Seq Scan" not in plan[0], f"the token lookup cannot use an index: {plan[0]}"
+    assert "ix_loan_files_inbox_token_lower" in plan[0], plan[0]

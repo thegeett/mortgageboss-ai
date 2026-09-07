@@ -27,7 +27,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -126,6 +126,22 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """
 
     __tablename__ = "loan_files"
+    __table_args__ = (
+        # LP-805 review — THE UNIQUE INDEX ON `inbox_token` CANNOT SERVE THE ROUTING LOOKUP.
+        # `resolve_loan_file_by_address` compares `func.lower(inbox_token)`, deliberately, so a relay
+        # that rewrites the case of an address does not make a borrower's documents vanish into
+        # triage. PostgreSQL cannot use a plain btree index for an expression: measured with
+        # `enable_seqscan = off`, which costs a sequential scan at ten billion, the planner STILL
+        # chose Seq Scan for the `lower()` form and an Index Scan for the exact one.
+        #
+        # That is the hottest path in inbound routing — every message resolves a token — and it is
+        # also the path an attacker probes by mailing guessed addresses, which LP-805 records as
+        # having no rate limit. A full table scan per guess is the wrong cost to hand them.
+        #
+        # NOT unique: the raw-token unique index above already prevents duplicates, and a unique
+        # functional index could fail to build on an existing database over a case-only collision.
+        Index("ix_loan_files_inbox_token_lower", text("lower(inbox_token)")),
+    )
 
     # --- Identifiers (ADR-036) ---------------------------------------------
     # Both are globally unique with a DB constraint as the final safety net.

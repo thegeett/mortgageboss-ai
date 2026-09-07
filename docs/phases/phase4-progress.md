@@ -64,7 +64,7 @@ user's call.
 
 | # | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|---|
-| 15 | LP-805 Routing ladder + participants + token resolver | AWAITING_REVIEW | see Log | | Migration b8e5f13a7c04. **Cross-tenant test written FIRST and proven to fail against an unscoped resolver** (3 tests fail on `select(LoanFile)`). Rungs 1-2 only — `phase4.md` §7 and the build plan disagree about 3-5. A surviving mutant found a negative test with nothing reachable to fail against |
+| 15 | LP-805 Routing ladder + participants + token resolver | REVIEWED | see Log | | Migration b8e5f13a7c04. **Cross-tenant test written FIRST and proven to fail against an unscoped resolver** (3 tests fail on `select(LoanFile)`). Rungs 1-2 only — `phase4.md` §7 and the build plan disagree about 3-5. A surviving mutant found a negative test with nothing reachable to fail against Review: tenancy SWEPT, not assured — exactly one writer of `message.company_id`, at inbound_routing.py:308, from the resolved file. Rung 2 is not a second inversion and its certain confidence is the plan's own; auto-accept additionally requires DMARC, virus and `is_trusted_sender` on that file. Finding: `func.lower(inbox_token)` could use NO index — measured Seq Scan with `enable_seqscan = off` — on the hottest routing path, which is also the un-rate-limited probing path. Functional index added, asserted through the planner. |
 | 16 | LP-806 Triage API + accept + `correspondence` disposition | PENDING | | | |
 | 17 | LP-807 Triage queue UI + seed data (§H3) | PENDING | | | |
 | 18 | LP-813 Underwriter contact + per-file assignment | PENDING | | | moved earlier — LP-805 needs them as participants |
@@ -106,6 +106,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-804a | 66788b19 | 3cd4bce4 | 1 | a corpus fix undone by two sibling hooks the same argument covered |
 | 2026-09-07 | LP-804b | af395644 | 4b4c209d | 1 | two plan-named PDF keys asserted vacuously and unstripped on page annotations |
 | 2026-09-07 | LP-819 | 66426f23 | 77a5285f | 1 | a bounce unwound the need and left the finding claiming the request stood, with the retry button disabled |
+| 2026-09-07 | LP-805 | 83feb4f0 | REVIEW_SHA | 1 | the token lookup could use no index, on the path an attacker probes for free |
 | 2026-09-07 | LP-805 | 83feb4f0 |  |  | awaiting review. Migration b8e5f13a7c04. The one tenancy inversion; cross-tenant test written first and proven to bite |
 | 2026-09-07 | LP-819 | 66426f23 |  |  | awaiting review. M2 application code complete. My own fixture assertion caught an empty bounce fixture before review |
 | 2026-09-07 | LP-804b | af395644 |  |  | awaiting review. pikepdf added on evidence; three dependencies declined. A surviving mutant found an untested branch |

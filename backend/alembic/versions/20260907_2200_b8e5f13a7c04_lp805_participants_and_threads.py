@@ -65,6 +65,16 @@ _GRANT = """
 
 
 def upgrade() -> None:
+    # LP-805 review — backs the case-insensitive token lookup in `resolve_loan_file_by_address`.
+    # Without it that query cannot use `ix_loan_files_inbox_token` and sequentially scans
+    # `loan_files` on every inbound message; measured with `enable_seqscan = off` and the planner
+    # still chose Seq Scan. Non-unique: the raw-token unique index already prevents duplicates.
+    op.create_index(
+        "ix_loan_files_inbox_token_lower",
+        "loan_files",
+        [sa.text("lower(inbox_token)")],
+    )
+
     op.create_table(
         "loan_file_participants",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -115,6 +125,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_loan_files_inbox_token_lower", table_name="loan_files")
     op.execute("DROP VIEW IF EXISTS readonly.email_threads")
     op.execute("DROP VIEW IF EXISTS readonly.loan_file_participants")
     op.drop_table("email_threads")
