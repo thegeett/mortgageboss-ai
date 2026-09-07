@@ -44,6 +44,7 @@ export function ReviewerFields({
   onAdd,
   onAddOpenChange,
   onUndo,
+  onEdit,
   addableFields,
   onCancelEdit,
   busy,
@@ -87,6 +88,14 @@ export function ReviewerFields({
   onAddOpenChange?: (open: boolean) => void;
   /** Withdraw whatever verdict is on this field, putting the model's value back. */
   onUndo?: (fieldKey: string) => void;
+  /**
+   * Open the verdict editor on this field — the MOUSE path to LP-703's editing.
+   *
+   * The capability existed from LP-703 and `setEditing` was called only from the
+   * `E` and `R` key handlers, so a processor using a mouse could select a field
+   * and read it and change nothing.
+   */
+  onEdit?: (fieldKey: string) => void;
   /** Field names this document type declares and the extraction does not carry. */
   addableFields?: readonly string[];
   onCancelEdit?: () => void;
@@ -257,6 +266,28 @@ export function ReviewerFields({
                         by a mis-key — was permanent from the screen. A removal and
                         an addition make that worse, because they change what the
                         checks compute from. */}
+                      {/* THE MOUSE PATH TO EDITING, which did not exist (LP-711).
+                        LP-703 built correcting a value, removing a field and adding
+                        one, all undoable and all reaching the rule engine — and
+                        `setEditing` was reachable ONLY from the `E` and `R` keys.
+                        A processor working with a mouse could select a field and
+                        see its box, and could not change anything at all; the whole
+                        feature was behind a shortcut discoverable only by opening
+                        the `?` sheet.
+
+                        On the SELECTED row rather than every row: a control on
+                        forty rows at once is the chrome LP-UI-032 spent a ticket
+                        removing. */}
+                      {onEdit && field.key === selected && editing !== field.key ? (
+                        <button
+                          type="button"
+                          className="rounded text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => onEdit(field.key)}
+                          disabled={busy}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
                       {onUndo && scrutiny[field.key]?.verdict ? (
                         <button
                           type="button"

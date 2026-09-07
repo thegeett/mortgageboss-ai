@@ -188,3 +188,67 @@ describe("the WHOLE ROW selects the field, not just its name", () => {
     expect(onSelect).toHaveBeenCalledWith("gross_pay");
   });
 });
+
+describe("editing is reachable with a mouse (LP-711)", () => {
+  /**
+   * LP-703 built correcting a value, removing a field and adding one — all
+   * undoable, all reaching the rule engine — and `setEditing` was called ONLY
+   * from the `E` and `R` key handlers. A processor working with a mouse could
+   * select a field, read it, and change nothing: the whole feature sat behind a
+   * shortcut discoverable only by opening the `?` sheet.
+   */
+  it("offers Edit on the SELECTED row", () => {
+    const { getByRole } = render(
+      <ReviewerFields documentId="d1" fields={FIELDS} selected="gross_pay" onEdit={vi.fn()} />,
+    );
+    expect(getByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("offers it on NO other row", () => {
+    // A control on forty rows at once is the chrome LP-UI-032 spent a ticket
+    // removing. Without this the test above would pass for a button rendered
+    // unconditionally.
+    const { queryAllByRole } = render(
+      <ReviewerFields documentId="d1" fields={FIELDS} selected="gross_pay" onEdit={vi.fn()} />,
+    );
+    expect(queryAllByRole("button", { name: "Edit" })).toHaveLength(1);
+  });
+
+  it("names the field it sits on, rather than trusting the selection to settle", () => {
+    const onEdit = vi.fn();
+    const { getByRole } = render(
+      <ReviewerFields documentId="d1" fields={FIELDS} selected="gross_pay" onEdit={onEdit} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Edit" }));
+    expect(onEdit).toHaveBeenCalledWith("gross_pay");
+  });
+
+  it("is not offered while that row's editor is already open", () => {
+    const { queryByRole } = render(
+      <ReviewerFields
+        documentId="d1"
+        fields={FIELDS}
+        selected="gross_pay"
+        editing="gross_pay"
+        onEdit={vi.fn()}
+      />,
+    );
+    expect(queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("does not stop the value's text being selected", () => {
+    // The row is clickable, and a processor copying an account number drags
+    // across the value. Nothing may call `preventDefault` on that — the click
+    // that ends the drag is allowed to select the row, and the browser's own
+    // text selection has to survive it.
+    const onSelect = vi.fn();
+    const { getByText } = render(
+      <ReviewerFields documentId="d1" fields={FIELDS} onSelect={onSelect} />,
+    );
+    const value = getByText("v-gross_pay");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    value.dispatchEvent(event);
+    expect(onSelect).toHaveBeenCalledWith("gross_pay");
+    expect(event.defaultPrevented, "the row must not swallow the click").toBe(false);
+  });
+});

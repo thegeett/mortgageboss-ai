@@ -223,10 +223,18 @@ function Reviewer() {
    * itself keyboard-driven. So `E` or `R` on any list field killed the reviewer's
    * keyboard — arrows, Enter, even `?` — until the page was reloaded.
    */
-  const openEditor = useCallback(() => {
-    const key = editableSelection();
-    if (key) setEditing(key);
-  }, [editableSelection]);
+  const openEditor = useCallback(
+    // `requested` is the mouse path (LP-711): the Edit control names the field it
+    // sits on rather than relying on `selected` having already settled in the same
+    // click. It goes through `editableFieldKey` like the keyboard does, so the two
+    // cannot disagree about which fields can be edited — which is the lockout
+    // above, reachable from a second direction.
+    (requested?: string) => {
+      const key = requested ? editableFieldKey(fields, requested) : editableSelection();
+      if (key) setEditing(key);
+    },
+    [editableSelection, fields],
+  );
 
   useReviewKeys(
     {
@@ -396,6 +404,9 @@ function Reviewer() {
             }}
             addableFields={detail?.addable_fields ?? []}
             onUndo={(fieldKey) => revertReview.mutate(fieldKey)}
+            // The same opener the `E` key uses, so the mouse and the keyboard
+            // cannot disagree about which fields are editable (LP-711).
+            onEdit={openEditor}
           />
         }
       />
