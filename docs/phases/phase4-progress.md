@@ -108,7 +108,6 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-819 | 66426f23 | 77a5285f | 1 | a bounce unwound the need and left the finding claiming the request stood, with the retry button disabled |
 | 2026-09-07 | LP-805 | 83feb4f0 | f5734f39 | 1 | the token lookup could use no index, on the path an attacker probes for free |
 | 2026-09-07 | LP-806 | 6f1d54b2 | bfbf4ad8 | 1 | cross-tenant PII on the unrouted queue; one reviewer finding withdrawn as already handled |
-| 2026-09-07 | LP-807 | 3a61e369 | 90f9ef2d | 1 | the SES id read off the wrong object, making the sender's header the global dedup key |
 | 2026-09-07 | LP-805 | 83feb4f0 |  |  | awaiting review. Migration b8e5f13a7c04. The one tenancy inversion; cross-tenant test written first and proven to bite |
 | 2026-09-07 | LP-819 | 66426f23 |  |  | awaiting review. M2 application code complete. My own fixture assertion caught an empty bounce fixture before review |
 | 2026-09-07 | LP-804b | af395644 |  |  | awaiting review. pikepdf added on evidence; three dependencies declined. A surviving mutant found an untested branch |
@@ -117,7 +116,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-803 | 4024f921 | 40067783 | 1 | a drift guard that a nested SELECT switched off silently; my own first fix broke it on a column named from_outcome |
 | 2026-09-07 | LP-811b | 710ed72b |  |  | awaiting review. Frontend only. The navigation question answered itself — the Communication tab placeholder has existed since LP-33. **M1 complete pending this review** |
 | 2026-09-07 | LP-806 | 6f1d54b2 |  |  | awaiting review. Migration c9d3a71b8e52. THE dangerous operation — the cross-file test uses a real attachment on a real other company's file. Two surviving mutants found real gaps; the view rebuild nearly dropped three columns because I copied LP-627's DOWNGRADE block |
-| 2026-09-07 | LP-807 | 3a61e369 |  |  | awaiting review. Migration e4a7c15d92b0. The ingest chain had NO caller — safety and routing were never invoked, both suites green. Wiring it in broke redelivery, because the dedup index keyed on a column routing writes. A surviving mutant found a test refusing for the wrong reason |
+| 2026-09-07 | LP-807 | 3a61e369 | ad486a91 | 1 | the ingest chain had NO caller — safety and routing were never invoked, both suites green. Wiring it in broke redelivery, because the dedup index keyed on a column routing writes. Review: `ses_message_id` was read off the `receipt` object when AWS documents it on `mail`, so the SENDER-WRITTEN Message-ID became the global dedup key — the cross-tenant suppression escalated here as unreachable was reachable on every message |
 | 2026-09-07 | LP-811a | 748ace96 |  |  | awaiting review. Split from LP-811; LP-811b (frontend) is row 8b. First write to `requested_at` in the system's life |
 | 2026-09-06 | LP-809 | c3d34471 |  |  | awaiting review. Migration b8d5e0a17c42; two provenance columns the plan did not ask for; LP-818 will need the draft uniqueness index revisited |
 | 2026-09-07 | LP-800a | f3f0e06c | 228ddc61 | 1 | sourcing pass, user-directed. Fannie Mae citations inline; no assignment wrong; found the party recorded twice with the wrong copy winning; review found one stale section number |
