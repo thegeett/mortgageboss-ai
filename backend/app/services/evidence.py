@@ -218,8 +218,9 @@ async def record_delivery_failed(
         event=EvidenceEvent.DELIVERY_FAILED,
         recipient=communication.recipient,
         # The provider's own words about why. Prose written by a mail system, not by a person, and
-        # kept because "why did it bounce" is the question a processor asks next.
-        guardrail_fired=reason,
+        # kept because "why did it bounce" is the question a processor asks next. NOT
+        # `guardrail_fired`: a bounce is not a guard, and that column is read as one.
+        failure_reason=reason,
         attachment_manifest=[],
         auth_verdicts={},
     )

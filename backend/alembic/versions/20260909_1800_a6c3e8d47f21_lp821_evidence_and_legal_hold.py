@@ -50,7 +50,7 @@ _EVIDENCE_VIEW = """
     CREATE VIEW readonly.communication_evidence AS
     SELECT id, loan_file_id, communication_id, event, recorded_at,
            approver_user_id, template_key, template_version,
-           guardrail_fired, model_id, prompt_version,
+           guardrail_fired, failure_reason, model_id, prompt_version,
            readonly.scrub(auth_verdicts::text)::jsonb AS auth_verdicts,
            jsonb_array_length(attachment_manifest) AS attachment_count,
            (body_composed IS NOT NULL) AS has_composed_draft,
@@ -112,6 +112,8 @@ def upgrade() -> None:
             server_default="[]",
         ),
         sa.Column("guardrail_fired", sa.String(128), nullable=True),
+        # LP-821 review — a bounce is not a guard; see the model docstring.
+        sa.Column("failure_reason", sa.String(128), nullable=True),
         sa.Column("model_id", sa.String(64), nullable=True),
         sa.Column("prompt_version", sa.String(64), nullable=True),
         sa.Column(

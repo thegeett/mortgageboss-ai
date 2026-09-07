@@ -125,10 +125,24 @@ class CommunicationEvidence(Base, UUIDMixin):
         JSONB, default=list, nullable=False
     )
 
-    #: Which deterministic guard refused a composition, or null when none did. LP-810's
-    #: `rejection_reason`; recorded so "the plain template was used" can be told from "the drafter
-    #: was off".
+    #: Which deterministic guard refused a composition — LP-810's `rejection_reason`.
+    #:
+    #: NULL MEANS "NOT RECORDED", NOT "NO GUARD FIRED", and the difference matters in an evidence
+    #: record. `send_draft` has no access to the verdict today: LP-810's drafter runs earlier and
+    #: returns prose, while the guard's reason lives in `email_draft_prose`. Threading it through is
+    #: a service edit rather than a migration, and until it happens this column is structurally
+    #: empty for every send. Reading an empty column as "the drafter was clean" is the failure this
+    #: comment exists to prevent.
     guardrail_fired: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+
+    #: Why a delivery failed — the provider's own words, on a `DELIVERY_FAILED` event.
+    #:
+    #: A SEPARATE COLUMN because it is a separate fact. This was written into `guardrail_fired`,
+    #: which meant the ONLY thing that ever populated a field documented as "which guard refused a
+    #: composition" was a bounce diagnostic — so `550 5.1.1 user unknown` read, to anyone following
+    #: the model or the AI System Disclosure, as a compliance guard having fired. One column, two
+    #: meanings, in the record that exists to be read by somebody who was not here.
+    failure_reason: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
 

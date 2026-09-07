@@ -394,3 +394,72 @@ async def test_evidence_is_file_scoped(db_session: AsyncSession) -> None:
 
     assert await evidence_for(db_session, loan_file=mine) == []
     assert len(await evidence_for(db_session, loan_file=theirs)) == 1
+
+
+# --------------------------------------------------------------------------------------------- #
+# A bounce is not a guard (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_a_bounce_reason_is_not_recorded_as_a_guardrail(db_session: AsyncSession) -> None:
+    """`guardrail_fired` is documented as "which deterministic guard refused a composition".
+
+    The provider's bounce diagnostic was being written into it — and since `send_draft` cannot reach
+    LP-810's verdict yet, that made a bounce reason the ONLY thing that ever populated the column. So
+    `550 5.1.1 user unknown` read, to anyone following the model docstring or the AI System
+    Disclosure, as a compliance guard having fired. One column, two meanings, in the record that
+    exists to be read by somebody who was not here.
+    """
+    from app.services.evidence import record_delivery_failed
+
+    company, loan_file = await _company_and_file(db_session, slug="notaguard")
+    actor = await _actor(db_session, company)
+    message = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.SENT,
+    )
+    db_session.add(message)
+    await db_session.flush()
+    await record_sent(
+        db_session, loan_file=loan_file, communication=message, approver_user_id=actor.id
+    )
+    await record_delivery_failed(
+        db_session,
+        loan_file=loan_file,
+        communication=message,
+        reason="550 5.1.1 user unknown",
+    )
+
+    rows = await evidence_for(db_session, loan_file=loan_file)
+    bounce = next(row for row in rows if row.event is EvidenceEvent.DELIVERY_FAILED)
+
+    assert bounce.failure_reason == "550 5.1.1 user unknown"
+    assert bounce.guardrail_fired is None
+
+
+async def test_the_send_row_records_neither(db_session: AsyncSession) -> None:
+    """The control, and the honest one.
+
+    `guardrail_fired` is null on a send because the verdict is not threaded through yet — NOT
+    because no guard fired. Asserting it here keeps the distinction visible: if a later change
+    starts populating it, this test says so rather than the column quietly gaining a meaning.
+    """
+    company, loan_file = await _company_and_file(db_session, slug="neither")
+    actor = await _actor(db_session, company)
+    message = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.SENT,
+    )
+    db_session.add(message)
+    await db_session.flush()
+    await record_sent(
+        db_session, loan_file=loan_file, communication=message, approver_user_id=actor.id
+    )
+
+    (sent_row,) = [
+        row
+        for row in await evidence_for(db_session, loan_file=loan_file)
+        if row.event is EvidenceEvent.SENT
+    ]
+    assert sent_row.failure_reason is None
+    assert sent_row.guardrail_fired is None

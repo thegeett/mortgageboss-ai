@@ -61,12 +61,24 @@ fixed template (LP-817) and no model is called.
 Deterministic, applied to every composition before it is stored or shown:
 
 - A composition failing any guard is **discarded**, not shown and not cached; the plain template is
-  used instead, and which guard fired is recorded (`guardrail_fired`).
+  used instead.
 - One retry, then the template. No unbounded loop.
 - The compliance scanner refuses wording that commits to a decision, states a rate, or implies
   approval.
-- The same guard function filters the **cache on the way in**, so a guard added later heals stored
-  prose rather than applying only to drafts nobody had composed yet.
+- The same guard function re-checks the **cache on the way out**, so a guard added later heals
+  stored prose rather than applying only to compositions made after it shipped.
+
+**Not yet recorded, and stated here because an evidence record is read by people who were not
+present.** `CommunicationEvidence.guardrail_fired` exists and is **empty for every send**. The
+drafter runs before the send and returns prose, while the guard's verdict stays in
+`email_draft_prose`, so nothing carries it across; threading it through is a service change rather
+than a schema one. Until then a null in that column means **not recorded**, not "no guard fired",
+and the same is true of `model_id` and `prompt_version`.
+
+This paragraph replaced two statements that were wrong in the direction that flatters the system.
+The first said which guard fired *is* recorded. The second said the cache is filtered "on the way
+in" — which would apply a new guard only to prose stored after it, the opposite of the healing
+property claimed in the same sentence, and the opposite of what the code does.
 
 ## 6. Monitoring
 

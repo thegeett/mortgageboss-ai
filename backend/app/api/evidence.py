@@ -48,6 +48,7 @@ class EvidencePublic(BaseModel):
     template_key: str | None
     template_version: str | None
     guardrail_fired: str | None
+    failure_reason: str | None
     model_id: str | None
     prompt_version: str | None
     auth_verdicts: dict[str, Any]
@@ -67,6 +68,7 @@ class EvidencePublic(BaseModel):
             template_key=row.template_key,
             template_version=row.template_version,
             guardrail_fired=row.guardrail_fired,
+            failure_reason=row.failure_reason,
             model_id=row.model_id,
             prompt_version=row.prompt_version,
             auth_verdicts={k: str(v) for k, v in (row.auth_verdicts or {}).items()},
