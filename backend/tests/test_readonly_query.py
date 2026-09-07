@@ -358,6 +358,12 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # `cardinality(exemplars)` would trip the NEVER_EXPOSED text check below, so the migration
     # chose the guarantee over the metric; its docstring explains the trade.
     "style_profiles": frozenset({"greeting", "closing", "signature_block", "exemplars"}),
+    # LP-810 — the composed draft body. DROPPED, not scrubbed, and stricter than `needs_prose.why`
+    # on purpose: a composed need reason is a sentence about one document, a composed draft body is a
+    # whole borrower-facing email. `readonly.communications` already drops `body` for that reason and
+    # this table holds the same content one step earlier. Scrubbing matches identifier shapes; an
+    # email is prose, and a name has no shape.
+    "email_draft_prose": frozenset({"body"}),
 }
 
 #: Columns that must NEVER appear in any view, whatever else changes. A belt-and-braces
@@ -377,6 +383,9 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),
     ("communications", "body"),
+    # LP-810 — the same content one step earlier, and here for the same strong-form reason: an email
+    # body is prose about a named person, which no scrub matches.
+    ("email_draft_prose", "body"),
     # LP-822, and here for the strong-form reason rather than only to record the decision: an
     # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it

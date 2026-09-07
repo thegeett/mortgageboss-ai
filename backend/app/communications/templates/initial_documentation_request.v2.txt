@@ -1,0 +1,19 @@
+Subject: Documents we need for your loan ($loan_reference)
+
+Hello $borrower_first_name,
+
+$opening
+
+$bridge
+
+$document_list
+
+You can reply to this message with them attached, or send them to:
+
+  $inbox_address
+
+$closing
+
+Email is not a fully secure channel. If you would rather not send something this way, reply and tell us and we will arrange another route.
+
+$processor_name

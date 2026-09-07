@@ -92,8 +92,17 @@ _COMMON = frozenset({"borrower_first_name", "processor_name"})
 TEMPLATES: dict[TemplateKey, TemplateSpec] = {
     TemplateKey.INITIAL_DOCUMENTATION_REQUEST: TemplateSpec(
         key=TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
-        version="v1",
-        variables=_COMMON | {"loan_reference", "document_list", "inbox_address"},
+        # v2 (LP-810) — v1's three framing sentences became `$opening`, `$bridge` and `$closing` so
+        # the drafting engine can replace them without touching the address line, the security notice
+        # or the document list. The plain path fills them from `framing.plain.v1.txt`, which carries
+        # v1's exact sentences: with the flag off, a reader sees what v1 produced.
+        #
+        # A VERSION BUMP RATHER THAN AN EDIT, which is what ADR-401 is for. v1's fingerprint stays
+        # pinned below and its file stays on disk, so an audit row naming v1 still resolves to the
+        # words it named.
+        version="v2",
+        variables=_COMMON
+        | {"loan_reference", "document_list", "inbox_address", "opening", "bridge", "closing"},
     ),
     TemplateKey.REMINDER_FOLLOW_UP: TemplateSpec(
         key=TemplateKey.REMINDER_FOLLOW_UP,
@@ -125,6 +134,10 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
+        "v2",
+    ): "4184bd43007cb049bb9f39aaeb2f445988eafa9932a967ee70f372d04fa91a28",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v1",
@@ -216,6 +229,51 @@ def render(key: TemplateKey, context: dict[str, str]) -> RenderedTemplate:
         )
     except (KeyError, ValueError) as exc:
         raise TemplateError(f"{key.value} {spec.version}: {exc}") from exc
+
+
+#: The plain framing file, and the version its sentences came from. It is CONTENT, like the templates
+#: beside it, and pinned like them — the sentences a borrower reads with the drafting flag off must be
+#: as unable to change silently as the template that frames them.
+PLAIN_FRAMING_FILE = "framing.plain.v1.txt"
+PLAIN_FRAMING_FINGERPRINT = (
+    "d77edec4103b2270155492ef85f3d1246523b07021732e8ac1ad3b3ff15d03f3"  # pragma: allowlist secret
+)
+
+
+@dataclass(frozen=True)
+class Framing:
+    """The three sentences a draft's structure wraps around: why we are writing, what follows, what next."""
+
+    opening: str
+    bridge: str
+    closing: str
+
+
+@cache
+def plain_framing() -> Framing:
+    """v1's own three sentences, unchanged — what a reader sees with the drafting flag off.
+
+    Kept in a file rather than as string constants for the reason every template is: they are words a
+    person will edit, and they diff cleanly in review. Kept SEPARATE from the template because the
+    template is the structure and these are one interchangeable part of it — LP-810 substitutes a
+    composed set into the same three slots.
+    """
+    path = (_TEMPLATES_DIR / PLAIN_FRAMING_FILE).resolve()
+    if _TEMPLATES_DIR not in path.parents:
+        raise TemplateError("plain framing path escapes the templates dir")
+    parts = [
+        block.strip() for block in path.read_text(encoding="utf-8").split("\n\n") if block.strip()
+    ]
+    if len(parts) != 3:
+        raise TemplateError(
+            f"{PLAIN_FRAMING_FILE}: expected three paragraphs (opening, bridge, closing), got {len(parts)}"
+        )
+    return Framing(*parts)
+
+
+def plain_framing_fingerprint() -> str:
+    """SHA-256 of the plain framing file as it stands on disk."""
+    return hashlib.sha256((_TEMPLATES_DIR / PLAIN_FRAMING_FILE).read_bytes()).hexdigest()
 
 
 def render_document_block(document_types: tuple[str, ...]) -> str:

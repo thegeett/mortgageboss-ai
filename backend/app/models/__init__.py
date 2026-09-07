@@ -38,6 +38,7 @@ from app.models.document_finding import (
 )
 from app.models.dti_custom_line import DtiCustomLine
 from app.models.dti_override import DtiOverride
+from app.models.email_draft_prose import EmailDraftProse
 from app.models.encrypted_types import EncryptedString
 from app.models.enums import RecordStatus, str_enum
 from app.models.extraction import Extraction, ExtractionStatus
@@ -118,6 +119,7 @@ __all__ = [
     "DocumentStatus",
     "DtiCustomLine",
     "DtiOverride",
+    "EmailDraftProse",
     "EncryptedString",
     "EvaluationOutcome",
     "Extraction",

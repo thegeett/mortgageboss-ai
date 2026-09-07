@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from app.communications.templates import (
+    PLAIN_FRAMING_FINGERPRINT,
     SECURITY_NOTICE,
     TEMPLATES,
     VERSION_FINGERPRINTS,
@@ -24,6 +25,8 @@ from app.communications.templates import (
     _load,
     file_fingerprint,
     placeholders,
+    plain_framing,
+    plain_framing_fingerprint,
     render,
     render_document_block,
 )
@@ -38,6 +41,11 @@ _CONTEXT = {
     "status_summary": "The appraisal came back on Tuesday.",
     "next_step": "We expect the underwriter's decision this week.",
     "condition_list": "- A letter of explanation",
+    # LP-810 — the initial request's three framing slots. Supplied here rather than defaulted, so the
+    # declared-variables test still compares the file against the spec in both directions.
+    "opening": "We are working through your file.",
+    "bridge": "Here is what we still need:",
+    "closing": "Ask us if anything is unclear.",
     "subject_line": "About your loan",
     "message_body": "Just a note.",
 }
@@ -162,6 +170,52 @@ def test_the_non_asking_templates_do_not(key: TemplateKey) -> None:
     """The control for the test above — without it, an address in all five would pass that one and
     say nothing about whether the distinction is real."""
     assert "inbox_address" not in TEMPLATES[key].variables
+
+
+# --------------------------------------------------------------------------------------------- #
+# The plain framing, and the version that introduced its slots (LP-810)
+# --------------------------------------------------------------------------------------------- #
+def test_the_initial_request_is_at_v2_and_v1_is_still_resolvable() -> None:
+    """ADR-401's mechanism doing its job. LP-810 needed three framing slots, so the file changed —
+    which means a NEW VERSION, not an edit. v1's fingerprint stays pinned and its file stays on disk,
+    so an audit row naming v1 still resolves to the words it named.
+
+    This is the first bump, and it is the case the pin exists for: an in-place edit here would have
+    left every v1 audit row describing an email that no longer exists in that form."""
+    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v2"
+    assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1") in VERSION_FINGERPRINTS
+    assert (
+        file_fingerprint(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1")
+        == VERSION_FINGERPRINTS[(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1")]
+    )
+
+
+def test_the_plain_framing_file_matches_its_pin() -> None:
+    """The sentences a borrower reads with the drafting flag OFF. Pinned like a template, because
+    they are exactly as borrower-facing as one and must be as unable to change silently."""
+    assert plain_framing_fingerprint() == PLAIN_FRAMING_FINGERPRINT
+
+
+def test_the_plain_framing_is_v1s_own_wording() -> None:
+    """The claim the version bump rests on: with the flag off, a reader sees what v1 sent. Asserted
+    against v1's FILE rather than against a copy of the sentences, so it cannot drift into agreeing
+    with itself."""
+    v1_body = _load(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1")[1]
+    framing = plain_framing()
+    for sentence in (framing.opening, framing.bridge, framing.closing):
+        assert sentence in v1_body, f"not in v1: {sentence!r}"
+
+
+def test_the_plain_render_still_reads_like_v1() -> None:
+    """End to end: the plain path produces v1's sentences in v1's order, around the same list."""
+    body = render(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, {**_CONTEXT, **_plain_slots()}).body
+    framing = plain_framing()
+    assert body.index(framing.opening) < body.index(framing.bridge) < body.index(framing.closing)
+
+
+def _plain_slots() -> dict[str, str]:
+    framing = plain_framing()
+    return {"opening": framing.opening, "bridge": framing.bridge, "closing": framing.closing}
 
 
 # --------------------------------------------------------------------------------------------- #

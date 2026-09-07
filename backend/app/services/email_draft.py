@@ -26,12 +26,21 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.email_draft import (
+    DraftComposition,
+    DraftFacts,
+    compose,
+    rejection_reason,
+)
 from app.communications.templates import (
+    Framing,
     RenderedTemplate,
     TemplateKey,
+    plain_framing,
     render,
     render_document_block,
 )
+from app.core.config import settings
 from app.documents.catalog import ResponsibleParty, get_guidance
 from app.models.communication import (
     Communication,
@@ -39,6 +48,7 @@ from app.models.communication import (
     CommunicationStatus,
 )
 from app.models.communication_needs_item import CommunicationNeedsItem
+from app.models.email_draft_prose import EmailDraftProse
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem
@@ -92,7 +102,16 @@ def _document_line(need: NeedsItem) -> str:
     return f"- {label}"
 
 
-def render_draft_body(loan_file: LoanFile, needs: list[NeedsItem]) -> RenderedTemplate:
+def _borrower_label(need: NeedsItem) -> str:
+    """What this need is CALLED to a borrower — never its slug, never the raw title if a label exists."""
+    if need.needs_type and (label := get_guidance(need.needs_type).borrower_label):
+        return label
+    return need.title or (document_label(need.needs_type) if need.needs_type else "")
+
+
+def render_draft_body(
+    loan_file: LoanFile, needs: list[NeedsItem], *, framing: Framing | None = None
+) -> RenderedTemplate:
     """The rendered draft for ``needs`` — subject, body, template key and version together.
 
     Returns the whole :class:`RenderedTemplate` rather than a subject/body pair so the version that
@@ -106,6 +125,9 @@ def render_draft_body(loan_file: LoanFile, needs: list[NeedsItem]) -> RenderedTe
     now would bake in whoever happened to click "request", who is not necessarily who sends it.
     """
     document_list = "\n\n".join(_document_line(need) for need in needs)
+    # LP-810 — the composed framing where there is one, the file's own plain sentences otherwise.
+    # `plain_framing()` carries v1's exact wording, so a reader with the flag off sees what v1 sent.
+    words = framing or plain_framing()
     return render(
         DRAFT_TEMPLATE,
         {
@@ -114,6 +136,9 @@ def render_draft_body(loan_file: LoanFile, needs: list[NeedsItem]) -> RenderedTe
             "loan_reference": loan_file.display_id,
             "document_list": document_list,
             "inbox_address": loan_file.get_inbox_address(),
+            "opening": words.opening,
+            "bridge": words.bridge,
+            "closing": words.closing,
         },
     )
 
@@ -177,10 +202,73 @@ async def _needs_in_draft(db: AsyncSession, *, draft: Communication) -> list[Nee
     return list(rows)
 
 
+async def _cached_prose(db: AsyncSession, key: str) -> str | None:
+    """A previously composed framing for these exact facts, or None."""
+    body = await db.scalar(select(EmailDraftProse.body).where(EmailDraftProse.fact_hash == key))
+    return str(body) if body is not None else None
+
+
+async def _store_prose(db: AsyncSession, *, key: str, body: str) -> None:
+    """Cache a composition. Callers store only what `rejection_reason` has already passed."""
+    if await db.get(EmailDraftProse, key) is None:
+        db.add(EmailDraftProse(fact_hash=key, body=body, template_key=DRAFT_TEMPLATE.value))
+        await db.flush()
+
+
+def _draft_facts(loan_file: LoanFile, needs: list[NeedsItem]) -> DraftFacts:
+    """The narrow bundle the model may draw on — LP-810's central constraint.
+
+    The borrower's first name is not resolved here and is left as the template's own placeholder, so
+    the facts (and therefore the cache key) do not vary per borrower for an otherwise identical
+    request. That is deliberate: it makes the cache actually hit, and the model has no legitimate use
+    for the name it is not already getting from the greeting line it does not write.
+    """
+    return DraftFacts(
+        borrower_first_name="the borrower",
+        loan_reference=loan_file.display_id,
+        requested_labels=tuple(_borrower_label(need) for need in needs),
+    )
+
+
+async def _composed_framing(
+    db: AsyncSession, *, loan_file: LoanFile, needs: list[NeedsItem]
+) -> Framing | None:
+    """The model-written framing for this draft, from cache or a fresh call, or None.
+
+    None means "use the plain template", which is a complete email rather than a degraded one.
+    """
+    if not settings.email_draft_enabled or not needs:
+        return None
+    facts = _draft_facts(loan_file, needs)
+    key = facts.cache_key()
+    if (cached := await _cached_prose(db, key)) is not None:
+        # LP-601 — THE CACHE IS FILTERED THROUGH THE SAME VERDICT. `compose` runs only on a miss, so a
+        # composition stored before a guard existed would be served forever and the guard would never
+        # see it. Re-checking on the way OUT means a guard added later heals stored prose next run.
+        stored = _framing_from_body(cached)
+        if stored is not None and rejection_reason(facts, stored) is None:
+            return Framing(stored.opening, stored.bridge, stored.closing)
+        return None
+    composition = await compose(facts)
+    if composition is None:
+        return None
+    await _store_prose(db, key=key, body=composition.message)
+    return Framing(composition.opening, composition.bridge, composition.closing)
+
+
+def _framing_from_body(body: str) -> DraftComposition | None:
+    """Rebuild a composition from its cached three-paragraph form, for re-checking."""
+    parts = [part.strip() for part in body.split("\n\n") if part.strip()]
+    if len(parts) != 3:
+        return None
+    return DraftComposition(parts[0], parts[1], parts[2])
+
+
 async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> None:
     """Rewrite the draft's subject and body from its current membership."""
     needs = await _needs_in_draft(db, draft=draft)
-    rendered = render_draft_body(loan_file, needs)
+    framing = await _composed_framing(db, loan_file=loan_file, needs=needs)
+    rendered = render_draft_body(loan_file, needs, framing=framing)
     draft.subject = rendered.subject
     draft.body = rendered.body
     # The version is stamped from what ACTUALLY rendered, not from the registry read separately.

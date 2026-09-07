@@ -213,6 +213,12 @@ class Settings(BaseSettings):
     # someone chooses to compare it against the templates, which is one env var.
     finding_prose_enabled: bool = False
 
+    # LP-810 — AI drafting of the borrower request's framing. OFF by default, like the two prose
+    # flags above and for a stronger reason: those compose text a PROCESSOR reads, this composes text
+    # a BORROWER reads. With it off, LP-817's deterministic render is not a degraded fallback — it is
+    # a complete email, and the only thing the flag adds is tone.
+    email_draft_enabled: bool = False
+
     # JWT / Auth
     jwt_secret_key: str = Field(
         min_length=32,
