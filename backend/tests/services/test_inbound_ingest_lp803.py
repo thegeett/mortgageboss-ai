@@ -258,3 +258,56 @@ async def test_the_envelope_is_recorded(db_session: AsyncSession) -> None:
     assert "lf-abc123@inbox.example.com" in stored.to_addresses
     assert stored.raw_storage_path == "s3://bucket/inbound/abc"
     assert stored.received_at is not None
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-804a — the attachment inventory, written at ingest
+# --------------------------------------------------------------------------------------------- #
+async def test_attachments_are_inventoried_on_first_ingest(db_session: AsyncSession) -> None:
+    """One row per file-like part, and nothing about them decided yet."""
+    from app.models.inbound_attachment import (
+        AttachmentDisposition,
+        AttachmentSafetyState,
+        InboundAttachment,
+    )
+
+    raw = (_FIXTURES / "forwarded_nested_pdf.eml").read_bytes()
+    await ingest_raw_message(db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-1")
+
+    rows = (await db_session.execute(select(InboundAttachment))).scalars().all()
+    assert len(rows) == 1
+    only = rows[0]
+    assert only.filename_normalized == "statement.pdf"
+    assert only.nesting_depth == 1
+    assert only.size_bytes > 0
+    assert len(only.sha256) == 64
+    # NOTHING IS DECIDED AT INGEST. Pending is not a synonym for safe, and the malware scan is
+    # asynchronous — so this state persists and must never read as a pass.
+    assert only.safety_state is AttachmentSafetyState.PENDING
+    assert only.disposition is AttachmentDisposition.PENDING
+    assert only.sniffed_content_type is None
+    assert only.derived_storage_path is None
+
+
+async def test_a_redelivery_does_not_duplicate_the_attachments(db_session: AsyncSession) -> None:
+    """Attachments are written only on a first insert, so a redelivery cannot double the inventory —
+    which would show a processor the same document twice with no way to tell them apart."""
+    from app.models.inbound_attachment import InboundAttachment
+
+    raw = (_FIXTURES / "forwarded_nested_pdf.eml").read_bytes()
+    await ingest_raw_message(db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-1")
+    await ingest_raw_message(db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-1")
+
+    count = await db_session.scalar(select(func.count()).select_from(InboundAttachment))
+    assert count == 1
+
+
+async def test_a_message_with_no_attachments_inventories_none(db_session: AsyncSession) -> None:
+    """The control — an inventory that recorded the body as a file would satisfy the tests above."""
+    from app.models.inbound_attachment import InboundAttachment
+
+    await ingest_raw_message(
+        db_session, raw=_eml("plain_reply.eml"), raw_storage_path=None, ses_message_id="ses-1"
+    )
+    count = await db_session.scalar(select(func.count()).select_from(InboundAttachment))
+    assert count == 0

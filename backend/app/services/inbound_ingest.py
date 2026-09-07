@@ -31,7 +31,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
+from app.services.inbound_mime import parse_message
 
 logger = get_logger(__name__)
 
@@ -219,6 +221,7 @@ async def ingest_raw_message(
     await db.flush()
 
     if inserted is not None:
+        await _record_attachments(db, inbound_message_id=inserted, raw=raw)
         # METADATA ONLY. No subject, no body, no sender address — the standing rule, and this is the
         # first code in Phase 4 that handles a real borrower's message.
         logger.info("inbound_message_ingested", ingest_key_prefix=ingest_key[:12], bytes=len(raw))
@@ -234,6 +237,45 @@ async def ingest_raw_message(
     ).scalar_one_or_none()
     logger.info("inbound_message_duplicate", ingest_key_prefix=ingest_key[:12])
     return IngestResult(message_id=str(existing), created=False, ingest_key=ingest_key)
+
+
+async def _record_attachments(db: AsyncSession, *, inbound_message_id: Any, raw: bytes) -> int:
+    """Inventory every file-like part (LP-804a). Returns how many rows were written.
+
+    ONLY ON A FIRST INSERT. A redelivery reaches the duplicate branch and never gets here, so the
+    attachment rows are written exactly once — which is what makes the per-message
+    ``(inbound_message_id, sha256)`` uniqueness a belt rather than the only mechanism.
+
+    NOTHING IS DECIDED HERE. Every row lands `PENDING`: not sniffed, not scanned, not safe. LP-804b
+    is what looks at the bytes, and until it has, nothing downstream may read one of these as a
+    document.
+    """
+    parsed = parse_message(raw)
+    if parsed.depth_limit_reached:
+        # Surfaced, not swallowed. A message whose parts were not fully enumerated must not look
+        # like one that simply had nothing deeper — that is how a payload hides behind the cap.
+        logger.warning("inbound_attachments_depth_limited", count=len(parsed.attachments))
+    for attachment in parsed.attachments:
+        db.add(
+            InboundAttachment(
+                inbound_message_id=inbound_message_id,
+                filename_original=attachment.filename_original,
+                filename_normalized=attachment.filename_normalized,
+                declared_content_type=attachment.declared_content_type,
+                size_bytes=attachment.size_bytes,
+                sha256=attachment.sha256,
+                nesting_depth=attachment.nesting_depth,
+            )
+        )
+    await db.flush()
+    # A COUNT AND A DEPTH, and nothing else. Not the filename — it is text a stranger wrote — and
+    # not the content type, which would leak what a borrower sent.
+    logger.info(
+        "inbound_attachments_recorded",
+        count=len(parsed.attachments),
+        max_depth=max((a.nesting_depth for a in parsed.attachments), default=0),
+    )
+    return len(parsed.attachments)
 
 
 __all__ = [

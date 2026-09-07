@@ -1,0 +1,68 @@
+From: Akash Patel <akash@example.com>
+To: lf-abc123@inbox.example.com
+Subject: Fwd: Fwd: Bank statement
+Message-ID: <twice-forwarded-001@example.com>
+Date: Mon, 07 Sep 2026 09:25:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============3480661470211084485=="
+
+--===============3480661470211084485==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Sorry, forwarding again.
+
+--===============3480661470211084485==
+Content-Type: message/rfc822
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+Content-Disposition: attachment
+
+From: Bansari Patel <bansari@example.com>
+To: Akash Patel <akash@example.com>
+Subject: Fwd: Bank statement
+Message-ID: <middle-001@example.com>
+Date: Sun, 06 Sep 2026 18:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============3284963633568009153=="
+
+--===============3284963633568009153==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Passing this on.
+
+--===============3284963633568009153==
+Content-Type: message/rfc822
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+Content-Disposition: attachment
+
+From: Akash Patel <akash@example.com>
+To: Bansari Patel <bansari@example.com>
+Subject: Bank statement
+Message-ID: <deep-001@example.com>
+Date: Sun, 06 Sep 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============4344745604814418250=="
+
+--===============4344745604814418250==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Attached.
+
+--===============4344745604814418250==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="statement.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEg
+MCBSPj4KJSVFT0YK
+
+--===============4344745604814418250==--
+
+--===============3284963633568009153==--
+
+--===============3480661470211084485==--

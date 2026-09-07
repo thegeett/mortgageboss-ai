@@ -370,6 +370,13 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # recipient/body C7 dropped for the outbound direction with the same reasoning. The dedup and
     # threading identifiers go too: `message_id` and `ingest_key` are per-message identifiers, and
     # `ses_message_id` names one delivery to one person.
+    # LP-804a — both filenames and the storage paths. `filename_original` is attacker-controlled
+    # text a stranger wrote; the NORMALISED form still carries whatever the sender called their own
+    # document, which on a mortgage file is routinely a name and a date. `sha256` is exposed: it is a
+    # content address with no preimage, and it is how a scan verdict is matched back to an object.
+    "inbound_attachments": frozenset(
+        {"filename_original", "filename_normalized", "derived_storage_path"}
+    ),
     "inbound_messages": frozenset(
         {
             "subject",
@@ -409,6 +416,9 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # scrub can match. Same argument as `documents.document_name`.
     ("inbound_messages", "subject"),
     ("inbound_messages", "from_address"),
+    # LP-804a, strong form: a filename a stranger chose is free text, and "Akash Patel W2 2025.pdf"
+    # is exactly the shape no scrub matches.
+    ("inbound_attachments", "filename_original"),
     # LP-822, and here for the strong-form reason rather than only to record the decision: an
     # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it

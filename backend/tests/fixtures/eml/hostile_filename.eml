@@ -1,0 +1,24 @@
+From: Akash Patel <akash@example.com>
+To: lf-abc123@inbox.example.com
+Subject: statement
+Message-ID: <hostile-name-001@example.com>
+Date: Mon, 07 Sep 2026 09:24:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============1074855016980746470=="
+
+--===============1074855016980746470==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See attached.
+
+--===============1074855016980746470==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="../../../etc/passwd.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEg
+MCBSPj4KJSVFT0YK
+
+--===============1074855016980746470==--

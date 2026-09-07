@@ -1,0 +1,20 @@
+From: Akash Patel <akash@example.com>
+To: lf-abc123@inbox.example.com
+Subject: photo of the paystub
+Message-ID: <inline-photo-001@example.com>
+Date: Mon, 07 Sep 2026 09:22:00 +0000
+Content-Type: multipart/related; boundary="rel"
+
+--rel
+Content-Type: text/plain; charset="utf-8"
+
+Here it is
+--rel
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <img1>
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+
+--rel--

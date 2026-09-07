@@ -20,6 +20,13 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
         args: ["--fix=lf"]
+        # LP-804a — `.eml` fixtures are excluded because EMAIL IS CRLF ON THE WIRE. RFC 5322 says
+        # so, SES stores what it received, and a corpus normalised to LF exercises a form no real
+        # message has. The hook silently rewrote one of these on its way into the repo, which would
+        # have left the MIME parser tested only against line endings it will never see in
+        # production. These files are test DATA, not source.
+        exclude: '\.eml$'
+
 
   # Secret detection (detect-secrets — pure Python, no external toolchain needed)
   - repo: https://github.com/Yelp/detect-secrets
