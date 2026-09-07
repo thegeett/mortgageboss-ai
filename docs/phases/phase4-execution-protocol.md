@@ -84,9 +84,23 @@ has no memory of the arguments the first one talked itself into.
 4. **Check the ticket against its "Done when" clause** in `phase4-build-plan.md`. A ticket whose
    acceptance criterion is not actually met goes back to `PENDING` with a note, not forward.
 5. **Three things to check on every Phase 4 ticket, regardless of what it touches:**
-   - **Tenancy.** Anything reachable from an email address must derive `company_id` *from* the
-     resolved loan file. There is exactly one place allowed to do that (LP-805's resolver). If a
-     second one appeared, that is a blocking finding.
+   - **Tenancy.** Anything reachable from an email address — or from a link in one — must derive
+     `company_id` *from* the resolved loan file, never from a sender, a header or a guess.
+
+     **Two places are allowed to invert the invariant, and they are named:**
+     `services/inbound_routing.resolve_loan_file_by_address` (LP-805) and
+     `services/upload_links.resolve_link` (LP-815). A **third** is a blocking finding.
+
+     This said "exactly one place" until LP-815's review. It was written before the secure upload
+     link existed, and by the time that shipped the rule named one of the two things it governed —
+     so a reviewer applying it literally would have had to call correct code a blocking finding.
+     A governing rule that no longer matches the code is worse than no rule, because it is still
+     obeyed. **If a third inversion is ever sanctioned, amend this line in the same commit.**
+
+     What makes a second one acceptable is not that it was needed. It is that it has the same
+     shape: ONE function, every failure collapsing to ONE answer, and the loan file it resolves
+     being the only thing that says whose the data is. Check a new one against those three, not
+     against whether it seemed unavoidable.
    - **No message content in logs.** Metadata only — never a body, never a subject, never a filename
      that came from outside.
    - **No AI in the decision path.** The model may classify and extract. It may not clear a

@@ -413,3 +413,60 @@ async def test_another_companys_file_cannot_be_minted_against(
     )
 
     assert resp.status_code == 404
+
+
+async def test_the_four_states_are_indistinguishable_on_the_WRITE_path_too(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The same four states, against POST rather than GET (review finding).
+
+    `test_unknown_expired_revoked_and_spent_are_indistinguishable` pins the property on the describe
+    route. Both endpoints happen to share `resolve_link`, so POST behaves identically today — which
+    is exactly why the property is pinned where it was tested rather than where it has to hold.
+    Move the usability check out of `resolve_link` into the GET handler, or give POST its own
+    resolution path, and this endpoint starts answering differently with nothing failing.
+
+    POST is the more dangerous of the two to leak state from: it is the one that writes, so a
+    distinguishable refusal tells a prober which token is worth spending an upload on.
+    """
+    _c1, _j1, _f1, expired = await _file_with_link(db, slug="post-expired")
+    expired.link.expires_at = utcnow() - timedelta(hours=1)
+    _c2, _j2, _f2, revoked = await _file_with_link(db, slug="post-revoked")
+    revoked.link.revoked_at = utcnow()
+    _c3, _j3, _f3, spent = await _file_with_link(db, slug="post-spent", max_uses=1)
+    spent.link.uses = 1
+    await db.commit()
+
+    answers = []
+    for token in ("never-existed-at-all", expired.token, revoked.token, spent.token):
+        resp = await client.post(
+            f"{API}/upload/{token}",
+            files={"file": ("statement.pdf", _PDF, "application/pdf")},
+        )
+        answers.append((resp.status_code, resp.json()))
+
+    assert {status for status, _ in answers} == {404}
+    assert len({repr(body) for _, body in answers}) == 1
+
+
+async def test_a_live_link_still_accepts_on_the_write_path(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The control for the four-way POST test, and it has to actually POST.
+
+    Four refusals that all look alike is also what a route refusing everything produces. My first
+    version of this asserted that the other test function existed, which is a tautology wearing a
+    control's name — the shape this review has spent its time objecting to.
+    """
+    _company, _jwt, loan_file, minted = await _file_with_link(db, slug="post-live")
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/upload/{minted.token}",
+        files={"file": ("statement.pdf", _PDF, "application/pdf")},
+    )
+
+    assert resp.status_code == 201
+    assert (
+        await db.execute(select(Document).where(Document.loan_file_id == loan_file.id))
+    ).scalar_one() is not None
