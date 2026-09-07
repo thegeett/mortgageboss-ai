@@ -175,6 +175,7 @@ standing M1 sequencing escalation arriving as a real question.
 | [LP-825](../tickets/LP-825.md) | The communication timeline carries the whole file's activity; ten of eleven rows were not about communication | Specified |
 | [LP-826](../tickets/LP-826.md) | Requesting a document says nothing about the draft it just wrote | Specified |
 | [LP-827](../tickets/LP-827.md) | The secure upload link points at `http://localhost:3000` — `UPLOAD_LINK_BASE_URL` is set in no environment | Specified — **cause identified** |
+| [LP-829](../tickets/LP-829.md) | Clicking a message on the timeline opens it — no endpoint returns one message's body today, so a SENT message's words are visible nowhere | Specified |
 | [LP-828](../tickets/LP-828.md) | The draft advertises an inbox address that receives nothing | **Needs a person** — `inbound_mail_enabled = false`, no DNS, no sandbox exit |
 
 **LP-828 is the one that can reach a borrower.** It is the same item the escalation table has carried
