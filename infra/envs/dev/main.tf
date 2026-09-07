@@ -320,7 +320,7 @@ module "compute" {
 
     # LP-802 — see the staging comment: unset means this environment advertises
     # production's inbox domain, because that is settings.inbox_domain's default.
-    INBOX_DOMAIN = "inbox.dev.mortgageboss.ai"
+    INBOX_DOMAIN = "imboxdev.mortgageboss.ai"
 
     # LP-827 — DELIBERATELY ABSENT HERE, unlike staging. This template has no `domain_name` variable
     # (it is a C4 addition staging carries and dev does not), so there is no public origin to build a

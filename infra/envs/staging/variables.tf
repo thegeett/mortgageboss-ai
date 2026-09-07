@@ -406,6 +406,27 @@ variable "documents_bucket_kms_key_arn" {
   default     = null
 }
 
+variable "inbox_domain" {
+  description = <<-EOT
+    The domain half of every loan file's borrower inbox address, and the domain SES
+    receives on. ONE variable for both, because the app advertising one name while the
+    MX record answers another is a borrower's documents going nowhere with nothing to
+    notice it.
+
+    ⚠️ NOT UNDER `domain_name` ANY MORE (LP-836). This was `inbox.${var.domain_name}` —
+    `inbox.staging.mortgageboss.ai` — which sits INSIDE the `staging.mortgageboss.ai`
+    hosted zone Terraform already owns, so staging needed no registrar step.
+
+    The confirmed value is `imboxstaging.mortgageboss.ai`, a sibling label directly under
+    the apex `mortgageboss.ai` — a zone that is NOT in Route 53 (phase4.md §3: the apex
+    stays with the existing registrar and is never delegated). So staging now needs the
+    same human-at-the-registrar step production does, which is a change to what INFRA-1
+    costs and is recorded in LP-836 rather than discovered at apply time.
+  EOT
+  type        = string
+  default     = "imboxstaging.mortgageboss.ai"
+}
+
 variable "cors_allowed_origins" {
   description = <<-EOT
     Origins the API accepts, as a LIST — Terraform jsonencodes it.

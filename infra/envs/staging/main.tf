@@ -466,10 +466,16 @@ module "compute" {
 
     # LP-802 — REQUIRED, and it must not be production's domain. The value is baked into
     # every file's borrower inbox address, which is a bearer credential (ADR-397): a
-    # staging file advertising @inbox.mortgageboss.ai invites real borrower mail, and
-    # real documents, into the staging database. settings.inbox_domain DEFAULTS to
-    # production, so leaving this unset fails open rather than failing to start.
-    INBOX_DOMAIN = "inbox.staging.mortgageboss.ai"
+    # staging file advertising production's domain invites real borrower mail, and real
+    # documents, into the staging database. settings.inbox_domain DEFAULTS to production,
+    # so leaving this unset fails open rather than failing to start.
+    #
+    # LP-836 — the open failure is now caught where the address is composed:
+    # `LoanFile.get_inbox_address` raises when the domain is production's and ENVIRONMENT
+    # is not "production". So an unset value here is a loud failure on the first address
+    # rather than a silent one on every file. This line is still what supplies the right
+    # value; the guard only stops a missing one being invisible.
+    INBOX_DOMAIN = var.inbox_domain
 
     # LP-827 — REQUIRED, and the app now refuses to start without it outside development.
     # `settings.upload_link_base_url` defaults to `http://localhost:3000` deliberately (a wrong
@@ -664,11 +670,19 @@ module "scheduler" {
 # --------------------------------------------------------------------------- #
 # INFRA-1 — inbound borrower mail
 # --------------------------------------------------------------------------- #
-# STAGING NEEDS NO REGISTRAR STEP. `staging.mortgageboss.ai` is already a hosted zone here and is
-# authoritative for everything beneath it, so `inbox.staging.mortgageboss.ai` is one MX record
-# inside a zone Terraform already owns. Production is the one that waits on a human at the
-# registrar, and it reuses `modules/dns` with enable_tls = false — an inbound-only mail domain
-# serves no HTTPS and needs no certificate.
+# ⚠️ STAGING NEEDS A REGISTRAR STEP NOW, AND DID NOT BEFORE (LP-836). This said the opposite, and
+# it was true of the old name: `inbox.staging.mortgageboss.ai` sits inside the
+# `staging.mortgageboss.ai` hosted zone Terraform already owns, so it was one MX record and no
+# human. The confirmed name is `imboxstaging.mortgageboss.ai` — a sibling label directly under the
+# apex `mortgageboss.ai`, which is NOT in Route 53 (phase4.md §3: the apex stays with the existing
+# registrar and is never delegated).
+#
+# So this module now needs a hosted zone for its own name and NS records entered at the registrar,
+# exactly as production does. That is a change to what INFRA-1 costs, not a detail: it is a person
+# and a propagation wait, on an environment that previously needed neither.
+#
+# Production reuses `modules/dns` with enable_tls = false — an inbound-only mail domain serves no
+# HTTPS and needs no certificate.
 #
 # COUNTED, NOT CONDITIONAL ON A HAND EDIT. `inbound_mail_enabled` defaults to false so this plans
 # as a no-op until somebody turns it on deliberately, and the same flag drives the KMS grant above —
@@ -680,7 +694,7 @@ module "inbound_mail" {
   name_prefix = var.name_prefix
   tags        = local.tags
 
-  mail_domain     = "inbox.${var.domain_name}"
+  mail_domain     = var.inbox_domain
   route53_zone_id = module.dns.zone_id
   aws_region      = var.aws_region
   aws_account_id  = var.aws_account_id

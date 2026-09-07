@@ -244,7 +244,7 @@ strictly separate:
 - **`inbox_token`** is a *capability*: possession grants the ability to send
   documents into a file, so it must be **cryptographically unguessable** and is
   **never derived from the display ID** (independent generation). It builds the
-  borrower address `lf-{inbox_token}@inbox.mortgageboss.ai` via
+  borrower address `lf-{inbox_token}@imbox.mortgageboss.ai` via
   `get_inbox_address()`.
 - Both the display ID's random characters and the inbox token use the `secrets`
   module — **never `random`**. Generation lives in `app/services/loan_file_ids.py`

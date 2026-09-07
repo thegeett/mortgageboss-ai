@@ -28,13 +28,13 @@ SES_NOTIFICATION: dict[str, Any] = {
         # Not a secret — an SES delivery id, which is also the S3 object key and appears in the
         # bucket listing. detect-secrets sees the entropy, not the meaning.
         "messageId": "qwertyuiop1234567890examplemsgid",  # pragma: allowlist secret
-        "destination": ["lf-abc123@inbox.staging.mortgageboss.ai"],
+        "destination": ["lf-abc123@imboxstaging.mortgageboss.ai"],
         "commonHeaders": {"messageId": "<sender-written@mail.example.com>"},
     },
     "receipt": {
         "timestamp": "2026-09-07T07:00:00.000Z",
         "processingTimeMillis": 222,
-        "recipients": ["lf-abc123@inbox.staging.mortgageboss.ai"],
+        "recipients": ["lf-abc123@imboxstaging.mortgageboss.ai"],
         "spamVerdict": {"status": "PASS"},
         "virusVerdict": {"status": "PASS"},
         "spfVerdict": {"status": "PASS"},

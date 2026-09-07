@@ -12,7 +12,7 @@ Uses the transaction-rollback ``db_session`` fixture from LP-10.
 from decimal import Decimal
 
 import pytest
-from app.core.config import settings
+from app.core.config import PRODUCTION_INBOX_DOMAIN, settings
 from app.models import (
     Company,
     Lender,
@@ -90,7 +90,7 @@ async def test_get_inbox_address_uses_the_configured_domain(
 
     Asserting `== f"...@{settings.inbox_domain}"` is a tautology — both sides read the same
     attribute, so it passes whatever the domain is, including production's leaking into
-    staging. Pinning `endswith("@inbox.mortgageboss.ai")` is worse: it asserts the
+    staging. Pinning `endswith("@imbox.mortgageboss.ai")` is worse: it asserts the
     PRODUCTION DEFAULT, and would fail in exactly the environments the ticket says must
     override it. So set a sentinel and require the address to follow it.
     """
@@ -102,8 +102,61 @@ async def test_get_inbox_address_uses_the_configured_domain(
 
     # And it re-reads: a second value gives a second address, which is what makes the
     # per-environment setting work at all.
-    monkeypatch.setattr(settings, "inbox_domain", "inbox.staging.mortgageboss.ai")
-    assert loan_file.get_inbox_address().endswith("@inbox.staging.mortgageboss.ai")
+    monkeypatch.setattr(settings, "inbox_domain", "imboxstaging.mortgageboss.ai")
+    assert loan_file.get_inbox_address().endswith("@imboxstaging.mortgageboss.ai")
+
+
+async def test_production_domain_outside_production_refuses(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-836 — THE OPEN FAILURE, MADE LOUD.
+
+    `inbox_domain` defaults to production's, so an environment that never sets `INBOX_DOMAIN` does
+    not fail to start: every file in it advertises an address that takes delivery of real borrower
+    mail. LP-802 named that outcome and then relied on the deploy wiring to prevent it, which means a
+    forgotten line in one task definition is a silent, file-by-file leak with nothing to notice it.
+
+    Refused where the address is composed rather than at boot — LP-827's lesson, learned by breaking
+    the deploy: a `Settings` validator fires inside `alembic upgrade head` too, so a boot-time guard
+    kills the migration step of the very deploy that would have supplied the value.
+    """
+    company = await _make_company(db_session, "acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    monkeypatch.setattr(settings, "inbox_domain", PRODUCTION_INBOX_DOMAIN)
+    monkeypatch.setattr(settings, "environment", "staging")
+
+    with pytest.raises(RuntimeError, match="INBOX_DOMAIN"):
+        loan_file.get_inbox_address()
+
+
+async def test_production_may_use_the_production_domain(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE POSITIVE CONTROL, and it is the whole point of the setting. A guard that refused
+    production's domain everywhere would satisfy the test above and stop production working — which
+    is the one environment where that address is correct."""
+    company = await _make_company(db_session, "acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    monkeypatch.setattr(settings, "inbox_domain", PRODUCTION_INBOX_DOMAIN)
+    monkeypatch.setattr(settings, "environment", "production")
+
+    assert loan_file.get_inbox_address().endswith(f"@{PRODUCTION_INBOX_DOMAIN}")
+
+
+async def test_a_non_production_domain_is_fine_anywhere(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second control. Without it a guard that refused EVERY domain outside production would
+    pass both tests above and break staging entirely."""
+    company = await _make_company(db_session, "acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    monkeypatch.setattr(settings, "inbox_domain", "imboxstaging.mortgageboss.ai")
+    monkeypatch.setattr(settings, "environment", "staging")
+
+    assert loan_file.get_inbox_address().endswith("@imboxstaging.mortgageboss.ai")
 
 
 async def test_identifiers_are_unique_across_files(db_session: AsyncSession) -> None:

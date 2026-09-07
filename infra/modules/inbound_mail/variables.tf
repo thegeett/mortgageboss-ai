@@ -11,7 +11,7 @@ variable "tags" {
 
 variable "mail_domain" {
   description = <<-EOT
-    The domain that RECEIVES borrower mail, e.g. inbox.staging.mortgageboss.ai.
+    The domain that RECEIVES borrower mail, e.g. imboxstaging.mortgageboss.ai.
 
     It must be a domain that sends nothing. An inbound MX overlapping an authenticated
     SENDING domain is the documented cause of an infinite mail loop, so this is deliberately

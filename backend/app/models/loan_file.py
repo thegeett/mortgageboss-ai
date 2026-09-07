@@ -368,11 +368,24 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         """Return the borrower inbox email address for this file.
 
         Built from the cryptographic inbox token (ADR-036), e.g.
-        ``lf-a7k4nq2x9m3p@inbox.staging.mortgageboss.ai``.
+        ``lf-a7k4nq2x9m3p@imboxstaging.mortgageboss.ai``.
 
         LP-802 — the domain comes from `settings` now, not a module constant, because it must differ
-        per environment: a staging file advertising `@inbox.mortgageboss.ai` would take delivery of
-        real borrower mail.
+        per environment: a staging file advertising production's domain would take delivery of real
+        borrower mail.
+
+        LP-836 — AND THAT IS NOW REFUSED RATHER THAN TRUSTED. `inbox_domain` defaults to production's
+        value, so an environment that forgets to set `INBOX_DOMAIN` does not fail — it advertises
+        production's address on every file, which is exactly the outcome LP-802's comment named and
+        then relied on the deploy wiring to prevent. A non-production process asking for an address
+        on the production domain is that failure happening, so it raises here.
+
+        HERE, NOT AT BOOT, and that is LP-827's lesson rather than a preference. A `model_validator`
+        on `Settings` fires in EVERY process — `alembic/env.py` imports the settings singleton at
+        module scope, and `scripts/deploy` runs migrations on the new image under the currently
+        deployed task definition. A boot-time guard therefore kills the deploy that would have
+        supplied the value. Checking where the value is USED lets migrations, the worker and the
+        query task start regardless, while the address remains impossible to hand out wrongly.
 
         IMPORTED INSIDE THE METHOD, deliberately, and for ONE reason: no model in this package
         imports `core.config`, and this ticket's blast radius is the setting, not the layering rule.
@@ -382,9 +395,16 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         `monkeypatch.setattr(settings, ...)` would still be seen. There is no import cycle to avoid
         either — `core/config.py` imports nothing from `app`.
         """
-        from app.core.config import settings
+        from app.core.config import PRODUCTION_INBOX_DOMAIN, settings
 
-        return f"lf-{self.inbox_token}@{settings.inbox_domain}"
+        domain = settings.inbox_domain
+        if domain == PRODUCTION_INBOX_DOMAIN and settings.environment != "production":
+            raise RuntimeError(
+                f"INBOX_DOMAIN is production's ({domain}) with ENVIRONMENT="
+                f"{settings.environment!r}. Every file in this environment would advertise an "
+                "address that takes delivery of real borrower mail. Set INBOX_DOMAIN."
+            )
+        return f"lf-{self.inbox_token}@{domain}"
 
     def __repr__(self) -> str:
         return f"<LoanFile {self.display_id} ({self.status})>"

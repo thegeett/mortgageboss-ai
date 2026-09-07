@@ -123,7 +123,7 @@ async def test_create_inbound_message(db_session: AsyncSession) -> None:
         direction=CommunicationDirection.INBOUND,
         status=CommunicationStatus.RECEIVED,
         sender="borrower@example.com",
-        recipient="lf-token@inbox.mortgageboss.ai",
+        recipient="lf-token@imbox.example.test",
         subject="Re: Please send your 2023 W-2",
         external_message_id="<abc123@mail.example.com>",
     )

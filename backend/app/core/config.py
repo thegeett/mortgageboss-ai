@@ -33,6 +33,12 @@ _BLANK_S3_MEANS_DEFAULT: dict[str, str | int] = {
 }
 
 
+#: Production's borrower inbox domain (LP-836). Named rather than repeated, because two places
+#: knowing this string is how one of them ends up stale — and the one that would be stale is the
+#: guard that exists to catch the other.
+PRODUCTION_INBOX_DOMAIN = "imbox.mortgageboss.ai"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
 
@@ -268,14 +274,20 @@ class Settings(BaseSettings):
     # --- Email: inbound (Phase 4) ------------------------------------------ #
     #
     # LP-802 — the borrower inbox domain, moved off `models/loan_file.py` because it MUST differ per
-    # environment: a staging file addressed at `inbox.mortgageboss.ai` would take delivery of real
+    # environment: a staging file addressed at production's domain would take delivery of real
     # borrower mail. The constant's own comment anticipated this move.
     #
-    # The default is PRODUCTION's domain, so this fails OPEN: an environment that forgets to set
-    # INBOX_DOMAIN starts happily and advertises `@inbox.mortgageboss.ai` on every file. Staging and
-    # dev therefore set it explicitly in their ECS task definitions (`infra/envs/*/main.tf`) — that
-    # wiring, not this default, is what keeps a non-production file from taking real borrower mail.
-    inbox_domain: str = "inbox.mortgageboss.ai"
+    # LP-836 — the values are `imbox.mortgageboss.ai` and `imboxstaging.mortgageboss.ai`, confirmed
+    # directly and deliberately DIFFERENT per environment. The spelling is `imbox`, with an m.
+    #
+    # The default is still PRODUCTION's domain, so this still fails OPEN: an environment that forgets
+    # to set INBOX_DOMAIN starts happily and advertises production's address on every file. That
+    # default is deliberate — see the note in `env_files` about why a loud failure is preferred where
+    # one is possible — and LP-836 adds the guard that makes the open failure survivable:
+    # `LoanFile.get_inbox_address` REFUSES to hand out the production domain outside production. The
+    # wiring in each environment is still what supplies the right value; the guard is what stops a
+    # missing one becoming a staging file that takes real borrower mail.
+    inbox_domain: str = PRODUCTION_INBOX_DOMAIN
 
     # LP-815 — where the borrower's upload link points. The app's own public origin, not the API's:
     # the token lands in a browser, on a page a person reads.
