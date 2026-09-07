@@ -1,3 +1,4 @@
+import { DraftsIndicator } from "@/components/file/communication/drafts-indicator";
 import { FileHeaderActions } from "@/components/file/file-header-actions";
 import { FileContextDrawer } from "@/components/layout/file-context-rail";
 import { StatusToken } from "@/components/status-token";
@@ -83,6 +84,11 @@ export function FileHeader({ file }: { file: LoanFileDetail | undefined }) {
             the file's status, ratios and activity (LP-UI-037). It lives beside
             the file's other actions rather than in the topbar, because it is
             about THIS file. */}
+        {/* LP-837 — HOW MANY DRAFTS ARE WAITING, wherever a processor is standing. Beside the
+            file's other actions for the same reason the drawer is: it is about THIS file, and a
+            topbar badge would have to answer "whose drafts" on the files list and the dashboard,
+            where the honest answer is none. This header renders on every page of a file. */}
+        <DraftsIndicator fileId={file.display_id} />
         <FileContextDrawer fileId={file.display_id} />
         <FileHeaderActions file={file} />
       </div>
