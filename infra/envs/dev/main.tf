@@ -324,14 +324,21 @@ module "compute" {
 
     # LP-827 — DELIBERATELY ABSENT HERE, unlike staging. This template has no `domain_name` variable
     # (it is a C4 addition staging carries and dev does not), so there is no public origin to build a
-    # link from — and `terraform validate` runs on this file, so a reference to one would fail it.
-    # A future environment copied from this template needs UPLOAD_LINK_BASE_URL set, and the app
-    # refuses to start without it outside development, which is what makes that impossible to forget.
+    # link from: a reference to one would not resolve.
+    #
+    # A future environment copied from this template needs UPLOAD_LINK_BASE_URL set. Nothing here
+    # will remind you — the app starts fine without it, and the refusal comes when a link is minted
+    # (`services.upload_links.usable_link_origin`), naming this variable.
     #
     # Note also `environment = "dev"` in this template's tfvars: `Settings.environment` is
     # Literal["development", "staging", "production"], so an app started from these values would be
-    # rejected by config validation before reaching the guard at all. Pre-existing, recorded here
-    # because it is the same class of never-exercised value.
+    # rejected by config validation outright. Pre-existing, recorded here because it is the same
+    # class of never-exercised value.
+    #
+    # LP-827 REVIEW — AND NOTHING WOULD CATCH EITHER BEFORE AN APPLY. `terraform validate` is run by
+    # no workflow in `.github/`, no pre-commit hook and no script in this repository; the earlier
+    # version of this comment said it runs on this file, which was not true. Whether that is worth
+    # adding is a question for a person, and it is in the progress file's escalations.
 
     AI_PROVIDER    = "bedrock"
     BEDROCK_REGION = var.aws_region

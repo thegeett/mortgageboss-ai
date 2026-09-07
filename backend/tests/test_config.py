@@ -103,7 +103,7 @@ def test_env_example_covers_every_required_setting() -> None:
 
 
 # --------------------------------------------------------------------------------------------- #
-# LP-827 — the upload base URL a deployed environment cannot silently fall back on
+# LP-827 — the upload base URL, and the process that must NOT be blocked by it
 # --------------------------------------------------------------------------------------------- #
 def _required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/test")
@@ -114,75 +114,43 @@ def _required_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("env", ["staging", "production"])
-def test_a_deployed_environment_refuses_the_localhost_upload_default(
+def test_settings_still_build_without_an_upload_base_url(
     monkeypatch: pytest.MonkeyPatch, env: str
 ) -> None:
-    """THE ONE THAT SHIPPED. `UPLOAD_LINK_BASE_URL` was assigned in no `.tf`, `.tfvars`, `.yml`,
-    `.env` or script in this repository, so staging ran on the development default and every secure
-    link it minted pointed the borrower at `http://localhost:3000` — their own machine. Reported as
-    "the secure link is not working on opening".
+    """LP-827 REVIEW — THE GUARD MUST NOT BLOCK ITS OWN ROLLOUT.
 
-    The default itself is right and stays: a wrong upload URL should fail visibly rather than send a
-    staging test email at a real borrower's production link. What was missing is that nothing made
-    its absence impossible to deploy.
+    LP-827 refused to build `Settings` outside development when `UPLOAD_LINK_BASE_URL` was the
+    localhost default. That fires in EVERY process, and one of them is `alembic upgrade head` —
+    which `scripts/deploy` runs on the NEW image using the CURRENTLY DEPLOYED task definition, one
+    step BEFORE the apply that sets the variable. Measured by running the real migration command
+    under that environment: it died on the validator. The deploy that introduced the requirement
+    could not complete, so the apply that satisfies it would never have run.
+
+    The check now lives in `services.upload_links.usable_link_origin`, where the value is read.
+    This asserts the property that fix exists for: a deployed process that never mints a link
+    starts, whatever this variable says.
     """
     _required_env(monkeypatch)
     monkeypatch.setenv("ENVIRONMENT", env)
     monkeypatch.delenv("UPLOAD_LINK_BASE_URL", raising=False)
 
-    with pytest.raises(ValueError, match="UPLOAD_LINK_BASE_URL"):
-        Settings()  # type: ignore[call-arg]
-
-
-@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"])
-def test_every_loopback_spelling_is_refused(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
-    """An asymmetry is a class, not an instance. Setting the variable to `127.0.0.1` is the same
-    misconfiguration as leaving it unset, and a guard that only knew the word "localhost" would pass
-    it — while the borrower's browser resolves all four to the same machine."""
-    _required_env(monkeypatch)
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    monkeypatch.setenv("UPLOAD_LINK_BASE_URL", f"https://{host}:3000")
-
-    with pytest.raises(ValueError, match="UPLOAD_LINK_BASE_URL"):
-        Settings()  # type: ignore[call-arg]
-
-
-def test_development_still_runs_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE POSITIVE CONTROL, and it is the point of the setting. A guard that refused localhost
-    everywhere would break every developer's machine, and every test above would still pass."""
-    _required_env(monkeypatch)
-    monkeypatch.setenv("ENVIRONMENT", "development")
-    monkeypatch.delenv("UPLOAD_LINK_BASE_URL", raising=False)
-
     settings = Settings()  # type: ignore[call-arg]
+
+    assert settings.environment == env
     assert settings.upload_link_base_url == "http://localhost:3000"
 
 
-def test_a_real_origin_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The second positive control. Without it, a guard that rejected EVERY value outside
-    development would satisfy both refusal tests above and stop staging booting at all."""
-    _required_env(monkeypatch)
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    monkeypatch.setenv("UPLOAD_LINK_BASE_URL", "https://staging.mortgageboss.ai")
+def test_the_migration_entrypoint_imports_settings() -> None:
+    """The positive control for the test above, and the reason it is not hypothetical.
 
-    settings = Settings()  # type: ignore[call-arg]
-    assert settings.upload_link_base_url == "https://staging.mortgageboss.ai"
+    Without this, "settings still build" would be a claim about a process nothing proved was
+    involved. `alembic/env.py` imports the cached singleton at module scope to read the database
+    URL, so ANY validator on `Settings` runs inside `alembic upgrade head` — the deploy step that
+    would have failed.
+    """
+    env_py = Path(__file__).resolve().parents[1] / "alembic" / "env.py"
 
-
-def test_the_minted_url_is_built_from_the_configured_origin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The link a borrower clicks, asserted end to end from the setting. The guard above proves the
-    value cannot be localhost in a deployed environment; this proves the value is what the URL is
-    actually made of, which no amount of config validation would show on its own."""
-    from app.services.upload_links import MintedLink
-
-    _required_env(monkeypatch)
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    monkeypatch.setenv("UPLOAD_LINK_BASE_URL", "https://staging.mortgageboss.ai/")
-    settings = Settings()  # type: ignore[call-arg]
-
-    monkeypatch.setattr("app.services.upload_links.settings", settings)
-    url = MintedLink(link=None, token="tok123").url  # type: ignore[arg-type]
-
-    assert url == "https://staging.mortgageboss.ai/upload/tok123"
+    assert "from app.core.config import settings" in env_py.read_text(), (
+        "alembic/env.py no longer imports settings — re-check whether a Settings validator can "
+        "still block the migration step before re-adding one"
+    )

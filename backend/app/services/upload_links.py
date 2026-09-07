@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+from ipaddress import ip_address
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -57,6 +59,78 @@ class UploadLinkError(Exception):
     """The link cannot be used. Always says which rule stopped it, in the borrower's words."""
 
 
+class LinkOriginNotConfigured(RuntimeError):
+    """This environment cannot build a usable link. An OPERATOR's error, not a borrower's.
+
+    Separate from `UploadLinkError` on purpose: that one is written in the borrower's words and
+    reaches their screen, and none of this is anything they can act on.
+    """
+
+
+def usable_link_origin() -> str:
+    """The origin a borrower's link is built from, or a refusal naming the variable (LP-827).
+
+    REPORTED FROM STAGING: the secure link did not open. `UPLOAD_LINK_BASE_URL` was assigned in no
+    `.tf`, `.tfvars`, `.yml`, `.env` or script in this repository, so staging ran on the development
+    default and every minted link pointed at `http://localhost:3000/upload/<token>` — the reader's
+    own machine. The default itself is right and stays: a wrong upload URL should fail visibly
+    rather than send a staging test email at a real borrower's production link.
+
+    CHECKED HERE, WHERE THE VALUE IS READ, and not in a `Settings` validator. A validator refuses to
+    build the settings object, so it fires in every process — including `alembic upgrade head`,
+    which `scripts/deploy` runs on the NEW image under the CURRENTLY DEPLOYED task definition, one
+    step BEFORE the apply that sets the variable. Measured by running the real migration command
+    under that environment: it dies. The deploy that introduces the requirement could not complete,
+    and the apply that satisfies it would never run. A guard that blocks its own rollout is not a
+    guard. This is the only place the setting is read, and its two callers — the API response and
+    the auto-reply nudge — are both "a link about to reach a person", which is exactly the moment to
+    refuse.
+
+    WHAT IT REFUSES, AND WHY THAT SET. A URL with no scheme or no host cannot be clicked from an
+    email at all: `urlparse("localhost:3000").hostname` is None, so the most natural way to write
+    the reported misconfiguration into a tfvars file passed the first version of this check
+    untouched. Loopback comes from `ipaddress`, not from a list of spellings — `127.0.0.1`,
+    `127.0.0.53`, `::1` and `::ffff:127.0.0.1` are all one rule, and a definition cannot miss a
+    member the way an enumeration can.
+
+    IT STILL DOES NOT JUDGE REACHABILITY. A wrong domain, a typo, an http/https mix-up are values
+    somebody chose, and config cannot tell a chosen mistake from a chosen intention.
+    """
+    origin = settings.upload_link_base_url.strip().rstrip("/")
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise LinkOriginNotConfigured(
+            f"UPLOAD_LINK_BASE_URL={settings.upload_link_base_url!r} is not an absolute http(s) "
+            "origin, so no link built from it can be opened from an email. Set it to this "
+            "environment's public web origin."
+        )
+    # LOOPBACK IS CORRECT IN DEVELOPMENT, and it is the default there for a reason — a developer's
+    # link should point at their own machine. The scheme/host check above still applies everywhere,
+    # because an origin with no host is unusable in any environment.
+    host = parsed.hostname.lower().rstrip(".")
+    if settings.environment == "development":
+        return origin
+    if host == "localhost" or _is_local_address(host):
+        raise LinkOriginNotConfigured(
+            f"UPLOAD_LINK_BASE_URL points at {host!r} with ENVIRONMENT="
+            f"{settings.environment!r}. Every secure upload link this environment mints would send "
+            "the borrower to their own machine. Set it to this environment's public web origin."
+        )
+    return origin
+
+
+def _is_local_address(host: str) -> bool:
+    """Is this host literal an address that means "the machine reading this"?
+
+    False for a name — a name is resolved by the reader's DNS and we are not going to ask.
+    """
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
+
+
 @dataclass(frozen=True)
 class MintedLink:
     """A new link and its URL. The plaintext token exists HERE AND NOWHERE ELSE — the row holds a
@@ -67,7 +141,7 @@ class MintedLink:
 
     @property
     def url(self) -> str:
-        return f"{settings.upload_link_base_url.rstrip('/')}/upload/{self.token}"
+        return f"{usable_link_origin()}/upload/{self.token}"
 
 
 async def mint_upload_link(
