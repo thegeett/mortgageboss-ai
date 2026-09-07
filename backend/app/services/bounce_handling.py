@@ -28,6 +28,7 @@ back to PENDING — because a request that bounced was never made.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -40,10 +41,13 @@ from app.core.logging import get_logger
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.communication import Communication, CommunicationStatus
+from app.models.finding import Finding
+from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.models.suppressed_address import SuppressedAddress, SuppressionReason
 from app.services.activity_log import log_activity
+from app.services.finding_requests import requested_needs_item_id
 
 logger = get_logger(__name__)
 
@@ -197,7 +201,50 @@ async def _unwind_requests(db: AsyncSession, *, communication: Communication) ->
     for need in needs:
         need.status = NeedsItemStatus.PENDING
         need.requested_at = None
+
+    await _clear_finding_markers(db, communication=communication, needs=needs)
     return len(needs)
+
+
+async def _clear_finding_markers(
+    db: AsyncSession, *, communication: Communication, needs: Sequence[NeedsItem]
+) -> None:
+    """Unwind the OTHER record of the request — the finding that produced it.
+
+    THE NEEDS ITEM IS NOT THE ONLY PLACE A REQUEST IS WRITTEN DOWN. LP-801 marks the originating
+    finding with ``details["docs_requested"]``, and the verification card does two things with it:
+    it shows a "docs requested" badge, and it renders the request button as "Requested" AND
+    DISABLES IT (`finding-card.tsx`).
+
+    So unwinding only the need leaves a processor looking at a finding that says the documents were
+    asked for, with the one control that would let them ask again greyed out — for a request this
+    same function has just decided was never made. The two records would disagree, and the one the
+    processor can act on would be the wrong one.
+
+    Matched through `requested_needs_item_id`, which tolerates the pre-LP-801 bare ``True``: those
+    rows carry no needs-item id, so they cannot be matched and are left alone. That is correct
+    rather than merely convenient — a marker with no link cannot be shown to belong to this bounce.
+    """
+    if not needs:
+        return
+    unwound = {need.id for need in needs}
+    findings = (
+        (
+            await db.execute(
+                only_active(
+                    select(Finding).where(Finding.loan_file_id == communication.loan_file_id),
+                    Finding,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for finding in findings:
+        if requested_needs_item_id(finding) in unwound:
+            details = dict(finding.details or {})
+            details.pop("docs_requested", None)
+            finding.details = details
 
 
 async def record_delivery_failure(

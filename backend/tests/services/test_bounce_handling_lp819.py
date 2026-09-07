@@ -24,6 +24,7 @@ import pytest
 from app.models import Company, LoanProgram
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.communication import CommunicationStatus
+from app.models.finding import Finding, FindingCategory, FindingStatus
 from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
 from app.models.suppressed_address import SuppressedAddress, SuppressionReason
 from app.services.bounce_handling import (
@@ -36,6 +37,7 @@ from app.services.bounce_handling import (
 )
 from app.services.email_draft import add_needs_to_draft
 from app.services.email_send import CannotSendError, send_draft
+from app.services.finding_requests import docs_requested_marker, requested_needs_item_id
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -434,3 +436,134 @@ async def test_an_unsuppressed_address_still_sends(db_session: AsyncSession) -> 
         approver_user_id=actor,
     )
     assert sent.status is CommunicationStatus.SENT
+
+
+# --------------------------------------------------------------------------------------------- #
+# The request is written down in two places (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_a_hard_bounce_also_unwinds_the_finding_that_asked(db_session: AsyncSession) -> None:
+    """The needs item is not the only record of a request.
+
+    LP-801 marks the originating finding with `details["docs_requested"]`, and `finding-card.tsx`
+    renders the request button as "Requested" AND DISABLES IT on that marker. Unwinding only the
+    need therefore left a processor looking at a finding claiming the documents were asked for, with
+    the one control that would let them ask again greyed out — for a request this code has just
+    decided was never made.
+    """
+    _company, loan_file, actor, need, _sent = await _file_with_sent_request(db_session)
+
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="CR-6",
+        message="A credit report is missing",
+        subject_key="lia1",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.DOCUMENTATION,
+        confidence=1.0,
+        details={
+            "docs_requested": docs_requested_marker(actor_user_id=actor, needs_item_id=need.id)
+        },
+    )
+    db_session.add(finding)
+    await db_session.flush()
+
+    # The fixture has to be armed for the assertion below to mean anything.
+    assert requested_needs_item_id(finding) == need.id
+
+    failure = parse_ses_bounce(
+        {
+            "mail": {"messageId": "ses-msg-1"},
+            "bounce": {
+                "bouncedRecipients": [{"emailAddress": "gone@example.com", "status": "5.1.1"}]
+            },
+        }
+    )[0]
+    await record_delivery_failure(db_session, failure=failure)
+
+    await db_session.refresh(need)
+    await db_session.refresh(finding)
+    assert need.status is NeedsItemStatus.PENDING  # the need was unwound
+    assert "docs_requested" not in (finding.details or {})  # and so was the finding
+
+
+async def test_a_soft_bounce_leaves_both_records_alone(db_session: AsyncSession) -> None:
+    """The control. A fix that cleared markers unconditionally would satisfy the test above while
+    erasing the request record every time a mailbox was briefly full."""
+    _company, loan_file, actor, need, _sent = await _file_with_sent_request(db_session)
+
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="CR-6",
+        message="A credit report is missing",
+        subject_key="lia1",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.DOCUMENTATION,
+        confidence=1.0,
+        details={
+            "docs_requested": docs_requested_marker(actor_user_id=actor, needs_item_id=need.id)
+        },
+    )
+    db_session.add(finding)
+    await db_session.flush()
+
+    failure = parse_ses_bounce(
+        {
+            "mail": {"messageId": "ses-msg-1"},
+            "bounce": {
+                "bouncedRecipients": [{"emailAddress": "gone@example.com", "status": "4.2.2"}]
+            },
+        }
+    )[0]
+    await record_delivery_failure(db_session, failure=failure)
+
+    await db_session.refresh(need)
+    await db_session.refresh(finding)
+    assert need.status is NeedsItemStatus.REQUESTED
+    assert "docs_requested" in (finding.details or {})
+
+
+async def test_a_marker_for_another_need_is_not_cleared(db_session: AsyncSession) -> None:
+    """The second control: only the findings whose request actually bounced are unwound."""
+    _company, loan_file, actor, _need, _sent = await _file_with_sent_request(db_session)
+
+    other_need = NeedsItem(
+        loan_file_id=loan_file.id,
+        title="Something else",
+        needs_type="pay_stub",
+        origin=NeedsItemOrigin.FINDING,
+    )
+    db_session.add(other_need)
+    await db_session.flush()
+
+    unrelated = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-8",
+        message="Income unverified",
+        subject_key="emp1",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.DOCUMENTATION,
+        confidence=1.0,
+        details={
+            "docs_requested": docs_requested_marker(
+                actor_user_id=actor, needs_item_id=other_need.id
+            )
+        },
+    )
+    db_session.add(unrelated)
+    await db_session.flush()
+
+    failure = parse_ses_bounce(
+        {
+            "mail": {"messageId": "ses-msg-1"},
+            "bounce": {
+                "bouncedRecipients": [{"emailAddress": "gone@example.com", "status": "5.1.1"}]
+            },
+        }
+    )[0]
+    await record_delivery_failure(db_session, failure=failure)
+
+    await db_session.refresh(unrelated)
+    assert "docs_requested" in (unrelated.details or {})
