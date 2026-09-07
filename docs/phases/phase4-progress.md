@@ -208,7 +208,7 @@ would have meant rebuilding:
 | [LP-833](../tickets/LP-833.md) | Compose by picking documents from the 166-type catalog; the model writes the framing, on the request | Specified |
 | [LP-834](../tickets/LP-834.md) | The secure link is added from inside the draft; minting expires the previous one | Specified |
 | [LP-835](../tickets/LP-835.md) | Writing to the other parties, from the same list and the same send path | Specified |
-| [LP-836](../tickets/LP-836.md) | One inbox domain per environment, including a local one that does not exist today | Specified |
+| [LP-836](../tickets/LP-836.md) | One inbox domain per environment, including a local one that does not exist today | **REVIEWED** — 2 review findings, both in the Terraform. `imboxstaging.mortgageboss.ai` is a sibling of the apex, so `inbound_mail`'s records could not go in the `staging.mortgageboss.ai` zone the module was still being passed; it has its own zone now, with its name servers as an output for the registrar step. And the new variable's description interpolated `${var.domain_name}` inside a heredoc, so `infra/envs/staging` did not INITIALISE — every plan, validate and apply failed. Found by running `terraform validate`, which needs no credentials and which nothing in this repository runs |
 | [LP-837](../tickets/LP-837.md) | A drafts indicator in the file header, on every page of a file, deep-linking into the modal | Specified |
 | [LP-838](../tickets/LP-838.md) | Every surface that lists or opens a message says when — including the popover, which was not named | Specified |
 

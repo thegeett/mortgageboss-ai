@@ -97,6 +97,10 @@ async def test_get_inbox_address_uses_the_configured_domain(
     company = await _make_company(db_session, "acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
 
+    # LP-836 REVIEW — THE `n` IS LOAD-BEARING, not a missed rename. `conftest`'s autouse fixture
+    # already pins `imbox.example.test`, so using that spelling here would make the monkeypatch a
+    # no-op and the assertion below pass without it. A sentinel has to differ from the ambient value
+    # to be a sentinel.
     monkeypatch.setattr(settings, "inbox_domain", "inbox.example.test")
     assert loan_file.get_inbox_address() == f"lf-{loan_file.inbox_token}@inbox.example.test"
 

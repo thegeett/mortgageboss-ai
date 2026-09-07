@@ -413,7 +413,10 @@ variable "inbox_domain" {
     MX record answers another is a borrower's documents going nowhere with nothing to
     notice it.
 
-    ⚠️ NOT UNDER `domain_name` ANY MORE (LP-836). This was `inbox.${var.domain_name}` —
+    ⚠️ NOT UNDER `domain_name` ANY MORE (LP-836). This was `inbox.$${var.domain_name}` —
+    (the `$$` is an escape, not a typo: Terraform interpolates `$${...}` inside a heredoc,
+    including in a `description`, where a variable reference is not allowed at all — an
+    unescaped one makes the whole environment fail to initialise)
     `inbox.staging.mortgageboss.ai` — which sits INSIDE the `staging.mortgageboss.ai`
     hosted zone Terraform already owns, so staging needed no registrar step.
 
