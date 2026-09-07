@@ -55,6 +55,11 @@ _RECEIPT_VERDICT_KEYS = (
 #: are still what most autoresponders actually send.
 _AUTO_REPLY_HEADERS = ("auto-submitted", "x-autoreply", "x-autorespond")
 
+#: `Precedence` values that mean "do not answer this" (LP-815). `bulk` and `list` are the two
+#: `phase4.md` §5 names; `junk` is the third value the same convention uses and refusing it costs
+#: nothing.
+_BULK_PRECEDENCE = frozenset({"bulk", "list", "junk"})
+
 _ANGLE = re.compile(r"<([^>]+)>")
 
 
@@ -174,6 +179,25 @@ def is_auto_reply(parsed: Message) -> bool:
     return any(parsed.get(name) is not None for name in _AUTO_REPLY_HEADERS[1:])
 
 
+def is_bulk(parsed: Message) -> bool:
+    """Whether this came from a list or a bulk sender (LP-815).
+
+    SEPARATE FROM `is_auto_reply`, and both are needed. An out-of-office is a machine answering one
+    message; a mailing list is a machine broadcasting to many, and the loop it forms is worse — a
+    reply goes to the LIST, so every subscriber sees it and the reflector sends it back.
+
+    `phase4.md` §5 names `Precedence: bulk|list` and `List-Id` as auto-reply suppressors alongside
+    the RFC 3834 marker. They are recorded here rather than decided at reply time because the
+    headers exist only on the raw message, and re-parsing an `.eml` to answer a boolean is how that
+    boolean quietly stops being asked.
+    """
+    precedence = (parsed.get("Precedence") or "").strip().lower()
+    if precedence in _BULK_PRECEDENCE:
+        return True
+    # RFC 2919. Any `List-Id` at all means a list distributed this, whatever else it says.
+    return any(parsed.get(name) is not None for name in ("List-Id", "List-Unsubscribe"))
+
+
 async def ingest_raw_message(
     db: AsyncSession,
     *,
@@ -208,6 +232,7 @@ async def ingest_raw_message(
         "routing_state": InboundRoutingState.PENDING,
         "is_dsn": is_delivery_status_notification(parsed),
         "is_auto_reply": is_auto_reply(parsed),
+        "is_bulk": is_bulk(parsed),
     }
 
     # ON CONFLICT DO NOTHING against the ingest-key index, so a redelivery is a no-op rather than an
@@ -363,6 +388,7 @@ __all__ = [
     "extract_receipt_verdicts",
     "ingest_raw_message",
     "is_auto_reply",
+    "is_bulk",
     "is_delivery_status_notification",
     "normalise_message_id",
     "process_raw_message",

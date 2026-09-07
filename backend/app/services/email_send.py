@@ -70,9 +70,27 @@ class CannotSendError(Exception):
     """The draft cannot be sent. Always tells the caller which rule stopped it."""
 
 
+#: LP-815 — OUTBOUND MAIL CARRIES NO ATTACHMENTS, AND THAT IS ENFORCED HERE RATHER THAN ASSUMED.
+#:
+#: `phase4.md` §6: GLBA Safeguards 16 CFR 314.4(c)(3) requires customer information to be encrypted
+#: in transit over external networks, and opportunistic STARTTLS is not a defensible compensating
+#: control on its own. So outbound carries an authenticated, expiring link — "the attachment path is
+#: blocked in code, not by policy".
+#:
+#: The block is this: `OutboundMessage` has no field an attachment could travel in, and a test
+#: asserts that rather than trusting the absence. Today that is true because nobody has added one,
+#: which is exactly the state a rule like this exists to survive — the day somebody adds
+#: `attachments: list[bytes]` because a lender needs a PDF, this is what refuses.
+_ATTACHMENT_FIELD_NAMES = frozenset({"attachment", "attachments", "files", "parts", "documents"})
+
+
 @dataclass(frozen=True)
 class OutboundMessage:
-    """Everything the processor's mail client needs, assembled once so it cannot disagree with itself."""
+    """Everything the processor's mail client needs, assembled once so it cannot disagree with itself.
+
+    NO ATTACHMENT FIELD, DELIBERATELY — see `_ATTACHMENT_FIELD_NAMES`. A message this system helps
+    send carries a link to the document, never the document.
+    """
 
     subject: str
     body: str

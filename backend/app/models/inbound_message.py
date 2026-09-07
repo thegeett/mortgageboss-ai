@@ -139,6 +139,11 @@ class InboundMessage(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     is_dsn: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     #: An out-of-office or other automatic reply. Never a document, and never worth a reminder.
     is_auto_reply: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: From a mailing list or a bulk sender — `Precedence: bulk|list|junk`, or any `List-Id`
+    #: (LP-815). SEPARATE FROM `is_auto_reply`: an out-of-office is a machine answering one message,
+    #: a list is a machine broadcasting to many, and the loop it forms is worse because a reply goes
+    #: to the LIST and comes back to every subscriber.
+    is_bulk: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     company: Mapped["Company | None"] = relationship()
     loan_file: Mapped["LoanFile | None"] = relationship()

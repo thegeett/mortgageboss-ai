@@ -277,6 +277,16 @@ class Settings(BaseSettings):
     # wiring, not this default, is what keeps a non-production file from taking real borrower mail.
     inbox_domain: str = "inbox.mortgageboss.ai"
 
+    # LP-815 — where the borrower's upload link points. The app's own public origin, not the API's:
+    # the token lands in a browser, on a page a person reads.
+    #
+    # The default is LOCAL, unlike `inbox_domain`, and the asymmetry is deliberate. A wrong inbox
+    # domain takes delivery of real borrower mail, so it fails to production. A wrong upload base
+    # URL sends a borrower to a link that does not resolve — visible, harmless and reported in
+    # minutes — while a default of the production origin would have a staging test email pointing a
+    # real borrower at production. The failure that is loud is the one to prefer.
+    upload_link_base_url: str = "http://localhost:3000"
+
     # Where SES writes a received message, and where the ingest task is told about it. All three are
     # None until INFRA-1 applies; nothing reads them before LP-803, and a None here is the honest
     # state of an environment with no inbound pipeline rather than a misconfiguration.

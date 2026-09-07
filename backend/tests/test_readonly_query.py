@@ -307,6 +307,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     "loan_files": frozenset(
         {"inbox_token", "loan_officer_name", "loan_officer_email", "underwriter_contact_id"}
     ),
+    # LP-815 — `token_hash` is the VERIFIER of a capability, and exposing it through the analytics
+    # path is the opposite of the reason it is hashed. `recipient_email` names a borrower, and
+    # `purpose` is prose that ends up naming one. What is left answers how many links were minted,
+    # how fast they are used and how many expire unused, which is the analytic question.
+    "upload_links": frozenset({"token_hash", "recipient_email", "purpose"}),
     # LP-813 — a lender contact is a person. The name, address and phone identify them outright,
     # and `notes` is free prose an admin typed about them, which is where a name ends up in a shape
     # no scrubber predicts. What is left — the lender, the role, whether they are active — answers
@@ -452,6 +457,13 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it
     # even scrubbed would put one borrower's details in an analytics view.
     ("style_profiles", "exemplars"),
+    # LP-815, and the strongest form of all: `token_hash` is the VERIFIER of a bearer capability.
+    # `loan_files.inbox_token` is already here for the same reason, and this one is worse in one
+    # respect — the whole point of hashing it is that the database cannot be used to reach a loan
+    # file, and a readonly view would put the verifier on the analytics path where the raw token
+    # never was. Absence asserted rather than only recorded, because a later migration adding it
+    # would pass both drift tests and turn an EXCLUDED entry into a stale comment.
+    ("upload_links", "token_hash"),
 )
 
 

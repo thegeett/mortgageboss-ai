@@ -62,9 +62,17 @@ class CommunicationChannel(StrEnum):
 
 
 class CommunicationStatus(StrEnum):
-    """Delivery state. DRAFT/SENT/DELIVERED/FAILED are outbound; RECEIVED inbound."""
+    """Delivery state. DRAFT/QUEUED/SENT/DELIVERED/FAILED are outbound; RECEIVED inbound."""
 
     DRAFT = "draft"  # outbound, not yet sent
+    # LP-815 — composed and awaiting a transport, with no human left to approve it.
+    #
+    # NOT `DRAFT`, and the distinction is load-bearing. A draft is the accumulating document request
+    # a processor reviews and edits; there is a partial unique index enforcing one open draft per
+    # (file, template) and `get_open_draft` reads by that status. An automatic reply parked as a
+    # DRAFT would be a second thing on the file waiting for a person who is never asked, and would
+    # sit in a state whose whole meaning is "somebody still has to look at this".
+    QUEUED = "queued"  # outbound, composed automatically, waiting to be transmitted
     SENT = "sent"  # outbound, sent
     DELIVERED = "delivered"  # outbound, delivery confirmed (if known)
     FAILED = "failed"  # outbound, send failed

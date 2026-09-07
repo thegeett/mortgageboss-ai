@@ -108,13 +108,18 @@ class UploadSource(StrEnum):
     """How a document entered the system (ADR-056).
 
     ``USER_UPLOAD`` has a user actor (``uploaded_by_user_id`` set); the other
-    two do not (the borrower emails the inbox, or a MISMO import creates it), so
-    ``uploaded_by_user_id`` is null for them.
+    three do not (the borrower emails the inbox, uses an expiring upload link, or a MISMO import
+    creates it), so ``uploaded_by_user_id`` is null for them.
     """
 
     USER_UPLOAD = "user_upload"
     BORROWER_INBOX = "borrower_inbox"
     MISMO_IMPORT = "mismo_import"
+    # LP-815 — the borrower used the expiring link instead of attaching the file to an email. A
+    # SEPARATE SOURCE FROM `BORROWER_INBOX`, though both are the borrower and neither has a user
+    # actor: the compliance argument for the link is that the document did not cross the network as
+    # a mail attachment, and a provenance record that cannot tell those apart cannot support it.
+    SECURE_LINK = "secure_link"
 
 
 class StalenessResolution(StrEnum):

@@ -99,6 +99,7 @@ from app.models.types import (
     Money,
     ShortStr,
 )
+from app.models.upload_link import UploadLink
 from app.models.user import User, UserRole
 from app.models.validation_verdict import ValidationVerdict, VerdictKind
 from app.models.verification import (
@@ -204,6 +205,7 @@ __all__ = [
     "Tier",
     "TimestampMixin",
     "UUIDMixin",
+    "UploadLink",
     "UploadSource",
     "User",
     "UserRole",
