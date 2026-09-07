@@ -9,11 +9,18 @@ and `HUMAN_GATED` (Terraform written and planned; waiting on a person to apply).
 Protocol: [`phase4-execution-protocol.md`](phase4-execution-protocol.md) ·
 Plan: [`phase4-build-plan.md`](phase4-build-plan.md) · Design: [`phase4.md`](phase4.md)
 
-**Branch:** `phase4-with-ui`, cut from `origin/mbai-ui-improvemet-merge` — NOT from the bedrock
-staging branch, and not named `phase4`. Corrected 2026-09-06 after both LP-802 and LP-801 were
-reported against the wrong branch for a whole session. Verify with `git rev-parse --abbrev-ref HEAD`
-rather than trusting this line or a session-start snapshot; the tree's branch has changed under a
-session at least once. One branch for the whole phase; one commit per ticket plus one per review pass.
+**Branch:** `phase4-with-ui` — not `phase4`. Corrected 2026-09-06, after both LP-802 and LP-801 were
+reported against `bedrock_integration_with_rules_staging` for a whole session. Verify with
+`git rev-parse --abbrev-ref HEAD` rather than trusting this line or a session-start snapshot; the
+tree's branch has changed under a running session at least once. One branch for the whole phase; one
+commit per ticket plus one per review pass.
+
+**Nothing is stranded, and the reflog alone would suggest otherwise.** The branch reflog says
+`Created from origin/mbai-ui-improvemet-merge^0`, which reads as "cut off the UI branch, away from
+bedrock". It is not: that branch had already merged bedrock at `1ca4e0f4`, so `phase4-with-ui`
+contains the bedrock staging branch in full — `git log --oneline bedrock_integration_with_rules_staging
+^HEAD` is empty, and the fork point is bedrock's own tip `076307f2`. The LP-640..643 work and its
+migrations are here alongside the UI merge's. No commit needs moving.
 
 Because the branch descends from the UI merge, it carries that merge's schema: `alembic heads` is
 `a7c93e12f4b8`, and staging's current revision `d7e3a9b41f02` is its direct parent. A deploy from here
