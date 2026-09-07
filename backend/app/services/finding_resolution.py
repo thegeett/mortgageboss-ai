@@ -624,6 +624,7 @@ async def request_documents_in_bulk(
 async def request_docs_for_finding(
     db: AsyncSession,
     *,
+    loan_file: LoanFile,
     finding: Finding,
     actor_user_id: UUID,
     note: str | None = None,
@@ -635,6 +636,19 @@ async def request_docs_for_finding(
     that the docs were requested (so the tab shows the linkage). Does NOT resolve the
     finding — it stays open until the request is satisfied. The needs item is the artifact
     the needs list + Phase-4 communication act on. ``flush`` only.
+
+    AND IT JOINS THE OPEN DRAFT, which it did not until now. `phase4.md` §1 states the chain as
+    *"processor clicks 'Request docs' on a finding -> the request is added to a pending draft ->
+    multiple requests accumulate into one email"*, and LP-809 wired `add_needs_to_draft` into
+    `request_documents_in_bulk` only — the function §1 called "the accumulation primitive". The
+    per-finding route is the other half of the same sentence and had no draft call at all, so a
+    processor who clicked the row-level button got a needs item, an activity line, and no email.
+    Reported on LF-JR4T (rule ID-3): activity read "Requested docs from finding ID-3" and the file
+    had no `communications` row of any kind.
+
+    ``loan_file`` is a parameter rather than a lookup from ``finding.loan_file_id`` because the only
+    caller already holds the tenant-scoped file — re-fetching it here would be a second, unscoped
+    read of the row the endpoint has already authorised.
     """
     if not requestable(finding):
         raise NotRequestable(
@@ -657,6 +671,11 @@ async def request_docs_for_finding(
         **finding.details,
         "docs_requested": docs_requested_marker(actor_user_id=actor_user_id, needs_item_id=item.id),
     }
+
+    # LP-809 — same call, same order and the same reasons as the bulk route above: after the needs
+    # item exists (the join row's foreign key needs it flushed) and before the activity log (a line
+    # claiming a request was made should not precede the draft that will carry it).
+    await add_needs_to_draft(db, loan_file=loan_file, needs=[item], actor_user_id=actor_user_id)
 
     await log_activity(
         db,

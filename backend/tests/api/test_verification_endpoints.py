@@ -27,8 +27,11 @@ from app.models import (
     UserRole,
 )
 from app.models.base import utcnow
+from app.models.communication import Communication, CommunicationStatus
+from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.document import DocumentStatus
 from app.models.finding import EvaluationOutcome
+from app.models.needs_item import NeedsItem
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.services.cross_source import assemble_cross_source_context, compute_input_fingerprint
 from app.services.documents import create_document
@@ -938,6 +941,133 @@ async def test_request_docs_creates_a_needs_item_and_keeps_the_finding_open(
     # The finding stays OPEN (request-docs doesn't resolve it) but is marked.
     assert finding.resolution_status.value == "open"
     assert "docs_requested" in finding.details
+
+
+async def test_request_docs_on_ONE_finding_starts_the_draft(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The row-level button builds an email, not just a to-do item.
+
+    REPORTED ON LF-JR4T. A processor clicked "Request" on the ID-3 date-of-birth finding, saw the
+    activity line, and found no draft on the communication page. `phase4.md` §1 states the chain as
+    "processor clicks 'Request docs' on a finding -> the request is added to a pending draft", but
+    LP-809 wired `add_needs_to_draft` into the BULK route only — the one §1 named "the accumulation
+    primitive" — and the singular route in the same sentence had no draft call. Nothing failed:
+    the needs item appeared, the finding showed as requested, the activity logged. Only the email
+    was missing, and a draft that was never started is invisible unless somebody looks for it.
+
+    Asserted at the ENDPOINT because that is where it was seen. The service-level assertion would
+    have been just as absent, and the button is what a processor presses.
+    """
+    from app.services.email_draft import get_open_draft
+    from sqlalchemy import select
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = await _add_finding(db, loan_file, confidence=0.9)
+    # THE REPORTED RULE, and it matters which one: `load_rule_spec("ID-3").requires_documents` is
+    # the EMPTY tuple, so the bulk route resolves no documents for it and creates nothing. The
+    # row-level button is the only route that can request against this finding at all — it names
+    # the ask from the finding's own sentence — which is why it is the one a processor reached for.
+    finding.rule_id = "ID-3"
+    finding.message = "One more source stating the date of birth"
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": "One more source stating the date of birth"},
+    )
+    assert resp.status_code == 200
+
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None, (
+        "no draft was created — the row-level request built a needs item and an activity line and "
+        "no email, which is what LF-JR4T showed"
+    )
+    linked = (
+        (
+            await db.execute(
+                select(CommunicationNeedsItem.needs_item_id).where(
+                    CommunicationNeedsItem.communication_id == draft.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    needs = (
+        (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert len(needs) == 1
+    assert linked == [needs[0].id], "the draft exists but does not carry the need that created it"
+    assert needs[0].title in (draft.body or ""), (
+        "the need is joined to the draft but not in its body"
+    )
+
+
+async def test_both_request_routes_accumulate_into_ONE_draft(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Two buttons, one email — the property LP-809 exists for, across the route that had the draft
+    call and the route that did not.
+
+    Fixing the singular route by giving it its own draft would satisfy the test above and be wrong
+    in the way that matters: a processor who uses both buttons on one file would send the borrower
+    two emails. This is the assertion that separates "a draft was created" from "the draft was
+    joined", and only the second is the behaviour.
+    """
+    from app.services.email_draft import get_open_draft
+    from sqlalchemy import func, select
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    one = await _add_finding(db, loan_file, confidence=0.9)
+    one.rule_id = "ID-3"
+    two = await _add_finding(db, loan_file, confidence=0.9)
+    # IN-1 declares (pay_stub, w2) and the file holds neither, so the bulk route resolves one
+    # missing document and creates one needs item. A rule with no `requires_documents` — ID-3, the
+    # reported one — would make the bulk leg create NOTHING, and this test would then pass on a
+    # single need without ever exercising the second route.
+    two.rule_id = "IN-1"
+    await db.commit()
+
+    assert (
+        await client.post(
+            f"{API}/{loan_file.display_id}/findings/{one.id}/request-docs",
+            headers=_auth(token),
+            json={"note": None},
+        )
+    ).status_code == 200
+    assert (
+        await client.post(
+            f"{API}/{loan_file.display_id}/findings/request-docs",
+            headers=_auth(token),
+            json={"finding_ids": [str(two.id)], "note": None},
+        )
+    ).status_code == 200
+
+    drafts = await db.scalar(
+        select(func.count())
+        .select_from(Communication)
+        .where(
+            Communication.loan_file_id == loan_file.id,
+            Communication.status == CommunicationStatus.DRAFT,
+            Communication.deleted_at.is_(None),
+        )
+    )
+    assert drafts == 1, f"{drafts} drafts — the borrower would receive that many emails"
+
+    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    assert draft is not None
+    linked = await db.scalar(
+        select(func.count())
+        .select_from(CommunicationNeedsItem)
+        .where(CommunicationNeedsItem.communication_id == draft.id)
+    )
+    assert linked == 2, "one draft, but it does not carry both requests"
 
 
 async def test_request_docs_on_the_unidentified_documents_row_is_refused(

@@ -109,7 +109,9 @@ async def test_the_single_finding_route_refuses_rather_than_creating_nothing(
     finding = await _finding(db_session, loan_file, rule_id=UNIDENTIFIED_DOCUMENTS_RULE_ID)
 
     with pytest.raises(NotRequestable):
-        await request_docs_for_finding(db_session, finding=finding, actor_user_id=actor)
+        await request_docs_for_finding(
+            db_session, loan_file=loan_file, finding=finding, actor_user_id=actor
+        )
 
     assert "docs_requested" not in finding.details
 
@@ -144,7 +146,9 @@ async def test_both_paths_write_the_same_marker_keys(db_session: AsyncSession) -
     single = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
     bulk = await _finding(db_session, loan_file, rule_id="CR-13", subject="lia2")
 
-    item = await request_docs_for_finding(db_session, finding=single, actor_user_id=actor)
+    item = await request_docs_for_finding(
+        db_session, loan_file=loan_file, finding=single, actor_user_id=actor
+    )
     created = await request_documents_in_bulk(
         db_session,
         loan_file=loan_file,
@@ -337,7 +341,9 @@ async def test_the_marker_reads_back_from_the_new_shape(db_session: AsyncSession
     loan_file, actor = await _loan_file(db_session)
     finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
 
-    item = await request_docs_for_finding(db_session, finding=finding, actor_user_id=actor)
+    item = await request_docs_for_finding(
+        db_session, loan_file=loan_file, finding=finding, actor_user_id=actor
+    )
 
     assert requested_needs_item_id(finding) == item.id
 

@@ -6,6 +6,7 @@
  * (and stops once it settles), surfacing the findings + the staleness flag.
  */
 import { apiClient } from "@/lib/api/client";
+import { outboundDraftQueryKey } from "@/lib/api/communications";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import type {
@@ -182,6 +183,11 @@ export function useResolveFinding(identifier: string) {
       void queryClient.invalidateQueries({ queryKey: ltvQueryKey(identifier) });
       void queryClient.invalidateQueries({ queryKey: ["needs", identifier] });
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
+      // LP-809 — request-docs now JOINS the file's open draft (both routes), so the draft the
+      // communication page reads is stale the moment this resolves. Without this, the backend
+      // writes the draft and the processor still sees "no draft" for up to the 60s default
+      // staleTime — the same empty screen the missing draft call produced, from the other side.
+      void queryClient.invalidateQueries({ queryKey: outboundDraftQueryKey(identifier) });
     },
   });
 }

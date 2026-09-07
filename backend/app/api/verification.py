@@ -1079,7 +1079,11 @@ async def request_docs_endpoint(
 
     try:
         await request_docs_for_finding(
-            db, finding=finding, actor_user_id=current_user.id, note=payload.note
+            db,
+            loan_file=loan_file,
+            finding=finding,
+            actor_user_id=current_user.id,
+            note=payload.note,
         )
     except NotRequestable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
