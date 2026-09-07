@@ -99,7 +99,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-810 | ab89cddd | f721148e | 3 | a sentence lost in the first real version bump; a house rule citing a regulation that does not require it; catalog prose past every guard |
 | 2026-09-07 | LP-811a | 748ace96 | d222da0f | 1 | a cross-tenant rate limit that leaked one company's contact with a borrower to another, asserted as correct by the existing test |
 | 2026-09-07 | LP-811b | 710ed72b | b55b6110 | 1 | the mail-client link sent the composed body while the record stored the edit — M1 complete |
-| 2026-09-07 | INFRA-1 | 662b9400 | REVIEW_SHA | 2 | an unchecked hand-built ARN in both policy conditions; a 30-day noncurrent purge five years ahead of the legal-hold flag |
+| 2026-09-07 | INFRA-1 | 662b9400 | 7656cefc | 2 | an unchecked hand-built ARN in both policy conditions; a 30-day noncurrent purge five years ahead of the legal-hold flag |
 | 2026-09-07 | LP-811b | 710ed72b |  |  | awaiting review. Frontend only. The navigation question answered itself — the Communication tab placeholder has existed since LP-33. **M1 complete pending this review** |
 | 2026-09-07 | LP-811a | 748ace96 |  |  | awaiting review. Split from LP-811; LP-811b (frontend) is row 8b. First write to `requested_at` in the system's life |
 | 2026-09-06 | LP-809 | c3d34471 |  |  | awaiting review. Migration b8d5e0a17c42; two provenance columns the plan did not ask for; LP-818 will need the draft uniqueness index revisited |
