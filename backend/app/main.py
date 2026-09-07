@@ -22,6 +22,7 @@ from app.api.lenders import file_router as lender_file_router
 from app.api.lenders import router as lenders_router
 from app.api.loan_files import router as loan_files_router
 from app.api.ltv import router as ltv_router
+from app.api.mailbox_connections import router as mailbox_connections_router
 from app.api.needs import router as needs_router
 from app.api.overlay_admin import router as overlay_admin_router
 from app.api.preferences import router as preferences_router
@@ -157,6 +158,7 @@ app.include_router(overlay_admin_router, prefix=API_V1_PREFIX)
 app.include_router(validation_aid_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
+app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)
 app.include_router(upload_links_router, prefix=API_V1_PREFIX)
 # LP-815 — THE ONE UNAUTHENTICATED SURFACE. The token in the path is the credential; see
 # `api/upload_links.py` for why every failure on it is one answer.

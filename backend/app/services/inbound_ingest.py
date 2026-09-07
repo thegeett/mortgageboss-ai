@@ -337,7 +337,9 @@ async def process_raw_message(
     from app.services.inbound_routing import apply_routing
 
     await apply_safety_to_message(db, inbound_message_id=message.id, raw=raw)
-    await apply_routing(db, message=message)
+    # `raw` is passed so a FORWARDED message's original-hop headers can be read (LP-808). It is
+    # ignored for a direct message, where §2.3 forbids reading them.
+    await apply_routing(db, message=message, raw=raw)
     await db.flush()
     return result
 

@@ -87,20 +87,36 @@ has no memory of the arguments the first one talked itself into.
    - **Tenancy.** Anything reachable from an email address — or from a link in one — must derive
      `company_id` *from* the resolved loan file, never from a sender, a header or a guess.
 
-     **Two places are allowed to invert the invariant, and they are named:**
-     `services/inbound_routing.resolve_loan_file_by_address` (LP-805) and
-     `services/upload_links.resolve_link` (LP-815). A **third** is a blocking finding.
+     **Three places are allowed to invert the invariant, and they are named:**
+     `services/inbound_routing.resolve_loan_file_by_address` (LP-805),
+     `services/upload_links.resolve_link` (LP-815), and
+     `services/mailbox_connections.resolve_connection_by_address` (LP-808).
+     A **fourth** is a blocking finding.
 
-     This said "exactly one place" until LP-815's review. It was written before the secure upload
-     link existed, and by the time that shipped the rule named one of the two things it governed —
-     so a reviewer applying it literally would have had to call correct code a blocking finding.
-     A governing rule that no longer matches the code is worse than no rule, because it is still
-     obeyed. **If a third inversion is ever sanctioned, amend this line in the same commit.**
+     This said "exactly one place" until LP-815's review and "two" until LP-808. It was written
+     before the secure upload link existed, and by the time that shipped the rule named one of the
+     two things it governed — so a reviewer applying it literally would have had to call correct
+     code a blocking finding. A governing rule that no longer matches the code is worse than no
+     rule, because it is still obeyed. **If a fourth inversion is ever sanctioned, amend this line
+     in the same commit**, which is what LP-808 did.
 
-     What makes a second one acceptable is not that it was needed. It is that it has the same
-     shape: ONE function, every failure collapsing to ONE answer, and the loan file it resolves
-     being the only thing that says whose the data is. Check a new one against those three, not
-     against whether it seemed unavoidable.
+     What makes another one acceptable is not that it was needed. It is that it has the same
+     shape: ONE function, every failure collapsing to ONE answer, and the row it resolves being the
+     only thing that says whose the data is. Check a new one against those three, not against
+     whether it seemed unavoidable.
+
+     **The third is weaker than the first two and the difference is recorded rather than glossed.**
+     LP-805 and LP-815 resolve a loan FILE; LP-808 resolves a COMPANY, because Route B's whole shape
+     is that a customer's admin forwards their own alias to an address we minted for them, and mail
+     arrives with no session and no user. A wrong answer from the first two misfiles one message; a
+     wrong answer from the third puts a message in the wrong company's queue. Two things narrow that
+     and neither removes it: the connection decides only the COMPANY — the FILE still comes from the
+     routing ladder, whose rungs 3-5 are then scoped to that company — and the token is 128 bits
+     matched on both halves of the address, exactly as `inbox_token` is.
+
+     **It was a builder, not a human, who sanctioned the third.** The rule gave the procedure and
+     the shape test, and both were followed; a person should still decide whether they agree, and
+     it is in the progress file's escalations for that reason.
    - **No message content in logs.** Metadata only — never a body, never a subject, never a filename
      that came from outside.
    - **No AI in the decision path.** The model may classify and extract. It may not clear a

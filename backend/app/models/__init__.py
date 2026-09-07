@@ -66,6 +66,12 @@ from app.models.lender_contact import LenderContact, LenderContactRole
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.ltv_override import LtvOverride
+from app.models.mailbox_connection import (
+    MailboxConnection,
+    MailboxConnectionKind,
+    MailboxConnectionStatus,
+    MailboxVerification,
+)
 from app.models.mismo_import import MismoImport, MismoImportStatus
 from app.models.needs_item import (
     NeedsItem,
@@ -162,6 +168,10 @@ __all__ = [
     "LoanPurpose",
     "LongStr",
     "LtvOverride",
+    "MailboxConnection",
+    "MailboxConnectionKind",
+    "MailboxConnectionStatus",
+    "MailboxVerification",
     "MaritalStatus",
     "MediumStr",
     "MismoImport",

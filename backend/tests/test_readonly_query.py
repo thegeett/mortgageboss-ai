@@ -307,6 +307,15 @@ EXCLUDED: dict[str, frozenset[str]] = {
     "loan_files": frozenset(
         {"inbox_token", "loan_officer_name", "loan_officer_email", "underwriter_contact_id"}
     ),
+    # LP-808 — `token` is a BEARER CAPABILITY, stored in the clear because an admin types it into a
+    # routing rule and must be able to read it back. Anyone who can send to `co-<token>@` gets mail
+    # into this company's triage queue, which is exactly why `loan_files.inbox_token` is excluded and
+    # this is the company-level analogue. `source_address` is a real mailbox at a customer's domain.
+    # `encrypted_refresh_token` and `cursor` are Route C's and are excluded now rather than when they
+    # first hold something.
+    "mailbox_connections": frozenset(
+        {"token", "source_address", "encrypted_refresh_token", "cursor", "watch_expires_at"}
+    ),
     # LP-815 — `token_hash` is the VERIFIER of a capability, and exposing it through the analytics
     # path is the opposite of the reason it is hashed. `recipient_email` names a borrower, and
     # `purpose` is prose that ends up naming one. What is left answers how many links were minted,
@@ -464,6 +473,11 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # never was. Absence asserted rather than only recorded, because a later migration adding it
     # would pass both drift tests and turn an EXCLUDED entry into a stale comment.
     ("upload_links", "token_hash"),
+    # LP-808, strong form and for the same reason as `loan_files.inbox_token` beside it: this token
+    # IS the company's ingest address, so a view carrying it hands the capability to the analytics
+    # path. Absence asserted rather than only recorded, because a later migration adding it would
+    # pass both drift tests and turn the EXCLUDED entry into a stale comment.
+    ("mailbox_connections", "token"),
 )
 
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,9 @@ class RoutingSignal(StrEnum):
 
     INBOX_TOKEN = "inbox_token"  # rung 1
     THREAD_REFERENCE = "thread_reference"  # rung 2
+    FOOTER_TAG = "footer_tag"  # rung 3 (LP-808)
+    PARTICIPANT = "participant"  # rung 4 (LP-808)
+    SUBJECT_REFERENCE = "subject_reference"  # rung 5 (LP-808)
 
 
 #: Rung confidences, from `phase4.md` §2.2. Stored so that CONFIDENCE GATES AUTO-ACCEPTANCE, NEVER
@@ -59,6 +63,14 @@ class RoutingSignal(StrEnum):
 _CONFIDENCE = {
     RoutingSignal.INBOX_TOKEN: 1.0,
     RoutingSignal.THREAD_REFERENCE: 1.0,
+    # HIGH, NOT CERTAIN. §2.2 grades the footer tag "high": it is a display id, which ADR-397 calls
+    # an identifier whose predictability is low-risk — so anybody who has seen one of our emails can
+    # write one into a message. High is enough to route and not enough to auto-accept.
+    RoutingSignal.FOOTER_TAG: 0.8,
+    # MEDIUM. The sender is on the file and exactly one open file matches — but a sender address is
+    # forgeable, and this rung is reached precisely when nothing checkable matched.
+    RoutingSignal.PARTICIPANT: 0.5,
+    RoutingSignal.SUBJECT_REFERENCE: 0.5,
 }
 
 
@@ -184,18 +196,181 @@ async def _route_by_thread(db: AsyncSession, message: InboundMessage) -> Routing
     )
 
 
+async def _scoped_files(db: AsyncSession, company_id: UUID | None) -> list[LoanFile]:
+    """Active loan files for one company, or nothing when the company is unknown.
+
+    RUNGS 3-5 ARE COMPANY-SCOPED AND RUNGS 1-2 ARE NOT, and that asymmetry is the point. The first
+    two match on something unguessable — a 128-bit token, or a message id we generated — so the
+    match itself proves which company. The last three match on a display id, a sender address or a
+    subject line, none of which is unguessable, so scoping is the only thing stopping
+    `[LF-7K3M]` in a stranger's subject line from reaching whichever company happens to hold that id.
+
+    NO COMPANY MEANS NO CANDIDATES. A message with no `company_id` reached us at an address nobody
+    owns, and there is no set of files it could belong to — returning "all of them" would be the
+    cross-tenant failure this scoping exists to prevent.
+    """
+    if company_id is None:
+        return []
+    stmt = select(LoanFile).where(LoanFile.company_id == company_id)
+    return list((await db.execute(only_active(stmt, LoanFile))).scalars().all())
+
+
+async def _route_by_footer_tag(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
+    """Rung 3 — the `[LF-xxxx]` tag we put in every outbound footer. High, not certain.
+
+    THE ZENDESK FALLBACK, for clients that strip or rewrite `Reply-To`. §2.2 grades it "high"
+    rather than certain because a display id is an IDENTIFIER, not a capability (ADR-397): anyone
+    who has ever received one of our emails can put that string in a message.
+
+    READ FROM THE SUBJECT AND THE STORED BODY. The subject is on the row; the body is not, so the
+    raw message is re-read from storage — which is why this rung is third and not first.
+    """
+    from app.services.email_send import loan_reference_in
+
+    candidates = await _scoped_files(db, message.company_id)
+    if not candidates:
+        return None
+
+    haystacks: list[str] = [message.subject or ""]
+    body = await _stored_body(message)
+    if body:
+        haystacks.append(body)
+
+    by_display_id = {loan_file.display_id.upper(): loan_file for loan_file in candidates}
+    for text_block in haystacks:
+        reference = loan_reference_in(text_block)
+        if reference is None:
+            continue
+        found = by_display_id.get(reference.upper())
+        if found is not None:
+            return RoutingOutcome(
+                found, RoutingSignal.FOOTER_TAG, _CONFIDENCE[RoutingSignal.FOOTER_TAG]
+            )
+    return None
+
+
+async def _route_by_participant(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
+    """Rung 4 — the sender is on exactly ONE of this company's open files. Medium.
+
+    EXACTLY ONE, and the word is load-bearing. A borrower with two files in progress is the ordinary
+    case, and picking either would file half their documents in the wrong place while looking
+    confident. Ambiguity here goes to triage, which is the answer a processor can fix in one click.
+    """
+    from app.services.inbound_participants import normalise_address
+
+    address = normalise_address(message.from_address)
+    if address is None:
+        return None
+    candidates = await _scoped_files(db, message.company_id)
+    if not candidates:
+        return None
+
+    from app.models.loan_file_participant import LoanFileParticipant
+
+    matches = (
+        (
+            await db.execute(
+                only_active(
+                    select(LoanFileParticipant).where(
+                        LoanFileParticipant.loan_file_id.in_([f.id for f in candidates]),
+                        LoanFileParticipant.email == address,
+                    ),
+                    LoanFileParticipant,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    files = {row.loan_file_id for row in matches}
+    if len(files) != 1:
+        return None
+    only = next(loan_file for loan_file in candidates if loan_file.id in files)
+    return RoutingOutcome(only, RoutingSignal.PARTICIPANT, _CONFIDENCE[RoutingSignal.PARTICIPANT])
+
+
+async def _route_by_subject(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
+    """Rung 5 — the subject names a display id, without the footer's brackets. Medium.
+
+    SEPARATE FROM RUNG 3 rather than folded into it, because they are graded differently and the
+    grade is stored. A bracketed `[LF-7K3M]` is our own footer coming back; a bare `LF-7K3M` is
+    somebody typing the reference into a subject line, which is likelier to be a person being
+    helpful and likelier to be wrong.
+    """
+    subject = message.subject or ""
+    if not subject:
+        return None
+    candidates = await _scoped_files(db, message.company_id)
+    if not candidates:
+        return None
+    upper = subject.upper()
+    matched = [loan_file for loan_file in candidates if loan_file.display_id.upper() in upper]
+    if len(matched) != 1:
+        return None
+    return RoutingOutcome(
+        matched[0], RoutingSignal.SUBJECT_REFERENCE, _CONFIDENCE[RoutingSignal.SUBJECT_REFERENCE]
+    )
+
+
+async def _stored_body(message: InboundMessage) -> str | None:
+    """The message's text, re-read from the stored `.eml`, or None.
+
+    RE-READ RATHER THAN STORED. `InboundMessage` deliberately holds no body — §4's data model keeps
+    the raw message in S3 and the row as metadata, so a borrower's prose lives in one place with one
+    retention story. This is the only rung that needs it.
+
+    NEVER RAISES. Storage being unavailable must degrade this rung to "no match" rather than fail
+    the whole ingest: a message that cannot be routed goes to triage, which is recoverable, and a
+    task that crashes leaves it unrouted anyway with an alarm nobody can action.
+    """
+    if not message.raw_storage_path:
+        return None
+    try:
+        import email
+
+        from app.storage import get_storage_backend
+
+        path = message.raw_storage_path
+        if path.startswith("s3://"):
+            path = path.split("/", 3)[3]
+        raw = await get_storage_backend().read(path)
+        parsed = email.message_from_bytes(raw)
+        parts: list[str] = []
+        for part in parsed.walk():
+            if part.get_content_maintype() != "text":
+                continue
+            payload = part.get_payload(decode=True)
+            if isinstance(payload, bytes):
+                parts.append(payload.decode("utf-8", "replace"))
+        return "\n".join(parts) if parts else None
+    except Exception:
+        # METADATA ONLY, and a warning rather than an error: this is a rung failing to fire, not a
+        # message being lost.
+        logger.warning("inbound_body_unreadable")
+        return None
+
+
 async def route_message(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
     """Run the ladder. First hit wins; the confidence is stored, not discarded.
 
-    Rungs 1 and 2 only. `phase4.md` §7 assigns rungs 3-5 to LP-808 and rung 6 is an AI SUGGESTION
-    that never auto-accepts. The build plan's LP-805 section says "the six-rung ladder", which
-    disagrees with the ticket table in the design doc — recorded in the ticket rather than resolved
-    by picking the larger reading.
+    RUNGS 1-5. LP-805 built 1 and 2; LP-808 adds 3, 4 and 5. Rung 6 is an AI SUGGESTION that never
+    auto-accepts and is not built — ADR-388's "flag, never close", and the standing rule that the
+    model may classify and extract but may not decide.
+
+    RUNGS 3-5 ARE COMPANY-SCOPED AND 1-2 ARE NOT. See `_scoped_files`: the first two match on
+    something unguessable, so the match proves the company; the last three match on strings anybody
+    can write, so scoping is the only thing between them and another tenant's file.
 
     NO MATCH IS NOT AN ERROR. An unrouted message goes to its company's triage queue and is visible
     there; confidence gates auto-acceptance, never visibility.
     """
-    for rung in (_route_by_token, _route_by_thread):
+    for rung in (
+        _route_by_token,
+        _route_by_thread,
+        _route_by_footer_tag,
+        _route_by_participant,
+        _route_by_subject,
+    ):
         outcome = await rung(db, message)
         if outcome is not None:
             return outcome
@@ -216,6 +391,26 @@ def _verdict(message: InboundMessage, key: str) -> str:
     return str(value).upper() if value is not None else ""
 
 
+def _sender_authenticated(message: InboundMessage) -> bool:
+    """Whether the SENDER — not the forwarder — is who they claim.
+
+    TWO DIFFERENT QUESTIONS FOR TWO DIFFERENT PATHS, and conflating them is the Route B trap.
+
+    On a direct message, SES's `dmarcVerdict` is about the sender, so it is the answer. On a
+    FORWARDED message, that same verdict is about the forwarder, who is a Google or Microsoft tenant
+    and will essentially always pass — reading it would make every forwarded message look
+    authenticated regardless of who actually sent it. The original hop's verdict is the one that is
+    about the borrower.
+
+    The two are told apart by whether an original hop was recorded at all, which happens only when a
+    connection resolved. `PASS` is compared for equality in both branches, so `GRAY`, `none` and
+    anything unrecognised fail closed.
+    """
+    if "originalHopAuthenticated" in (message.auth_verdicts or {}):
+        return _verdict(message, "originalHopAuthenticated") == "PASS"
+    return _verdict(message, "dmarcVerdict") == "PASS"
+
+
 async def decide_disposition(
     db: AsyncSession, *, message: InboundMessage, outcome: RoutingOutcome
 ) -> tuple[Disposition, str]:
@@ -226,6 +421,10 @@ async def decide_disposition(
     class of "a stranger dropped a document into a loan file". So TRIAGE is what happens unless every
     auto-accept condition holds, and REJECT is reserved for the three cases where there is nothing
     for a person to decide.
+
+    A FORWARDED MESSAGE IS JUDGED ON ITS ORIGINAL HOP (LP-808) — see `_sender_authenticated`. Its
+    own SES DMARC verdict is about the forwarder, and reading that would make every Route B message
+    look authenticated whoever sent it.
 
     `GRAY` IS NOT `PASS`, and this is the subtlety §2.3 calls out. SES's `dkimVerdict: GRAY` most
     often means *signed by a domain that does not match `From:`* — precisely the spoofing case. It is
@@ -255,7 +454,7 @@ async def decide_disposition(
 
     if outcome.confidence is None or outcome.confidence < 1.0:
         return Disposition.TRIAGE, "The match to this loan file is not certain."
-    if _verdict(message, "dmarcVerdict") != "PASS":
+    if not _sender_authenticated(message):
         return Disposition.TRIAGE, "The sender's domain did not authenticate."
     if _verdict(message, "virusVerdict") != "PASS":
         return Disposition.TRIAGE, "The message has not been confirmed virus-free."
@@ -271,7 +470,69 @@ async def decide_disposition(
     return Disposition.AUTO_ACCEPT, "Certain match from a trusted sender that authenticated."
 
 
-async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
+def record_original_hop(message: InboundMessage, *, raw: bytes | None) -> bool:
+    """Merge the FIRST HOP's verdicts into `auth_verdicts` for a forwarded message. True if any.
+
+    ONLY FOR A FORWARD, and the caller enforces that by only calling it when a connection resolved.
+    §2.3 forbids reading `Authentication-Results` out of the body of a message that arrived
+    directly, because RFC 8601 says a stranger can write one; Route B is the single exception,
+    because there the header was added by the borrower's own provider before the forward.
+
+    UNDER SEPARATE KEYS. SES's `dmarcVerdict` for a forwarded message is a verdict about the
+    FORWARDER, and overwriting it would let the forwarder's pass be read as the borrower's — the
+    exact confusion `services/original_hop` exists to prevent.
+    """
+    if raw is None:
+        return False
+    import email as email_module
+
+    from app.services.original_hop import as_auth_verdicts, evaluate_original_hop
+
+    parsed = email_module.message_from_bytes(raw)
+    recorded = as_auth_verdicts(evaluate_original_hop(parsed))
+    message.auth_verdicts = {**(message.auth_verdicts or {}), **recorded}
+    return True
+
+
+async def attach_route_b_company(db: AsyncSession, *, message: InboundMessage) -> bool:
+    """Route B — set `company_id` from the `co-<token>@` alias the message arrived at. True if set.
+
+    THIS RUNS BEFORE THE LADDER, and it must: rungs 3-5 are company-scoped, so without a company they
+    return nothing and a forwarded message can only ever route on a token or a thread id — which is
+    the case Route B exists to cover, because on Route B the borrower wrote to HER address and never
+    saw ours.
+
+    IT SETS THE COMPANY AND NOTHING ELSE. The loan file still comes from the ladder. That separation
+    is what keeps the file-level tenancy invariant intact while adding a company-level one — see
+    `services/mailbox_connections` for the full argument, and for why this is the third and last
+    inversion the protocol permits.
+
+    THE ORIGINAL RECIPIENT IS ALSO TRIED. Google's admin-level forward preserves `X-Gm-Original-To`
+    and Microsoft's transport rule preserves the original `To` — so a message forwarded to us may
+    still carry `lf-<token>@` from the borrower's own reply, and rung 1 then matches with certainty.
+    Nothing here needs to know that; it is why `to_addresses` collects both.
+    """
+    from app.services.mailbox_connections import record_arrival, resolve_connection_by_address
+
+    if message.company_id is not None:
+        return False
+    for address in _recipient_addresses(message):
+        connection = await resolve_connection_by_address(db, address=address)
+        if connection is None:
+            continue
+        message.company_id = connection.company_id
+        # VERIFICATION FLIPS ON ARRIVAL, not on a button. `phase4.md` §3: "the moment anything
+        # arrives at that address we flip it to verified".
+        await record_arrival(db, connection=connection)
+        await db.flush()
+        logger.info("inbound_routed_via_connection", connection_id=str(connection.id))
+        return True
+    return False
+
+
+async def apply_routing(
+    db: AsyncSession, *, message: InboundMessage, raw: bytes | None = None
+) -> RoutingOutcome:
     """Route one message, record what happened, and open the correspondence record. ``flush`` only.
 
     THE COMPANY IS READ OFF THE RESOLVED FILE. That is the invariant this whole module exists to keep
@@ -287,6 +548,16 @@ async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> Routing
     from app.models.inbound_message import InboundRoutingState
     from app.services.activity_log import log_activity
 
+    # ROUTE B FIRST. The alias says which company; the ladder then says which file, with rungs 3-5
+    # scoped to that company. Without this a forwarded message has no company and those rungs have
+    # nothing to search.
+    forwarded = await attach_route_b_company(db, message=message)
+    if forwarded:
+        # BEFORE `decide_disposition`, which is what reads the verdicts. §2.3's auto-accept condition
+        # is "dmarc_verdict == PASS (or, for a forward, original-hop DMARC pass via ARC/DKIM)", and a
+        # forward's own SES DMARC verdict always describes the forwarder.
+        record_original_hop(message, raw=raw)
+
     outcome = await route_message(db, message=message)
     disposition, reason = await decide_disposition(db, message=message, outcome=outcome)
 
@@ -294,6 +565,10 @@ async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> Routing
     message.routing_confidence = outcome.confidence
 
     if outcome.loan_file is None:
+        # `company_id` MAY ALREADY BE SET, by Route B above. That is not the derivation this module
+        # confines — it came from a connection this company minted, not from a sender or a header —
+        # and leaving it is what puts an unroutable forwarded message in the RIGHT company's triage
+        # queue instead of the global unclaimed pile.
         message.routing_state = (
             InboundRoutingState.REJECTED
             if disposition is Disposition.REJECT
@@ -351,8 +626,10 @@ __all__ = [
     "RoutingOutcome",
     "RoutingSignal",
     "apply_routing",
+    "attach_route_b_company",
     "decide_disposition",
     "inbox_token_in",
+    "record_original_hop",
     "resolve_loan_file_by_address",
     "route_message",
 ]
