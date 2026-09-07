@@ -203,3 +203,36 @@ def test_nesting_within_the_cap_is_not_reported() -> None:
 
     assert parsed.depth_limit_reached is False
     assert len(parsed.attachments) == 1
+
+
+# --------------------------------------------------------------------------------------------- #
+# The corpus is only a corpus if it looks like the wire (review finding)
+# --------------------------------------------------------------------------------------------- #
+def test_every_fixture_is_crlf_like_a_real_message() -> None:
+    """Email is CRLF on the wire (RFC 5322), and SES stores the bytes it received.
+
+    This asserts the PROPERTY rather than the pre-commit config that protects it, because the
+    config is not the only thing that can undo it — an editor, a `sed -i`, or a future hook would
+    all normalise these files just as silently. LP-804a found the whole corpus in LF, which meant
+    the MIME parser was exercised only against a form no real message has; that gap happened not to
+    be hiding a bug, and this is what stops the next one being discovered the same way.
+
+    Three pre-commit hooks rewrite files and all three now exclude `.eml`: `mixed-line-ending` (the
+    one LP-804a caught), plus `trailing-whitespace` and `end-of-file-fixer`, which this review
+    added — measured stripping the space from `b=sig \\r\\n`, which DKIM's `simple` body
+    canonicalisation preserves exactly.
+    """
+    fixtures = sorted(_FIXTURES.glob("*.eml"))
+    assert fixtures, "no .eml fixtures found — this test would pass vacuously"
+
+    offenders: list[str] = []
+    for path in fixtures:
+        raw = path.read_bytes()
+        bare_lf = raw.replace(b"\r\n", b"")
+        if b"\n" in bare_lf:
+            offenders.append(path.name)
+
+    assert not offenders, (
+        "these fixtures contain a bare LF, so they are not in the line ending a real message "
+        f"arrives in: {offenders}"
+    )

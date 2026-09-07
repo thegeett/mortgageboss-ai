@@ -9,8 +9,16 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: '\.(md|markdown)$' # markdown uses trailing whitespace for line breaks
+        # markdown uses trailing whitespace for line breaks; `.eml` is worse than that — trailing
+        # whitespace is SIGNIFICANT on the wire. Measured: this hook turned `b=sig \r\n` into
+        # `b=sig\r\n` in a fixture. DKIM's `simple` body canonicalisation preserves trailing
+        # whitespace exactly, so a signed fixture would fail verification in LP-808 with nothing
+        # saying why. Same reason as the `mixed-line-ending` exclusion below, one hook over.
+        exclude: '\.(md|markdown|eml)$'
       - id: end-of-file-fixer
+        # A message ends how it arrived. This hook appends or trims a final newline, which changes
+        # the bytes SES stored and therefore any hash or signature computed over them.
+        exclude: '\.eml$'
       - id: check-yaml
       - id: check-json
       - id: check-toml
