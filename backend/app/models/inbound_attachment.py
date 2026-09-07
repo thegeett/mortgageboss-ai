@@ -48,6 +48,14 @@ class AttachmentDisposition(StrEnum):
 
     PENDING = "pending"
     ACCEPTED = "accepted"  # became a Document
+    # LP-806 — attached to the file and the timeline WITHOUT entering classify → extract → needs.
+    #
+    # NOT EVERY ACCEPTED ATTACHMENT IS A BORROWER DOCUMENT. A lender's conditional-approval PDF
+    # satisfies no need and would be classified against a 166-type BORROWER taxonomy — which would
+    # either mis-file it or push it to the long-tail bucket and then ask a processor why the file has
+    # an unrecognised document. Correspondence is the honest third answer: keep it, show it, do not
+    # pretend it is evidence of anything.
+    CORRESPONDENCE = "correspondence"
     REJECTED = "rejected"
     DUPLICATE = "duplicate"  # the same bytes are already on the file
 

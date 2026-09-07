@@ -239,6 +239,17 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     loan_officer_name: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     loan_officer_email: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
 
+    # LP-806 — whether a certain-match message from a TRUSTED sender that authenticated may become a
+    # document without a person looking. DEFAULT FALSE, and `phase4.md` §2.3 is why: "quarantine is
+    # the default, not the exception. A processor already reviews every document; one click to accept
+    # a first-time sender costs almost nothing and closes the entire class of 'a stranger dropped a
+    # document into a loan file.'"
+    #
+    # It is the LAST of four conditions, not the only one — LP-805's `decide_disposition` already
+    # requires a certain route, DMARC PASS, virus PASS and `is_trusted_sender` on this file. Turning
+    # this on does not lower those; it permits the outcome they were already computing.
+    auto_accept_inbound: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # --- Relationships -----------------------------------------------------
     # No destructive cascade: company/lender are soft-deleted and the FKs are
     # ondelete=RESTRICT (ADR-044).

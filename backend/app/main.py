@@ -16,6 +16,8 @@ from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
 from app.api.documents import nested_router as documents_nested_router
 from app.api.dti import router as dti_router
+from app.api.inbound import company_router as inbound_company_router
+from app.api.inbound import router as inbound_router
 from app.api.lenders import router as lenders_router
 from app.api.loan_files import router as loan_files_router
 from app.api.ltv import router as ltv_router
@@ -136,6 +138,8 @@ app.include_router(borrowers_router, prefix=API_V1_PREFIX)
 app.include_router(property_router, prefix=API_V1_PREFIX)
 app.include_router(lenders_router, prefix=API_V1_PREFIX)
 app.include_router(communications_router, prefix=API_V1_PREFIX)
+app.include_router(inbound_router, prefix=API_V1_PREFIX)
+app.include_router(inbound_company_router, prefix=API_V1_PREFIX)
 app.include_router(needs_router, prefix=API_V1_PREFIX)
 app.include_router(activity_router, prefix=API_V1_PREFIX)
 app.include_router(documents_nested_router, prefix=API_V1_PREFIX)
