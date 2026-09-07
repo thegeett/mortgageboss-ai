@@ -20,6 +20,7 @@ list is the record and the draft is not.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from string import Template
 from uuid import UUID
 
 from sqlalchemy import select
@@ -114,6 +115,29 @@ def render_draft_body(loan_file: LoanFile, needs: list[NeedsItem]) -> RenderedTe
             "document_list": document_list,
             "inbox_address": loan_file.get_inbox_address(),
         },
+    )
+
+
+def finalise_draft_body(body: str, *, borrower_first_name: str, processor_name: str) -> str:
+    """Resolve a stored draft body's deferred placeholders — THE ONLY SUPPORTED WAY TO DO IT.
+
+    `render_draft_body` deliberately leaves ``$borrower_first_name`` and ``$processor_name`` in the
+    stored body, so the send decides who signs. That makes the stored body a MIXTURE of template
+    placeholders and arbitrary human text, and the second pass has to survive the human half.
+
+    WHY ``safe_substitute`` HERE, WHEN LP-817's ``render`` REFUSES IT. There the inputs are a
+    template file and a context a caller controls, so a missing variable is a bug and failing loudly
+    is right. Here the input contains a NEED TITLE, and a processor writes those: "Proof of $10,000
+    gift deposit" is an ordinary thing to ask a borrower for. ``$10`` is not a valid placeholder, so
+    ``substitute`` raises ``ValueError: Invalid placeholder in string`` and the send dies on a
+    perfectly reasonable request. Measured on exactly that title before this function existed.
+
+    ``safe_substitute`` leaves what it cannot resolve alone, which is the correct behaviour for text
+    a person wrote: a literal dollar amount stays a literal dollar amount and reaches the borrower
+    as typed. The two real placeholders still resolve, and a test pins both halves.
+    """
+    return Template(body).safe_substitute(
+        borrower_first_name=borrower_first_name, processor_name=processor_name
     )
 
 

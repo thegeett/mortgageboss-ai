@@ -11,6 +11,7 @@ finds two. An appended body reads perfectly while contradicting the needs list. 
 
 from __future__ import annotations
 
+from string import Template
 from uuid import uuid4
 
 import pytest
@@ -21,6 +22,7 @@ from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import (
     DRAFT_TEMPLATE,
     add_needs_to_draft,
+    finalise_draft_body,
     get_open_draft,
     remove_need_from_draft,
 )
@@ -303,3 +305,58 @@ async def test_membership_goes_when_the_draft_goes(db_session: AsyncSession) -> 
 
     remaining = await db_session.scalar(select(func.count()).select_from(CommunicationNeedsItem))
     assert remaining == 0
+
+
+# --------------------------------------------------------------------------------------------- #
+# Resolving the stored body at send time (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_a_dollar_amount_in_a_need_title_does_not_break_the_send(
+    db_session: AsyncSession,
+) -> None:
+    """The stored body mixes template placeholders with text a PROCESSOR wrote, and the second
+    substitution pass has to survive the human half.
+
+    "Proof of $10,000 gift deposit" is an ordinary mortgage ask. `$10` is not a valid placeholder,
+    so a strict `Template.substitute` over the stored body raises `ValueError: Invalid placeholder
+    in string` and the send dies. Measured before `finalise_draft_body` existed; this pins both
+    that the strict form still fails and that the supported path does not.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(
+        db_session, loan_file, title="Proof of $10,000 gift deposit", needs_type=None
+    )
+
+    update = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+    body = update.draft.body
+    assert body is not None
+    assert "$10,000" in body
+
+    # The strict pass — what a caller reaching for `string.Template` directly would write.
+    with pytest.raises(ValueError, match="Invalid placeholder"):
+        Template(body).substitute(borrower_first_name="Ann", processor_name="Pat")
+
+    final = finalise_draft_body(body, borrower_first_name="Ann", processor_name="Pat")
+    assert "Proof of $10,000 gift deposit" in final  # reaches the borrower exactly as typed
+    assert "Hello Ann," in final
+    assert "$borrower_first_name" not in final
+    assert "$processor_name" not in final
+
+
+async def test_finalising_resolves_both_deferred_placeholders(db_session: AsyncSession) -> None:
+    """The positive control. A `safe_substitute` that resolved NOTHING would also satisfy the test
+    above, since its assertions are about what survives."""
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Bank statements", needs_type=None)
+
+    update = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+    body = update.draft.body
+    assert body is not None
+    assert "$borrower_first_name" in body and "$processor_name" in body  # deferred, as designed
+
+    final = finalise_draft_body(body, borrower_first_name="Ann", processor_name="Pat")
+    assert "Hello Ann," in final
+    assert final.rstrip().endswith("Pat")
