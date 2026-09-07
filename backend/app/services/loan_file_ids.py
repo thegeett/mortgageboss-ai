@@ -26,7 +26,11 @@ DISPLAY_ALPHABET = (
 DISPLAY_CODE_LENGTH = 4
 DISPLAY_PREFIX = "LF-"
 
-INBOX_TOKEN_BYTES = 12  # token_urlsafe(12) -> ~16 chars, ~96 bits entropy
+# LP-802 — 16, not 12: token_urlsafe(16) -> 22 chars, 128 bits. Widened while it is free. The token is
+# a bearer capability (anyone holding the address can post documents into the file), it is printed in
+# an email address that gets forwarded and quoted, and it has no expiry — so its entropy is the whole
+# of its security. Existing tokens keep working; the column is String(64) and needs no migration.
+INBOX_TOKEN_BYTES = 16
 
 MAX_DISPLAY_ID_ATTEMPTS = 10
 

@@ -12,6 +12,7 @@ Uses the transaction-rollback ``db_session`` fixture from LP-10.
 from decimal import Decimal
 
 import pytest
+from app.core.config import settings
 from app.models import (
     Company,
     Lender,
@@ -23,7 +24,6 @@ from app.models import (
     scope_to_company,
     utcnow,
 )
-from app.models.loan_file import INBOX_DOMAIN
 from app.services.loan_file_ids import DISPLAY_ALPHABET, DISPLAY_PREFIX
 from app.services.loan_files import create_loan_file
 from sqlalchemy import select, text
@@ -81,11 +81,11 @@ async def test_create_loan_file_sets_identifiers_and_defaults(
 
 
 async def test_get_inbox_address_format(db_session: AsyncSession) -> None:
-    """get_inbox_address() returns lf-{token}@{INBOX_DOMAIN}."""
+    """get_inbox_address() returns lf-{token}@{settings.inbox_domain} (LP-802)."""
     company = await _make_company(db_session, "acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
 
-    assert loan_file.get_inbox_address() == f"lf-{loan_file.inbox_token}@{INBOX_DOMAIN}"
+    assert loan_file.get_inbox_address() == f"lf-{loan_file.inbox_token}@{settings.inbox_domain}"
     assert loan_file.get_inbox_address().endswith("@inbox.mortgageboss.ai")
 
 

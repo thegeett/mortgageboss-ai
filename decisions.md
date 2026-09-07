@@ -2527,6 +2527,11 @@ capability leak; the raw SSN is GLBA-covered PII that must never leave the serve
 feature, not an accidental field. All borrower views use `masked_ssn`. Tests assert no
 `inbox_token` / raw SSN appears in any response body.
 
+**Amended by ADR-397 (LP-802).** Phase 4 exposes the inbox ADDRESS, which contains the token.
+The `inbox_token` field stays out of every response and the leak test still enforces that, but
+the capability is now deliberately handed over in one shape through one accessor. ADR-397 states
+why that is a narrowing of this decision rather than a preservation of it.
+
 ---
 
 ## ADR-095: Loan files addressed by UUID or display_id; soft delete only
@@ -15911,3 +15916,108 @@ ever wanted, the reviewer is the screen that has to be redesigned rather than re
 everything else already degrades acceptably.
 
 *Status.* Accepted (LP-UI-037).
+
+---
+
+## ADR-395
+
+**The ingestion source is pluggable. The parser, the router and the store never learn which one
+delivered the message.**
+
+*Context.* LP-802 opens Phase 4. The pilot customer's mail provider is unknown (protocol the protocol's fixed decisions), so the
+build targets Route B — a forwarding address — and must not foreclose Gmail API or Microsoft Graph
+later. The temptation is a `ses_*` prefix on every column and an SES receipt shape threaded through
+the parser, at which point a second source is a rewrite rather than an addition.
+
+*Decision.* One boundary: a source hands the pipeline a **raw RFC-5322 message plus a verdict set**,
+and nothing downstream of that boundary names its provider. `inbound_bucket`, `inbound_queue_url` and
+`inbound_kms_key_arn` are SES-shaped settings and stop at the ingest task; the message row records
+`auth_verdicts` as data rather than as an SES receipt.
+
+*Rationale.* The provider question is the one the protocol's fixed decisions could not answer, so it is the one the architecture
+must survive being wrong about. Everything after ingest cares about a message, not a mailbox.
+
+*Consequences.* A second source is a new ingest task and nothing else. The cost is that SES-specific
+facts must be normalised at the boundary rather than read where convenient.
+
+*Status.* Accepted (LP-802).
+
+---
+
+## ADR-396
+
+**SES over SendGrid, for inbound and outbound both.**
+
+*Context.* The application already runs entirely inside one AWS account with no NAT — every egress
+path is an interface endpoint, which is the property that justified moving inference to Bedrock
+(`infra/envs/staging/terraform.tfvars`). A third-party mail provider is an internet dependency and a
+second place borrower NPI comes to rest.
+
+*Decision.* SES for receiving and sending. Inbound writes to S3 with a KMS key this account owns;
+outbound uses an SES identity in the same account.
+
+*Rationale.* A message carrying a borrower's pay stub should not transit a vendor whose retention we
+do not set. SES keeps the message inside the compliance boundary that already exists, and the S3
+lifecycle is ours to configure — which is what makes the 5-year `.eml` retention in the protocol's fixed decisions enforceable
+rather than aspirational.
+
+*Consequences.* SES's production sandbox exit has AWS lead time and must be requested early
+(INFRA-3). Deliverability tooling is thinner than SendGrid's; bounces and DSNs are handled explicitly
+in LP-819 rather than inherited from a dashboard.
+
+*Status.* Accepted (LP-802).
+
+---
+
+## ADR-397
+
+**The inbox ADDRESS is exposed. The `inbox_token` field is not — and the distinction is smaller than
+it sounds, so it is stated plainly.**
+
+*Context.* ADR-094 says `inbox_token` never appears in a response, because it is a capability: anyone
+holding it can post documents into a loan file. Phase 4 needs the borrower and the processor to SEE
+the file's address — a forwarding flow is unusable otherwise.
+
+*Decision.* `get_inbox_address()` is the exposed form. The raw `inbox_token` field stays out of every
+response, and `tests/integration/test_contracts_leaks.py` keeps asserting that.
+
+**The honest part:** the address CONTAINS the token — `lf-{token}@{domain}`. So this is not a
+technicality that preserves ADR-094's guarantee; it is a deliberate, narrowed change to it. Anyone
+holding the address holds the capability, exactly as anyone holding the token did. What the rule buys
+is that the capability is only ever handed over in the one shape that is meant to be handed over,
+through one accessor, rather than leaking as a field on an unrelated payload.
+
+*Rationale.* Pretending the address is safe because the field name is absent would be the more
+dangerous position, because it invites treating the address as ordinary metadata. It is a bearer
+credential that happens to look like an email address.
+
+*Consequences.* Any endpoint returning the address is returning a capability and must be scoped to a
+caller already entitled to the file. LP-802 widens the token to 128 bits on this reasoning: it is
+printed, forwarded, quoted, and never expires.
+
+*Status.* Accepted (LP-802). Amends ADR-094.
+
+---
+
+## ADR-398
+
+**Outbound mail never carries an attachment containing borrower NPI.**
+
+*Context.* The drafting engine (LP-810) composes requests to borrowers, and the obvious convenience
+is attaching the document under discussion. Email is not a channel this system controls: it is
+forwarded, quoted, auto-filed, and retained by recipients indefinitely.
+
+*Decision.* Outbound messages carry text and links. A document reaches a borrower through the secure
+link (LP-815), never as an attachment. Inbound attachments are unaffected — receiving NPI is the
+point of the inbox.
+
+*Rationale.* An attachment is a copy the system can never withdraw, in a place it never chose. A link
+is revocable, expiring and audited. This also gives the "email is not a secure channel" line in the protocol's fixed decisions
+something to be true about — telling a borrower not to email documents while emailing them theirs
+would be incoherent.
+
+*Consequences.* Every outbound path needs a link-generation route rather than an attach step.
+LP-817's templates and LP-810's compliance scanner both enforce it; the scanner is the mechanism that
+makes this ADR checkable rather than advisory.
+
+*Status.* Accepted (LP-802).

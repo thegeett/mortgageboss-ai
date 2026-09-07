@@ -54,10 +54,6 @@ if TYPE_CHECKING:
     )
     from app.models.verification import Verification
 
-# Domain for the borrower inbox address. A module constant for now; may move to
-# settings later if it needs to vary per environment.
-INBOX_DOMAIN = "inbox.mortgageboss.ai"
-
 
 class LoanFileStatus(StrEnum):
     """The loan file lifecycle (ADR-049).
@@ -304,9 +300,20 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         """Return the borrower inbox email address for this file.
 
         Built from the cryptographic inbox token (ADR-036), e.g.
-        ``lf-a7k4nq2x9m3p@inbox.mortgageboss.ai``.
+        ``lf-a7k4nq2x9m3p@inbox.staging.mortgageboss.ai``.
+
+        LP-802 — the domain comes from `settings` now, not a module constant, because it must differ
+        per environment: a staging file advertising `@inbox.mortgageboss.ai` would take delivery of
+        real borrower mail.
+
+        IMPORTED INSIDE THE METHOD, deliberately. No model in this package imports `core.config`, and
+        this ticket's blast radius is the setting rather than the layering rule. A module-level import
+        would also freeze the value at import time, which breaks the per-environment point and every
+        test that monkeypatches it.
         """
-        return f"lf-{self.inbox_token}@{INBOX_DOMAIN}"
+        from app.core.config import settings
+
+        return f"lf-{self.inbox_token}@{settings.inbox_domain}"
 
     def __repr__(self) -> str:
         return f"<LoanFile {self.display_id} ({self.status})>"

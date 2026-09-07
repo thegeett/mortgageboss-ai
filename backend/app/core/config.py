@@ -259,6 +259,22 @@ class Settings(BaseSettings):
     # When set, objects are written with SSE-KMS using this key; otherwise SSE-S3.
     s3_kms_key_id: str | None = None
 
+    # --- Email: inbound (Phase 4) ------------------------------------------ #
+    #
+    # LP-802 — the borrower inbox domain, moved off `models/loan_file.py` because it MUST differ per
+    # environment: a staging file addressed at `inbox.mortgageboss.ai` would take delivery of real
+    # borrower mail. The constant's own comment anticipated this move.
+    #
+    # Staging sets `inbox.staging.mortgageboss.ai`; production keeps the default.
+    inbox_domain: str = "inbox.mortgageboss.ai"
+
+    # Where SES writes a received message, and where the ingest task is told about it. All three are
+    # None until INFRA-1 applies; nothing reads them before LP-803, and a None here is the honest
+    # state of an environment with no inbound pipeline rather than a misconfiguration.
+    inbound_bucket: str | None = None
+    inbound_queue_url: str | None = None
+    inbound_kms_key_arn: str | None = None
+
     # Email (SMTP)
     smtp_host: str = "localhost"
     smtp_port: int = 1025  # MailHog default
