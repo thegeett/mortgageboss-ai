@@ -106,7 +106,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-804a | 66788b19 | 3cd4bce4 | 1 | a corpus fix undone by two sibling hooks the same argument covered |
 | 2026-09-07 | LP-804b | af395644 | 4b4c209d | 1 | two plan-named PDF keys asserted vacuously and unstripped on page annotations |
 | 2026-09-07 | LP-819 | 66426f23 | 77a5285f | 1 | a bounce unwound the need and left the finding claiming the request stood, with the retry button disabled |
-| 2026-09-07 | LP-805 | 83feb4f0 | REVIEW_SHA | 1 | the token lookup could use no index, on the path an attacker probes for free |
+| 2026-09-07 | LP-805 | 83feb4f0 | f5734f39 | 1 | the token lookup could use no index, on the path an attacker probes for free |
 | 2026-09-07 | LP-805 | 83feb4f0 |  |  | awaiting review. Migration b8e5f13a7c04. The one tenancy inversion; cross-tenant test written first and proven to bite |
 | 2026-09-07 | LP-819 | 66426f23 |  |  | awaiting review. M2 application code complete. My own fixture assertion caught an empty bounce fixture before review |
 | 2026-09-07 | LP-804b | af395644 |  |  | awaiting review. pikepdf added on evidence; three dependencies declined. A surviving mutant found an untested branch |
