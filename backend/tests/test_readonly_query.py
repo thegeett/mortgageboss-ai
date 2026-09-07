@@ -564,9 +564,48 @@ def _output_columns(view_sql: str) -> set[str]:
     So each select item is reduced to the name it comes out as: its alias if it has
     one, otherwise the bare column name. `scrub(x) AS x` still counts as exposing
     `x` — scrubbed is exposed, just not in the raw.
+
+    DEPTH-AWARE, AND IT HAS TO BE. This used to take the text before the FIRST ``FROM`` and then
+    the LAST ``SELECT`` in it. A nested select inside the select list — ``cardinality(ARRAY(SELECT
+    jsonb_array_elements_text(x)))``, ordinary SQL for counting a jsonb array — moved both anchors:
+    the inner ``SELECT`` won the ``rindex``, and everything before it was discarded. Measured on
+    exactly that shape, the parser returned an EMPTY set, so every column in the table read as
+    unexposed.
+
+    That direction fails loudly only while the columns are absent from ``EXCLUDED``. List them and
+    the guard passes while parsing nothing — and a column deliberately excluded but actually
+    exposed would go unseen, which is the failure this whole file exists to prevent. LP-803 found
+    it by writing such a view and rewriting it; the parser is fixed here so the next one does not
+    have to.
     """
-    select_part = view_sql.split("FROM")[0]
-    select_part = select_part[select_part.upper().rindex("SELECT") + len("SELECT") :]
+    upper = view_sql.upper()
+    start = upper.index("SELECT") + len("SELECT")
+
+    # Walk to the FROM that belongs to THIS select, ignoring any inside parentheses.
+    depth, end = 0, len(view_sql)
+    i = start
+    while i < len(view_sql):
+        char = view_sql[i]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif (
+            depth == 0
+            and upper.startswith("FROM", i)
+            # A WORD BOUNDARY ON BOTH SIDES. `from_outcome` is a real column on
+            # `finding_events`, and checking only the character BEFORE the keyword matched it —
+            # truncating that view's select list at the very column it was meant to read. Found by
+            # running the suite after the first version of this fix, not by re-reading it.
+            and (i == 0 or not (view_sql[i - 1].isalnum() or view_sql[i - 1] == "_"))
+            and (
+                i + 4 >= len(view_sql) or not (view_sql[i + 4].isalnum() or view_sql[i + 4] == "_")
+            )
+        ):
+            end = i
+            break
+        i += 1
+    select_part = view_sql[start:end]
 
     items, depth, current = [], 0, ""
     for char in select_part:
@@ -978,3 +1017,46 @@ async def test_the_style_profiles_view_is_valid_sql(db_session: AsyncSession) ->
     assert exposed == {"id", "user_id", "has_signature_block", "created_at", "updated_at"}
     for hidden in EXCLUDED["style_profiles"]:
         assert hidden not in exposed
+
+
+# --------------------------------------------------------------------------------------------- #
+# The guard's own parser (LP-803 review finding)
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("view_sql", "expected"),
+    [
+        # The ordinary case.
+        ("SELECT id, company_id, created_at FROM public.t", {"id", "company_id", "created_at"}),
+        # A NESTED SELECT in the select list. `cardinality(ARRAY(SELECT ...))` is ordinary SQL for
+        # counting a jsonb array, and it used to return an EMPTY set — every column of the table
+        # then read as unexposed, which fails loudly only while those columns are absent from
+        # EXCLUDED. List them and the guard passes while parsing nothing.
+        (
+            "SELECT id, cardinality(ARRAY(SELECT jsonb_array_elements_text(x))) AS n, created_at "
+            "FROM public.t",
+            {"id", "n", "created_at"},
+        ),
+        # A COLUMN WHOSE NAME BEGINS WITH THE `FROM` KEYWORD. `finding_events.from_outcome` is real,
+        # and the first version of the fix above truncated that view's select list on it.
+        (
+            "SELECT id, from_outcome, to_outcome, readonly.scrub_jsonb(detail) AS detail, "
+            "occurred_at FROM public.finding_events",
+            {"id", "from_outcome", "to_outcome", "detail", "occurred_at"},
+        ),
+        # A function call containing a comma, which the depth-aware comma split must not break on.
+        (
+            "SELECT id, coalesce(a, b) AS merged FROM public.t",
+            {"id", "merged"},
+        ),
+    ],
+)
+def test_the_select_list_parser_reads_the_columns_a_view_returns(
+    view_sql: str, expected: set[str]
+) -> None:
+    """`_output_columns` decides what every other check in this file is checking.
+
+    It is worth its own test because it fails SILENTLY: a mis-parse does not raise, it returns a
+    smaller set, and a smaller set means "not exposed" — which is indistinguishable from a view that
+    genuinely drops the column. The two cases in the middle are both taken from views in this repo.
+    """
+    assert _output_columns(view_sql) == expected
