@@ -137,7 +137,7 @@ VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v2",
-    ): "4184bd43007cb049bb9f39aaeb2f445988eafa9932a967ee70f372d04fa91a28",  # pragma: allowlist secret
+    ): "6835d09dbbe811e766c52bae1effe365943ee8c049e54ae8724ce1568d3f4ad3",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v1",

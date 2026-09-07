@@ -14,8 +14,11 @@ None of those raise on their own, and none are visible in a diff of the sending 
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from app.communications.templates import (
+    _TEMPLATES_DIR,
     PLAIN_FRAMING_FINGERPRINT,
     SECURITY_NOTICE,
     TEMPLATES,
@@ -63,6 +66,15 @@ _ADDRESS_BEARING = {
 # --------------------------------------------------------------------------------------------- #
 # The registry
 # --------------------------------------------------------------------------------------------- #
+def _raw(stem: str, version: str) -> str:
+    """The template file's raw text, for tests that compare words across versions."""
+    return (_TEMPLATES_DIR / f"{stem}.{version}.txt").read_text(encoding="utf-8")
+
+
+def _raw_framing(stem: str, version: str) -> str:
+    return (_TEMPLATES_DIR / f"framing.{stem}.{version}.txt").read_text(encoding="utf-8")
+
+
 def test_all_five_templates_are_registered() -> None:
     """Spec 4.1 names five. A key with no spec is a draft that cannot render at all."""
     assert set(TEMPLATES) == set(TemplateKey)
@@ -327,3 +339,43 @@ def test_the_status_update_does_not_ask_and_then_offer_a_route_out() -> None:
 
     assert "nothing is needed from you" in body
     assert body.index("just reply here") < body.index(SECURITY_NOTICE)
+
+
+# --------------------------------------------------------------------------------------------- #
+# A version bump must not lose words (LP-810 review finding)
+# --------------------------------------------------------------------------------------------- #
+def _prose_sentences(text: str) -> list[str]:
+    """Sentences of a template body, with placeholders stripped — the words a borrower reads.
+
+    PARAGRAPH-AWARE, and it has to be: the greeting line ends in a comma, so splitting the whole
+    body on sentence terminators glues "Hello ," onto whatever follows and reports a false loss.
+    Splitting paragraphs first keeps each sentence the unit it actually is.
+    """
+    body = text.split("\n\n", 1)[1] if "\n\n" in text else text
+    out: list[str] = []
+    for paragraph in body.split("\n\n"):
+        stripped = re.sub(r"\$\w+", "", paragraph).replace("\n", " ").strip()
+        out.extend(s.strip() for s in re.split(r"(?<=[.:])\s+", stripped) if len(s.strip()) > 25)
+    return out
+
+
+def test_v2_plus_the_plain_framing_loses_nothing_from_v1() -> None:
+    """The OTHER direction, and the one that was unchecked.
+
+    `test_the_plain_framing_is_v1s_own_words` asserts each framing sentence appears in v1 — which
+    catches a framing sentence that drifted, and cannot catch a v1 sentence that was dropped. Both
+    are needed, because the version bump's whole promise is that the words are accounted for.
+
+    Measured when this test was written: the v2 bump had silently lost "Anything sent to that
+    address reaches your loan file directly…" — the sentence LP-817's own review rewrote after
+    finding it made a false automatic-filing claim. With the drafting flag off, v2 plus the plain
+    framing IS the email, so a sentence missing from both is a sentence no borrower ever sees.
+    """
+    v1 = _prose_sentences(_raw("initial_documentation_request", "v1"))
+    covered = " ".join(
+        _prose_sentences(_raw("initial_documentation_request", "v2"))
+        + _prose_sentences("Subject: x\n\n" + _raw_framing("plain", "v1"))
+    )
+
+    lost = [s for s in v1 if s not in covered]
+    assert not lost, f"v1 sentences absent from v2 + the plain framing: {lost}"

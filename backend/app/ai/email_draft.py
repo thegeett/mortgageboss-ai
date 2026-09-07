@@ -107,8 +107,17 @@ _RATE = re.compile(r"\d+(?:\.\d+)?\s*%|\bAPR\b|\bannual percentage rate\b|\binte
 #: the fly, so the scanner refuses the amount rather than the argument.
 _MONEY = re.compile(r"[$£€]\s?\d|\b\d[\d,]*(?:\.\d{2})?\s*dollars\b", re.I)
 
-#: The other two triggering terms from §1026.24(d)(1), which are phrases rather than numbers: "the
-#: number of payments or period of repayment". Read 2026-09-07 from 12 CFR §1026.24 Advertising.
+#: §1026.24(d)(1)'s triggering terms in their PHRASE form, plus one house rule. Verified against the
+#: regulation's own text at consumerfinance.gov/rules-policy/regulations/1026/24 on 2026-09-07, under
+#: the heading "Advertisement of terms that require additional disclosures" — the four are
+#: (i) the amount or percentage of any downpayment, (ii) the number of payments or period of
+#: repayment, (iii) the amount of any payment, (iv) the amount of any finance charge.
+#:
+#: `closing costs` IS NOT ONE OF THE FOUR and is refused anyway, as a house rule rather than as a
+#: requirement of this section: a document request has no reason to quote them, and quoting them
+#: invites the payment-amount conversation the four terms govern. Named separately so nobody reads
+#: the regulation as demanding it, and so removing it is a product decision rather than a compliance
+#: one.
 _TRIGGERING_TERMS = re.compile(
     r"\b(?:down\s?payment|monthly payment|number of payments|period of repayment|"
     r"repayment period|finance charge|closing costs?)\b",
@@ -159,7 +168,11 @@ def states_a_money_amount(composition: DraftComposition) -> bool:
 
 
 def states_a_triggering_term(composition: DraftComposition) -> bool:
-    """12 CFR §1026.24(d)(1)'s triggering terms, in their phrase form."""
+    """12 CFR §1026.24(d)(1)'s triggering terms in phrase form, plus `closing costs` as a house rule.
+
+    See the pattern's own comment: the regulation lists four, `closing costs` is not among them, and
+    the distinction matters because one of those is a compliance obligation and the other is ours.
+    """
     return bool(_TRIGGERING_TERMS.search(composition.message))
 
 

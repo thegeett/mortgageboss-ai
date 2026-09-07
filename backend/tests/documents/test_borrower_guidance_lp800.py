@@ -237,3 +237,43 @@ def test_the_types_the_plan_names_all_have_full_instructions() -> None:
     }
     missing = {slug for slug in named if slug not in _full_entries()}
     assert not missing, f"plan-named borrower types with no full entry: {sorted(missing)}"
+
+
+# --------------------------------------------------------------------------------------------- #
+# The catalog's borrower-facing prose is scanned by nothing either (LP-810 review finding)
+# --------------------------------------------------------------------------------------------- #
+#: The same deny-list LP-817's review put over template text. It belongs here for the same reason and
+#: it was missed: LP-810's compliance scanner reads the MODEL's three fields only, and the document
+#: block is interpolated from this catalog AFTER that scan. So these strings reach a borrower having
+#: passed no guard at all — the identical hole the template deny-list was written to close, one file
+#: over. Deliberately NOT applied to a processor's own typed need title: that is a person's own words
+#: about their own file, and refusing "Proof of $10,000 gift deposit" would be the guard costing more
+#: than it saves.
+_MUST_NOT_APPEAR = (
+    "approved",
+    "denied",
+    "guaranteed",
+    "wrong with your",
+    "no problem with your",
+    "will close on",
+    "on track",
+    "automatically",
+    "instantly",
+)
+
+
+def test_no_guidance_prose_carries_language_nothing_scans() -> None:
+    """Every borrower-facing string in the catalog, against the template deny-list."""
+    for slug, guidance in GUIDANCE.items():
+        text = " ".join(
+            part
+            for part in (
+                guidance.borrower_label,
+                guidance.how_to_obtain,
+                guidance.completeness_rule,
+                *guidance.common_rejects,
+            )
+            if part
+        ).lower()
+        hits = [phrase for phrase in _MUST_NOT_APPEAR if phrase in text]
+        assert not hits, f"{slug} carries language no guard downstream will catch: {hits}"
