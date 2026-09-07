@@ -140,6 +140,19 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # e.g. an inbound email Message-ID, kept for threading/dedup.
     external_message_id: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    #: The inbound message this row REPRESENTS on the timeline (LP-812). Null for outbound.
+    #:
+    #: THE TIMELINE NEEDS ONE ROW PER MESSAGE AND THE ATTACHMENTS HANG OFF THE OTHER ONE. LP-805
+    #: writes an `InboundMessage`, a `Communication` and an activity entry for a single arrival;
+    #: LP-812 settles that the `Communication` is the timeline's row, which leaves it needing a way
+    #: to reach the attachment manifest. `external_message_id` could not serve: it holds the RFC 5322
+    #: `Message-ID`, which is written by the SENDER, is nullable, and is not unique — matching on it
+    #: would join a borrower's message to whatever else claimed the same id.
+    inbound_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("inbound_messages.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
 
     # --- Which template produced this body (LP-809) ------------------------
     # `phase4.md` §6 requires the communication record to capture "template + version" alongside the

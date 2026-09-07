@@ -595,6 +595,10 @@ async def apply_routing(
             direction=CommunicationDirection.INBOUND,
             status=CommunicationStatus.RECEIVED,
             external_message_id=message.message_id,
+            # LP-812 — the timeline's row for this arrival is THIS one, and the attachments hang
+            # off `inbound_messages`. A real FK rather than matching on `external_message_id`,
+            # which the sender writes and which is neither unique nor always present.
+            inbound_message_id=message.id,
             # NO subject, NO body, NO sender. They are on the inbound_message row, which the
             # readonly view already drops; copying them here would put borrower prose in a second
             # place with its own exposure decisions.

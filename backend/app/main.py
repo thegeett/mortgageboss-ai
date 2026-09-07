@@ -29,6 +29,7 @@ from app.api.preferences import router as preferences_router
 from app.api.property import router as property_router
 from app.api.saved_views import router as saved_views_router
 from app.api.stated_financials import router as stated_financials_router
+from app.api.timeline import router as timeline_router
 from app.api.upload_links import public_router as upload_public_router
 from app.api.upload_links import router as upload_links_router
 from app.api.validation_aid import router as validation_aid_router
@@ -158,6 +159,7 @@ app.include_router(overlay_admin_router, prefix=API_V1_PREFIX)
 app.include_router(validation_aid_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
+app.include_router(timeline_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)
 app.include_router(upload_links_router, prefix=API_V1_PREFIX)
 # LP-815 — THE ONE UNAUTHENTICATED SURFACE. The token in the path is the credential; see

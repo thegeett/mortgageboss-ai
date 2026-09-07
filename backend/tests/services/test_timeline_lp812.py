@@ -1,0 +1,366 @@
+"""LP-812 — the timeline, and the double-count it exists to remove.
+
+THE FIRST TEST IS THE TICKET. `b7`'s warning going in was the right one: *"a merge that picks
+per-source will show one arrival twice and look correct in every test built from one source."* So
+the case that matters drives ONE real message through the REAL ingest chain — LP-803's ingest,
+LP-804b's safety, LP-805's routing, all of which write their own row — and asserts the timeline
+holds exactly one entry for it.
+
+A fixture that hand-built a `Communication` would produce a timeline with one row whether or not the
+reconciliation existed, because the activity entry it duplicates would never have been written.
+"""
+
+from __future__ import annotations
+
+from email import policy
+from email.message import EmailMessage
+from pathlib import Path
+from uuid import uuid4
+
+from app.models import Company, LoanProgram
+from app.models.activity_log import ActivityType
+from app.models.communication import (
+    Communication,
+    CommunicationDirection,
+    CommunicationStatus,
+)
+from app.models.inbound_message import InboundMessage
+from app.services.activity_log import log_activity
+from app.services.inbound_ingest import process_raw_message
+from app.services.timeline import (
+    MESSAGE_ACTIVITY_TYPES,
+    TimelineFilter,
+    TimelineKind,
+    build_timeline,
+)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+_PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
+
+
+async def _company_and_file(db: AsyncSession, *, slug: str):
+    from app.services.loan_files import create_loan_file
+
+    company = Company(name=slug.title(), slug=f"{slug}-{uuid4().hex[:8]}")
+    db.add(company)
+    await db.flush()
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    return company, loan_file
+
+
+def _raw(address: str, *, message_id: str, filename: str = "March_statement.pdf") -> bytes:
+    message = EmailMessage()
+    message["From"] = "jane@borrower.example"
+    message["To"] = address
+    message["Subject"] = "Statements attached"
+    message["Message-ID"] = f"<{message_id}>"
+    message.set_content("here you go")
+    message.add_attachment(_PDF, maintype="application", subtype="pdf", filename=filename)
+    return message.as_bytes(policy=policy.default)
+
+
+# --------------------------------------------------------------------------------------------- #
+# The double-count
+# --------------------------------------------------------------------------------------------- #
+async def test_one_real_arrival_is_one_timeline_row(db_session: AsyncSession) -> None:
+    """THROUGH THE REAL CHAIN, so all three rows genuinely exist.
+
+    LP-803 writes the `inbound_message`, LP-805 writes the `Communication` AND the
+    `COMMUNICATION_RECEIVED` activity. A timeline that merged both sources naively shows this
+    arrival twice — and would pass any test whose fixture wrote only one of them.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug="once")
+    await process_raw_message(
+        db_session,
+        raw=_raw(loan_file.get_inbox_address(), message_id="once@example.com"),
+        raw_storage_path=None,
+        store_raw=True,
+    )
+
+    # THE PRECONDITION, asserted rather than assumed: all three rows are really there.
+    assert (
+        (
+            await db_session.execute(
+                select(InboundMessage).where(InboundMessage.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert (
+        (
+            await db_session.execute(
+                select(Communication).where(Communication.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    from app.models.activity_log import ActivityLog
+
+    assert (
+        (
+            await db_session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.loan_file_id == loan_file.id,
+                    ActivityLog.activity_type == ActivityType.COMMUNICATION_RECEIVED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    assert len(timeline) == 1
+    assert timeline[0].kind is TimelineKind.MESSAGE
+    assert timeline[0].direction == CommunicationDirection.INBOUND.value
+
+
+async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSession) -> None:
+    """THE OTHER HALF OF THE RECONCILIATION. Choosing the `Communication` as the timeline's row left
+    it needing a path to the attachments, which hang off `inbound_messages`. That path is the FK,
+    not the sender-written `Message-ID`."""
+    _company, loan_file = await _company_and_file(db_session, slug="manifest")
+    await process_raw_message(
+        db_session,
+        raw=_raw(loan_file.get_inbox_address(), message_id="manifest@example.com"),
+        raw_storage_path=None,
+        store_raw=True,
+    )
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    assert timeline[0].attachments == ("March_statement.pdf",)
+
+
+async def test_a_non_message_activity_still_appears(db_session: AsyncSession) -> None:
+    """THE CONTROL. Without it, a timeline that dropped EVERY activity would pass the test above —
+    and silence is the failure nobody reports."""
+    _company, loan_file = await _company_and_file(db_session, slug="activity")
+    await log_activity(
+        db_session,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.DOCUMENT_UPLOADED,
+        summary="A document was uploaded",
+    )
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    assert [entry.kind for entry in timeline] == [TimelineKind.ACTIVITY]
+    assert timeline[0].summary == "A document was uploaded"
+
+
+def test_every_communication_activity_type_is_excluded() -> None:
+    """DERIVED FROM THE ENUM, not listed. A fourth `COMMUNICATION_*` type added later would appear
+    beside the Communication it describes — the same double-count, arriving by a different route.
+
+    The non-empty assertion is the control on the derivation itself: a set built by a predicate that
+    matches nothing excludes nothing, and reads exactly like a working exclusion.
+    """
+    matching = {activity for activity in ActivityType if activity.name.startswith("COMMUNICATION_")}
+
+    assert matching, "the prefix matched nothing — the exclusion would be silently empty"
+    assert matching == MESSAGE_ACTIVITY_TYPES
+    assert ActivityType.COMMUNICATION_FAILED in MESSAGE_ACTIVITY_TYPES
+
+
+async def test_a_bounce_does_not_appear_twice(db_session: AsyncSession) -> None:
+    """LP-819 writes a `COMMUNICATION_FAILED` activity AND sets the Communication to FAILED. The
+    message row already says it failed; the activity beside it would read as a second event."""
+    _company, loan_file = await _company_and_file(db_session, slug="bounce")
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.FAILED,
+            recipient="jane@borrower.example",
+        )
+    )
+    await log_activity(
+        db_session,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.COMMUNICATION_FAILED,
+        summary="A message bounced",
+    )
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    assert len(timeline) == 1
+    assert timeline[0].summary == "A message could not be delivered"
+
+
+# --------------------------------------------------------------------------------------------- #
+# Order
+# --------------------------------------------------------------------------------------------- #
+async def test_a_sent_message_sits_at_when_it_was_sent(db_session: AsyncSession) -> None:
+    """A draft composed on Monday and sent on Thursday belongs at Thursday — that is when the
+    borrower heard from us. Ordered by composition, the send would appear before a reminder that
+    actually preceded it."""
+    from datetime import timedelta
+
+    from app.models.base import utcnow
+
+    _company, loan_file = await _company_and_file(db_session, slug="order")
+    sent = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.SENT,
+        recipient="jane@borrower.example",
+        sent_at=utcnow(),
+    )
+    db_session.add(sent)
+    await db_session.flush()
+    sent.created_at = utcnow() - timedelta(days=3)
+    await log_activity(
+        db_session,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.DOCUMENT_UPLOADED,
+        summary="Something happened yesterday",
+    )
+    await db_session.flush()
+    from app.models.activity_log import ActivityLog
+
+    activity_row = (
+        await db_session.execute(
+            select(ActivityLog).where(ActivityLog.loan_file_id == loan_file.id)
+        )
+    ).scalar_one_or_none()
+    assert activity_row is not None
+    activity_row.created_at = utcnow() - timedelta(days=1)
+    await db_session.flush()
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    # Newest first, and the message is newest because it was SENT today despite being composed
+    # three days ago.
+    assert [entry.kind for entry in timeline] == [TimelineKind.MESSAGE, TimelineKind.ACTIVITY]
+
+
+# --------------------------------------------------------------------------------------------- #
+# The filter pills
+# --------------------------------------------------------------------------------------------- #
+async def _mixed(db: AsyncSession, loan_file) -> None:
+    for direction, status in (
+        (CommunicationDirection.OUTBOUND, CommunicationStatus.SENT),
+        (CommunicationDirection.OUTBOUND, CommunicationStatus.DRAFT),
+        (CommunicationDirection.OUTBOUND, CommunicationStatus.QUEUED),
+        (CommunicationDirection.INBOUND, CommunicationStatus.RECEIVED),
+    ):
+        db.add(
+            Communication(
+                loan_file_id=loan_file.id,
+                direction=direction,
+                status=status,
+                recipient="jane@borrower.example",
+                template_key=f"k-{status.value}",
+            )
+        )
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.DOCUMENT_UPLOADED,
+        summary="A document was uploaded",
+    )
+    await db.flush()
+
+
+async def test_all_shows_everything(db_session: AsyncSession) -> None:
+    _company, loan_file = await _company_and_file(db_session, slug="pill-all")
+    await _mixed(db_session, loan_file)
+
+    assert len(await build_timeline(db_session, loan_file=loan_file)) == 5
+
+
+async def test_sent_excludes_drafts(db_session: AsyncSession) -> None:
+    """A draft is outbound and has not gone. Showing it under "sent" tells a processor they have
+    already asked for something they have not."""
+    _company, loan_file = await _company_and_file(db_session, slug="pill-sent")
+    await _mixed(db_session, loan_file)
+
+    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.SENT)
+
+    assert [entry.status for entry in entries] == [CommunicationStatus.SENT.value]
+
+
+async def test_drafts_includes_a_queued_auto_reply(db_session: AsyncSession) -> None:
+    """QUEUED is a message not yet gone, which is what a processor means by drafts — and it is the
+    one state no other pill would show, so excluding it here makes it invisible everywhere."""
+    _company, loan_file = await _company_and_file(db_session, slug="pill-drafts")
+    await _mixed(db_session, loan_file)
+
+    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.DRAFTS)
+
+    assert {entry.status for entry in entries} == {
+        CommunicationStatus.DRAFT.value,
+        CommunicationStatus.QUEUED.value,
+    }
+
+
+async def test_received_is_inbound_only(db_session: AsyncSession) -> None:
+    _company, loan_file = await _company_and_file(db_session, slug="pill-recv")
+    await _mixed(db_session, loan_file)
+
+    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.RECEIVED)
+
+    assert [entry.direction for entry in entries] == [CommunicationDirection.INBOUND.value]
+
+
+async def test_activity_excludes_every_message(db_session: AsyncSession) -> None:
+    _company, loan_file = await _company_and_file(db_session, slug="pill-act")
+    await _mixed(db_session, loan_file)
+
+    entries = await build_timeline(db_session, loan_file=loan_file, wanted=TimelineFilter.ACTIVITY)
+
+    assert [entry.kind for entry in entries] == [TimelineKind.ACTIVITY]
+
+
+# --------------------------------------------------------------------------------------------- #
+# Scoping
+# --------------------------------------------------------------------------------------------- #
+async def test_a_sibling_files_history_does_not_leak_in(db_session: AsyncSession) -> None:
+    """SAME COMPANY, TWO FILES. The scoping axis here is the file, and a company-scoped query would
+    pass every cross-tenant test while showing one borrower's mail on another borrower's file."""
+    from app.services.loan_files import create_loan_file
+
+    company, mine = await _company_and_file(db_session, slug="sibling")
+    theirs = await create_loan_file(
+        db_session, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    await _mixed(db_session, theirs)
+
+    assert await build_timeline(db_session, loan_file=mine) == []
+    assert len(await build_timeline(db_session, loan_file=theirs)) == 5
+
+
+async def test_the_timeline_never_carries_a_body(db_session: AsyncSession) -> None:
+    """A timeline is a list anybody scrolls past. The body lives on the message, is dropped from
+    every readonly view, and would make this the fullest copy of a borrower's prose in the product.
+
+    The fixture puts a distinctive string in the body so the absence is a choice, not an empty
+    column.
+    """
+    _company, loan_file = await _company_and_file(db_session, slug="nobody")
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.SENT,
+            recipient="jane@borrower.example",
+            subject="Your documents",
+            body="Dear Jane, your account ending 4821 needs a statement.",
+        )
+    )
+    await db_session.flush()
+
+    timeline = await build_timeline(db_session, loan_file=loan_file)
+
+    rendered = repr(timeline[0])
+    assert "4821" not in rendered
+    assert "Dear Jane" not in rendered
+    # The SUBJECT does travel — it is what a processor recognises a message by.
+    assert timeline[0].subject == "Your documents"
