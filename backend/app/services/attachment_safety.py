@@ -341,6 +341,15 @@ async def apply_safety_to_message(db: AsyncSession, *, inbound_message_id: UUID,
     parsed = parse_message(raw)
     by_hash = {attachment.sha256: attachment for attachment in parsed.attachments}
 
+    # LP-819 — A BOUNCE IS NOT A DOCUMENT, and it is the shape that most looks like one: a DSN is an
+    # email, addressed to the file's inbox, and it CARRIES THE ORIGINAL MESSAGE AS AN ATTACHMENT.
+    # Assessed normally that attachment is a well-formed message or PDF and comes back SAFE — so the
+    # borrower's own request would be filed back onto their file as though they had sent it.
+    from app.models.inbound_message import InboundMessage
+
+    message = await db.get(InboundMessage, inbound_message_id)
+    is_notification = bool(message and (message.is_dsn or message.is_auto_reply))
+
     rows = (
         (
             await db.execute(
@@ -363,6 +372,15 @@ async def apply_safety_to_message(db: AsyncSession, *, inbound_message_id: UUID,
             # read as "not looked at yet" forever.
             row.safety_state = AttachmentSafetyState.UNSUPPORTED
             row.safety_reason = "This attachment could not be found in the stored message."
+            assessed += 1
+            continue
+        if is_notification:
+            row.safety_state = AttachmentSafetyState.UNSUPPORTED
+            row.sniffed_content_type = sniff_content_type(attachment.content)
+            row.safety_reason = (
+                "This arrived on a bounce or an automatic reply, not from the borrower. "
+                "It is the original message coming back, not a document they sent."
+            )
             assessed += 1
             continue
         outcome = assess(attachment.content, declared_content_type=row.declared_content_type)

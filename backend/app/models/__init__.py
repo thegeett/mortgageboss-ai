@@ -87,6 +87,7 @@ from app.models.stated_financials import (
     StatedOwnedProperty,
 )
 from app.models.style_profile import StyleProfile
+from app.models.suppressed_address import SuppressedAddress, SuppressionReason
 from app.models.tag import RuleTag, Tag, TagDependency
 from app.models.tag_cache import TagCacheEntry, TagCacheKind
 from app.models.types import (
@@ -186,6 +187,8 @@ __all__ = [
     "StatedLiability",
     "StatedOwnedProperty",
     "StyleProfile",
+    "SuppressedAddress",
+    "SuppressionReason",
     "Tag",
     "TagCacheEntry",
     "TagCacheKind",

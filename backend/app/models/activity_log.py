@@ -88,6 +88,11 @@ class ActivityType(StrEnum):
     NEEDS_ITEM_WAIVED = "needs_item_waived"  # processor waived a need (LP-70)
     COMMUNICATION_SENT = "communication_sent"
     COMMUNICATION_RECEIVED = "communication_received"
+    # LP-819 — a message that did not arrive. Its own type rather than a detail on
+    # COMMUNICATION_SENT, because the timeline reads differently: "sent" and "sent, and bounced" are
+    # not the same event, and a processor scanning a file needs the failure to be visible without
+    # opening anything.
+    COMMUNICATION_FAILED = "communication_failed"
     NOTE_ADDED = "note_added"
 
 

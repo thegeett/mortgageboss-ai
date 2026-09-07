@@ -4,18 +4,45 @@ Subject: Undelivered Mail Returned to Sender
 Message-ID: <dsn-001@mail.example.com>
 Date: Mon, 07 Sep 2026 09:16:00 +0000
 Return-Path: <>
-Content-Type: multipart/report; report-type=delivery-status; boundary="b1"
+MIME-Version: 1.0
+Content-Type: multipart/mixed; report-type="delivery-status";
+ boundary="===============3872087098554483053=="
 
---b1
+--===============3872087098554483053==
 Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
 
 The following message could not be delivered.
 
---b1
-Content-Type: message/delivery-status
+--===============3872087098554483053==
+Content-Type: message/rfc822
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+Content-Disposition: attachment
 
-Final-Recipient: rfc822; nobody@example.com
-Action: failed
-Status: 5.1.1
+From: Priya <priya@mail.example.com>
+To: gone@example.com
+Subject: Documents we need for your loan (LF-6T3N)
+Message-ID: <original-001@mail.example.com>
+Date: Mon, 07 Sep 2026 09:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============8509195018286615828=="
 
---b1--
+--===============8509195018286615828==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please send these.
+
+--===============8509195018286615828==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="checklist.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZz4+ZW5kb2JqCnRyYWlsZXI8PC9Sb290IDEg
+MCBSPj4KJSVFT0YK
+
+--===============8509195018286615828==--
+
+--===============3872087098554483053==--

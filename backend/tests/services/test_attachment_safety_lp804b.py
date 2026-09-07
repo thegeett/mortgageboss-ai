@@ -504,3 +504,63 @@ def test_an_ordinary_link_survives_sanitising() -> None:
 
     assert b"/URI" in cleaned
     assert b"example.com" in cleaned
+
+
+async def test_a_bounces_attachments_are_never_filed_as_documents(db_session) -> None:  # type: ignore[no-untyped-def]
+    """LP-819 — A BOUNCE IS NOT A DOCUMENT, and it is the shape that most looks like one.
+
+    A DSN is an email, addressed to the file's inbox, and it carries THE ORIGINAL MESSAGE as an
+    attachment. Assessed on its bytes alone, that attachment is a well-formed message or PDF and
+    comes back SAFE — so the borrower's own request would be filed back onto their file as though
+    they had sent it, and a processor would see a document they are still waiting for."""
+    from pathlib import Path
+    from uuid import UUID as _UUID
+
+    from app.models.inbound_attachment import InboundAttachment
+    from app.services.attachment_safety import apply_safety_to_message
+    from app.services.inbound_ingest import ingest_raw_message
+    from sqlalchemy import select
+
+    raw = (Path(__file__).resolve().parents[1] / "fixtures" / "eml" / "bounce_dsn.eml").read_bytes()
+    result = await ingest_raw_message(
+        db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-dsn-1"
+    )
+    await apply_safety_to_message(db_session, inbound_message_id=_UUID(result.message_id), raw=raw)
+
+    rows = (await db_session.execute(select(InboundAttachment))).scalars().all()
+    assert rows, "the bounce fixture must carry an attachment for this test to mean anything"
+    for row in rows:
+        assert row.safety_state is AttachmentSafetyState.UNSUPPORTED
+        assert "bounce" in (row.safety_reason or "").lower()
+
+
+async def test_an_ordinary_reply_is_still_assessed_normally(db_session) -> None:  # type: ignore[no-untyped-def]
+    """The control for the rule above. A guard keyed on the wrong thing would mark every borrower's
+    attachment UNSUPPORTED and the product would accept nothing."""
+    from email import policy
+    from email.message import EmailMessage
+    from uuid import UUID as _UUID
+
+    from app.models.inbound_attachment import InboundAttachment
+    from app.services.attachment_safety import apply_safety_to_message
+    from app.services.inbound_ingest import ingest_raw_message
+    from sqlalchemy import select
+
+    message = EmailMessage()
+    message["From"] = "akash@example.com"
+    message["To"] = "lf-abc@inbox.example.com"
+    message["Subject"] = "statements"
+    message["Message-ID"] = "<not-a-bounce@example.com>"
+    message.set_content("here you go")
+    message.add_attachment(
+        _fixture("clean.pdf"), maintype="application", subtype="pdf", filename="ok.pdf"
+    )
+    raw = message.as_bytes(policy=policy.default)
+
+    result = await ingest_raw_message(
+        db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-not-dsn"
+    )
+    await apply_safety_to_message(db_session, inbound_message_id=_UUID(result.message_id), raw=raw)
+
+    row = (await db_session.execute(select(InboundAttachment))).scalar_one()
+    assert row.safety_state is AttachmentSafetyState.SAFE

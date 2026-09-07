@@ -374,6 +374,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # text a stranger wrote; the NORMALISED form still carries whatever the sender called their own
     # document, which on a mortgage file is routinely a name and a date. `sha256` is exposed: it is a
     # content address with no preimage, and it is how a scan verdict is matched back to an object.
+    # LP-819 — `address` identifies one borrower's mailbox, and `diagnostic` is the provider's own
+    # words, which routinely quote that address back in free text no scrub matches. What is left —
+    # the reason, the status code, when — makes "how many hard bounces, and of what kind" answerable
+    # without naming anybody.
+    "suppressed_addresses": frozenset({"address", "diagnostic"}),
     "inbound_attachments": frozenset(
         {"filename_original", "filename_normalized", "derived_storage_path"}
     ),
@@ -419,6 +424,9 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # LP-804a, strong form: a filename a stranger chose is free text, and "Akash Patel W2 2025.pdf"
     # is exactly the shape no scrub matches.
     ("inbound_attachments", "filename_original"),
+    # LP-819, strong form: a bounce diagnostic is a provider's free text that quotes the recipient's
+    # address back — a mailbox and often a name, in a shape no scrub matches.
+    ("suppressed_addresses", "diagnostic"),
     # LP-822, and here for the strong-form reason rather than only to record the decision: an
     # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
     # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it

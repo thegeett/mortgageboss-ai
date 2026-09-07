@@ -30,6 +30,7 @@ from app.models.communication import (
 )
 from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
+from app.services.bounce_handling import is_suppressed
 from app.services.email_draft import _needs_in_draft, get_open_draft
 from app.services.needs_items import request_needs_item
 
@@ -203,6 +204,15 @@ async def send_draft(
         raise CannotSendError(f"this message is already {draft.status.value}")
     if not (body or "").strip():
         raise CannotSendError("an empty message cannot be sent")
+    # LP-819 — a hard bounce means this mailbox does not exist. Sending again produces another
+    # bounce, and enough of those damage a sending reputation shared by every borrower this system
+    # writes to. Checked BEFORE the rate limit so the message says the useful thing: "this address is
+    # dead" is actionable, "wait five minutes" is not.
+    if await is_suppressed(db, company_id=loan_file.company_id, address=recipient):
+        raise CannotSendError(
+            f"{recipient} is suppressed — an earlier message to it bounced permanently. "
+            "Confirm the address with the borrower before sending again."
+        )
     await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
 
     needs = await _needs_in_draft(db, draft=draft)
