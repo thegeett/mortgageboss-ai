@@ -335,6 +335,13 @@ EXCLUDED: dict[str, frozenset[str]] = {
     ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
     "communications": frozenset({"sender", "recipient", "subject", "body"}),
+    # LP-822 — a processor's writing voice. `greeting`, `closing` and `signature_block` are typed by
+    # hand, which is where an identifier arrives in a form no scrubber predicts — the same reason
+    # `dti_custom_lines.label` is excluded. `exemplars` is stronger than that: they are excerpts of
+    # real borrower-request emails, so a borrower's NAME is the likeliest thing left in one, and a
+    # name is not digit-shaped, so it would cross a scrubbing view intact. The view answers how many
+    # people have set up a voice, how many exemplars they gave and when it last changed.
+    "style_profiles": frozenset({"greeting", "closing", "signature_block", "exemplars"}),
 }
 
 #: Columns that must NEVER appear in any view, whatever else changes. A belt-and-braces
@@ -354,6 +361,11 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),
     ("communications", "body"),
+    # LP-822, and here for the strong-form reason rather than only to record the decision: an
+    # exemplar is an excerpt of a real email to a real borrower, so what it most likely still
+    # carries is a person's name — which no scrub matches, because a name has no shape. Exposing it
+    # even scrubbed would put one borrower's details in an analytics view.
+    ("style_profiles", "exemplars"),
 )
 
 

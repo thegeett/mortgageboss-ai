@@ -42,7 +42,7 @@ user's call.
 | 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | REVIEWED | see Log | see Log | Review found the bulk dedupe never matched untyped or aliased labels — two clicks made two needs items for one ask, measured. Marker unified for new writes only; pre-LP-801 rows keep a bare `True`, read them with `requested_needs_item_id` |
 | 3 | LP-800 Borrower instruction catalog | REVIEWED | see Log | see Log | Priya's review still outstanding by design — 3 of 4 "Done when" clauses met, not sent back per the do-not-block note. Review found a misspelled instruction key drops in silence (guarded now) and the Form 1007/1025 pair split from `appraisal` across two parties |
 | 4 | LP-817 Template library (5 templates, versioned) | REVIEWED | see Log | see Log | LP-810's "plain template" fallback lives here. No "Done when" clause (2nd after LP-802). Review rewrote three borrower-facing sentences: an automatic-filing promise LP-806's `auto_accept_inbound=false` does not keep, a claim about the borrower's own application, and a security notice offering a route out of an unasked request. ESCALATION: M1 can send an email advertising an inbox that receives nothing until M3 |
-| 5 | LP-822 Tone / style profile | PENDING | | | needs Priya's real emails; ship the mechanism with a neutral default profile and fill it in later |
+| 5 | LP-822 Tone / style profile | AWAITING_REVIEW | see Log | | Mechanism + neutral default, as this row instructed. Keyed on `user_id`, no `company_id` (transitive, ADR-052). `fingerprint` is the separate style cache key that resolves the bug-008 conflict. Exemplars validated for identifier shapes — a tripwire, not a guarantee. Readonly view drops every free-text column and does not count the exemplars |
 | 6 | LP-809 Draft accumulation | PENDING | | | |
 | 7 | LP-810 AI drafting engine + compliance scanner | PENDING | | | flag off by default |
 | 8 | LP-811 Send, threading, `request_needs_item()` | PENDING | | | the ticket that finally stamps `requested_at` |
@@ -102,4 +102,8 @@ Append one line per completed cycle. Newest last.
 
 Anything a session could not resolve. One line each, with the ticket it belongs to.
 
-_(none yet)_
+| Item | What it is, and what it needs |
+|---|---|
+| **LP-817 / M1 sequencing** | M1 can send an email advertising an inbox that receives nothing until M3. LP-811 (send) is inside M1; LP-803 (ingest) and LP-805 (routing) are inside M2, and nothing sequences them. Raised by the LP-817 review. **Needs a person to decide** before M1 ships: hold the send behind M2, drop the address line from the initial-request template until M3 (it would need a version bump, ADR-401), or ship knowing a borrower can email documents into a void. |
+| **LP-800 / LP-817 domain review** | The 166 responsible-party assignments and the five templates' wording are both a first pass written without Priya. No test can tell us a party is wrong or a sentence is patronising. The plan says not to block on her, and we have not — but this should reach her before Phase 4 mails a real borrower. |
+| **Build plan: two tickets with no "Done when"** | LP-802 and LP-817. Both were judged against the section prose, by different sessions reaching the same call. The plan should carry the clause rather than each reviewer re-deriving it. |
