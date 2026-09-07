@@ -101,6 +101,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-07 | LP-811b | 710ed72b | b55b6110 | 1 | the mail-client link sent the composed body while the record stored the edit — M1 complete |
 | 2026-09-07 | INFRA-1 | 662b9400 | 7656cefc | 2 | HUMAN_GATED. Review found the ARN-consequence backwards (fail-open, not closed) and that `noncurrent_version_expiration` was the real §6 conflict — a deleted message destroyed in 30 days, not 5 years |
 | 2026-09-07 | INFRA-2 | c297a3df | 48244319 | 1 | exact-matched event types the guide spells two ways, and a missing health event; one predicted finding checked and dropped. Plan still not run — human |
+| 2026-09-07 | LP-803 | 4024f921 |  |  | awaiting review. Migration d1a8f37c0e59; nullable company_id against the plan; NULLS NOT DISTINCT dedup; §H1 injector |
 | 2026-09-07 | INFRA-3 | 4c71c20b | 9cd54199 | 2 | a malformed DMARC record one flag-flip away, now fail-closed; the DKIM suffix sourced from the published table; the bounces escalation verified and strengthened |
 | 2026-09-07 | LP-811b | 710ed72b |  |  | awaiting review. Frontend only. The navigation question answered itself — the Communication tab placeholder has existed since LP-33. **M1 complete pending this review** |
 | 2026-09-07 | LP-811a | 748ace96 |  |  | awaiting review. Split from LP-811; LP-811b (frontend) is row 8b. First write to `requested_at` in the system's life |
