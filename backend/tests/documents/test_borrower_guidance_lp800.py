@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import pytest
 from app.documents.catalog import (
+    _BORROWER_INSTRUCTIONS,
+    _RESPONSIBLE_PARTY,
     CATALOG,
     GUIDANCE,
     BorrowerGuidance,
@@ -137,3 +139,41 @@ def test_template_urls_are_all_absent_for_now() -> None:
     template library; a link that resolves to nothing is worse in an email than no link, so the
     first entry to set one should have to change this test and say why."""
     assert all(g.template_url is None for g in GUIDANCE.values())
+
+
+# --------------------------------------------------------------------------------------------- #
+# The instruction set cannot silently shrink (review finding)
+# --------------------------------------------------------------------------------------------- #
+def test_every_instruction_is_keyed_on_a_REAL_catalog_type() -> None:
+    """A misspelled instruction key is dropped in silence, and nothing else here notices.
+
+    ``GUIDANCE`` is built by walking ``_RESPONSIBLE_PARTY``, so an instruction keyed on a slug that
+    map does not carry never enters it. The coverage test then sees no orphan (the key is not in
+    GUIDANCE to be orphaned), and the floor test is a `>=`, so 28 entries quietly becoming 27 still
+    passes. Measured before this test existed: renaming `pay_stub` to `pay_stubs` — the single most
+    requested document in a file — left the whole suite green while its borrower instructions
+    stopped reaching anyone.
+    """
+    unknown = set(_BORROWER_INSTRUCTIONS) - set(_RESPONSIBLE_PARTY)
+    assert not unknown, f"instructions keyed on types no catalog slug matches: {sorted(unknown)}"
+
+
+def test_the_types_the_plan_names_all_have_full_instructions() -> None:
+    """The floor is a `>=`, which cannot tell WHICH types are covered — 25 entries for the rarest
+    types in the catalog would satisfy it. These are the ones the build plan names as the ones a
+    borrower is actually asked for, so they are pinned by name rather than by count."""
+    named = {
+        "pay_stub",
+        "w2",
+        "bank_statement",
+        "tax_return",
+        "drivers_license",
+        "homeowners_insurance",
+        "gift_letter",
+        "letter_of_explanation",
+        "divorce_decree",
+        "lease_agreement",
+        "emd_withdrawal_proof",
+    }
+    missing = {slug for slug in named if slug not in _full_entries()}
+    assert not missing, f"plan-named borrower types with no full entry: {sorted(missing)}"

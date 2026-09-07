@@ -796,8 +796,14 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     # mortgage, tax bill, HOA dues, leases, inspections they commissioned) versus what
     # the transaction produces around them (appraisal, title, flood determination), which
     # the borrower cannot obtain and should never be asked for.
-    "comparable_rent_schedule": ResponsibleParty.PROCESSOR,  # form 1007, from the appraiser
-    "small_residential_income_appraisal": ResponsibleParty.PROCESSOR,
+    # LP-800 review — LENDER, matching `appraisal` below. All three are the same appraiser's work
+    # product arriving through the same AMC order, and this file already quotes the guide language
+    # for these two: `ai/extraction/comparable_rent_schedule.py` opens with "The LENDER must obtain
+    # the following: a Single-Family Comparable Rent Schedule (Form 1007) or Small Residential Income
+    # Property Appraisal Report (Form 1025)". Splitting one order across two parties would give
+    # LP-820 two request paths and two clocks for documents that arrive together.
+    "comparable_rent_schedule": ResponsibleParty.LENDER,  # Form 1007, appraiser-prepared
+    "small_residential_income_appraisal": ResponsibleParty.LENDER,  # Form 1025 / Freddie 72
     "purchase_agreement": ResponsibleParty.AGENT,
     "homeowners_insurance": ResponsibleParty.BORROWER,
     "mortgage_statement": ResponsibleParty.BORROWER,
