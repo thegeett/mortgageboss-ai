@@ -21,13 +21,24 @@ in by :func:`app.services.loan_files.create_loan_file` (ADR-050); the model
 only holds the columns. The status lifecycle is described in ADR-049.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -166,6 +177,23 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         index=True,
         nullable=True,
     )
+    #: Under legal hold — nothing on this file may be destroyed (LP-821).
+    #:
+    #: SHIPPED BEFORE THE PURGE JOB, which is `phase4.md` §6's explicit sequencing and FRCP 37(e)'s
+    #: requirement: a party who knows litigation is reasonably anticipated must suspend routine
+    #: destruction. INFRA-1 builds the S3 lifecycle expiry — which IS the purge job — on day one of
+    #: the critical path, so this flag existing first is the difference between a retention policy
+    #: and a spoliation finding.
+    #:
+    #: A BOOLEAN AND A TIMESTAMP, not one field. "Is it held" is what a purge asks; "since when" is
+    #: what a court asks, and a nullable timestamp answering both would make the first question a
+    #: null check that a later refactor could invert.
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    legal_hold_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Why, in the words of whoever placed it. Required to PLACE a hold and never required to lift
+    #: one — placing is the decision that has to be justifiable later.
+    legal_hold_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     #: The named underwriter this file is with (LP-813). A row in `lender_contacts`, which belongs
     #: to a lender, which belongs to a company — so this is the one place a loan file points at
     #: something owned by a DIFFERENT row's company, and `assign_underwriter` is what proves the two

@@ -234,6 +234,11 @@ async def send_draft(
     await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
 
     needs = await _needs_in_draft(db, draft=draft)
+    # CAPTURED BEFORE THE OVERWRITE (LP-821). The next line replaces `draft.body` with what the
+    # processor is actually sending, so this is the last moment the COMPOSED version exists. §6 asks
+    # for the model draft, the human edit and the diff; for everything sent before LP-821 the first
+    # is gone rather than unstored, and this is the line that stops that being true going forward.
+    body_composed = draft.body
     outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)
 
     draft.body = outbound.body
@@ -262,6 +267,19 @@ async def send_draft(
             "template_version": draft.template_version,
         },
     )
+    # THE EVIDENCE ROW (LP-821). Written here rather than by the endpoint, so every caller of
+    # `send_draft` produces one — an evidence record that depends on a route remembering to ask for
+    # it is one that is missing exactly where somebody added a second route.
+    from app.services.evidence import record_sent
+
+    await record_sent(
+        db,
+        loan_file=loan_file,
+        communication=draft,
+        approver_user_id=approver_user_id,
+        body_composed=body_composed,
+    )
+
     await db.flush()
     return draft
 

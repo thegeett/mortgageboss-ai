@@ -17,6 +17,7 @@ from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
 from app.api.documents import nested_router as documents_nested_router
 from app.api.dti import router as dti_router
+from app.api.evidence import router as evidence_router
 from app.api.inbound import company_router as inbound_company_router
 from app.api.inbound import router as inbound_router
 from app.api.lenders import file_router as lender_file_router
@@ -165,6 +166,7 @@ app.include_router(validation_aid_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
 app.include_router(timeline_router, prefix=API_V1_PREFIX)
+app.include_router(evidence_router, prefix=API_V1_PREFIX)
 app.include_router(party_requests_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)

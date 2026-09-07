@@ -304,8 +304,18 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # LP-813 — `underwriter_contact_id` joins straight back to a named person at a lender, so the
     # view answers the analytic question as a boolean (`has_named_underwriter`) instead. Which
     # LENDER a file is with stays exposed; which PERSON does not.
+    # LP-821 adds `legal_hold_reason`: free prose a processor typed about a legal matter on one
+    # borrower's file, which is where a name arrives in a shape no scrubber predicts. The FLAG and
+    # the TIME are exposed — "how many files are held, and since when" is a question about how a
+    # company works and names nobody.
     "loan_files": frozenset(
-        {"inbox_token", "loan_officer_name", "loan_officer_email", "underwriter_contact_id"}
+        {
+            "inbox_token",
+            "loan_officer_name",
+            "loan_officer_email",
+            "underwriter_contact_id",
+            "legal_hold_reason",
+        }
     ),
     # LP-808 — `token` is a BEARER CAPABILITY, stored in the clear because an admin types it into a
     # routing rule and must be able to read it back. Anyone who can send to `co-<token>@` gets mail
@@ -377,6 +387,15 @@ EXCLUDED: dict[str, frozenset[str]] = {
         {"hashed_password", "email", "first_name", "last_name", "reviewer_pane_split"}
     ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
+    # LP-821 — the evidence table holds a SECOND COPY of exactly the four columns
+    # `readonly.communications` already drops, plus the composed draft, plus a manifest of filenames
+    # a sender chose. Excluded on identical reasoning: an audit record is not a reason to reproduce
+    # a borrower's mail in the analytics path. What IS exposed answers "how much was sent, under
+    # which template, with what firing, and was it edited" — the last as a boolean derived in the
+    # view, so "was it edited" is answerable without either body.
+    "communication_evidence": frozenset(
+        {"sender", "recipient", "subject", "body_as_sent", "body_composed", "attachment_manifest"}
+    ),
     # LP-818 adds `in_reply_to_message_id`: a sender-written `Message-ID`, which identifies one
     # message from one person. `external_message_id` beside it is already exposed for dedup
     # analysis, and a second copy of the same class of identifier buys nothing. `is_important` and

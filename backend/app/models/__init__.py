@@ -21,6 +21,7 @@ from app.models.communication import (
     CommunicationDirection,
     CommunicationStatus,
 )
+from app.models.communication_evidence import CommunicationEvidence, EvidenceEvent
 from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.company import Company
 from app.models.document import (
@@ -127,6 +128,7 @@ __all__ = [
     "Communication",
     "CommunicationChannel",
     "CommunicationDirection",
+    "CommunicationEvidence",
     "CommunicationNeedsItem",
     "CommunicationStatus",
     "Company",
@@ -143,6 +145,7 @@ __all__ = [
     "EmailThread",
     "EncryptedString",
     "EvaluationOutcome",
+    "EvidenceEvent",
     "Extraction",
     "ExtractionStatus",
     "FieldReview",
