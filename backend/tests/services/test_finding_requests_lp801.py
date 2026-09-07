@@ -26,7 +26,11 @@ from app.models import Company, LoanProgram
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.finding import Finding, FindingCategory, FindingStatus
 from app.models.needs_item import NeedsItem
-from app.services.finding_requests import NotRequestable, requestable
+from app.services.finding_requests import (
+    NotRequestable,
+    requestable,
+    requested_needs_item_id,
+)
 from app.services.finding_resolution import request_docs_for_finding, request_documents_in_bulk
 from app.verification.rule_engine.result import UNIDENTIFIED_DOCUMENTS_RULE_ID
 from sqlalchemy import select
@@ -215,3 +219,152 @@ async def test_a_bulk_request_is_logged_as_a_needs_item_not_a_resolution(
         .all()
     )
     assert [item.title for item in items] == ["credit report"]
+
+
+# --------------------------------------------------------------------------------------------- #
+# 4. The dedupe, which only worked for catalogued labels (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_a_second_click_does_not_duplicate_an_UNTYPED_request(
+    db_session: AsyncSession,
+) -> None:
+    """The docstring's promise — "a second click must not produce a second copy" — held only when the
+    document label happened to be in the catalog.
+
+    `canonical_need_type` returns None for a label it does not carry, which is EVERY sentence coming
+    through LP-620's `requested_documents` channel, including the "One more source stating the ..."
+    this ticket rewrote. The dedupe compared the raw slug against the `needs_type` of open needs, and
+    an untyped need has no `needs_type` to compare, so it never matched itself. Measured before the
+    fix: two items for one ask.
+    """
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="ID-2", subject="b1")
+    document = "One more source stating the date of birth"
+
+    first = await request_documents_in_bulk(
+        db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
+    )
+    second = await request_documents_in_bulk(
+        db_session, loan_file=loan_file, by_document={document: [finding]}, actor_user_id=actor
+    )
+
+    assert [item.title for item in first] == [document]
+    assert first[0].needs_type is None  # the condition that defeated the old key
+    assert second == []
+    total = (
+        (await db_session.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))
+        .scalars()
+        .all()
+    )
+    assert len(total) == 1
+
+
+async def test_a_second_click_does_not_duplicate_an_ALIASED_request(
+    db_session: AsyncSession,
+) -> None:
+    """The other half the old key missed. `canonical_need_type` ALIASES — a
+    `verification_of_employment` label is stored as `voe` — so the raw slug never matched the type it
+    had just been stored under, and the second click duplicated it too."""
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="IN-8", subject="emp1")
+
+    first = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"verification of employment": [finding]},
+        actor_user_id=actor,
+    )
+    second = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"verification of employment": [finding]},
+        actor_user_id=actor,
+    )
+
+    assert len(first) == 1
+    assert first[0].needs_type != "verification_of_employment"  # it aliased
+    assert second == []
+
+
+async def test_a_catalogued_label_still_dedupes(db_session: AsyncSession) -> None:
+    """The positive control, and the case that always worked — kept so a fix that broke the ordinary
+    path could not pass by making everything look like a duplicate."""
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
+
+    first = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"credit report": [finding]},
+        actor_user_id=actor,
+    )
+    second = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={"credit report": [finding]},
+        actor_user_id=actor,
+    )
+
+    assert [item.needs_type for item in first] == ["credit_report"]
+    assert second == []
+
+
+async def test_two_different_documents_are_both_created(db_session: AsyncSession) -> None:
+    """The second positive control: the new key must not collapse DISTINCT asks. Two untyped
+    sentences share `needs_type is None`, so keying on the type alone would have made the second one
+    look like a duplicate of the first."""
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="ID-2", subject="b1")
+
+    created = await request_documents_in_bulk(
+        db_session,
+        loan_file=loan_file,
+        by_document={
+            "One more source stating the date of birth": [finding],
+            "One more source stating the current address": [finding],
+        },
+        actor_user_id=actor,
+    )
+
+    assert len(created) == 2
+    assert all(item.needs_type is None for item in created)
+
+
+# --------------------------------------------------------------------------------------------- #
+# 5. Reading the marker back, across both shapes (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def test_the_marker_reads_back_from_the_new_shape(db_session: AsyncSession) -> None:
+    """The forward link LP-810 follows, on a row this build wrote."""
+    loan_file, actor = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
+
+    item = await request_docs_for_finding(db_session, finding=finding, actor_user_id=actor)
+
+    assert requested_needs_item_id(finding) == item.id
+
+
+async def test_the_marker_reads_back_as_None_from_the_PRE_LP801_shape(
+    db_session: AsyncSession,
+) -> None:
+    """The bare `True` every bulk request wrote before this ticket. It still means "documents were
+    requested" — the key is present — but there is no needs item to follow, and reaching into it
+    positionally raises rather than returning nothing."""
+    loan_file, _ = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
+    finding.details = {**finding.details, "docs_requested": True}
+
+    assert requested_needs_item_id(finding) is None
+    assert "docs_requested" in finding.details  # still the "was requested" signal
+    with pytest.raises(TypeError):
+        _ = finding.details["docs_requested"]["needs_item_id"]  # type: ignore[index]
+
+
+async def test_the_marker_reads_back_as_None_when_never_requested(
+    db_session: AsyncSession,
+) -> None:
+    """The negative control — an unrequested finding and an old-shape one must not be confused by a
+    reader that only checks for None."""
+    loan_file, _ = await _loan_file(db_session)
+    finding = await _finding(db_session, loan_file, rule_id="CR-6", subject="lia1")
+
+    assert requested_needs_item_id(finding) is None
+    assert "docs_requested" not in finding.details

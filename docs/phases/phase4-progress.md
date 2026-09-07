@@ -39,7 +39,7 @@ user's call.
 | # | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|---|
 | 1 | LP-802 ADRs, settings, `inbox_domain`, token widening | REVIEWED | see Log | see Log | ADR-094 amended by ADR-397 — the address contains the token, so exposure is a narrowing not a technicality. Review found `inbox_domain` set by nothing; now wired in both task definitions. LP-802 has no "Done when" clause in the build plan |
-| 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | AWAITING_REVIEW | see Log | | ADR-399: no migration. The plan preferred persisting the cause on the finding; the consolidated rule id already IS the persisted cause, because the flagged abstentions are replaced before any write. Predicate gate lives in the service, not the endpoint |
+| 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | REVIEWED | see Log | see Log | Review found the bulk dedupe never matched untyped or aliased labels — two clicks made two needs items for one ask, measured. Marker unified for new writes only; pre-LP-801 rows keep a bare `True`, read them with `requested_needs_item_id` |
 | 3 | LP-800 Borrower instruction catalog | PENDING | | | Claude writes a first pass for the ~25 borrower-facing types; **Priya reviews after** — do not block on her |
 | 4 | LP-817 Template library (5 templates, versioned) | PENDING | | | LP-810's "plain template" fallback lives here |
 | 5 | LP-822 Tone / style profile | PENDING | | | needs Priya's real emails; ship the mechanism with a neutral default profile and fill it in later |
@@ -90,6 +90,7 @@ Append one line per completed cycle. Newest last.
 | date | ticket | build SHA | review SHA | findings fixed | note |
 |------|--------|-----------|------------|----------------|------|
 | 2026-09-06 | LP-802 | bcf00b0a | b57b085f | 5 | first Phase 4 ticket; ADR-094 amended. Fixed: inbox_domain unset in every env, a false import rationale, a tautological address test, two token-length assertions the widening could not fail |
+| 2026-09-06 | LP-801 | 392b1469 | REVIEW_SHA | 3 | duplicate borrower request from an untyped label; the marker's other shape and its reader |
 | 2026-09-06 | LP-801 | 392b1469 |  |  | awaiting review. ADR-399: predicate over the consolidated rule id, no migration — the plan's preferred column would be True on exactly one row per file |
 ```
 

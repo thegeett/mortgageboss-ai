@@ -28,6 +28,7 @@ __all__ = [
     "NotRequestable",
     "docs_requested_marker",
     "requestable",
+    "requested_needs_item_id",
 ]
 
 
@@ -75,3 +76,34 @@ def docs_requested_marker(*, actor_user_id: UUID, needs_item_id: UUID) -> dict[s
         "at": utcnow().isoformat(),
         "needs_item_id": str(needs_item_id),
     }
+
+
+def requested_needs_item_id(finding: Finding) -> UUID | None:
+    """The needs item a request from this finding produced, or None — TOLERANT OF THE OLD SHAPE.
+
+    READ THIS BEFORE REACHING INTO ``details["docs_requested"]`` DIRECTLY. LP-801 unified what the two
+    request paths WRITE; it did not and could not change what is already stored. Every finding
+    requested through the bulk path before LP-801 carries a bare ``True`` — the shape LP-562 wrote
+    from the day that path shipped — so on historical rows there is no needs-item id to follow and
+    ``details["docs_requested"]["needs_item_id"]`` raises ``TypeError`` rather than returning nothing.
+    LP-810 drafts an email from this link and will meet both shapes on one file.
+
+    Returning None for the old shape is the honest answer, not a degraded one: the link genuinely was
+    not recorded, and there is nothing to recover it from. A caller that needs the distinction should
+    ask whether the key is present, which still means "documents were requested" under either shape.
+
+    Not backfilled deliberately: the bulk path created one needs item per DOCUMENT from many findings,
+    so which item any given finding should point at is not derivable after the fact — a backfill would
+    have to guess, and a guessed link is worse than an absent one in an email to a borrower.
+    """
+    details = finding.details or {}
+    marker = details.get("docs_requested")
+    if not isinstance(marker, dict):
+        return None  # the pre-LP-801 bare `True`, or nothing at all
+    raw = marker.get("needs_item_id")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return UUID(raw)
+    except ValueError:
+        return None

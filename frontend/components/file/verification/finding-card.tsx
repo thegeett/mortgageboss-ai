@@ -134,7 +134,11 @@ export function FindingCard({
     reasoning?: string;
     notes?: Note[];
     overlay_applied?: string | null;
-    docs_requested?: { needs_item_id?: string } | null;
+    // LP-801 — `true` is not legacy trivia: it is what EVERY finding requested through the bulk
+    // path before LP-801 still carries, and this type never admitted it. Nothing breaks today
+    // because the only read is `Boolean(...)` below, but a component that follows `needs_item_id`
+    // on the strength of this declaration would be reading a type the data does not honour.
+    docs_requested?: { needs_item_id?: string } | boolean | null;
     why_it_matters?: string | null;
     suggested_fix?: string | null;
     guidance_starter?: boolean;

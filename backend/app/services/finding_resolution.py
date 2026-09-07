@@ -464,6 +464,20 @@ _STATUS_TO_PRIORITY = {
 }
 
 
+def _already_asked_key(needs_type: str | None, title: str) -> str:
+    """The identity of "this has already been asked for", for the bulk dedupe (LP-801).
+
+    ``needs_type`` when the label resolved to one, because that is the identity the matcher and every
+    other need agree on — and it is the ALIASED form, so a `verification_of_employment` label and the
+    `voe` it was stored under are one key rather than two. Otherwise the title, which is the only
+    thing an untyped need has: `canonical_need_type` returns None for any label the catalog does not
+    carry, and returning None is correct there (a type no document can match must not be stored as
+    one). The `title:` prefix keeps the two namespaces apart, so a need literally titled "voe" cannot
+    collide with the type.
+    """
+    return needs_type or f"title:{title.strip().lower()}"
+
+
 async def request_documents_in_bulk(
     db: AsyncSession,
     *,
@@ -487,25 +501,22 @@ async def request_documents_in_bulk(
     ALREADY-REQUESTED DOCUMENTS ARE SKIPPED. A second click must not produce a second copy — a
     duplicate request is worse than no button, because the borrower gets asked twice for one thing.
     """
-    existing = {
-        row.needs_type
-        for row in (
-            (
-                await db.execute(
-                    only_active(
-                        select(NeedsItem).where(
-                            NeedsItem.loan_file_id == loan_file.id,
-                            NeedsItem.status == NeedsItemStatus.PENDING,
-                        ),
-                        NeedsItem,
-                    )
+    open_needs = (
+        (
+            await db.execute(
+                only_active(
+                    select(NeedsItem).where(
+                        NeedsItem.loan_file_id == loan_file.id,
+                        NeedsItem.status == NeedsItemStatus.PENDING,
+                    ),
+                    NeedsItem,
                 )
             )
-            .scalars()
-            .all()
         )
-        if row.needs_type
-    }
+        .scalars()
+        .all()
+    )
+    existing = {_already_asked_key(row.needs_type, row.title) for row in open_needs}
 
     created: list[NeedsItem] = []
     # LP-801 — the finding -> needs-item link, written once per finding for the FIRST document it
@@ -524,7 +535,7 @@ async def request_documents_in_bulk(
         if not findings:
             continue
         slug = document.strip().lower().replace(" ", "_")
-        if not slug or slug in existing:
+        if not slug:
             continue
         # LP-624 — A TYPE THE MATCHER CAN REACH, OR NONE. This slugs a DOCUMENT LABEL, which is right
         # for every entry `_missing_documents` produces. LP-620's `requested_documents` channel now
@@ -533,12 +544,25 @@ async def request_documents_in_bulk(
         # ever match, so the need would sit unsatisfiable forever and group under no category. The
         # title still says what to get; the TYPE stops claiming a match that cannot happen.
         needs_type = canonical_need_type(slug)
+        title = document[:200]
+        # LP-801 — DEDUPE ON A KEY EVERY NEED HAS. This compared the raw slug against the
+        # `needs_type` of open needs, which coincide only when the label is catalogued. It therefore
+        # did nothing in the two cases that matter: `canonical_need_type` returns None for a label the
+        # catalog does not carry — which is EVERY `requested_documents` sentence, including the
+        # "One more source stating the ..." this ticket rewrote — and it ALIASES the rest, so a
+        # `verification_of_employment` label never matched the `voe` it had been stored as. Measured
+        # before the fix: two clicks produced two identical needs items for one ask, while a
+        # catalogued "credit report" correctly produced one. That is the duplicate this function's
+        # docstring says it exists to prevent, and a borrower asked twice is the visible end of it.
+        key = _already_asked_key(needs_type, title)
+        if key in existing:
+            continue
         rules = ", ".join(sorted({f.rule_id for f in findings}))
         first = findings[0]
         item = await create_needs_item(
             db,
             loan_file_id=loan_file.id,
-            title=document[:200],
+            title=title,
             needs_type=needs_type,
             origin=NeedsItemOrigin.FINDING,
             priority=_STATUS_TO_PRIORITY.get(first.status, NeedsItemPriority.STANDARD),
@@ -550,7 +574,7 @@ async def request_documents_in_bulk(
             # has the same limit for the same reason.
             reasoning=f"Requested from verification findings: {rules}",
         )
-        existing.add(slug)
+        existing.add(key)
         created.append(item)
         # Mark every contributing finding, exactly as the per-finding path does. Without this the rows
         # still offered "Request ..." as though nothing had happened, and a second click would ask the
