@@ -132,7 +132,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-06 | LP-801 | 392b1469 |  |  | awaiting review. ADR-399: predicate over the consolidated rule id, no migration — the plan's preferred column would be True on exactly one row per file |
 | 2026-09-09 | LP-814 | 2fee4484 | 40b81afd | 1 | a processor's dismissal outliving the request it was about, so a re-sent request went unchased in silence. The builder's own catch — two tests named after the trap passing on the status filter — is the ticket's best moment |
 | 2026-09-09 | LP-820 | 094da111 | d3b361bc | 1 | a column given a writer one ticket earlier and still not read for the purpose it was written for — the lender's desk, seeded under one role and looked for under another |
-| 2026-09-09 | LP-821 | c6a8be51 | REVIEW_SHA | 2 | a field named for a compliance guard whose only writer was a bounce reason, and a disclosure describing a control in the direction that would not produce the effect it claimed |
+| 2026-09-09 | LP-821 | c6a8be51 | 1405c249 | 2 | a field named for a compliance guard whose only writer was a bounce reason, and a disclosure describing a control in the direction that would not produce the effect it claimed |
 ```
 
 ## Blocked / escalations
