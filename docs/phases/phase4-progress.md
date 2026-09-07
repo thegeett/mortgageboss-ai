@@ -168,7 +168,7 @@ counterparty meet this, with nobody watching"**. A message that lands in the unr
 qualify: LP-806 built a screen and a person works it. A message that goes out under an identity
 nobody chose does.
 
-### Must be decided before the pilot mails a real borrower (4)
+### Must be decided before the pilot mails a real borrower (5)
 
 | Item | What it is, and what it needs |
 |---|---|
@@ -176,6 +176,8 @@ nobody chose does.
 | **LP-804b / the UPLOAD path still rejects TIFF and HEIC** | `storage/base.py` permits the extensions, `services/documents.py` rejects the content types, and LP-804b now accepts them on the INBOUND path. So a borrower can email a HEIC and it is accepted, but the same file uploaded through the UI is refused. Fixing the upload allowlist is outside Phase 4's blast radius and needs a person to decide whether the extraction pipeline handles HEIC at all. |
 | **LP-816 / which mailbox is "the" mailbox** | RE-MEASURED at the close. The review made the lookup TOTAL — ordered on `(created_at, id)`, the same tiebreaker as LP-820 — so the same file no longer sends under a different identity on two requests with nothing changed. That was the part that was undefined rather than merely undecided. What remains is the product question: with two connected mailboxes, the oldest wins because somebody has to, and nobody has said it should. A borrower sees the sender. |
 | **LP-818 / the send rate limit applies to replies** | One per address per five minutes, three per day. A genuine back-and-forth on one afternoon hits it. Correct as a guardrail against a loop, wrong as a conversation limit — needs a decision rather than a quiet widening. |
+
+| **LP-806 / accepting does not enqueue processing, so the need is never satisfied** | RE-PLACED at the close, from "known gaps". It was filed there on the finding that "the needs update runs on accept, so LP-814's clock is satisfied" — **measured, and it does not**. `apply_document_to_needs` "fires once, when a document is processed" (`needs_engine.py:760`), accept never enqueues processing, and nothing on the accept path touches needs at all. So: a borrower emails a bank statement, a processor accepts it, the document sits `PENDING` and is never extracted, the need stays `REQUESTED` with its `requested_at` — and three days later LP-814 suggests chasing the borrower for the document they already sent and the processor already accepted. That is the group's own dividing question answered yes: a borrower meets it, with nobody watching. The fix is small — the enqueue the upload path already does — and the reason it was not made stands: `_enqueue_processing` is module-private in `api/documents.py` and reaching into another module's private was outside the ticket. |
 
 ### Waiting on a named person; nothing in the repo to change (8)
 
@@ -196,14 +198,15 @@ requests the SES sandbox exit.
 | **INFRA-3 / DMARC reports need a real mailbox** | `dmarc_report_address` is empty and `outbound_mail_enabled` is false. `rua=` names an address somebody has to actually read; choosing one would create a report nobody receives. A person sets both together. **Now enforced rather than trusted (review):** `outbound_mail_enabled = true` with an empty address fails at plan time, so the two can no longer be turned on apart. The decision — which mailbox — is still a person's. |
 | **INFRA-1 / `terraform plan` needs credentials** | The protocol wants the plan output committed. This session has no AWS credentials and the S3 state backend is reached even under `-backend=false`. The config is validated offline (`docs/tickets/infra-1/validate.txt`); the plan is outstanding and needs either a person to run it or `aws login` in this session. |
 
-### Known gaps with no owner yet (28)
+### Known gaps with no owner yet (27)
 
 Each is something the phase did not build, with the reason it did not. None is waiting on a person
-and none can surprise a borrower unwatched. The two worth reading first are **LP-806 / accepting does
-not enqueue processing** — an accepted document sits `PENDING` and is never extracted, though its
-need is still satisfied so no reminder nags a borrower for it — and **LP-818 / `email_threads`**, a
-table nothing writes and nothing reads, which is the fifth form of the pattern this loop kept
-finding.
+and none can surprise a borrower unwatched. The one worth reading first is **LP-818 /
+`email_threads`**, a table nothing writes and nothing reads, which is the fifth form of the pattern
+this loop kept finding.
+
+**LP-806 / accepting does not enqueue processing moved to the group above at the close**, because
+the reason it was placed here did not hold — see that row.
 
 | Item | What it is, and what it needs |
 |---|---|
@@ -231,7 +234,6 @@ finding.
 | **LP-807 / ingest_key is now globally unique** | Without an SES id the key falls back to the `Message-ID` header, which two companies could share if the same forwarded thread were mailed to both — one would be suppressed. Not reachable on the SES path, which always supplies a globally unique id, but it is a real narrowing of what the fallback tolerates and it should be a decision rather than a consequence. |
 | **LP-807 / no suggested document type or need on the card** | The plan asks for them. Classification runs AFTER accept, and ladder rung 6 (the AI suggestion) was never built — LP-805 stopped at rung 2. There is no source for a suggestion today. The card shows the routing SIGNAL instead, which is real. Needs either rung 6 or a pre-accept classifier, both of which are their own tickets. |
 | **LP-807 / the preview re-derives on every request** | Uncached beyond TanStack's five minutes: a queue of five messages with three attachments each is fifteen rasterisations. The alternative is storing the raster, which is a second durable copy of a borrower's document with its own retention and destruction story. |
-| **LP-806 / accepting does not enqueue processing** | An accepted document sits PENDING until something processes it. The upload path calls a module-private `_enqueue_processing` in `api/documents.py`; the needs update then runs under `loan_file_needs_lock` as it does for an upload. The enqueue probably belongs in the accept path and I did not reach into another module's private to do it. |
 | **LP-806 / no reassign endpoint** | The plan lists list/accept/reassign/reject. Reassign for an UNROUTED message is a company CLAIMING it — the one operation that moves data across a tenant boundary. It needs its own design rather than an endpoint appended to a long ticket. |
 | **LP-810 / no prompt-version in the audit record** | `phase4.md` §6 wants "model + prompt version" stored beside a sent message. The drafting prompt is a file with no version discipline of its own, and LP-810 has no send path to store one against. Not built rather than half-built; LP-811 is where it lands or is dropped on purpose. |
 | **Build plan: four tickets with no "Done when"** | LP-802, LP-817, LP-822 and LP-809. Both were judged against the section prose, by different sessions reaching the same call. The plan should carry the clause rather than each reviewer re-deriving it. |
