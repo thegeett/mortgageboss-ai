@@ -55,13 +55,17 @@ _CONTEXT = {
 }
 
 #: The templates that hand the borrower somewhere to send documents. M3's routing depends on the
-#: address appearing in the initial request; the other two are asks, so they carry it for the same
-#: reason. `status_update` and `custom` are excluded deliberately — neither asks for anything.
-_ADDRESS_BEARING = {
-    TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
-    TemplateKey.REMINDER_FOLLOW_UP,
-    TemplateKey.CONDITION_RESPONSE_REQUEST,
-}
+#: address appearing in the initial request; the others are asks, so they carry it for the same
+#: reason. `status_update` and `custom` are excluded — neither asks for anything.
+#:
+#: LP-824 REVIEW — DERIVED FROM THE SPEC, NOT LISTED. This was a hand-maintained set of three, and
+#: the build flagged the risk itself: a template that starts asking for documents without being
+#: added here does not inherit the requirement, and nothing says so. It does not have to be a list.
+#: A template that asks for documents by email is exactly one that declares `inbox_address` among
+#: its variables — that is what "hands the borrower somewhere to send documents" MEANS — and the
+#: spec already states it. Measured: this picks out the same three today, and a fourth inherits the
+#: requirement the moment it declares the slot.
+_ADDRESS_BEARING = {key for key, spec in TEMPLATES.items() if "inbox_address" in spec.variables}
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -235,15 +239,36 @@ def test_the_initial_request_is_at_v3_and_the_older_versions_still_resolve() -> 
     This is the first bump, and it is the case the pin exists for: an in-place edit here would have
     left every v1 audit row describing an email that no longer exists in that form."""
     assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v3"
-    # EVERY superseded version, not just the previous one. LP-824 is the second bump, and a check
-    # that only looked one step back would have stopped protecting v1 the moment v3 landed — which
-    # is exactly when a v1 audit row is oldest and least able to speak for itself.
-    for old in ("v1", "v2"):
-        assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old) in VERSION_FINGERPRINTS
-        assert (
-            file_fingerprint(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old)
-            == VERSION_FINGERPRINTS[(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old)]
-        )
+    assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1") in VERSION_FINGERPRINTS
+    assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v2") in VERSION_FINGERPRINTS
+
+
+@pytest.mark.parametrize(("key", "version"), sorted((k.value, v) for k, v in VERSION_FINGERPRINTS))
+def test_every_pinned_version_still_resolves_to_the_words_it_names(key: str, version: str) -> None:
+    """LP-824 REVIEW — ADR-401's GUARANTEE, FOR EVERY VERSION RATHER THAN FOR ONE TEMPLATE.
+
+    `test_every_template_file_matches_its_version_pin` checks each template's CURRENT version only,
+    and the superseded ones were covered by a hand-written loop over the initial request's `("v1",
+    "v2")`. So LP-824, which superseded `reminder_follow_up.v1` and `condition_response_request.v1`,
+    created two historical versions that nothing protected.
+
+    Measured before this test existed: rewriting `reminder_follow_up.v1`'s security sentence to
+    "Email is perfectly safe." left the whole suite green, while the identical edit to
+    `initial_documentation_request.v1` failed — one template guarded, two not.
+
+    That is the exact failure ADR-401 exists to prevent, and it is worse for a superseded version
+    than for a current one: a live template that drifts is visible in the next email somebody reads,
+    where a v1 audit row is old, unread until an auditor asks, and has nothing else to speak for it.
+
+    Parametrized over the pin table itself, so the next bump is covered by having been pinned rather
+    than by somebody remembering to widen a tuple.
+    """
+    template_key = TemplateKey(key)
+    assert (
+        file_fingerprint(template_key, version) == VERSION_FINGERPRINTS[(template_key, version)]
+    ), (
+        f"{key} {version} was edited under its own pin — an audit row naming it now describes words that no longer exist"
+    )
 
 
 def test_the_plain_framing_file_matches_its_pin() -> None:
