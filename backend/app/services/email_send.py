@@ -28,6 +28,7 @@ from app.models.communication import (
     CommunicationDirection,
     CommunicationStatus,
 )
+from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
 from app.services.bounce_handling import is_suppressed
@@ -280,8 +281,81 @@ async def send_draft(
         body_composed=body_composed,
     )
 
+    # LP-816 — TRANSMIT, IF THERE IS ANYTHING TO TRANSMIT THROUGH.
+    #
+    # INSIDE THIS FUNCTION, AFTER EVERY GUARD, AND NOWHERE ELSE. The suppression check, the rate
+    # limit and the approver requirement are all above this line, so a provider implementation
+    # inherits them by construction rather than by remembering. A send that skipped them because it
+    # went out through a different transport would be the same message with none of the checks —
+    # and the way to make that impossible is to have nowhere else to call from.
+    #
+    # NONE IS THE ORDINARY ANSWER TODAY. §5 says build the interface and no provider, so
+    # `transport_for` returns None for every connection and this stays copy-and-send: the record
+    # above is the whole of what happened, exactly as it was before this ticket.
+    await _transmit_if_possible(db, loan_file=loan_file, draft=draft)
+
     await db.flush()
     return draft
+
+
+async def _transmit_if_possible(
+    db: AsyncSession, *, loan_file: LoanFile, draft: Communication
+) -> None:
+    """Hand the message to a provider when one is connected. Silent when none is.
+
+    THE PROVIDER'S ID IS WHAT THIS BUYS. A transmitted message has a `Message-ID` we generated, and
+    LP-805's rung 2 matches a borrower's `References` against exactly that — so their reply routes
+    with CERTAIN confidence instead of falling to the footer tag, which §2.2 grades "high" and which
+    Gmail and Outlook mobile routinely trim out of a quoted body. On copy-and-send there is no such
+    id, because the message left from her own client and we never saw it.
+
+    A FAILURE DOES NOT UNDO THE RECORD, and the ordering above is why: `record_sent` has already run.
+    Rolling back would lose the evidence row and the needs transition for a message that may well
+    have gone out — a provider that timed out after accepting it is the ordinary failure, not the
+    exception. The status moves to FAILED so a processor sees it and LP-819's paths treat it as one.
+    """
+    from app.models.mailbox_connection import MailboxConnection
+    from app.services.mail_transport import (
+        AUTO_REPLY_HEADERS_NONE,
+        OutboundEnvelope,
+        TransportError,
+        transmit,
+    )
+
+    connection = (
+        (
+            await db.execute(
+                only_active(
+                    select(MailboxConnection).where(
+                        MailboxConnection.company_id == loan_file.company_id
+                    ),
+                    MailboxConnection,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    envelope = OutboundEnvelope(
+        to=draft.recipient or "",
+        subject=draft.subject or "",
+        body=draft.body or "",
+        in_reply_to=draft.in_reply_to_message_id,
+        headers=AUTO_REPLY_HEADERS_NONE,
+    )
+    try:
+        result = await transmit(connection, envelope)
+    except TransportError:
+        draft.status = CommunicationStatus.FAILED
+        await db.flush()
+        raise
+    if result is None:
+        return
+    # `external_message_id` MEANS "THIS MESSAGE'S OWN ID" (LP-818 separated it from the id a reply
+    # answers), and this is the first thing in the product that can fill it for an outbound message.
+    draft.external_message_id = result.provider_message_id
+    await db.flush()
 
 
 async def open_draft_preview(db: AsyncSession, *, loan_file: LoanFile) -> OutboundMessage | None:
