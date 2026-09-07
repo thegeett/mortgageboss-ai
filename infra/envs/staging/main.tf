@@ -471,6 +471,20 @@ module "compute" {
     # production, so leaving this unset fails open rather than failing to start.
     INBOX_DOMAIN = "inbox.staging.mortgageboss.ai"
 
+    # LP-827 — REQUIRED, and the app now refuses to start without it outside development.
+    # `settings.upload_link_base_url` defaults to `http://localhost:3000` deliberately (a wrong
+    # upload URL should fail visibly rather than send a staging test email at a real borrower's
+    # production link), and that default was never overridden anywhere — so every secure upload link
+    # staging minted pointed the borrower at their OWN machine. Reported from staging: "the secure
+    # link is not working on opening."
+    #
+    # The APP's public origin, not the API's: the token lands in a browser, on a page a person reads.
+    # Built from `domain_name` — "the public domain this environment is served on" — rather than from
+    # `cors_allowed_origins`, whose own variable block says it carries a placeholder until after the
+    # first apply and should be updated later. A link is not a thing to build out of a value
+    # documented as possibly stale.
+    UPLOAD_LINK_BASE_URL = "https://${var.domain_name}"
+
     AI_PROVIDER    = "bedrock"
     BEDROCK_REGION = var.aws_region
 

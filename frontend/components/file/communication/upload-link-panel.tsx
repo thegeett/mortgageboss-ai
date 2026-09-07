@@ -117,6 +117,15 @@ export function UploadLinkPanel({ fileId }: { fileId: string }) {
         </Button>
       </div>
 
+      {/* LP-827 — WHAT THE LINK PERMITS, said before one is made. The numbers lived only in the
+          backend's constants, so the question "does it just work one time?" had no answer on any
+          screen — and the borrower is told nothing either. Opening it costs nothing: a use is spent
+          when a document arrives, which is what bounds it. */}
+      <p className={CAPTION}>
+        A new link works for 3 days and accepts up to 20 documents. Opening it costs nothing — a use
+        is spent only when a document is uploaded.
+      </p>
+
       {isPending ? (
         <p className="text-sm text-muted-foreground">Loading links…</p>
       ) : isError ? (

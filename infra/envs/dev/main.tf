@@ -322,6 +322,17 @@ module "compute" {
     # production's inbox domain, because that is settings.inbox_domain's default.
     INBOX_DOMAIN = "inbox.dev.mortgageboss.ai"
 
+    # LP-827 — DELIBERATELY ABSENT HERE, unlike staging. This template has no `domain_name` variable
+    # (it is a C4 addition staging carries and dev does not), so there is no public origin to build a
+    # link from — and `terraform validate` runs on this file, so a reference to one would fail it.
+    # A future environment copied from this template needs UPLOAD_LINK_BASE_URL set, and the app
+    # refuses to start without it outside development, which is what makes that impossible to forget.
+    #
+    # Note also `environment = "dev"` in this template's tfvars: `Settings.environment` is
+    # Literal["development", "staging", "production"], so an app started from these values would be
+    # rejected by config validation before reaching the guard at all. Pre-existing, recorded here
+    # because it is the same class of never-exercised value.
+
     AI_PROVIDER    = "bedrock"
     BEDROCK_REGION = var.aws_region
 

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import (
     Field,
@@ -31,6 +32,12 @@ _BLANK_S3_MEANS_DEFAULT: dict[str, str | int] = {
     "s3_region": _DEFAULT_S3_REGION,
     "s3_presign_expiry_seconds": _DEFAULT_S3_PRESIGN_EXPIRY_SECONDS,
 }
+
+
+#: Hostnames that mean "the machine reading this". A deployed process that mints links pointing at
+#: one of these is misconfigured, whatever else is true — the borrower's browser resolves them to
+#: the borrower's own computer.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 
 class Settings(BaseSettings):
@@ -473,6 +480,39 @@ class Settings(BaseSettings):
         """
         if self.storage_backend == "s3" and not self.s3_bucket:
             raise ValueError('S3_BUCKET is required when STORAGE_BACKEND is "s3"')
+        return self
+
+    @model_validator(mode="after")
+    def _require_a_reachable_upload_base_url(self) -> "Settings":
+        """Refuse to start outside development with an upload base URL nobody can reach (LP-827).
+
+        REPORTED FROM STAGING: the secure link did not open. `UPLOAD_LINK_BASE_URL` was assigned in
+        no `.tf`, `.tfvars`, `.yml`, `.env` or script in this repository, so staging ran on the
+        development default and every minted link pointed at `http://localhost:3000/upload/<token>`
+        — the reader's own machine.
+
+        THE DEFAULT IS NOT THE DEFECT. `upload_link_base_url`'s own comment argues for a local
+        default deliberately: a wrong upload URL should fail visibly rather than send a staging test
+        email to a real borrower's production link. That reasoning holds. What was missing is the
+        wiring, and this is what makes its absence impossible to ship — the same treatment
+        `INBOX_DOMAIN` has in the ECS task definition, moved into the app so it cannot depend on
+        somebody remembering.
+
+        NARROW ON PURPOSE. It checks the host, not reachability: `localhost`, `127.0.0.1` and `::1`
+        are the values that mean "this machine", and a deployed process that means one of them is
+        misconfigured whatever else is true. Anything else — a wrong domain, a typo, an https/http
+        mix-up — is a value somebody chose, and config cannot tell a chosen mistake from a chosen
+        intention.
+        """
+        if self.environment == "development":
+            return self
+        host = (urlparse(self.upload_link_base_url).hostname or "").lower()
+        if host in _LOOPBACK_HOSTS:
+            raise ValueError(
+                f"UPLOAD_LINK_BASE_URL points at {host!r} with ENVIRONMENT={self.environment!r}. "
+                "Every secure upload link this environment mints would send the borrower to their "
+                "own machine. Set it to this environment's public web origin."
+            )
         return self
 
 

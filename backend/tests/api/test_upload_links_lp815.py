@@ -325,6 +325,39 @@ async def test_the_use_counter_bounds_a_leaked_link(client: AsyncClient, db: Asy
     assert second.status_code == 404
 
 
+async def test_opening_the_page_spends_nothing(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-827 — ASKED DIRECTLY, and answered by observation rather than by reading the constant:
+    *"Also it just works one time open only?"*
+
+    It does not. A borrower opens the link, reads it, closes it, comes back tomorrow. `max_uses`
+    bounds DOCUMENTS DELIVERED — `link.uses += 1` lives in `redeem_link`, after the document is
+    written, and `resolve_link` never touches it. Three opens on a one-use link leave the upload
+    still available.
+
+    Worth a test rather than a comment: the question was asked because nothing on screen says so and
+    the link had never opened for anyone, so no behaviour had been demonstrated either way.
+    """
+    _company, _jwt, _loan_file, minted = await _file_with_link(db, slug="reopen", max_uses=1)
+    await db.commit()
+
+    for _ in range(3):
+        page = await client.get(f"{API}/upload/{minted.token}")
+        assert page.status_code == 200
+        assert page.json()["remaining_uses"] == 1
+
+    accepted = await client.post(
+        f"{API}/upload/{minted.token}", files={"file": ("a.pdf", _PDF, "application/pdf")}
+    )
+    assert accepted.status_code == 201, "three opens spent the only use"
+
+    # THE POSITIVE CONTROL: the counter DOES move, so "opening spends nothing" is not being
+    # satisfied by a counter that never moves at all. Measured rather than assumed — a spent link
+    # answers 404, not 200 with nothing left, because LP-815 gives every failure the same reply and
+    # a spent token must not be distinguishable from a wrong one.
+    spent = await client.get(f"{API}/upload/{minted.token}")
+    assert spent.status_code == 404
+
+
 async def test_a_refused_upload_does_not_spend_a_use(client: AsyncClient, db: AsyncSession) -> None:
     """THE COUNTER MOVES ON A DELIVERED DOCUMENT. A borrower whose first attempt was a zip must not
     be locked out of their remaining tries by the mistake."""
@@ -470,3 +503,39 @@ async def test_a_live_link_still_accepts_on_the_write_path(
     assert (
         await db.execute(select(Document).where(Document.loan_file_id == loan_file.id))
     ).scalar_one() is not None
+
+
+def test_the_panel_says_what_the_constants_actually_permit() -> None:
+    """LP-827 — UI COPY IS AN UNTESTED CLAIM.
+
+    The link panel now tells a processor "3 days and up to 20 documents", because nothing on any
+    screen said so and the question had to be asked. Those numbers live in Python constants the
+    browser cannot read, so the sentence is a hand-copied duplicate — and a duplicate of a number is
+    wrong the first time somebody changes the original.
+
+    Reaching across the language boundary is deliberate. The alternative is a comment asking the
+    next person to remember, and a comment is not a guard.
+    """
+    from pathlib import Path
+
+    from app.models.upload_link import DEFAULT_MAX_USES, DEFAULT_TTL_HOURS
+
+    panel = (
+        Path(__file__).resolve().parents[3]
+        / "frontend"
+        / "components"
+        / "file"
+        / "communication"
+        / "upload-link-panel.tsx"
+    )
+    assert panel.is_file(), f"the panel moved: {panel}"
+    copy = panel.read_text()
+
+    assert f"{DEFAULT_TTL_HOURS // 24} days" in copy, (
+        f"the panel does not say {DEFAULT_TTL_HOURS // 24} days"
+    )
+    assert f"up to {DEFAULT_MAX_USES} documents" in copy, (
+        f"the panel does not say up to {DEFAULT_MAX_USES} documents"
+    )
+    # The claim that is not a number, and the one the question was actually about.
+    assert "Opening it costs nothing" in copy
