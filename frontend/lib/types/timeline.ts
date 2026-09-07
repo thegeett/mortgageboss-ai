@@ -1,10 +1,13 @@
 /** The communication timeline (LP-812) — mirrors `app/api/timeline.py`. */
 
 /** What a row IS. The server decides, so the client never re-derives it. */
-export type TimelineKind = "message" | "activity";
+/** LP-825 — one member. The timeline carries messages; the file's other history is on Recent
+ * activity, where it always belonged. Kept as a union so LP-829 can add to it. */
+export type TimelineKind = "message";
 
 /** Spec 4.3's filter pills. Defined by the SERVER — see `services/timeline.py`. */
-export type TimelineFilter = "all" | "sent" | "received" | "drafts" | "activity";
+/** LP-825 — no "activity" pill: it could only match an activity row, and there are none. */
+export type TimelineFilter = "all" | "sent" | "received" | "drafts";
 
 export interface TimelineEntry {
   id: string;
@@ -15,7 +18,7 @@ export interface TimelineEntry {
   direction: "inbound" | "outbound" | null;
   status: string | null;
   subject: string | null;
-  /** Sender for inbound, recipient for outbound. Null on an activity. */
+  /** Sender for inbound, recipient for outbound. */
   counterparty: string | null;
   actor_user_id: string | null;
   /** Filenames on an inbound message. Sender-written text — rendered, never used to build a URL. */

@@ -139,9 +139,21 @@ async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSess
     assert timeline[0].attachments == ("March_statement.pdf",)
 
 
-async def test_a_non_message_activity_still_appears(db_session: AsyncSession) -> None:
-    """THE CONTROL. Without it, a timeline that dropped EVERY activity would pass the test above —
-    and silence is the failure nobody reports."""
+async def test_a_non_message_activity_does_not_appear(db_session: AsyncSession) -> None:
+    """LP-825 — THE REPORTED DEFECT, INVERTED FROM WHAT THIS TEST USED TO ASSERT.
+
+    It read "a non-message activity STILL appears", and stood as the control against a timeline that
+    dropped everything. That control was right about the risk and wrong about the requirement: the
+    filter was written as "drop the three duplicates" and its effect was "keep the other
+    twenty-nine", so a processor's Communication page carried document classifications, DTI
+    overrides and field reviews. Measured on LF-JR4T: ten of eleven recent rows were not about
+    communication.
+
+    The control it provided has not been dropped — it moved to
+    `test_a_message_still_appears_on_an_otherwise_busy_file`, which is the only kind of row left. A
+    silent empty timeline is still the failure nobody reports; it just is not this assertion any
+    more.
+    """
     _company, loan_file = await _company_and_file(db_session, slug="activity")
     await log_activity(
         db_session,
@@ -152,8 +164,42 @@ async def test_a_non_message_activity_still_appears(db_session: AsyncSession) ->
 
     timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
-    assert [entry.kind for entry in timeline] == [TimelineKind.ACTIVITY]
-    assert timeline[0].summary == "A document was uploaded"
+    assert timeline == []
+
+
+async def test_a_message_still_appears_on_an_otherwise_busy_file(
+    db_session: AsyncSession,
+) -> None:
+    """THE CONTROL, in its new home. A timeline that returned nothing at all would satisfy the test
+    above and every filter test below, and the failure would be a Communication page that shows
+    silence on a file with a live conversation — worse than the noise it replaced."""
+    _company, loan_file = await _company_and_file(db_session, slug="busy")
+    for activity_type in (
+        ActivityType.DOCUMENT_UPLOADED,
+        ActivityType.DTI_OVERRIDDEN,
+        ActivityType.FIELD_REVIEWED,
+    ):
+        await log_activity(
+            db_session,
+            loan_file_id=loan_file.id,
+            activity_type=activity_type,
+            summary=f"{activity_type.value} happened",
+        )
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.DRAFT,
+            recipient="jane@borrower.example",
+            subject="Documents we need",
+        )
+    )
+    await db_session.flush()
+
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
+
+    assert [entry.kind for entry in timeline] == [TimelineKind.MESSAGE]
+    assert timeline[0].subject == "Documents we need"
 
 
 def test_every_communication_activity_type_is_excluded() -> None:
@@ -237,9 +283,12 @@ async def test_a_sent_message_sits_at_when_it_was_sent(db_session: AsyncSession)
 
     timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
-    # Newest first, and the message is newest because it was SENT today despite being composed
-    # three days ago.
-    assert [entry.kind for entry in timeline] == [TimelineKind.MESSAGE, TimelineKind.ACTIVITY]
+    # LP-825 — the activity row this used to sit beside is no longer on the timeline, so the
+    # ordering claim is now made against `created_at` directly: the message is placed at `sent_at`
+    # (today), not at its composition three days ago, which is the whole point of `_message_at`.
+    assert [entry.kind for entry in timeline] == [TimelineKind.MESSAGE]
+    assert timeline[0].at == sent.sent_at
+    assert timeline[0].at > sent.created_at
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -274,7 +323,9 @@ async def test_all_shows_everything(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_and_file(db_session, slug="pill-all")
     await _mixed(db_session, loan_file)
 
-    assert len((await build_timeline(db_session, loan_file=loan_file))[0]) == 5
+    # FOUR — `_mixed`'s four messages. Its activity row is not on the timeline since LP-825, and
+    # "all" means every row the timeline HAS, not every row the file has.
+    assert len((await build_timeline(db_session, loan_file=loan_file))[0]) == 4
 
 
 async def test_sent_excludes_drafts(db_session: AsyncSession) -> None:
@@ -317,15 +368,15 @@ async def test_received_is_inbound_only(db_session: AsyncSession) -> None:
     assert [entry.direction for entry in entries] == [CommunicationDirection.INBOUND.value]
 
 
-async def test_activity_excludes_every_message(db_session: AsyncSession) -> None:
-    _company, loan_file = await _company_and_file(db_session, slug="pill-act")
-    await _mixed(db_session, loan_file)
+def test_there_is_no_activity_pill(db_session: AsyncSession) -> None:
+    """LP-825 — REMOVED, NOT LEFT EMPTY. The pill could only ever match an activity row and the
+    timeline has none, so it would answer "Nothing in activity" on every file forever. A control
+    that always says nothing is a broken control, not a filter with no results.
 
-    entries, _truncated = await build_timeline(
-        db_session, loan_file=loan_file, wanted=TimelineFilter.ACTIVITY
-    )
-
-    assert [entry.kind for entry in entries] == [TimelineKind.ACTIVITY]
+    Asserted against the enum rather than the screen, because the pill list is built from it: a
+    reinstated member would put the pill back on the panel with nothing behind it."""
+    assert not hasattr(TimelineFilter, "ACTIVITY")
+    assert {f.value for f in TimelineFilter} == {"all", "sent", "received", "drafts"}
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -343,7 +394,10 @@ async def test_a_sibling_files_history_does_not_leak_in(db_session: AsyncSession
     await _mixed(db_session, theirs)
 
     assert (await build_timeline(db_session, loan_file=mine))[0] == []
-    assert len((await build_timeline(db_session, loan_file=theirs))[0]) == 5
+    # FOUR, not five: `_mixed` adds four messages and one activity, and LP-825 took the activity off
+    # the timeline. The number is stated here rather than counted from the fixture so that a change
+    # to what the timeline carries fails this test rather than silently agreeing with it.
+    assert len((await build_timeline(db_session, loan_file=theirs))[0]) == 4
 
 
 async def test_the_timeline_never_carries_a_body(db_session: AsyncSession) -> None:
@@ -528,12 +582,19 @@ async def test_a_truncated_timeline_says_so(db_session: AsyncSession) -> None:
     paginated the response at least has to be able to say there is more.
     """
     _company, loan_file = await _company_and_file(db_session, slug=f"trunc-{uuid4().hex[:6]}")
+    # MESSAGES, not activity rows. This fixture used the activity log because it was the cheapest
+    # way to make four entries; since LP-825 that produces an EMPTY timeline, and the truncation
+    # test would have passed on nothing being capped at all.
     for index in range(4):
-        await log_activity(
-            db_session,
-            loan_file_id=loan_file.id,
-            activity_type=ActivityType.DOCUMENT_UPLOADED,
-            summary=f"entry {index}",
+        db_session.add(
+            Communication(
+                loan_file_id=loan_file.id,
+                direction=CommunicationDirection.OUTBOUND,
+                status=CommunicationStatus.DRAFT,
+                recipient="jane@borrower.example",
+                subject=f"entry {index}",
+                template_key=f"trunc-{index}",
+            )
         )
     await db_session.flush()
 

@@ -35,7 +35,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.activity_log import ActivityLog, ActivityType
+from app.models.activity_log import ActivityType
 from app.models.communication import (
     Communication,
     CommunicationDirection,
@@ -56,6 +56,15 @@ from app.models.loan_file import LoanFile
 #: `COMMUNICATION_` would slip through, which is why `test_every_communication_type_is_excluded`
 #: asserts the set is non-empty and covers every member whose name matches — an empty derived set
 #: reads exactly like a working one.
+#: The activity types that describe a message — DERIVED from the enum, never listed.
+#:
+#: LP-825 — this is now a claim rather than a filter, and it is the claim the timeline rests on: an
+#: activity belongs on a communication timeline only if it is about a message, and every activity
+#: type that is about a message already has a `Communication` row carrying the same event. So there
+#: is nothing left for an activity row to be, and `build_timeline` does not query the activity log
+#: at all. Kept and exported because `test_the_three_message_activity_types_are_still_the_only_ones`
+#: asserts it against the live enum: if a thirty-third type ever describes a message without being
+#: named for one, that test is where it surfaces.
 MESSAGE_ACTIVITY_TYPES: frozenset[ActivityType] = frozenset(
     activity for activity in ActivityType if activity.name.startswith("COMMUNICATION_")
 )
@@ -68,14 +77,19 @@ class TimelineFilter(StrEnum):
     SENT = "sent"
     RECEIVED = "received"
     DRAFTS = "drafts"
-    ACTIVITY = "activity"
+    # NO `ACTIVITY` PILL SINCE LP-825. It could only ever match an activity row, and the timeline
+    # has none — a pill that always answers "Nothing in activity" is a broken control, not a filter
+    # with no results. The activity it named is on the file's Recent activity, where it belongs.
 
 
 class TimelineKind(StrEnum):
-    """What a row IS, so the client renders it without re-deriving the answer."""
+    """What a row IS, so the client renders it without re-deriving the answer.
+
+    ONE MEMBER SINCE LP-825, and it stays an enum rather than collapsing to a literal: the field is
+    what a client branches on, and LP-829's message dialog is the next thing to add to it.
+    """
 
     MESSAGE = "message"
-    ACTIVITY = "activity"
 
 
 @dataclass(frozen=True)
@@ -213,10 +227,6 @@ def _matches(entry: TimelineEntry, wanted: TimelineFilter) -> bool:
     """
     if wanted is TimelineFilter.ALL:
         return True
-    if wanted is TimelineFilter.ACTIVITY:
-        return entry.kind is TimelineKind.ACTIVITY
-    if entry.kind is not TimelineKind.MESSAGE:
-        return False
     if wanted is TimelineFilter.RECEIVED:
         return entry.direction == CommunicationDirection.INBOUND.value
     if wanted is TimelineFilter.DRAFTS:
@@ -240,7 +250,24 @@ async def build_timeline(
     wanted: TimelineFilter = TimelineFilter.ALL,
     limit: int = 200,
 ) -> tuple[list[TimelineEntry], bool]:
-    """This file's messages and activity, newest first, with each event appearing once.
+    """This file's MESSAGES, newest first, with each event appearing once.
+
+    LP-825 — NO ACTIVITY ROWS, AND THAT IS DERIVED RATHER THAN CHOSEN. A processor reported the
+    Communication page carrying the whole file's history: on LF-JR4T, ten of eleven recent rows were
+    document classifications, DTI overrides and field reviews. The cause was that this query said
+    ``notin_(MESSAGE_ACTIVITY_TYPES)`` — written as "drop the three duplicates", meaning "keep the
+    other twenty-nine".
+
+    The fix is not a longer exclusion list and not an allow-list either. Both are enumerations, and
+    an enumeration goes stale the moment somebody adds an `ActivityType`. The derivation is already
+    here: an activity belongs on a COMMUNICATION timeline only if it is about a message;
+    ``MESSAGE_ACTIVITY_TYPES`` is exactly the set of activity types about messages, derived from the
+    enum; and every one of those is excluded because the ``Communication`` row is already the entry.
+    Nothing is left. So the timeline is messages, and a thirty-third activity type inherits that by
+    construction rather than by being remembered.
+
+    The rest of the history has a home: the file's Recent activity, which is what it always
+    described.
 
     Returns the entries AND whether the cap bit. A truncated timeline that does not say so is the
     wrong failure: it reads as a complete history, and the entries it drops are the OLDEST — so a
@@ -264,24 +291,6 @@ async def build_timeline(
         .scalars()
         .all()
     )
-    activities = (
-        (
-            await db.execute(
-                only_active(
-                    select(ActivityLog).where(
-                        ActivityLog.loan_file_id == loan_file.id,
-                        # THE RECONCILIATION, in one clause. Every activity that describes a
-                        # Communication is dropped, because that Communication is already a row.
-                        ActivityLog.activity_type.notin_(MESSAGE_ACTIVITY_TYPES),
-                    ),
-                    ActivityLog,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     inbound_ids = [m.inbound_message_id for m in messages if m.inbound_message_id is not None]
     manifests = await _attachment_names(db, inbound_ids)
     senders = await _inbound_senders(db, inbound_ids)
@@ -325,23 +334,6 @@ async def build_timeline(
             },
         )
         for message in messages
-    ] + [
-        TimelineEntry(
-            id=activity.id,
-            kind=TimelineKind.ACTIVITY,
-            at=activity.created_at,
-            summary=activity.summary,
-            direction=None,
-            status=None,
-            subject=None,
-            counterparty=None,
-            actor_user_id=activity.actor_user_id,
-            attachments=(),
-            is_important=False,
-            unread=False,
-            detail=dict(activity.detail or {}),
-        )
-        for activity in activities
     ]
 
     entries.sort(key=lambda entry: entry.at, reverse=True)

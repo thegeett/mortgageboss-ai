@@ -122,12 +122,36 @@ export function useLoanFileBorrowers(identifier: string) {
 // The needs list moved to its own data layer (LP-70) — see `lib/api/needs.ts`,
 // which adds live polling + the disposition mutations.
 
-export function useLoanFileActivity(identifier: string) {
-  return useQuery({
-    queryKey: ["loan-file-activity", identifier],
+/** LP-825 — the first page of Recent activity. */
+export const ACTIVITY_PAGE = 20;
+
+/**
+ * The file's recent activity, newest first.
+ *
+ * `limit` IS PART OF THE QUERY KEY, so "see more" is a new query rather than a refetch of the same
+ * one — the previous page stays cached and visible while the larger one loads, instead of the list
+ * emptying and re-filling under the reader.
+ *
+ * ONE ROW OVER THE ASK. The endpoint has no total and no cursor, so the only way to know whether
+ * there is more is to ask for one more than is shown. `hasMore` is that extra row's existence, and
+ * `entries` drops it — otherwise every "see more" would reveal a row that was already on screen.
+ */
+export function useLoanFileActivity(identifier: string, limit: number = ACTIVITY_PAGE) {
+  const query = useQuery({
+    queryKey: ["loan-file-activity", identifier, limit],
     queryFn: async () =>
-      (await apiClient.get<ActivityPublic[]>(`${LOAN_FILES_PATH}/${identifier}/activity`)).data,
+      (
+        await apiClient.get<ActivityPublic[]>(`${LOAN_FILES_PATH}/${identifier}/activity`, {
+          params: { limit: limit + 1 },
+        })
+      ).data,
     enabled: Boolean(identifier),
     retry: noRetryOn404,
   });
+  const fetched = query.data;
+  return {
+    ...query,
+    data: fetched?.slice(0, limit),
+    hasMore: fetched !== undefined && fetched.length > limit,
+  };
 }

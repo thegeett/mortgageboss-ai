@@ -116,7 +116,11 @@ async def test_the_timeline_reads_back(client: AsyncClient, db: AsyncSession) ->
     resp = await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
 
     assert resp.status_code == 200
-    assert len(resp.json()["entries"]) == 3
+    # TWO, not three. `_history` writes two messages and one activity, and LP-825 took the activity
+    # off this screen — the file's document, DTI and field history is on Recent activity, which is
+    # what it always described. Stated rather than counted off the fixture, so a change to what the
+    # timeline carries fails here instead of agreeing with itself.
+    assert [e["kind"] for e in resp.json()["entries"]] == ["message", "message"]
     # Spec 4.3 asks for the address on this screen; ADR-397's accessor is what produces it.
     assert resp.json()["inbox_address"] == loan_file.get_inbox_address()
 
@@ -198,3 +202,37 @@ async def test_no_message_body_reaches_the_response(client: AsyncClient, db: Asy
     assert "4821" not in resp.text
     assert "Dear Jane" not in resp.text
     assert resp.json()["entries"][0]["subject"] == "Your documents"
+
+
+async def test_the_activity_endpoint_pages(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-825 — Recent activity is where the file's non-message history went, so twenty rows with no
+    way past them is the whole record a processor can reach.
+
+    `limit` is a client's ask with a ceiling on it: the cap exists so "see more" cannot become
+    "return this file's entire history in one request" by a client passing a large number.
+    """
+    company, token = await _company_user_token(db, slug="paging")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    for index in range(25):
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.DOCUMENT_PROCESSED,
+            summary=f"Classified document {index}",
+        )
+    await db.commit()
+
+    url = f"{API}/{loan_file.display_id}/activity"
+    default = await client.get(url, headers=_auth(token))
+    assert default.status_code == 200
+    assert len(default.json()) == 20, "the default page is what the feed shows"
+
+    more = await client.get(url, params={"limit": 25}, headers=_auth(token))
+    assert more.status_code == 200
+    assert len(more.json()) == 25
+
+    # THE CEILING, asserted as a REFUSAL rather than as a silent clamp: a client asking for more
+    # than the cap should be told, not quietly given less than it asked for and left to believe it
+    # has the whole history.
+    assert (await client.get(url, params={"limit": 5000}, headers=_auth(token))).status_code == 422
+    assert (await client.get(url, params={"limit": 0}, headers=_auth(token))).status_code == 422

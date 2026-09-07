@@ -18,11 +18,16 @@ export function ActivityFeed({
   isPending,
   isError,
   onRetry,
+  hasMore = false,
+  onSeeMore,
 }: {
   activity: ActivityPublic[] | undefined;
   isPending: boolean;
   isError: boolean;
   onRetry?: () => void;
+  /** LP-825 — whether the file has history past what is shown. */
+  hasMore?: boolean;
+  onSeeMore?: () => void;
 }) {
   return (
     <Card className="border-border/80">
@@ -62,6 +67,19 @@ export function ActivityFeed({
             ))}
           </ul>
         )}
+        {/* LP-825 — THE OVERFLOW. This feed was capped at twenty with nothing saying so, and it is
+            now where the file's whole non-message history lives: the Communication timeline used to
+            carry it and no longer does. A list that stops without a way past it is the same silent
+            truncation LP-812's review already fixed once, on the other panel. */}
+        {hasMore && onSeeMore ? (
+          <button
+            type="button"
+            onClick={onSeeMore}
+            className="mt-3 text-sm font-medium text-primary hover:underline"
+          >
+            See more
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );

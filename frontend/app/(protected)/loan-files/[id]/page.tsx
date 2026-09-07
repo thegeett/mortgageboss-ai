@@ -6,8 +6,14 @@ import { MismoWarnings } from "@/components/file/overview/mismo-warnings";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
 import { ReconciliationLedger } from "@/components/file/overview/reconciliation-ledger";
 import { StatedFinancialsSection } from "@/components/file/overview/stated-financials-section";
-import { useLoanFile, useLoanFileActivity, useLoanFileBorrowers } from "@/lib/api/loan-files";
+import {
+  ACTIVITY_PAGE,
+  useLoanFile,
+  useLoanFileActivity,
+  useLoanFileBorrowers,
+} from "@/lib/api/loan-files";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 
 /**
  * Overview tab (LP-34) — the at-a-glance file summary. Composes the file detail
@@ -25,7 +31,10 @@ export default function OverviewPage() {
   const { id } = useParams<{ id: string }>();
   const file = useLoanFile(id);
   const borrowers = useLoanFileBorrowers(id);
-  const activity = useLoanFileActivity(id);
+  // LP-825 — Recent activity is now the file's whole non-message history, so it needs a way past
+  // the first page. Held here rather than inside the feed because the hook keyed on it lives here.
+  const [activityLimit, setActivityLimit] = useState(ACTIVITY_PAGE);
+  const activity = useLoanFileActivity(id, activityLimit);
 
   return (
     <div className="space-y-6">
@@ -68,6 +77,8 @@ export default function OverviewPage() {
         isPending={activity.isPending}
         isError={activity.isError}
         onRetry={() => void activity.refetch()}
+        hasMore={activity.hasMore}
+        onSeeMore={() => setActivityLimit((shown) => shown + ACTIVITY_PAGE)}
       />
     </div>
   );

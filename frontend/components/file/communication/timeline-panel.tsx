@@ -20,17 +20,7 @@ import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib
 import { useTimeline } from "@/lib/api/timeline";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { formatDistanceToNow } from "date-fns";
-import {
-  Check,
-  Copy,
-  FileText,
-  Mail,
-  MailOpen,
-  PenLine,
-  Reply,
-  Star,
-  TriangleAlert,
-} from "lucide-react";
+import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
@@ -38,7 +28,9 @@ const PILLS: { value: TimelineFilter; label: string }[] = [
   { value: "sent", label: "Sent" },
   { value: "received", label: "Received" },
   { value: "drafts", label: "Drafts" },
-  { value: "activity", label: "Activity" },
+  // LP-825 — NO "Activity" PILL. It matched activity rows, and the timeline no longer has any: the
+  // file's document, DTI and field history is on Recent activity, which is what it always
+  // described. A pill that answers "Nothing in activity" on every file is a broken control.
 ];
 
 /**
@@ -49,8 +41,6 @@ const PILLS: { value: TimelineFilter; label: string }[] = [
  * will not notice the one that did not arrive.
  */
 function EntryIcon({ entry }: { entry: TimelineEntry }) {
-  if (entry.kind === "activity")
-    return <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />;
   if (entry.status === "failed")
     return <TriangleAlert className="h-4 w-4 text-danger" aria-hidden />;
   if (entry.status === "draft" || entry.status === "queued") {
