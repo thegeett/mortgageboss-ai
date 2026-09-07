@@ -389,3 +389,93 @@ async def test_clearing_returns_null(client: AsyncClient, db: AsyncSession) -> N
 
     assert resp.status_code == 200
     assert resp.json() is None
+
+
+# --------------------------------------------------------------------------------------------- #
+# The gate is per route, so something has to notice a new route without it (review finding)
+# --------------------------------------------------------------------------------------------- #
+#: Mutating routes that are DELIBERATELY not admin-gated, each with the reason it is exempt.
+#:
+#: Named individually rather than pattern-matched: an exemption should cost somebody a line in this
+#: file and a sentence explaining it, which is the only thing that makes the default meaningful.
+_UNGATED_BY_DESIGN = {
+    (
+        "PUT",
+        "/loan-files/{file_identifier}/underwriter",
+    ): "configuring which lenders exist is administration; deciding who is handling THIS file is "
+    "the processor's own work, and gating it would make every reassignment wait on somebody else",
+}
+
+
+def test_every_mutating_lender_route_is_admin_gated() -> None:
+    """LP-813 put the admin gate on each route rather than the router, and that was right — on the
+    router it would have taken the processor-facing `GET /lenders` with it and 403'd the intake
+    form's lender dropdown.
+
+    The cost of per-route is that a NEW write route added without the gate is silently open, and
+    every existing refusal test passes because they test the routes that exist. This walks the
+    routers instead, so the failure arrives when the route is added rather than when someone
+    notices.
+
+    Detected by dependency IDENTITY — the same `_ADMIN` object every gated route shares — rather
+    than by reading source or matching a name, so a route that merely mentions `require_role` in a
+    docstring does not count as gated.
+    """
+    from app.api.lenders import _ADMIN, file_router, router
+
+    admin_dependency = _ADMIN.dependency
+    ungated: list[str] = []
+
+    for route in [*router.routes, *file_router.routes]:
+        methods = getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}
+        mutating = methods - {"GET"}
+        if not mutating:
+            continue
+        gated = any(
+            dependency.call is admin_dependency for dependency in route.dependant.dependencies
+        )
+        for method in sorted(mutating):
+            if gated or (method, route.path) in _UNGATED_BY_DESIGN:
+                continue
+            ungated.append(f"{method} {route.path}")
+
+    assert not ungated, (
+        "these mutating routes carry no admin gate. Either add `_ADMIN`, or add them to "
+        f"_UNGATED_BY_DESIGN with the reason: {ungated}"
+    )
+
+
+def test_the_exemption_list_describes_routes_that_exist() -> None:
+    """A stale exemption is worse than none: it reads as a considered decision about a route that
+    is no longer there, and it would silently cover a future route that reused the path."""
+    from app.api.lenders import file_router, router
+
+    live = {
+        (method, route.path)
+        for route in [*router.routes, *file_router.routes]
+        for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}
+    }
+    stale = [entry for entry in _UNGATED_BY_DESIGN if entry not in live]
+
+    assert not stale, f"exemptions for routes that no longer exist: {stale}"
+
+
+def test_the_gate_detection_would_notice_an_ungated_route() -> None:
+    """The positive control for the two tests above.
+
+    Both are absence assertions over a set the code supplies, so they would pass just as happily
+    against a detector that found nothing at all. This builds a route with no gate and asserts the
+    detection sees it — the same shape as an unrouted fixture that cannot reach the dangerous case.
+    """
+    from app.api.lenders import _ADMIN
+    from fastapi import APIRouter
+
+    probe = APIRouter()
+
+    @probe.post("/probe")
+    async def _probe() -> None:  # pragma: no cover - never called
+        return None
+
+    (route,) = probe.routes
+    gated = any(dependency.call is _ADMIN.dependency for dependency in route.dependant.dependencies)
+    assert gated is False
