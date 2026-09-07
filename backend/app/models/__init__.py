@@ -21,6 +21,7 @@ from app.models.communication import (
     CommunicationDirection,
     CommunicationStatus,
 )
+from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.company import Company
 from app.models.document import (
     Document,
@@ -105,6 +106,7 @@ __all__ = [
     "Communication",
     "CommunicationChannel",
     "CommunicationDirection",
+    "CommunicationNeedsItem",
     "CommunicationStatus",
     "Company",
     "Document",

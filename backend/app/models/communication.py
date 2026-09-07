@@ -8,6 +8,11 @@ the Phase 4 communication module.
 This ticket creates the **record** and a minimal create helper. Email **sending**
 and inbound **routing** are Phase 4; here a communication is just persisted state.
 
+LP-809 adds template provenance and the ``communication_needs_items`` join: a DRAFT document
+request accumulates needs and regenerates its body from them, which the single ``needs_item_id``
+column cannot express. That column is unchanged and still answers "which need was this message
+about" for a sent, single-purpose message.
+
 A communication is a separate model from :class:`~app.models.activity_log.
 ActivityLog` (ADR-070): it carries message-specific fields (sender/recipient/
 subject/body) that an event log doesn't need. A *sent* communication may also
@@ -24,12 +29,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
-from app.models.types import MEDIUM_STRING
+from app.models.types import MEDIUM_STRING, SHORT_STRING
 
 if TYPE_CHECKING:
     from app.models.loan_file import LoanFile
@@ -70,6 +75,23 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A message associated with a loan file."""
 
     __tablename__ = "communications"
+    __table_args__ = (
+        # LP-809 — ONE OPEN DRAFT PER (FILE, TEMPLATE KIND). Without it, two near-simultaneous
+        # requests each find no draft, each create one, and the file holds two half-populated drafts
+        # with no basis for choosing between them. Declared here as well as in the migration because
+        # the test database is built by `create_all`: a constraint that exists only in the migration
+        # is a constraint no test can violate, which is the same as not having one.
+        #
+        # PARTIAL. A file accumulates hundreds of SENT messages and they must not collide.
+        Index(
+            "uq_communications_open_draft",
+            "loan_file_id",
+            "template_key",
+            unique=True,
+            postgresql_where=text("status = 'draft' AND deleted_at IS NULL"),
+            sqlite_where=text("status = 'draft' AND deleted_at IS NULL"),
+        ),
+    )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
     loan_file_id: Mapped[UUID] = mapped_column(
@@ -110,6 +132,18 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     # e.g. an inbound email Message-ID, kept for threading/dedup.
     external_message_id: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+
+    # --- Which template produced this body (LP-809) ------------------------
+    # `phase4.md` §6 requires the communication record to capture "template + version" alongside the
+    # rendered body, because that record is evidence. LP-817 pins each version to a content hash
+    # (ADR-401) so a version identifies exactly one set of words — but only if the version that was
+    # used is stored. These are that storage.
+    #
+    # NULL for inbound mail and for anything composed by hand: not every message comes from a
+    # template, and a placeholder value would make "which template?" unanswerable in the one case
+    # where the honest answer is "none".
+    template_key: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    template_version: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 

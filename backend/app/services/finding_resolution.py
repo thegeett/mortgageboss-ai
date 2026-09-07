@@ -48,6 +48,7 @@ from app.models.needs_item import (
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
+from app.services.email_draft import add_needs_to_draft
 from app.services.finding_requests import (
     NotRequestable,
     docs_requested_marker,
@@ -595,6 +596,13 @@ async def request_documents_in_bulk(
             }
 
     if created:
+        # LP-809 — the requested documents join the file's OPEN draft rather than each becoming its
+        # own email. Deliberately after the needs items exist and before the activity log: a draft
+        # that referenced a need not yet flushed would fail its foreign key, and a log line claiming
+        # a request was made should not precede the draft that will carry it.
+        await add_needs_to_draft(
+            db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+        )
         await log_activity(
             db,
             loan_file_id=loan_file.id,

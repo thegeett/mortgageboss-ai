@@ -875,6 +875,49 @@ def test_every_model_module_is_reachable_from_app_models() -> None:
                 )
 
 
+async def test_the_lp809_views_are_valid_sql(db_session: AsyncSession) -> None:
+    """LP-809's two views, executed rather than only string-matched — the same gap LP-822's review
+    found, in the migration that comes after it.
+
+    One is NEW (`communication_needs_items`) and one is a REBUILD (`communications`, gaining
+    `template_key` and `template_version`). The rebuild is the more dangerous of the two: it drops a
+    view that already exists and recreates it, so a mistake does not merely fail to add a view, it
+    leaves the deploy with none — and the checks above would still pass, because they read the
+    migration's text and the text is syntactically fine.
+
+    The rebuilt view calls `readonly.scrub`, so the function is installed first; without it the
+    failure would be "no such function" rather than anything about this migration.
+    """
+    c7 = _migration_module()
+    module = _view_module("b8d5e0a17c42")
+    await db_session.execute(sa.text("CREATE SCHEMA IF NOT EXISTS readonly"))
+    await db_session.execute(sa.text(c7._SCRUB_FN))  # type: ignore[attr-defined]
+    await db_session.execute(sa.text("DROP VIEW IF EXISTS readonly.communications"))
+    await db_session.execute(sa.text("DROP VIEW IF EXISTS readonly.communication_needs_items"))
+    await db_session.execute(sa.text(module._COMMUNICATIONS_VIEW))  # type: ignore[attr-defined]
+    await db_session.execute(sa.text(module._JOIN_VIEW))  # type: ignore[attr-defined]
+
+    exposed = {
+        (row.table_name, row.column_name)
+        for row in (
+            await db_session.execute(
+                sa.text(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'readonly' "
+                    "AND table_name IN ('communications', 'communication_needs_items')"
+                )
+            )
+        ).all()
+    }
+    # The two columns the rebuild exists to add.
+    assert ("communications", "template_key") in exposed
+    assert ("communications", "template_version") in exposed
+    # And the content C7 dropped is still dropped. A rebuild is exactly where that comes back by
+    # accident, because the new view is written fresh rather than altered.
+    for column in ("body", "subject", "sender", "recipient"):
+        assert ("communications", column) not in exposed
+
+
 async def test_the_style_profiles_view_is_valid_sql(db_session: AsyncSession) -> None:
     """LP-822's review — the view's DDL had nothing that ever RAN it.
 
