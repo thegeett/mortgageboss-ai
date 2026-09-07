@@ -38,12 +38,23 @@ function draft(over: Partial<TimelineEntry> = {}): TimelineEntry {
   };
 }
 
-function loaded(entries: TimelineEntry[]) {
+function loaded(entries: TimelineEntry[], { truncated = false } = {}) {
   mockTimeline.mockReturnValue({
-    data: { entries, inbox_address: "lf-t@imbox.example.test", truncated: false },
+    data: { entries, inbox_address: "lf-t@imbox.example.test", truncated },
     isPending: false,
     isError: false,
   });
+}
+
+// `user-event` is not a dependency here, and adding one to open a menu would be a heavier answer
+// than the question. Radix opens on a real pointer-down/up pair; `fireEvent.click` alone does not
+// reach it, which is why this is spelled out rather than a one-liner.
+async function openMenu() {
+  const trigger = screen.getByRole("button");
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeNull());
 }
 
 describe("DraftsIndicator", () => {
@@ -82,17 +93,6 @@ describe("DraftsIndicator", () => {
 });
 
 describe("the menu", () => {
-  // `user-event` is not a dependency here, and adding one to open a menu would be a heavier answer
-  // than the question. Radix opens on a real pointer-down/up pair; `fireEvent.click` alone does not
-  // reach it, which is why this is spelled out rather than a one-liner.
-  async function openMenu() {
-    const trigger = screen.getByRole("button");
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
-    fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
-    fireEvent.click(trigger);
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeNull());
-  }
-
   it("links each draft so the page opens it", async () => {
     // THE HALF THAT FAILS QUIETLY. Navigating is visible; opening the modal on arrival is a second
     // thing, and if it is missed a processor lands on a list and assumes they mis-clicked. The
@@ -134,5 +134,46 @@ describe("the menu", () => {
     await openMenu();
 
     expect(screen.getByText(/^Created .*ago$/)).toBeTruthy();
+  });
+});
+
+/**
+ * LP-837 REVIEW — THE COUNT CAN BE A PAGE RATHER THAN A TOTAL.
+ *
+ * `build_timeline` takes `limit: int = 200` and returns `matched[:limit], len(matched) > limit`, so
+ * `entries.length` is capped. `TimelinePublic.truncated` says when that happened, the client type
+ * declares it, and `timeline-panel.tsx` — the component beside this one, reading the same query —
+ * already renders it. This one read the length and said "See all 200 drafts": a number that looks
+ * like a total and is a limit, which is the silent truncation LP-812 refused.
+ */
+describe("DraftsIndicator — a capped count does not claim to be a total", () => {
+  const many = Array.from({ length: 200 }, (_, i) => draft({ id: `d-${i}` }));
+
+  it("marks the badge and the accessible name as a floor", () => {
+    loaded(many, { truncated: true });
+    render(<DraftsIndicator fileId="LF-JR4T" />);
+
+    const trigger = screen.getByRole("button", { name: /at least 200 drafts on this file/i });
+    expect(trigger.textContent).toContain("200+");
+  });
+
+  it("drops the number from the overflow link when it would be a limit", async () => {
+    loaded(many, { truncated: true });
+    render(<DraftsIndicator fileId="LF-JR4T" />);
+    await openMenu();
+
+    expect(screen.getByRole("link", { name: "See all drafts" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /See all 200 drafts/ })).toBeNull();
+  });
+
+  it("still states the exact total when nothing was capped", async () => {
+    // THE CONTROL. A component that never printed a number would satisfy both cases above, and the
+    // ordinary file — which is every file today — is the one that must read exactly.
+    loaded([draft({ id: "a" }), draft({ id: "b" })], { truncated: false });
+    render(<DraftsIndicator fileId="LF-JR4T" />);
+
+    const trigger = screen.getByRole("button", { name: "2 drafts on this file" });
+    expect(trigger.textContent).toContain("2");
+    expect(trigger.textContent).not.toContain("+");
   });
 });

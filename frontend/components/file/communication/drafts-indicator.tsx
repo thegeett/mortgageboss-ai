@@ -45,6 +45,18 @@ export function DraftsIndicator({ fileId }: { fileId: string }) {
   const drafts = data?.entries ?? [];
   if (drafts.length === 0) return null;
 
+  // LP-837 REVIEW — THE COUNT CAN BE CAPPED, AND THE PAYLOAD ALREADY SAYS SO. `build_timeline` takes
+  // `limit: int = 200` and returns `matched[:limit], len(matched) > limit`, so `entries.length` is a
+  // page rather than a total. `TimelinePublic.truncated` carries that, `lib/types/timeline.ts`
+  // declares it, and `timeline-panel.tsx:433` — the component beside this one, on the same query —
+  // already renders it. This read the length and said "See all 200 drafts", which is the silent
+  // truncation LP-812 refused: a number that looks like a total and is a limit.
+  //
+  // `200+` rather than a second request for the real total: the badge's job is "there are drafts and
+  // roughly how many", and a count query for a case nobody has hit would be work for a digit.
+  const capped = data?.truncated ?? false;
+  const countLabel = capped ? `${drafts.length}+` : `${drafts.length}`;
+
   const shown = drafts.slice(0, POPOVER_LIMIT);
   const communicationPath = `/loan-files/${fileId}/communication`;
 
@@ -57,11 +69,15 @@ export function DraftsIndicator({ fileId }: { fileId: string }) {
       <DropdownMenuTrigger
         className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
         aria-label={
-          drafts.length === 1 ? "1 draft on this file" : `${drafts.length} drafts on this file`
+          capped
+            ? `At least ${drafts.length} drafts on this file`
+            : drafts.length === 1
+              ? "1 draft on this file"
+              : `${drafts.length} drafts on this file`
         }
       >
         <FileText className="h-3.5 w-3.5" aria-hidden />
-        {drafts.length}
+        {countLabel}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 p-0">
         {shown.map((draft) => (
@@ -93,7 +109,8 @@ export function DraftsIndicator({ fileId }: { fileId: string }) {
               href={communicationPath}
               className="block border-t border-border px-3 py-2 text-xs font-medium text-primary hover:bg-muted"
             >
-              See all {drafts.length} drafts
+              {/* NO NUMBER WHEN IT WOULD BE A LIMIT RATHER THAN A TOTAL. */}
+              {capped ? "See all drafts" : `See all ${drafts.length} drafts`}
             </Link>
           </>
         ) : null}
