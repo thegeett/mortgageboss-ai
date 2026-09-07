@@ -252,14 +252,28 @@ export function ReviewerFields({
                     </span>
                   ) : null}
 
-                  {/* A field with no value has nothing to check — a mark here
-                      would be telling a processor to go and read a dash. A list
-                      has no single value to accept or correct either, so it
-                      carries no mark and opens no editor (LP-702); editing rows
-                      is LP-703's subject. */}
-                  {field.kind === "scalar" && field.value && field.value !== EMPTY_VALUE ? (
+                  {/* A list has no single value to accept or correct, so it carries
+                      no mark and opens no editor (LP-702); editing rows is LP-703's
+                      subject.
+
+                      THE EMPTY-VALUE RULE APPLIES TO THE MARK ALONE, and used to
+                      gate this whole group by sitting on the outside of it. A mark
+                      on a field with no value would be telling a processor to go and
+                      read a dash — that argument is about the MARK. Applied to Edit
+                      and Undo it made the mouse and the keyboard disagree in exactly
+                      the case LP-711 says they cannot: `editableFieldKey` asks only
+                      whether a field is scalar, so `E` opens the editor on a field
+                      the model returned empty while no Edit control was drawn for
+                      it, and that is the one field a processor most needs to supply
+                      — `AddField` cannot offer it either, because it is already in
+                      the extraction. Undo went the same way, so a verdict recorded
+                      on an empty field by keystroke could not be withdrawn from the
+                      screen at all, which is the LP-703 finding again. */}
+                  {field.kind === "scalar" ? (
                     <span className="flex flex-wrap items-center gap-x-2">
-                      <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                      {field.value && field.value !== EMPTY_VALUE ? (
+                        <ScrutinyMark input={tierInputFor(field.confidence, scrutiny[field.key])} />
+                      ) : null}
                       {/* UNDO IS REACHABLE, which it was not until LP-703.
                         `useRevertFieldReview` existed from LP-UI-033 and no
                         component called it, so every decision — including one made

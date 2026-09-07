@@ -226,14 +226,15 @@ function Reviewer() {
   const openEditor = useCallback(
     // `requested` is the mouse path (LP-711): the Edit control names the field it
     // sits on rather than relying on `selected` having already settled in the same
-    // click. It goes through `editableFieldKey` like the keyboard does, so the two
-    // cannot disagree about which fields can be edited — which is the lockout
-    // above, reachable from a second direction.
+    // click. ONE CALL, NOT A BRANCH PER PATH — `editableSelection` is this same
+    // function applied to `field.selected`, so a branch here was two spellings of
+    // one rule and the next argument added to either would have separated them.
+    // The keyboard passes nothing and gets the selection; the mouse names its row.
     (requested?: string) => {
-      const key = requested ? editableFieldKey(fields, requested) : editableSelection();
+      const key = editableFieldKey(fields, requested ?? field.selected);
       if (key) setEditing(key);
     },
-    [editableSelection, fields],
+    [fields, field.selected],
   );
 
   useReviewKeys(

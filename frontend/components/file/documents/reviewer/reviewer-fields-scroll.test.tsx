@@ -21,6 +21,7 @@ vi.mock("@/lib/api/documents", () => ({
 }));
 
 import { extractionFields } from "@/lib/loan-files/documents";
+import { editableFieldKey } from "./review-queue";
 import { ReviewerFields } from "./reviewer-fields";
 
 /** The rows the PAGE derives and passes down (LP-703 review). */
@@ -146,6 +147,89 @@ describe("the WHOLE ROW selects the field, not just its name", () => {
     expect(snippet, "the row should render its source snippet").toBeTruthy();
     fireEvent.click(snippet as Element);
     expect(onSelect).toHaveBeenCalledWith("gross_pay");
+  });
+
+  it("offers Edit on a field the model returned EMPTY, as the keyboard does", () => {
+    // `editableFieldKey` asks only whether a field is scalar, so `E` opens the
+    // editor on an empty one. The Edit control sat inside a gate requiring a
+    // value, so the mouse could not — the two disagreeing in exactly the case
+    // LP-711 says they cannot.
+    //
+    // It is also the field a processor most needs: the model found nothing, and
+    // `AddField` cannot offer it either, because the key IS in the extraction.
+    const empty = extractionFields({ ytd_gross: { value: "", source: { page: 1, snippet: "s" } } });
+    expect(editableFieldKey(empty, "ytd_gross")).toBe("ytd_gross");
+    const onEdit = vi.fn();
+    render(
+      <ReviewerFields
+        documentId="d1"
+        fields={empty}
+        selected="ytd_gross"
+        editing={null}
+        onEdit={onEdit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(onEdit).toHaveBeenCalledWith("ytd_gross");
+  });
+
+  it("offers Undo for a verdict on an empty field, so it is not permanent", () => {
+    // The same gate took Undo with it, so a verdict recorded by keystroke on an
+    // empty field could not be withdrawn from the screen at all — which is the
+    // LP-703 finding (`useRevertFieldReview` built and unreachable) once more.
+    const raw = { ytd_gross: { value: "", source: { page: 1, snippet: "s" } } };
+    detail.data = {
+      status: "completed",
+      current_extraction: { extracted_data: raw },
+      field_scrutiny: { ytd_gross: { verdict: "rejected" } },
+    };
+    const onUndo = vi.fn();
+    render(
+      <ReviewerFields
+        documentId="d1"
+        fields={extractionFields(raw)}
+        selected={null}
+        onUndo={onUndo}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(onUndo).toHaveBeenCalledWith("ytd_gross");
+  });
+
+  it("still shows no confidence mark on an empty field", () => {
+    // The control for the two above: moving Edit and Undo out of that gate must
+    // not drag the MARK out with them. A mark on a field with no value tells a
+    // processor to go and read a dash, and that argument was always about the mark.
+    const raw = { ytd_gross: { value: "", source: { page: 1, snippet: "s" } } };
+    detail.data = { status: "completed", current_extraction: { extracted_data: raw } };
+    const { container } = render(
+      <ReviewerFields documentId="d1" fields={extractionFields(raw)} selected="ytd_gross" />,
+    );
+    // The mark is the only `cursor-help` control in a row — it is a button whose
+    // whole job is to be hovered for the reason a field was flagged.
+    expect(container.querySelector(".cursor-help")).toBeNull();
+
+    // AND IT RENDERS WHEN THERE IS A VALUE, or the assertion above would hold for
+    // a mark that had stopped drawing anywhere and say nothing about this gate.
+    cleanup();
+    const valued = { gross_pay: { value: "15000", source: { page: 1, snippet: "s" } } };
+    detail.data = { status: "completed", current_extraction: { extracted_data: valued } };
+    const withValue = render(
+      <ReviewerFields documentId="d1" fields={extractionFields(valued)} selected="gross_pay" />,
+    );
+    expect(withValue.container.querySelector(".cursor-help")).toBeTruthy();
+  });
+
+  it("does not stop a drag-select: the row carries no `select-none`", () => {
+    // The ticket asserts `defaultPrevented === false` on a synthetic click, which
+    // is the weaker half of the claim. What actually breaks copying an account
+    // number out of a row is `user-select: none` — the utility someone reaches for
+    // when a row becomes clickable and the text starts highlighting on a
+    // double-click. A synthetic click cannot see that, and neither can jsdom
+    // execute a real drag, so this pins the class instead.
+    render(<ReviewerFields documentId="d1" fields={FIELDS} selected={null} />);
+    const row = screen.getByText("v-gross_pay").closest("li");
+    expect(row?.className).not.toMatch(/(^|\s|:)select-none(\s|$)/);
   });
 
   it("pointing at anywhere in the row hovers its field, and leaving clears it", () => {
