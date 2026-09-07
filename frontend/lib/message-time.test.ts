@@ -88,31 +88,49 @@ describe("the two presentations", () => {
 });
 
 describe("no surface keeps its own format", () => {
-  it("nothing under components/file/communication formats a message time itself", async () => {
+  it("no surface that shows a message time formats it itself", async () => {
     // LP-838 — THE CLASS, ASSERTED RATHER THAN DESCRIBED. "Every surface that lists or opens a
     // message" is the sentence that produces four date formats and one of them wrong, and it had
     // already produced three: two functions both called `when` with different behaviour, and a
     // `toLocaleString()` on the inbound card — on the same page, none wrong on its own.
     //
     // A fourth surface inherits the rule by failing this rather than by somebody remembering.
-    const { readdirSync, readFileSync } = await import("node:fs");
+    const { existsSync, readdirSync, readFileSync } = await import("node:fs");
     const dir = new URL("../components/file/communication/", import.meta.url).pathname;
 
-    const offenders = readdirSync(dir)
-      .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
-      .filter((name) => {
-        // COMMENTS STRIPPED FIRST. This test is about what the code DOES, and the comment explaining
-        // why `toLocaleString()` was removed from the inbound card matched the scan and reported the
-        // file it had just fixed. A guard that fires on prose about itself is a guard nobody keeps.
-        const source = readFileSync(`${dir}${name}`, "utf8")
-          .replace(/\/\*[\s\S]*?\*\//g, "")
-          .replace(/^\s*\/\/.*$/gm, "");
+    // LP-838 REVIEW — THE FILE HEADER IS IN SCOPE, because that is where the next one lands.
+    // LP-837's drafts popover is specified for `components/file/file-header.tsx`, and this ticket
+    // moved the "the time comes from `lib/message-time.ts`" requirement into LP-837's done-when —
+    // a sentence in a document, which is the thing this ticket exists to stop being the mechanism.
+    // Scanning the file it will live in is what makes the requirement hold on the day it is written.
+    const extra = [new URL("../components/file/file-header.tsx", import.meta.url).pathname];
+
+    const scanned = [
+      ...readdirSync(dir)
+        .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+        .map((name) => `${dir}${name}`),
+      ...extra.filter(existsSync),
+    ];
+    // A SCAN OVER NOTHING PASSES. Both halves must actually be there, or this reports no offenders
+    // because it read no files — and a renamed directory would read as a clean bill of health.
+    expect(scanned.length).toBeGreaterThan(3);
+    expect(extra.every(existsSync)).toBe(true);
+
+    const offenders = scanned
+      .filter((path) => {
+        // NO COMMENT STRIPPING. It was here for exactly one sentence — the inbound card's note
+        // about what it had replaced — and it could be defeated: an unclosed `/*` in one string
+        // literal and a `*/` in a later one makes the strip swallow the code between them, which
+        // measures as the offender disappearing. That comment names the formatter instead of
+        // quoting it, so a plain substring scan is both simpler and harder to fool.
+        const source = readFileSync(path, "utf8");
         return (
           source.includes("toLocaleString()") ||
           source.includes("formatDistanceToNow") ||
           /format\(new Date/.test(source)
         );
-      });
+      })
+      .map((path) => path.slice(path.lastIndexOf("/") + 1));
 
     expect(offenders).toEqual([
       // The one legitimate exception, and it is not a message: an upload link's EXPIRY is a

@@ -44,7 +44,16 @@ export function messageTimeLabel(message: {
   // NULLABLE ON A TIMELINE ROW, and typed that way rather than asserted away. `TimelineEntry`
   // declares both as `string | null` — LP-825 left the shape wide enough for a kind that is not a
   // message, and narrowing here with a cast would be the client deciding something the server did
-  // not say. An unlabelled time is better than a wrong label.
+  // not say.
+  //
+  // LP-838 REVIEW — "AN UNLABELLED TIME IS BETTER THAN A WRONG LABEL" WAS THE SENTENCE HERE, AND
+  // THE CODE RETURNS "Created". Both cannot be true of the same function, so the sentence is the
+  // part that goes. `Communication.direction` and `.status` are both `nullable=False`, and
+  // `build_timeline` reads `.value` off each — so a row reaching this with both null cannot come
+  // from the server today. Returning "Created" for it costs nothing real, and adding an unlabelled
+  // branch would be machinery for a case that cannot occur plus two callers learning to trim a
+  // leading space. If a non-message kind is ever added, THIS is the line to revisit, and the
+  // wrongness would be visible rather than silent.
   if (message.direction === "inbound") return "Received";
   if (message.status === "sent" || message.status === "delivered") return "Sent";
   if (message.status === "failed") return "Failed";

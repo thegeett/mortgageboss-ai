@@ -70,9 +70,15 @@ function RoutingNote({ message }: { message: InboundMessage }) {
 
 function receivedLabel(iso: string | null): string {
   // LP-838 — THE THIRD FORMAT ON THIS PAGE, and the one the ticket's class-level statement was
-  // written to catch. `toLocaleString()` gave a locale-dependent absolute time beside a timeline
+  // written to catch. This used the browser's locale-dependent absolute formatter, beside a timeline
   // showing "2 hours ago" and a modal showing "4 Sep 2026, 14:30" — three formats for the same kind
   // of fact, on one screen, none of which was wrong on its own.
+  //
+  // The formatter is NAMED rather than quoted, deliberately: the class guard in
+  // `lib/message-time.test.ts` is a plain substring scan over this directory, and prose containing
+  // the literal token would report the file it had just fixed. It stripped comments to cope with
+  // this one sentence, and that strip could be defeated by an unclosed `/*` in a string literal —
+  // measured, not supposed. Rewording one comment is cheaper than a regex that can hide real code.
   //
   // `received_at` STAYS the instant, and is not swapped for the timeline's. It is the message's own
   // arrival time; `_message_at` falls back to `created_at` for inbound only to avoid joining
