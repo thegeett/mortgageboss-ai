@@ -32,6 +32,26 @@ ticket; the resource actually shared is the TREE, so a checkout by one session m
 another mid-review with nothing on screen to say so. A worktree per session is the fix, and it is the
 user's call.
 
+**PHASE 4 BUILD: COMPLETE, 2026-09-07.** All 25 rows below read `REVIEWED` — every ticket built by
+one session and reviewed by a different one with the code-review skill, every finding fixed and
+committed before the next ticket started.
+
+**COUNTED, WITH ITS DENOMINATOR:** the Log's `findings fixed` column totals **50 across the 29 cycles
+that recorded a number**. Fourteen cycles left it blank, so the real figure is higher and nobody
+measured it — which is worth knowing before the number is quoted anywhere as "50 defects". The ones
+worth remembering are in the Log's notes.
+
+**WHAT "COMPLETE" DOES NOT MEAN.** Three of the 25 are `REVIEWED (HUMAN_GATED)` — INFRA-1, INFRA-2
+and INFRA-3. Their Terraform is written and validated; `terraform plan` was never run, because this
+environment has no AWS credentials. **Nothing in Phase 4 exists in AWS.** No inbox receives mail, no
+identity sends it, no bucket is scanned. And the software cannot send either: LP-816 shipped the
+transport seam with an empty registry, per the protocol's §5, so `transport_for` returns None for
+every connection and every file stays on copy-and-send. What is complete is the code and its tests.
+What is not is a single deployed byte.
+
+Four decisions stand between this and a pilot that mails a real borrower. They are the first group
+of the escalations, and that group is short on purpose.
+
 ---
 
 ## M1 — The email is right (no infrastructure)
@@ -138,37 +158,72 @@ Append one line per completed cycle. Newest last.
 
 ## Blocked / escalations
 
-Anything a session could not resolve. One line each, with the ticket it belongs to.
+Anything a session could not resolve. One line each, with the ticket it belongs to. **Forty items,
+sorted at the close into three kinds, because they are not equally actionable and a flat list of
+forty reads as forty equal problems.** Every item is in exactly one group and the three add to
+forty — no group is "the rest", which is the way a label absorbs members nobody placed.
+
+The dividing question for the first group is not "is it important" but **"can a borrower or their
+counterparty meet this, with nobody watching"**. A message that lands in the unrouted queue does not
+qualify: LP-806 built a screen and a person works it. A message that goes out under an identity
+nobody chose does.
+
+### Must be decided before the pilot mails a real borrower (4)
 
 | Item | What it is, and what it needs |
 |---|---|
 | **LP-817 / M1 sequencing** | M1 can send an email advertising an inbox that receives nothing until M3. LP-811 (send) is inside M1; LP-803 (ingest) and LP-805 (routing) are inside M2, and nothing sequences them. Raised by the LP-817 review. **Needs a person to decide** before M1 ships: hold the send behind M2, drop the address line from the initial-request template until M3 (it would need a version bump, ADR-401), or ship knowing a borrower can email documents into a void. |
-| **LP-800 / LP-817 domain review** | NARROWED 2026-09-07. The assignments the Fannie Mae Selling Guide governs are now sourced and cited inline (B4-1.1-03, B3-4.2-01, B3-3.1-02, B3-3.1-04, B3-4.3-04, B3-4.3-09), with tests named after the rules; none was wrong. What remains for Priya is the unsourced majority — disclosures, identity, LOEs, inspections — plus the five templates' wording, which no source settles. Still not blocking, but it should reach her before Phase 4 mails a real borrower. |
-| **LP-820 / the party vocabulary has no depository or servicer** | Surfaced by the sourcing pass. `verification_of_deposit`, `verification_of_assets`, `verification_of_mortgage` and `verification_of_rent` are forms sent OUT to a bank, servicer or landlord — the same shape as `voe`, which can name its third party because `EMPLOYER` exists. Recorded as PROCESSOR, which is right about "not a borrower ask" and wrong about "no outbound request at all". LP-820 needs a party for each or it will read them as having nowhere to go. |
-| **INFRA-1 / the purge job ships before the legal hold** | INFRA-1's S3 lifecycle expiry IS the purge job `phase4.md` §6 says must not precede the legal-hold flag — and that flag is LP-821, in M5. Written with retention as a stated variable and flagged rather than silently created. **A person must decide**: hold the lifecycle rule until LP-821, or accept a window in which nothing can suppress expiry. |
-| **LP-819 / bounces cannot be ingested as mail** | LP-819's text says "ingest the `bounces.` subdomain". Not possible: a custom MAIL FROM domain must carry **exactly one** MX, pointing at SES's feedback endpoint, so bounces never arrive as mail we can read — they arrive as SES events. INFRA-3 therefore builds an SES configuration set with an SNS destination for reject/bounce/complaint/delivery, and LP-819 reads that topic. **The plan's wording needs correcting** before somebody writes LP-819 against the wrong shape. |
 | **LP-804b / the UPLOAD path still rejects TIFF and HEIC** | `storage/base.py` permits the extensions, `services/documents.py` rejects the content types, and LP-804b now accepts them on the INBOUND path. So a borrower can email a HEIC and it is accepted, but the same file uploaded through the UI is refused. Fixing the upload allowlist is outside Phase 4's blast radius and needs a person to decide whether the extraction pipeline handles HEIC at all. |
+| **LP-816 / which mailbox is "the" mailbox** | RE-MEASURED at the close. The review made the lookup TOTAL — ordered on `(created_at, id)`, the same tiebreaker as LP-820 — so the same file no longer sends under a different identity on two requests with nothing changed. That was the part that was undefined rather than merely undecided. What remains is the product question: with two connected mailboxes, the oldest wins because somebody has to, and nobody has said it should. A borrower sees the sender. |
+| **LP-818 / the send rate limit applies to replies** | One per address per five minutes, three per day. A genuine back-and-forth on one afternoon hits it. Correct as a guardrail against a loop, wrong as a conversation limit — needs a decision rather than a quiet widening. |
+
+### Waiting on a named person; nothing in the repo to change (8)
+
+These block no code. Each needs an answer, a signature, or an AWS credential — and until one arrives
+the honest state is written down rather than guessed at. Note that INFRA-1, INFRA-2 and INFRA-3 are
+`REVIEWED (HUMAN_GATED)`: the Terraform is written and validated, `terraform plan` was never run, and
+**nothing in Phase 4 exists in AWS.** No mail can arrive or leave until a person applies them and
+requests the SES sandbox exit.
+
+| Item | What it is, and what it needs |
+|---|---|
+| **LP-800 / LP-817 domain review** | NARROWED 2026-09-07. The assignments the Fannie Mae Selling Guide governs are now sourced and cited inline (B4-1.1-03, B3-4.2-01, B3-3.1-02, B3-3.1-04, B3-4.3-04, B3-4.3-09), with tests named after the rules; none was wrong. What remains for Priya is the unsourced majority — disclosures, identity, LOEs, inspections — plus the five templates' wording, which no source settles. Still not blocking, but it should reach her before Phase 4 mails a real borrower. |
+| **INFRA-1 / the purge job ships before the legal hold** | INFRA-1's S3 lifecycle expiry IS the purge job `phase4.md` §6 says must not precede the legal-hold flag — and that flag is LP-821, in M5. Written with retention as a stated variable and flagged rather than silently created. **A person must decide**: hold the lifecycle rule until LP-821, or accept a window in which nothing can suppress expiry. |
+| **LP-816 / no provider implementation, and the ADR §3 asks for is unwritten** | §5 says build the interface only until somebody says which provider the pilot customer is on. §3 also asks for an ADR — "Email ingestion source is pluggable — forwarded SMTP for pilot, provider API for GA" — which belongs with the provider choice rather than ahead of it. **Needs the answer to that question.** |
+| **LP-821 / the AI System Disclosure is unreviewed** | Written from the code by engineering. Not seen by the domain expert or by counsel; no offline evaluation exists; the Bedrock retention settings are asserted rather than verified in this repo. Not yet usable for the diligence purpose §6 describes. |
+| **LP-820 / no non-borrower document type has catalog guidance** | MEASURED: 28 of 113 borrower types have a `borrower_label`; none of the 53 belonging to any other party does. So a party request's body is titles with no retrieval instructions — honest, not broken, and pinned by a test so it cannot quietly become false. Needs Priya's call on whether title/CPA/insurer types deserve their own guidance. |
+| **LP-808 / a BUILDER sanctioned the third tenancy inversion** | §3.5 permitted two and gave the procedure for a third — amend the line in the same commit, and check it against the stated shape test. Both were done. But it resolves a COMPANY where the other two resolve a FILE, so a wrong answer misplaces a message across tenants rather than across files, and no human agreed to that. **Needs a person to confirm or reverse it.** |
+| **INFRA-3 / DMARC reports need a real mailbox** | `dmarc_report_address` is empty and `outbound_mail_enabled` is false. `rua=` names an address somebody has to actually read; choosing one would create a report nobody receives. A person sets both together. **Now enforced rather than trusted (review):** `outbound_mail_enabled = true` with an empty address fails at plan time, so the two can no longer be turned on apart. The decision — which mailbox — is still a person's. |
+| **INFRA-1 / `terraform plan` needs credentials** | The protocol wants the plan output committed. This session has no AWS credentials and the S3 state backend is reached even under `-backend=false`. The config is validated offline (`docs/tickets/infra-1/validate.txt`); the plan is outstanding and needs either a person to run it or `aws login` in this session. |
+
+### Known gaps with no owner yet (28)
+
+Each is something the phase did not build, with the reason it did not. None is waiting on a person
+and none can surprise a borrower unwatched. The two worth reading first are **LP-806 / accepting does
+not enqueue processing** — an accepted document sits `PENDING` and is never extracted, though its
+need is still satisfied so no reminder nags a borrower for it — and **LP-818 / `email_threads`**, a
+table nothing writes and nothing reads, which is the fifth form of the pattern this loop kept
+finding.
+
+| Item | What it is, and what it needs |
+|---|---|
+| **LP-820 / the party vocabulary has no depository or servicer** | Surfaced by the sourcing pass. `verification_of_deposit`, `verification_of_assets`, `verification_of_mortgage` and `verification_of_rent` are forms sent OUT to a bank, servicer or landlord — the same shape as `voe`, which can name its third party because `EMPLOYER` exists. Recorded as PROCESSOR, which is right about "not a borrower ask" and wrong about "no outbound request at all". LP-820 needs a party for each or it will read them as having nowhere to go. |
+| **LP-819 / bounces cannot be ingested as mail** | LP-819's text says "ingest the `bounces.` subdomain". Not possible: a custom MAIL FROM domain must carry **exactly one** MX, pointing at SES's feedback endpoint, so bounces never arrive as mail we can read — they arrive as SES events. INFRA-3 therefore builds an SES configuration set with an SNS destination for reject/bounce/complaint/delivery, and LP-819 reads that topic. **The plan's wording needs correcting** before somebody writes LP-819 against the wrong shape. |
 | **LP-805 / rung 1 misses Cc and Bcc** | §2.2 names To/Cc/Bcc/`X-Gm-Original-To`; LP-803 collects `To` and `Delivered-To` only, so a borrower who **Ccs** the file address goes to triage instead of routing. One line in LP-803's ingest, but that ticket is REVIEWED and this is a behaviour change. Needs a call. |
 | **LP-805 / no rate limit on token probing** | The plan asks for probing to be rate-limited by source IP. There is no HTTP endpoint — the probe vector is sending mail to guessed addresses, and the counter would need `receipt.sourceIp`, which LP-803 does not store. Not half-built. |
-| **LP-816 / no provider implementation, and the ADR §3 asks for is unwritten** | §5 says build the interface only until somebody says which provider the pilot customer is on. §3 also asks for an ADR — "Email ingestion source is pluggable — forwarded SMTP for pilot, provider API for GA" — which belongs with the provider choice rather than ahead of it. **Needs the answer to that question.** |
-| **LP-816 / one company with two connected mailboxes is undefined** | The connection is picked with `.first()` over the company's active ones, with no ordering. LP-808's review made the analogous participant lookup total with an id tiebreaker; this has none. |
 | **LP-821 / the composed draft is permanently gone for historical sends** | `send_draft` overwrote `draft.body` with the processor's edit, so §6's "model draft / human edit / diff" is unanswerable for anything sent before this ticket. Captured going forward; NOT backfillable. An audit should be told this rather than shown nulls. |
 | **LP-821 / `guardrail_fired`, `model_id` and `prompt_version` are always null** | `send_draft` has no access to them — LP-810's drafter runs earlier and returns prose, and the guard verdict lives in `email_draft_prose`. The columns exist so threading them through is a service edit rather than a migration. |
 | **LP-821 / the legal hold has no screen** | Endpoints only. A processor about to act on a held file should see it on the file header; `GET /legal-hold` exists for that. |
-| **LP-821 / the AI System Disclosure is unreviewed** | Written from the code by engineering. Not seen by the domain expert or by counsel; no offline evaluation exists; the Bedrock retention settings are asserted rather than verified in this repo. Not yet usable for the diligence purpose §6 describes. |
 | **LP-820 / the address book is per file, not per company** | A title company used on thirty files is typed thirty times. A company-level directory with per-file selection is a real feature and a bigger one; per-file is where the data already lives and where LP-805's trust decision reads it. |
-| **LP-820 / no non-borrower document type has catalog guidance** | MEASURED: 28 of 113 borrower types have a `borrower_label`; none of the 53 belonging to any other party does. So a party request's body is titles with no retrieval instructions — honest, not broken, and pinned by a test so it cannot quietly become false. Needs Priya's call on whether title/CPA/insurer types deserve their own guidance. |
 | **LP-814 / there is no Celery beat, and the plan asks for one** | A beat that computes suggestions and writes them changes nothing a read cannot do — it suggests only, so it has no side effect worth scheduling, and a materialised list goes stale the moment a document arrives. What a beat WOULD serve is reaching a processor who is not looking, which needs a notification channel this product does not have. Built as a read; needs a decision on whether "Celery beat" was load-bearing. |
 | **LP-814 / thresholds are not configurable** | 3, 5 and 7 days come from spec 4.5 and are named constants. A per-company threshold is a decision nobody has made, and a settings row nobody reads is worse than a constant somebody can find. |
 | **LP-818 / `email_threads` is a table nothing writes and nothing reads** | LP-805 created it. The build plan says LP-805 "writes `email_threads` and `references[]`" and only the second half is true. Threading a reply needs `In-Reply-To`, which is per-message, so nothing needed the table. Fifth form of the pattern this loop keeps finding — either populate it or drop it, but not silently. |
-| **LP-818 / the send rate limit applies to replies** | One per address per five minutes, three per day. A genuine back-and-forth on one afternoon hits it. Correct as a guardrail against a loop, wrong as a conversation limit — needs a decision rather than a quiet widening. |
 | **LP-818 / no "view full thread"** | Spec 4.3 lists it. Grouping needs either `email_threads` populated or a walk of the `References` chains; both are more than a button. |
-| **LP-812 / the timeline has no pagination** | A hard limit of 200, newest first. A file with more history loses its tail SILENTLY, which is the wrong failure — it should say so. Needs either a cursor or a "showing the most recent 200" line. |
+| **LP-812 / the timeline has no pagination** | NARROWED by its own review: the cap still drops the oldest entries, but no longer SILENTLY — `truncated` is on the API response and rendered on `timeline-panel.tsx`. So a reader is told their view is partial. What is still missing is a way to reach entry 201, which is a cursor and its own ticket. |
 | **LP-812 / compose-with-template-selector is unbuilt and the two docs disagree** | `phase4.md`'s ticket table lists it for LP-812; the build plan's M5 table does not, and gives "compose a message with no needs behind it" to LP-818. Recorded rather than resolved by picking the larger reading — the same disagreement LP-805 hit. |
-| **LP-808 / a BUILDER sanctioned the third tenancy inversion** | §3.5 permitted two and gave the procedure for a third — amend the line in the same commit, and check it against the stated shape test. Both were done. But it resolves a COMPANY where the other two resolve a FILE, so a wrong answer misplaces a message across tenants rather than across files, and no human agreed to that. **Needs a person to confirm or reverse it.** |
 | **LP-808 / DKIM is checked for alignment, not verified** | The `d=` tag is compared to `From:`; the cryptography is not checked, because that needs a DNS lookup on the ingest path whose timing an attacker chooses. Alignment plus the first hop's own verdict is what is relied on. |
-| **LP-808 / nothing sends the connection steps** | Same as LP-815's nudge: there is no transport. The endpoint records the state change; the mail waits on LP-816. |
-| **LP-815 / the auto-reply has no caller** | `record_auto_reply` is not invoked from the ingest chain, because there is no transport (INFRA-3 unapplied, LP-816 sends). Wiring it now would queue rows nobody drains. The DECISION is the deliverable and is fully tested; this is the same shape as LP-807's finding, written down rather than left to be discovered. |
+| **LP-808 / nothing sends the connection steps** | RE-MEASURED at the close: this said "the mail waits on LP-816", and LP-816 has now shipped without changing it. LP-816 is an interface with an EMPTY registry, so `transport_for` returns None for every connection and nothing transmits. The wait is on a provider implementation, not on the ticket — and the same correction applies to LP-815's auto-reply. |
+| **LP-815 / the auto-reply has no caller** | `record_auto_reply` is invoked from nothing — verified again at the close, no caller outside its own module. Wiring it would queue rows nobody drains, because there is still no transport: LP-816 shipped the seam, not a provider. The DECISION is the deliverable and is fully tested. Same shape as LP-807's finding, written down rather than left to be discovered. |
 | **LP-815 / no per-IP rate limit on the public upload endpoint** | Bounds are per link — size, uses, expiry — not per caller. A 256-bit token is not guessable; a LEAKED link being hammered is the real case and `max_uses` bounds it. A per-IP limit needs infrastructure this environment does not have. |
 | **LP-815 / no virus scan on a link upload** | `assess` sniffs, sanitises and rasterises. GuardDuty (INFRA-2) scans the SES bucket; nothing scans this path. Same gap the inbound path had before INFRA-2, which is itself unapplied. |
 | **LP-813 / no lender delete** | Soft-deleting a lender with live files raises questions this ticket has no answer to: the FK is RESTRICT, files reference it, and what happens to those files is a product decision. Deactivating is available. |
@@ -178,7 +233,5 @@ Anything a session could not resolve. One line each, with the ticket it belongs 
 | **LP-807 / the preview re-derives on every request** | Uncached beyond TanStack's five minutes: a queue of five messages with three attachments each is fifteen rasterisations. The alternative is storing the raster, which is a second durable copy of a borrower's document with its own retention and destruction story. |
 | **LP-806 / accepting does not enqueue processing** | An accepted document sits PENDING until something processes it. The upload path calls a module-private `_enqueue_processing` in `api/documents.py`; the needs update then runs under `loan_file_needs_lock` as it does for an upload. The enqueue probably belongs in the accept path and I did not reach into another module's private to do it. |
 | **LP-806 / no reassign endpoint** | The plan lists list/accept/reassign/reject. Reassign for an UNROUTED message is a company CLAIMING it — the one operation that moves data across a tenant boundary. It needs its own design rather than an endpoint appended to a long ticket. |
-| **INFRA-3 / DMARC reports need a real mailbox** | `dmarc_report_address` is empty and `outbound_mail_enabled` is false. `rua=` names an address somebody has to actually read; choosing one would create a report nobody receives. A person sets both together. **Now enforced rather than trusted (review):** `outbound_mail_enabled = true` with an empty address fails at plan time, so the two can no longer be turned on apart. The decision — which mailbox — is still a person's. |
-| **INFRA-1 / `terraform plan` needs credentials** | The protocol wants the plan output committed. This session has no AWS credentials and the S3 state backend is reached even under `-backend=false`. The config is validated offline (`docs/tickets/infra-1/validate.txt`); the plan is outstanding and needs either a person to run it or `aws login` in this session. |
 | **LP-810 / no prompt-version in the audit record** | `phase4.md` §6 wants "model + prompt version" stored beside a sent message. The drafting prompt is a file with no version discipline of its own, and LP-810 has no send path to store one against. Not built rather than half-built; LP-811 is where it lands or is dropped on purpose. |
 | **Build plan: four tickets with no "Done when"** | LP-802, LP-817, LP-822 and LP-809. Both were judged against the section prose, by different sessions reaching the same call. The plan should carry the clause rather than each reviewer re-deriving it. |
