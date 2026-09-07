@@ -32,7 +32,11 @@ ticket; the resource actually shared is the TREE, so a checkout by one session m
 another mid-review with nothing on screen to say so. A worktree per session is the fix, and it is the
 user's call.
 
-**PHASE 4 BUILD: COMPLETE, 2026-09-07.** All 25 rows below read `REVIEWED` — every ticket built by
+**PHASE 4 BUILD: COMPLETE, 2026-09-07.** All **28** ticket rows below read `REVIEWED` — 25 plain and
+3 `REVIEWED (HUMAN_GATED)`. That is every ticket the build plan names: LP-800 through LP-822 with
+LP-804 and LP-811 each split in two (rows 13b and 8b), plus INFRA-1, INFRA-2 and INFRA-3. Nothing in
+the plan is absent from this table and nothing here is absent from the plan — checked by set
+difference, not by reading down the column. Every ticket was built by
 one session and reviewed by a different one with the code-review skill, every finding fixed and
 committed before the next ticket started.
 
@@ -41,7 +45,7 @@ that recorded a number**. Fourteen cycles left it blank, so the real figure is h
 measured it — which is worth knowing before the number is quoted anywhere as "50 defects". The ones
 worth remembering are in the Log's notes.
 
-**WHAT "COMPLETE" DOES NOT MEAN.** Three of the 25 are `REVIEWED (HUMAN_GATED)` — INFRA-1, INFRA-2
+**WHAT "COMPLETE" DOES NOT MEAN.** Three of the 28 are `REVIEWED (HUMAN_GATED)` — INFRA-1, INFRA-2
 and INFRA-3. Their Terraform is written and validated; `terraform plan` was never run, because this
 environment has no AWS credentials. **Nothing in Phase 4 exists in AWS.** No inbox receives mail, no
 identity sends it, no bucket is scanned. And the software cannot send either: LP-816 shipped the
