@@ -3,6 +3,7 @@
 import { InboundAttachmentRow } from "@/components/file/communication/inbound-attachment";
 import { Badge } from "@/components/ui/badge";
 import { unclaimed, useAcceptAttachment, useRejectAttachment } from "@/lib/api/inbound";
+import { messageTimeShort } from "@/lib/message-time";
 import type { InboundMessage } from "@/lib/types/inbound";
 import { Mail, MailQuestion, ShieldCheck, ShieldQuestion } from "lucide-react";
 
@@ -68,8 +69,17 @@ function RoutingNote({ message }: { message: InboundMessage }) {
 }
 
 function receivedLabel(iso: string | null): string {
+  // LP-838 — THE THIRD FORMAT ON THIS PAGE, and the one the ticket's class-level statement was
+  // written to catch. `toLocaleString()` gave a locale-dependent absolute time beside a timeline
+  // showing "2 hours ago" and a modal showing "4 Sep 2026, 14:30" — three formats for the same kind
+  // of fact, on one screen, none of which was wrong on its own.
+  //
+  // `received_at` STAYS the instant, and is not swapped for the timeline's. It is the message's own
+  // arrival time; `_message_at` falls back to `created_at` for inbound only to avoid joining
+  // `inbound_messages` to order a list, and its own comment says received_at "is the better answer".
+  // This card already holds it, so it uses it.
   if (!iso) return "Arrival time unknown";
-  return new Date(iso).toLocaleString();
+  return `Received ${messageTimeShort(iso)}`;
 }
 
 /**

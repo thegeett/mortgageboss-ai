@@ -210,6 +210,42 @@ describe("MessageDialog", () => {
     expect(screen.getByText(/550 5\.1\.1 user unknown/)).toBeTruthy();
   });
 
+  it("says when it happened, in full, with the label (LP-838)", () => {
+    // THE SAME INSTANT THE LIST SHOWS, longer form. Somebody reading one message is looking at that
+    // message, and "yesterday" is not enough to put in a note or an audit conversation.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          status: "sent",
+          sent_at: "2026-09-04T14:30:00Z",
+          created_at: "2026-09-01T10:00:00Z",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    // SENT, not created — and the date is `sent_at`, three days after composition. A dialog reading
+    // `created_at` would show 1 Sep and label it Sent, which is two wrong answers that look like one
+    // right one.
+    expect(screen.getByText(/Sent 4 Sep 2026/)).toBeTruthy();
+  });
+
+  it("labels an unsent draft Created, at its composition time", () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          status: "draft",
+          sent_at: null,
+          created_at: "2026-09-01T10:00:00Z",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.getByText(/Created 1 Sep 2026/)).toBeTruthy();
+  });
+
   it("renders nothing when no message is open", () => {
     // THE CONTROL. A dialog that rendered its content regardless would satisfy every assertion
     // above and sit permanently over the timeline.

@@ -19,8 +19,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
 import { useTimeline } from "@/lib/api/timeline";
+import { messageTimeLabel, messageTimeShort } from "@/lib/message-time";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
-import { formatDistanceToNow } from "date-fns";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -51,14 +51,6 @@ function EntryIcon({ entry }: { entry: TimelineEntry }) {
   if (entry.direction === "inbound")
     return <MailOpen className="h-4 w-4 text-success" aria-hidden />;
   return <Mail className="h-4 w-4 text-primary" aria-hidden />;
-}
-
-function when(iso: string): string {
-  try {
-    return formatDistanceToNow(new Date(iso), { addSuffix: true });
-  } catch {
-    return "at an unknown time";
-  }
 }
 
 /**
@@ -419,7 +411,12 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <span className="text-xs text-muted-foreground">{when(entry.at)}</span>
+                <span className="whitespace-nowrap text-xs text-muted-foreground">
+                  {/* LP-838 — THE LABEL, because a bare timestamp is ambiguous in exactly the way
+                      that matters. A draft composed on Monday and sent on Thursday shows Thursday,
+                      and "Thursday" alone does not say whether the borrower has heard from us. */}
+                  {messageTimeLabel(entry)} {messageTimeShort(entry.at)}
+                </span>
                 {entry.kind === "message" ? (
                   <MessageActions
                     fileId={fileId}

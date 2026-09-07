@@ -428,3 +428,35 @@ describe("the ?draft deep link (LP-831)", () => {
     expect(mockMessageDetailArgs.at(-1)).toEqual(["LF-JR4T", null]);
   });
 });
+
+describe("when it happened (LP-838)", () => {
+  it("labels a draft Created and a sent message Sent", () => {
+    // A BARE TIMESTAMP IS AMBIGUOUS IN EXACTLY THE WAY THAT MATTERS. Both rows below show the same
+    // kind of value; only the label says whether the borrower has heard from us.
+    loaded([
+      {
+        ...MESSAGE,
+        id: "d1",
+        direction: "outbound",
+        status: "draft",
+        summary: "Documents we need",
+      },
+      { ...MESSAGE, id: "s1", direction: "outbound", status: "sent", summary: "Documents we sent" },
+    ]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Created /)).toBeTruthy();
+    expect(screen.getByText(/^Sent /)).toBeTruthy();
+  });
+
+  it("shows a time on every row", () => {
+    // THE CONTROL on the label: a panel that rendered the word and dropped the time would satisfy
+    // the assertions above and tell a processor nothing they came for.
+    loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft" }]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Created .*ago$/)).toBeTruthy();
+  });
+});

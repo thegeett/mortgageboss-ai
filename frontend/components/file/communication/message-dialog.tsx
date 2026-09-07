@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { messageMailtoUrl, useMessageDetail, useSendDraft } from "@/lib/api/communications";
-import { format } from "date-fns";
+import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
 import { Check, Copy, Mail, Send } from "lucide-react";
 import { useState } from "react";
 
@@ -40,14 +40,6 @@ import { useState } from "react";
  * mailed the borrower believing they had contacted the title company. `send_draft` takes a draft id
  * and has never cared which template rendered it; the missing piece was always a screen.
  */
-function when(iso: string): string {
-  try {
-    return format(new Date(iso), "d MMM yyyy, HH:mm");
-  } catch {
-    return iso;
-  }
-}
-
 export function MessageDialog({
   fileId,
   messageId,
@@ -90,10 +82,14 @@ export function MessageDialog({
           <DialogDescription className="text-xs">
             {data
               ? [
-                  data.direction === "inbound" ? "Received from" : "To",
+                  data.direction === "inbound" ? "From" : "To",
                   data.counterparty ?? "nobody yet",
                   "·",
-                  when(data.sent_at ?? data.created_at),
+                  // LP-838 — SAME INSTANT AS THE LIST, SAME RULE, longer form. `messageInstant`
+                  // applies `_message_at`'s rule rather than restating it, so a row and the message
+                  // it opens cannot disagree about when it happened.
+                  messageTimeLabel(data),
+                  messageTimeFull(messageInstant(data)),
                 ].join(" ")
               : null}
           </DialogDescription>
