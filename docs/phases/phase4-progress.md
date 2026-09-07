@@ -49,7 +49,7 @@ transport seam with an empty registry, per the protocol's §5, so `transport_for
 every connection and every file stays on copy-and-send. What is complete is the code and its tests.
 What is not is a single deployed byte.
 
-Four decisions stand between this and a pilot that mails a real borrower. They are the first group
+Five decisions stand between this and a pilot that mails a real borrower. They are the first group
 of the escalations, and that group is short on purpose.
 
 ---
