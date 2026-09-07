@@ -79,11 +79,29 @@ export function useSendDraft(fileId: string) {
  * compose window containing part of the message, which a processor may send without noticing. The
  * server decides whether it fits; this only builds the URL when it said yes.
  */
-export function mailtoUrl(draft: OutboundDraft, recipient: string): string | null {
+/**
+ * The `mailto:` link for the message AS IT STANDS IN THE TEXTAREA — never the composed draft.
+ *
+ * `body` is a parameter rather than read off `draft` because those two diverge the moment a
+ * processor types. Built from `draft.body`, this link opened the mail client on the UNEDITED text
+ * while "Copy message" and "Mark as sent" both used the edit: the borrower would receive one
+ * version and the record would store the other, which is the one failure an evidence record cannot
+ * survive.
+ *
+ * The length gate is recomputed here for the same reason. `draft.mailto_available` is the server's
+ * verdict on the COMPOSED body (LP-811a's `build_outbound`), and an edit that runs past the limit
+ * would otherwise still be offered a link that silently truncates. The server still owns the limit;
+ * only the measurement moves to the text actually being sent.
+ */
+export function mailtoUrl(draft: OutboundDraft, recipient: string, body: string): string | null {
+  // BOTH gates. `draft.mailto_available` is the server's verdict on the composed body and may
+  // know things this side does not; the length check catches an EDIT that ran past the limit after
+  // that verdict was formed. Either one saying no is a no.
   if (!draft.mailto_available) return null;
+  if (body.length + draft.subject.length > draft.mailto_max_chars) return null;
   const params = new URLSearchParams({
     subject: draft.subject,
-    body: draft.body,
+    body,
     bcc: draft.suggested_bcc,
   });
   return `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;

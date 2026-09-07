@@ -192,3 +192,54 @@ describe("OutboundDraftPanel", () => {
     expect(screen.getByText(/2 documents moved to requested/)).toBeDefined();
   });
 });
+
+describe("the mail-client link and the processor's edit", () => {
+  it("carries the EDITED body, not the composed one", () => {
+    // Measured before this was fixed: the link was built from `draft.body`, so a processor who
+    // edited the message and opened their mail client sent the composed text — while "Mark as
+    // sent" recorded their edit. The borrower receives one version and the record stores the
+    // other, which is the one divergence an evidence record cannot survive.
+    mockUseOutboundDraft.mockReturnValue(draftState({ body: "COMPOSED BODY" }));
+    render(<OutboundDraftPanel fileId="f1" />, { wrapper });
+
+    fireEvent.change(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "EDITED BY THE PROCESSOR" },
+    });
+
+    const link = screen.getByRole("link", { name: /open in mail client/i }) as HTMLAnchorElement;
+    // `URLSearchParams` writes spaces as `+`, which `decodeURIComponent` does not undo.
+    const href = decodeURIComponent(link.href).replace(/\+/g, " ");
+    expect(href).toContain("EDITED BY THE PROCESSOR");
+    expect(href).not.toContain("COMPOSED BODY");
+  });
+
+  it("withdraws the link when an EDIT runs past the length limit", () => {
+    // The gate was the server's verdict on the COMPOSED body, so an edit could run past the limit
+    // and still be offered a link that truncates silently. The limit is still the server's; only
+    // the measurement is of the text actually being sent.
+    mockUseOutboundDraft.mockReturnValue(draftState({ body: "Short.", mailto_max_chars: 100 }));
+    render(<OutboundDraftPanel fileId="f1" />, { wrapper });
+
+    expect(screen.getByRole("link", { name: /open in mail client/i })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "x".repeat(500) },
+    });
+
+    expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
+    expect(screen.getByText(/too long to open in a mail client/i)).toBeTruthy();
+  });
+
+  it("still offers the link for a short edit — the control", () => {
+    // A fix that simply never returned a link would satisfy both cases above.
+    mockUseOutboundDraft.mockReturnValue(draftState({ mailto_max_chars: 2000 }));
+    render(<OutboundDraftPanel fileId="f1" />, { wrapper });
+
+    fireEvent.change(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "A short edit." },
+    });
+
+    const link = screen.getByRole("link", { name: /open in mail client/i }) as HTMLAnchorElement;
+    expect(decodeURIComponent(link.href).replace(/\+/g, " ")).toContain("A short edit.");
+  });
+});

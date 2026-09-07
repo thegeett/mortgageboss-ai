@@ -59,7 +59,8 @@ export function OutboundDraftPanel({ fileId }: { fileId: string }) {
     );
   }
 
-  const href = mailtoUrl(draft, recipient);
+  // The EDITED body, not `draft.body` — see `mailtoUrl`.
+  const href = mailtoUrl(draft, recipient, body);
   const canSend = recipient.trim().length > 0 && body.trim().length > 0 && !send.isPending;
 
   const copyToClipboard = async () => {
@@ -146,7 +147,7 @@ export function OutboundDraftPanel({ fileId }: { fileId: string }) {
         </Button>
       </div>
 
-      {!draft.mailto_available && (
+      {href === null && (
         <p className="text-xs text-muted-foreground">
           This message is too long to open in a mail client without being cut short (the limit is
           about {draft.mailto_max_chars} characters). Copy it instead.
