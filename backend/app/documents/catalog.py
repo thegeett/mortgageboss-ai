@@ -745,7 +745,10 @@ _RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
     "voe": ResponsibleParty.EMPLOYER,
     "profit_and_loss": ResponsibleParty.BORROWER,
     "tax_transcript": ResponsibleParty.PROCESSOR,
-    # B3-3.1-06: "The lender must have each borrower whose income is used in qualifying ... complete
+    # B3-3.1-02 (06/03/2026), which ABSORBED the old B3-3.1-06 — the b3-3.1-06 URL still resolves and
+    # still carries this sentence, but the page now titles itself B3-3.1-02. Cite the heading, not the
+    # URL that got you there.
+    # B3-3.1-02: "The lender must have each borrower whose income is used in qualifying ... complete
     # and sign a separate IRS Form 4506-C at or before closing", and the LENDER enters its own name
     # as the recipient of the transcripts. So the ask goes to the borrower — a signature — even
     # though what comes back comes to us. That is why this is BORROWER and `tax_transcript` is not.

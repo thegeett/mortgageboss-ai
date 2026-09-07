@@ -176,7 +176,7 @@ def test_a_direct_verification_form_is_never_the_borrowers(document_type: str) -
 
 
 def test_the_signed_authorisation_is_the_borrowers_even_though_we_receive_the_result() -> None:
-    """B3-3.1-06 splits an ask that looks like one thing. The lender enters its own name as the
+    """B3-3.1-02 (06/03/2026, formerly B3-3.1-06) splits an ask that looks like one thing. The lender enters its own name as the
     recipient of the transcripts, but "the lender must have each borrower ... complete and sign a
     separate IRS Form 4506-C" — so the FORM is a borrower ask and the TRANSCRIPT is not.
 
