@@ -2,6 +2,7 @@
 
 import { InboundMessagesPanel } from "@/components/file/communication/inbound-messages-panel";
 import { OutboundDraftPanel } from "@/components/file/communication/outbound-draft-panel";
+import { PartyRequestsPanel } from "@/components/file/communication/party-requests-panel";
 import { TimelinePanel } from "@/components/file/communication/timeline-panel";
 import { UploadLinkPanel } from "@/components/file/communication/upload-link-panel";
 import { useParams } from "next/navigation";
@@ -24,6 +25,9 @@ export default function CommunicationPage() {
           processor composes the request above, and the link is what the request should carry
           instead of asking for an attachment. */}
       <UploadLinkPanel fileId={id} />
+      {/* LP-820 — after the borrower's request and before what came back. The borrower is who a
+          processor asks first; the other parties are the ones whose requests had nowhere to go. */}
+      <PartyRequestsPanel fileId={id} />
       <InboundMessagesPanel fileId={id} />
       {/* LP-812 — LAST, and that is the order of the work: compose the request, offer the secure
           link, triage what came back, then look at the whole history. The panels above are the two

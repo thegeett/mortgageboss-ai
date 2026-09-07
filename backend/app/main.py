@@ -26,6 +26,7 @@ from app.api.ltv import router as ltv_router
 from app.api.mailbox_connections import router as mailbox_connections_router
 from app.api.needs import router as needs_router
 from app.api.overlay_admin import router as overlay_admin_router
+from app.api.party_requests import router as party_requests_router
 from app.api.preferences import router as preferences_router
 from app.api.property import router as property_router
 from app.api.reminders import file_router as reminders_file_router
@@ -164,6 +165,7 @@ app.include_router(validation_aid_router, prefix=API_V1_PREFIX)
 app.include_router(verification_router, prefix=API_V1_PREFIX)
 app.include_router(preferences_router, prefix=API_V1_PREFIX)
 app.include_router(timeline_router, prefix=API_V1_PREFIX)
+app.include_router(party_requests_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)

@@ -39,6 +39,15 @@ class ParticipantRole(StrEnum):
     AGENT = "agent"
     TITLE = "title"
     UNDERWRITER = "underwriter"
+    # LP-820 — the three parties LP-800's catalog sorts documents to and that had no address
+    # anywhere in the schema. MEASURED before adding them: of 166 document types, 113 go to the
+    # borrower, 24 to the processor (who orders them and needs no request), 16 to the lender — and
+    # the remaining 13 went to title, employer, CPA, agent and insurer, of which only title and
+    # agent had even a ROLE here, and neither had a writer. A clock for a party with no address is a
+    # reminder nobody can act on.
+    EMPLOYER = "employer"
+    CPA = "cpa"
+    INSURER = "insurer"
     OTHER = "other"
 
 
