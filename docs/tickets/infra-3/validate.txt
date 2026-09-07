@@ -28,3 +28,34 @@ aws_ses_domain_mail_from
 $ terraform -chdir=infra/envs/staging plan
   NOT RUN. No AWS credentials in this session; the S3 state backend is contacted even
   under -backend=false. Same blocker as INFRA-1 and INFRA-2.
+
+# ---------------------------------------------------------------------------- #
+# Reviewer pass (second session), 2026-09-07
+# ---------------------------------------------------------------------------- #
+
+$ terraform validate    # root, from a faithful scratch copy outside the repo
+Success! The configuration is valid.
+
+$ terraform fmt -check -recursive infra/
+(clean)
+
+# The new fail-closed guard on dmarc_report_address, proved in an isolated config with
+# no providers (so no credentials and no AWS contact), all three cases:
+#
+#   flag off, address ""            -> PASS   (today's staging, unaffected)
+#   flag ON,  address ""            -> FAIL   "dmarc_report_address must be set before
+#                                              outbound_mail_enabled is turned on."
+#   flag ON,  address set           -> PASS
+#
+# The middle case is the one that matters: the module interpolates the address straight
+# into the record, so `""` with the flag on publishes `rua=mailto:` with nothing after
+# the colon.
+
+# DKIM suffix, settled from the published table rather than left to a lookup:
+#   "DKIM domains", AWS General Reference for SES, read 2026-09-07.
+#   Eleven regions have their own (af-south-1, ap-south-2, ap-southeast-3, ap-southeast-5,
+#   ca-west-1, ap-northeast-3, eu-south-1, eu-central-2, il-central-1, me-central-1,
+#   us-gov-east-1); the table ends "All other regions: dkim.amazonses.com".
+#   us-east-1 is NOT among the eleven, so this deployment's default is correct — verified,
+#   not assumed. Note us-west-2 is also not among them, which is worth knowing because the
+#   guide's own worked example uses a us-west-2 address to illustrate a region-specific form.

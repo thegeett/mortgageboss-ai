@@ -137,3 +137,105 @@ The judgement calls worth a second opinion:
 3. **The DKIM hosted-zone variable.** A default that is right in most cells and wrong in some is
    still a default. The alternative is no default, which forces a value nobody can know before the
    identity exists — a chicken-and-egg that would make the first apply impossible.
+
+---
+
+## Review (second session, protocol §3)
+
+Two findings. The escalation against the plan is **correct and under-supported** — there is a
+stronger citation for it than the one given — and the DKIM catch is right but leaves more uncertainty
+on the table than it needs to.
+
+### The escalation: LP-819 cannot ingest `bounces.*`, and the reason is stronger than quoted
+
+Checked at the source, as asked. The builder quotes the one-MX rule, which the page states twice:
+
+> "To successfully set up a custom MAIL FROM domain with Amazon SES, you must publish exactly one MX
+> record to the DNS server of your MAIL FROM domain. If the MAIL FROM domain has multiple MX records,
+> the custom MAIL FROM setup with Amazon SES will fail."
+
+That is accurate. But the same page settles it more directly in its requirements list, and this is
+the sentence LP-819's author should be shown:
+
+> "The MAIL FROM domain **shouldn't be a subdomain that you use to receive email**."
+
+So it is not merely that a second MX breaks the setup — AWS says outright not to use the MAIL FROM
+subdomain for receiving. The escalation stands, and the configuration-set-plus-SNS path this module
+builds is the real one. Recorded with both quotations so nobody re-opens it on the weaker of the two.
+
+**One operational consequence nobody has written down yet, and it belongs in the runbook.** The
+states table shows `Pending`, `TemporaryFailure` and `Failed` all "use custom MAIL FROM fallback
+setting", and `behavior_on_mx_failure = "RejectMessage"` makes that fallback *reject*. SES spends up
+to **72 hours** trying to detect the MX. So if the identity is configured before its MX resolves,
+every outbound message is rejected for as long as that takes. The apply order is therefore not
+cosmetic: publish DNS first, confirm detection, then send. Added to the escalation rather than left
+for whoever meets it.
+
+### A — Enabling outbound mail without a report address publishes a malformed DMARC record
+
+`main.tf` interpolates the address straight in:
+
+```
+records = ["v=DMARC1; p=none; rua=mailto:${var.dmarc_report_address}"]
+```
+
+and `infra/envs/staging/terraform.tfvars` carries `dmarc_report_address = ""`. The module variable
+has no default — correctly — but the **root** supplies one, so the module's "Required" is a comment
+rather than a constraint. Flip `outbound_mail_enabled` without also setting the address and the
+published record is `v=DMARC1; p=none; rua=mailto:` with nothing after the colon.
+
+That is malformed, and it is the exact configuration the variable's own description warns about: a
+`p=none` policy that neither enforces nor informs. The description argues the case and then ships
+the thing it argues against, guarded only by a flag someone is going to flip.
+
+Now fail-closed, using Terraform 1.9's cross-variable validation (the module requires `>= 1.9`):
+empty is allowed while the flag is off, and refused at plan time when it is on. Proved in an
+isolated config with no providers — flag off + empty passes, flag on + empty fails with the message,
+flag on + address passes. The first case is what keeps today's staging plan clean.
+
+### B — The DKIM suffix is knowable for this deployment, not merely overridable
+
+The finding is right and it is the kind that would have cost a silent 72 hours: the CNAME target is
+not always `dkim.amazonses.com`, and no provider resource exposes the correct value. Making it a
+variable is the right shape.
+
+But the authoritative source is not only `GetEmailIdentity` — the SES guide's own note points at a
+**published table**: "DKIM domains" in the AWS General Reference. It is region-level, it lists
+eleven regions with their own `dkim.<region>.amazonses.com`, and it ends "All other regions:
+`dkim.amazonses.com`". **us-east-1 is not among the eleven**, so this deployment's default is
+correct — verified rather than probably right, which is a different claim to make to whoever applies
+this.
+
+Worth noting for accuracy: the module's description says the zone "varies by AWS Region and cell"
+and cites `token.a31d.dkim.us-west-2.amazonses.com`. The published table has no cell component, and
+us-west-2 is itself not one of the eleven — it uses the default. The caution was correct; the
+worked example illustrating it is not a form that table produces. Description rewritten around the
+table, with `SigningHostedZone` kept as the read-back fallback.
+
+### The builder's three, ruled on
+
+1. **The configuration set and SNS topic with no reader — keep them, and the rule holds.** An unused
+   constant is inert; a second spelling of a fact can drift. This is a resource with no consumer,
+   which is the inert kind. The argument is stronger here than in the earlier cases: LP-819 is
+   application code and the plan gives it no Terraform, so "a later ticket will build it" is false —
+   nobody would, and the first symptom would be bounces going nowhere.
+2. **`behavior_on_mx_failure = "RejectMessage"` — right.** The alternative silently reverts the
+   envelope sender to `amazonses.com`: mail goes out, SPF still passes, and the bounce path is
+   simply unused with nothing saying so. On a system that emails borrowers about their loan, a loud
+   refusal beats a quiet loss of the feedback channel. The cost is real and is now written into the
+   runbook note above rather than discovered during a 72-hour window.
+3. **No `aspf` / `adkim` — correct, and correctly flagged as easy to "fix" wrongly.** Their absence
+   is relaxed alignment, which is what lets `From: @mail.<parent>` align with
+   `MAIL FROM: @bounces.<parent>`. Someone hardening the record later would break SPF alignment
+   while believing they were tightening it. The comment naming that is the right defence.
+
+### Done when, and the standing checks
+
+Same disposition as INFRA-1 and INFRA-2: the acceptance criteria are post-apply observations no
+session may make under §2.8, so REVIEWED with them carried forward. `outbound_mail_enabled` is
+false, so an apply is a no-op until a person turns it on — and now cannot be turned on without a
+DMARC report address.
+
+Still the human's: `terraform plan`, apply, DNS delegation for `mail.` and `bounces.`, and the
+production sandbox exit request, which has AWS-side lead time and is not something a session may
+file.

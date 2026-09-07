@@ -727,16 +727,39 @@ variable "dmarc_report_address" {
   description = <<-EOT
     Where DMARC aggregate reports go (`rua=`). A `p=none` policy with no reporting address neither
     enforces nor informs, which is the one setting that is strictly worse than no DMARC record.
+
+    Empty is allowed only while `outbound_mail_enabled` is false. The module interpolates this
+    straight into the record, so an empty value with the flag ON publishes `rua=mailto:` with
+    nothing after the colon — a malformed record, and exactly the do-nothing configuration the
+    sentence above warns about. The validation below turns that into a plan-time failure instead.
   EOT
   type        = string
   default     = ""
+
+  validation {
+    condition     = !var.outbound_mail_enabled || length(trimspace(var.dmarc_report_address)) > 0
+    error_message = "dmarc_report_address must be set before outbound_mail_enabled is turned on: the DMARC record interpolates it directly, and an empty value publishes `rua=mailto:` with no address."
+  }
 }
 
 variable "dkim_signing_hosted_zone" {
   description = <<-EOT
-    The suffix each DKIM CNAME points at, after the token. Varies by AWS Region and cell; the
-    authoritative value is `SigningHostedZone` from `GetEmailIdentity`, which the Terraform provider
-    does not expose. Default is the common form; override if DKIM does not verify after apply.
+    The suffix each DKIM CNAME points at, after the token, and it is NOT always the default.
+
+    THE AUTHORITATIVE LIST IS A PUBLISHED TABLE, not an API call: "DKIM domains" in the AWS General
+    Reference for SES (docs.aws.amazon.com/general/latest/gr/ses.html#ses_dkim_domains), read
+    2026-09-07. It is region-level. Eleven regions have their own — af-south-1, ap-south-2,
+    ap-southeast-3, ap-southeast-5, ca-west-1, ap-northeast-3, eu-south-1, eu-central-2,
+    il-central-1, me-central-1, us-gov-east-1, each as `dkim.<region>.amazonses.com` — and the table
+    ends with "All other regions: dkim.amazonses.com".
+
+    THIS DEPLOYMENT IS us-east-1, which falls under "all other regions", so the default below is
+    CORRECT HERE and verified rather than assumed. Change it only when deploying to one of the
+    eleven. `SigningHostedZone` on `GetEmailIdentity` is the same value read back from the API and is
+    the fallback if the table and reality ever disagree; the Terraform provider exposes neither.
+
+    Getting it wrong is silent: DKIM simply never verifies, and the symptom reads as DNS not having
+    propagated for the 72 hours SES spends trying.
   EOT
   type        = string
   default     = "dkim.amazonses.com"
