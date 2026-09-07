@@ -69,7 +69,7 @@ Append one line per completed cycle. Newest last.
 ```
 | date | ticket | build SHA | review SHA | findings fixed | note |
 |------|--------|-----------|------------|----------------|------|
-| 2026-09-06 | LP-802 | __SHA__ | | | first Phase 4 ticket; ADR-094 amended |
+| 2026-09-06 | LP-802 | bcf00b0a | | | first Phase 4 ticket; ADR-094 amended |
 ```
 
 ## Blocked / escalations
