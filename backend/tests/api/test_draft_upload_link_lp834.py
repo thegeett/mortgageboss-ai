@@ -336,3 +336,32 @@ async def test_a_url_naming_another_files_link_revokes_nothing(
     assert theirs.link.is_usable(), "another file's link was revoked through a draft on this one"
     # THE CONTROL: this draft still got a link of its own.
     assert "/upload/" in body
+
+
+async def test_a_link_holder_is_told_a_reference_and_nothing_else(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-835's question, answered on the endpoint rather than by reading the schema.
+
+    A party draft is addressed to somebody who is not the borrower. If it can carry a secure upload
+    link, the question is what the title company can SEE with it — whether a credential meant for
+    sending a title commitment also opens the borrower's documents.
+
+    It does not. The page is write-only by construction: a reference, a purpose, a byte ceiling and
+    the uses left. No name, no address, no needs list, no documents. Asserted as an exact key set so
+    a field added later has to be a decision — the holder of this token is whoever the email reached,
+    which after a forward is more people than the borrower.
+    """
+    loan_file, draft, token = await _file_with_draft(db)
+    await db.commit()
+    body = (await _attach(client, loan_file, draft, token))["body"]
+    link_token = _token_from(next(word for word in body.split() if "/upload/" in word))
+
+    page = await client.get(f"{PUBLIC}/{link_token}")
+
+    assert page.status_code == 200
+    assert set(page.json()) == {"reference", "purpose", "max_bytes", "remaining_uses"}
+    # The reference is the file's display id — deliberately not the borrower's name.
+    assert page.json()["reference"] == loan_file.display_id
+    assert "Sarah" not in page.text
+    assert "sarah@example.com" not in page.text
