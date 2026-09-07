@@ -94,7 +94,7 @@ Append one line per completed cycle. Newest last.
 | 2026-09-06 | LP-800 | 6d71cb9d | 9d1cad77 | 2 | silent drop of a mistyped instruction key; the appraiser-prepared family split across two parties |
 | 2026-09-06 | LP-817 | 228b4c19 | 7fd7f924 | 3 | three sentences a borrower reads; templates are the one path LP-810's scanner never sees |
 | 2026-09-06 | LP-822 | bb203058 | 626547b2 | 4 | unregistered models autogenerate would drop (4 total, 3 pre-existing); an untested readonly view; a duplicate index; a comment contradicting the migration |
-| 2026-09-07 | LP-809 | c3d34471 | REVIEW_SHA | 1 | a dollar amount in a need title broke the send-time substitution; one predicted finding disproved by measuring it |
+| 2026-09-07 | LP-809 | c3d34471 | e238e6c7 | 1 | a dollar amount in a need title broke the send-time substitution; one predicted finding disproved by measuring it |
 | 2026-09-06 | LP-809 | c3d34471 |  |  | awaiting review. Migration b8d5e0a17c42; two provenance columns the plan did not ask for; LP-818 will need the draft uniqueness index revisited |
 | 2026-09-06 | LP-822 | bb203058 |  |  | awaiting review. Mechanism + neutral default; migration e4a1c7d90b3f. No "Done when" clause in the plan (3rd) |
 | 2026-09-06 | LP-817 | 228b4c19 |  |  | awaiting review. ADR-401 (version pinned by content hash). No "Done when" clause in the plan |
