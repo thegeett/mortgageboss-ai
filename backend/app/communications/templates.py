@@ -43,9 +43,31 @@ _TEMPLATES_DIR = (Path(__file__).parent / "templates").resolve()
 #: no upload link exists until LP-815. Telling someone not to email documents while giving them an
 #: email address to send them to would be the incoherence ADR-398 warns about, and pointing at a
 #: link that resolves to nothing would be worse than saying nothing.
+#: The caution itself — a fixed decision in the execution protocol: borrowers are told email is not
+#: secure. Every template carries it, asking or not.
+SECURITY_CAUTION = "Email is not a fully secure channel."
+
+#: LP-824 — THE CAUTION PLUS A ROUTE THAT EXISTS.
+#:
+#: v1 read "...reply and tell us and we will arrange another route", and a processor reported the
+#: result: the same email says "reply to this message with them attached, or send them to
+#: $inbox_address" four lines earlier. A borrower read *send it by email, but email is not safe, but
+#: tell us if you would rather not and we will think of something.* The instruction and the caveat
+#: cancelled out, and the offer named nothing anybody could act on.
+#:
+#: The alternative it was gesturing at ALREADY EXISTS. LP-815 built the secure upload link and the
+#: panel that mints one. So the caveat can name it, and the message stops arguing with itself: it
+#: gives an instruction and a real choice.
+#:
+#: NAMED, NOT LINKED, and that is deliberate. The plaintext token exists only in `MintedLink` at the
+#: moment of minting — the row holds a hash — so no URL can be rebuilt for an email composed later,
+#: and a URL that resolved to nothing would be worse in a borrower's inbox than no URL at all. That
+#: was the reasoning of `test_the_security_notice_does_not_promise_a_link_that_does_not_exist`, and
+#: it still holds for the URL. It no longer holds for the WORD: a processor can mint a link from the
+#: communication page today, so "reply and ask" is an instruction we can honour.
 SECURITY_NOTICE = (
-    "Email is not a fully secure channel. If you would rather not send something this way, "
-    "reply and tell us and we will arrange another route."
+    f"{SECURITY_CAUTION} If you would rather not send documents this way, reply and ask — "
+    "we will send you a secure upload link instead."
 )
 
 
@@ -100,13 +122,26 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         # A VERSION BUMP RATHER THAN AN EDIT, which is what ADR-401 is for. v1's fingerprint stays
         # pinned below and its file stays on disk, so an audit row naming v1 still resolves to the
         # words it named.
-        version="v2",
+        # v3 (LP-824) — THE CONTRADICTION A PROCESSOR REPORTED. v2 asked the borrower to reply with
+        # documents attached or send them to the file address, and then said email is not a fully
+        # secure channel and to "reply and tell us and we will arrange another route". Instruction
+        # and caveat cancelled out, and the route named nothing. v3 carries the rewritten
+        # `SECURITY_NOTICE`, which names the secure upload link LP-815 already built.
+        #
+        # A VERSION BUMP RATHER THAN AN EDIT, which is what ADR-401 is for. v2's fingerprint stays
+        # pinned below and its file stays on disk, so an audit row naming v2 still resolves to the
+        # words it named.
+        version="v3",
         variables=_COMMON
         | {"loan_reference", "document_list", "inbox_address", "opening", "bridge", "closing"},
     ),
     TemplateKey.REMINDER_FOLLOW_UP: TemplateSpec(
         key=TemplateKey.REMINDER_FOLLOW_UP,
-        version="v1",
+        # v2 (LP-824) — THE SAME CONTRADICTION, in a template nothing renders yet. It asks "reply
+        # with them attached, or send them to $inbox_address" and carried the old notice verbatim.
+        # Bumped with the reported one because an asymmetry is a class: leaving it would ship the
+        # defect on the day somebody wires this template up, with nothing to say it was known.
+        version="v2",
         variables=_COMMON | {"loan_reference", "document_list", "inbox_address"},
     ),
     TemplateKey.STATUS_UPDATE: TemplateSpec(
@@ -116,7 +151,8 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
     ),
     TemplateKey.CONDITION_RESPONSE_REQUEST: TemplateSpec(
         key=TemplateKey.CONDITION_RESPONSE_REQUEST,
-        version="v1",
+        # v2 (LP-824) — the third member of the class, same words, also unrendered today.
+        version="v2",
         variables=_COMMON | {"loan_reference", "condition_list", "inbox_address"},
     ),
     TemplateKey.CUSTOM: TemplateSpec(
@@ -134,6 +170,18 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
+        "v3",
+    ): "26c5c4682896d4d6218cb14f64f71b7a45ba8fb25f550e25a38091ff3cf03537",  # pragma: allowlist secret
+    (
+        TemplateKey.REMINDER_FOLLOW_UP,
+        "v2",
+    ): "daa0a07f05c38830c6bb062489df29e6b3e7455b4e0adaef4dda4dea5eae004b",  # pragma: allowlist secret
+    (
+        TemplateKey.CONDITION_RESPONSE_REQUEST,
+        "v2",
+    ): "de475c7e87225435a13238a47afae70bf4a542261033eb50d19c6d96740b17cd",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v2",

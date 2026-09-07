@@ -20,6 +20,7 @@ import pytest
 from app.communications.templates import (
     _TEMPLATES_DIR,
     PLAIN_FRAMING_FINGERPRINT,
+    SECURITY_CAUTION,
     SECURITY_NOTICE,
     TEMPLATES,
     VERSION_FINGERPRINTS,
@@ -157,17 +158,56 @@ def test_rendering_is_deterministic() -> None:
 # What every template must say
 # --------------------------------------------------------------------------------------------- #
 @pytest.mark.parametrize("key", list(TemplateKey))
-def test_every_template_carries_the_security_notice(key: TemplateKey) -> None:
+def test_every_template_carries_the_security_caution(key: TemplateKey) -> None:
     """A fixed decision in the execution protocol: borrowers are told email is not secure. Asserted
-    on the RENDERED body, not the file, because that is what the borrower reads."""
+    on the RENDERED body, not the file, because that is what the borrower reads.
+
+    LP-824 SPLIT THE CONSTANT. The caution is universal; the sentence that follows it is not. A
+    template that asks for documents has to offer a route out of email, and one that asks for
+    nothing has nothing to offer a route out of — `test_the_status_update_does_not_ask_and_then_
+    offer_a_route_out` already said so about placement, and the wording follows the same line.
+    """
+    assert SECURITY_CAUTION in render(key, _CONTEXT).body
+
+
+@pytest.mark.parametrize("key", sorted(_ADDRESS_BEARING))
+def test_every_asking_template_offers_a_route_that_names_something(key: TemplateKey) -> None:
+    """LP-824 — THE DEFECT, AS A CLASS RATHER THAN AS THE ONE THAT WAS REPORTED.
+
+    A processor reported the initial request: it says "reply to this message with them attached, or
+    send them to $inbox_address" and then, four lines later, that email is not a fully secure channel
+    and to "reply and tell us and we will arrange another route". The instruction and the caveat
+    cancel out, and the route named nothing anybody could act on.
+
+    THE SAME WORDS WERE IN TWO MORE TEMPLATES — the reminder and the condition request — neither of
+    which anything renders yet. Bumped with the reported one, because leaving them would ship this
+    on the day somebody wires them up, with nothing to say it was known.
+
+    Parametrized over `_ADDRESS_BEARING` rather than listed, so a fourth asking template inherits
+    the requirement instead of quietly not having it.
+    """
     assert SECURITY_NOTICE in render(key, _CONTEXT).body
 
 
-def test_the_security_notice_does_not_promise_a_link_that_does_not_exist() -> None:
-    """It cautions and offers a route out. Steering to an upload link is LP-815's, and a link that
-    resolves to nothing would be worse in an email than no link at all."""
+def test_the_notice_names_the_route_but_never_a_url() -> None:
+    """WHY IT NAMES THE LINK BUT DOES NOT CARRY ONE, which is the whole reason this is a wording
+    change and not a plumbing one.
+
+    The plaintext token exists only in `MintedLink` at the moment of minting — the row holds a hash
+    — so no URL can be rebuilt for an email composed later. A URL in a stored template would have to
+    be a live credential sitting in `communications.body`, and a URL that resolved to nothing would
+    be worse in a borrower's inbox than no URL at all.
+
+    That second half was this test's original reasoning, when it also asserted the word "link" was
+    absent because "steering to an upload link is LP-815's". LP-815 has since shipped: a processor
+    can mint one from the communication page, so "reply and ask" is now an instruction we can
+    honour. The URL half of the rule is unchanged and is what is asserted here.
+    """
     assert "http" not in SECURITY_NOTICE
-    assert "link" not in SECURITY_NOTICE.lower()
+    assert "upload link" in SECURITY_NOTICE.lower(), "the route has to name something"
+    # The vague form it replaced, kept as a literal so a revert reads as a failure rather than as a
+    # rewording nobody notices.
+    assert "arrange another route" not in SECURITY_NOTICE
 
 
 @pytest.mark.parametrize("key", sorted(_ADDRESS_BEARING))
@@ -187,19 +227,23 @@ def test_the_non_asking_templates_do_not(key: TemplateKey) -> None:
 # --------------------------------------------------------------------------------------------- #
 # The plain framing, and the version that introduced its slots (LP-810)
 # --------------------------------------------------------------------------------------------- #
-def test_the_initial_request_is_at_v2_and_v1_is_still_resolvable() -> None:
+def test_the_initial_request_is_at_v3_and_the_older_versions_still_resolve() -> None:
     """ADR-401's mechanism doing its job. LP-810 needed three framing slots, so the file changed —
     which means a NEW VERSION, not an edit. v1's fingerprint stays pinned and its file stays on disk,
     so an audit row naming v1 still resolves to the words it named.
 
     This is the first bump, and it is the case the pin exists for: an in-place edit here would have
     left every v1 audit row describing an email that no longer exists in that form."""
-    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v2"
-    assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1") in VERSION_FINGERPRINTS
-    assert (
-        file_fingerprint(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1")
-        == VERSION_FINGERPRINTS[(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1")]
-    )
+    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v3"
+    # EVERY superseded version, not just the previous one. LP-824 is the second bump, and a check
+    # that only looked one step back would have stopped protecting v1 the moment v3 landed — which
+    # is exactly when a v1 audit row is oldest and least able to speak for itself.
+    for old in ("v1", "v2"):
+        assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old) in VERSION_FINGERPRINTS
+        assert (
+            file_fingerprint(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old)
+            == VERSION_FINGERPRINTS[(TemplateKey.INITIAL_DOCUMENTATION_REQUEST, old)]
+        )
 
 
 def test_the_plain_framing_file_matches_its_pin() -> None:
@@ -338,7 +382,7 @@ def test_the_status_update_does_not_ask_and_then_offer_a_route_out() -> None:
     _, body = _load(TemplateKey.STATUS_UPDATE, TEMPLATES[TemplateKey.STATUS_UPDATE].version)
 
     assert "nothing is needed from you" in body
-    assert body.index("just reply here") < body.index(SECURITY_NOTICE)
+    assert body.index("just reply here") < body.index(SECURITY_CAUTION)
 
 
 # --------------------------------------------------------------------------------------------- #

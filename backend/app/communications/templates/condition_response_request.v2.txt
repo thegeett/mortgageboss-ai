@@ -1,0 +1,15 @@
+Subject: A few conditions from the underwriter ($loan_reference)
+
+Hello $borrower_first_name,
+
+The underwriter has reviewed your file and asked for the following before your loan can move ahead:
+
+$condition_list
+
+You can reply with them attached, or send them to $inbox_address.
+
+Email is not a fully secure channel. If you would rather not send documents this way, reply and ask — we will send you a secure upload link instead.
+
+Conditions are a normal part of underwriting, and most files have them.
+
+$processor_name

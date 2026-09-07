@@ -1,0 +1,15 @@
+Subject: Still outstanding on your loan ($loan_reference)
+
+Hello $borrower_first_name,
+
+A short follow-up. We are still waiting on the following:
+
+$document_list
+
+You can reply with them attached, or send them to $inbox_address.
+
+Email is not a fully secure channel. If you would rather not send documents this way, reply and ask — we will send you a secure upload link instead.
+
+If you have already sent any of these, tell us and we will go looking rather than asking you for it again.
+
+$processor_name
