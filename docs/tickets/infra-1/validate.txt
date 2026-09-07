@@ -22,3 +22,33 @@ Error: No valid credential sources found
 $ terraform -chdir=infra/envs/staging plan
   NOT RUN. Requires AWS credentials and the remote state; none are available in this
   session. See "The plan that has not been run" in ../INFRA-1.md.
+
+# ---------------------------------------------------------------------------- #
+# Reviewer pass (second session), 2026-09-07
+# ---------------------------------------------------------------------------- #
+
+$ terraform -chdir=infra/modules/inbound_mail init -backend=false -input=false
+Terraform has been successfully initialized!
+
+$ terraform -chdir=infra/modules/inbound_mail validate
+Success! The configuration is valid.       # after the review's two edits
+
+$ terraform fmt -check -recursive infra/
+(clean)
+
+$ terraform -chdir=infra/modules/inbound_mail providers schema -json | ...
+aws_ses_receipt_rule attributes: ['after','arn','enabled','id','name','recipients',
+                                  'rule_set_name','scan_enabled','tls_policy']
+has arn: True | computed: True
+  -- Checked because the review ADDS a `check` block referencing that attribute, on a
+     ticket whose plan cannot be run. A check block naming an attribute that does not
+     exist would fail at the human's plan, which is the one run that has to be clean.
+
+$ terraform -chdir=infra/envs/staging init -input=false
+  BLOCKED. This session HAS working AWS credentials —
+    aws sts get-caller-identity --profile mbai-staging-admin
+    -> arn:aws:sts::058190633983:assumed-role/AWSReservedSSO_AdministratorAccess.../GeetaIdev
+  — but `terraform init` against the real backend was refused by this session's own
+  permission layer. Not worked around. For a HUMAN_GATED ticket that refusal is the
+  correct outcome, so the root-module plan remains a human step for a second reason
+  now, not only for the builder's missing credentials.

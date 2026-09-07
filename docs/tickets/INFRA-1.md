@@ -140,3 +140,100 @@ The judgement calls worth a second opinion, in the order I would attack them:
 3. **`GLACIER_IR` rather than `GLACIER`.** Instant Retrieval costs more to store and nothing to
    read. A stored message is read once on arrival and then almost never — but "almost never" includes
    a legal hold, where a multi-hour restore on every object is its own problem.
+
+---
+
+## Review (second session, protocol §3)
+
+Two findings, both in the failure mode this module exists to prevent: mail accepted and then lost.
+The permission work is correct — I verified both details against the source rather than agreeing
+with the reasoning — and the module's structure, the deliberate omission of the active rule set, and
+the flag are all right.
+
+### On the plan, which I also could not run
+
+This session **does** have working AWS credentials (`aws sts get-caller-identity` returns an
+assumed AdministratorAccess role in 058190633983), so the builder's blocker did not apply to me.
+`terraform init` against the real backend was then refused by this session's own permission layer,
+and I did not work around it. For a HUMAN_GATED ticket that refusal is the right outcome: the root
+plan is now a human step for two independent reasons rather than one. Everything reachable without
+it is in `infra-1/validate.txt`, including what I ran.
+
+The unverifiable claim the builder singled out — `Statement = concat([...three...], [])` rendering
+byte-identical JSON — **holds by language semantics**, not merely by hope: `concat(xs, [])` returns
+a list equal to `xs`, and `jsonencode` is deterministic on equal values. That is reasoning, not a
+plan, and it should still be read off the human's plan output as the builder asked.
+
+### A — The receipt-rule ARN is hand-built and nothing compared it to the rule
+
+`local.receipt_rule_arn` is assembled from strings, and it has to be: SES validates permissions when
+the receipt rule is created, so the bucket and key policies must already grant access, which means
+they cannot reference `aws_ses_receipt_rule.store.arn` — it does not exist yet. Terraform's graph
+therefore never compares the string in those two `Condition` blocks against the rule it names.
+
+**The builder has the consequence backwards.** Its message says "a wrong ARN shape here fails closed
+at apply, but a wrong CONDITION could fail open" — but the ARN *is* the condition's value. A wrong
+one does not fail at apply at all: every resource applies cleanly, SES accepts the message, the S3
+write is denied against a condition matching nothing, and the mail is gone while the sender sees
+success. That is precisely the fail-open case, reached by a typo instead of by a missing grant.
+
+I checked the shape against the SES developer guide and it is correct today —
+`arn:aws:ses:{region}:{account}:receipt-rule-set/{set}:receipt-rule/{rule}`. Added a `check` block
+comparing the constructed ARN to `aws_ses_receipt_rule.store.arn`, which runs on every plan after
+the first apply and warns rather than blocks. Before adding it I confirmed against the provider
+schema that `aws_ses_receipt_rule` really exposes a computed `arn` — a check block naming a
+non-existent attribute would fail at the human's plan, and that is the one run that has to be clean.
+
+### B — The early purge was the 30-day rule, not the five-year one
+
+The builder escalated the `phase4.md` §6 ordering conflict: the lifecycle expiry *is* the purge job,
+and §6 says the legal-hold flag ships before it. That escalation is right and it is aimed at the
+wrong rule.
+
+`expiration { days = retention_years * 365 }` is five years. Nothing can reach five years before
+LP-821 lands, so that rule does not conflict with §6 in practice. But the bucket is **versioned**,
+and `noncurrent_version_expiration { noncurrent_days = 30 }` did. On a versioned bucket a DELETE
+removes nothing — it writes a delete marker and makes the message's only version noncurrent. Thirty
+days later that version is destroyed permanently, five years before the expiry rule would have
+touched it, with no legal hold able to intervene because that flag is LP-821 in M5. A deleted
+message, whether by hand or by a bug, becomes unrecoverable inside a month.
+
+Noncurrent versions now carry the same retention as current ones. SES writes a unique key per
+message so overwrites are rare, and holding those versions costs close to nothing. The escalation
+stands as the builder wrote it — a person still has to choose about the five-year rule — but the
+part that needed fixing rather than deciding is fixed.
+
+### The builder's three, ruled on
+
+1. **`inbound_mail_enabled = false`, and rule 3.4.** The ticket does **not** go back to `PENDING`.
+   The "Done when" — *dig answers, a hand-sent message appears in the bucket* — is a post-apply,
+   post-activation observation that **no session can make under §2.8**. Returning it to PENDING
+   would loop the protocol forever on a criterion the builder is forbidden to satisfy. It is
+   REVIEWED with the criterion carried forward as the human's to observe, which is what HUMAN_GATED
+   means.
+   The flag being off is right, though the stated reason is stronger than the facts: an MX with the
+   rule in place does not lose mail, it lands it in the bucket for LP-803 to collect. Two things
+   make the caution correct anyway — the domain would accept mail from anyone, unmonitored, into a
+   five-year-retained store; and the rule set is not activated, so mail arriving before that human
+   step is **rejected**, not stored. Off is the right default. Both gates are needed and both are
+   human.
+2. **The two permission details — verified, both correct.** Read from the SES developer guide's
+   "Giving permissions to Amazon SES for email receiving" page, heading confirmed, on 2026-09-07.
+   The bucket policy example conditions on `AWS:SourceAccount` and `AWS:SourceArn` naming the
+   receipt rule, with no `aws:Referer` anywhere on the page. And the KMS section says it outright:
+   *"If you're using AWS KMS to send encrypted messages to an S3 bucket with server-side encryption
+   enabled, then you need to add the policy action, `kms:Decrypt`."* Both transcribed correctly,
+   including the list-valued `AWS:SourceArn`, which is a valid any-of.
+3. **Not creating `aws_ses_active_receipt_rule_set` — agreed, and it belongs outside Terraform.**
+   It is an account-wide single-valued switch; applying one silently deactivates whatever was
+   active, and the symptom is inbound mail stopping with no error anywhere. A flag would not help,
+   because the danger is not the flag's default but that Terraform would own a resource whose
+   correct value depends on what else the account is doing. A one-time human step with the account
+   in view is right.
+
+### One correction to the handover note
+
+The builder told me it "wrote retention as a stated variable and flagged it rather than creating it
+quietly". The lifecycle rule **is** created — the module's own header comment says so plainly, so
+the code is honest, but the summary reads as though nothing was applied-shaped. Worth stating
+exactly for whoever decides the escalation: applying INFRA-1 creates the purge job.

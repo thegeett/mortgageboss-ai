@@ -138,8 +138,19 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
       days = var.retention_years * 365
     }
 
+    # THIRTY DAYS WOULD HAVE BEEN THE EARLY PURGE, not the five-year one. The bucket is versioned,
+    # so a DELETE does not remove anything: it writes a delete marker and makes the message's only
+    # version noncurrent. At 30 days that version is destroyed permanently — five years before the
+    # `expiration` rule above would have touched it, and with no legal hold able to intervene
+    # because that flag is LP-821, in M5.
+    #
+    # `phase4.md` §6 says the legal-hold flag ships BEFORE the purge job. The five-year expiry does
+    # not actually conflict with that, since nothing can reach five years before LP-821 lands. This
+    # rule did. Noncurrent versions therefore keep the same retention as current ones until there is
+    # something that can suppress a purge; SES writes a unique key per message, so overwrites are
+    # rare and holding the versions costs close to nothing.
     noncurrent_version_expiration {
-      noncurrent_days = 30
+      noncurrent_days = var.retention_years * 365
     }
 
     abort_incomplete_multipart_upload {
@@ -335,6 +346,37 @@ resource "aws_ses_receipt_rule" "store" {
     aws_sns_topic_policy.this,
     aws_ses_domain_identity_verification.this,
   ]
+}
+
+# The one claim in this module nothing else can check.
+#
+# `local.receipt_rule_arn` is BUILT BY HAND, and it has to be: SES validates permissions when the
+# receipt rule is created, so the bucket and key policies must already grant access — which means
+# they cannot reference `aws_ses_receipt_rule.store.arn`, because it does not exist yet. Terraform's
+# graph therefore never compares the string in those two Condition blocks against the rule it names.
+#
+# A wrong ARN here does NOT fail at apply. Every resource applies cleanly, SES accepts the message,
+# the S3 write is denied on a condition that matches nothing, and the mail is gone with the sender
+# seeing success. That is the exact failure this module's permission work exists to prevent, reached
+# by a typo instead of by a missing grant.
+#
+# The check runs on every plan AFTER the first apply, when the real ARN is in state, and reports a
+# warning rather than blocking — the resources are already correct or already wrong by then, and a
+# hard failure would only stop the plan that tells you.
+check "receipt_rule_arn_matches_the_policies" {
+  assert {
+    condition     = aws_ses_receipt_rule.store.arn == local.receipt_rule_arn
+    error_message = <<-EOT
+      The receipt-rule ARN granted in the S3 bucket policy and the KMS key policy does not match the
+      rule that was actually created.
+
+        granted: ${local.receipt_rule_arn}
+        actual:  ${aws_ses_receipt_rule.store.arn}
+
+      SES will accept inbound mail and then fail to write it to the bucket, with the sender seeing
+      a successful delivery. Fix `local.receipt_rule_arn` in this module.
+    EOT
+  }
 }
 
 # NOT CREATED HERE, DELIBERATELY: `aws_ses_active_receipt_rule_set`. Activation is an ACCOUNT-WIDE,
