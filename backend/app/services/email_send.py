@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
+import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -135,6 +136,9 @@ def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundM
         suggested_bcc=address,
         mailto_available=len(tagged) + len(subject) <= MAILTO_MAX_CHARS,
     )
+
+
+logger = structlog.get_logger(__name__)
 
 
 async def _recent_sends(
@@ -313,6 +317,21 @@ async def _transmit_if_possible(
     Rolling back would lose the evidence row and the needs transition for a message that may well
     have gone out — a provider that timed out after accepting it is the ordinary failure, not the
     exception. The status moves to FAILED so a processor sees it and LP-819's paths treat it as one.
+
+    WHICH MEANS THIS MUST NOT RE-RAISE, and it used to. `TransportError` derives from `Exception`,
+    not from `CannotSendError`, so it went straight past the endpoint's only handler; `db.commit()`
+    is the line after that handler and was never reached; and `get_db` rolls back on any exception.
+    The paragraph above described the intent and the transaction boundary delivered its exact
+    opposite — evidence row, FAILED status, needs transitions and the send itself, all gone.
+
+    Worst in precisely the case the paragraph names: if the provider accepted and then timed out,
+    the borrower has the message, we keep no record of it, the draft still reads as unsent, and the
+    next thing a processor does is send it again.
+
+    So a transport failure is recorded, not raised. The FAILED status IS the signal — that is what
+    this docstring already said it was for — and it only exists if the transaction survives to
+    carry it. A guard refusal still raises `CannotSendError`, and rolling back is right there:
+    nothing should be recorded for a message that was never allowed to go.
     """
     from app.models.mailbox_connection import MailboxConnection
     from app.services.mail_transport import (
@@ -326,9 +345,15 @@ async def _transmit_if_possible(
         (
             await db.execute(
                 only_active(
-                    select(MailboxConnection).where(
-                        MailboxConnection.company_id == loan_file.company_id
-                    ),
+                    select(MailboxConnection)
+                    .where(MailboxConnection.company_id == loan_file.company_id)
+                    # WHICH mailbox is "the" mailbox is a product answer and is escalated. That
+                    # `.first()` had no ordering at all is not: two connected mailboxes made the
+                    # choice undefined, so the same file could send as a different identity on two
+                    # requests with nothing changed. Ordering does not decide the product question;
+                    # it makes the answer reproducible while somebody decides. Same reasoning as
+                    # LP-820's participant tiebreaker.
+                    .order_by(MailboxConnection.created_at, MailboxConnection.id),
                     MailboxConnection,
                 )
             )
@@ -346,10 +371,14 @@ async def _transmit_if_possible(
     )
     try:
         result = await transmit(connection, envelope)
-    except TransportError:
+    except TransportError as exc:
         draft.status = CommunicationStatus.FAILED
+        # The provider's own words, kept for the same reason LP-819 keeps a bounce diagnostic. Never
+        # logged: it can quote the recipient.
+        draft.error_detail = str(exc)
         await db.flush()
-        raise
+        logger.warning("outbound_transport_failed")
+        return
     if result is None:
         return
     # `external_message_id` MEANS "THIS MESSAGE'S OWN ID" (LP-818 separated it from the id a reply

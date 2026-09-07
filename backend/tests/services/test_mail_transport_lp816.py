@@ -29,8 +29,9 @@ from app.models.mailbox_connection import (
     MailboxConnectionKind,
     MailboxConnectionStatus,
 )
-from app.models.needs_item import NeedsItem, NeedsItemOrigin
+from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
 from app.services import mail_transport
+from app.services.email_send import _needs_in_draft
 from app.services.mail_transport import (
     ALLOWED_SCOPES,
     MailTransport,
@@ -394,7 +395,16 @@ async def test_a_transport_failure_marks_the_message_failed(
 ) -> None:
     """THE RECORD IS NOT UNDONE. `record_sent` has already run, and rolling back would lose the
     evidence row and the needs transition for a message that may well have gone out — a provider
-    that timed out after accepting it is the ordinary failure, not the exception."""
+    that timed out after accepting it is the ordinary failure, not the exception.
+
+    THIS TEST USED TO ASSERT `pytest.raises(TransportError)`, which is the mechanism that undid it.
+    `TransportError` derives from `Exception`, not `CannotSendError`, so it went past the endpoint's
+    only handler; `db.commit()` is the line after that handler; and `get_db` rolls back on any
+    exception. The name said the record survives and the assertion pinned the thing that destroyed
+    it — including in the very case the docstring names, where the provider accepted and then timed
+    out, so the borrower has the message, we keep nothing, and the next thing a processor does is
+    send it again.
+    """
     from app.services.email_send import send_draft
     from app.services.evidence import evidence_for
 
@@ -408,17 +418,18 @@ async def test_a_transport_failure_marks_the_message_failed(
     register(MailboxConnectionKind.GRAPH, Broken())
     await _connect(db_session, company)
 
-    with pytest.raises(TransportError):
-        await send_draft(
-            db_session,
-            loan_file=loan_file,
-            draft_id=draft.id,
-            recipient="jane@borrower.example",
-            body="please send these",
-            approver_user_id=actor.id,
-        )
+    # No raise: the FAILED status is the signal, and it only exists if the transaction survives it.
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="jane@borrower.example",
+        body="please send these",
+        approver_user_id=actor.id,
+    )
 
     assert draft.status is CommunicationStatus.FAILED
+    assert draft.error_detail == "the provider timed out"
     assert len(await evidence_for(db_session, loan_file=loan_file)) == 1
 
 
@@ -448,3 +459,67 @@ async def test_another_companys_connection_is_not_used(
 
     assert transport.sent == []
     assert draft.external_message_id is None
+
+
+async def test_the_needs_transition_survives_a_transport_failure(
+    db_session: AsyncSession, registry_restored: None
+) -> None:
+    """The other half of "the record is not undone", and the half a status check cannot see.
+
+    `send_draft` moves every need in the draft to REQUESTED and stamps `requested_at` — the clock
+    LP-814 reads. If a transport failure unwound the transaction those go too, so a message the
+    borrower may have received leaves no clock, no reminder and a need that reads as never asked
+    for.
+    """
+    from app.services.email_send import send_draft
+
+    class Broken(RecordingTransport):
+        async def send(self, envelope: OutboundEnvelope) -> SentResult:
+            raise TransportError("the provider timed out")
+
+    company, loan_file = await _company_and_file(db_session, slug="needs-survive")
+    actor = await _actor(db_session, company)
+    draft = await _draft(db_session, loan_file, actor)
+    register(MailboxConnectionKind.GRAPH, Broken())
+    await _connect(db_session, company)
+
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="jane@borrower.example",
+        body="please send these",
+        approver_user_id=actor.id,
+    )
+
+    needs = await _needs_in_draft(db_session, draft=draft)
+    assert needs, "the draft must carry a need for this test to mean anything"
+    assert all(need.status is NeedsItemStatus.REQUESTED for need in needs)
+    assert all(need.requested_at is not None for need in needs)
+
+
+async def test_a_guard_refusal_still_raises(
+    db_session: AsyncSession, registry_restored: None
+) -> None:
+    """The control, and the distinction that makes the change safe.
+
+    A transport failure is recorded because the message may have gone. A GUARD refusal is different:
+    nothing should be recorded for a message that was never allowed to leave, so `CannotSendError`
+    still raises and the caller's rollback is correct. A fix that stopped raising for everything
+    would satisfy the tests above while silently accepting sends the guards refused.
+    """
+    from app.services.email_send import CannotSendError, send_draft
+
+    company, loan_file = await _company_and_file(db_session, slug="guard-raises")
+    actor = await _actor(db_session, company)
+    draft = await _draft(db_session, loan_file, actor)
+
+    with pytest.raises(CannotSendError):
+        await send_draft(
+            db_session,
+            loan_file=loan_file,
+            draft_id=draft.id,
+            recipient="jane@borrower.example",
+            body="   ",  # empty after stripping — refused before anything is recorded
+            approver_user_id=actor.id,
+        )
