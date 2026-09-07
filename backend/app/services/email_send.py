@@ -117,12 +117,16 @@ def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundM
     )
 
 
-async def _recent_sends(db: AsyncSession, *, recipient: str, since_hours: int) -> int:
+async def _recent_sends(
+    db: AsyncSession, *, company_id: UUID, recipient: str, since_hours: int
+) -> int:
     return int(
         await db.scalar(
             select(func.count())
             .select_from(Communication)
+            .join(LoanFile, LoanFile.id == Communication.loan_file_id)
             .where(
+                LoanFile.company_id == company_id,
                 Communication.recipient == recipient,
                 Communication.status == CommunicationStatus.SENT,
                 Communication.direction == CommunicationDirection.OUTBOUND,
@@ -133,17 +137,29 @@ async def _recent_sends(db: AsyncSession, *, recipient: str, since_hours: int) -
     )
 
 
-async def _refuse_if_rate_limited(db: AsyncSession, *, recipient: str) -> None:
-    """One per address per five minutes, three per day. Counted across the whole system.
+async def _refuse_if_rate_limited(db: AsyncSession, *, company_id: UUID, recipient: str) -> None:
+    """One per address per five minutes, three per day, ACROSS THIS COMPANY'S FILES.
 
-    ACROSS FILES, NOT WITHIN ONE, and that is the direction that matters. A borrower with two loan
-    files in progress is one mailbox; limiting per file would let them be mailed twice in a minute
-    while every individual limit read as respected.
+    ACROSS FILES, NOT WITHIN ONE: a borrower with two loan files in progress is one mailbox, and
+    limiting per file would let them be mailed twice in a minute while every individual limit read
+    as respected.
+
+    AND WITHIN ONE COMPANY, NOT ACROSS ALL OF THEM. Counting system-wide reads as the safer
+    direction and is not: two processing companies can hold a file for the same person — a borrower
+    shopping two brokers is the ordinary case — and an unscoped count means one tenant's send blocks
+    another's, and says so. Measured before this was scoped: company B's send was refused with
+    "was emailed less than 5 minutes ago", which tells B that somebody else has been in touch with
+    their borrower. A rate limit is not worth a cross-tenant disclosure, and one tenant must not be
+    able to stall another's mail by writing to the same address.
     """
     last = await db.scalar(
-        select(func.max(Communication.sent_at)).where(
+        select(func.max(Communication.sent_at))
+        .join(LoanFile, LoanFile.id == Communication.loan_file_id)
+        .where(
+            LoanFile.company_id == company_id,
             Communication.recipient == recipient,
             Communication.status == CommunicationStatus.SENT,
+            Communication.direction == CommunicationDirection.OUTBOUND,
         )
     )
     if last is not None and utcnow() - last < RATE_LIMIT_WINDOW:
@@ -151,7 +167,10 @@ async def _refuse_if_rate_limited(db: AsyncSession, *, recipient: str) -> None:
             f"{recipient} was emailed less than {int(RATE_LIMIT_WINDOW.total_seconds() // 60)} "
             "minutes ago; wait before sending again"
         )
-    if await _recent_sends(db, recipient=recipient, since_hours=24) >= RATE_LIMIT_PER_DAY:
+    if (
+        await _recent_sends(db, company_id=company_id, recipient=recipient, since_hours=24)
+        >= RATE_LIMIT_PER_DAY
+    ):
         raise CannotSendError(
             f"{recipient} has already been emailed {RATE_LIMIT_PER_DAY} times today"
         )
@@ -184,7 +203,7 @@ async def send_draft(
         raise CannotSendError(f"this message is already {draft.status.value}")
     if not (body or "").strip():
         raise CannotSendError("an empty message cannot be sent")
-    await _refuse_if_rate_limited(db, recipient=recipient)
+    await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
 
     needs = await _needs_in_draft(db, draft=draft)
     outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)

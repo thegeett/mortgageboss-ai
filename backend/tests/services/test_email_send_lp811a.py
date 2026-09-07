@@ -198,6 +198,13 @@ async def test_a_short_message_does_offer_one(db_session: AsyncSession) -> None:
 async def test_the_same_address_cannot_be_mailed_twice_in_five_minutes(
     db_session: AsyncSession,
 ) -> None:
+    """Across two files of ONE company — which is what "across files, not within one" means.
+
+    This test used to call `_setup` twice, and `_setup` builds a fresh COMPANY each time. So it was
+    asserting that one tenant's send blocks another's, as though that were the feature. It passed
+    for a reason unrelated to what it claimed: the limit was unscoped, and the test had accidentally
+    pinned the cross-tenant leak in place. Two files, one company, is the case the limit is for.
+    """
     loan_file, actor, _needs, draft = await _setup(db_session)
     await send_draft(
         db_session,
@@ -207,16 +214,19 @@ async def test_the_same_address_cannot_be_mailed_twice_in_five_minutes(
         body="First.",
         approver_user_id=actor,
     )
-    second_file, second_actor, _n2, second_draft = await _setup(db_session)
+    second_file, second_need = await _second_file_in(db_session, loan_file.company_id)
+    second = await add_needs_to_draft(
+        db_session, loan_file=second_file, needs=[second_need], actor_user_id=actor
+    )
 
     with pytest.raises(CannotSendError, match="minutes ago"):
         await send_draft(
             db_session,
             loan_file=second_file,
-            draft_id=second_draft.id,
+            draft_id=second.draft.id,
             recipient="borrower@example.com",
             body="Second.",
-            approver_user_id=second_actor,
+            approver_user_id=actor,
         )
 
 
@@ -383,5 +393,94 @@ async def test_an_empty_body_is_refused(db_session: AsyncSession) -> None:
             draft_id=draft.id,
             recipient="borrower@example.com",
             body="   ",
+            approver_user_id=actor,
+        )
+
+
+# --------------------------------------------------------------------------------------------- #
+# The rate limit is scoped to a company (review finding)
+# --------------------------------------------------------------------------------------------- #
+async def _second_file_in(db: AsyncSession, company_id, *, title: str = "Pay stubs"):
+    """Another file for the SAME company, with its own draft."""
+    from app.services.loan_files import create_loan_file
+
+    loan_file = await create_loan_file(
+        db, company_id=company_id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    need = NeedsItem(
+        loan_file_id=loan_file.id,
+        title=title,
+        needs_type="bank_statement",
+        origin=NeedsItemOrigin.FINDING,
+    )
+    db.add(need)
+    await db.flush()
+    return loan_file, need
+
+
+async def test_one_companys_send_does_not_block_another_company(db_session: AsyncSession) -> None:
+    """Two processing companies can hold a file for the same person — a borrower shopping two
+    brokers is the ordinary case, not a contrivance.
+
+    Counted system-wide, company A's send refused company B's with "was emailed less than 5 minutes
+    ago", which both stalls B's mail and tells B that somebody else has been in touch with their
+    borrower. Measured that way before the query was scoped.
+    """
+    borrower = "shared.borrower@example.com"
+    file_a, actor_a, _, draft_a = await _setup(db_session)
+    file_b, actor_b, _, draft_b = await _setup(db_session)
+    assert file_a.company_id != file_b.company_id  # the property under test
+
+    await send_draft(
+        db_session,
+        loan_file=file_a,
+        draft_id=draft_a.id,
+        recipient=borrower,
+        body="Hello, please send documents.",
+        approver_user_id=actor_a,
+    )
+    sent_b = await send_draft(
+        db_session,
+        loan_file=file_b,
+        draft_id=draft_b.id,
+        recipient=borrower,
+        body="Hello, please send documents.",
+        approver_user_id=actor_b,
+    )
+
+    assert sent_b.status is CommunicationStatus.SENT
+
+
+async def test_the_window_still_applies_across_one_companys_files(
+    db_session: AsyncSession,
+) -> None:
+    """The positive control, and the one that matters: scoping the query must not disable the limit.
+
+    A fix that simply stopped counting would satisfy the test above while leaving a borrower
+    mailable every second, which is the failure the limit exists to prevent. The two files here
+    belong to ONE company, which is the case the limit is for.
+    """
+    borrower = "same.borrower@example.com"
+    file_one, actor, _, draft_one = await _setup(db_session)
+    file_two, need_two = await _second_file_in(db_session, file_one.company_id)
+    result = await add_needs_to_draft(
+        db_session, loan_file=file_two, needs=[need_two], actor_user_id=actor
+    )
+
+    await send_draft(
+        db_session,
+        loan_file=file_one,
+        draft_id=draft_one.id,
+        recipient=borrower,
+        body="Hello, please send documents.",
+        approver_user_id=actor,
+    )
+    with pytest.raises(CannotSendError, match="less than"):
+        await send_draft(
+            db_session,
+            loan_file=file_two,
+            draft_id=result.draft.id,
+            recipient=borrower,
+            body="Hello, please send documents.",
             approver_user_id=actor,
         )
