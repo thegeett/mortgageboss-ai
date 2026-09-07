@@ -9,6 +9,13 @@ export type TimelineKind = "message";
 /** LP-825 — no "activity" pill: it could only match an activity row, and there are none. */
 export type TimelineFilter = "all" | "sent" | "received" | "drafts";
 
+/** One file on an inbound message, and what became of it. */
+export interface TimelineAttachment {
+  name: string;
+  /** `pending` | `accepted` | `correspondence` | `rejected`. */
+  disposition: string;
+}
+
 export interface TimelineEntry {
   id: string;
   kind: TimelineKind;
@@ -21,8 +28,9 @@ export interface TimelineEntry {
   /** Sender for inbound, recipient for outbound. */
   counterparty: string | null;
   actor_user_id: string | null;
-  /** Filenames on an inbound message. Sender-written text — rendered, never used to build a URL. */
-  attachments: string[];
+  /** Attachments on an inbound message, each with what became of it (LP-825 review). The name is
+   * sender-written text — rendered, never used to build a URL. The disposition is ours. */
+  attachments: TimelineAttachment[];
   /** Flagged by a processor (LP-818). Never computed and never suggested by a model. */
   is_important: boolean;
   /** An arrived message nobody has opened. Always false for outbound — we wrote those. */

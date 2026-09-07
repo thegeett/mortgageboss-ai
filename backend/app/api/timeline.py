@@ -23,6 +23,19 @@ from app.services.timeline import TimelineEntry, TimelineFilter, build_timeline
 router = APIRouter(prefix="/loan-files/{file_identifier}/timeline", tags=["communications"])
 
 
+class TimelineAttachmentPublic(BaseModel):
+    """One attachment on an inbound message, and what became of it (LP-825 review).
+
+    THE DISPOSITION IS THE HALF THAT WAS MISSING. The manifest sent filenames alone, so a document
+    accepted into the file rendered identically to one nobody has looked at — and the sentence that
+    used to answer it, `inbound_triage`'s "A document arrived by email and was accepted", left the
+    timeline when LP-825 stopped it reading the activity log.
+    """
+
+    name: str
+    disposition: str
+
+
 class TimelineEntryPublic(BaseModel):
     """One thing that happened, as the screen renders it."""
 
@@ -35,7 +48,7 @@ class TimelineEntryPublic(BaseModel):
     subject: str | None
     counterparty: str | None
     actor_user_id: UUID | None
-    attachments: list[str]
+    attachments: list[TimelineAttachmentPublic]
     is_important: bool
     unread: bool
     detail: dict[str, Any]
@@ -52,7 +65,10 @@ class TimelineEntryPublic(BaseModel):
             subject=entry.subject,
             counterparty=entry.counterparty,
             actor_user_id=entry.actor_user_id,
-            attachments=list(entry.attachments),
+            attachments=[
+                TimelineAttachmentPublic(name=a.name, disposition=a.disposition)
+                for a in entry.attachments
+            ],
             is_important=entry.is_important,
             unread=entry.unread,
             detail=entry.detail,

@@ -57,7 +57,7 @@ const MESSAGE: TimelineEntry = {
   subject: "Statements attached",
   counterparty: "jane@borrower.example",
   actor_user_id: null,
-  attachments: ["March_statement.pdf"],
+  attachments: [{ name: "March_statement.pdf", disposition: "accepted" }],
   is_important: false,
   unread: true,
   detail: {},
@@ -141,7 +141,7 @@ describe("a row", () => {
   it("renders a filename as text and never as a link", () => {
     // Sender-written text. React escapes by default; what this pins is that nothing builds a URL,
     // a title or an href out of it.
-    loaded([{ ...MESSAGE, attachments: ["../../etc/passwd"] }]);
+    loaded([{ ...MESSAGE, attachments: [{ name: "../../etc/passwd", disposition: "pending" }] }]);
     const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });
 
     expect(screen.getByText("../../etc/passwd")).toBeDefined();
@@ -316,5 +316,47 @@ describe("the reply box's context fetch", () => {
     fireEvent.change(box, { target: { value: "ab" } });
 
     expect(calls).toBe(1);
+  });
+});
+
+/**
+ * LP-825 REVIEW — WHAT BECAME OF THE ATTACHMENT, on the screen that shows it arrived.
+ *
+ * `inbound_triage` writes "A document arrived by email and was accepted" as a DOCUMENT_UPLOADED
+ * activity, and LP-825 stopped this timeline reading the activity log — on the reasoning that every
+ * activity about a message is named COMMUNICATION_* and already carried by the Communication row.
+ * That one is neither: it is about an inbound attachment (its detail names `inbound_attachment_id`)
+ * and the manifest carried only filenames, so an accepted document rendered identically to one
+ * nobody had looked at.
+ */
+describe("TimelinePanel — the attachment manifest says what happened to each file", () => {
+  it("distinguishes an accepted document from one still waiting", () => {
+    loaded([
+      {
+        ...MESSAGE,
+        attachments: [
+          { name: "March_statement.pdf", disposition: "accepted" },
+          { name: "selfie.heic", disposition: "pending" },
+        ],
+      },
+    ]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    const accepted = screen.getByText("March_statement.pdf").closest("li");
+    const waiting = screen.getByText("selfie.heic").closest("li");
+
+    expect(accepted?.textContent).toContain("accepted");
+    // The half that makes the first assertion mean something: the two rows must not read alike.
+    expect(waiting?.textContent).toContain("not yet accepted");
+    expect(waiting?.textContent).not.toContain("· accepted");
+  });
+
+  it("renders an unrecognised disposition as itself rather than as nothing", () => {
+    // A manifest that silently drops the answer is the defect this exists to stop, so a value this
+    // build does not know must still say something.
+    loaded([{ ...MESSAGE, attachments: [{ name: "x.pdf", disposition: "quarantined" }] }]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.getByText("x.pdf").closest("li")?.textContent).toContain("quarantined");
   });
 });

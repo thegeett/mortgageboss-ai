@@ -225,6 +225,15 @@ function ReplyBox({
   );
 }
 
+/** What a processor calls each disposition. An unknown value renders as itself rather than as
+ *  nothing — a manifest that silently drops the answer is what this exists to stop. */
+const ATTACHMENT_DISPOSITION: Record<string, string> = {
+  pending: "not yet accepted",
+  accepted: "accepted",
+  correspondence: "kept as correspondence",
+  rejected: "rejected",
+};
+
 export function TimelinePanel({ fileId }: { fileId: string }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
@@ -350,12 +359,21 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                   // THE MANIFEST. Sender-written text, rendered as text — no title, no href, and
                   // nothing built into a URL from it.
                   <ul className="mt-1 flex flex-wrap gap-1">
-                    {entry.attachments.map((name) => (
+                    {entry.attachments.map((attachment) => (
                       <li
-                        key={name}
+                        key={attachment.name}
                         className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
                       >
-                        {name}
+                        {attachment.name}
+                        {/* LP-825 REVIEW — WHAT BECAME OF IT, beside the name. The manifest was
+                            names alone, which reads the same whether a document was accepted into
+                            the file or is still sitting there unlooked-at. The sentence that used
+                            to answer it ("A document arrived by email and was accepted") was an
+                            activity row, and LP-825 stopped this timeline reading activity. */}
+                        <span className="ml-1 text-[11px] text-foreground-2">
+                          ·{" "}
+                          {ATTACHMENT_DISPOSITION[attachment.disposition] ?? attachment.disposition}
+                        </span>
                       </li>
                     ))}
                   </ul>

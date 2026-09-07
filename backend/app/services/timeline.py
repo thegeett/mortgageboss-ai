@@ -93,6 +93,26 @@ class TimelineKind(StrEnum):
 
 
 @dataclass(frozen=True)
+class TimelineAttachment:
+    """One file on an inbound message, and what became of it.
+
+    LP-825 REVIEW — THE DISPOSITION TRAVELS WITH THE NAME. The manifest was filenames alone, which
+    renders identically whether a document was accepted into the file, kept as correspondence,
+    rejected, or is still sitting there waiting for somebody. That gap did not matter while the
+    activity log supplied the answer on the same screen: `inbound_triage` writes "A document arrived
+    by email and was accepted" for every acceptance. LP-825 stopped the timeline reading activity at
+    all, so the sentence went with it and nothing replaced it.
+
+    This is the shape that ticket's own boundary rule asks for — give the event a communication-
+    shaped row rather than reinstating the activity query — applied to the one event that needed it.
+    """
+
+    name: str
+    #: `pending` / `accepted` / `correspondence` / `rejected` — `AttachmentDisposition`'s values.
+    disposition: str
+
+
+@dataclass(frozen=True)
 class TimelineEntry:
     """One thing that happened on this file."""
 
@@ -107,8 +127,8 @@ class TimelineEntry:
     subject: str | None
     counterparty: str | None
     actor_user_id: UUID | None
-    #: Filenames on an inbound message, for the manifest. Empty for everything else.
-    attachments: tuple[str, ...]
+    #: The inbound message's attachments, each with what became of it. Empty for everything else.
+    attachments: tuple[TimelineAttachment, ...]
     #: Flagged by a processor (LP-818). False on an activity, which cannot be flagged.
     is_important: bool
     #: True for an INBOUND message nobody has opened. False for everything else, including outbound
@@ -182,10 +202,10 @@ async def _inbound_senders(db: AsyncSession, message_ids: list[UUID]) -> dict[UU
     return {row.id: row.from_address for row in rows}
 
 
-async def _attachment_names(
+async def _attachment_manifest(
     db: AsyncSession, message_ids: list[UUID]
-) -> dict[UUID, tuple[str, ...]]:
-    """`{inbound_message_id: filenames}` for the manifest, in one query.
+) -> dict[UUID, tuple[TimelineAttachment, ...]]:
+    """`{inbound_message_id: attachments}` for the manifest, in one query.
 
     ONE QUERY FOR THE WHOLE PAGE rather than one per row: a timeline is a list, and a per-row lookup
     is the N+1 that turns a fast screen into a slow one as a file accumulates history.
@@ -210,11 +230,13 @@ async def _attachment_names(
         .scalars()
         .all()
     )
-    grouped: dict[UUID, list[str]] = {}
+    grouped: dict[UUID, list[TimelineAttachment]] = {}
     for row in rows:
         name = row.filename_original or row.filename_normalized
         if name:
-            grouped.setdefault(row.inbound_message_id, []).append(name)
+            grouped.setdefault(row.inbound_message_id, []).append(
+                TimelineAttachment(name=name, disposition=row.disposition.value)
+            )
     return {key: tuple(value) for key, value in grouped.items()}
 
 
@@ -292,7 +314,7 @@ async def build_timeline(
         .all()
     )
     inbound_ids = [m.inbound_message_id for m in messages if m.inbound_message_id is not None]
-    manifests = await _attachment_names(db, inbound_ids)
+    manifests = await _attachment_manifest(db, inbound_ids)
     senders = await _inbound_senders(db, inbound_ids)
 
     entries: list[TimelineEntry] = [

@@ -136,7 +136,54 @@ async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSess
 
     timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
-    assert timeline[0].attachments == ("March_statement.pdf",)
+    assert [a.name for a in timeline[0].attachments] == ["March_statement.pdf"]
+    # LP-825 REVIEW — AND WHAT BECAME OF IT. A freshly arrived attachment is PENDING; the manifest
+    # used to be names alone, which reads the same as one already accepted into the file.
+    assert [a.disposition for a in timeline[0].attachments] == ["pending"]
+
+
+async def test_the_manifest_says_which_attachments_were_accepted(db_session: AsyncSession) -> None:
+    """LP-825 REVIEW — THE ONE ACTIVITY THAT WAS ABOUT A MESSAGE AND NOT NAMED FOR ONE.
+
+    LP-825 stopped the timeline reading the activity log, on the claim that every activity type
+    describing a message is `COMMUNICATION_*` and already carried by the `Communication` row. That
+    claim is false for an existing type, not only for a future one: `inbound_triage` writes
+    `DOCUMENT_UPLOADED` with the summary "A document arrived by email and was accepted" and
+    `inbound_attachment_id` in its detail. It is about an attachment on a message, and the manifest
+    carried filenames only — so after LP-825 an accepted document rendered identically to one nobody
+    had looked at, and the sentence that used to say so was gone from the screen.
+
+    Fixed the way this ticket's own boundary rule says to: give the event a communication-shaped
+    row, rather than reinstating the activity query. Both halves are asserted, because "says
+    accepted" passes trivially if every attachment says accepted.
+    """
+    from app.models.inbound_attachment import AttachmentDisposition, InboundAttachment
+    from sqlalchemy import select
+
+    _company, loan_file = await _company_and_file(db_session, slug="accepted")
+    await process_raw_message(
+        db_session,
+        raw=_raw(loan_file.get_inbox_address(), message_id="accepted@example.com"),
+        raw_storage_path=None,
+        store_raw=True,
+    )
+    attachment = (await db_session.execute(select(InboundAttachment))).scalars().first()
+    assert attachment is not None
+    attachment.disposition = AttachmentDisposition.ACCEPTED
+    await db_session.flush()
+
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
+
+    assert [(a.name, a.disposition) for a in timeline[0].attachments] == [
+        ("March_statement.pdf", "accepted")
+    ]
+
+    # THE CONTROL: the same file, moved back, must read differently. Without it a manifest hardcoded
+    # to "accepted" would satisfy the assertion above.
+    attachment.disposition = AttachmentDisposition.PENDING
+    await db_session.flush()
+    again, _ = await build_timeline(db_session, loan_file=loan_file)
+    assert [a.disposition for a in again[0].attachments] == ["pending"]
 
 
 async def test_a_non_message_activity_does_not_appear(db_session: AsyncSession) -> None:
@@ -206,14 +253,82 @@ def test_every_communication_activity_type_is_excluded() -> None:
     """DERIVED FROM THE ENUM, not listed. A fourth `COMMUNICATION_*` type added later would appear
     beside the Communication it describes — the same double-count, arriving by a different route.
 
-    The non-empty assertion is the control on the derivation itself: a set built by a predicate that
-    matches nothing excludes nothing, and reads exactly like a working exclusion.
+    LP-825 REVIEW — WHAT THIS TEST DOES AND DOES NOT DO. Its docstring used to say a thirty-third
+    type describing a message without being named for one "is where it surfaces". It is not: the
+    middle assertion re-derived the constant with the constant's own comprehension and compared it
+    to itself, which cannot fail while the definition is unchanged. Two of the three assertions do
+    have content — the prefix matching nothing, and one concrete member — and they are kept. The
+    claim about a mis-named future type is checked by
+    `test_the_message_pipeline_writes_no_unaccounted_activity_type` below, as far as it can be.
     """
     matching = {activity for activity in ActivityType if activity.name.startswith("COMMUNICATION_")}
 
     assert matching, "the prefix matched nothing — the exclusion would be silently empty"
     assert matching == MESSAGE_ACTIVITY_TYPES
     assert ActivityType.COMMUNICATION_FAILED in MESSAGE_ACTIVITY_TYPES
+
+
+#: Activity types written by the message pipeline that are NOT named `COMMUNICATION_*`, each with
+#: the reason it is nevertheless accounted for. A RECORD OF DEVIATIONS, not an allow-list: a new
+#: entry here is a deliberate decision somebody wrote down, and a new one that nobody wrote down is
+#: what the test below fails on.
+_ACCOUNTED_FOR = {
+    # LP-825 review — `inbound_triage` logs this when a processor accepts an emailed attachment
+    # ("A document arrived by email and was accepted"). It IS about a message, which is why the
+    # timeline stopping at COMMUNICATION_* lost it. It is accounted for on the timeline now by the
+    # attachment manifest carrying each file's disposition, not by an activity row.
+    ActivityType.DOCUMENT_UPLOADED,
+}
+
+#: The modules that handle a message: ingest, routing, triage, send, reply, bounces, auto-reply.
+_MESSAGE_PIPELINE = (
+    "services/inbound_triage.py",
+    "services/inbound_routing.py",
+    "services/inbound_ingest.py",
+    "services/email_send.py",
+    "services/email_reply.py",
+    "services/bounce_handling.py",
+    "services/auto_reply.py",
+)
+
+
+def test_the_message_pipeline_writes_no_unaccounted_activity_type() -> None:
+    """LP-825 REVIEW — THE CLAIM THE TIMELINE RESTS ON, checked as far as source can check it.
+
+    The timeline no longer reads the activity log at all, on the reasoning that every activity type
+    about a message is named `COMMUNICATION_*` and already carried by the `Communication` row. That
+    reasoning was wrong about an existing type, not only a hypothetical future one:
+    `inbound_triage` writes `DOCUMENT_UPLOADED` with the summary "A document arrived by email and
+    was accepted" and `inbound_attachment_id` in its detail, and the manifest carried filenames
+    only — so an accepted document read exactly like one nobody had looked at.
+
+    Semantics cannot be asserted, but PROVENANCE can: an activity type written by a module that
+    handles messages is a candidate for being about a message. This fails when a message-pipeline
+    module starts writing a type that is neither `COMMUNICATION_*` nor written down as accounted
+    for — which is the moment to decide where it belongs, rather than a year later when somebody
+    notices the timeline is missing something.
+    """
+    import re
+
+    app_dir = Path(__file__).resolve().parents[2] / "app"
+    found: dict[str, set[str]] = {}
+    for relative in _MESSAGE_PIPELINE:
+        module = app_dir / relative
+        assert module.is_file(), f"{relative} moved — this test is checking nothing for it"
+        for name in re.findall(r"activity_type=ActivityType\.([A-Z_]+)", module.read_text()):
+            found.setdefault(name, set()).add(relative)
+
+    assert found, "no activity writes found at all — the regex or the module list is stale"
+
+    allowed = {a.name for a in MESSAGE_ACTIVITY_TYPES} | {a.name for a in _ACCOUNTED_FOR}
+    unaccounted = {name: sorted(where) for name, where in found.items() if name not in allowed}
+
+    assert not unaccounted, (
+        "a module that handles messages writes an activity type that is neither COMMUNICATION_* "
+        f"nor recorded as accounted for: {unaccounted}. Decide where it belongs on the "
+        "communication timeline — the manifest's disposition field is the precedent — and add it "
+        "to _ACCOUNTED_FOR with the reason."
+    )
 
 
 async def test_a_bounce_does_not_appear_twice(db_session: AsyncSession) -> None:
