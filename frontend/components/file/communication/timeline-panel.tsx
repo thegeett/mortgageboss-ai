@@ -14,6 +14,7 @@
  * documents into this file — so it is shown, copyable, and never linked.
  */
 
+import { MessageDialog } from "@/components/file/communication/message-dialog";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
@@ -239,6 +240,10 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   const { data, isPending, isError } = useTimeline(fileId, filter);
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  // LP-829 — which message the dialog is showing. Separate from `open`, which is the inline reply
+  // box: a processor reading a message and a processor answering one are different acts, and
+  // sharing the state would make opening one close the other.
+  const [openMessage, setOpenMessage] = useState<string | null>(null);
 
   async function copyAddress(address: string) {
     await navigator.clipboard.writeText(address);
@@ -336,17 +341,28 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 <EntryIcon entry={entry} />
               </span>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span
-                  className={entry.unread ? "font-semibold text-foreground" : "text-foreground"}
+                {/* LP-829 — THE SUMMARY IS THE HANDLE. A whole-row click would swallow the reply and
+                    flag controls beside it, and a separate "open" affordance would be a second thing
+                    to find; the line naming the message is what a processor is already reading when
+                    they want to see it. A button, not a div with a handler, so it is reachable from
+                    the keyboard and announced as something that does anything at all. */}
+                <button
+                  type="button"
+                  onClick={() => setOpenMessage(entry.id)}
+                  className="text-left hover:underline"
                 >
-                  {entry.summary}
-                  {entry.is_important ? (
-                    <Star
-                      className="ml-1 inline h-3.5 w-3.5 fill-warning text-warning"
-                      aria-label="Important"
-                    />
-                  ) : null}
-                </span>
+                  <span
+                    className={entry.unread ? "font-semibold text-foreground" : "text-foreground"}
+                  >
+                    {entry.summary}
+                    {entry.is_important ? (
+                      <Star
+                        className="ml-1 inline h-3.5 w-3.5 fill-warning text-warning"
+                        aria-label="Important"
+                      />
+                    ) : null}
+                  </span>
+                </button>
                 {entry.subject ? (
                   <span className="truncate text-xs text-muted-foreground">{entry.subject}</span>
                 ) : null}
@@ -406,6 +422,7 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
           Older entries are not shown — this file has more history than fits on one page.
         </p>
       ) : null}
+      <MessageDialog fileId={fileId} messageId={openMessage} onClose={() => setOpenMessage(null)} />
     </section>
   );
 }

@@ -6,7 +6,7 @@
  * moves every requested document to REQUESTED and starts the reminder clock.
  */
 import { apiClient } from "@/lib/api/client";
-import type { OutboundDraft, SentCommunication } from "@/lib/types/communication";
+import type { MessageDetail, OutboundDraft, SentCommunication } from "@/lib/types/communication";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
@@ -33,6 +33,27 @@ export async function fetchOutboundDraft(fileId: string): Promise<OutboundDraft 
     if (isAxiosError(error) && error.response?.status === 404) return null;
     throw error;
   }
+}
+
+export const messageQueryKey = (fileId: string, messageId: string) =>
+  ["message", fileId, messageId] as const;
+
+/**
+ * One message in full (LP-829) — the dialog's data.
+ *
+ * FETCHED ON OPEN, not with the timeline. A timeline row is a summary and there can be two hundred
+ * of them; loading every body to render a list would make this the fullest copy of a borrower's
+ * prose in the browser, for messages nobody opened.
+ */
+export function useMessageDetail(fileId: string, messageId: string | null) {
+  return useQuery({
+    queryKey: messageQueryKey(fileId, messageId ?? ""),
+    queryFn: async () =>
+      (await apiClient.get<MessageDetail>(`${API_V1}/loan-files/${fileId}/messages/${messageId}`))
+        .data,
+    enabled: Boolean(fileId) && Boolean(messageId),
+    retry: noRetryOn404,
+  });
 }
 
 export function useOutboundDraft(fileId: string) {

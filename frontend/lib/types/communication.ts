@@ -24,3 +24,41 @@ export interface SentCommunication {
   sent_at: string | null;
   needs_items_requested: number;
 }
+
+/** One file on an inbound message, and what became of it (LP-825). */
+export interface MessageAttachment {
+  name: string;
+  disposition: string;
+}
+
+/**
+ * One message in full (LP-829).
+ *
+ * `body` is here and is the point: before this, a sent message's words were readable nowhere in the
+ * product. For an OPEN DRAFT the server has already resolved LP-823's deferred placeholders; for a
+ * sent message they were resolved when it went out; for an inbound message the body is exactly what
+ * the borrower wrote, placeholders and all.
+ */
+export interface MessageDetail {
+  id: string;
+  direction: "inbound" | "outbound";
+  status: string;
+  subject: string | null;
+  body: string;
+  /** Sender for inbound, recipient for outbound. Null on a draft nobody has addressed yet. */
+  counterparty: string | null;
+  template_key: string | null;
+  template_version: string | null;
+  created_at: string;
+  sent_at: string | null;
+  read_at: string | null;
+  is_important: boolean;
+  /** Why a send failed, in the provider's own words. Null on everything else. */
+  error_detail: string | null;
+  /** Outbound: what this message asks for. Empty on inbound. */
+  documents: string[];
+  /** Inbound: what arrived, and what became of each. Empty on outbound. */
+  attachments: MessageAttachment[];
+  /** Whether this is the file's open draft — the one the panel above is editing. */
+  is_open_draft: boolean;
+}

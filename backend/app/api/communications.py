@@ -10,6 +10,7 @@ before anything else runs, exactly as needs/borrowers/property do. Nothing in th
 `company_id`; LP-805's resolver remains the only place allowed to do that.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -34,6 +35,7 @@ from app.services.email_reply import (
     set_important,
 )
 from app.services.email_send import CannotSendError, build_outbound, send_draft
+from app.services.message_detail import message_detail
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/outbound", tags=["communications"])
 
@@ -181,6 +183,85 @@ def _refuse(exc: CannotReplyError) -> HTTPException:
     such message" and "on another file", so the status carries no more information than the text.
     """
     return HTTPException(status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+class MessageAttachmentPublic(BaseModel):
+    """One file on an inbound message, and what became of it (LP-825's manifest)."""
+
+    name: str
+    disposition: str
+
+
+class MessageDetailPublic(BaseModel):
+    """One message in full — the dialog a processor opens from the timeline (LP-829).
+
+    THE BODY IS HERE, and that is the whole point. `MessagePublic` withholds it — *"the caller
+    already has what they typed"* — which is right for a write response and left a sent message's
+    words readable nowhere in the product.
+    """
+
+    id: UUID
+    direction: str
+    status: str
+    subject: str | None
+    body: str
+    counterparty: str | None
+    template_key: str | None
+    template_version: str | None
+    created_at: datetime
+    sent_at: datetime | None
+    read_at: datetime | None
+    is_important: bool
+    error_detail: str | None
+    documents: list[str]
+    attachments: list[MessageAttachmentPublic]
+    is_open_draft: bool
+
+
+@message_router.get("/{communication_id}", response_model=MessageDetailPublic)
+async def read_message(
+    communication_id: UUID,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> MessageDetailPublic:
+    """One message in full.
+
+    SCOPED BY THE FILE, like every other route on this router: `ScopedLoanFile` resolves the file
+    under the caller's company first, and the service then checks `loan_file_id` on the row itself
+    rather than trusting the id in the path. A message on another company's file is a 404 — the same
+    answer a message that does not exist gets, because telling those apart is how a caller
+    enumerates what another tenant has.
+
+    NO BODY IN ANY LOG LINE. This is the fullest copy of a borrower's prose the product serves, and
+    `communications.body` is dropped from every readonly view for the same reason.
+    """
+    detail = await message_detail(
+        db, loan_file=loan_file, communication_id=communication_id, reader=current_user
+    )
+    if detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message on this loan file")
+    return MessageDetailPublic(
+        id=detail.id,
+        direction=detail.direction,
+        status=detail.status,
+        subject=detail.subject,
+        body=detail.body,
+        counterparty=detail.counterparty,
+        template_key=detail.template_key,
+        template_version=detail.template_version,
+        created_at=detail.created_at,
+        sent_at=detail.sent_at,
+        read_at=detail.read_at,
+        is_important=detail.is_important,
+        error_detail=detail.error_detail,
+        documents=list(detail.documents),
+        attachments=[
+            MessageAttachmentPublic(name=a.name, disposition=a.disposition)
+            for a in detail.attachments
+        ],
+        is_open_draft=detail.is_open_draft,
+    )
 
 
 @message_router.get("/{communication_id}/reply-context", response_model=ReplyContextPublic)
