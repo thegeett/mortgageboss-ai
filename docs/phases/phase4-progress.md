@@ -190,6 +190,32 @@ duplicates" quietly means "all non-communication activity".
 
 ---
 
+## The mailbox redesign (LP-831 … LP-836)
+
+Asked for 2026-09-07 after using the built feature. Six tickets, specified and not started. Two
+answers were confirmed directly rather than guessed, because both readings were plausible and wrong
+would have meant rebuilding:
+
+* **a request creates a NEW draft each time**, carrying everything requested since the last send —
+  not one draft that grows, which is what the system does today;
+* **the inbox domains are `imbox.mortgageboss.ai` and `imboxstaging.mortgageboss.ai`** — spelled with
+  an `m`, deliberately, and different per environment by request.
+
+| Ticket | What | Status |
+|---|---|---|
+| [LP-831](../tickets/LP-831.md) | The Communication page becomes a mailbox: a list of drafts, one modal to read or edit | Specified |
+| [LP-832](../tickets/LP-832.md) | A request creates a new draft and the old one stays — removes `get_open_draft`'s single-row assumption, which **raises** rather than picking | Specified |
+| [LP-833](../tickets/LP-833.md) | Compose by picking documents from the 166-type catalog; the model writes the framing, on the request | Specified |
+| [LP-834](../tickets/LP-834.md) | The secure link is added from inside the draft; minting expires the previous one | Specified |
+| [LP-835](../tickets/LP-835.md) | Writing to the other parties, from the same list and the same send path | Specified |
+| [LP-836](../tickets/LP-836.md) | One inbox domain per environment, including a local one that does not exist today | Specified |
+
+**Two of these close the escalated LP-820 defect** — a party draft is built today and no screen can
+send it, while the party panel tells a processor to send it from the borrower's draft. LP-831's list
+makes every draft reachable; LP-835 makes the party path end in one.
+
+---
+
 ## Blocked / escalations
 
 Anything a session could not resolve. One line each, with the ticket it belongs to. **Forty items,
