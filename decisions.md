@@ -16054,3 +16054,37 @@ finding is non-requestable for a reason that is *not* visible in its rule id, th
 which a persisted cause earns its keep; this decision is not a claim that it never will.
 
 *Status.* Accepted (LP-801). Refines LP-640.
+
+---
+
+## ADR-400
+
+**Who holds a document is app-layer knowledge on the document TYPE, not data on the file.**
+
+*Context.* Phase 4 drafts requests. Before it can address one it has to know whether the borrower can
+act on the ask at all: an appraisal is ordered by the lender through an AMC, a title commitment comes
+from the title company, a written VOE is completed by the employer. Asking a borrower for any of
+them wastes a round trip and costs their confidence in every other ask in the same email. The obvious
+alternatives are a per-file assignment, or a `responsible_party` column on `documents` / `needs_items`.
+
+*Decision.* `ResponsibleParty` is a closed vocabulary in `documents/catalog.py`, mapped from the
+document-type slug, alongside tier and category. No column, no migration, no per-file override.
+
+*Rationale.* This extends ADR-053/ADR-167 rather than deciding something new: tier and category are
+app-layer knowledge precisely so a type can be added in a one-line edit, and the party is the same
+kind of fact — a property of what the document IS, stable across every loan file that has one. A
+column would make it a per-document value that has to be populated at classification time and can be
+wrong on one file while right on the next, for a fact that does not vary by file.
+
+The default is `PROCESSOR`, not `BORROWER`, and that is the load-bearing half. An unknown or
+uncataloged type is one nobody has classified; failing towards "someone on our side deals with this"
+costs a processor one manual step, where the other default generates a borrower-facing request for a
+document that may not be theirs to send.
+
+*Consequences.* A processing company whose habits differ — ordering payoffs through the borrower, say
+— cannot express that today. If that turns out to matter, the extension is a per-company override
+layered over this mapping, not a replacement of it; the mapping stays the default. The instruction
+prose in the same structure could never have been a DB enum, so splitting party into the database and
+prose into code would have put one fact about a type in two stores.
+
+*Status.* Accepted (LP-800). Extends ADR-053 and ADR-167.

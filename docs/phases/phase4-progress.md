@@ -40,7 +40,7 @@ user's call.
 |---|---|---|---|---|---|
 | 1 | LP-802 ADRs, settings, `inbox_domain`, token widening | REVIEWED | see Log | see Log | ADR-094 amended by ADR-397 — the address contains the token, so exposure is a narrowing not a technicality. Review found `inbox_domain` set by nothing; now wired in both task definitions. LP-802 has no "Done when" clause in the build plan |
 | 2 | LP-801 Requestable-finding filter + `docs_requested` shape + activity type | REVIEWED | see Log | see Log | Review found the bulk dedupe never matched untyped or aliased labels — two clicks made two needs items for one ask, measured. Marker unified for new writes only; pre-LP-801 rows keep a bare `True`, read them with `requested_needs_item_id` |
-| 3 | LP-800 Borrower instruction catalog | PENDING | | | Claude writes a first pass for the ~25 borrower-facing types; **Priya reviews after** — do not block on her |
+| 3 | LP-800 Borrower instruction catalog | AWAITING_REVIEW | see Log | | ADR-400: party is app-layer knowledge on the TYPE, no column, default PROCESSOR. All 166 types carry a party; 28 have full instructions. **Priya's pass is still outstanding** — the plan's fourth "Done when" clause, not blocking per this row's original note |
 | 4 | LP-817 Template library (5 templates, versioned) | PENDING | | | LP-810's "plain template" fallback lives here |
 | 5 | LP-822 Tone / style profile | PENDING | | | needs Priya's real emails; ship the mechanism with a neutral default profile and fill it in later |
 | 6 | LP-809 Draft accumulation | PENDING | | | |

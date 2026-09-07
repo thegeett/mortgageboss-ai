@@ -32,10 +32,17 @@ The catalog is also the source of truth for the classifier's **type list**: the
 classification prompt is built from these slugs (see
 :mod:`app.ai.classification_prompt`), so the two cannot drift — a type the
 classifier can return is a type the catalog knows, and vice versa.
+
+LP-800 adds a **third** axis on the same slugs: :data:`GUIDANCE` — who holds each
+document type, and, for the types a borrower is actually asked for, what to say to
+them. Phase 4 drafts the request, and neither the tier nor the category can tell it
+whether the borrower can act on the ask at all. Same one-line-edit discipline, same
+never-raise lookup, and a test keeps all three axes covering the same slug set.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from app.models.document import DocumentCategory, Tier
 
@@ -632,3 +639,776 @@ def types_for_category(category: DocumentCategory) -> list[str]:
     the prompt's structure is driven by the catalog — one source of truth.
     """
     return [slug for slug, (_, cat) in CATALOG.items() if cat is category]
+
+
+# --------------------------------------------------------------------------- #
+# Borrower guidance — who a document comes FROM, and how to ask for it (LP-800)
+# --------------------------------------------------------------------------- #
+# Phase 4 sends the ask. Everything above answers "what IS this document"; nothing
+# answered "whose document is it, and what do I say to the person who has it".
+# Without that, a drafted request either names the document type at the borrower —
+# "please provide a comparable_rent_schedule" — or asks them for something they
+# cannot produce, because the appraiser, the title company or their own employer
+# holds it.
+#
+# CODE, NOT A TABLE, for the same reason tier and category are (ADR-053/ADR-167):
+# adding a type stays a one-line edit with no migration. `responsible_party` is a
+# closed vocabulary and could be a DB enum; the instruction prose could not, and
+# splitting one fact about a type across two stores is how the two drift.
+
+
+class ResponsibleParty(StrEnum):
+    """Who actually holds a document — the party a request has to reach.
+
+    Not "who is accountable for the file". A processor chases every one of these; the
+    distinction that matters to a draft is whether the BORROWER can act on the ask at
+    all. ``PROCESSOR`` means the processor orders it themselves and no borrower-facing
+    request should be generated (LP-801's `requestable` is about a finding; this is
+    about a document type, and the two gates are independent).
+    """
+
+    BORROWER = "borrower"
+    PROCESSOR = "processor"
+    LENDER = "lender"
+    TITLE = "title"
+    EMPLOYER = "employer"
+    CPA = "cpa"
+    AGENT = "agent"
+    INSURER = "insurer"
+
+
+@dataclass(frozen=True)
+class BorrowerGuidance:
+    """What a request for one document type has to say, in the borrower's words.
+
+    ``borrower_label`` is the ONLY string a borrower should ever see for a type — the
+    catalog slug is an internal identifier and reads as a system leak in an email.
+
+    ``common_rejects`` is the field that earns its keep and the one most easily skipped.
+    Almost every re-request in a processing file is a document that arrived, was looked
+    at, and was sent back: page 1 of 5, a screenshot of a balance, an expired licence.
+    Naming the failure in the FIRST ask is cheaper than a second round trip, and it is
+    knowledge the borrower has no way to have.
+    """
+
+    responsible_party: ResponsibleParty
+    #: What to call the document when speaking to a borrower.
+    borrower_label: str | None = None
+    #: Where to get it, in the borrower's words — a portal, an office, a person.
+    how_to_obtain: str | None = None
+    #: What "all of it" means for THIS type. Generic completeness advice is useless:
+    #: "all pages" means something different for a bank statement and a tax return.
+    completeness_rule: str | None = None
+    #: The ways this specific type usually arrives wrong.
+    common_rejects: tuple[str, ...] = ()
+    #: A blank form the borrower fills in, where one exists. None everywhere today —
+    #: LP-817 owns the template library, and a link that resolves to nothing is worse
+    #: in an email than no link, so these stay None until there is something to point at.
+    template_url: str | None = None
+
+
+#: Who holds each cataloged type. EVERY catalog slug appears here — a type with no party
+#: is a type Phase 4 cannot address, and the sync test refuses one rather than letting it
+#: fall to a default that would quietly address it to the borrower.
+#:
+#: The assignments below are an INDUSTRY-STANDARD FIRST PASS on the same footing as the
+#: catalog itself: the party a US residential mortgage file normally draws each type from.
+#: They are NOT yet validated against the resident domain expert's real workflow, and a
+#: processing company's own habits move some of them — a shop that orders payoffs through
+#: the borrower rather than the servicer, say. Expect this to refine with Priya.
+_RESPONSIBLE_PARTY: dict[str, ResponsibleParty] = {
+    # ===================================================================== #
+    # Income / Employment
+    # ===================================================================== #
+    # The borrower holds their own pay and tax records. The exceptions are the ones
+    # ordered on the borrower's authorisation rather than fetched by them: transcripts
+    # come back from the IRS to the processor, and a VOE is completed by the employer.
+    "pay_stub": ResponsibleParty.BORROWER,
+    "w2": ResponsibleParty.BORROWER,
+    "1099": ResponsibleParty.BORROWER,
+    "tax_return": ResponsibleParty.BORROWER,
+    "voe": ResponsibleParty.EMPLOYER,
+    "profit_and_loss": ResponsibleParty.BORROWER,
+    "tax_transcript": ResponsibleParty.PROCESSOR,
+    "form_4506c": ResponsibleParty.BORROWER,  # the borrower SIGNS it; the processor sends it
+    "business_tax_return": ResponsibleParty.BORROWER,
+    "k1_statement": ResponsibleParty.BORROWER,
+    "social_security_award_letter": ResponsibleParty.BORROWER,
+    "pension_statement": ResponsibleParty.BORROWER,
+    "retirement_income_letter": ResponsibleParty.BORROWER,
+    "unemployment_income_letter": ResponsibleParty.BORROWER,
+    "disability_income_letter": ResponsibleParty.BORROWER,
+    "child_support_income": ResponsibleParty.BORROWER,
+    "alimony_income": ResponsibleParty.BORROWER,
+    "rental_income_schedule": ResponsibleParty.BORROWER,
+    "commission_income_statement": ResponsibleParty.BORROWER,
+    "compensation_statement": ResponsibleParty.BORROWER,
+    "employment_offer_letter": ResponsibleParty.BORROWER,
+    "form_1040_personal_tax_transcripts": ResponsibleParty.PROCESSOR,
+    "form_1065_partnership_tax_transcripts": ResponsibleParty.PROCESSOR,
+    "form_1120_corporate_tax_transcripts": ResponsibleParty.PROCESSOR,
+    "form_4506t_request_for_transcript": ResponsibleParty.BORROWER,  # signed, like the 4506-C
+    "transcripts_of_1099": ResponsibleParty.PROCESSOR,
+    "k_1_shareholder_profit_and_loss_transcripts": ResponsibleParty.PROCESSOR,
+    "trust_federal_tax_returns": ResponsibleParty.BORROWER,
+    "cpa_letter": ResponsibleParty.CPA,
+    "business_existence_verification_cpa_ltr_bus_lic": ResponsibleParty.CPA,
+    "business_license": ResponsibleParty.BORROWER,
+    "disability_award_letter": ResponsibleParty.BORROWER,
+    "retirement_pension_award_letter": ResponsibleParty.BORROWER,
+    "retirement_check": ResponsibleParty.BORROWER,
+    "verbal_voe": ResponsibleParty.PROCESSOR,  # the processor telephones the employer
+    "military_leave_and_earning_statement_les": ResponsibleParty.BORROWER,
+    "foster_care_verification": ResponsibleParty.BORROWER,
+    "boarder_rental_payments": ResponsibleParty.BORROWER,
+    "boarder_proof_of_residency": ResponsibleParty.BORROWER,
+    "cancelled_checks_evidencing_receipt_of_note_income": ResponsibleParty.BORROWER,
+    # ===================================================================== #
+    # Assets
+    # ===================================================================== #
+    # Statements are the borrower's. The verifications (VOD / VOA) are third-party forms
+    # the processor sends to the depository, which is why they are not borrower asks even
+    # though they describe the borrower's own accounts.
+    "bank_statement": ResponsibleParty.BORROWER,
+    "investment_account": ResponsibleParty.BORROWER,
+    "retirement_account": ResponsibleParty.BORROWER,
+    "gift_letter": ResponsibleParty.BORROWER,  # the DONOR signs; the borrower obtains it
+    "verification_of_deposit": ResponsibleParty.PROCESSOR,
+    "brokerage_statement": ResponsibleParty.BORROWER,
+    "money_market_statement": ResponsibleParty.BORROWER,
+    "certificate_of_deposit": ResponsibleParty.BORROWER,
+    "earnest_money_receipt": ResponsibleParty.AGENT,
+    "gift_donor_bank_statement": ResponsibleParty.BORROWER,
+    "life_insurance_statement": ResponsibleParty.BORROWER,
+    "sale_of_asset_proof": ResponsibleParty.BORROWER,
+    "crypto_account_statement": ResponsibleParty.BORROWER,
+    "ira_401k": ResponsibleParty.BORROWER,
+    "bank_deposit_slip": ResponsibleParty.BORROWER,
+    "emd_withdrawal_proof": ResponsibleParty.BORROWER,
+    "life_insurance_policy": ResponsibleParty.BORROWER,
+    "verification_of_assets": ResponsibleParty.PROCESSOR,
+    "financial_statements": ResponsibleParty.BORROWER,
+    "statement_of_account": ResponsibleParty.BORROWER,
+    # ===================================================================== #
+    # Property
+    # ===================================================================== #
+    # The split that matters here: what the borrower OWNS the paperwork for (their
+    # mortgage, tax bill, HOA dues, leases, inspections they commissioned) versus what
+    # the transaction produces around them (appraisal, title, flood determination), which
+    # the borrower cannot obtain and should never be asked for.
+    "comparable_rent_schedule": ResponsibleParty.PROCESSOR,  # form 1007, from the appraiser
+    "small_residential_income_appraisal": ResponsibleParty.PROCESSOR,
+    "purchase_agreement": ResponsibleParty.AGENT,
+    "homeowners_insurance": ResponsibleParty.BORROWER,
+    "mortgage_statement": ResponsibleParty.BORROWER,
+    "form_1098": ResponsibleParty.BORROWER,
+    "property_tax_bill": ResponsibleParty.BORROWER,
+    "hoa_statement": ResponsibleParty.BORROWER,
+    "appraisal": ResponsibleParty.LENDER,  # ordered through an AMC; never a borrower ask
+    "title_commitment": ResponsibleParty.TITLE,
+    "preliminary_title_report": ResponsibleParty.TITLE,
+    "flood_certification": ResponsibleParty.LENDER,
+    "flood_insurance_policy": ResponsibleParty.BORROWER,
+    "survey": ResponsibleParty.TITLE,
+    "warranty_deed": ResponsibleParty.TITLE,
+    "home_inspection_report": ResponsibleParty.BORROWER,
+    "pest_inspection_report": ResponsibleParty.BORROWER,
+    "well_septic_certification": ResponsibleParty.BORROWER,
+    "condo_questionnaire": ResponsibleParty.PROCESSOR,  # sent to the HOA / management co.
+    "payoff_statement": ResponsibleParty.PROCESSOR,  # ordered from the servicer
+    "lease_agreement": ResponsibleParty.BORROWER,
+    "master_insurance_policy_for_condominium": ResponsibleParty.INSURER,
+    "building_permits": ResponsibleParty.BORROWER,
+    "hoa_certification": ResponsibleParty.PROCESSOR,
+    "homeowner_s_insurance_quote": ResponsibleParty.BORROWER,
+    "termite_report": ResponsibleParty.BORROWER,
+    "termite_completion": ResponsibleParty.BORROWER,
+    "property_profile_subject": ResponsibleParty.PROCESSOR,
+    "property_profile_non_subject": ResponsibleParty.PROCESSOR,
+    "property_tax_bill_non_subject": ResponsibleParty.BORROWER,
+    "proof_of_occupancy": ResponsibleParty.BORROWER,
+    "subject_property_note": ResponsibleParty.BORROWER,
+    "other_property_note": ResponsibleParty.BORROWER,
+    "seller_signature_authority": ResponsibleParty.AGENT,
+    "home_value_estimate": ResponsibleParty.PROCESSOR,
+    "certificate_of_liability_insurance": ResponsibleParty.INSURER,
+    # ===================================================================== #
+    # Credit
+    # ===================================================================== #
+    # The report and its supplements are pulled by the lender; everything the report
+    # RAISES — a discharge, a judgment, a payoff, an explanation — is the borrower's to
+    # produce. VOM and VOR are third-party forms sent to a servicer or landlord.
+    "credit_report": ResponsibleParty.LENDER,
+    "credit_explanation_letter": ResponsibleParty.BORROWER,
+    "credit_supplement": ResponsibleParty.PROCESSOR,
+    "bankruptcy_discharge": ResponsibleParty.BORROWER,
+    "foreclosure_documentation": ResponsibleParty.BORROWER,
+    "judgment_documentation": ResponsibleParty.BORROWER,
+    "collection_account_letter": ResponsibleParty.BORROWER,
+    "debt_payoff_statement": ResponsibleParty.BORROWER,
+    "student_loan_statement": ResponsibleParty.BORROWER,
+    "installment_loan_statement": ResponsibleParty.BORROWER,
+    "credit_card_statement": ResponsibleParty.BORROWER,
+    "bankruptcy_filing": ResponsibleParty.BORROWER,
+    "unsecured_note": ResponsibleParty.BORROWER,
+    "verification_of_mortgage": ResponsibleParty.PROCESSOR,
+    "verification_of_rent": ResponsibleParty.PROCESSOR,
+    # ===================================================================== #
+    # Disclosures
+    # ===================================================================== #
+    # The lender ISSUES these; the borrower signs and returns some of them. The party
+    # recorded is whoever a missing copy has to be chased from, which for a signed
+    # authorisation or consent is the borrower and for a CD or LE is the lender.
+    "closing_disclosure": ResponsibleParty.LENDER,
+    "loan_estimate": ResponsibleParty.LENDER,
+    "intent_to_proceed": ResponsibleParty.BORROWER,
+    "notice_of_right_to_cancel": ResponsibleParty.LENDER,
+    "truth_in_lending": ResponsibleParty.LENDER,
+    "servicing_disclosure": ResponsibleParty.LENDER,
+    "affiliated_business_disclosure": ResponsibleParty.LENDER,
+    "privacy_notice": ResponsibleParty.LENDER,
+    "e_consent_disclosure": ResponsibleParty.BORROWER,
+    "authorization_to_run_credit": ResponsibleParty.BORROWER,
+    "borrower_authorization_and_certification": ResponsibleParty.BORROWER,
+    "borrower_s_authorization_for_counseling": ResponsibleParty.BORROWER,
+    "credit_card_authorization": ResponsibleParty.BORROWER,
+    "social_security_administration_ssa_89": ResponsibleParty.BORROWER,
+    "mortgage_loan_origination_agreement": ResponsibleParty.BORROWER,
+    "prior_closing_disclosure_final_cd_from_purchase": ResponsibleParty.BORROWER,
+    "temporary_buydown_agreement": ResponsibleParty.LENDER,
+    # ===================================================================== #
+    # Borrower information
+    # ===================================================================== #
+    # Identity, life events, and the letters only the borrower can write. Every one of
+    # these is a borrower ask by definition — the category IS the party.
+    "drivers_license": ResponsibleParty.BORROWER,
+    "divorce_decree": ResponsibleParty.BORROWER,
+    "letter_of_explanation": ResponsibleParty.BORROWER,
+    "passport": ResponsibleParty.BORROWER,
+    "social_security_card": ResponsibleParty.BORROWER,
+    "permanent_resident_card": ResponsibleParty.BORROWER,
+    "visa_documentation": ResponsibleParty.BORROWER,
+    "birth_certificate": ResponsibleParty.BORROWER,
+    "marriage_certificate": ResponsibleParty.BORROWER,
+    "military_id": ResponsibleParty.BORROWER,
+    "power_of_attorney": ResponsibleParty.BORROWER,
+    "trust_documentation": ResponsibleParty.BORROWER,
+    "name_affidavit": ResponsibleParty.BORROWER,
+    "government_issued_id": ResponsibleParty.BORROWER,
+    "work_visa_ead_card": ResponsibleParty.BORROWER,
+    "court_order_documents": ResponsibleParty.BORROWER,
+    "trust_agreement": ResponsibleParty.BORROWER,
+    "trust_documents": ResponsibleParty.BORROWER,
+    "application_loe": ResponsibleParty.BORROWER,
+    "letter_of_explanation_asset": ResponsibleParty.BORROWER,
+    "letter_of_explanation_child_care": ResponsibleParty.BORROWER,
+    "letter_of_explanation_income": ResponsibleParty.BORROWER,
+    "letter_of_explanation_misc": ResponsibleParty.BORROWER,
+    "letter_of_explanation_property": ResponsibleParty.BORROWER,
+    "uscis_notice_of_action": ResponsibleParty.BORROWER,
+    # ===================================================================== #
+    # Misc
+    # ===================================================================== #
+    # System artefacts and lender output. `custom` and `miscellaneous_document` are
+    # PROCESSOR deliberately: they are "we do not know what this is", and the safe
+    # reading of an unknown type is that nobody has been told to send it.
+    "uniform_residential_loan_application": ResponsibleParty.PROCESSOR,
+    "underwriting_approval": ResponsibleParty.LENDER,
+    "rate_lock_agreement": ResponsibleParty.LENDER,
+    "general_correspondence": ResponsibleParty.PROCESSOR,
+    "aus_findings": ResponsibleParty.LENDER,
+    "certificate_of_eligibility": ResponsibleParty.BORROWER,
+    "appraisal_payment": ResponsibleParty.BORROWER,
+    "evidence_of_payment": ResponsibleParty.BORROWER,
+    "custom": ResponsibleParty.PROCESSOR,
+    "miscellaneous_document": ResponsibleParty.PROCESSOR,
+    "wire_instructions": ResponsibleParty.TITLE,
+    "lender_dashboard_screenshot": ResponsibleParty.PROCESSOR,
+    "service_invoice": ResponsibleParty.PROCESSOR,
+}
+
+
+#: Full instructions for the types a borrower is actually asked for. Everything else gets
+#: its party and no prose — writing thin instructions for all 166 would take longer and
+#: read worse than writing real ones for the types that carry the traffic.
+#:
+#: Every entry here has ``responsible_party = BORROWER`` (asserted by the sync test): a
+#: paragraph telling a borrower how to obtain their own appraisal would be instructions
+#: for something they cannot do.
+_BORROWER_INSTRUCTIONS: dict[str, BorrowerGuidance] = {
+    # ---------------------------------------------------------------- income
+    "pay_stub": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Pay stubs — your most recent 30 days",
+        how_to_obtain=(
+            "From your employer's payroll portal — ADP, Workday, Paychex and similar all "
+            "have a 'pay statements' section — or ask your HR or payroll contact."
+        ),
+        completeness_rule=(
+            "Every stub covering the last 30 days, each showing your name, your employer's "
+            "name, the pay period dates, and the year-to-date totals."
+        ),
+        common_rejects=(
+            "a screenshot of the payroll portal instead of the stub itself",
+            "a stub with the year-to-date totals cut off",
+            "the summary page rather than the full stub",
+            "stubs older than 30 days",
+        ),
+    ),
+    "w2": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="W-2s — the last two years",
+        how_to_obtain=(
+            "From your employer, or downloaded from the same payroll portal as your pay "
+            "stubs. If you changed jobs, you need one from each employer."
+        ),
+        completeness_rule=(
+            "All pages of the W-2 for each of the last two tax years, from every employer, "
+            "with the boxes legible."
+        ),
+        common_rejects=(
+            "one year when two were asked for",
+            "one employer's W-2 when you worked for two",
+            "the state copy with the federal wage boxes cut off",
+        ),
+    ),
+    "1099": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="1099s — the last two years",
+        how_to_obtain=(
+            "From whoever paid you — a client, a platform, a broker, or the Social Security "
+            "Administration. Most send them by the end of January."
+        ),
+        completeness_rule=(
+            "Every 1099 you received for each of the last two tax years, all pages."
+        ),
+        common_rejects=(
+            "a summary of earnings instead of the 1099 form",
+            "one 1099 when you had several payers",
+        ),
+    ),
+    "tax_return": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Personal tax returns — the last two years",
+        how_to_obtain=(
+            "From your tax preparer, or from the software you filed with — TurboTax, H&R "
+            "Block and similar keep a PDF of the filed return. The IRS also provides copies "
+            "at irs.gov."
+        ),
+        completeness_rule=(
+            "The complete federal return for each year: every page, every schedule, and the "
+            "W-2s and 1099s attached to it. State returns are not needed."
+        ),
+        common_rejects=(
+            "the first two pages only",
+            "a return with schedules missing",
+            "an unsigned return where a signed copy was asked for",
+            "a state return instead of the federal one",
+        ),
+    ),
+    "business_tax_return": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Business tax returns — the last two years",
+        how_to_obtain=(
+            "From your CPA or tax preparer. This is the return filed for the business — a "
+            "1065, 1120 or 1120-S — not your personal return."
+        ),
+        completeness_rule=(
+            "The complete federal business return for each year, including every schedule "
+            "and every K-1 the business issued."
+        ),
+        common_rejects=(
+            "the personal return instead of the business one",
+            "a return without the K-1s",
+        ),
+    ),
+    "profit_and_loss": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Profit and loss statement — year to date",
+        how_to_obtain=(
+            "From your accountant, or exported from your bookkeeping software — QuickBooks, "
+            "Xero and similar all produce one."
+        ),
+        completeness_rule=(
+            "Covering 1 January of this year through the most recent complete month, showing "
+            "gross income, expenses and net profit, with the business name and the period on it."
+        ),
+        common_rejects=(
+            "a bank statement in place of a profit and loss statement",
+            "a statement that stops several months short of the current month",
+            "a statement with no period stated on it",
+        ),
+    ),
+    "k1_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Schedule K-1 — the last two years",
+        how_to_obtain="From the accountant who prepared the partnership or S-corporation return.",
+        completeness_rule=("The K-1 issued to you for each of the last two tax years, all pages."),
+        common_rejects=(
+            "the business return without the K-1 attached",
+            "one year when two were asked for",
+        ),
+    ),
+    "social_security_award_letter": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Social Security award letter — the current year",
+        how_to_obtain=(
+            "From ssa.gov: sign in and choose 'get a benefit verification letter'. It can "
+            "also be requested by telephone."
+        ),
+        completeness_rule=(
+            "The letter for the current year, showing your name, the monthly amount, and the "
+            "date the benefit started or was renewed."
+        ),
+        common_rejects=(
+            "a bank statement showing the deposit instead of the letter",
+            "an award letter from an earlier year",
+            "a 1099-SSA instead of the award letter",
+        ),
+    ),
+    "form_4506c": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="IRS Form 4506-C — signed",
+        how_to_obtain=(
+            "We send you the form already filled in. Sign and date it; do not change the "
+            "years or any of the boxes."
+        ),
+        completeness_rule=(
+            "Signed and dated, with your name and Social Security number exactly as they "
+            "appear on the tax return the form covers."
+        ),
+        common_rejects=(
+            "a name spelled differently from the tax return",
+            "a signature with no date beside it",
+            "a form where the requested years were altered",
+        ),
+    ),
+    # ---------------------------------------------------------------- assets
+    "bank_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Bank statements — the two most recent months",
+        how_to_obtain=(
+            "Download them from your bank's website or app. Look for 'statements' or "
+            "'documents' — not the transaction list on the account screen."
+        ),
+        completeness_rule=(
+            "Every page of each statement, including pages that are blank or say 'this page "
+            "intentionally left blank'. Each must show your name, the bank's name, the "
+            "account number and the statement period."
+        ),
+        common_rejects=(
+            "a screenshot of the account balance",
+            "the transaction history exported to a spreadsheet",
+            "page 1 of 5",
+            "a statement with your name or the bank's name cropped out",
+        ),
+    ),
+    "investment_account": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Investment account statements — the two most recent months",
+        how_to_obtain=(
+            "From your brokerage's website — the monthly or quarterly statement, not the "
+            "holdings screen."
+        ),
+        completeness_rule=(
+            "All pages of each statement, showing your name, the institution, the account "
+            "number and the period."
+        ),
+        common_rejects=(
+            "a screenshot of the portfolio value",
+            "a trade confirmation instead of a statement",
+        ),
+    ),
+    "retirement_account": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Retirement account statement — the most recent quarter",
+        how_to_obtain=(
+            "From your 401(k), IRA or pension provider's website, under 'statements' or "
+            "'documents'."
+        ),
+        completeness_rule=(
+            "All pages of the most recent statement, showing your name, the institution, the "
+            "account number and the vested balance."
+        ),
+        common_rejects=(
+            "a screenshot of the balance",
+            "the annual summary instead of the statement",
+        ),
+    ),
+    "gift_letter": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Gift letter — signed by the person giving the gift",
+        how_to_obtain=(
+            "We will send you the form. The person giving the gift fills it in and signs it; "
+            "you cannot sign it on their behalf."
+        ),
+        completeness_rule=(
+            "Signed and dated by the donor, stating the amount, their relationship to you, "
+            "and that the money is a gift with no expectation of repayment."
+        ),
+        common_rejects=(
+            "a letter saying the money is a loan or will be paid back",
+            "an unsigned or undated letter",
+            "a text message or email in place of the signed letter",
+        ),
+    ),
+    "gift_donor_bank_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="The gift donor's bank statement — showing the money leaving",
+        how_to_obtain=(
+            "Ask the person giving the gift for the statement from the account the money "
+            "came out of."
+        ),
+        completeness_rule=(
+            "All pages of the statement covering the withdrawal, with the donor's name and "
+            "the account visible and the withdrawal itself shown."
+        ),
+        common_rejects=(
+            "a screenshot of the transfer",
+            "a statement where the withdrawal does not appear",
+            "your own statement instead of the donor's",
+        ),
+    ),
+    "emd_withdrawal_proof": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Proof the earnest money left your account",
+        how_to_obtain=(
+            "Your bank statement or online banking record showing the payment clearing, plus "
+            "the cancelled cheque or wire confirmation if you have one."
+        ),
+        completeness_rule=(
+            "A record showing the amount, the date, and that the money came from an account "
+            "in your name — matching the amount on the purchase agreement."
+        ),
+        common_rejects=(
+            "a screenshot of a pending transaction",
+            "the agent's receipt without the matching bank record",
+        ),
+    ),
+    # -------------------------------------------------------------- property
+    "homeowners_insurance": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Homeowner's insurance — the declarations page",
+        how_to_obtain=(
+            "From your insurance agent or the insurer's website. Ask for the 'declarations "
+            "page' or 'dec page' — not the full policy booklet."
+        ),
+        completeness_rule=(
+            "The declarations page showing the property address, the coverage amount, the "
+            "annual premium, the policy period and the named insured."
+        ),
+        common_rejects=(
+            "the policy booklet without the declarations page",
+            "a quote instead of a bound policy",
+            "a policy whose period begins after the closing date",
+        ),
+    ),
+    "mortgage_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Mortgage statement — the most recent",
+        how_to_obtain="From your servicer's website, or the statement they post to you monthly.",
+        completeness_rule=(
+            "All pages of the most recent statement, showing the loan number, the balance and "
+            "the monthly payment including escrow."
+        ),
+        common_rejects=(
+            "a payment confirmation instead of the statement",
+            "a statement more than 60 days old",
+        ),
+    ),
+    "property_tax_bill": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Property tax bill — the most recent",
+        how_to_obtain=(
+            "From your county or city tax collector's website — most let you search by "
+            "address or parcel number."
+        ),
+        completeness_rule=(
+            "The full bill showing the property address, the parcel number, the annual amount "
+            "and the tax year."
+        ),
+        common_rejects=(
+            "a payment receipt that does not show the amounts",
+            "an assessment notice instead of the bill",
+        ),
+    ),
+    "hoa_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="HOA statement or dues notice",
+        how_to_obtain="From your homeowners association or its management company.",
+        completeness_rule=(
+            "A statement showing the association's name, the property, the dues amount and "
+            "how often they are charged."
+        ),
+        common_rejects=(
+            "a screenshot of a payment",
+            "the association's rules instead of the dues statement",
+        ),
+    ),
+    "lease_agreement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Lease agreement — the signed lease",
+        how_to_obtain="Your own copy of the signed lease for the rental property.",
+        completeness_rule=(
+            "Every page of the executed lease, signed by you and the tenant, showing the "
+            "rent, the term and the property address."
+        ),
+        common_rejects=(
+            "an unsigned draft",
+            "the first page only",
+            "a rental listing instead of the lease",
+        ),
+    ),
+    # -------------------------------------------------------- credit + identity
+    "student_loan_statement": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Student loan statement — the most recent",
+        how_to_obtain=(
+            "From your loan servicer's website. If your loans sit with more than one "
+            "servicer, you need a statement from each."
+        ),
+        completeness_rule=(
+            "A statement showing the balance and the monthly payment. If you are on an "
+            "income-driven plan, in deferment or in forbearance, it must say so and give the "
+            "payment amount."
+        ),
+        common_rejects=(
+            "a screenshot of the balance with no payment shown",
+            "one servicer's statement when the loans sit with several",
+            "a payoff quote instead of a statement",
+        ),
+    ),
+    "credit_explanation_letter": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Letter of explanation — credit history",
+        how_to_obtain=(
+            "You write this one. We will tell you which accounts or inquiries it needs to cover."
+        ),
+        completeness_rule=(
+            "Dated and signed by you, naming each account or inquiry asked about and explaining it."
+        ),
+        common_rejects=(
+            "a letter covering some but not all of the items asked about",
+            "an unsigned letter",
+        ),
+    ),
+    "letter_of_explanation": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Letter of explanation — in your own words",
+        how_to_obtain=(
+            "You write this one. We will tell you what it needs to cover; a short paragraph "
+            "in plain language is enough."
+        ),
+        completeness_rule=(
+            "Dated and signed by you, answering the specific question asked — what happened, "
+            "when, and why."
+        ),
+        common_rejects=(
+            "a letter that does not answer the question that was asked",
+            "an unsigned or undated letter",
+            "an explanation sent as a text or email instead of a signed letter",
+        ),
+    ),
+    "divorce_decree": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Divorce decree — the complete filed copy",
+        how_to_obtain=(
+            "From the court that issued it, usually through the clerk's office, or from your "
+            "attorney."
+        ),
+        completeness_rule=(
+            "Every page of the filed decree, including any settlement agreement or support "
+            "order attached to it, carrying the court's stamp or the judge's signature."
+        ),
+        common_rejects=(
+            "the first pages without the support terms",
+            "a separation agreement that was never filed with the court",
+            "a summary or cover letter from an attorney",
+        ),
+    ),
+    "drivers_license": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Driver's licence — front and back",
+        how_to_obtain="A photograph or scan of your current licence.",
+        completeness_rule=(
+            "Both sides, unexpired, with all four corners in frame and every line of text readable."
+        ),
+        common_rejects=(
+            "an expired licence",
+            "the front only",
+            "a photograph taken at an angle where the text blurs",
+            "a licence on a dark background where the edges are lost",
+        ),
+    ),
+    "passport": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Passport — the photo page",
+        how_to_obtain="A photograph or scan of the page carrying your photograph and details.",
+        completeness_rule=(
+            "The whole photo page, unexpired, with the two machine-readable lines at the "
+            "bottom in frame."
+        ),
+        common_rejects=(
+            "an expired passport",
+            "a photo page with the edges cropped",
+            "the cover instead of the photo page",
+        ),
+    ),
+    "permanent_resident_card": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Permanent resident card — front and back",
+        how_to_obtain="A photograph or scan of your current card.",
+        completeness_rule=(
+            "Both sides, unexpired, with all four corners in frame and the card number readable."
+        ),
+        common_rejects=(
+            "the front only",
+            "an expired card without the extension notice",
+            "a photograph where glare covers the card number",
+        ),
+    ),
+    "social_security_card": BorrowerGuidance(
+        ResponsibleParty.BORROWER,
+        borrower_label="Social Security card",
+        how_to_obtain=(
+            "A photograph or scan of the card itself. If it is lost, ssa.gov can issue a "
+            "replacement."
+        ),
+        completeness_rule=(
+            "The whole card, with your name and number readable and nothing written over them."
+        ),
+        common_rejects=(
+            "the number written on a piece of paper",
+            "a laminated card where glare covers the number",
+            "a photograph with a corner out of frame",
+        ),
+    ),
+}
+
+
+#: The public mapping: one entry per catalog type, party always, prose where it exists.
+#:
+#: DERIVED rather than written out 166 times, so each fact has one home. A slug's party
+#: lives in `_RESPONSIBLE_PARTY` and its instructions in `_BORROWER_INSTRUCTIONS`, and a
+#: type added to the catalog without a party is missing from GUIDANCE entirely — which is
+#: what the sync test reports, instead of a silent default.
+GUIDANCE: dict[str, BorrowerGuidance] = {
+    slug: _BORROWER_INSTRUCTIONS.get(slug) or BorrowerGuidance(party)
+    for slug, party in _RESPONSIBLE_PARTY.items()
+}
+
+
+#: An uncataloged type is addressed to the PROCESSOR with no instructions. Failing towards
+#: "a person on our side deals with this" is the safe direction: the other default would
+#: generate a borrower-facing ask for a document nobody has classified.
+_DEFAULT_GUIDANCE = BorrowerGuidance(ResponsibleParty.PROCESSOR)
+
+
+def get_guidance(document_type: str | None) -> BorrowerGuidance:
+    """Borrower guidance for ``document_type`` — never raises, like the rest of the catalog.
+
+    Unknown or absent types fall back to processor-owned with no instructions.
+    """
+    if not document_type:
+        return _DEFAULT_GUIDANCE
+    return GUIDANCE.get(document_type, _DEFAULT_GUIDANCE)
