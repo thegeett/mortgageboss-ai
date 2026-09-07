@@ -456,8 +456,16 @@ module "compute" {
     # sends AES256 (SSE-S3) instead, which conflicts with the bucket's KMS default.
     S3_KMS_KEY_ID        = local.documents_kms_key_arn
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
-    AI_PROVIDER          = "bedrock"
-    BEDROCK_REGION       = var.aws_region
+
+    # LP-802 — REQUIRED, and it must not be production's domain. The value is baked into
+    # every file's borrower inbox address, which is a bearer credential (ADR-397): a
+    # staging file advertising @inbox.mortgageboss.ai invites real borrower mail, and
+    # real documents, into the staging database. settings.inbox_domain DEFAULTS to
+    # production, so leaving this unset fails open rather than failing to start.
+    INBOX_DOMAIN = "inbox.staging.mortgageboss.ai"
+
+    AI_PROVIDER    = "bedrock"
+    BEDROCK_REGION = var.aws_region
 
     BEDROCK_MODEL_CLASSIFICATION = var.bedrock_model_ids["classification"]
     BEDROCK_MODEL_EXTRACTION     = var.bedrock_model_ids["extraction"]

@@ -265,7 +265,10 @@ class Settings(BaseSettings):
     # environment: a staging file addressed at `inbox.mortgageboss.ai` would take delivery of real
     # borrower mail. The constant's own comment anticipated this move.
     #
-    # Staging sets `inbox.staging.mortgageboss.ai`; production keeps the default.
+    # The default is PRODUCTION's domain, so this fails OPEN: an environment that forgets to set
+    # INBOX_DOMAIN starts happily and advertises `@inbox.mortgageboss.ai` on every file. Staging and
+    # dev therefore set it explicitly in their ECS task definitions (`infra/envs/*/main.tf`) — that
+    # wiring, not this default, is what keeps a non-production file from taking real borrower mail.
     inbox_domain: str = "inbox.mortgageboss.ai"
 
     # Where SES writes a received message, and where the ingest task is told about it. All three are

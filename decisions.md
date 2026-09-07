@@ -2508,7 +2508,7 @@ greppable `scope_to_company` helper.
 ## ADR-094: Summary vs detail response schemas; capabilities never exposed
 
 - **Date:** 2026-06-11
-- **Status:** Accepted
+- **Status:** Accepted — **amended by ADR-397 (LP-802)**; see the closing note
 
 **Context:** List and single-file reads have different needs, and some model fields must
 never reach a client.

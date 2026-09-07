@@ -306,10 +306,13 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         per environment: a staging file advertising `@inbox.mortgageboss.ai` would take delivery of
         real borrower mail.
 
-        IMPORTED INSIDE THE METHOD, deliberately. No model in this package imports `core.config`, and
-        this ticket's blast radius is the setting rather than the layering rule. A module-level import
-        would also freeze the value at import time, which breaks the per-environment point and every
-        test that monkeypatches it.
+        IMPORTED INSIDE THE METHOD, deliberately, and for ONE reason: no model in this package
+        imports `core.config`, and this ticket's blast radius is the setting, not the layering rule.
+
+        It is NOT about the value being read late. `settings` is a singleton object, so a module-level
+        `from app.core.config import settings` would still resolve `.inbox_domain` on every call, and
+        `monkeypatch.setattr(settings, ...)` would still be seen. There is no import cycle to avoid
+        either — `core/config.py` imports nothing from `app`.
         """
         from app.core.config import settings
 

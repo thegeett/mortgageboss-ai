@@ -317,8 +317,13 @@ module "compute" {
     S3_REGION            = var.aws_region
     AWS_REGION           = var.aws_region # boto3 clients with no explicit region; Fargate has no IMDS
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
-    AI_PROVIDER          = "bedrock"
-    BEDROCK_REGION       = var.aws_region
+
+    # LP-802 — see the staging comment: unset means this environment advertises
+    # production's inbox domain, because that is settings.inbox_domain's default.
+    INBOX_DOMAIN = "inbox.dev.mortgageboss.ai"
+
+    AI_PROVIDER    = "bedrock"
+    BEDROCK_REGION = var.aws_region
 
     BEDROCK_MODEL_CLASSIFICATION = var.bedrock_model_ids["classification"]
     BEDROCK_MODEL_EXTRACTION     = var.bedrock_model_ids["extraction"]

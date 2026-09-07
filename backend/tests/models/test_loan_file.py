@@ -65,7 +65,10 @@ async def test_create_loan_file_sets_identifiers_and_defaults(
 
     # Inbox token is populated, non-trivial, and independent of the display id.
     assert loan_file.inbox_token
-    assert len(loan_file.inbox_token) >= 16
+    # 22, not ">= 16": LP-802 widened INBOX_TOKEN_BYTES 12 -> 16, and `>= 16` was already
+    # satisfied by the OLD 12-byte token, so it could not have noticed the change or a
+    # revert of it.
+    assert len(loan_file.inbox_token) == 22
     assert loan_file.display_id not in loan_file.inbox_token
     assert code not in loan_file.inbox_token
 
@@ -80,13 +83,27 @@ async def test_create_loan_file_sets_identifiers_and_defaults(
     assert loan_file.deleted_at is None
 
 
-async def test_get_inbox_address_format(db_session: AsyncSession) -> None:
-    """get_inbox_address() returns lf-{token}@{settings.inbox_domain} (LP-802)."""
+async def test_get_inbox_address_uses_the_configured_domain(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The domain comes from settings AT CALL TIME, per-environment (LP-802).
+
+    Asserting `== f"...@{settings.inbox_domain}"` is a tautology — both sides read the same
+    attribute, so it passes whatever the domain is, including production's leaking into
+    staging. Pinning `endswith("@inbox.mortgageboss.ai")` is worse: it asserts the
+    PRODUCTION DEFAULT, and would fail in exactly the environments the ticket says must
+    override it. So set a sentinel and require the address to follow it.
+    """
     company = await _make_company(db_session, "acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
 
-    assert loan_file.get_inbox_address() == f"lf-{loan_file.inbox_token}@{settings.inbox_domain}"
-    assert loan_file.get_inbox_address().endswith("@inbox.mortgageboss.ai")
+    monkeypatch.setattr(settings, "inbox_domain", "inbox.example.test")
+    assert loan_file.get_inbox_address() == f"lf-{loan_file.inbox_token}@inbox.example.test"
+
+    # And it re-reads: a second value gives a second address, which is what makes the
+    # per-environment setting work at all.
+    monkeypatch.setattr(settings, "inbox_domain", "inbox.staging.mortgageboss.ai")
+    assert loan_file.get_inbox_address().endswith("@inbox.staging.mortgageboss.ai")
 
 
 async def test_identifiers_are_unique_across_files(db_session: AsyncSession) -> None:

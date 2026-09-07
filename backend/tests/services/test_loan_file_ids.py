@@ -80,14 +80,16 @@ def test_display_alphabet_excludes_ambiguous_characters() -> None:
 def test_inbox_token_is_sufficiently_long() -> None:
     """The inbox token is long enough to be infeasible to guess/enumerate."""
     token = generate_inbox_token()
-    # token_urlsafe(12) yields ~16 url-safe chars (~96 bits of entropy).
-    assert len(token) >= 16
+    # LP-802 — token_urlsafe(16) yields 22 url-safe chars (128 bits of entropy). Pinned at
+    # ==, not >=: the previous `>= 16` was satisfied by the old 12-byte/96-bit token, so
+    # nothing in the suite would have failed if the widening were reverted.
+    assert len(token) == 22
     # url-safe base64 alphabet only.
     assert all(char.isalnum() or char in "-_" for char in token)
 
 
 def test_inbox_tokens_are_unique_across_many_generations() -> None:
-    """1000 tokens are all distinct (statistical uniqueness at ~96 bits)."""
+    """1000 tokens are all distinct (statistical uniqueness at 128 bits)."""
     tokens = {generate_inbox_token() for _ in range(1000)}
     assert len(tokens) == 1000
 
