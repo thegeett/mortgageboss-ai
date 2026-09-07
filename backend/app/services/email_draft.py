@@ -189,6 +189,31 @@ async def primary_borrower(db: AsyncSession, *, loan_file_id: UUID) -> Borrower 
     )
 
 
+async def greeting_name_for(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> str:
+    """Whose first name goes in this draft's greeting — decided from the DRAFT, not from the file.
+
+    LP-823 REVIEW — `$borrower_first_name` IS NOT ALWAYS THE BORROWER. `render_draft_body` is shared:
+    `party_requests.build_party_draft` renders the same template for the title company, the agent,
+    the lender, the CPA, the insurer and the employer, each under its own `template_key`. Resolving
+    the placeholder from `primary_borrower` unconditionally put the BORROWER's first name in a
+    message addressed to a third party — measured end to end, a title request to `t@title.example`
+    went out reading "Hello Akash,".
+
+    That is strictly worse than the placeholder it replaced. `$borrower_first_name` reaching a
+    reader is visibly broken and gets noticed; a real person's name in the wrong message is not.
+    LP-820's own docstring says the greeting "is generic in the template rather than addressed to a
+    borrower" — true only while nothing resolved it, which is the assumption LP-823 removed.
+
+    So: the borrower's name for the BORROWER's draft, and the generic fallback for every other one.
+    A party greeting that names the party is a better email and belongs to LP-820 — it owns the
+    template's voice, and the rest of that body still says "your loan file" to a title company.
+    """
+    if draft.template_key != DRAFT_TEMPLATE.value:
+        return BORROWER_NAME_FALLBACK
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+    return borrower.first_name if borrower else BORROWER_NAME_FALLBACK
+
+
 async def draft_for_reading(
     db: AsyncSession, *, draft: Communication, loan_file: LoanFile, reader: User
 ) -> tuple[str, str | None]:
@@ -206,12 +231,12 @@ async def draft_for_reading(
     Resolving here rather than in `render_draft_body` keeps both true: the stored draft is still
     unaddressed, and a colleague who opens the same draft sees their own name.
     """
-    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
     body = finalise_draft_body(
         draft.body or "",
-        borrower_first_name=(borrower.first_name if borrower else BORROWER_NAME_FALLBACK),
+        borrower_first_name=await greeting_name_for(db, draft=draft, loan_file=loan_file),
         processor_name=reader.full_name,
     )
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
     return body, (borrower.email if borrower else None)
 
 

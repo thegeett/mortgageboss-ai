@@ -35,11 +35,10 @@ from app.models.user import User
 from app.services.activity_log import log_activity
 from app.services.bounce_handling import is_suppressed
 from app.services.email_draft import (
-    BORROWER_NAME_FALLBACK,
     _needs_in_draft,
     finalise_draft_body,
     get_open_draft,
-    primary_borrower,
+    greeting_name_for,
 )
 from app.services.needs_items import request_needs_item
 
@@ -135,7 +134,16 @@ def loan_reference_in(text: str) -> str | None:
 def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundMessage:
     """Assemble the message a processor will send, footer tag included."""
     address = loan_file.get_inbox_address()
-    tagged = f"{body.rstrip()}\n\n{footer_tag(loan_file)}"
+    # LP-823 REVIEW — IDEMPOTENT, because this function runs TWICE over one message. `GET
+    # /outbound/draft` returns `build_outbound(...).body`, the panel puts that in the textarea, and
+    # the send posts the textarea back through here again. Measured over the real HTTP round trip:
+    # every sent message ended "[LF-H5HH]\n\n[LF-H5HH]". Pre-existing rather than new, but it is on
+    # the path this ticket changed, and it also made the composed-vs-sent comparison in `send_draft`
+    # impossible to write honestly. Appending only when it is not already the last thing leaves the
+    # single-pass case untouched.
+    stripped = body.rstrip()
+    tag = footer_tag(loan_file)
+    tagged = stripped if stripped.endswith(tag) else f"{stripped}\n\n{tag}"
     return OutboundMessage(
         subject=subject,
         body=tagged,
@@ -259,14 +267,39 @@ async def send_draft(
     #
     # THE SIGNER IS THE APPROVER, not whoever composed it or whoever last previewed it. That is the
     # distinction `render_draft_body` deferred the name for in the first place.
+    #
+    # WHOSE NAME, THOUGH — `greeting_name_for`, not `primary_borrower`. This route sends every
+    # outbound draft on the file, and `party_requests` renders the SAME template for the title
+    # company, the agent and the lender under their own template keys. Resolving from the borrower
+    # unconditionally addressed a title request to the borrower by name: measured, a request to
+    # `t@title.example` went out reading "Hello Akash,". A placeholder in the wrong message is
+    # visibly broken; a real person's name in it is not.
     approver = await db.get(User, approver_user_id)
-    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
-    body = finalise_draft_body(
-        body,
-        borrower_first_name=(borrower.first_name if borrower else BORROWER_NAME_FALLBACK),
-        processor_name=(approver.full_name if approver else ""),
-    )
+    greeting = await greeting_name_for(db, draft=draft, loan_file=loan_file)
+    signature = approver.full_name if approver else ""
+    body = finalise_draft_body(body, borrower_first_name=greeting, processor_name=signature)
     outbound = build_outbound(loan_file, subject=draft.subject or "", body=body)
+
+    # LP-823 REVIEW — RESOLVED THE SAME WAY, so the comparison downstream is like with like.
+    # `EvidencePublic.was_edited` is `body_composed != body_as_sent`, and its own comment says it
+    # means "the processor changed the drafted words". The composed version is the STORED body, which
+    # still holds the placeholders, and the sent body never does — so after LP-823 every message was
+    # recorded as edited, including one where nobody typed a character. Measured before this line
+    # existed: composed "Hello $borrower_first_name,", as sent "Hello Akash,", was_edited True.
+    #
+    # Resolving the composed copy with the SAME two values leaves a real edit visible and a
+    # placeholder substitution invisible, which is the distinction the field is for. It is not a
+    # loss of evidence: what the template stores is `render_draft_body`'s output, reproducible from
+    # `template_key` and `template_version`, both of which are on the same row.
+    # THROUGH THE SAME PIPELINE, not merely the same substitution: `build_outbound` also appends the
+    # footer tag, so resolving alone would still leave the two strings differing by it.
+    body_composed = build_outbound(
+        loan_file,
+        subject=draft.subject or "",
+        body=finalise_draft_body(
+            body_composed or "", borrower_first_name=greeting, processor_name=signature
+        ),
+    ).body
 
     draft.body = outbound.body
     draft.recipient = recipient

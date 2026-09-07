@@ -187,7 +187,20 @@ async def test_the_send_path_captures_the_draft_before_it_is_overwritten(
             )
         )
     ).scalar_one()
-    assert row.body_composed == composed
+    # LP-823 REVIEW — THE DRAFTED WORDS, not the raw stored string. `send_draft` now resolves
+    # `$borrower_first_name` / `$processor_name` and stamps the footer tag through the SAME pipeline
+    # for both copies, because `EvidencePublic.was_edited` is `body_composed != body_as_sent` and its
+    # own comment says that means "the processor changed the drafted words". Comparing a stored body
+    # holding placeholders against a sent body that never holds them made every message report as
+    # edited, including one where nobody typed a character.
+    #
+    # So this asserts the SUBSTANCE rather than string identity: what was recorded is the draft, not
+    # the rewrite. It still fails on code that recorded the edit twice — the fixture rewrites the
+    # message entirely, so no sentence of the draft would survive.
+    assert row.body_composed is not None
+    assert "documents we still need from you" in row.body_composed
+    assert "I rewrote this entirely" not in row.body_composed
+    assert "$borrower_first_name" not in row.body_composed
     assert row.body_as_sent is not None
     assert "I rewrote this entirely" in row.body_as_sent
     assert row.body_composed != row.body_as_sent

@@ -337,3 +337,218 @@ async def test_sending_the_stored_body_still_resolves_it(
     # THE SIGNER IS THE APPROVER. Same user here, but the assertion names the rule the code follows,
     # so a change to resolve from the composer instead fails rather than passing by coincidence.
     assert "Dana Reyes" in (sent.body or "")
+
+
+# --------------------------------------------------------------------------------------------- #
+# Review — the placeholder is shared with drafts that are not the borrower's
+# --------------------------------------------------------------------------------------------- #
+async def test_a_party_request_is_not_addressed_to_the_borrower_by_name(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """`render_draft_body` is shared, and resolving from the borrower unconditionally leaked a name.
+
+    `party_requests.build_party_draft` renders the SAME template for the title company, the agent,
+    the lender, the CPA, the insurer and the employer — each under its own `template_key`, all
+    carrying `Hello $borrower_first_name,`. LP-823 resolved that from `primary_borrower` in
+    `send_draft`, which sends every outbound draft on the file. Measured before the fix: a title
+    request to `t@title.example` went out reading "Hello Akash,".
+
+    Worse than what it replaced, and that is the reason this is a finding rather than a nit. A
+    placeholder in a message to the wrong reader is visibly broken and gets noticed. A real
+    borrower's name in it is not — LP-820's docstring even records the belief that the greeting "is
+    generic in the template rather than addressed to a borrower", which was true only while nothing
+    resolved it.
+
+    The positive control is the second half: the borrower's OWN draft on the same file, with the
+    same borrower, still resolves to their name. Without it, a fix that stopped resolving anywhere
+    would pass the first assertion.
+    """
+    from app.documents.catalog import ResponsibleParty
+    from app.models.loan_file_participant import ParticipantRole
+    from app.models.needs_item import NeedsItemStatus
+    from app.services.email_send import send_draft
+    from app.services.party_requests import add_participant, build_party_draft
+
+    company, user, _token = await _company_user_token(db, first="Dana", last="Reyes")
+    loan_file, borrower_draft = await _file_with_draft(db, company, user)
+    await _borrower(
+        db, loan_file, first="Akash", email="akash@example.com", primary=True, position=1
+    )
+    db.add(
+        NeedsItem(
+            loan_file_id=loan_file.id,
+            title="Title commitment",
+            needs_type="title_commitment",
+            origin=NeedsItemOrigin.FINDING,
+            status=NeedsItemStatus.PENDING,
+        )
+    )
+    await db.flush()
+    await add_participant(
+        db, loan_file=loan_file, role=ParticipantRole.TITLE, email="t@title.example"
+    )
+    party_draft = await build_party_draft(
+        db, loan_file=loan_file, party=ResponsibleParty.TITLE, actor_user_id=user.id
+    )
+    # The stored body is what a caller posts back; the party draft has no panel to resolve it first.
+    assert "$borrower_first_name" in (party_draft.body or "")
+
+    sent = await send_draft(
+        db,
+        loan_file=loan_file,
+        draft_id=party_draft.id,
+        recipient="t@title.example",
+        body=party_draft.body or "",
+        approver_user_id=user.id,
+    )
+
+    assert "Akash" not in (sent.body or ""), (
+        "the borrower's first name went out in a message addressed to the title company"
+    )
+    assert "$borrower_first_name" not in (sent.body or ""), (
+        "the placeholder survived to the title company — the greeting resolved to nothing"
+    )
+    assert "Hello there," in (sent.body or "")
+
+    # THE CONTROL: the same borrower, the same file, their own draft — still resolved by name.
+    assert borrower_draft is not None
+    sent_to_borrower = await send_draft(
+        db,
+        loan_file=loan_file,
+        draft_id=borrower_draft.id,
+        recipient="akash@example.com",
+        body=borrower_draft.body or "",
+        approver_user_id=user.id,
+    )
+    assert "Hello Akash," in (sent_to_borrower.body or "")
+
+
+async def test_a_message_nobody_edited_is_not_recorded_as_edited(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """`EvidencePublic.was_edited` says "the processor changed the drafted words". It stopped being
+    true of every message the moment the send resolved placeholders.
+
+    The evidence row holds `body_composed` (the STORED body, still holding the placeholders) and
+    `body_as_sent` (resolved), and the field is `body_composed != body_as_sent`. Measured: a send
+    where the panel's own text was posted back untouched recorded composed "Hello
+    $borrower_first_name," against as-sent "Hello Akash," — `was_edited` True, with nobody having
+    typed a character.
+
+    Both halves asserted, because "not edited" is also what a broken fixture produces: the second
+    send changes one word and must come back True.
+    """
+    from app.models.communication_evidence import CommunicationEvidence
+    from app.services.email_draft import draft_for_reading
+    from app.services.email_send import send_draft
+    from sqlalchemy import select
+
+    company, user, _token = await _company_user_token(db, first="Dana", last="Reyes")
+    loan_file, draft = await _file_with_draft(db, company, user)
+    await _borrower(
+        db, loan_file, first="Akash", email="akash@example.com", primary=True, position=1
+    )
+    await db.flush()
+    assert draft is not None
+
+    # Exactly what the panel does: GET the resolved body, then post the textarea back UNCHANGED.
+    shown, _suggested = await draft_for_reading(db, draft=draft, loan_file=loan_file, reader=user)
+    sent = await send_draft(
+        db,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="akash@example.com",
+        body=shown,
+        approver_user_id=user.id,
+    )
+    row = (
+        (
+            await db.execute(
+                select(CommunicationEvidence).where(
+                    CommunicationEvidence.communication_id == sent.id
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.body_composed is not None
+    assert row.body_composed == row.body_as_sent, (
+        "nobody typed a character and the evidence record says the processor edited the message"
+    )
+
+    # THE CONTROL: a real edit still shows. A second draft on a second file, sent with one word
+    # changed — if this came back equal, the assertion above would be measuring nothing.
+    other_file, other_draft = await _file_with_draft(db, company, user)
+    await _borrower(
+        db, other_file, first="Mira", email="mira@example.com", primary=True, position=1
+    )
+    await db.flush()
+    assert other_draft is not None
+    edited, _ = await draft_for_reading(db, draft=other_draft, loan_file=other_file, reader=user)
+    sent_edited = await send_draft(
+        db,
+        loan_file=other_file,
+        draft_id=other_draft.id,
+        recipient="mira@example.com",
+        body=edited + "\n\nPS: whenever is convenient.",
+        approver_user_id=user.id,
+    )
+    edited_row = (
+        (
+            await db.execute(
+                select(CommunicationEvidence).where(
+                    CommunicationEvidence.communication_id == sent_edited.id
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert edited_row.body_composed != edited_row.body_as_sent
+
+
+async def test_the_file_tag_is_not_stamped_on_the_message_twice(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """`build_outbound` runs twice over one message, and stamped its footer both times.
+
+    `GET /outbound/draft` returns `build_outbound(...).body` — tag included — the panel puts exactly
+    that in the textarea, and the send posts the textarea back through `build_outbound` again.
+    Measured over the real round trip before the fix: every sent message ended
+    `[LF-H5HH]\\n\\n[LF-H5HH]`.
+
+    Pre-existing rather than caused by LP-823, and found only because the composed-vs-sent
+    comparison could not be written while it was true. It reaches the borrower: the tag is the
+    footer LP-805 matches a reply on, and it was in their email twice.
+
+    Asserted over HTTP rather than on `build_outbound` directly, because the defect is the two calls
+    and a unit test on one of them cannot see it. The count is asserted at each stage, so a fix that
+    dropped the tag entirely — which would break LP-805's fallback routing — fails here too.
+    """
+    company, user, token = await _company_user_token(db)
+    loan_file, draft = await _file_with_draft(db, company, user)
+    await _borrower(
+        db, loan_file, first="Akash", email="akash@example.com", primary=True, position=1
+    )
+    await db.commit()
+    tag = f"[{loan_file.display_id}]"
+
+    shown = (
+        await client.get(f"{API}/{loan_file.display_id}/outbound/draft", headers=_auth(token))
+    ).json()["body"]
+    assert shown.count(tag) == 1, "the draft a processor copies must carry the tag exactly once"
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/draft/{draft.id}/send",
+        headers=_auth(token),
+        json={"recipient": "akash@example.com", "body": shown},
+    )
+    assert resp.status_code == 200
+
+    sent = await db.get(Communication, draft.id)
+    assert sent is not None
+    await db.refresh(sent)
+    assert (sent.body or "").count(tag) == 1, (
+        "the borrower's email carried the file tag twice — once from the GET, once from the send"
+    )
