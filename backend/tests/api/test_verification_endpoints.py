@@ -1008,16 +1008,17 @@ async def test_request_docs_on_ONE_finding_starts_the_draft(
     )
 
 
-async def test_both_request_routes_accumulate_into_ONE_draft(
+async def test_both_request_routes_accumulate_into_ONE_LIST(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    """Two buttons, one email — the property LP-809 exists for, across the route that had the draft
-    call and the route that did not.
+    """Two buttons, one outstanding set — the property LP-809 exists for, restated for LP-832.
 
-    Fixing the singular route by giving it its own draft would satisfy the test above and be wrong
-    in the way that matters: a processor who uses both buttons on one file would send the borrower
-    two emails. This is the assertion that separates "a draft was created" from "the draft was
-    joined", and only the second is the behaviour.
+    THIS ASSERTED ONE DRAFT AND NOW ASSERTS TWO, and the change is the model rather than a
+    weakening. LP-832 makes a request create a NEW draft carrying everything requested since the last
+    send, so two buttons give two drafts — and the thing that must remain true is that the NEWEST
+    carries both documents. A route that gave its request a draft of its own, listing only its own
+    document, would still produce two rows here and would mail the borrower twice; that is what the
+    membership count below separates from the correct behaviour.
     """
     from app.services.email_draft import get_open_draft
     from sqlalchemy import func, select
@@ -1058,8 +1059,10 @@ async def test_both_request_routes_accumulate_into_ONE_draft(
             Communication.deleted_at.is_(None),
         )
     )
-    assert drafts == 1, f"{drafts} drafts — the borrower would receive that many emails"
+    assert drafts == 2, f"{drafts} drafts — one per request is the LP-832 model"
 
+    # THE NEWEST CARRIES BOTH. This is the assertion that survived the model change: it is what
+    # stops each route drafting only its own document and the borrower getting two emails.
     draft = await get_open_draft(db, loan_file_id=loan_file.id)
     assert draft is not None
     linked = await db.scalar(
@@ -1067,7 +1070,7 @@ async def test_both_request_routes_accumulate_into_ONE_draft(
         .select_from(CommunicationNeedsItem)
         .where(CommunicationNeedsItem.communication_id == draft.id)
     )
-    assert linked == 2, "one draft, but it does not carry both requests"
+    assert linked == 2, "the newest draft does not carry both requests"
 
 
 async def test_request_docs_on_the_unidentified_documents_row_is_refused(

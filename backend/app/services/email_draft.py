@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from string import Template
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.email_draft import (
@@ -263,20 +263,44 @@ def finalise_draft_body(body: str, *, borrower_first_name: str, processor_name: 
     )
 
 
+def _open_drafts_stmt(loan_file_id: UUID):  # type: ignore[no-untyped-def]
+    """The file's unsent document-request drafts, newest first."""
+    return only_active(
+        select(Communication).where(
+            Communication.loan_file_id == loan_file_id,
+            Communication.status == CommunicationStatus.DRAFT,
+            Communication.template_key == DRAFT_TEMPLATE.value,
+        ),
+        Communication,
+    ).order_by(Communication.created_at.desc(), Communication.id.desc())
+
+
+async def open_drafts(db: AsyncSession, *, loan_file_id: UUID) -> list[Communication]:
+    """Every unsent document-request draft on the file, newest first (LP-832).
+
+    ORDERED, AND THE TIEBREAK MATTERS. Two drafts created in the same transaction share a
+    `created_at` to microsecond precision often enough to see, and "the newest" has to be one row
+    rather than whichever the planner returns.
+    """
+    return list((await db.execute(_open_drafts_stmt(loan_file_id))).scalars().all())
+
+
 async def get_open_draft(db: AsyncSession, *, loan_file_id: UUID) -> Communication | None:
-    """The file's open document-request draft, with its needs loaded, or None."""
-    return (
-        await db.execute(
-            only_active(
-                select(Communication).where(
-                    Communication.loan_file_id == loan_file_id,
-                    Communication.status == CommunicationStatus.DRAFT,
-                    Communication.template_key == DRAFT_TEMPLATE.value,
-                ),
-                Communication,
-            )
-        )
-    ).scalar_one_or_none()
+    """The file's NEWEST unsent document-request draft, or None.
+
+    LP-832 — THIS USED TO BE `scalar_one_or_none()`, AND THAT DID NOT MEAN "the one draft". It meant
+    *raise* if there were two, which the `uq_communications_open_draft` partial unique index made
+    unreachable — so four callers were written against a guarantee the database was holding, not one
+    they checked.
+
+    That index is gone: a request now creates a NEW draft each time, carrying everything requested
+    since the last send. So this returns the newest rather than asserting there is only one, and
+    every caller that wanted "the draft a processor is working on" still gets it.
+
+    A caller that wants ALL of them — the drafts list, the count in the header — uses
+    :func:`open_drafts`. Nothing should reach for this one to count with.
+    """
+    return (await db.execute(_open_drafts_stmt(loan_file_id).limit(1))).scalars().first()
 
 
 async def _needs_in_draft(db: AsyncSession, *, draft: Communication) -> list[NeedsItem]:
@@ -406,6 +430,47 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     await db.flush()
 
 
+async def _outstanding_needs(db: AsyncSession, *, loan_file_id: UUID) -> list[NeedsItem]:
+    """Every need carried by an unsent draft on this file, oldest membership first (LP-832).
+
+    "EVERYTHING REQUESTED SINCE THE LAST SEND", expressed as the thing that is actually true rather
+    than as a time comparison. A send closes its draft — the row leaves `DRAFT` — so the needs it
+    carried drop out of this set by the same statement that sent them. There is no clock to read and
+    no window to get wrong.
+
+    A UNION ACROSS THE OPEN DRAFTS, deliberately. While each draft is a superset of the previous one
+    the newest alone would answer identically; they diverge the moment a processor deletes the newest,
+    which this model invites them to do. Deleting a draft must not quietly drop its documents out of
+    the next request.
+
+    DISTINCT, ORDERED BY WHEN EACH JOINED ITS FIRST DRAFT. Two drafts carry the same need twice over
+    and a borrower must read it once.
+    """
+    rows = (
+        await db.execute(
+            select(NeedsItem, func.min(CommunicationNeedsItem.created_at).label("first_added"))
+            .join(
+                CommunicationNeedsItem,
+                CommunicationNeedsItem.needs_item_id == NeedsItem.id,
+            )
+            .join(
+                Communication,
+                Communication.id == CommunicationNeedsItem.communication_id,
+            )
+            .where(
+                Communication.loan_file_id == loan_file_id,
+                Communication.status == CommunicationStatus.DRAFT,
+                Communication.template_key == DRAFT_TEMPLATE.value,
+                Communication.deleted_at.is_(None),
+                NeedsItem.deleted_at.is_(None),
+            )
+            .group_by(NeedsItem.id)
+            .order_by("first_added", NeedsItem.id)
+        )
+    ).all()
+    return [row[0] for row in rows]
+
+
 async def add_needs_to_draft(
     db: AsyncSession,
     *,
@@ -413,65 +478,89 @@ async def add_needs_to_draft(
     needs: list[NeedsItem],
     actor_user_id: UUID,
 ) -> DraftUpdate:
-    """Add ``needs`` to the file's open draft, creating it if there is none. ``flush`` only.
+    """Create a NEW draft carrying everything outstanding, plus ``needs``. ``flush`` only.
 
-    Idempotent per need: adding one twice leaves one row and one line in the email. The composite
-    primary key makes that structural, but it is checked here too so a second click is an ordinary
-    no-op rather than an IntegrityError a caller has to catch.
+    LP-832 — A REQUEST MAKES A DRAFT; IT DOES NOT GROW ONE. Confirmed directly with the user, because
+    the sentence admitted both readings and the other one is what this function used to do:
+
+    | request Bank statements | **Draft 1**: Bank statements |
+    | request Pay stub        | **Draft 2**: Bank statements, Pay stub — Draft 1 still in the list |
+    | mark Draft 2 sent       | — |
+    | request W-2             | **Draft 3**: W-2 only, because the set resets at a send |
+
+    So a draft carries everything requested SINCE THE LAST SEND, and the older ones stay for the
+    processor to send, delete or ignore. Nothing supersedes automatically: a draft disappearing
+    because the system decided it was stale is worse than a list that needs tidying.
+
+    THE OUTSTANDING SET IS A UNION OVER THE OPEN DRAFTS, not a read of the newest one. Both give the
+    same answer while each draft is a superset of the last — and they stop agreeing the moment a
+    processor deletes the newest, which is an action this model invites. A union keeps a deleted
+    draft from taking its documents out of the next one.
+
+    NOTHING NEW MEANS NO DRAFT. A second click on the same finding adds nothing, and minting a
+    duplicate draft with identical contents would put a second identical email in the list for a
+    request that did not happen. `added` is empty and the newest existing draft is returned, so
+    LP-826's outcome still reports honestly that the draft took nothing.
+
+    SERIALIZED ON THE FILE ROW, which is what `uq_communications_open_draft` was really buying. That
+    index is gone — it is the guarantee this ticket removes — but its stated purpose was not "one
+    draft": it was that two near-simultaneous requests must not each create a draft "with no basis
+    for choosing between them". Under this model two drafts are correct; two drafts each missing the
+    OTHER's new document is not, and that is what a concurrent pair would produce, because both would
+    compute the outstanding set from the same pre-state. A row lock on the loan file makes the second
+    request see the first one's draft.
     """
     borrower_facing = [need for need in needs if _is_borrower_facing(need)]
     skipped = tuple(need.id for need in needs if not _is_borrower_facing(need))
 
-    draft = await get_open_draft(db, loan_file_id=loan_file.id)
-    if draft is None:
-        if not borrower_facing:
-            # LP-809 REVIEW — DO NOT MINT AN EMPTY DRAFT FOR A REQUEST THE BORROWER HAS NO PART IN.
-            # This ran before the filter was consulted, so requesting the appraisal — or any of the
-            # 34 rules whose documents are only the lender's, the title company's or the employer's —
-            # created an OUTBOUND DRAFT with no documents in it. It occupies the file's one open-draft
-            # slot (`uq_communications_open_draft`), shows on the communication page as an email
-            # waiting to be sent, and LP-816 would send it: a real message to a real borrower listing
-            # nothing. An existing draft is left exactly as it is; only the minting is guarded.
-            return DraftUpdate(draft=None, skipped_not_borrower=skipped)
-        draft = Communication(
-            loan_file_id=loan_file.id,
-            direction=CommunicationDirection.OUTBOUND,
-            status=CommunicationStatus.DRAFT,
-            template_key=DRAFT_TEMPLATE.value,
-            # Stamped by `_regenerate` below, from the render itself.
-            template_version=None,
-            initiated_by_user_id=actor_user_id,
-        )
-        db.add(draft)
-        await db.flush()
+    # THE LOCK, before anything is read. Held to the end of the transaction, so a concurrent request
+    # on the same file waits here and then computes the outstanding set including this one's draft.
+    await db.execute(select(LoanFile.id).where(LoanFile.id == loan_file.id).with_for_update())
 
-    existing = set(
-        (
-            await db.execute(
-                select(CommunicationNeedsItem.needs_item_id).where(
-                    CommunicationNeedsItem.communication_id == draft.id
-                )
-            )
+    outstanding = await _outstanding_needs(db, loan_file_id=loan_file.id)
+    carried = {need.id for need in outstanding}
+    fresh = [need for need in borrower_facing if need.id not in carried]
+    already = tuple(need.id for need in borrower_facing if need.id in carried)
+
+    if not fresh:
+        # LP-809 REVIEW — DO NOT MINT AN EMPTY DRAFT FOR A REQUEST THE BORROWER HAS NO PART IN.
+        # Requesting the appraisal — or any of the 34 rules whose documents are only the lender's,
+        # the title company's or the employer's — used to create an OUTBOUND DRAFT with no documents
+        # in it: an email waiting to be sent, listing nothing, which LP-816 would send.
+        #
+        # LP-832 widens the same guard to the other way of asking for nothing: a second click on a
+        # finding already carried. Both mean "this request added no document", and both must leave
+        # the list as it was.
+        return DraftUpdate(
+            draft=await get_open_draft(db, loan_file_id=loan_file.id),
+            already_present=already,
+            skipped_not_borrower=skipped,
         )
-        .scalars()
-        .all()
+
+    draft = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        template_key=DRAFT_TEMPLATE.value,
+        # Stamped by `_regenerate` below, from the render itself.
+        template_version=None,
+        initiated_by_user_id=actor_user_id,
     )
-    added: list[UUID] = []
-    already: list[UUID] = []
-    for need in borrower_facing:
-        if need.id in existing:
-            already.append(need.id)
-            continue
+    db.add(draft)
+    await db.flush()
+
+    # ORDER IS THE ORDER A BORROWER READS. The carried needs first, oldest membership first, then
+    # what this request adds — so a processor who asked for three things on Tuesday and one on
+    # Wednesday sees the new one at the bottom rather than the list reshuffled.
+    for need in [*outstanding, *fresh]:
         db.add(CommunicationNeedsItem(communication_id=draft.id, needs_item_id=need.id))
-        existing.add(need.id)
-        added.append(need.id)
     await db.flush()
 
     await _regenerate(db, draft=draft, loan_file=loan_file)
     return DraftUpdate(
         draft=draft,
-        added=tuple(added),
-        already_present=tuple(already),
+        added=tuple(need.id for need in fresh),
+        already_present=already,
         skipped_not_borrower=skipped,
     )
 

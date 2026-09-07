@@ -29,7 +29,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -84,21 +84,21 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "communications"
     __table_args__ = (
-        # LP-809 — ONE OPEN DRAFT PER (FILE, TEMPLATE KIND). Without it, two near-simultaneous
-        # requests each find no draft, each create one, and the file holds two half-populated drafts
-        # with no basis for choosing between them. Declared here as well as in the migration because
-        # the test database is built by `create_all`: a constraint that exists only in the migration
-        # is a constraint no test can violate, which is the same as not having one.
+        # LP-832 — `uq_communications_open_draft` WAS HERE AND IS GONE. It was a partial unique index
+        # on (loan_file_id, template_key) where status = 'draft', and it is the guarantee this ticket
+        # removes: a request now creates a NEW draft each time, carrying everything requested since
+        # the last send, so several unsent drafts on one file is the ordinary state.
         #
-        # PARTIAL. A file accumulates hundreds of SENT messages and they must not collide.
-        Index(
-            "uq_communications_open_draft",
-            "loan_file_id",
-            "template_key",
-            unique=True,
-            postgresql_where=text("status = 'draft' AND deleted_at IS NULL"),
-            sqlite_where=text("status = 'draft' AND deleted_at IS NULL"),
-        ),
+        # WHAT IT WAS REALLY BUYING IS NOT LOST. Its own comment gave the reason as two
+        # near-simultaneous requests each creating a draft "with no basis for choosing between them".
+        # Under this model two drafts are correct; two drafts each MISSING THE OTHER'S new document
+        # is not, and that is what a concurrent pair produces when both compute the outstanding set
+        # from the same pre-state. `add_needs_to_draft` takes a row lock on the loan file instead, so
+        # the second request sees the first one's draft.
+        #
+        # A non-unique index is kept: the drafts list, the header count and the outstanding-set union
+        # all read by (loan_file_id, status).
+        Index("ix_communications_loan_file_status", "loan_file_id", "status"),
     )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
