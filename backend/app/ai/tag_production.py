@@ -169,7 +169,7 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
 
     ``context_json`` is ``{"transactions": [{"index", "date", "amount", "direction",
     "description"}, ...]}`` assembled deterministically by the orchestrator. Calls the
-    extraction/reasoning tier (Sonnet by default, env-overridable) at
+    extraction/reasoning tier (Haiku 4.5 by default, env-overridable) at
     temperature 0 (same file → same tags), guards truncation, and parses defensively (a
     malformed response yields no judgments — the orchestrator falls back to unknown). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout (``complete()``
@@ -178,7 +178,7 @@ async def reason_stage_a_transactions(context_json: str) -> StageAResult:
     # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
     # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
     result = await complete(
-        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over the facts
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Haiku 4.5 by default) — real reasoning over the facts
         system=STAGE_A_TRANSACTION_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

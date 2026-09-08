@@ -113,8 +113,8 @@ async def reason_stage_b_sourcing(context_json: str) -> SourcingResult:
     """Judge whether ONE deposit is sourced, given its candidate set (never the whole file).
 
     ``context_json`` is ``{"deposit": {...}, "candidates": [{"index", ...}, ...]}`` assembled
-    deterministically by the orchestrator. Calls the extraction/reasoning tier (Sonnet by
-    default, env-overridable) at temperature 0, guards truncation, and
+    deterministically by the orchestrator. Calls the extraction/reasoning tier (Haiku 4.5
+    by default, env-overridable) at temperature 0, guards truncation, and
     parses defensively (a malformed response → ``judgment=None`` → the orchestrator falls back
     to unknown-with-reason). Raises :class:`~app.ai.client.AIClientError` on a transport failure
     OR a timeout. NEVER logs the context or the response — only counts.
@@ -122,7 +122,7 @@ async def reason_stage_b_sourcing(context_json: str) -> SourcingResult:
     # NOT wrapped in asyncio.wait_for: complete() bounds every attempt itself (B1), and an
     # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
     result = await complete(
-        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Haiku 4.5 by default) — real judgment over the facts
         system=STAGE_B_SOURCING_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

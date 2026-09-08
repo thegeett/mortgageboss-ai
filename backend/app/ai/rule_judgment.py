@@ -53,7 +53,7 @@ Reasoner = Callable[[str], Awaitable[RuleJudgmentResult]]
 async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJudgmentResult:
     """Ask ONE judgment question (``system_prompt``) over the structured-tag ``context_json``.
 
-    Calls the extraction/reasoning tier (Sonnet by default, env-overridable) at temperature 0,
+    Calls the extraction/reasoning tier (Haiku 4.5 by default, env-overridable) at temperature 0,
     guards truncation, parses defensively (a malformed response →
     ``judgment=None`` → the evaluator falls back to unknown/needs_review). Raises
     :class:`~app.ai.client.AIClientError` on a transport failure OR a timeout. NEVER logs the context
@@ -63,7 +63,7 @@ async def reason_rule_judgment(system_prompt: str, context_json: str) -> RuleJud
     # outer wrapper would also bill the rate limiter's queueing time to this call's budget.
     # At a low RPM that made pacing look like a provider timeout — see complete()'s docstring.
     result = await complete(
-        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real judgment over the facts
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Haiku 4.5 by default) — real judgment over the facts
         system=system_prompt,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

@@ -173,7 +173,7 @@ class CrossSourceResult:
 async def reason_cross_source(context_json: str) -> CrossSourceResult:
     """Run one general AI pass over the assembled stated-vs-verified context.
 
-    Calls the extraction/reasoning tier (Sonnet by default, env-overridable) with the
+    Calls the extraction/reasoning tier (Haiku 4.5 by default, env-overridable) with the
     cross-source system prompt and the context as the user
     message, then parses the structured findings defensively (never raises on bad
     JSON — a malformed response yields no findings). Raises
@@ -181,7 +181,7 @@ async def reason_cross_source(context_json: str) -> CrossSourceResult:
     the run FAILED). **Never logs the context or the response** — only counts.
     """
     result = await complete(
-        model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over context
+        model=settings.anthropic_model_reasoning,  # reasoning tier (Haiku 4.5 by default) — real reasoning over context
         system=CROSS_SOURCE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": context_json}],
         max_tokens=_MAX_TOKENS,

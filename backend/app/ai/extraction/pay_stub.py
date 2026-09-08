@@ -32,7 +32,8 @@ content block (LP-37 revision, ADR-126; this change ADR-128). Reuses the LP-38
 patterns: the file-based prompt (``load_prompt``), the shared defensive parser
 (``app.ai.parsing``), graceful failure, and metadata-only logging. Uses
 ``settings.anthropic_model_extraction`` — the extraction tier (Haiku 4.5 as of
-LP-457), distinct from the reasoning tier (Sonnet) and classification's model.
+LP-457). Every tier holds that same value today, but they stay separate knobs: read
+the extraction setting here, never another tier's, or a re-point will drag this along.
 """
 
 import json

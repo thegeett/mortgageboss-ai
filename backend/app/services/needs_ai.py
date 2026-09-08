@@ -494,7 +494,7 @@ async def propose_needs(db: AsyncSession, loan_file: LoanFile) -> ReasonedNeeds:
     )
     try:
         result = await complete(
-            model=settings.anthropic_model_reasoning,  # reasoning tier (Sonnet by default) — real reasoning over context
+            model=settings.anthropic_model_reasoning,  # reasoning tier (Haiku 4.5 by default) — real reasoning over context
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
             max_tokens=_MAX_TOKENS,
