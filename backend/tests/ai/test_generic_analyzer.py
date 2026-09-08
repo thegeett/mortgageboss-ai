@@ -82,16 +82,17 @@ def test_parse_unparseable_returns_none(raw: str) -> None:
     assert _parse_analysis_json(raw) is None
 
 
-async def test_analyze_success_uses_sonnet_and_generous_budget(
+async def test_analyze_success_uses_the_analysis_tier_and_generous_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock = _mock_complete(monkeypatch, text=FULL_JSON)
     a = await analyze_document(PDF_BYTES, "application/pdf")
     assert a is not None and a.document_type_guess == "civil court judgment"
     kwargs = mock.await_args.kwargs
-    # LP-457 review: the generic analyzer runs on the ANALYSIS tier — Sonnet by default (Tier-3
-    # understanding, not extraction), but its OWN knob, decoupled from the CALIBRATED reasoning tier so a
-    # reasoning re-point for calibration never drags this perception task along.
+    # LP-457 review: the generic analyzer runs on the ANALYSIS tier — Haiku 4.5 since LP-628
+    # (Tier-3 understanding, not extraction), on its OWN knob so re-pointing another tier never
+    # drags this perception task along. Asserts the SETTING, not a model string, so the tier stays
+    # the subject of the test whatever it is pointed at.
     assert (
         kwargs["model"] == analyzer_module.settings.anthropic_model_analysis
     )  # Haiku 4.5, own knob

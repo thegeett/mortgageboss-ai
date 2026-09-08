@@ -65,14 +65,44 @@ def _default(field: str) -> str:
 
 
 def test_four_model_tiers_exist_and_default_correctly() -> None:
-    # The four purposes. Extraction is Haiku (LP-457 switch); reasoning STAYS Sonnet (the live rules were
-    # calibrated on Sonnet reasoning — moving it invalidates every activation bar); classification is Haiku;
-    # analysis (Tier-3 generic analyzer) is Haiku as of LP-628, still on its OWN knob (LP-457 review —
-    # decoupled from reasoning, so cheapening Tier 3 cannot drag calibrated reasoning with it).
+    # The four purposes, all Haiku 4.5 as shipped. Extraction moved off Sonnet in LP-457,
+    # Tier-3 analysis in LP-628, and reasoning in the Bedrock cost switch. They remain FOUR
+    # separate knobs precisely so any one of them can be re-pointed without the others: equal
+    # values today are a decision, not a merge.
     assert _default("anthropic_model_classification") == "claude-haiku-4-5"
     assert _default("anthropic_model_extraction") == "claude-haiku-4-5"
-    assert _default("anthropic_model_reasoning") == "claude-sonnet-4-5"
+    assert _default("anthropic_model_reasoning") == "claude-haiku-4-5"
     assert _default("anthropic_model_analysis") == "claude-haiku-4-5"
+
+
+def test_no_tier_ships_pointed_at_sonnet() -> None:
+    """The switch is the point: no configured tier may resolve to a Sonnet model.
+
+    Asserts against the DECLARED defaults, not the live singleton, for the same reason
+    `_default` exists — an operator's `.env` override is a deliberate act, while the
+    SHIPPED configuration is the invariant. A positive control guards the check itself:
+    the matcher must actually fire on a Sonnet string, or this test would pass on a
+    codebase that had silently stopped reading model names at all.
+    """
+
+    def _is_sonnet(value: str) -> bool:
+        return "sonnet" in value.lower()
+
+    assert _is_sonnet("claude-sonnet-4-5"), "positive control: the matcher does not match Sonnet"
+    assert _is_sonnet("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    assert not _is_sonnet("claude-haiku-4-5")
+
+    offenders = {
+        field: _default(field)
+        for field in (
+            "anthropic_model_classification",
+            "anthropic_model_extraction",
+            "anthropic_model_reasoning",
+            "anthropic_model_analysis",
+        )
+        if _is_sonnet(_default(field))
+    }
+    assert not offenders, f"tier(s) still shipped pointing at Sonnet: {offenders}"
 
 
 def test_the_analysis_tier_resolves_under_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:

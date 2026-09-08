@@ -198,7 +198,7 @@ bedrock_rpm_budget = 8
 bedrock_model_ids = {
   classification = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   extraction     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-  reasoning      = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  reasoning      = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 # ⚠️ VERIFIED with `aws bedrock get-inference-profile`: the us. profiles route to

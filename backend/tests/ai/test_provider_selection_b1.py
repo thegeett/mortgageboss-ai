@@ -58,10 +58,16 @@ def _reset_caches() -> Any:
 
 
 def _use_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mirror the SHIPPED Bedrock config: all three tiers on the Haiku profile.
+
+    Reasoning was the Sonnet profile until the cost switch. It matters that this
+    fixture tracks what is deployed — a fixture pinning a model the app no longer
+    calls tests a configuration that exists nowhere.
+    """
     monkeypatch.setattr(settings, "ai_provider", "bedrock")
     monkeypatch.setattr(settings, "bedrock_model_classification", HAIKU_PROFILE)
     monkeypatch.setattr(settings, "bedrock_model_extraction", HAIKU_PROFILE)
-    monkeypatch.setattr(settings, "bedrock_model_reasoning", SONNET_PROFILE)
+    monkeypatch.setattr(settings, "bedrock_model_reasoning", HAIKU_PROFILE)
 
 
 # --------------------------------------------------------------------------- #
@@ -135,15 +141,67 @@ def test_resolve_model_maps_each_tier_under_bedrock(monkeypatch: pytest.MonkeyPa
     _use_bedrock(monkeypatch)
     assert resolve_model(settings.anthropic_model_classification) == HAIKU_PROFILE
     assert resolve_model(settings.anthropic_model_extraction) == HAIKU_PROFILE
-    assert resolve_model(settings.anthropic_model_reasoning) == SONNET_PROFILE
+    assert resolve_model(settings.anthropic_model_reasoning) == HAIKU_PROFILE
 
 
-def test_reasoning_resolves_to_sonnet_not_haiku(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The 37 live rules are calibrated on Sonnet reasoning — this must never drift."""
+def test_resolve_model_still_maps_tiers_INDEPENDENTLY(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-tier routing, proven on DISTINCT values.
+
+    The test above can no longer show this: every shipped tier holds one value and one
+    id, so it would pass on a `resolve_model` that ignored the tier argument entirely.
+    This one gives each tier a different Anthropic value and a different Bedrock id, so
+    a collapsed mapping fails it.
+    """
+    monkeypatch.setattr(settings, "ai_provider", "bedrock")
+    monkeypatch.setattr(settings, "anthropic_model_classification", "model-c")
+    monkeypatch.setattr(settings, "anthropic_model_extraction", "model-e")
+    monkeypatch.setattr(settings, "anthropic_model_reasoning", "model-r")
+    monkeypatch.setattr(settings, "bedrock_model_classification", "us.bedrock-c")
+    monkeypatch.setattr(settings, "bedrock_model_extraction", "us.bedrock-e")
+    monkeypatch.setattr(settings, "bedrock_model_reasoning", "us.bedrock-r")
+
+    assert resolve_model("model-c") == "us.bedrock-c"
+    assert resolve_model("model-e") == "us.bedrock-e"
+    assert resolve_model("model-r") == "us.bedrock-r"
+
+
+def test_no_tier_resolves_to_sonnet_under_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No Sonnet id reaches the wire on any tier — the requirement behind the cost switch."""
     _use_bedrock(monkeypatch)
-    resolved = resolve_model(settings.anthropic_model_reasoning)
-    assert "sonnet" in resolved
-    assert resolved != resolve_model(settings.anthropic_model_extraction)
+    assert "sonnet" in SONNET_PROFILE, "positive control: the matcher cannot see Sonnet"
+
+    resolved = {
+        tier: resolve_model(getattr(settings, f"anthropic_model_{tier}"))
+        for tier in ("classification", "extraction", "reasoning", "analysis")
+    }
+    assert all(resolved.values()), f"a tier resolved to nothing: {resolved}"
+    offenders = {t: m for t, m in resolved.items() if "sonnet" in m.lower()}
+    assert not offenders, f"tier(s) still routed to Sonnet under Bedrock: {offenders}"
+
+
+def test_a_sonnet_reasoning_id_cannot_survive_boot() -> None:
+    """What ACTUALLY keeps Sonnet off the wire, now that all four tiers share one value.
+
+    `resolve_model` keys on the ANTHROPIC_MODEL_* value and returns the first tier that
+    matches, so with every tier on `claude-haiku-4-5` the classification mapping answers
+    for all of them and BEDROCK_MODEL_REASONING is unreachable — a Sonnet id sitting in
+    that variable would resolve to Haiku rather than raise. That makes a resolve-level
+    assertion unable to fail on this configuration (verified by mutation: flipping the
+    fixture's reasoning id to the Sonnet profile left the test above green).
+
+    The enforcement therefore lives one layer up, in the ambiguity validator: a Settings
+    whose shared Anthropic value maps to two different Bedrock ids is refused at BOOT.
+    That is the guard this test pins.
+    """
+    with pytest.raises(ValidationError, match="ambiguous Bedrock model mapping"):
+        Settings(
+            **_settings_kwargs(
+                ai_provider="bedrock",
+                bedrock_model_classification=HAIKU_PROFILE,
+                bedrock_model_extraction=HAIKU_PROFILE,
+                bedrock_model_reasoning=SONNET_PROFILE,
+            )
+        )
 
 
 def test_resolve_model_rejects_an_unknown_value_under_bedrock(
@@ -205,7 +263,7 @@ def test_bedrock_starts_with_no_anthropic_api_key() -> None:
             anthropic_api_key=None,
             bedrock_model_classification=HAIKU_PROFILE,
             bedrock_model_extraction=HAIKU_PROFILE,
-            bedrock_model_reasoning=SONNET_PROFILE,
+            bedrock_model_reasoning=HAIKU_PROFILE,
         )
     )
     assert cfg.anthropic_api_key is None

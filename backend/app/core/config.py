@@ -97,19 +97,30 @@ class Settings(BaseSettings):
     #     4.5 for cost; verified field-by-field on a dense credit report + pay stub, LP-457
     #     Phase D). A deployment can dial it up via env.
     #   - reasoning: the fact-tag AI groups, rule judgment, cross-source, guidance, needs
-    #     -> STAYS on Sonnet 4.5. ⚠️ The 37 live rules were CALIBRATED on Sonnet reasoning;
-    #     moving the reasoning model would invalidate every activation bar. Kept separate so
-    #     extraction can be cheapened WITHOUT touching calibrated reasoning.
+    #     -> Haiku 4.5. Was Sonnet 4.5 until the cost switch: the reasoning tier is the most
+    #     expensive path in the app (13 call sites, every fact-tag group and every judgmental
+    #     rule) and Sonnet was 3x Haiku's per-token rate. No Sonnet call is made on any tier
+    #     any more. Kept a separate knob so a deployment can dial reasoning back up via env
+    #     WITHOUT touching extraction — but note that under Bedrock all four tiers now hold
+    #     the SAME value, and `resolve_model` keys on that value, so dialling reasoning up
+    #     means setting ANTHROPIC_MODEL_REASONING *and* BEDROCK_MODEL_REASONING together.
+    #     Setting only the latter is refused at boot by the ambiguity check below, loudly,
+    #     rather than silently mis-routing.
+    #     Calibration note: 18 ACTIVE rules (CR-1/4/6/8/10, DT-7, FR-3/5, IN-13/14, OC-1/3,
+    #     PC-8, PR-3/4/5, TI-2/6) record `self_consistency_model` in activation_bars.yaml
+    #     pinned to the Sonnet inference profile — their `measured_accuracy`, the number that
+    #     gates whether each ships a TRUSTED auto verdict, was measured on Sonnet. Those bars
+    #     are provenance metadata (parsed, never invoked), so nothing breaks at runtime, but
+    #     they are now claims about a model the app no longer runs. Re-measure them before
+    #     treating those 18 gates as evidence.
     #   - analysis: the Tier-3 generic analyzer ("understand anything" for unrecognised docs)
-    #     -> Sonnet 4.5 for open-ended comprehension. Its OWN tier (LP-457 review), NOT the
+    #     -> Haiku 4.5. Its OWN tier (LP-457 review), NOT the
     #     reasoning tier: it is a document-PERCEPTION task, not calibration-sensitive, so it must
     #     not be dragged along when reasoning is re-pointed for CALIBRATION (that is exactly the
     #     cross-purpose coupling this split exists to prevent). Same default value, distinct knob.
     anthropic_model_classification: str = "claude-haiku-4-5"
     anthropic_model_extraction: str = "claude-haiku-4-5"  # LP-457: switched from Sonnet 4.5 (cost)
-    anthropic_model_reasoning: str = (
-        "claude-sonnet-4-5"  # STAYS Sonnet — the live bars are calibrated on it
-    )
+    anthropic_model_reasoning: str = "claude-haiku-4-5"  # was Sonnet 4.5; see the note above
     # Tier-3 generic analysis. Haiku 4.5 as of LP-628, down from Sonnet 4.5 — a deliberate cost
     # choice: Tier 3 runs on documents that already failed structured extraction, so it is a
     # best-effort salvage pass rather than the reading the loan file depends on, and it was 3x the

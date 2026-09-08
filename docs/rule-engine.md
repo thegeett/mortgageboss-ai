@@ -1199,10 +1199,16 @@ stubs judgment rules so it never pays for a verdict it discards; the judgment ev
 concurrency at 8 subjects; content-ids never reach the AI (batches address items by a 1-based index
 and the id is attached afterwards).
 
-**Models.** Reasoning is `claude-sonnet-4-5` and stays there — the live activation bars are
-calibrated on it, and re-pointing reasoning would invalidate them. Classification and extraction run
-`claude-haiku-4-5`. Analysis has its own knob so it is not dragged along when reasoning is
-re-pointed for calibration. The provider is switchable between the direct Anthropic API and
+**Models.** All four tiers run `claude-haiku-4-5`. Reasoning was `claude-sonnet-4-5` until the
+Bedrock cost switch; no tier calls Sonnet any more. The tiers remain four separate knobs, so any one
+can be re-pointed without the others — though under Bedrock, where every tier now shares a single
+value and `resolve_model` keys on that value, re-pointing means changing the `ANTHROPIC_MODEL_*` and
+`BEDROCK_MODEL_*` pair together; changing only the latter is refused at boot by the ambiguity check.
+Carried over from the switch: 18 active rules (CR-1/4/6/8/10, DT-7, FR-3/5, IN-13/14, OC-1/3, PC-8,
+PR-3/4/5, TI-2/6) still record a Sonnet `self_consistency_model` in `activation_bars.yaml`. Those
+entries are provenance metadata — parsed, never invoked — but each rule's `measured_accuracy`, the
+number gating whether it ships a TRUSTED auto verdict, was measured on Sonnet and has not been
+re-measured on Haiku. The provider is switchable between the direct Anthropic API and
 **Amazon Bedrock**, which routes the same calls inside the AWS trust boundary — the compliance basis
 for putting real borrower NPI in staging.
 
