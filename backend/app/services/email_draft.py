@@ -396,16 +396,30 @@ async def _cached_framing(
     return None
 
 
-async def compose_open_draft_prose(db: AsyncSession, *, loan_file: LoanFile) -> bool:
-    """Compose the framing for this file's open draft and re-render it. Returns whether it changed.
+async def compose_open_draft_prose(
+    db: AsyncSession, *, loan_file: LoanFile, draft: Communication | None = None
+) -> bool:
+    """Compose the framing for a draft and re-render it. Returns whether it changed.
 
-    The OFF-REQUEST half of `_cached_framing`: called only from `tasks.email_draft`, never from a
-    route. A miss composes, stores, and re-renders the draft body from the now-warm cache; a hit
-    re-renders nothing and returns False, which is what makes a duplicate enqueue harmless.
+    The OFF-REQUEST half of `_cached_framing` when the task calls it: a miss composes, stores, and
+    re-renders the draft body from the now-warm cache; a hit re-renders nothing and returns False,
+    which is what makes a duplicate enqueue harmless.
+
+    LP-833 REVIEW — `draft` IS PASSED WHEN THE CALLER HAS ONE. `compose_request` had just created a
+    draft and then asked for "this file's newest open draft", which is the same row today only
+    because nothing runs between the two statements. That is a property of the current code rather
+    than of this function, and it is the shape LP-832's review already found once in
+    `remove_need_from_draft`: a function resolving "the draft" while its caller is holding the one it
+    means. The row lock covers a concurrent request; it does not cover a future caller in the same
+    transaction. Passing it removes the question instead of documenting it.
+
+    `tasks.email_draft` keeps the lookup — it has a loan file id and no draft, which is the case the
+    default is for.
     """
     if not settings.email_draft_enabled:
         return False
-    draft = await get_open_draft(db, loan_file_id=loan_file.id)
+    if draft is None:
+        draft = await get_open_draft(db, loan_file_id=loan_file.id)
     if draft is None:
         return False
     needs = await _needs_in_draft(db, draft=draft)
@@ -679,7 +693,7 @@ async def compose_request(
     # switched off leaves the deterministic draft standing rather than failing the request.
     composed = False
     if update.draft is not None:
-        composed = await compose_open_draft_prose(db, loan_file=loan_file)
+        composed = await compose_open_draft_prose(db, loan_file=loan_file, draft=update.draft)
     return ComposedRequest(update=update, composed_by_model=composed)
 
 

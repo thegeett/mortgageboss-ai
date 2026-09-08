@@ -247,3 +247,54 @@ async def test_the_add_itself_never_calls_the_model_even_with_the_flag_on(
     in_request = False
     assert await compose_open_draft_prose(db_session, loan_file=loan_file) is True
     assert _COMPOSED.opening in result.draft.body
+
+
+async def test_the_compose_is_handed_the_draft_the_request_made(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-833 REVIEW — the compose asked for "this file's newest open draft" while holding one.
+
+    `compose_request` creates a draft and then called `compose_open_draft_prose(db,
+    loan_file=loan_file)`, which resolves the newest. Those are the same row today only because
+    nothing runs between the two statements — a property of the current code rather than of the
+    function, and the same shape LP-832's review found in `remove_need_from_draft`. The row lock
+    covers a concurrent request; it does not cover a future caller inside this transaction.
+
+    ASSERTED ON THE ARGUMENT, and the first version of this test was not. Asserting the OUTCOME —
+    that each request's framing lands on its own draft — is true either way, because the draft a
+    request creates IS the newest at the moment it composes. That test passed under the mutant that
+    dropped the parameter, which makes it a statement about today's call order rather than about the
+    wiring. The divergence it defends against cannot be produced from outside, so the honest
+    assertion is that the caller hands over the row it means.
+    """
+    from app.core.config import settings
+    from app.services import email_draft
+    from app.services.email_draft import compose_request
+
+    monkeypatch.setattr(settings, "email_draft_enabled", True)
+    seen: list[object] = []
+    real = email_draft.compose_open_draft_prose
+
+    async def _spy(db, *, loan_file, draft=None):  # type: ignore[no-untyped-def]
+        seen.append(draft)
+        return await real(db, loan_file=loan_file, draft=draft)
+
+    async def _compose(*_args: object, **_kwargs: object) -> DraftComposition:
+        return _COMPOSED
+
+    monkeypatch.setattr("app.services.email_draft.compose", _compose)
+    monkeypatch.setattr(email_draft, "compose_open_draft_prose", _spy)
+    loan_file, actor, _need = await _setup(db_session)
+
+    result = await compose_request(
+        db_session, loan_file=loan_file, document_types=["bank_statement"], actor_user_id=actor
+    )
+
+    assert result.update.draft is not None
+    assert seen == [result.update.draft], (
+        "the compose was not handed the draft this request created — it resolved one instead"
+    )
+    # The control: it did compose, so the assertion above is not being satisfied by a call that
+    # never happened.
+    assert result.composed_by_model is True
+    assert _COMPOSED.opening in (result.update.draft.body or "")
