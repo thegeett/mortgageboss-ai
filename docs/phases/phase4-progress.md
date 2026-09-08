@@ -190,7 +190,54 @@ duplicates" quietly means "all non-communication activity".
 
 ---
 
-## The mailbox redesign (LP-831 … LP-836)
+## The mailbox redesign (LP-831 … LP-838) — COMPLETE
+
+**All eight built and reviewed, 2026-09-09.** Each built by one session, reviewed by a different one
+with the code-review skill, every finding fixed and committed before the next started. No SHAs
+recorded, by the user's instruction.
+
+**What a processor can do that they could not:** read a list of every draft on a file and open any of
+them; edit and send a draft — including a **party** draft, which LP-820 built and which no screen
+could send; add a secure upload link from inside the draft; ask for a document no rule flagged; see
+how many drafts are waiting from any page of a file; and read when each thing happened, in one
+format.
+
+**What none of it changed:** nothing transmits. The message leaves through "Copy message" or "Open in
+mail client", and "Mark as sent" records that it did.
+
+### Three things that need a person, carried out of this run
+
+1. **`docs/tickets/LP-828.md` is modified and UNSTAGED in the tree right now** — its header reads
+   "re-groomed 2026-09-09", so it is the user's own work in progress. Both sessions have left it
+   alone since discovering it, and it is sitting uncommitted in a worktree several sessions write
+   to. An earlier state of it was swept into `26ae30c5` by a `git add -A`; both sessions now stage
+   by explicit path and have verified after every commit since.
+2. **Staging's Terraform is unapplied**, so upload links there do not work — and since LP-827,
+   minting *raises* rather than producing a broken link, which is the guard behaving correctly.
+   Human-gated on AWS credentials.
+3. **Nothing in CI validates the Terraform**, and that escalation now has two instances behind it: a
+   heredoc that stopped `infra/envs/staging` initialising at all, and an inbound-mail module pointed
+   at a hosted zone that could not contain its own records. `validate -backend=false` needs no
+   credentials and found both in seconds.
+
+### One operational limit, before the AI flag is ever turned on
+
+LP-833 calls the model **in the request handler**, deliberately — a processor is waiting on purpose.
+There is a real bound, `ai_request_timeout_seconds = 60.0`, but `config.py:169` states the total as
+that times `ai_max_retries = 3` plus backoff and pacing — roughly three minutes — and **no
+`idle_timeout` is set on the ALB in any environment**, so AWS's 60-second default cuts first.
+
+With the flag on, a compose that retries even once never reaches the processor: they wait, get a
+gateway error, refresh, and the draft is there. Measured as **cosmetic rather than damaging** — the
+server commits, and a repeat of the same selection creates no fresh needs, so it returns the existing
+draft rather than minting a second.
+
+Wrapping the call in `asyncio.wait_for` was considered and rejected: the same comment forbids it,
+because an outer wrapper bills rate-limiter queueing time to the call and makes pacing look like a
+provider timeout (LP-313/B1).
+
+### The tickets
+
 
 Asked for 2026-09-07 after using the built feature. Six tickets, specified and not started. Two
 answers were confirmed directly rather than guessed, because both readings were plausible and wrong
