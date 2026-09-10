@@ -265,6 +265,14 @@ makes every draft reachable; LP-835 makes the party path end in one.
 
 ---
 
+## Reported after the mailbox shipped
+
+| Ticket | What | Status |
+|---|---|---|
+| [LP-839](../tickets/LP-839.md) | The request button does not say what a request did — a VOE goes to the EMPLOYER, so the borrower draft is correctly unchanged, and the governed rows still show the pre-LP-826 hedge that cannot say so | Specified |
+
+---
+
 ## Blocked / escalations
 
 Anything a session could not resolve. One line each, with the ticket it belongs to. **Forty items,
