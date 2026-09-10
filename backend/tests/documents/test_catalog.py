@@ -377,3 +377,36 @@ def test_every_matched_slug_is_actually_in_the_catalog() -> None:
         slug = match_catalog_type(name)
         assert slug is not None
         assert is_cataloged(slug)
+
+
+def test_no_two_document_types_share_a_label() -> None:
+    """LP-839 REVIEW — `_not_borrower_facing` round-trips through labels, so uniqueness is load-bearing.
+
+    `schemas/verification._not_borrower_facing` builds `{document_label(t): t for t in CATALOG}` to get
+    from a label back to a type, because `missing_documents` carries labels and the responsible party
+    lives on the type. A dict comprehension keeps the LAST writer, so two types sharing a label would
+    silently resolve to one of them — and if their parties differed, the screen would tell a processor
+    that a document is the borrower's to send when it is the lender's, or the reverse.
+
+    Measured when that mapping was reviewed: 166 types, 166 distinct labels, no collision. This is
+    what keeps that true. The build flagged it as something it had not proven; proving it once is not
+    the same as it staying proven, and the 167th type is where it would go wrong.
+
+    A COLLISION IS NOT NECESSARILY A BUG IN THE CATALOG — two types may deserve the same human name.
+    It is a bug in reading a label as an identity, and this failing is the signal to give
+    `_not_borrower_facing` the type rather than the label.
+    """
+    from collections import Counter
+
+    from app.verification.rule_engine.reasons import document_label
+
+    labels = Counter(document_label(document_type) for document_type in CATALOG)
+    shared = {label: count for label, count in labels.items() if count > 1}
+
+    assert not shared, (
+        f"{len(shared)} label(s) are produced by more than one document type: {sorted(shared)}. "
+        "`_not_borrower_facing` maps a label back to a type and would silently pick one of them."
+    )
+    # The control: the comprehension actually ran over the catalog. An empty CATALOG would satisfy
+    # the assertion above and prove nothing.
+    assert len(labels) == len(CATALOG) > 100

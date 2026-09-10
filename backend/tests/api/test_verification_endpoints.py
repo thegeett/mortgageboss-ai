@@ -265,6 +265,20 @@ async def test_retired_xsrc_findings_do_not_render_in_the_legacy_tab(
             message="Borrower name differs across sources: ADITYA TALLURI; TALLURI ADITYA.",
         )
     )
+    # LP-839 REVIEW — A GOVERNED ROW, SO THE SECOND ASSERTION BELOW MEANS SOMETHING. Without it
+    # `rule_findings` is empty — measured — and "it did not leak into the governed list either"
+    # asserts an absence in a list that has nothing in it. The same shape this ticket's own
+    # `requested_notes` mutation exposed: a check satisfied for a reason other than the one it names.
+    db.add(
+        _rule_finding(
+            loan_file,
+            rule_id="IN-5",
+            outcome=EvaluationOutcome.OPEN,
+            status=FindingStatus.YELLOW,
+            message="stated income is not supported by the documents",
+            subject_key="loan",
+        )
+    )
     await db.commit()
 
     body = (
@@ -274,7 +288,10 @@ async def test_retired_xsrc_findings_do_not_render_in_the_legacy_tab(
     rule_ids = [f["rule_id"] for f in body["findings"]]
     assert rule_ids == ["cross_source.income_variance"]
     assert not any(r.startswith("xsrc.") for r in rule_ids)
-    # ...and it did not leak into the governed list either (it has no evaluation_outcome).
+    # ...and it did not leak into the governed list either (it has no evaluation_outcome). The
+    # governed list is non-empty, so this is a statement about what is in it rather than about an
+    # empty collection.
+    assert [f["rule_id"] for f in body["rule_findings"]] == ["IN-5"]
     assert not any(f["rule_id"].startswith("xsrc.") for f in body["rule_findings"])
 
 
