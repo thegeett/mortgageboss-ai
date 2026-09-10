@@ -629,3 +629,108 @@ async def test_removing_from_another_files_draft_is_refused(db_session: AsyncSes
     )
     await db_session.refresh(theirs)
     assert "Bank statements" in (theirs.body or ""), "another file's draft was edited"
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-839 — the processor's note, which reached nobody
+# --------------------------------------------------------------------------------------------- #
+async def test_the_note_reaches_the_borrower(db_session: AsyncSession) -> None:
+    """THE TEXTAREA WROTE TO A COLUMN AND STOPPED. The request form asks for something to add,
+    stores it in `NeedsItem.description`, and `_document_line` rendered the catalog's guidance or the
+    title — so "the March one specifically, not February" reached nobody."""
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
+    need.description = "The March one specifically, not February."
+    await db_session.flush()
+
+    update = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    assert update.draft is not None
+    assert "The March one specifically, not February." in update.draft.body
+
+
+async def test_a_note_survives_the_next_request(db_session: AsyncSession) -> None:
+    """WHY IT LIVES ON THE NEED AND NOT ON THE DRAFT. The body is rewritten from the needs on every
+    add and remove, so a note anywhere else would be wiped by the next request — LP-834's problem,
+    with a cheaper answer available because a note already has a row to live on."""
+    loan_file, actor = await _file_and_actor(db_session)
+    first = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
+    first.description = "The March one specifically."
+    second = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+    await db_session.flush()
+
+    await add_needs_to_draft(db_session, loan_file=loan_file, needs=[first], actor_user_id=actor)
+    after = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+    )
+
+    assert after.draft is not None
+    assert "The March one specifically." in after.draft.body
+
+
+async def test_a_draft_with_no_notes_reads_as_before(db_session: AsyncSession) -> None:
+    """THE CONTROL. A renderer that appended something for every need would put a blank line under
+    each document on every file that has never used the field."""
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
+
+    update = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    assert update.draft is not None
+    assert "\n  \n" not in update.draft.body
+    assert "Bank statement" in update.draft.body or "bank statement" in update.draft.body.lower()
+
+
+def test_a_note_changes_the_composition_key() -> None:
+    """AND THE MODEL MUST BE ASKED AGAIN. `cache_key` is a digest of the facts payload: without the
+    notes in it, adding one leaves the key unchanged, `_cached_prose` hits, and no composition runs —
+    the framing would stay written for a request that has since changed.
+
+    Compared as keys rather than as prose, because the claim is about the cache and not about what
+    the model would say.
+    """
+    from app.ai.email_draft import DraftFacts
+
+    plain = DraftFacts(
+        borrower_first_name="the borrower",
+        loan_reference="LF-1",
+        requested_labels=("Bank statement",),
+    )
+    annotated = DraftFacts(
+        borrower_first_name="the borrower",
+        loan_reference="LF-1",
+        requested_labels=("Bank statement",),
+        requested_notes=("The March one specifically.",),
+    )
+
+    assert plain.cache_key() != annotated.cache_key()
+
+
+def test_a_number_in_a_note_does_not_license_the_model_to_state_one() -> None:
+    """THE GUARD THE PREVIOUS CHANGE NEARLY OPENED. Putting notes in the facts put them in
+    `to_json()`, which is what licenses a number — so "the one showing the $10,000 deposit" would
+    have licensed "10,000" anywhere in the output. LP-597 and LP-613 each cost a shipped defect to
+    find; a note is the same shape of thing as a label and joins the unlicensed set."""
+    from app.ai.email_draft import DraftComposition, DraftFacts, rejection_reason
+
+    facts = DraftFacts(
+        borrower_first_name="the borrower",
+        loan_reference="LF-1",
+        requested_labels=("Bank statement",),
+        requested_notes=("The one showing the $10,000 deposit.",),
+    )
+    composition = DraftComposition(
+        opening="We are working through your file.",
+        bridge="Here is what we still need:",
+        # NO CURRENCY SYMBOL, deliberately. `$10,000` also trips `states_a_money_amount`, so an
+        # `is not None` assertion passed whether or not the note was licensed — it was measuring a
+        # different guard. A bare number reaches the licensing check and nothing else.
+        closing="Please include the 10,000 deposit.",
+    )
+
+    # THE SPECIFIC REASON, not merely "rejected": that is what makes this about licensing.
+    assert rejection_reason(facts, composition) == "unsupported_numbers:1"

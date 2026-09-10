@@ -2023,3 +2023,94 @@ async def test_two_findings_that_name_no_document_get_their_own_asks(
     assert reused.title == f"Documents for: {asks['ID-3']}", (
         "the second click reused another finding's needs item"
     )
+
+
+async def test_the_row_says_a_request_happened_and_where_it_went(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-839 — the two facts the row could not state.
+
+    `documents_requested` is LP-801's marker, written at request time since that ticket and read by
+    nothing; the row offered an identical button before and after.
+
+    `documents_not_borrower` is the one the client cannot work out: responsible party lives in the
+    server's catalog and `missing_documents` is a list of LABELS. Measured over the rule specs, **16
+    of the 43 documents any rule can request are somebody else's to send** — including the credit
+    report, the appraisal and the title commitment — so this is the common case, not the edge.
+
+    IN-8 is the reported one: it wants a `voe`, whose responsible party is the EMPLOYER.
+    """
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    # A GOVERNED §8 ROW, not the legacy AI sweep: `_add_finding` builds an AI_CROSS_SOURCE finding,
+    # which lands in `findings` rather than `rule_findings`, and the Request button being reported
+    # on lives on the governed rows.
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-8",
+        message="employment could not be verified",
+        subject_key="loan",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        confidence=1.0,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        details={},
+    )
+    db.add(finding)
+    await db.flush()
+    await db.commit()
+
+    before = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    row = next(f for f in before["rule_findings"] if f["id"] == str(finding.id))
+    assert row["documents_requested"] is False
+    # The control on the field below: it is populated because the document is somebody else's, not
+    # because the endpoint fills it in regardless.
+    assert row["missing_documents"], "IN-8 declares documents; the fixture is not exercising this"
+    assert row["documents_not_borrower"] == row["missing_documents"]
+
+    await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+    after = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    row = next(f for f in after["rule_findings"] if f["id"] == str(finding.id))
+    assert row["documents_requested"] is True
+
+
+async def test_a_borrower_document_is_not_reported_as_somebody_elses(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE POSITIVE CONTROL. A field that listed every missing document would satisfy the test above
+    and tell a processor that a pay stub is not the borrower's to send."""
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="IN-1",  # pay stub / W-2 — both the borrower's
+        message="income could not be verified",
+        subject_key="loan",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.INCOME,
+        confidence=1.0,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        details={},
+    )
+    db.add(finding)
+    await db.flush()
+    await db.commit()
+
+    payload = (
+        await client.get(f"{API}/{loan_file.display_id}/verification", headers=_auth(token))
+    ).json()
+    row = next(f for f in payload["rule_findings"] if f["id"] == str(finding.id))
+
+    assert row["missing_documents"]
+    assert row["documents_not_borrower"] == []

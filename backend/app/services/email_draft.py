@@ -110,9 +110,26 @@ def _document_line(need: NeedsItem) -> str:
     and it is exactly the ask a borrower most needs spelled out.
     """
     if need.needs_type and get_guidance(need.needs_type).borrower_label:
-        return render_document_block((need.needs_type,))
-    label = need.title or (document_label(need.needs_type) if need.needs_type else "")
-    return f"- {label}"
+        line = render_document_block((need.needs_type,))
+    else:
+        label = need.title or (document_label(need.needs_type) if need.needs_type else "")
+        line = f"- {label}"
+
+    # LP-839 — THE PROCESSOR'S NOTE, WHICH REACHED NOBODY.
+    #
+    # The request form asks "Anything to add to the request?", stores the answer in
+    # `NeedsItem.description`, and nothing read it: this function rendered the catalog's guidance or
+    # the title and stopped. A processor typing "the March one specifically, not February" was
+    # writing to a column.
+    #
+    # ATTACHED TO ITS OWN DOCUMENT rather than appended to the email, because that is what makes it
+    # survive: the body is rewritten from the needs on every add and remove, so a note living
+    # anywhere but the need it belongs to would be wiped by the next request — LP-834's problem, with
+    # a cheaper answer available because a note already has a row to live on.
+    note = (need.description or "").strip()
+    if note:
+        line = f"{line}\n  {note}"
+    return line
 
 
 def _borrower_label(need: NeedsItem) -> str:
@@ -363,6 +380,10 @@ def _draft_facts(loan_file: LoanFile, needs: list[NeedsItem]) -> DraftFacts:
         borrower_first_name="the borrower",
         loan_reference=loan_file.display_id,
         requested_labels=tuple(_borrower_label(need) for need in needs),
+        # LP-839 — the processor's notes, which the borrower now reads. Included so the cache key
+        # moves when one is added: without it `_cached_prose` hits and the framing stays written for
+        # a request that has changed.
+        requested_notes=tuple(note for need in needs if (note := (need.description or "").strip())),
     )
 
 

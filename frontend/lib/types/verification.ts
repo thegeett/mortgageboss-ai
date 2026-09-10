@@ -147,6 +147,16 @@ export interface RuleFinding {
    *  "VOE"). Empty means every required document is present, so the gap is in what a document SAYS
    *  rather than whether it exists — a different job, and the basis for the request/review split. */
   missing_documents: string[];
+  /** LP-839 — LP-801's marker, read at last. The row offered an identical button before and after. */
+  documents_requested?: boolean;
+  /**
+   * LP-839 — which of `missing_documents` are NOT the borrower's to send, same labels.
+   *
+   * Served, because responsible party lives in the server's catalog and these are LABELS. 16 of the
+   * 43 documents a rule can request are somebody else's — the credit report, the appraisal, the
+   * title commitment among them — and every one is correctly kept out of the borrower's draft.
+   */
+  documents_not_borrower?: string[];
   /** Would Apply actually change anything? Apply acts on the finding's declared change, and a rule
    *  that declares none would give a button that looks right and does nothing. */
   can_apply: boolean;

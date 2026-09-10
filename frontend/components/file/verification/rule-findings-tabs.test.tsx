@@ -698,12 +698,45 @@ describe("LP-562 — one click requests every outstanding document", () => {
     });
 
     renderCouldntCheck([missingA, missingB, present], 0, false, onAct);
-    screen.getByRole("button", { name: /request all 1/i }).click();
+    fireEvent.click(screen.getByRole("button", { name: /request all 1/i }));
+
+    // LP-839 — CONFIRMS FIRST NOW. The click opens a dialog naming what is about to be asked for;
+    // this is the only action on the tab whose blast radius a processor cannot see beforehand.
+    // Asserted as "nothing happened yet" rather than skipped, because a confirmation that fires the
+    // action anyway is worse than none — it is a dialog that lies about being a decision.
+    expect(onAct).not.toHaveBeenCalled();
+    expect(screen.getByText("credit report")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Looks good" }));
 
     expect(onAct).toHaveBeenCalledWith({
       kind: "request-docs-bulk",
       findingIds: ["a", "b"],
     });
+  });
+
+  it("cancelling asks for nothing", () => {
+    // THE CONTROL on the confirmation. A Cancel that still requested would be the worst of both:
+    // a processor told they had a choice, and the documents asked for anyway.
+    const onAct = vi.fn();
+    renderCouldntCheck(
+      [
+        ruleFinding({
+          id: "a",
+          rule_id: "CR-6",
+          evaluation_outcome: "couldnt_check",
+          missing_documents: ["credit report"],
+        }),
+      ],
+      0,
+      false,
+      onAct,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /request all 1/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onAct).not.toHaveBeenCalled();
   });
 });
 

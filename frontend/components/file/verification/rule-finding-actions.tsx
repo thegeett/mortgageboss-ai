@@ -62,9 +62,14 @@ const FORM: Record<
     required: true,
   },
   "request-docs": {
-    label: "Anything to add to the request?",
+    // LP-839 — SAYS WHO READS IT. This asked "anything to add to the request?", stored the answer
+    // in `NeedsItem.description`, and nothing rendered it: the draft's body came from the catalog's
+    // guidance or the need's title, so a processor's note reached a column and stopped. It now
+    // appears under its own document in the email, which makes the label a promise rather than an
+    // invitation into a void.
+    label: "Anything to add for the borrower?",
     submit: "Request",
-    placeholder: "optional",
+    placeholder: "e.g. the March statement specifically, not February",
     required: false,
   },
 };
@@ -125,9 +130,37 @@ export function RuleFindingActions({
   // Ratify; a missing document is a request; anything else leads with the dismissal path.
   const canRatify = finding.ratification_pending;
   const canRequest = finding.missing_documents.length > 0;
+  // LP-839 — LP-801 has written this marker at request time since that ticket, and nothing read it.
+  const alreadyRequested = finding.documents_requested === true;
+  const elsewhere = finding.documents_not_borrower ?? [];
+  // WHERE THE REQUEST WENT, said on the row rather than only in a toast that has gone. A document
+  // that is not the borrower's is deliberately kept out of their email — the same rule that keeps an
+  // appraisal out — so "requested" and "in the draft" are different claims and only one of them is
+  // always true.
+  const inDraft = finding.missing_documents.filter((d) => !elsewhere.includes(d));
 
   return (
     <div className="mt-2">
+      {/* LP-839 — WHAT THE LAST REQUEST DID, on the row and not only in a toast that has gone.
+          Split, because "requested" and "in the draft" are different claims: a document that is not
+          the borrower's to send is deliberately kept out of their email. */}
+      {alreadyRequested && canRequest ? (
+        <p className="mb-1 text-[11px] text-muted-foreground">
+          {inDraft.length > 0 ? (
+            <>
+              <span className="text-foreground">{inDraft.join(", ")}</span> requested — in the
+              latest draft.
+            </>
+          ) : null}
+          {inDraft.length > 0 && elsewhere.length > 0 ? " " : null}
+          {elsewhere.length > 0 ? (
+            <>
+              <span className="text-foreground">{elsewhere.join(", ")}</span> requested — on the
+              needs list, not the borrower&apos;s to send.
+            </>
+          ) : null}
+        </p>
+      ) : null}
       {meta === null ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {canRatify && (
@@ -192,12 +225,20 @@ export function RuleFindingActions({
           )}
           {canRequest && (
             <Button
-              variant={canRatify || finding.can_apply ? "outline" : "default"}
+              variant={alreadyRequested || canRatify || finding.can_apply ? "outline" : "default"}
               className="px-2 text-xs"
               disabled={pending}
+              // LP-839 — the whole effect of this button is on another page, so the tooltip is the
+              // cheapest place to say where. Named as the LATEST draft: LP-832 makes a request
+              // create a new one carrying everything outstanding, so "the draft" is ambiguous.
+              title={
+                elsewhere.length === finding.missing_documents.length
+                  ? `Not the borrower's to send — this goes on the needs list, not the email.`
+                  : "This will be added to the latest communication draft."
+              }
               onClick={() => setForm("request-docs")}
             >
-              Request {finding.missing_documents.join(", ")}
+              {alreadyRequested ? "Re-request" : "Request"} {finding.missing_documents.join(", ")}
             </Button>
           )}
           <Button

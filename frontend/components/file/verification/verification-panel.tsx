@@ -45,6 +45,7 @@ import type {
 } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FILTERS, type FindingFilters } from "@/lib/verification/finding-filters";
+import { requestConsequence } from "@/lib/verification/request-consequence";
 import { lastRunLabel, phaseLabel, remainingLabel } from "@/lib/verification/rule-findings";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -463,12 +464,18 @@ function VerificationBody({
             // Only the request is confirmed here: the other actions have their own on-screen
             // consequence (a row moves, a preview closes, a verdict changes), where a request's
             // whole effect is on two other pages.
-            onSuccess: () => {
-              if (action.kind !== "request-docs") return;
+            // LP-839 — THE SAME SENTENCE THE LEGACY ROWS SAY, from the server's own outcome.
+            // This handler had its own hedge — "whatever the borrower can send is in the file's
+            // email draft" — which is true whether the draft gained a line or not, and 16 of the 43
+            // documents a rule can put behind this button are somebody else's to send. A processor
+            // requesting a VOE, an appraisal or a credit report saw success and an unchanged draft.
+            // LP-826 built `requestConsequence` and wired it into `findings-list` only; this is the
+            // half where a processor clicks.
+            onSuccess: (status) => {
+              if (action.kind !== "request-docs" && action.kind !== "request-docs-bulk") return;
               notifySuccess({
                 title: "Documents requested",
-                consequence:
-                  "On the needs list, and whatever the borrower can send is in the file's email draft. The finding stays open until it is met.",
+                consequence: requestConsequence(status),
               });
             },
             onError: (error) => {

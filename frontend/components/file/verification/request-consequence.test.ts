@@ -1,3 +1,4 @@
+import type { VerificationStatus } from "@/lib/types/verification";
 /**
  * LP-826 — what a request tells a processor it did.
  *
@@ -6,8 +7,7 @@
  * request for an appraisal is deliberately left out of an email addressed to the borrower, and on
  * the draft's count that is indistinguishable from a click that did nothing.
  */
-import { requestConsequence } from "@/components/file/verification/findings-list";
-import type { VerificationStatus } from "@/lib/types/verification";
+import { requestConsequence } from "@/lib/verification/request-consequence";
 import { describe, expect, it } from "vitest";
 
 function status(added: number, elsewhere: number): VerificationStatus {
@@ -66,6 +66,12 @@ describe("requestConsequence", () => {
     // The control: the sentence still says something. An empty string would satisfy the line above.
     expect(message.length).toBeGreaterThan(20);
     expect(message).toContain("The finding stays open");
+  });
+
+  it("does not throw when there is no status at all", () => {
+    // It runs in two mutation handlers now. A toast that throws takes the confirmation with it and
+    // leaves a processor with a request that worked and no sign it did.
+    expect(requestConsequence(undefined)).toContain("whatever the borrower can send");
   });
 
   it("falls back to the hedge when the server did not say", () => {

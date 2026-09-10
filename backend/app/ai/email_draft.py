@@ -56,6 +56,22 @@ class DraftFacts:
     #: Labels only — the instructions themselves never reach the model, because the model is not
     #: writing them.
     requested_labels: tuple[str, ...] = ()
+    #: LP-839 — the processor's own notes on what is being asked for, one per note, unordered pairs
+    #: with `requested_labels` deliberately NOT reconstructed here.
+    #:
+    #: PART OF THE BUNDLE BECAUSE IT IS PART OF THE ASK. A note ("the March one specifically, not
+    #: February") is text the BORROWER now reads — `_document_line` renders it under its document —
+    #: so the model seeing it is not a new exposure, and a composition written as though it were not
+    #: there would open a message it does not match.
+    #:
+    #: AND BECAUSE THE CACHE KEY IS THE POINT. `cache_key` is a digest of this payload: without the
+    #: notes in it, adding one leaves the key unchanged, `_cached_prose` hits, and no composition
+    #: runs at all — the framing would stay written for a request that has since changed.
+    #:
+    #: The guard still applies to the OUTPUT: a note naming a money amount cannot make the model
+    #: state one, because `rejection_reason` reads the composition and falls back to the plain
+    #: template when it does.
+    requested_notes: tuple[str, ...] = ()
     #: True when this is a follow-up rather than a first ask, which changes how an opening reads.
     is_follow_up: bool = False
     facts: dict[str, str] = field(default_factory=dict)
@@ -65,6 +81,7 @@ class DraftFacts:
             "borrower_first_name": self.borrower_first_name,
             "loan_reference": self.loan_reference,
             "requested": list(self.requested_labels),
+            "notes": list(self.requested_notes),
             "is_follow_up": self.is_follow_up,
         }
         if self.facts:
@@ -226,8 +243,15 @@ def rejection_reason(facts: DraftFacts, composition: DraftComposition) -> str | 
     # is a decision, and a second copy of it drifts (bug-006). `requested_labels` is unlicensed: a
     # label like "W-2s — the last two years" would otherwise license "2" anywhere in the output, the
     # same hole LP-597 and LP-613 each cost a shipped defect to find.
+    # LP-839 — `requested_notes` JOINS THE UNLICENSED SET, and it has to. Adding notes to the facts
+    # put them in `to_json()`, which is what licenses a number — so a processor typing "the one
+    # showing the $10,000 deposit" would have licensed "10,000" anywhere in the model's output. A
+    # note is the same shape of thing as a label: processor prose that happens to contain digits, and
+    # never a fact the model may restate.
     if invented := unsupported_numbers_in(
-        facts.to_json(), composition.message, unlicensed=facts.requested_labels
+        facts.to_json(),
+        composition.message,
+        unlicensed=(*facts.requested_labels, *facts.requested_notes),
     ):
         return f"unsupported_numbers:{len(invented)}"
     return None

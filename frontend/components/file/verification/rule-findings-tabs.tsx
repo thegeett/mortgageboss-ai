@@ -10,6 +10,7 @@
  * structurally empty (those subjects aren't persisted) and says so honestly rather than being dropped.
  */
 
+import { BulkRequestButton } from "@/components/file/verification/bulk-request-button";
 import { Button } from "@/components/ui/button";
 import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { humanize } from "@/lib/format";
@@ -280,18 +281,18 @@ function MissingVsPresent({
               same thing. This is the single biggest saving available on the tab, and the data for it
               was already on screen. */}
           {onAct !== undefined && (
-            <Button
-              size="sm"
-              className="px-2 text-[11px]"
-              onClick={() =>
+            // LP-839 — CONFIRMS FIRST. This asks for every document across a group of findings in
+            // one click, and it is the only action on the tab whose blast radius a processor cannot
+            // see beforehand — the count is on the button, the LIST is not.
+            <BulkRequestButton
+              documents={awaitedDocuments(missing)}
+              onConfirm={() =>
                 onAct({
                   kind: "request-docs-bulk",
                   findingIds: missing.map((finding) => finding.id),
                 })
               }
-            >
-              Request all {awaitedDocuments(missing).length}
-            </Button>
+            />
           )}
         </div>
         <GroupedFindingList findings={missing} onAct={onAct} fileId={fileId} />
