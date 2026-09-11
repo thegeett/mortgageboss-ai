@@ -161,7 +161,13 @@ _FACT_LABELS: dict[str, str] = {
     # `has_identified_source` / `source_strength` keep "deposit's": they exist only for money in.
     "txn.amount": "transaction amount",
     "txn.date": "transaction date",
-    "txn.is_money_in": "transaction direction (money in or out)",
+    # bug-015 review — NO PARENTHETICAL. Every label here is interpolated into a sentence, and two of
+    # them already end in one: `gate.py` renders "… could not be read from the documents (it is present
+    # but unclear)", so the gloss produced "the transaction direction (money in or out) could not be
+    # read from the documents (it is present but unclear)" — two asides in one sentence a processor
+    # reads. "Transaction direction", beside an amount and a date, needs no gloss; bug-015's own test
+    # fixture wrote it that way, which is the tell that the sentence was never read back whole.
+    "txn.is_money_in": "transaction direction",
     "txn.has_identified_source": "deposit's source",
     # LP-546/551 — FR-5's two deterministic inputs. Both are phrased as QUESTIONS, so `fact_phrase`
     # returns them without an article ("the whether ..." was the LP-526 bug).

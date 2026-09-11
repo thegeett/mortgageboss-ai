@@ -42,6 +42,14 @@ _DATE_TAG = "txn.date"
 _DIRECTION_TAG = "txn.is_money_in"
 _CREDITOR_TAG = "liab.creditor_name"
 
+# What a transaction subject degrades to when its tags carry NO AMOUNT: a KIND of thing, naming no
+# particular one. Exported because a caller that puts a subject label in front of a message has to know
+# when the label adds nothing — bug-015 review: `rule_findings` kept its own copy of these three
+# strings, a literal that goes stale the moment a direction is added or reworded here.
+_UNIDENTIFIED_LABELS = {"in": "a deposit", "out": "a payment"}
+_UNIDENTIFIED_FALLBACK = "a transaction"
+ANONYMOUS_TXN_LABELS = frozenset({*_UNIDENTIFIED_LABELS.values(), _UNIDENTIFIED_FALLBACK})
+
 
 def _tag_value(load_bearing_tags: Sequence[Mapping[str, Any]], tag_id: str) -> str | None:
     """The value of a load-bearing tag by id (the finding carries them inline), or None if absent/empty."""
@@ -88,7 +96,7 @@ def _deposit_label(load_bearing_tags: Sequence[Mapping[str, Any]]) -> str:
     direction = _tag_value(load_bearing_tags, _DIRECTION_TAG)
     amount = _tag_value(load_bearing_tags, _AMOUNT_TAG)
     if amount is None:
-        return {"in": "a deposit", "out": "a payment"}.get(direction or "", "a transaction")
+        return _UNIDENTIFIED_LABELS.get(direction or "", _UNIDENTIFIED_FALLBACK)
     # THE AMOUNT AND DATE IDENTIFY THE SUBJECT; THE NOUN ONLY DRESSES IT. A first version required
     # the direction before it would print either, and AS-12's findings do not carry
     # `txn.is_money_in` — their inline tags come from `reasoned_over`, which excludes the applicability
@@ -173,4 +181,4 @@ def resolve_subject_label(
     )
 
 
-__all__ = ["resolve_subject_label"]
+__all__ = ["ANONYMOUS_TXN_LABELS", "resolve_subject_label"]

@@ -35,7 +35,7 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.finding_event import FindingEvent, FindingEventType
-from app.services.rule_subject_label import resolve_subject_label
+from app.services.rule_subject_label import ANONYMOUS_TXN_LABELS, resolve_subject_label
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.result import (
     UNIDENTIFIED_DOCUMENTS_RULE_ID,
@@ -248,11 +248,6 @@ def _persistable(results: list[RuleEvaluation]) -> list[_Persistable]:
     return persistable
 
 
-#: A transaction label carrying no amount — the honest degradation of `_deposit_label` when the tags
-#: do not identify the subject. Prefixing one of these adds no information, so it is not done.
-_ANONYMOUS_TXN_LABELS = frozenset({"a transaction", "a deposit", "a payment"})
-
-
 def _named_subject(result: RuleEvaluation, outcome: EvaluationOutcome, message: str) -> str:
     """A couldnt_check about a TRANSACTION says which one (bug-015).
 
@@ -283,7 +278,10 @@ def _named_subject(result: RuleEvaluation, outcome: EvaluationOutcome, message: 
     label = resolve_subject_label(
         result.subject_id, [_tag_dict(tag) for tag in result.load_bearing_tags]
     )
-    if label.lower() in _ANONYMOUS_TXN_LABELS or label in message:
+    # bug-015 review — ASKED OF THE LABEL LAYER, not of a copy of its strings kept here. The set is
+    # built beside `_deposit_label` from the same literals it returns, so a new direction or a reworded
+    # generic cannot leave this test silently passing on a label that identifies nothing.
+    if label.lower() in ANONYMOUS_TXN_LABELS or label in message:
         return message
     return f"{label} — {message}"
 

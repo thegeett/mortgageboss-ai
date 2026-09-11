@@ -147,6 +147,48 @@ def test_a_loan_or_borrower_subject_is_left_alone() -> None:
     assert _message(_evaluation("loan")) == _GATE_TEMPLATE
 
 
+def test_the_direction_label_reads_as_one_sentence() -> None:
+    """bug-015 review — THE LABEL IS NEVER READ ALONE, and the first rename forgot that.
+
+    `txn.is_money_in` was renamed to "transaction direction (money in or out)", which `gate.py` drops
+    into a template that already ends in an aside: "… could not be read from the documents (it is
+    present but unclear)". Two parentheticals in one sentence a processor reads. The fixture in this
+    file wrote the reason WITHOUT the gloss, so the sentence was never read back whole.
+    """
+    from app.verification.rule_engine.reasons import fact_phrase
+
+    gate_sentence = (
+        f"{fact_phrase('txn.is_money_in')} could not be read from the documents "
+        "(it is present but unclear)"
+    )
+
+    assert gate_sentence.count("(") == 1
+    assert gate_sentence == (
+        "the transaction direction could not be read from the documents (it is present but unclear)"
+    )
+
+
+def test_the_anonymity_guard_tracks_the_label_layer() -> None:
+    """bug-015 review — the guard asks the LABEL LAYER what is anonymous, rather than holding a copy.
+
+    `_named_subject` kept its own frozenset of the three strings `_deposit_label` degrades to. Correct
+    on the day, and stale the moment a direction is added or a generic reworded there — the prefix would
+    then read "a credit — the transaction category could not be read", a label identifying nothing in
+    front of a sentence that already says it. Every amount-less label the resolver can produce must be
+    in the exported set, and none of them may be prefixed.
+    """
+    from app.services.rule_subject_label import ANONYMOUS_TXN_LABELS, resolve_subject_label
+
+    subject = "txn0bbc15b93316a2a7"
+    for direction in ("in", "out", "unknown", "reversal", ""):
+        tags = (_tag("txn.is_money_in", direction),) if direction else ()
+        inline = [{"tag_id": tag.tag_id, "value": tag.value} for tag in tags]
+
+        # No amount tag → the label names a KIND of thing and identifies no member of it.
+        assert resolve_subject_label(subject, inline) in ANONYMOUS_TXN_LABELS
+        assert _message(_evaluation(subject, tags=tags)) == _GATE_TEMPLATE
+
+
 def test_only_a_couldnt_check_is_prefixed() -> None:
     """Every other outcome interpolates its own operands: AS-1's fired reasoning already opens
     "deposit 19039.08 exceeds the large-deposit threshold …". Prefixing would say it twice."""
