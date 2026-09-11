@@ -112,6 +112,11 @@ tags:
   # DESCRIPTIVE enum; one_sided (only one doc type) lets IN-6 reach not_applicable. Reuses IN-5's
   # measured normalizers (no new judgment — IN-6 inherits IN-5's calibration). Fail-closed to unknown.
   income.employer_coverage: {mode: derived, subject: borrower, data: income_employer_coverage}
+  # bug-016 — PER BORROWER: does the application state BOTH an ended and a current employer? IN-7 says
+  # it is scoped to "every borrower with a job change" and had nothing to test that with, so it ran on
+  # every borrower. Read from the application's employment records, never from documents: only the 1003
+  # says what came before, which is the whole of IN-7's question. Fail-closed to unknown.
+  income.has_job_change: {mode: derived, subject: borrower, data: income_has_job_change}
   # LP-418 — PER BORROWER: does the borrower have self-employment income? A DETERMINISTIC promotion of the
   # measured income.type (no new AI), for IN-12 — the borrower-level self-employment signal its bar said was
   # missing (income.type is subject:document). "no" lets IN-12 reach not_applicable (an enum can, unlike a number).

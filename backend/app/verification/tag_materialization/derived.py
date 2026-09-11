@@ -6214,6 +6214,79 @@ def _income_employer_coverage(
     )
 
 
+def _income_has_job_change(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.has_job_change — PER BORROWER: has this borrower changed jobs? Scopes IN-7 (bug-016).
+
+    IN-7 asks whether a job change keeps the borrower in the same line of work. Its spec has always SAID
+    "every borrower on the loan with a job change", but nothing tested for one, so it ran on every
+    borrower — and on LF-XMB2 it asked a borrower who has held one job since 2021 for "an offer letter
+    or contract" for a "new position" that does not exist. The AI tag it reasons over cannot scope it:
+    `income.same_line_of_work`'s own prompt says to answer "yes" when there is one employer throughout,
+    so a no-change borrower and a same-field mover are indistinguishable at that tag.
+
+    Read from the APPLICATION's own employment records (`borrower.{n}.employer.{m}`), which is where a
+    job change is stated — a start date, an end date and an is_current flag per employer. DESCRIPTIVE
+    enum, no threshold, no AI:
+
+      * "yes"     — the borrower has BOTH an ended employer and a current one: a move between jobs.
+      * "no"      — every record is current (no move), or every record has ended with nothing current
+                    (a TERMINATION, which is IN-15's question and not a change of line of work).
+      * "unknown" — the application states no employment for this borrower → fail-closed, so IN-7
+                    abstains rather than judging a borrower whose employment history is not on the file.
+
+    Deliberately NOT derived from documents. A pay stub says who pays the borrower now; only the
+    application says what came before, and IN-7's question is precisely about the before-and-after.
+    """
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "a job change is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.mismo.absent:
+        return _UNKNOWN, "the application's employment records are not on the file"
+
+    prefix = f"borrower.{subject_raw.index}.employer."
+    rows = {
+        name[len(prefix) :].split(".", 1)[0]
+        for name in snapshot.mismo.facts
+        if name.startswith(prefix)
+    }
+    if not rows:
+        return _UNKNOWN, "the application states no employment history for this borrower"
+
+    def _stated(row: str, field_name: str) -> str | None:
+        field = snapshot.mismo.facts.get(f"{prefix}{row}.{field_name}")
+        if not isinstance(field, Field) or not field.is_present:
+            return None
+        text = str(field.value).strip()
+        return text or None
+
+    current = ended = 0
+    for row in sorted(rows):
+        is_current = (_stated(row, "is_current") or "").lower() in ("true", "yes", "y", "1")
+        # ENDED is either flag: an end date is the fact, and `is_current: false` is the same fact said
+        # the other way. Neither alone is reliable — a MISMO export may carry one and not the other.
+        if _stated(row, "end_date") is not None or (
+            not is_current and _stated(row, "is_current") is not None
+        ):
+            ended += 1
+        elif is_current:
+            current += 1
+
+    if ended and current:
+        return "yes", (
+            f"the application lists {ended} previous and {current} current employment record(s) for "
+            "this borrower — a job change"
+        )
+    if ended:
+        return "no", (
+            "the application lists only employment that has ended for this borrower, with nothing "
+            "current — not a move between jobs"
+        )
+    return "no", (
+        "the application lists no previous employer for this borrower — no job change to judge"
+    )
+
+
 def _income_is_self_employed(
     snapshot: Snapshot, subject_id: str, subject_raw: object
 ) -> tuple[JsonValue, str]:
@@ -7138,6 +7211,7 @@ _RECIPES: dict[str, Recipe] = {
     "loan_sales_price": _loan_sales_price,
     "housing_taxes_monthly": _housing_taxes_monthly,
     "housing_hoa_monthly": _housing_hoa_monthly,
+    "income_has_job_change": _income_has_job_change,  # bug-016 — scopes IN-7
 }
 
 KNOWN_RECIPES = frozenset(_RECIPES)

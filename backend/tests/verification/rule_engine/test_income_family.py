@@ -409,7 +409,9 @@ def test_in10_declining_read_per_borrower() -> None:
 # --------------------------------------------------------------------------- #
 async def test_judgment_rules_are_ratification_pending_and_gate_fail_closed() -> None:
     for rule_id, reasoned in [
-        ("IN-7", {"income.same_line_of_work": _tag("yes")}),
+        # bug-016 — IN-7 is now scoped to a borrower who HAS changed jobs; without this the rule is
+        # not_applicable before the gate and this case would no longer exercise the armor it is about.
+        ("IN-7", {"income.same_line_of_work": _tag("yes"), "income.has_job_change": _tag("yes")}),
         ("IN-13", {"income.continuance_3yr": _tag("yes"), "income.type": _tag("other")}),
         (
             "IN-14",

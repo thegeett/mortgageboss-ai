@@ -594,9 +594,14 @@ async def test_judgment_rules_armor_provenance_failclosed() -> None:
             "occupancy.rental_support": _tag("inadequate"),
         },
     }
+    # bug-016 — what each rule needs merely to be IN SCOPE, kept apart from what it reasons over. IN-7
+    # is now scoped to a borrower who HAS changed jobs; without this every case below would resolve
+    # not_applicable (or couldnt_check) at applicability and stop testing the armor it is here for.
+    scope: dict[str, dict[str, Tag]] = {"IN-7": {"income.has_job_change": _tag("yes")}}
+
     for rule_id, reasoned in cases.items():
         stub = _Reasoner("no")
-        (ev,) = await _judge(rule_id, reasoned, stub)
+        (ev,) = await _judge(rule_id, {**scope.get(rule_id, {}), **reasoned}, stub)
         assert ev.evaluation.verdict is Verdict.NEEDS_REVIEW  # a judgment never auto-fires
         assert (
             ev.evaluation.ratification_pending
@@ -604,9 +609,11 @@ async def test_judgment_rules_armor_provenance_failclosed() -> None:
         assert (
             ev.evaluation.reasoning and stub.calls == 1
         )  # CASE 9 provenance; the AI was consulted
-        # Fail-closed: the gated reasoned-over tag absent → couldnt_check, NO AI call.
+        # Fail-closed: the gated reasoned-over tag absent → couldnt_check, NO AI call. IN-7 keeps its
+        # scope tag here (bug-016) so it still reaches the GATE — otherwise it would abstain one step
+        # earlier, at applicability, and this would no longer prove the gate fails closed.
         gated_stub = _Reasoner("no")
-        (gated,) = await _judge(rule_id, {}, gated_stub)
+        (gated,) = await _judge(rule_id, dict(scope.get(rule_id, {})), gated_stub)
         assert gated.evaluation.verdict is Verdict.COULDNT_CHECK and gated_stub.calls == 0
 
 
@@ -616,7 +623,11 @@ async def test_in7_case13_same_field_vs_unrelated() -> None:
     same = _Reasoner("yes")
     (s,) = await _judge(
         "IN-7",
-        {"income.same_line_of_work": _tag("yes"), "income.employment_start": _parsed("2025-01-01")},
+        {
+            "income.same_line_of_work": _tag("yes"),
+            "income.employment_start": _parsed("2025-01-01"),
+            "income.has_job_change": _tag("yes"),  # bug-016 — in scope: this borrower DID move jobs
+        },
         same,
     )
     assert s.evaluation.ratification_pending and same.calls == 1
