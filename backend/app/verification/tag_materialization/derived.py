@@ -6182,6 +6182,7 @@ def _income_employer_coverage(
     # nothing on LF-XMB2 while AS-8's named its two statements — the difference is entirely here.
     stated_by: dict[str, list[str]] = {}  # normalized employer -> the documents stating it
     compared: list[str] = []  # every pay stub / W-2 whose employer was read
+    unreadable: list[str] = []  # bug-017 review — the ones whose employer name could NOT be read
     paystub_docs = w2_docs = 0
     any_unreadable = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
@@ -6195,6 +6196,7 @@ def _income_employer_coverage(
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.employer_normalized")
         if tag is None or str(tag.value) == _UNKNOWN:
             any_unreadable = True
+            unreadable.append(entry.content_id)  # bug-017 review — WHICH one could not be read
             continue
         original = str(tag.value)
         key = _normalize(original, norm)
@@ -6208,9 +6210,22 @@ def _income_employer_coverage(
             "between the two"
         )
     if any_unreadable or not paystub or not w2:
-        return _UNKNOWN, (
-            "an employer name on one of this borrower's income documents could not be read — cannot "
-            "confirm coverage"
+        return (
+            _UNKNOWN,
+            (
+                "an employer name on one of this borrower's income documents could not be read — "
+                "cannot confirm coverage"
+            ),
+            # bug-017 review — THE UNREADABLE DOCUMENT LEADS, and this branch must name one. It is
+            # reached ONLY when a name could not be read (with both sides present and every name
+            # readable, both buckets are non-empty), so the recipe knows exactly which document that
+            # was — and that is the one a processor has to open. Returning nothing here left IN-6
+            # saying "an employer name on ONE of this borrower's income documents could not be read"
+            # with no way to tell which: the processor's original complaint, surviving in the branch
+            # that needs the link most. `unknown` does reach a finding — IN-6's applicability routes it
+            # to couldnt_check (§8 Tab 1) and that path carries the load-bearing tags, so these ids
+            # travel to `source_content_ids` exactly as the uncovered ones do.
+            tuple(dict.fromkeys([*unreadable, *compared])),
         )
     uncovered = sorted((set(paystub) - set(w2)) | (set(w2) - set(paystub)))
     if uncovered:

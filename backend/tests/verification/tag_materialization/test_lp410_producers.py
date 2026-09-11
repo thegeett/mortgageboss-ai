@@ -482,6 +482,64 @@ def test_coverage_names_nothing_when_it_compared_nothing() -> None:
     assert produced[0] == "one_sided" and len(produced) == 2
 
 
+def test_coverage_unknown_names_the_document_it_could_not_read() -> None:
+    """bug-017 review — THE BRANCH WHERE THE LINK MATTERS MOST, and it named nothing.
+
+    "one_sided and unknown have no comparison to point at" is true of one_sided, which never reaches a
+    finding at all (IN-6's applicability makes it not_applicable). It is NOT true of unknown: that branch
+    is reached only when an employer name could not be READ, so the recipe knows precisely which document
+    defeated it — and IN-6 still shipped "an employer name on ONE of this borrower's income documents
+    could not be read" with no way to tell which. The unreadable document leads, then what was read.
+    """
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    snap = _snap(
+        docs=docs,
+        tags={
+            "p1": {"income.employer_normalized": _tag("Acme")}
+        },  # the W-2's name never materialized
+        mismo={"borrower.1.borrower_id": _f(bid)},
+    )
+
+    produced = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+
+    assert produced[0] == "unknown"
+    assert len(produced) == 3
+    assert produced[2] == ("w1", "p1")
+
+
+@pytest.mark.asyncio
+async def test_in6_couldnt_check_end_to_end_names_the_unreadable_document() -> None:
+    """And through the real evaluator, because the couldnt_check takes a DIFFERENT path to the finding
+    than the uncovered one: it terminates at applicability rather than at an outcome. That path builds
+    its result with the subject's load-bearing tags too, which is what carries the ids — so the abstention
+    a processor reads can name the document to open."""
+    from app.verification.rule_engine.registry import evaluate_rules
+    from app.verification.rule_engine.result import Verdict
+    from app.verification.tag_materialization.producer import materialize_tags
+
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    snapshot = await materialize_tags(
+        _snap(
+            docs=docs,
+            tags={"p1": {"income.employer_normalized": _tag("Acme")}},
+            mismo={"borrower.1.borrower_id": _f(bid)},
+        ),
+        only_groups=frozenset(),
+    )
+
+    evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("IN-6",))
+
+    assert evaluations, "IN-6 produced no evaluation — the fixture does not reach the rule"
+    result = evaluations[0]
+    assert result.verdict is Verdict.COULDNT_CHECK
+    assert result.source_content_ids == ("w1", "p1"), (
+        "an abstention that cannot say WHICH document it could not read is the complaint bug-017 "
+        f"exists to answer. Got {result.source_content_ids}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_in6_end_to_end_names_the_documents_on_the_evaluation() -> None:
     """THROUGH THE REAL EVALUATOR (LP-487's standing rule), which is the only version that proves a
