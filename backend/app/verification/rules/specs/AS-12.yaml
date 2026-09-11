@@ -56,7 +56,19 @@ evidence_required: the deposit pattern and why it suggests (or does not) a borro
 guideline_reference: "Fannie Mae Selling Guide B3-4.2 / B3-6 (source of funds / undisclosed debt)."
 judgment:
   subject: per_deposit
-  load_bearing_tags: [txn.is_money_in, txn.apparent_category, txn.has_identified_source]
+  # bug-019 — `txn.apparent_category` LEFT THE GATE, and stayed everywhere else. The gate abstains on any
+  # load-bearing tag reading "unknown", BEFORE the model is asked; the category is the tag the AI is least
+  # able to resolve from a bank line ("DEPOSIT ID NUMBER 56194" has no category) and the one AS-12 needs
+  # least, because its question is whether the money was BORROWED and `txn.has_identified_source` answers
+  # that. On LF-XMB2 four deposits abstained on it — including an $8,000 deposit whose own tags read
+  # `has_identified_source=yes` and `source_strength=verified`, i.e. a matched own-account withdrawal was
+  # found and AS-12 still declined to say so.
+  #
+  # It REMAINS in `reasoned_over` (so the model still sees it and the provenance still carries it) and in
+  # the activation bar's `load_bearing_ai_tags` (so the calibration gate still covers it), because the
+  # `exempt_when` predicates below rest on it. Those are unaffected: they clear a deposit only on a
+  # DEFINITE payroll/interest, and "unknown" equals neither — the exemption still fails closed.
+  load_bearing_tags: [txn.is_money_in, txn.has_identified_source]
   # LP-516: +txn.amount +txn.date. The prompt below asks the model to find "a large round-dollar
   # deposit" and "funds appearing just before closing" — it was given neither the amount nor the date,
   # so it was being asked about signals it could not observe. `_build_context` builds the judgment
