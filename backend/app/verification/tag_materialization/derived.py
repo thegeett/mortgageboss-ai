@@ -515,39 +515,77 @@ def _income_max_employment_gap(
     with no belongs_to share one group), each group's consecutive (end → next start) gaps are measured,
     and the loan-level tag is the LARGEST gap across the groups. Abstains when no group has two dated
     records (a single job cannot have a gap)."""
-    if snapshot.tags.absent or snapshot.documents.absent:
-        return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
     # (starts, ends) keyed by the document's borrower attribution — records only pair WITHIN a group,
     # so a gap is never spanned across two different borrowers' timelines.
     # LP-647 §1 group A — each date carries the RECORD it was read from, so the gap can name the two
     # documents it spans: the job that ended and the job that started after it. Those are the two a
     # processor opens to check the claim; the borrower's other records are not what the sentence is
-    # about.
-    groups: dict[object, tuple[list[tuple[date, str]], list[tuple[date, str]]]] = {}
-    for entry in snapshot.documents.entries:
-        tags = snapshot.tags.by_subject.get(entry.content_id)
-        if not tags:
-            continue
-        key = (
-            frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
-            if entry.belongs_to
-            else None
-        )
-        starts, ends = groups.setdefault(key, ([], []))
-        for tag_id, bucket in (
-            ("income.employment_start", starts),
-            ("income.employment_end", ends),
-        ):
-            tag = tags.get(tag_id)
-            if tag is None or str(tag.value) == _UNKNOWN:
+    # about. bug-018 — a record read from the APPLICATION carries None: it has no document to name.
+    groups: dict[object, tuple[list[tuple[date, str | None]], list[tuple[date, str | None]]]] = {}
+    if not (snapshot.tags.absent or snapshot.documents.absent):
+        for entry in snapshot.documents.entries:
+            tags = snapshot.tags.by_subject.get(entry.content_id)
+            if not tags:
                 continue
-            parsed = coerce_date(str(tag.value))
-            if parsed is not None:
-                bucket.append((parsed, entry.content_id))
+            key = (
+                frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
+                if entry.belongs_to
+                else None
+            )
+            starts, ends = groups.setdefault(key, ([], []))
+            for tag_id, bucket in (
+                ("income.employment_start", starts),
+                ("income.employment_end", ends),
+            ):
+                tag = tags.get(tag_id)
+                if tag is None or str(tag.value) == _UNKNOWN:
+                    continue
+                parsed = coerce_date(str(tag.value))
+                if parsed is not None:
+                    bucket.append((parsed, entry.content_id))
+
+    # bug-018 — AND THE APPLICATION'S OWN EMPLOYMENT RECORDS. `income.employment_start` / `_end` are
+    # read from VOE fields and nothing else, so a file with no VOE had fewer than two dated records and
+    # IN-4 abstained — on LF-XMB2 while the 1003 stated PNC ending 2026-03-03 and FNB starting
+    # 2026-03-09 for the same borrower, a six-day gap sitting in plain sight. The 1003 has carried these
+    # dates since LP-624 and nothing read them.
+    #
+    # Merged into the SAME group as that borrower's documents (`frozenset({borrower_id})` is the key a
+    # belongs_to-attributed document produces), so a VOE end pairs with a stated start and vice versa
+    # rather than the two sources forming rival timelines.
+    if not snapshot.mismo.absent:
+        borrower_ids: dict[str, str] = {}
+        for name, field in snapshot.mismo.facts.items():
+            if (
+                name.startswith("borrower.")
+                and name.endswith(".borrower_id")
+                and isinstance(field, Field)
+                and field.is_present
+            ):
+                borrower_ids[name.split(".")[1]] = str(field.value)
+        for name, field in snapshot.mismo.facts.items():
+            parts = name.split(".")
+            if len(parts) != 5 or parts[0] != "borrower" or parts[2] != "employer":
+                continue
+            if parts[4] not in ("start_date", "end_date"):
+                continue
+            if not isinstance(field, Field) or not field.is_present:
+                continue
+            parsed = coerce_date(str(field.value))
+            if parsed is None:
+                continue
+            # A borrower the application does not link to an id cannot be grouped with their own
+            # documents, and grouping them under None would pool them with unattributed documents —
+            # manufacturing a gap across two people, which is the one thing this recipe forbids.
+            stated_id = borrower_ids.get(parts[1])
+            if stated_id is None:
+                continue
+            starts, ends = groups.setdefault(frozenset({stated_id}), ([], []))
+            (starts if parts[4] == "start_date" else ends).append((parsed, None))
     # Each end pairs with the NEXT start in its OWN group (the earliest start after it), NOT every later
     # start — else the max would span intervening jobs (end of job A → start of job C) and overstate a
     # gap that job B actually fills. The largest of those consecutive per-borrower gaps is the answer.
-    gaps: list[tuple[int, str, str]] = []  # (days, ended-record, next-started-record)
+    gaps: list[tuple[int, str | None, str | None]] = []  # (days, ended-record, next-started-record)
     for starts, ends in groups.values():
         for end_date, end_cid in ends:
             later = [(s, cid) for s, cid in starts if s > end_date]
@@ -555,13 +593,28 @@ def _income_max_employment_gap(
                 next_start, start_cid = min(later, key=lambda pair: pair[0])
                 gaps.append(((next_start - end_date).days, end_cid, start_cid))
     if not gaps:
-        return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
+        # bug-018 — TWO DIFFERENT ABSENCES, and one sentence was serving both. "fewer than two dated
+        # employment records" is what a processor reads, and it is wrong whenever the records exist but
+        # none of them pair (a single position, or every start before every end): they were told to
+        # upload dates they have already provided.
+        dated = sum(len(starts) + len(ends) for starts, ends in groups.values())
+        if dated < 2:
+            return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
+        return _UNKNOWN, (
+            "no employment record starts after another one ends, so there is no gap between "
+            "positions to measure"
+        )
     max_gap, ended_at, resumed_at = max(gaps, key=lambda g: g[0])
-    return (
-        str(max_gap),
-        f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)",
-        tuple(dict.fromkeys((ended_at, resumed_at))),  # one record may state both
+    # bug-018 — NAME ONLY DOCUMENTS. A date read from the application has no document behind it, and a
+    # gap measured from stated dates alone names nothing rather than pointing at a file that does not
+    # evidence it.
+    named = tuple(dict.fromkeys(cid for cid in (ended_at, resumed_at) if cid is not None))
+    reason = (
+        f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)"
     )
+    if named:
+        return str(max_gap), reason, named  # one record may state both
+    return str(max_gap), reason
 
 
 def _income_days_since_recent_pay(
