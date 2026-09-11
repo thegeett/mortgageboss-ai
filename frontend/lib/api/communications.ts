@@ -6,13 +6,13 @@
  * moves every requested document to REQUESTED and starts the reminder clock.
  */
 import { apiClient } from "@/lib/api/client";
+import { invalidateDraftViews } from "@/lib/api/draft-views";
 import type { MessageDetail, OutboundDraft, SentCommunication } from "@/lib/types/communication";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
 const API_V1 = "/api/v1";
 
-export const outboundDraftQueryKey = (fileId: string) => ["outbound-draft", fileId] as const;
 const needsQueryKey = (fileId: string) => ["loan-file-needs", fileId] as const;
 const activityQueryKey = (fileId: string) => ["loan-file-activity", fileId] as const;
 
@@ -75,9 +75,7 @@ export function useComposeRequest(fileId: string) {
         })
       ).data,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
-      void queryClient.invalidateQueries({ queryKey: needsQueryKey(fileId) });
-      void queryClient.invalidateQueries({ queryKey: outboundDraftQueryKey(fileId) });
+      invalidateDraftViews(queryClient, fileId);
     },
   });
 }
@@ -94,7 +92,7 @@ export function useAttachUploadLink(fileId: string, messageId: string) {
     onSuccess: (detail) => {
       queryClient.setQueryData(messageQueryKey(fileId, messageId), detail);
       void queryClient.invalidateQueries({ queryKey: ["upload-links", fileId] });
-      void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
+      invalidateDraftViews(queryClient, fileId);
     },
   });
 }
@@ -106,15 +104,6 @@ export function useMessageDetail(fileId: string, messageId: string | null) {
       (await apiClient.get<MessageDetail>(`${API_V1}/loan-files/${fileId}/messages/${messageId}`))
         .data,
     enabled: Boolean(fileId) && Boolean(messageId),
-    retry: noRetryOn404,
-  });
-}
-
-export function useOutboundDraft(fileId: string) {
-  return useQuery({
-    queryKey: outboundDraftQueryKey(fileId),
-    queryFn: () => fetchOutboundDraft(fileId),
-    enabled: Boolean(fileId),
     retry: noRetryOn404,
   });
 }
@@ -144,14 +133,11 @@ export function useSendDraft(fileId: string) {
         })
       ).data,
     onSuccess: (_sent, variables) => {
-      void queryClient.invalidateQueries({ queryKey: outboundDraftQueryKey(fileId) });
-      void queryClient.invalidateQueries({ queryKey: needsQueryKey(fileId) });
-      void queryClient.invalidateQueries({ queryKey: activityQueryKey(fileId) });
-      // LP-831 — THE LIST AND THE MESSAGE ITSELF. A send moves a draft out of the drafts filter and
-      // changes its status, so the timeline is stale; and the modal that just sent it is showing a
-      // row that is no longer a draft. Neither was invalidated while the compose form lived on the
-      // page and the timeline was somewhere else to scroll to.
-      void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
+      // LP-840 — one helper, so a mutation that changes a draft cannot refresh a different list
+      // from the one a processor is looking at.
+      invalidateDraftViews(queryClient, fileId);
+      // AND THE MESSAGE ITSELF: the modal that just sent it is showing a row that is no longer a
+      // draft.
       void queryClient.invalidateQueries({
         queryKey: messageQueryKey(fileId, variables.draftId),
       });

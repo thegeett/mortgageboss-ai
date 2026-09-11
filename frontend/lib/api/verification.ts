@@ -6,7 +6,7 @@
  * (and stops once it settles), surfacing the findings + the staleness flag.
  */
 import { apiClient } from "@/lib/api/client";
-import { outboundDraftQueryKey } from "@/lib/api/communications";
+import { invalidateDraftViews } from "@/lib/api/draft-views";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import { needsQueryKey } from "@/lib/api/needs";
@@ -187,13 +187,13 @@ export function useResolveFinding(identifier: string) {
       // verification-stats all read it), and TanStack prefix-matches element by element, so "needs"
       // never matched "loan-file-needs". Requesting documents creates a need; the list showing it was
       // the one thing this mutation was already trying to refresh, and had never once refreshed.
-      void queryClient.invalidateQueries({ queryKey: needsQueryKey(identifier) });
-      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", identifier] });
-      // LP-809 — request-docs now JOINS the file's open draft (both routes), so the draft the
-      // communication page reads is stale the moment this resolves. Without this, the backend
-      // writes the draft and the processor still sees "no draft" for up to the 60s default
-      // staleTime — the same empty screen the missing draft call produced, from the other side.
-      void queryClient.invalidateQueries({ queryKey: outboundDraftQueryKey(identifier) });
+      // LP-840 — ONE HELPER, because this list drifted from what the screens actually read.
+      // LP-809 added `outboundDraftQueryKey` here with the right reasoning — the communication page
+      // reads the draft and is stale the moment this resolves — and LP-831 then changed WHAT that
+      // page reads, to `["timeline", fileId]`, without moving this line. So a request refreshed the
+      // key of a panel nothing renders any more, the mailbox kept showing its cached rows, and a
+      // draft that had been created looked exactly like a button that did nothing.
+      invalidateDraftViews(queryClient, identifier);
     },
   });
 }

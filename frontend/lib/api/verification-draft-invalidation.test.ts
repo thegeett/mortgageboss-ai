@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { outboundDraftQueryKey } from "@/lib/api/communications";
 import { needsQueryKey } from "@/lib/api/needs";
 import { useResolveFinding } from "@/lib/api/verification";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -26,14 +25,25 @@ vi.mock("@/lib/api/client", () => ({
  * proving the opposite of what it claimed: the mutation was invalidating nothing. Registering real
  * queries and reading `isInvalidated` back cannot pass that way, because a key that matches nothing
  * leaves every query untouched.
+ *
+ * LP-840 — AND IT STILL PINNED THE WRONG SCREEN. It asserted `outboundDraftQueryKey`, which was the
+ * communication page's query when LP-809 wrote it. LP-831 moved that page onto the timeline and
+ * deleted the panel; this test kept passing, because it was asserting a KEY rather than "the list a
+ * processor is looking at refreshes". Reported as: three rows on the page, request a document,
+ * still three rows — the draft created and the screen never told.
+ *
+ * It asserts the timeline now. The lesson is the one this file already carries, one level up: a
+ * guard naming an implementation survives the implementation moving out from under it.
  */
 const FILE = "LF-JR4T";
 
 describe("useResolveFinding — what the request just wrote", () => {
-  it("invalidates the needs list and the outbound draft, and nothing else", async () => {
+  it("invalidates the needs list and the MAILBOX, and nothing else", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(needsQueryKey(FILE), []);
-    client.setQueryData(outboundDraftQueryKey(FILE), { id: "draft-1" });
+    // The mailbox and the header badge both read this, under every filter — registered with a
+    // filter so the prefix match is exercised rather than assumed.
+    client.setQueryData(["timeline", FILE, "all"], { entries: [] });
     // The negative control: a query on the same file that this mutation has no business touching.
     // Without it, an `invalidateQueries()` with no key at all would satisfy every assertion above.
     client.setQueryData(["documents", FILE], []);
@@ -46,7 +56,7 @@ describe("useResolveFinding — what the request just wrote", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(client.getQueryState(needsQueryKey(FILE))?.isInvalidated).toBe(true);
-    expect(client.getQueryState(outboundDraftQueryKey(FILE))?.isInvalidated).toBe(true);
+    expect(client.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["documents", FILE])?.isInvalidated).toBe(false);
   });
 });
