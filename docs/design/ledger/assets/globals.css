@@ -185,6 +185,15 @@
   }
 }
 
+/* Native widgets — scrollbars, a <select>'s option list, date and file pickers —
+   take their colours from `color-scheme`, not from the palette, so without this
+   the dark theme drew them light on a dark page (LP-902 review). Not a colour
+   role: the roles above still have no dark block. Outside any @layer so Tailwind
+   never tree-shakes it, like the palettes. */
+.dark {
+  color-scheme: dark;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -16167,10 +16167,12 @@ around the one layer that says what a colour is for.
 *Consequences.* The palette and theme are applied to `<html>` and only there. A role is declared on
 `:root`, resolves there, and is inherited as a value, so a `.dark` or `data-palette` on an inner element
 does not re-theme its subtree; a side-by-side light/dark preview would need the roles restated on those
-selectors too. `text-primary/80`-style exemptions in `a11y-contrast.test.ts` carry ratios measured
-against Petrol and are not recomputed per palette. Values stay HSL triples, unchanged from ADR-389, so
-all ~200 opacity modifiers keep working. Switching palette or theme at runtime is development-only
-until there is a product decision to offer either to processors: a production build neither shows the
-switcher nor reads its cookies (LP-902). Extends ADR-389.
+selectors too. `text-primary/80`-style exemptions in `a11y-contrast.test.ts` carry a ratio measured
+on Petrol light; `palettes.test.ts` reads that list and recomputes each one for every palette and theme.
+The one rule `.dark` carries beyond the palettes is `color-scheme: dark`, so native widgets (scrollbars,
+a `<select>`'s option list) follow the theme; it is not a colour role. Values stay HSL triples,
+unchanged from ADR-389, so all ~200 opacity modifiers keep working. Switching palette or theme at
+runtime is development-only until there is a product decision to offer either to processors: a
+production build neither shows the switcher nor honours its cookies (LP-902). Extends ADR-389.
 
 *Status.* Accepted (LP-901, LP-902).

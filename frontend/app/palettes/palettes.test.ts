@@ -219,9 +219,9 @@ const FILLS = [
  *  - hover, `hover:bg-primary/90` and `hover:bg-destructive/90` (Button) and
  *    `hover:bg-primary/80` (Badge's default variant).
  *
- * Badge's `destructive` variant also hovers at /80, and in Petrol light that is
- * 4.13:1. It has no caller, so it is not listed; its first caller should fix it
- * rather than add it here.
+ * Badge's `destructive` variant also hovers at /80: 4.09:1 over a card in Petrol
+ * light, 4.42:1 in Blue. It has no caller, so it is not listed; its first caller
+ * should fix it rather than add it here.
  */
 const TINTED: { text: string; fill: string; alpha: number }[] = [
   ...["destructive", "success", "warning", "info", "ai"].map((x) => ({
@@ -235,6 +235,26 @@ const TINTED: { text: string; fill: string; alpha: number }[] = [
   { text: "primary-foreground", fill: "primary", alpha: 0.8 },
 ];
 const TINT_GROUNDS = ["background", "card"];
+
+/**
+ * Faded text that a person measured and exempted: `MEASURED_SAFE` in
+ * lib/a11y-contrast.test.ts, e.g. `"text-primary/80": "5.10:1 on bg-card …"`.
+ * Each number there was measured on one palette in one theme. With a second
+ * palette it is a claim about colours the page may not be showing — Blue light
+ * puts `text-primary/80` on a card at 4.59:1, not 5.10 — so every exemption is
+ * recomputed here for every palette and theme (LP-902 review). Read from the
+ * exemption list itself, so a new exemption is covered without anyone
+ * remembering to add it.
+ */
+const FADED = [
+  ...readFileSync(new URL("../../lib/a11y-contrast.test.ts", import.meta.url), "utf8").matchAll(
+    /"text-([\w-]+)\/(\d+)":\s*"[\d.]+:1 on bg-([\w-]+)/g,
+  ),
+].map(([, text, alpha, ground]) => ({
+  text: text as string,
+  alpha: Number(alpha) / 100,
+  ground: ground as string,
+}));
 
 const TEXT_FLOOR = 4.5; // WCAG 1.4.3, normal text
 const NON_TEXT_FLOOR = 3; // WCAG 1.4.11, control borders and the focus ring
@@ -269,6 +289,13 @@ function cases(values: Props): Case[] {
       });
     }
   }
+  for (const { text, alpha, ground } of FADED) {
+    out.push({
+      label: `text-${text}/${Math.round(alpha * 100)} on bg-${ground} (a11y-contrast exemption)`,
+      ratio: contrast(over(c(text), alpha, c(ground)), c(ground)),
+      floor: TEXT_FLOOR,
+    });
+  }
   for (const edge of ["input", "ring"]) {
     for (const ground of ["background", "card"]) {
       out.push({
@@ -300,6 +327,13 @@ describe("the palettes on disk", () => {
         `import "./palettes/${id}.css";`,
       );
     }
+  });
+
+  it("reads the measured exemptions it recomputes", () => {
+    // The control. A regex that stopped matching MEASURED_SAFE's shape would drop
+    // every exemption from the contrast check and leave it green.
+    expect(FADED).toContainEqual({ text: "primary", alpha: 0.8, ground: "card" });
+    expect(FADED).toContainEqual({ text: "background", alpha: 0.75, ground: "foreground" });
   });
 
   it("the switcher offers exactly the palettes on disk", () => {

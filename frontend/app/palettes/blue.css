@@ -3,8 +3,11 @@
    -----------------------------------------------------------------------------
    LP-5's original blue accent on slate neutrals, re-tuned so every pair clears
    the floors palettes.test.ts computes. Stock blue-600 (53.3%) is 4.37:1 as
-   text on the hover fill, and white on its /80 hover (Badge) needs the accent at
-   44% or darker — 4.59:1 over a card; 48% was 4.20:1. A development palette: it
+   text on the hover fill. White on the accent's /80 hover (Badge) clears 4.5:1
+   only below 44.9% lightness: 44% gives 4.59:1 over a card, where 48% was
+   4.20:1. `text-primary/80` on a card (an a11y-contrast exemption) crosses the
+   floor at the same point, so an accent lighter than 44.9% fails both. A
+   development palette: it
    exists to prove a swap is one attribute, and to be compared against petrol on
    real screens. The vocabulary, and what each neutral step is for, is
    documented in petrol.css.
