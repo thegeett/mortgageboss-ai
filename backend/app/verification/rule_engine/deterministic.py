@@ -118,7 +118,9 @@ def _named_documents(load_bearing: tuple[LoadBearingTag, ...]) -> tuple[str, ...
     only ids present in `document_id_by_content_id`, so anything that is not a current document on
     this file is DROPPED rather than written as a dangling or wrong link. The two vocabularies cannot
     collide either: content ids are prefixed (`doc` / `txn`), so a transaction id can never resolve
-    as a document.
+    as a document — SAFE FROM A WRONG LINK, BUT NOT FROM NO LINK AT ALL, which is what bug-013 below
+    turned out to be: for a per-transaction subject every id this returns is a transaction, so the
+    drop that protects against a dangling link took the whole set.
 
     AND IT SURFACES ONLY WHAT A RECIPE DELIBERATELY NAMED. The 77 recipes that return two elements
     fall back to `(subject_id,)`, which for a loan subject is the string "loan" and resolves to

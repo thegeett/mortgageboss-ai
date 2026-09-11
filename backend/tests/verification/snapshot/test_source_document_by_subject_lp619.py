@@ -210,8 +210,17 @@ def test_a_carried_transaction_resolves_to_its_statement() -> None:
 
 
 def test_a_matched_debit_on_another_statement_names_both_statements() -> None:
-    """A verified source names the deposit AND its matching withdrawal. Both statements are what the
-    verdict rests on, and the deposit's own statement stays first — it is the finding's primary link."""
+    """A FORWARD GUARD — not a shape anything produces today, and the docstring said otherwise.
+
+    Every load-bearing tag on the four `per_deposit` rules is AI or parsed, and both producers set
+    `source_facts=(subject_id,)` (`tag_materialization/ai.py`, `parsed.py`); `_per_deposit` merges no
+    loan-level tags into a transaction's map, and the only two recipes that name their own sources are
+    loan-subject. So a carried id today is the subject's own transaction and nothing else.
+
+    A producer that named a matched withdrawal — the obvious next one for AS-2 — would land here, and
+    then both statements are what the verdict rests on. See the ordering test below for which of them
+    becomes the finding's primary link.
+    """
     from app.services.verification_run import _attach_document_provenance
 
     snap = _snapshot(
@@ -230,6 +239,38 @@ def test_a_matched_debit_on_another_statement_names_both_statements() -> None:
     )
     (attached,) = _attach_document_provenance([_evaluation("txn1", carried=("txn1", "txn9"))], snap)
     assert attached.source_content_ids == ("stmt_jan", "stmt_savings")
+
+
+def test_the_carried_order_decides_the_primary_link() -> None:
+    """WHICH STATEMENT LEADS IS THE SPEC'S TAG ORDER, not the subject — the invariant a future producer
+    has to respect, pinned here because the reviewed commit asserted the opposite ("the deposit's own
+    statement stays first") as though the code guaranteed it.
+
+    Translation preserves carried order, and `rule_findings._update_finding` writes `source_ids[0]` to
+    `source_document_id` — the single document the UI opens. So the FIRST load-bearing tag in the spec
+    decides it. Today every `per_deposit` spec lists a tag on the subject first (AS-1 opens with
+    `txn.is_money_in`), which is the whole reason the deposit's own statement leads; a spec that led
+    with a tag naming another document would silently send a processor there instead.
+    """
+    from app.services.verification_run import _attach_document_provenance
+
+    snap = _snapshot(
+        [
+            DocumentEntry(
+                content_id="stmt_jan",
+                document_type="bank_statement",
+                transactions=(_txn("txn1"),),
+            ),
+            DocumentEntry(
+                content_id="stmt_savings",
+                document_type="bank_statement",
+                transactions=(_txn("txn9"),),
+            ),
+        ]
+    )
+    # The subject is still txn1; only the CARRIED order is reversed.
+    (attached,) = _attach_document_provenance([_evaluation("txn1", carried=("txn9", "txn1"))], snap)
+    assert attached.source_content_ids == ("stmt_savings", "stmt_jan")
 
 
 def test_two_transactions_on_one_statement_name_it_once() -> None:

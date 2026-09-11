@@ -903,6 +903,11 @@ def _attach_document_provenance(
     were the same. A carried id NESTED inside a document is therefore translated to that document —
     the same parent link the subject path uses — while a carried DOCUMENT id, or any id this map does
     not know, passes through untouched, so a consistency rule's included/excluded sources still stand.
+
+    ORDER IS THE CARRIED ORDER, which is the spec's `load_bearing_tags` order, and it is load-bearing
+    itself: `rule_findings._update_finding` writes `source_ids[0]` to `source_document_id`, the one
+    document the UI opens. A per-transaction rule's own statement leads only because every `per_deposit`
+    spec lists a tag on the subject first — not because anything here puts it there.
     """
     parents = source_document_by_subject(snapshot)
     attached: list[RuleEvaluation] = []
