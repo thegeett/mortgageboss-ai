@@ -564,7 +564,9 @@ def evaluate_deterministic_rule(
         # 4. The ordered outcomes — first match wins (the fire condition via satisfies()).
         for outcome in det.outcomes:
             if _outcome_matches(outcome, subject_tags, operands):
-                reasoning = outcome.reasoning.format(**_reason_fields(operands))
+                # One field map for both templates — they render the same operands into the same card.
+                fields = _reason_fields(operands)
+                reasoning = outcome.reasoning.format(**fields)
                 results.append(
                     _result(
                         spec,
@@ -579,9 +581,7 @@ def evaluate_deterministic_rule(
                         # requirement falls away" — the one number the sentence exists to give. MI-4
                         # ({required}) and IN-15 ({end_date}) carry the same latent defect.
                         how_to_fix=(
-                            outcome.how_to_fix.format(**_reason_fields(operands))
-                            if outcome.how_to_fix
-                            else None
+                            outcome.how_to_fix.format(**fields) if outcome.how_to_fix else None
                         ),
                     )
                 )

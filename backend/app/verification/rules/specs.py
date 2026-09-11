@@ -53,6 +53,33 @@ def _template_fields(template: str) -> set[str]:
     }
 
 
+def _unknown_operand_fields(fields: set[str], operands: dict[str, Operand]) -> list[str]:
+    """The referenced names a deterministic outcome template CANNOT resolve at eval time.
+
+    bug-014 review — THE COMPANION IS ONLY SUPPLIED FOR A DECIMAL, so accepting it for any operand
+    validated a placeholder the evaluator does not provide. `_reason_fields` adds `{name}_percent` under
+    `isinstance(value, Decimal)`; a `date` operand gets no companion, so `{end_date_percent}` passed the
+    load check by having its suffix stripped and then raised KeyError mid-run — the precise failure the
+    load-time check exists to prevent, surviving inside it. Non-decimal types are only ever valid on a
+    `tag`/`loan_tag` operand (reference / calc / product are decimal by construction), so this rejects
+    exactly the date case.
+
+    A DIRECT HIT WINS OVER THE SUFFIX, which the strip-first form got wrong: an operand genuinely NAMED
+    `foo_percent` resolves as itself, rather than being read as the companion of a `foo` that need not
+    exist.
+    """
+    unknown: list[str] = []
+    for name in sorted(fields):
+        if name in operands:
+            continue
+        base = name.removesuffix("_percent")
+        companion = operands.get(base) if base != name else None
+        if companion is not None and companion.type == "decimal":
+            continue
+        unknown.append(name)
+    return unknown
+
+
 class RuleSpecError(Exception):
     """Base for every rule-spec load failure (all fail loud, never silent)."""
 
@@ -480,11 +507,9 @@ class DeterministicEval(BaseModel):
             # the identifier scrub. It resolves to a real operand, so it is accepted here; the suffix
             # is stripped before the membership test rather than added to `operand_names`, so a
             # genuinely unknown `{foo_percent}` still fails loud.
-            referenced = {f.removesuffix("_percent") for f in fields}
-            unknown = referenced - operand_names
-            if unknown:
+            if unknown := _unknown_operand_fields(fields, self.operands):
                 raise ValueError(
-                    f"outcome reasoning references unknown operand(s) {sorted(unknown)} "
+                    f"outcome reasoning references unknown operand(s) {unknown} "
                     f"(operands: {sorted(operand_names)})"
                 )
             # bug-014 — `how_to_fix` IS FORMATTED TOO, and was not validated because it was not
@@ -496,10 +521,9 @@ class DeterministicEval(BaseModel):
                     fix_fields = _template_fields(outcome.how_to_fix)
                 except ValueError as exc:
                     raise ValueError(f"outcome how_to_fix template is malformed: {exc}") from exc
-                unknown_fix = {f.removesuffix("_percent") for f in fix_fields} - operand_names
-                if unknown_fix:
+                if unknown_fix := _unknown_operand_fields(fix_fields, self.operands):
                     raise ValueError(
-                        f"outcome how_to_fix references unknown operand(s) {sorted(unknown_fix)} "
+                        f"outcome how_to_fix references unknown operand(s) {unknown_fix} "
                         f"(operands: {sorted(operand_names)})"
                     )
         return self
