@@ -122,12 +122,14 @@ def test_non_document_applicability_reason_names_the_fact_not_a_document() -> No
     unknown = resolve_applicability(applic, {"txn.is_money_in": _tag("unknown")})
     assert unknown is not None
     _assert_clean(unknown[1])
-    assert "deposit direction" in unknown[1] and "document" not in unknown[1].lower()
+    # bug-015: "transaction direction", not "deposit direction" — FR-5 reads this same tag on money
+    # going OUT, so calling every subject a deposit contradicted the finding printed beside it.
+    assert "transaction direction" in unknown[1] and "document" not in unknown[1].lower()
 
     absent = resolve_applicability(applic, {})  # tag not produced
     assert absent is not None
     _assert_clean(absent[1])
-    assert "deposit direction" in absent[1] and "document" not in absent[1].lower()
+    assert "transaction direction" in absent[1] and "document" not in absent[1].lower()
 
 
 def test_every_live_rule_reason_tag_has_a_curated_fact_label() -> None:

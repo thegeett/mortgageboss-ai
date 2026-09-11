@@ -35,6 +35,7 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.finding_event import FindingEvent, FindingEventType
+from app.services.rule_subject_label import resolve_subject_label
 from app.verification.rule_engine.enumerators import LOAN_SUBJECT
 from app.verification.rule_engine.result import (
     UNIDENTIFIED_DOCUMENTS_RULE_ID,
@@ -42,6 +43,7 @@ from app.verification.rule_engine.result import (
     RuleEvaluation,
     Verdict,
 )
+from app.verification.snapshot.content_id import TXN_PREFIX
 
 # LP-640/LP-801 — re-exported from `rule_engine.result`, where it now lives beside the in-run
 # `unidentified_document` flag it is the persisted form of. Kept importable from here because this
@@ -242,8 +244,48 @@ def _persistable(results: list[RuleEvaluation]) -> list[_Persistable]:
                 f"refusing to persist a finding with empty reasoning "
                 f"(rule {result.rule_id}, subject {result.subject_id})"
             )
-        persistable.append((result, outcome, severity, message))
+        persistable.append((result, outcome, severity, _named_subject(result, outcome, message)))
     return persistable
+
+
+#: A transaction label carrying no amount — the honest degradation of `_deposit_label` when the tags
+#: do not identify the subject. Prefixing one of these adds no information, so it is not done.
+_ANONYMOUS_TXN_LABELS = frozenset({"a transaction", "a deposit", "a payment"})
+
+
+def _named_subject(result: RuleEvaluation, outcome: EvaluationOutcome, message: str) -> str:
+    """A couldnt_check about a TRANSACTION says which one (bug-015).
+
+    A couldnt_check reason is built from the tag that blocked it and nothing else — `gate.py`'s "the
+    transaction category could not be read from the documents (it is present but unclear)" and
+    `applicability.py`'s "the file does not clearly establish …". Both are true of the whole class of
+    subject and identify no member of it, so on LF-XMB2 AS-12 shipped four findings with the same
+    sentence and AS-1/AS-2 three more: seven rows a processor cannot tell apart, about seven different
+    transactions.
+
+    The composer (`services/finding_prose.py`) is what usually rewrites these into specific prose, and
+    when it does this prefix is redundant but harmless. It is a FALLBACK, and the fallback is the whole
+    point: a rejected or failed composition ships the template, which is exactly what happened here.
+
+    Deliberately narrow:
+
+    * only ``couldnt_check`` — every other outcome interpolates its own operands, so AS-1's fired
+      reasoning already opens "deposit 19039.08 exceeds …";
+    * only a transaction subject, whose label the read path builds from the finding's own inline tags
+      (`resolve_subject_label`, the SAME resolver the list and the composer use, so a finding cannot
+      name its subject one way here and another way there);
+    * never when the label is anonymous, and never when the message already carries it.
+    """
+    if outcome is not EvaluationOutcome.COULDNT_CHECK:
+        return message
+    if not (result.subject_id or "").startswith(TXN_PREFIX):
+        return message
+    label = resolve_subject_label(
+        result.subject_id, [_tag_dict(tag) for tag in result.load_bearing_tags]
+    )
+    if label.lower() in _ANONYMOUS_TXN_LABELS or label in message:
+        return message
+    return f"{label} — {message}"
 
 
 def _source_document_ids(

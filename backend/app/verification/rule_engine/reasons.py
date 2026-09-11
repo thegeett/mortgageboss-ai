@@ -152,9 +152,16 @@ _FACT_LABELS: dict[str, str] = {
     "dti.qualifying_income_monthly": "qualifying income",
     "housing.insurance_monthly": "homeowners insurance",
     "housing.taxes_monthly": "property taxes",
-    "txn.amount": "deposit amount",
-    "txn.date": "deposit date",
-    "txn.is_money_in": "deposit direction",
+    # bug-015 — TRANSACTION, not deposit, for the tags every transaction carries. These were written
+    # when only money-IN rules read them (AS-1, AS-2, AS-12 all scope `txn.is_money_in eq in`). FR-5
+    # reads money OUT, so on LF-XMB2 a $24.34 card purchase and three ATM withdrawals each shipped
+    # "the deposit category could not be read", and AS-1 called an outgoing "Zel To …" payment a
+    # deposit. The direction-aware subject label (`rule_subject_label._deposit_label`) made exactly
+    # this correction for the same reason; the reason vocabulary did not follow.
+    # `has_identified_source` / `source_strength` keep "deposit's": they exist only for money in.
+    "txn.amount": "transaction amount",
+    "txn.date": "transaction date",
+    "txn.is_money_in": "transaction direction (money in or out)",
     "txn.has_identified_source": "deposit's source",
     # LP-546/551 — FR-5's two deterministic inputs. Both are phrased as QUESTIONS, so `fact_phrase`
     # returns them without an article ("the whether ..." was the LP-526 bug).
@@ -173,7 +180,9 @@ _FACT_LABELS: dict[str, str] = {
     "txn.is_recurring": "whether this payment recurs across months",
     "txn.stated_liability_match": "whether this payee matches a liability on the application",
     "txn.source_strength": "deposit's source strength",
-    "txn.apparent_category": "deposit category",  # LP-390-7: AS-12 (live) reads it — a curated reason label
+    # LP-390-7: AS-12 (live) reads it — a curated reason label. bug-015: FR-5 reads it on WITHDRAWALS,
+    # so the noun cannot be "deposit" (see the transaction tags above).
+    "txn.apparent_category": "transaction category",
     # LP-393-6 — the scenario-calibrated income/asset rules went live; their couldnt_check reasons read these.
     "income.same_line_of_work": "same line of work (job-change continuity)",  # IN-7
     "income.is_declining": "year-over-year income trend",  # IN-10
