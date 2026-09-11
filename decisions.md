@@ -16156,9 +16156,13 @@ is a role, and neither can be done by accident while attempting the other.
 
 Contrast moves from a comment to arithmetic. `palettes.test.ts` resolves every role through every
 palette in both themes and computes WCAG ratios for the pairs the UI draws — text tones on every
-surface, each `-foreground` on its fill, status text on its own `/10` chip tint, `input` and `ring` at
-3:1 — so a palette cannot be added, or edited, below the floor. It also fails a palette missing a
-colour, which would otherwise render that colour from the default and look like it worked.
+surface, each `-foreground` on its fill, text on the translucent fills (status text on its own `/10`
+chip tint, the drop zone's `primary/15`, the buttons' `/90` and the default badge's `/80` hovers),
+`input` and `ring` at 3:1 — so a palette cannot be added, or edited, below the floor. It also fails a palette
+missing a colour, which would otherwise render that colour from the default and look like it worked,
+and any file outside `globals.css` and `app/palettes/` that names a palette colour: palette colours
+are ordinary custom properties on `<html>`, so `bg-[hsl(var(--brand))]` renders, and it would route
+around the one layer that says what a colour is for.
 
 *Consequences.* The palette and theme are applied to `<html>` and only there. A role is declared on
 `:root`, resolves there, and is inherited as a value, so a `.dark` or `data-palette` on an inner element

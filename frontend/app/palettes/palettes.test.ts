@@ -18,6 +18,7 @@
  *    stayed on screen, true-sounding, after the next one arrived.
  */
 import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import resolveConfig from "tailwindcss/resolveConfig";
 import { describe, expect, it } from "vitest";
 import config from "../../tailwind.config";
@@ -210,13 +211,32 @@ const FILLS = [
 ];
 
 /**
- * The tinted chip: `bg-x/10 text-x` (status-token.tsx `CHIP`). /10 is the
- * house tint — 62 of the app's 108 status-fill opacities, and the only one the
- * status map uses. The tint lowers the contrast of the very text it frames.
+ * Text on a TRANSLUCENT fill. What shows is the fill blended into the ground under
+ * it, so the text loses contrast that the solid pair never shows:
+ *
+ *  - the chip, `bg-x/10 text-x` (status-token.tsx `CHIP`). /10 is the heaviest
+ *    resting tint a status hue takes — 44 fills at /10, 21 at /5, which is lighter
+ *    and so reads better — and the only one the status map uses;
+ *  - the drop zone, `bg-primary/15 text-primary` (mismo-upload, document-dropzone);
+ *  - hover, `hover:bg-primary/90` and `hover:bg-destructive/90` (Button) and
+ *    `hover:bg-primary/80` (Badge's default variant).
+ *
+ * Badge's `destructive` variant also hovers at /80, and in Petrol light that is
+ * 4.13:1. It has no caller, so it is not listed; its first caller should fix it
+ * rather than add it here.
  */
-const CHIPS = ["destructive", "success", "warning", "info", "ai"];
-const CHIP_TINT = 0.1;
-const CHIP_GROUNDS = ["background", "card"];
+const TINTED: { text: string; fill: string; alpha: number }[] = [
+  ...["destructive", "success", "warning", "info", "ai"].map((x) => ({
+    text: x,
+    fill: x,
+    alpha: 0.1,
+  })),
+  { text: "primary", fill: "primary", alpha: 0.15 },
+  { text: "primary-foreground", fill: "primary", alpha: 0.9 },
+  { text: "destructive-foreground", fill: "destructive", alpha: 0.9 },
+  { text: "primary-foreground", fill: "primary", alpha: 0.8 },
+];
+const TINT_GROUNDS = ["background", "card"];
 
 const TEXT_FLOOR = 4.5; // WCAG 1.4.3, normal text
 const NON_TEXT_FLOOR = 3; // WCAG 1.4.11, control borders and the focus ring
@@ -242,11 +262,11 @@ function cases(values: Props): Case[] {
       floor: TEXT_FLOOR,
     });
   }
-  for (const chip of CHIPS) {
-    for (const ground of CHIP_GROUNDS) {
+  for (const { text, fill, alpha } of TINTED) {
+    for (const ground of TINT_GROUNDS) {
       out.push({
-        label: `text-${chip} on bg-${chip}/10 over bg-${ground}`,
-        ratio: contrast(c(chip), over(c(chip), CHIP_TINT, c(ground))),
+        label: `text-${text} on bg-${fill}/${Math.round(alpha * 100)} over bg-${ground}`,
+        ratio: contrast(c(text), over(c(fill), alpha, c(ground))),
         floor: TEXT_FLOOR,
       });
     }
@@ -343,5 +363,77 @@ describe("the role layer", () => {
     const washedOut = Object.fromEntries(COLOUR_NAMES.map((name) => [name, "0 0% 50%"]));
     expect(cases(washedOut).every((c) => c.ratio < c.floor)).toBe(true);
     expect(contrast(hslToRgb("0 0% 0%"), hslToRgb("0 0% 100%"))).toBeCloseTo(21, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other direction: nothing reaches past the roles into the palette.
+// ---------------------------------------------------------------------------
+
+/**
+ * Palette colours are ordinary custom properties on <html>, so a component CAN
+ * write `bg-[hsl(var(--brand))]` and it will render — and follow the palette —
+ * while skipping the role layer. Then "change which colour plays which part by
+ * editing a role" silently stops being true for that element. ADR-402 says only
+ * roles point at a palette; this is what checks it (LP-901 review).
+ */
+const FRONTEND = new URL("../../", import.meta.url).pathname;
+/** The two places a palette name belongs: the roles, and the palettes themselves. */
+const ROLE_LAYER = join(FRONTEND, "app/globals.css");
+const PALETTE_DIR = join(FRONTEND, "app/palettes");
+
+const PALETTE_NAME = new RegExp(`(?<![\\w-])(?:${COLOUR_NAMES.join("|")})(?![\\w-])`, "g");
+
+function consumerFiles(): string[] {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (path === ROLE_LAYER || path === PALETTE_DIR) return [];
+      if (entry.isDirectory()) return entry.name === "node_modules" ? [] : walk(path);
+      return /\.(tsx?|css)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+    });
+  // Derived from the tree, like design-tokens.test.ts, so a new directory is
+  // scanned without anyone remembering to add it.
+  return readdirSync(FRONTEND, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+    .flatMap((e) => walk(join(FRONTEND, e.name)));
+}
+
+/**
+ * Code only: a palette name quoted in a comment is documentation, not a use.
+ * Comments are blanked rather than removed, so reported line numbers stay true.
+ */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ""))
+    .split("\n")
+    .map((line) => (line.trim().startsWith("//") ? "" : line))
+    .join("\n");
+}
+
+describe("only the role layer names a palette colour", () => {
+  it("scans the whole tree, and knows a palette name when it sees one", () => {
+    // The controls: an empty scan, or a pattern that matches nothing, is green.
+    const files = consumerFiles();
+    expect(files.some((f) => f.endsWith("components/status-token.tsx"))).toBe(true);
+    expect(files).not.toContain(ROLE_LAYER);
+    expect(files.some((f) => f.startsWith(`${PALETTE_DIR}/`))).toBe(false);
+    expect("bg-[hsl(var(--brand))]".match(PALETTE_NAME)).toEqual(["--brand"]);
+    expect("hsl(var(--neutral-10) / 0.5)".match(PALETTE_NAME)).toEqual(["--neutral-10"]);
+    expect("var(--primary) var(--brand-new) var(--reduce)".match(PALETTE_NAME)).toBeNull();
+  });
+
+  it("finds none outside globals.css and app/palettes/", () => {
+    const offenders: string[] = [];
+    for (const file of consumerFiles()) {
+      for (const [index, line] of codeOnly(readFileSync(file, "utf8")).split("\n").entries()) {
+        for (const [name] of line.matchAll(PALETTE_NAME)) {
+          offenders.push(`${file.slice(FRONTEND.length)}:${index + 1} ${name}`);
+        }
+      }
+    }
+    expect(offenders, "use the role (bg-primary, text-warning), not the palette colour").toEqual(
+      [],
+    );
   });
 });

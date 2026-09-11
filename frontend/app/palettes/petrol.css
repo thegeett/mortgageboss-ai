@@ -8,10 +8,12 @@
      - to change the colours, edit a palette (or pick another one);
      - to change which colour plays which part, edit a role in globals.css.
 
-   Every palette defines exactly this set of names, for light (:root) AND dark
-   (.dark). app/palettes/palettes.test.ts fails on a missing or extra name, and
-   computes every text/ground contrast pair from the values — nothing here is
-   "verified" by a comment.
+   Every palette defines exactly this set of names, for light AND dark — here
+   under :root and .dark, because this is the default; any other palette scopes
+   both blocks to its own `data-palette` (ADR-402). Only the role layer may name
+   one of these colours. app/palettes/palettes.test.ts fails on a missing or
+   extra name, on a component that names one, and computes the contrast of the
+   pairs the UI draws from the values — nothing here is "verified" by a comment.
 
    Values are space-separated HSL triples, never hex: the role layer passes them
    straight through to hsl(var(--x)), which is what makes opacity modifiers
