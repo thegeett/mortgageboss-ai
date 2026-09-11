@@ -6125,7 +6125,7 @@ def _stmt_continuity(
 
 def _income_employer_coverage(
     snapshot: Snapshot, subject_id: str, subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.employer_coverage — PER BORROWER: do this borrower's PAY-STUB employers and W-2 employers
     cover each other (every pay-stub employer has a matching W-2 and vice-versa)? Unblocks IN-6.
 
@@ -6176,6 +6176,12 @@ def _income_employer_coverage(
         str, str
     ] = {}  # normalized -> an original rendering (for a human-readable reason)
     w2: dict[str, str] = {}
+    # bug-017 — WHICH DOCUMENTS THIS READ. `produce_derived_tags` puts a third element on the tag's
+    # `source_facts`, which is what carries a finding's document links; a recipe returning two elements
+    # falls back to the subject, and a borrower id resolves to no document. So IN-6's finding named
+    # nothing on LF-XMB2 while AS-8's named its two statements — the difference is entirely here.
+    stated_by: dict[str, list[str]] = {}  # normalized employer -> the documents stating it
+    compared: list[str] = []  # every pay stub / W-2 whose employer was read
     paystub_docs = w2_docs = 0
     any_unreadable = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
@@ -6191,7 +6197,10 @@ def _income_employer_coverage(
             any_unreadable = True
             continue
         original = str(tag.value)
-        bucket[_normalize(original, norm)] = original
+        key = _normalize(original, norm)
+        bucket[key] = original
+        stated_by.setdefault(key, []).append(entry.content_id)
+        compared.append(entry.content_id)
 
     if paystub_docs == 0 or w2_docs == 0:
         return "one_sided", (
@@ -6205,12 +6214,30 @@ def _income_employer_coverage(
         )
     uncovered = sorted((set(paystub) - set(w2)) | (set(w2) - set(paystub)))
     if uncovered:
-        shown = (paystub | w2)[uncovered[0]]
-        return "uncovered", (
-            f"employer '{shown}' appears on one of the borrower's pay stubs / W-2s but not the other"
+        key = uncovered[0]
+        shown = (paystub | w2)[key]
+        # NAME THE SIDE. "appears on one of the borrower's pay stubs / W-2s but not the other" left a
+        # processor to work out which was missing before they could act. On LF-XMB2 the answer is the
+        # whole finding: 'Commonwealth Of Pennsylvania' is on the W-2 and the pay stubs say
+        # 'COPA Exec Off', a naming variance the normalizer cannot reduce rather than a missing document.
+        on_paystub = key in paystub
+        side = "pay stubs" if on_paystub else "W-2s"
+        counterpart = "a W-2" if on_paystub else "a pay stub"
+        return (
+            "uncovered",
+            (
+                f"employer '{shown}' appears on this borrower's {side} but not on {counterpart} — "
+                "confirm it is the same employer named differently, or obtain the missing document"
+            ),
+            # THE UNCOVERED EMPLOYER'S OWN DOCUMENTS FIRST. The first id becomes the finding's
+            # `source_document_id`, the single document the UI opens (bug-013 review), and that must be
+            # the one carrying the employer the sentence names — not whichever was read first.
+            tuple(dict.fromkeys([*stated_by[key], *compared])),
         )
-    return "covered", (
-        "every employer on this borrower's pay stubs also appears on a W-2 and vice-versa"
+    return (
+        "covered",
+        "every employer on this borrower's pay stubs also appears on a W-2 and vice-versa",
+        tuple(dict.fromkeys(compared)),
     )
 
 

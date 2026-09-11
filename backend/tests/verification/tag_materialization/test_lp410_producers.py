@@ -327,8 +327,9 @@ def _cov(docs: list[DocumentEntry], employers: dict[str, str], bid: str, *, inde
     tags = {cid: {"income.employer_normalized": _tag(emp)} for cid, emp in employers.items()}
     mismo: dict[str, Field | PiiField] = {"borrower.1.borrower_id": _f(bid)}
     snap = _snap(docs=docs, tags=tags, mismo=mismo)
-    value, _ = _income_employer_coverage(snap, bid, BorrowerSubject(bid, index, snap))
-    return str(value)
+    # bug-017 — the recipe now names the documents it compared on covered/uncovered, so it returns a
+    # 3-tuple there and a 2-tuple where it has nothing to name. Index rather than unpack.
+    return str(_income_employer_coverage(snap, bid, BorrowerSubject(bid, index, snap))[0])
 
 
 def test_coverage_covered_reuses_in5_normalization() -> None:
@@ -398,7 +399,7 @@ def test_coverage_tags_absent_with_documents_is_unknown_not_one_sided() -> None:
         mismo=MismoSection.present({"borrower.1.borrower_id": _f(bid)}),
         tags=TagsSection.missing(),  # documents present, but the tags layer never materialized
     )
-    value, _ = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+    value = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))[0]
     assert value == "unknown"
 
 
@@ -417,9 +418,99 @@ def test_coverage_per_borrower_isolation() -> None:
         "borrower.2.borrower_id": _f(b),
     }
     snap = _snap(docs=docs, tags=tags, mismo=mismo)
-    a_val, _ = _income_employer_coverage(snap, a, BorrowerSubject(a, 1, snap))
-    b_val, _ = _income_employer_coverage(snap, b, BorrowerSubject(b, 2, snap))
+    a_val = _income_employer_coverage(snap, a, BorrowerSubject(a, 1, snap))[0]
+    b_val = _income_employer_coverage(snap, b, BorrowerSubject(b, 2, snap))[0]
     assert a_val == "one_sided" and b_val == "one_sided"
+
+
+# --------------------------------------------------------------------------- #
+# bug-017 — IN-6 names the pay stubs and W-2s it compared
+# --------------------------------------------------------------------------- #
+def test_coverage_uncovered_names_the_documents_it_compared() -> None:
+    """THE LF-XMB2 SHAPE. IN-6's finding said an employer appears on one document type but not the
+    other and linked NO document, while AS-8's finding — same file, same run — named its two
+    statements. The difference was entirely the recipe's return arity."""
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    tags = {
+        "p1": {"income.employer_normalized": _tag("COPA Exec Off")},
+        "w1": {"income.employer_normalized": _tag("Commonwealth Of Pennsylvania")},
+    }
+    snap = _snap(docs=docs, tags=tags, mismo={"borrower.1.borrower_id": _f(bid)})
+
+    produced = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+
+    assert produced[0] == "uncovered"
+    assert len(produced) == 3
+    # THE ORDERING IS THE LOAD-BEARING PART. The employer the sentence names is whichever sorts first
+    # among the uncovered — normalized, "commonwealth of pennsylvania" < "copa exec off" — so the W-2
+    # is the document that states it, and the W-2 must LEAD: the first id becomes the finding's
+    # source_document_id, the single document the UI opens (bug-013 review). The pay stub follows as
+    # the side it was compared against.
+    assert produced[2] == ("w1", "p1")
+    assert "Commonwealth Of Pennsylvania" in produced[1]
+    assert "W-2s" in produced[1] and "not on a pay stub" in produced[1]
+
+
+def test_coverage_covered_names_every_document_it_read() -> None:
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    tags = {
+        "p1": {"income.employer_normalized": _tag("Acme Corp")},
+        "w1": {"income.employer_normalized": _tag("Acme")},  # normalizes equal
+    }
+    snap = _snap(docs=docs, tags=tags, mismo={"borrower.1.borrower_id": _f(bid)})
+
+    produced = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+
+    assert produced[0] == "covered"
+    assert produced[2] == ("p1", "w1")
+
+
+def test_coverage_names_nothing_when_it_compared_nothing() -> None:
+    """one_sided and unknown have no comparison to point at. EMPTY IS HONEST — the subject stands, and
+    `_source_document_ids` drops a borrower id rather than writing a link to a document."""
+    bid = str(uuid4())
+    snap = _snap(
+        docs=[_income_doc("p1", "pay_stub", bid)],
+        tags={"p1": {"income.employer_normalized": _tag("Acme")}},
+        mismo={"borrower.1.borrower_id": _f(bid)},
+    )
+
+    produced = _income_employer_coverage(snap, bid, BorrowerSubject(bid, 1, snap))
+
+    assert produced[0] == "one_sided" and len(produced) == 2
+
+
+@pytest.mark.asyncio
+async def test_in6_end_to_end_names_the_documents_on_the_evaluation() -> None:
+    """THROUGH THE REAL EVALUATOR (LP-487's standing rule), which is the only version that proves a
+    processor sees it: the tag carrying ids proves the recipe, `source_content_ids` proves the bridge."""
+    from app.verification.rule_engine.registry import evaluate_rules
+    from app.verification.tag_materialization.producer import materialize_tags
+
+    bid = str(uuid4())
+    docs = [_income_doc("p1", "pay_stub", bid), _income_doc("w1", "w2", bid)]
+    tags = {
+        "p1": {"income.employer_normalized": _tag("COPA Exec Off")},
+        "w1": {"income.employer_normalized": _tag("Commonwealth Of Pennsylvania")},
+    }
+    snapshot = await materialize_tags(
+        _snap(docs=docs, tags=tags, mismo={"borrower.1.borrower_id": _f(bid)}),
+        only_groups=frozenset(),
+    )
+
+    evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("IN-6",))
+
+    assert evaluations, "IN-6 produced no evaluation — the fixture does not reach the rule"
+    result = evaluations[0]
+    # W-2 first: it states 'Commonwealth Of Pennsylvania', the employer the finding's sentence names
+    # (it sorts first among the uncovered), and the leading id is the document the UI opens.
+    assert result.source_content_ids == ("w1", "p1"), (
+        "the pay stub and W-2 the recipe compared must reach `source_content_ids` — the only field "
+        f"`_source_document_ids` reads, and so the only one a processor sees. Got "
+        f"{result.source_content_ids}"
+    )
 
 
 # --------------------------------------------------------------------------- #
