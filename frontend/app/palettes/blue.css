@@ -1,0 +1,68 @@
+/* =============================================================================
+   PALETTE — Blue                                                        LP-902
+   -----------------------------------------------------------------------------
+   LP-5's original blue accent on slate neutrals, re-tuned so every pair clears
+   the floors palettes.test.ts computes. Stock blue-600 (53.3%) is 4.37:1 as
+   text on the hover fill, and white on its /80 hover (Badge) needs the accent at
+   44% or darker — 4.59:1 over a card; 48% was 4.20:1. A development palette: it
+   exists to prove a swap is one attribute, and to be compared against petrol on
+   real screens. The vocabulary, and what each neutral step is for, is
+   documented in petrol.css.
+
+   Scoped to `data-palette="blue"` on <html>. `:root` in front of the attribute
+   so these outrank petrol's `.dark` regardless of stylesheet order.
+   ============================================================================= */
+
+:root[data-palette="blue"] {
+  --neutral-1: 210 40% 98%;
+  --neutral-2: 0 0% 100%;
+  --neutral-3: 0 0% 100%;
+  --neutral-4: 210 40% 96.1%;
+  --neutral-5: 214 32% 93%;
+  --neutral-6: 214.3 31.8% 91.4%;
+  --neutral-7: 214 30% 88.5%;
+  --neutral-8: 212.7 26.8% 83.9%;
+  --neutral-9: 215 16% 52%;
+  --neutral-10: 215.4 16.3% 42%;
+  --neutral-11: 215.3 25% 26.7%;
+  --neutral-12: 222.2 47.4% 11.2%;
+
+  --brand: 221.2 83.2% 44%;
+  --brand-contrast: 0 0% 100%;
+
+  --red: 0 72.2% 44%;
+  --red-contrast: 0 0% 100%;
+  --green: 142.1 76.2% 26%;
+  --green-contrast: 0 0% 100%;
+  --amber: 26 90.5% 34%;
+  --amber-contrast: 0 0% 100%;
+  --violet: 262.1 83.3% 55%;
+  --violet-contrast: 0 0% 100%;
+}
+
+:root[data-palette="blue"].dark {
+  --neutral-1: 222 40% 6%;
+  --neutral-2: 222 33% 9%;
+  --neutral-3: 222 30% 10.5%;
+  --neutral-4: 220 28% 12.5%;
+  --neutral-5: 218 25% 15.5%;
+  --neutral-6: 217 23% 17%;
+  --neutral-7: 216 20% 20%;
+  --neutral-8: 215 18% 23%;
+  --neutral-9: 215 14% 43%;
+  --neutral-10: 215 16% 62%;
+  --neutral-11: 214 22% 76%;
+  --neutral-12: 210 40% 96%;
+
+  --brand: 213.1 93.9% 67.8%;
+  --brand-contrast: 222 47% 9%;
+
+  --red: 0 90.6% 70.8%;
+  --red-contrast: 0 60% 9%;
+  --green: 141.9 69.2% 58%;
+  --green-contrast: 142 70% 8%;
+  --amber: 43.3 96.4% 56.3%;
+  --amber-contrast: 38 70% 9%;
+  --violet: 255.1 91.7% 76.3%;
+  --violet-contrast: 260 45% 12%;
+}

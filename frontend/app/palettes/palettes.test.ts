@@ -19,15 +19,13 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_PALETTE, PALETTES } from "@/lib/theme";
 import resolveConfig from "tailwindcss/resolveConfig";
 import { describe, expect, it } from "vitest";
 import config from "../../tailwind.config";
 
 const DIR = new URL("./", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, DIR), "utf8");
-
-/** The palette `:root` and `.dark` apply with no attribute on <html>. */
-const DEFAULT_PALETTE = "petrol";
 
 // ---------------------------------------------------------------------------
 // Parsing. Palette files are flat — `selector { --x: value; … }`, no nesting —
@@ -302,6 +300,12 @@ describe("the palettes on disk", () => {
         `import "./palettes/${id}.css";`,
       );
     }
+  });
+
+  it("the switcher offers exactly the palettes on disk", () => {
+    // LP-902. One way round, the menu offers a palette with no colours and the
+    // screen stays on the default; the other, a finished palette nobody can pick.
+    expect(PALETTES.map((p) => p.id).sort()).toEqual(PALETTE_IDS);
   });
 });
 

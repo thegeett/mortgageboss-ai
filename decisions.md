@@ -16169,6 +16169,8 @@ around the one layer that says what a colour is for.
 does not re-theme its subtree; a side-by-side light/dark preview would need the roles restated on those
 selectors too. `text-primary/80`-style exemptions in `a11y-contrast.test.ts` carry ratios measured
 against Petrol and are not recomputed per palette. Values stay HSL triples, unchanged from ADR-389, so
-all ~200 opacity modifiers keep working. Extends ADR-389.
+all ~200 opacity modifiers keep working. Switching palette or theme at runtime is development-only
+until there is a product decision to offer either to processors: a production build neither shows the
+switcher nor reads its cookies (LP-902). Extends ADR-389.
 
-*Status.* Accepted (LP-901).
+*Status.* Accepted (LP-901, LP-902).

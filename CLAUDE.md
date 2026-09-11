@@ -84,10 +84,11 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
   `app/globals.css` (`--primary: var(--brand)`) say what each colour is for, and
   `tailwind.config.ts` exposes the roles. Components use role classes
   (`bg-primary`, `text-warning`) and never a palette name, a Tailwind palette
-  scale, or a hex value. Recolour the app by editing a palette; change which
-  colour plays which part by editing a role. `app/palettes/palettes.test.ts`
-  computes WCAG contrast for every palette in both themes. The default palette
-  is Petrol.
+  scale, or a hex value. Recolour the app by editing or switching a palette;
+  change which colour plays which part by editing a role.
+  `app/palettes/palettes.test.ts` computes WCAG contrast for every palette in
+  both themes. The default palette is Petrol; switching palette or dark theme is
+  **dev-only** (account menu, LP-902) — a production build ignores it.
 
 **Data model principles** (apply as Epic 2+ lands)
 
