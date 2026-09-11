@@ -191,6 +191,12 @@ _FACT_LABELS: dict[str, str] = {
     "txn.apparent_category": "transaction category",
     # LP-393-6 — the scenario-calibrated income/asset rules went live; their couldnt_check reasons read these.
     "income.same_line_of_work": "same line of work (job-change continuity)",  # IN-7
+    # bug-016 review — IN-7'S NEW APPLICABILITY PREDICATE, WHICH IS A REASON TAG. An undetermined
+    # predicate produces the couldnt_check sentence, and with no entry here `fact_label` degrades to the
+    # humanized stem: "the file does not clearly establish the has job change". Phrased as a question so
+    # `fact_phrase` drops the article — "…does not clearly establish whether the borrower has changed
+    # jobs, so it is not known whether this requirement applies here."
+    "income.has_job_change": "whether the borrower has changed jobs",  # IN-7 (bug-016)
     "income.is_declining": "year-over-year income trend",  # IN-10
     "income.has_2yr_history": "two-year income history",  # IN-11
     "asset.liquidation_terms": "account's liquidation terms",  # AS-11

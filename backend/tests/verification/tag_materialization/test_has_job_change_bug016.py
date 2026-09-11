@@ -137,6 +137,45 @@ def test_employment_that_has_only_ended_is_not_a_job_change() -> None:
     )
 
 
+def test_an_ended_employer_beside_a_flagless_one_is_still_a_job_change() -> None:
+    """bug-016 review — THE ROW THAT STATED NEITHER FLAG USED TO VANISH.
+
+    The count was `if ended … elif is_current`, so a record with no `is_current` and no `end_date` was
+    neither, and a borrower with one ENDED employer beside one flagless employer read "no" — IN-7
+    skipping a real job change in silence, which is the failure its scope exists to prevent, inverted.
+
+    Not hypothetical in shape: `stated_employers.is_current` is nullable and, as its own column comment
+    records, every employer imported before LP-624 carried NULL there; `put()` omits a NULL, so those
+    rows reach the snapshot stating only a name — exactly what LF-6T3N's fixture still does.
+    """
+    assert (
+        _value(
+            {
+                "borrower.1.employer.1.is_current": _f("False"),
+                "borrower.1.employer.1.end_date": _f("2026-03-03"),
+                "borrower.1.employer.2.name": _f("Northgate Warehousing"),  # states neither flag
+            }
+        )
+        == "yes"
+    )
+
+
+def test_employers_stating_no_flags_at_all_are_not_a_job_change() -> None:
+    """The other half of that repair, and why it is not just "count everything as current": with NOTHING
+    ended there is no move to judge. LF-6T3N's shape — two employer rows per borrower, names only — must
+    stay "no", which is what keeps IN-7 out of scope there rather than asking about an unevidenced move.
+    """
+    assert (
+        _value(
+            {
+                "borrower.1.employer.1.name": _f("Acme Logistics Inc"),
+                "borrower.1.employer.2.name": _f("Northgate Warehousing"),
+            }
+        )
+        == "no"
+    )
+
+
 def test_no_employment_records_is_unknown_never_no() -> None:
     """FAIL-CLOSED. "no" would silently remove IN-7 from a file whose employment simply was not
     imported; "unknown" makes the rule abstain and say so."""

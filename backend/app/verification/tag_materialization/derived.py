@@ -6269,7 +6269,17 @@ def _income_has_job_change(
             not is_current and _stated(row, "is_current") is not None
         ):
             ended += 1
-        elif is_current:
+        else:
+            # bug-016 review — NOT `elif is_current`. A row stating NEITHER flag counted as neither
+            # current nor ended and vanished from both totals, so an ended employer beside a flagless one
+            # read "no" and IN-7 skipped a REAL job change in silence — the failure this rule's scope
+            # exists to prevent, inverted. Every employment record on a 1003 is either former or current,
+            # and "not stated as ended" is the honest reading of one that does not say.
+            #
+            # No such row exists on staging today (18 employer records, every one stating `is_current` —
+            # the parser has set it from EmploymentStatusType since LP-624), but the pre-LP-624 rows that
+            # column's comment describes are exactly this shape, and so is the repo's own LF-6T3N
+            # fixture, whose employer rows carry a name and nothing else.
             current += 1
 
     if ended and current:
