@@ -119,7 +119,10 @@ pipeline, and vice versa.
 1. `pnpm install --frozen-lockfile` — install locked dependencies.
 2. `pnpm lint` — Biome lint + format check.
 3. `pnpm typecheck` — `tsc --noEmit`.
-4. `pnpm build` — production `next build`.
+4. `pnpm test` — the vitest suite, run with `TZ=UTC` (LP-900). This is where the
+   design-token guards live (`tailwind.config.test.ts`, `lib/design-tokens.test.ts`,
+   `lib/a11y-contrast.test.ts`), so CI is what enforces them.
+5. `pnpm build` — production `next build`.
 
 > **Service-backed tests:** CI runs a **Postgres** service container, so the
 > DB-backed suites (models, services, and the API integration suite) run against
@@ -175,6 +178,7 @@ status badges in the README link straight to the latest runs.
 | `uv.lock` out of sync           | `cd backend && uv lock`                                |
 | Biome lint/format fails         | `cd frontend && pnpm lint:fix`                          |
 | `tsc` errors                    | `cd frontend && pnpm typecheck` and fix the types      |
+| `vitest` fails                  | `cd frontend && TZ=UTC pnpm test` and fix the test/code |
 | `next build` fails              | `cd frontend && pnpm build` and fix the error          |
 | pnpm lockfile mismatch          | `cd frontend && pnpm install` then commit the lockfile |
 

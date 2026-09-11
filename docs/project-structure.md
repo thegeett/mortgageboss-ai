@@ -100,7 +100,7 @@ docs/
 .github/
 ├── workflows/
 │   ├── backend-ci.yml    # ruff, mypy, pytest, uv.lock check
-│   └── frontend-ci.yml   # biome, tsc, next build
+│   └── frontend-ci.yml   # biome, tsc, vitest, next build
 ├── CODEOWNERS
 ├── pull_request_template.md
 └── ISSUE_TEMPLATE/{bug_report,feature_request}.md

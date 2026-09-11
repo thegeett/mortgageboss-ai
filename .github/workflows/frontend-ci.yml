@@ -48,6 +48,17 @@ jobs:
       - name: Run TypeScript type check
         run: pnpm typecheck
 
+      # LP-900. The suite holds the design-system guards (no palette-scale
+      # classes, every colour token defined, no faded text) and the ledger-asset
+      # drift check. Before this step they only ran when someone remembered
+      # `pnpm test` locally, so a PR could break any of them and still go green.
+      # TZ is pinned so a date-formatting test cannot pass here and fail on a
+      # laptop (or the reverse) purely because of the runner's clock.
+      - name: Run tests (vitest)
+        run: pnpm test
+        env:
+          TZ: UTC
+
       - name: Build for production
         run: pnpm build
         env:
