@@ -156,6 +156,41 @@ def test_a_document_backed_gap_still_names_both_of_its_documents() -> None:
 # --------------------------------------------------------------------------- #
 # What must NOT change
 # --------------------------------------------------------------------------- #
+def test_a_child_support_start_date_is_not_an_employment_start() -> None:
+    """bug-018 review — THE DATE THAT IS NOT A JOB START, MASKING THE GAP IN THE RULE'S OWN SUBJECT.
+
+    `income.employment_start` is declared over the field name `start_date` with no document_type filter,
+    and `alimony_income` / `child_support_income` both declare a field of exactly that name — so a
+    support order produces an "employment start" carrying the date the SUPPORT began. Each end pairs
+    with the EARLIEST start after it, so that date falling inside a real gap shrinks it: 121 days of
+    unemployment read as 10, and IN-4 satisfies instead of firing.
+
+    Pre-existing mis-scoping, made reachable by this ticket — before it, a file with no VOE had no pair
+    at all and abstained; now the application supplies the other half.
+    """
+    order = DocumentEntry(
+        content_id="cs1",
+        document_type="child_support_income",
+        belongs_to=(BorrowerRef(borrower_id=_B1, name="fixture"),),
+    )
+    ended, ended_tags = _voe("voe_end", _B1, end="2026-01-31")
+
+    produced = _income_max_employment_gap(
+        _snap(
+            mismo=_stated(1, _B1, **{"2_start": "2026-06-01"}),
+            docs=[ended, order],
+            tags={**ended_tags, "cs1": {"income.employment_start": _tag("2026-02-10")}},
+        ),
+        "loan",
+        None,
+    )
+
+    assert produced[0] == "121", (
+        "the gap runs from the VOE's end to the job that actually started (2026-01-31 → 2026-06-01); "
+        "the child-support start date must not stand in as a job start"
+    )
+
+
 def test_two_borrowers_stated_records_never_pair_with_each_other() -> None:
     """The rule this recipe has always had: one borrower's job-end must not pair with ANOTHER
     borrower's job-start. Merging a second source must not become a way around it."""

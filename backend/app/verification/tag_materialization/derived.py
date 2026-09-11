@@ -503,6 +503,30 @@ def _qualifying_income_monthly(
     )
 
 
+#: bug-018 review — THE DOCUMENT TYPES WHOSE `start_date` / `end_date` ARE EMPLOYMENT DATES.
+#:
+#: `income.employment_start` is declared `{mode: parsed, subject: document, data: start_date}` with NO
+#: `document_type` filter, though `declarations.py` supports one for exactly this reason ("a field-name
+#: is not unique"). Four extraction schemas declare a field named precisely `start_date` — `voe`,
+#: `employment_offer_letter`, `alimony_income` and `child_support_income` — so a child-support order
+#: produces an `income.employment_start` tag carrying the date the SUPPORT began.
+#:
+#: That is not a cosmetic mismatch here: each end pairs with the EARLIEST start after it, so a support
+#: date falling inside a real employment gap SHRINKS it. A VOE ending 2026-01-31 against a job starting
+#: 2026-06-01 is a 121-day gap that IN-4 must fire on; a child-support start of 2026-02-10 makes it read
+#: 10 days and IN-4 SATISFIES — the rule silently clearing the thing it exists to catch.
+#:
+#: The mis-scoping predates this ticket (LP-382 / LP-454), but bug-018 is what makes it reachable: a
+#: file with no VOE used to have no pair at all and abstained, and now the application supplies one.
+#: Filtering here rather than in `tag_production.yaml` because the declaration takes a SINGLE
+#: document_type, an offer letter's start date is a legitimate employment start, and IN-7 reads the same
+#: tag for its own purposes — so the arithmetic that can be silently wrong is fixed where it is done.
+#:
+#: Unclassified (`None` / "unknown") is EXCLUDED too: including a date that may not be employment can
+#: only mask a gap, and masking is the one failure this recipe must not have.
+_EMPLOYMENT_DATE_DOC_TYPES = frozenset({"voe", "employment_offer_letter"})
+
+
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
@@ -524,6 +548,10 @@ def _income_max_employment_gap(
     groups: dict[object, tuple[list[tuple[date, str | None]], list[tuple[date, str | None]]]] = {}
     if not (snapshot.tags.absent or snapshot.documents.absent):
         for entry in snapshot.documents.entries:
+            # bug-018 review — see `_EMPLOYMENT_DATE_DOC_TYPES`: an alimony or child-support order also
+            # produces `income.employment_start`, and its date would shrink a real gap to nothing.
+            if entry.document_type not in _EMPLOYMENT_DATE_DOC_TYPES:
+                continue
             tags = snapshot.tags.by_subject.get(entry.content_id)
             if not tags:
                 continue

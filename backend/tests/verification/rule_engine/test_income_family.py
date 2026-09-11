@@ -247,8 +247,17 @@ def test_recipe_reports_the_shortfall_as_a_percentage() -> None:
 def test_recipe_employment_gap_pairs_consecutive_not_spanning_records() -> None:
     # LP-323-IN-B review #2: three back-to-back jobs (A end, B fills the middle, C start). The gap is
     # the largest CONSECUTIVE gap (31 days), NOT job-A-end → job-C-start spanning job B (~1127 days).
+    # bug-018 review — THE DOCUMENT TYPE NOW MATTERS, and this fixture's default never could have
+    # carried these tags. `income.employment_start` / `_end` map the field names `start_date` /
+    # `end_date`, which a pay stub does not have (its own field is `employment_start_date`); the four
+    # schemas that do are voe, employment_offer_letter, alimony_income and child_support_income. The
+    # recipe now reads employment dates only off an employment document, because an alimony or
+    # child-support start date landing inside a real gap shrinks it and IN-4 silently satisfies. These
+    # are VOEs, which is what a document stating an employment END is in production; what the test
+    # proves — consecutive pairing rather than spanning, and naming the ended-then-resumed pair — is
+    # unchanged.
     snap = _snap(
-        docs=[_doc("a"), _doc("b"), _doc("c")],
+        docs=[_doc("a", dtype="voe"), _doc("b", dtype="voe"), _doc("c", dtype="voe")],
         by_subject={
             "a": {"income.employment_end": _parsed("2020-01-01")},
             "b": {
