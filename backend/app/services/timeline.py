@@ -35,6 +35,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.documents.catalog import ResponsibleParty
 from app.models.activity_log import ActivityType
 from app.models.communication import (
     Communication,
@@ -135,6 +136,70 @@ class TimelineEntry:
     #: — we wrote those, so "unread" is not a state they can be in.
     unread: bool
     detail: dict[str, Any]
+    #: LP-841 — which party's bucket this belongs in (`borrower`, `lender`, `title`, `employer`,
+    #: …), or None for anything that is not addressed to a party: an activity, a notification, a
+    #: template this build does not recognise. The tabs read this rather than deriving it from the
+    #: template key, so the bucket a draft is FILED under and the bucket it is SHOWN in are one
+    #: decision made once. Defaulted, because an activity has no party and every caller that builds
+    #: one would otherwise have to say so.
+    party: str | None = None
+
+
+async def _party_by_address(
+    db: AsyncSession, *, loan_file: LoanFile
+) -> dict[str, ResponsibleParty]:
+    """`{email: party}` for everybody on this file — how an INBOUND message finds its bucket.
+
+    An outbound message says who it is for in its template key. An inbound one does not: replies all
+    arrive at the same per-file inbox address (ADR-397), so the address they came TO says nothing
+    about who sent them. The sender address is the only evidence there is, and the participants
+    table is where this file records it.
+    """
+    from app.services.email_draft import primary_borrower
+    from app.services.party_requests import PARTY_ROLE, party_addresses
+
+    found: dict[str, ResponsibleParty] = {}
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+    if borrower and borrower.email:
+        found[borrower.email.strip().lower()] = ResponsibleParty.BORROWER
+    addresses = await party_addresses(db, loan_file=loan_file)
+    for party, role in PARTY_ROLE.items():
+        for address in addresses.get(role, ()):
+            # A participant with no address on file is real and common (LP-841 allows an empty To).
+            # They contribute nothing to a lookup BY address, which is different from contributing
+            # nothing at all — their tab still appears, because their drafts carry the template key.
+            if not address:
+                continue
+            # First writer wins, so the borrower's own address stays the borrower's even if they are
+            # also recorded in another role on this file.
+            found.setdefault(address.strip().lower(), party)
+    return found
+
+
+def _party_of(
+    message: Communication,
+    *,
+    senders: dict[UUID, str | None],
+    by_address: dict[str, ResponsibleParty],
+) -> str | None:
+    """Which party's tab this message belongs in, or None for one that belongs in no tab.
+
+    NONE IS A REAL ANSWER, not a fallback. An inbound message from an address nobody on this file
+    recognises — a spam reply, a forward from a third party, a borrower writing from an address we
+    were never given — has no party, and filing it under the borrower because that is the common
+    case would put a stranger's mail in the borrower's thread. It shows on the unfiltered list,
+    which is where something we cannot place belongs.
+    """
+    if message.direction is CommunicationDirection.INBOUND:
+        sender = message.sender or (
+            senders.get(message.inbound_message_id) if message.inbound_message_id else None
+        )
+        party = by_address.get(sender.strip().lower()) if sender else None
+        return party.value if party else None
+    from app.services.email_draft import party_for_draft_template
+
+    party = party_for_draft_template(message.template_key)
+    return party.value if party else None
 
 
 def _message_at(message: Communication) -> datetime:
@@ -316,6 +381,7 @@ async def build_timeline(
     inbound_ids = [m.inbound_message_id for m in messages if m.inbound_message_id is not None]
     manifests = await _attachment_manifest(db, inbound_ids)
     senders = await _inbound_senders(db, inbound_ids)
+    by_address = await _party_by_address(db, loan_file=loan_file)
 
     entries: list[TimelineEntry] = [
         TimelineEntry(
@@ -349,6 +415,7 @@ async def build_timeline(
             unread=(
                 message.direction is CommunicationDirection.INBOUND and message.read_at is None
             ),
+            party=_party_of(message, senders=senders, by_address=by_address),
             detail={
                 "template_key": message.template_key,
                 "template_version": message.template_version,

@@ -10,45 +10,63 @@ import type { VerificationStatus } from "@/lib/types/verification";
 import { requestConsequence } from "@/lib/verification/request-consequence";
 import { describe, expect, it } from "vitest";
 
-function status(added: number, elsewhere: number): VerificationStatus {
+function status(added: number, elsewhere: Record<string, number> = {}): VerificationStatus {
   return {
-    document_request: { added_to_draft: added, not_borrower_facing: elsewhere },
+    document_request: { added_to_draft: added, routed_elsewhere: elsewhere },
   } as unknown as VerificationStatus;
 }
 
 describe("requestConsequence", () => {
   it("says how many joined the email", () => {
-    expect(requestConsequence(status(2, 0))).toContain(
-      "2 documents were added to the file's email draft",
+    expect(requestConsequence(status(2))).toContain(
+      "2 documents were added to the borrower's email draft",
     );
   });
 
   it("singular reads as English, not as a count of one", () => {
-    expect(requestConsequence(status(1, 0))).toContain("1 document was added");
+    expect(requestConsequence(status(1))).toContain("1 document was added");
   });
 
-  it("says where a non-borrower request went instead", () => {
-    // THE CASE THE BADGE CANNOT SHOW. Without this sentence the draft count stays where it was and
-    // the processor is left to guess whether the click worked.
-    const message = requestConsequence(status(0, 1));
+  it("names the party a non-borrower request went to", () => {
+    // THE CASE THE BADGE CANNOT SHOW. The borrower's draft count stays where it was, and without
+    // this sentence a processor cannot tell that from a click that did nothing.
+    //
+    // LP-841 — IT NAMES WHO. This asserted "not the borrower's to send" and "needs list", which was
+    // true while those documents were dropped from every draft. They go to the party who holds them
+    // now, and that sentence would tell a processor their request reached nobody.
+    const message = requestConsequence(status(0, { lender: 1 }));
 
-    expect(message).toContain("not the borrower's to send");
-    expect(message).toContain("needs list");
-    // And it must NOT claim the email gained anything.
-    expect(message).not.toContain("added to the file's email draft");
+    expect(message).toContain("draft for the lender");
+    expect(message).not.toContain("needs list only");
+    // And it must NOT claim the BORROWER's email gained anything.
+    expect(message).not.toContain("added to the borrower's email draft");
+  });
+
+  it("says the title company, not the catalog's key for it", () => {
+    // `title` is a slug. "a draft for the title" is not a sentence a processor would write.
+    expect(requestConsequence(status(0, { title: 1 }))).toContain("draft for the title company");
+  });
+
+  it("names each party separately when one request went to two", () => {
+    // A single finding can want a credit report (lender) and a VOE (employer). Summing them into
+    // "2 went elsewhere" loses the only part a processor can act on.
+    const message = requestConsequence(status(0, { lender: 1, employer: 2 }));
+
+    expect(message).toContain("1 went to a draft for the lender");
+    expect(message).toContain("2 went to a draft for the employer");
   });
 
   it("reports both halves of a mixed request", () => {
-    const message = requestConsequence(status(2, 1));
+    const message = requestConsequence(status(2, { lender: 1 }));
 
     expect(message).toContain("2 documents were added");
-    expect(message).toContain("1 is not the borrower's to send");
+    expect(message).toContain("1 went to a draft for the lender");
   });
 
   it("a second click on the same row says so rather than claiming an addition", () => {
     // Already present: `add_needs_to_draft` is idempotent per need, so nothing was added and
     // nothing was skipped. "Added" would be false; silence would read as a broken button.
-    const message = requestConsequence(status(0, 0));
+    const message = requestConsequence(status(0));
 
     expect(message).toContain("already");
     expect(message).not.toContain("were added");
@@ -60,7 +78,7 @@ describe("requestConsequence", () => {
     // click returns {added: 0, elsewhere: 0} on a file with NO draft at all, so the sentence
     // asserted membership of an email that does not exist. It is the same confusion this ticket
     // exists to remove, arriving one click later.
-    const message = requestConsequence(status(0, 0));
+    const message = requestConsequence(status(0));
 
     expect(message).not.toContain("draft");
     // The control: the sentence still says something. An empty string would satisfy the line above.

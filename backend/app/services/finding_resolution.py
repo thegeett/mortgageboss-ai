@@ -29,9 +29,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.documents.catalog import ResponsibleParty
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
+from app.models.communication import Communication
+from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.finding import (
     EvaluationOutcome,
     Finding,
@@ -489,19 +492,46 @@ async def _already_asked(db: AsyncSession, *, loan_file_id: UUID) -> set[str]:
     with no duplicate check at all. Measured on ID-3, the rule the original report came from: two
     clicks produced two identical needs items and two identical lines in the borrower's email.
     """
+    # LP-841 — "ALREADY ASKED" MEANS IN A DRAFT OR ALREADY SENT, not "a pending need exists".
+    #
+    # Reported on LF-JR4T: a processor clicked Request on the rate lock agreement, the closing
+    # disclosure and the credit report and was told each was already requested, with nothing added
+    # and no draft anywhere. Measured — all three had been PENDING on the needs list since the rule
+    # engine created them on 6 September, and NONE of them was in a draft. So the duplicate check
+    # blocked every new request while the thing it was protecting had never been in a message.
+    #
+    # Two questions had drifted apart: this one asked "is there a pending need of this type?" and
+    # the draft asks "is it carried by an open draft?". A need can be pending and in no draft — the
+    # ordinary state of anything the engine found and nobody has emailed about — and in that state
+    # the file is stuck, permanently, with no way to ask for the document.
+    #
+    # A need is genuinely already asked for when it is in an unsent draft (asking again would list
+    # it twice) or when a draft carrying it has been SENT (the recipient has it). Both are
+    # membership of a communication; `requested_at` is the send's own stamp and says the second.
     rows = (
         (
             await db.execute(
                 only_active(
-                    select(NeedsItem).where(
+                    select(NeedsItem)
+                    .join(
+                        CommunicationNeedsItem,
+                        CommunicationNeedsItem.needs_item_id == NeedsItem.id,
+                    )
+                    .join(
+                        Communication,
+                        Communication.id == CommunicationNeedsItem.communication_id,
+                    )
+                    .where(
                         NeedsItem.loan_file_id == loan_file_id,
                         NeedsItem.status == NeedsItemStatus.PENDING,
+                        Communication.deleted_at.is_(None),
                     ),
                     NeedsItem,
                 )
             )
         )
         .scalars()
+        .unique()
         .all()
     )
     return {_already_asked_key(row.needs_type, row.title) for row in rows}
@@ -657,14 +687,32 @@ class RequestOutcome:
 
     needs: list[NeedsItem]
     added: int
-    not_borrower: int
+    #: LP-841 — WHAT WENT TO SOMEBODY ELSE'S DRAFT, by party, rather than what was discarded.
+    #:
+    #: This was `not_borrower: int` and meant "we did not email the borrower about these". It is a
+    #: different fact now: the credit report went to the LENDER's draft, and a processor is owed the
+    #: name rather than a count of things that did not happen.
+    elsewhere: dict[str, int]
 
     @classmethod
     def of(cls, needs: list[NeedsItem], updates: list[DraftUpdate]) -> RequestOutcome:
+        elsewhere: dict[str, int] = {}
+        for update in updates:
+            for party in update.parties:
+                if party.party is ResponsibleParty.BORROWER or not party.added:
+                    continue
+                elsewhere[party.party.value] = elsewhere.get(party.party.value, 0) + len(
+                    party.added
+                )
         return cls(
             needs=needs,
-            added=sum(len(update.added) for update in updates),
-            not_borrower=sum(len(update.skipped_not_borrower) for update in updates),
+            added=sum(
+                len(p.added)
+                for update in updates
+                for p in update.parties
+                if p.party is ResponsibleParty.BORROWER
+            ),
+            elsewhere=elsewhere,
         )
 
 

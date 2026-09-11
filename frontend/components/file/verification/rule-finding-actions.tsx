@@ -74,6 +74,17 @@ const FORM: Record<
   },
 };
 
+/** The party names as a processor says them, not as the catalog keys them. */
+const PARTY_NOUN: Record<string, string> = {
+  borrower: "borrower",
+  employer: "employer",
+  lender: "lender",
+  title: "title company",
+  cpa: "accountant",
+  agent: "agent",
+  insurer: "insurer",
+};
+
 export function RuleFindingActions({
   finding,
   onAct,
@@ -132,12 +143,16 @@ export function RuleFindingActions({
   const canRequest = finding.missing_documents.length > 0;
   // LP-839 — LP-801 has written this marker at request time since that ticket, and nothing read it.
   const alreadyRequested = finding.documents_requested === true;
-  const elsewhere = finding.documents_not_borrower ?? [];
-  // WHERE THE REQUEST WENT, said on the row rather than only in a toast that has gone. A document
-  // that is not the borrower's is deliberately kept out of their email — the same rule that keeps an
-  // appraisal out — so "requested" and "in the draft" are different claims and only one of them is
-  // always true.
-  const inDraft = finding.missing_documents.filter((d) => !elsewhere.includes(d));
+  // LP-841 — `{label: party}`. WHERE THE REQUEST WENT, said on the row rather than only in a toast
+  // that has gone. A document that is not the borrower's stays out of THEIR email and goes to the
+  // party who holds it, so "in the borrower's draft" and "requested" remain different claims — but
+  // the second one no longer means "and nobody was asked".
+  const elsewhere = finding.documents_other_party ?? {};
+  const inDraft = finding.missing_documents.filter((d) => !(d in elsewhere));
+  const byParty = new Map<string, string[]>();
+  for (const [label, party] of Object.entries(elsewhere)) {
+    byParty.set(party, [...(byParty.get(party) ?? []), label]);
+  }
 
   return (
     <div className="mt-2">
@@ -152,13 +167,17 @@ export function RuleFindingActions({
               latest draft.
             </>
           ) : null}
-          {inDraft.length > 0 && elsewhere.length > 0 ? " " : null}
-          {elsewhere.length > 0 ? (
-            <>
-              <span className="text-foreground">{elsewhere.join(", ")}</span> requested — on the
-              needs list, not the borrower&apos;s to send.
-            </>
-          ) : null}
+          {inDraft.length > 0 && byParty.size > 0 ? " " : null}
+          {/* LP-841 — one clause per party. This read "on the needs list, not the borrower's to
+              send": true while those documents were dropped from every draft, and false now that
+              they go to the party who holds them. It told a processor their request reached nobody
+              in exactly the case where it reached somebody. */}
+          {[...byParty.entries()].map(([party, labels]) => (
+            <span key={party}>
+              <span className="text-foreground">{labels.join(", ")}</span> requested — in a draft
+              for the {PARTY_NOUN[party] ?? party}.{" "}
+            </span>
+          ))}
         </p>
       ) : null}
       {meta === null ? (
@@ -232,8 +251,10 @@ export function RuleFindingActions({
               // cheapest place to say where. Named as the LATEST draft: LP-832 makes a request
               // create a new one carrying everything outstanding, so "the draft" is ambiguous.
               title={
-                elsewhere.length === finding.missing_documents.length
-                  ? `Not the borrower's to send — this goes on the needs list, not the email.`
+                byParty.size > 0 && inDraft.length === 0
+                  ? `Not the borrower's to send — this starts a draft to the ${
+                      PARTY_NOUN[[...byParty.keys()][0] ?? ""] ?? "responsible party"
+                    }.`
                   : "This will be added to the latest communication draft."
               }
               onClick={() => setForm("request-docs")}

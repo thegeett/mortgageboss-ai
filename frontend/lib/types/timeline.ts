@@ -35,6 +35,16 @@ export interface TimelineEntry {
   is_important: boolean;
   /** An arrived message nobody has opened. Always false for outbound — we wrote those. */
   unread: boolean;
+  /**
+   * LP-841 — whose bucket this belongs in: `borrower`, `lender`, `title`, `employer`, `cpa`,
+   * `agent`, `insurer`, or null.
+   *
+   * FROM THE SERVER, not derived here. An outbound message's party is decided by the template key
+   * its draft was filed under, and a second definition of that on the client is how a lender draft
+   * comes to exist with an empty Lender tab in front of it. Null is a real answer, not a gap: an
+   * inbound message from an address nobody on the file recognises belongs in no party's thread.
+   */
+  party: string | null;
   detail: Record<string, unknown>;
 }
 

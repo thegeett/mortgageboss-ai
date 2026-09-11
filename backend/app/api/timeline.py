@@ -52,6 +52,11 @@ class TimelineEntryPublic(BaseModel):
     is_important: bool
     unread: bool
     detail: dict[str, Any]
+    #: LP-841 — which party tab this belongs under, or None for anything that belongs under none.
+    #: Sent from the server for the reason the FILTER is (see `read`): a bucket derived on the
+    #: client is a second definition of "the lender's messages", and when the two drift a draft
+    #: exists with an empty tab in front of it.
+    party: str | None
 
     @classmethod
     def of(cls, entry: TimelineEntry) -> "TimelineEntryPublic":
@@ -72,6 +77,7 @@ class TimelineEntryPublic(BaseModel):
             is_important=entry.is_important,
             unread=entry.unread,
             detail=entry.detail,
+            party=entry.party,
         )
 
 

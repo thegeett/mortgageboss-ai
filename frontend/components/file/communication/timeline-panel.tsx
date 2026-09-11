@@ -36,6 +36,49 @@ const PILLS: { value: TimelineFilter; label: string }[] = [
 ];
 
 /**
+ * The party tabs (LP-841) — the four buckets a processor works in, plus whoever else this file has.
+ *
+ * A SECOND AXIS, NOT A SECOND SET OF PILLS. The pills above answer "what happened to it" (sent,
+ * received, still a draft); these answer "who is it with". They are orthogonal — a processor
+ * chasing the title company wants that company's drafts AND its replies — so collapsing them into
+ * one row of pills would make every useful combination unreachable.
+ *
+ * THE ORDER IS THE WORK, not the alphabet: the borrower is who a processor chases most, then the
+ * employer for a VOE, then the lender, then title. The three after them are rare and sit where they
+ * fall. The PROCESSOR is deliberately absent — the catalog's 24 processor-owned types are ordered
+ * by the processor from somebody who is not on this list, so they never become a message and there
+ * is nothing for that tab to hold.
+ */
+const PARTY_ORDER = ["borrower", "employer", "lender", "title", "cpa", "agent", "insurer"] as const;
+
+const PARTY_LABEL: Record<string, string> = {
+  borrower: "Borrower",
+  employer: "Employer",
+  lender: "Lender",
+  title: "Title",
+  cpa: "Accountant",
+  agent: "Agent",
+  insurer: "Insurer",
+};
+
+/**
+ * Which tabs to show: the ones this file actually has something for.
+ *
+ * DERIVED, NOT LISTED. Showing all seven on every file would put five empty tabs in front of a
+ * processor on the ordinary purchase that only ever involves a borrower and a lender. Showing only
+ * the four the ticket names would do the opposite and worse — an accountant draft would exist with
+ * no tab that reaches it, which is invisible rather than merely noisy.
+ *
+ * `selected` is always kept, so switching the status pill to one a party has nothing under does not
+ * pull the tab out from under the person standing on it.
+ */
+function partyTabs(entries: TimelineEntry[], selected: string | null): string[] {
+  const present = new Set(entries.map((e) => e.party).filter((p): p is string => p !== null));
+  if (selected) present.add(selected);
+  return PARTY_ORDER.filter((p) => present.has(p));
+}
+
+/**
  * The icon for a row, which encodes what happened as a second channel beside the words.
  *
  * FAILED HAS ITS OWN. "Sent" and "sent, and bounced" are not the same event — LP-819 made that its
@@ -230,6 +273,9 @@ const ATTACHMENT_DISPOSITION: Record<string, string> = {
 
 export function TimelinePanel({ fileId }: { fileId: string }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
+  // LP-841 — null is "everyone", which is the landing state. A processor opening this page wants
+  // the file's history, not one correspondent's.
+  const [party, setParty] = useState<string | null>(null);
   const { data, isPending, isError } = useTimeline(fileId, filter);
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -248,6 +294,14 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   // the panel has to render without one.
   const linkedDraft = searchParams?.get("draft") ?? null;
   const [openMessage, setOpenMessage] = useState<string | null>(linkedDraft);
+
+  const entries = data?.entries ?? [];
+  const tabs = partyTabs(entries, party);
+  // The party axis is applied HERE while the status axis is a query parameter, and the asymmetry is
+  // deliberate: "sent" and "draft" are server definitions (see the header comment), but `party` is
+  // a value the server already put on every row — this only groups by it. Nothing is being decided
+  // twice.
+  const shown = party === null ? entries : entries.filter((e) => e.party === party);
   // Tracked rather than compared against `openMessage`: after a processor CLOSES the linked message
   // the parameter is still in the URL, and re-opening it on the next render would make the dialog
   // impossible to dismiss.
@@ -303,6 +357,50 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
             </div>
           ) : null}
         </div>
+        {/* LP-841 — WHO IT IS WITH, above WHAT HAPPENED TO IT. The underline treatment separates
+            the two axes at a glance: these are tabs a processor lives in, the pills below narrow
+            what is inside one. Hidden entirely when the file has one correspondent, which is the
+            common case — a single tab is a control that cannot do anything. */}
+        {tabs.length > 1 ? (
+          <div
+            className="-mb-px flex flex-wrap items-center gap-4 border-b border-border"
+            role="tablist"
+            aria-label="Filter by who the message is with"
+          >
+            {[null, ...tabs].map((value) => {
+              const active = party === value;
+              const label = value === null ? "Everyone" : (PARTY_LABEL[value] ?? value);
+              // The count is the reason a tab is worth clicking — an unread reply or an unsent
+              // draft waiting under a name a processor is not currently looking at.
+              const waiting =
+                value === null
+                  ? 0
+                  : entries.filter((e) => e.party === value && (e.unread || e.status === "draft"))
+                      .length;
+              return (
+                <button
+                  key={value ?? "all"}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setParty(value)}
+                  className={
+                    active
+                      ? "flex items-center gap-1.5 border-b-2 border-primary pb-1.5 text-xs font-semibold text-foreground"
+                      : "flex items-center gap-1.5 border-b-2 border-transparent pb-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  }
+                >
+                  {label}
+                  {waiting > 0 ? (
+                    <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold tabular-nums text-primary">
+                      {waiting}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-1" role="tablist" aria-label="Filter the history">
           {PILLS.map((pill) => (
             <button
@@ -329,22 +427,30 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
         <p className="text-sm text-danger">
           The history could not be loaded. Refresh to try again.
         </p>
-      ) : data.entries.length === 0 ? (
+      ) : shown.length === 0 ? (
         // "filtered" when a pill is on, "nothing-yet" otherwise — they mean different things, and
         // telling a processor who filtered to Drafts that nothing has ever happened is false.
-        filter === "all" ? (
+        // LP-841 — THE PARTY TAB IS A FILTER TOO. This tested only the pill, so standing on the
+        // Lender tab of a busy file was told "Nothing has happened yet" — the message that means
+        // the file is new, in front of a processor looking at a file that is not.
+        filter === "all" && party === null ? (
           <EmptyState kind="nothing-yet" title="Nothing has happened yet">
             Messages you send and replies that arrive appear here, alongside what changes on the
             file.
           </EmptyState>
         ) : (
-          <EmptyState kind="filtered" title={`Nothing in ${filter}`}>
+          <EmptyState
+            kind="filtered"
+            title={
+              party ? `Nothing with the ${PARTY_LABEL[party] ?? party}` : `Nothing in ${filter}`
+            }
+          >
             There is history on this file; this filter hides it.
           </EmptyState>
         )
       ) : (
         <ul className="flex flex-col">
-          {data.entries.map((entry) => (
+          {shown.map((entry) => (
             <li
               key={`${entry.kind}-${entry.id}`}
               className="flex items-start gap-3 border-t border-border py-2 text-sm first:border-t-0"

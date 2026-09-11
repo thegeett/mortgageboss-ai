@@ -310,26 +310,35 @@ class FindingPublic(BaseModel):
 _PURCHASE_ONLY = frozenset({"purchase_agreement", "earnest_money_receipt", "emd_withdrawal_proof"})
 
 
-def _not_borrower_facing(labels: list[str]) -> list[str]:
-    """Which of these documents are somebody else's to send (LP-839).
+def _other_party_documents(labels: list[str]) -> dict[str, str]:
+    """`{label: party}` for the documents here that somebody other than the borrower holds.
 
     THE ANSWER THE SCREEN COULD NOT WORK OUT. `missing_documents` is a list of LABELS and the
     responsible party lives in LP-800's catalog, so deriving this in the browser would be a second
-    copy of the rule that decides what enters a borrower's email — the rule `_is_borrower_facing`
-    already applies when the draft is built.
+    copy of the rule that decides whose email a document enters.
+
+    LP-841 — THE PARTY, NOT A TALLY OF ABSENCES. This returned a bare list and the row rendered it
+    as "not the borrower's to send, so it is on the needs list only" — true while a non-borrower
+    document was DISCARDED from the draft, and false the moment requests started routing. The
+    credit report is not missing from an email; it is in one, addressed to the lender. Naming the
+    party is the difference between telling a processor where their request went and telling them
+    it went nowhere.
 
     LABEL IN, LABEL OUT, so the caller can compare against `missing_documents` without a second
     mapping. `document_label` is the same function that produced them, so the round trip holds for
     every catalogued type; anything it cannot resolve is treated as the borrower's, which matches
-    `_is_borrower_facing`'s own default for an untyped need.
+    the draft builder's own default for an untyped need.
     """
     by_label = {document_label(document_type): document_type for document_type in CATALOG}
-    return [
-        label
-        for label in labels
-        if (document_type := by_label.get(label)) is not None
-        and get_guidance(document_type).responsible_party is not ResponsibleParty.BORROWER
-    ]
+    found: dict[str, str] = {}
+    for label in labels:
+        document_type = by_label.get(label)
+        if document_type is None:
+            continue
+        party = get_guidance(document_type).responsible_party
+        if party is not ResponsibleParty.BORROWER:
+            found[label] = party.value
+    return found
 
 
 def _missing_documents(
@@ -497,9 +506,12 @@ class RuleFindingPublic(BaseModel):
     #:
     #: MEASURED, AND IT IS NOT AN EDGE CASE: of the 43 documents any rule can put behind a Request
     #: button, 16 are somebody else's — the credit report, the appraisal, the closing disclosure, the
-    #: title commitment, the purchase agreement among them. Every one is correctly kept out of the
-    #: borrower draft, and every one looked identical to a request that landed in it.
-    documents_not_borrower: list[str] = Field(default_factory=list)
+    #: title commitment, the purchase agreement among them.
+    #:
+    #: LP-841 — `{label: party}`, where this was a bare list of labels. Until this ticket those 16
+    #: were kept out of the borrower's draft and put nowhere else, so a list of what was missing was
+    #: the whole answer. They now go to the party who holds them, and the row needs the name.
+    documents_other_party: dict[str, str] = Field(default_factory=dict)
     # LP-561 — would Apply actually change anything? Apply acts on `details["apply"]`, and a rule that
     # declares none would give a button that looks right and does nothing. Sent so the row can omit it
     # rather than offer a no-op.
@@ -576,7 +588,7 @@ class RuleFindingPublic(BaseModel):
             # LP-839 — LP-801's marker, read rather than added. It has been written at request time
             # since that ticket and nothing on the row looked at it.
             documents_requested=isinstance(details.get("docs_requested"), dict),
-            documents_not_borrower=_not_borrower_facing(
+            documents_other_party=_other_party_documents(
                 requested
                 if (requested := _requested_documents(details))
                 else _missing_documents(spec, documents_on_file or set(), loan_purpose=loan_purpose)
@@ -637,11 +649,14 @@ class DocumentRequestOutcome(BaseModel):
     contains something it does not.
     """
 
-    #: How many of this request's needs joined the borrower draft.
+    #: How many of this request's needs joined the BORROWER's draft.
     added_to_draft: int
-    #: How many did NOT, because they are not the borrower's to send (LP-800's responsible party).
-    #: They are on the needs list; LP-820 owns the paths that chase the other parties.
-    not_borrower_facing: int
+    #: LP-841 — how many went to each OTHER party's draft, keyed by party.
+    #:
+    #: This was `not_borrower_facing: int` — a count of what the borrower's email did not get. It is
+    #: a different fact now: nothing is discarded, so the answer is "the credit report is in a draft
+    #: to the lender", and a processor is owed the name rather than a tally of absences.
+    routed_elsewhere: dict[str, int] = Field(default_factory=dict)
 
 
 class VerificationStatusPublic(BaseModel):

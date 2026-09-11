@@ -80,6 +80,7 @@ const MESSAGE: TimelineEntry = {
   attachments: [{ name: "March_statement.pdf", disposition: "accepted" }],
   is_important: false,
   unread: true,
+  party: "borrower",
   detail: {},
 };
 
@@ -461,5 +462,85 @@ describe("when it happened (LP-838)", () => {
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(screen.getByText(/^Created .*ago$/)).toBeTruthy();
+  });
+});
+
+/**
+ * LP-841 — THE PARTY TABS.
+ *
+ * The reported shape was a request that reached nobody. Routing it to the right party's draft fixes
+ * the backend half; a draft in a bucket with no tab is the same invisibility with a different cause,
+ * so these assert that what exists is reachable.
+ */
+describe("the party tabs", () => {
+  function entry(over: Partial<TimelineEntry>): TimelineEntry {
+    return { ...MESSAGE, ...over };
+  }
+
+  it("shows a tab per party on the file and filters the list to it", async () => {
+    loaded([
+      entry({ id: "b1", party: "borrower", summary: "Documents we need" }),
+      entry({ id: "l1", party: "lender", summary: "Credit report request" }),
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    const lender = await screen.findByRole("tab", { name: /Lender/ });
+    expect(screen.getByRole("tab", { name: /Borrower/ })).toBeTruthy();
+    // Both rows are there before anyone clicks.
+    expect(screen.getByText("Documents we need")).toBeTruthy();
+
+    fireEvent.click(lender);
+
+    expect(screen.getByText("Credit report request")).toBeTruthy();
+    expect(screen.queryByText("Documents we need")).toBeNull();
+  });
+
+  it("offers no tab for a party this file has nothing with", async () => {
+    loaded([entry({ id: "b1", party: "borrower" })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    await screen.findByText(MESSAGE.summary);
+    // Five empty tabs on an ordinary purchase is the noise this derivation exists to avoid.
+    expect(screen.queryByRole("tab", { name: /Accountant/ })).toBeNull();
+  });
+
+  it("reaches a party the ticket never named", async () => {
+    // THE ONE THE FOUR-TAB READING WOULD HAVE HIDDEN. The request names borrower, employer, lender
+    // and title; the catalog also routes to an accountant, an agent and an insurer. A draft those
+    // produce must have a tab, or it exists where nobody can open it — the reported failure again.
+    loaded([
+      entry({ id: "b1", party: "borrower" }),
+      entry({ id: "c1", party: "cpa", summary: "P&L request" }),
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Accountant/ }));
+    expect(screen.getByText("P&L request")).toBeTruthy();
+  });
+
+  it("does not tell a processor on a tab that outlived its messages that the file is new", async () => {
+    // THE CASE THE PILL VERSION OF THIS TEST COULD NOT REACH. A selected tab is kept alive after
+    // its last entry goes (sent, deleted, re-fetched away) so it does not vanish from under the
+    // person standing on it — and that is the one state where the party tab alone empties the list
+    // while the status pill is still All. Measured: asserting this through the pill instead passed
+    // against a build with no party clause at all.
+    loaded([
+      entry({ id: "b1", party: "borrower" }),
+      entry({ id: "l1", party: "lender", status: "draft" }),
+    ]);
+    const view = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Lender/ }));
+    loaded([entry({ id: "b1", party: "borrower" })]);
+    view.rerender(<TimelinePanel fileId="LF-JR4T" />);
+
+    expect(screen.queryByText(/Nothing has happened yet/)).toBeNull();
+    expect(screen.getByText(/Nothing with the Lender/)).toBeTruthy();
+  });
+
+  it("hides the strip entirely when the file has one correspondent", async () => {
+    loaded([entry({ id: "b1", party: "borrower" })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    await screen.findByText(MESSAGE.summary);
+    expect(screen.queryByRole("tab", { name: "Everyone" })).toBeNull();
   });
 });

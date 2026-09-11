@@ -58,6 +58,12 @@ from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrig
 from app.models.upload_link import UploadLink, hash_token
 from app.models.user import User
 from app.services.needs_items import create_needs_item
+from app.services.party_requests import (
+    PARTY_ROLE,
+    party_addresses,
+    party_for,
+    template_key_for,
+)
 from app.services.upload_links import mint_upload_link, revoke_link
 from app.verification.rule_engine.reasons import document_label
 
@@ -68,22 +74,56 @@ DRAFT_TEMPLATE = TemplateKey.INITIAL_DOCUMENTATION_REQUEST
 
 
 @dataclass(frozen=True)
-class DraftUpdate:
-    """What an add actually did.
+class PartyDraft:
+    """One party's share of a request (LP-841)."""
 
-    ``skipped_not_borrower`` is returned rather than swallowed. A processor who requested five
-    documents and sees three in the draft is owed an answer, and the answer is not "an error" — the
-    other two are somebody else's to chase. The needs list still carries them.
-
-    ``draft`` IS NONE when every need was somebody else's and no draft was already open. See the
-    guard in ``add_needs_to_draft``.
-    """
-
-    #: None when there was nothing for the borrower and no draft already open — see below.
+    party: ResponsibleParty
+    #: None when this party is the PROCESSOR — nobody to email — or when the request added nothing
+    #: new and no draft was already open for them.
     draft: Communication | None
     added: tuple[UUID, ...] = ()
     already_present: tuple[UUID, ...] = ()
-    skipped_not_borrower: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True)
+class DraftUpdate:
+    """What an add actually did, per party.
+
+    ONE REQUEST CAN TOUCH SEVERAL DRAFTS, which is why this is a collection. CR-6 wants a credit
+    report and a closing disclosure — both the lender's; IN-8 mixes a pay stub with a VOE, which is
+    the borrower's and the employer's. A single `draft` field could only ever describe one of them,
+    and what it described before this ticket was the borrower's, with the rest discarded.
+
+    `skipped_not_borrower` IS GONE, and its absence is the ticket. Nothing is skipped any more —
+    every need reaches whoever holds it, so "we did not email the borrower about this" stopped being
+    the interesting fact and "here is the draft to the lender" took its place.
+    """
+
+    parties: tuple[PartyDraft, ...] = ()
+
+    @property
+    def borrower(self) -> PartyDraft | None:
+        """This request's effect on the BORROWER's draft, if it had one.
+
+        A convenience for the callers that legitimately care about one party — the badge, the
+        preview — and never a way to pretend the others did not happen.
+        """
+        return next((p for p in self.parties if p.party is ResponsibleParty.BORROWER), None)
+
+    @property
+    def draft(self) -> Communication | None:
+        """The borrower's draft, for callers that predate the split."""
+        borrower = self.borrower
+        return borrower.draft if borrower else None
+
+    @property
+    def added(self) -> tuple[UUID, ...]:
+        """Everything this request put into a draft, across every party."""
+        return tuple(need_id for party in self.parties for need_id in party.added)
+
+    @property
+    def already_present(self) -> tuple[UUID, ...]:
+        return tuple(need_id for party in self.parties for need_id in party.already_present)
 
 
 def _is_borrower_facing(need: NeedsItem) -> bool:
@@ -295,29 +335,83 @@ def finalise_draft_body(body: str, *, borrower_first_name: str, processor_name: 
     )
 
 
-def _open_drafts_stmt(loan_file_id: UUID):  # type: ignore[no-untyped-def]
-    """The file's unsent document-request drafts, newest first."""
+#: The party whose documents nobody can be emailed about (LP-841).
+#:
+#: LP-800 gives 24 of 166 types to the PROCESSOR — the condo questionnaire, the HOA certification, a
+#: verbal VOE, the 1003. "We order it ourselves" is not a message to anybody, so these never become a
+#: draft. They are real work and stay on the needs list, which is where a processor tracks them.
+NO_RECIPIENT = ResponsibleParty.PROCESSOR
+
+
+def draft_template_key(party: ResponsibleParty) -> str:
+    """The template key a draft to this party is filed under (LP-841).
+
+    THE BORROWER KEEPS `initial_documentation_request`, and the asymmetry is deliberate rather than
+    untidy: that key is on every draft and every sent message this product has ever produced, and it
+    is what ADR-401's version pin resolves against. Renaming it to match the pattern would orphan
+    every historical row's template + version pair, which is the one thing that pin exists to make
+    impossible.
+    """
+    if party is ResponsibleParty.BORROWER:
+        return DRAFT_TEMPLATE.value
+    return template_key_for(party)
+
+
+def party_for_draft_template(template_key: str | None) -> ResponsibleParty | None:
+    """The inverse of :func:`draft_template_key` — which party's bucket a message belongs in.
+
+    THE BUCKETS ARE A SERVER CONCERN, for the reason the timeline filter already is: a tab computed
+    from a template key on the client is a second definition of "the lender's messages" that nothing
+    forces to agree with the one the draft was filed under. When they drift, a draft exists and its
+    tab is empty.
+
+    Returns None for a template this function does not recognise — a notification, a status update,
+    anything that is not a document request. Those belong in no party bucket, and guessing one would
+    put a message in front of somebody it was never about.
+    """
+    if template_key is None:
+        return None
+    if template_key == DRAFT_TEMPLATE.value:
+        return ResponsibleParty.BORROWER
+    for party in ResponsibleParty:
+        if template_key == template_key_for(party):
+            return party
+    return None
+
+
+def _open_drafts_stmt(loan_file_id: UUID, party: ResponsibleParty):  # type: ignore[no-untyped-def]
+    """This party's unsent drafts on the file, newest first."""
     return only_active(
         select(Communication).where(
             Communication.loan_file_id == loan_file_id,
             Communication.status == CommunicationStatus.DRAFT,
-            Communication.template_key == DRAFT_TEMPLATE.value,
+            Communication.template_key == draft_template_key(party),
         ),
         Communication,
     ).order_by(Communication.created_at.desc(), Communication.id.desc())
 
 
-async def open_drafts(db: AsyncSession, *, loan_file_id: UUID) -> list[Communication]:
+async def open_drafts(
+    db: AsyncSession,
+    *,
+    loan_file_id: UUID,
+    party: ResponsibleParty = ResponsibleParty.BORROWER,
+) -> list[Communication]:
     """Every unsent document-request draft on the file, newest first (LP-832).
 
     ORDERED, AND THE TIEBREAK MATTERS. Two drafts created in the same transaction share a
     `created_at` to microsecond precision often enough to see, and "the newest" has to be one row
     rather than whichever the planner returns.
     """
-    return list((await db.execute(_open_drafts_stmt(loan_file_id))).scalars().all())
+    return list((await db.execute(_open_drafts_stmt(loan_file_id, party))).scalars().all())
 
 
-async def get_open_draft(db: AsyncSession, *, loan_file_id: UUID) -> Communication | None:
+async def get_open_draft(
+    db: AsyncSession,
+    *,
+    loan_file_id: UUID,
+    party: ResponsibleParty = ResponsibleParty.BORROWER,
+) -> Communication | None:
     """The file's NEWEST unsent document-request draft, or None.
 
     LP-832 — THIS USED TO BE `scalar_one_or_none()`, AND THAT DID NOT MEAN "the one draft". It meant
@@ -332,7 +426,7 @@ async def get_open_draft(db: AsyncSession, *, loan_file_id: UUID) -> Communicati
     A caller that wants ALL of them — the drafts list, the count in the header — uses
     :func:`open_drafts`. Nothing should reach for this one to count with.
     """
-    return (await db.execute(_open_drafts_stmt(loan_file_id).limit(1))).scalars().first()
+    return (await db.execute(_open_drafts_stmt(loan_file_id, party).limit(1))).scalars().first()
 
 
 async def _needs_in_draft(db: AsyncSession, *, draft: Communication) -> list[NeedsItem]:
@@ -486,7 +580,9 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     await db.flush()
 
 
-async def _outstanding_needs(db: AsyncSession, *, loan_file_id: UUID) -> list[NeedsItem]:
+async def _outstanding_needs(
+    db: AsyncSession, *, loan_file_id: UUID, party: ResponsibleParty
+) -> list[NeedsItem]:
     """Every need carried by an unsent draft on this file, oldest membership first (LP-832).
 
     "EVERYTHING REQUESTED SINCE THE LAST SEND", expressed as the thing that is actually true rather
@@ -516,7 +612,7 @@ async def _outstanding_needs(db: AsyncSession, *, loan_file_id: UUID) -> list[Ne
             .where(
                 Communication.loan_file_id == loan_file_id,
                 Communication.status == CommunicationStatus.DRAFT,
-                Communication.template_key == DRAFT_TEMPLATE.value,
+                Communication.template_key == draft_template_key(party),
                 Communication.deleted_at.is_(None),
                 NeedsItem.deleted_at.is_(None),
             )
@@ -566,58 +662,124 @@ async def add_needs_to_draft(
     compute the outstanding set from the same pre-state. A row lock on the loan file makes the second
     request see the first one's draft.
     """
-    borrower_facing = [need for need in needs if _is_borrower_facing(need)]
-    skipped = tuple(need.id for need in needs if not _is_borrower_facing(need))
+    # LP-841 — EVERY NEED GOES TO WHOEVER HOLDS IT. This kept the borrower's and discarded the rest:
+    # 53 of 166 document types belong to somebody else, so a request for a credit report, an
+    # appraisal or a title commitment produced a needs item and no message to anybody.
+    #
+    # `party_for` is the routing rule and it already existed — LP-820 wrote it, and it is the same
+    # rule `_is_borrower_facing` was applying to one party. Grouping by it rather than filtering on
+    # it is the whole change.
+    by_party: dict[ResponsibleParty, list[NeedsItem]] = {}
+    for need in needs:
+        by_party.setdefault(party_for(need), []).append(need)
 
     # THE LOCK, before anything is read. Held to the end of the transaction, so a concurrent request
-    # on the same file waits here and then computes the outstanding set including this one's draft.
+    # on the same file waits here and then computes the outstanding set including this one's drafts.
     await db.execute(select(LoanFile.id).where(LoanFile.id == loan_file.id).with_for_update())
 
-    outstanding = await _outstanding_needs(db, loan_file_id=loan_file.id)
+    results: list[PartyDraft] = []
+    for party, party_needs in by_party.items():
+        if party is NO_RECIPIENT:
+            # NOBODY TO EMAIL. "We order it ourselves" is not a message, so these never become a
+            # draft — they are real work and the needs list is where a processor tracks them.
+            results.append(PartyDraft(party=party, draft=None, added=(), already_present=()))
+            continue
+        results.append(
+            await _add_to_party_draft(
+                db,
+                loan_file=loan_file,
+                party=party,
+                needs=party_needs,
+                actor_user_id=actor_user_id,
+            )
+        )
+    return DraftUpdate(parties=tuple(results))
+
+
+async def _party_address(
+    db: AsyncSession, *, loan_file: LoanFile, party: ResponsibleParty
+) -> str | None:
+    """Where this party's draft is addressed, or None when nobody has said (LP-841).
+
+    NONE IS AN ORDINARY ANSWER, NOT A REFUSAL. `build_party_draft` raised on a missing address —
+    "a draft addressed to nobody is a message that will never be sent" — and the processor's answer
+    is the opposite: keep it empty. LP-820 measured that 13 of 166 document types have no address
+    anywhere in the schema, so refusing means those documents never produce a message at all, and
+    the message is the part a processor wants. An address can be typed into the modal before
+    sending; a message nobody wrote cannot be recovered.
+
+    The borrower is resolved through their own row rather than the participants table, because that
+    is where their address lives and `draft_for_reading` already suggests it.
+    """
+    if party is ResponsibleParty.BORROWER:
+        borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+        return borrower.email if borrower else None
+    addresses = await party_addresses(db, loan_file=loan_file)
+    found = addresses.get(PARTY_ROLE[party]) if party in PARTY_ROLE else None
+    return found[0] if found else None
+
+
+async def _add_to_party_draft(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    party: ResponsibleParty,
+    needs: list[NeedsItem],
+    actor_user_id: UUID,
+) -> PartyDraft:
+    """One party's share of a request, in one new draft (LP-841).
+
+    THE SAME RULE PER BUCKET, which is what the processor asked for: an open draft for this party
+    means the next request creates a NEW one carrying that party's outstanding documents plus
+    whatever is new; a draft that has been marked sent takes its documents out of the set, so the
+    next request starts fresh.
+
+    NO ADDRESS IS NOT A REFUSAL. `build_party_draft` raised when a party had none — "a draft
+    addressed to nobody is a message that will never be sent" — and the processor's answer is the
+    opposite: keep it empty, because the message is the part they want. A recipient can be typed in
+    the modal; a message that was never written cannot be recovered.
+    """
+    outstanding = await _outstanding_needs(db, loan_file_id=loan_file.id, party=party)
     carried = {need.id for need in outstanding}
-    fresh = [need for need in borrower_facing if need.id not in carried]
-    already = tuple(need.id for need in borrower_facing if need.id in carried)
+    fresh = [need for need in needs if need.id not in carried]
+    already = tuple(need.id for need in needs if need.id in carried)
 
     if not fresh:
-        # LP-809 REVIEW — DO NOT MINT AN EMPTY DRAFT FOR A REQUEST THE BORROWER HAS NO PART IN.
-        # Requesting the appraisal — or any of the 34 rules whose documents are only the lender's,
-        # the title company's or the employer's — used to create an OUTBOUND DRAFT with no documents
-        # in it: an email waiting to be sent, listing nothing, which LP-816 would send.
-        #
-        # LP-832 widens the same guard to the other way of asking for nothing: a second click on a
-        # finding already carried. Both mean "this request added no document", and both must leave
-        # the list as it was.
-        return DraftUpdate(
-            draft=await get_open_draft(db, loan_file_id=loan_file.id),
+        # NOTHING NEW MEANS NO DRAFT. A second click on the same finding adds nothing, and minting a
+        # duplicate with identical contents would put a second identical email in the list for a
+        # request that did not happen.
+        return PartyDraft(
+            party=party,
+            draft=await get_open_draft(db, loan_file_id=loan_file.id, party=party),
+            added=(),
             already_present=already,
-            skipped_not_borrower=skipped,
         )
 
     draft = Communication(
         loan_file_id=loan_file.id,
         direction=CommunicationDirection.OUTBOUND,
         status=CommunicationStatus.DRAFT,
-        template_key=DRAFT_TEMPLATE.value,
+        template_key=draft_template_key(party),
         # Stamped by `_regenerate` below, from the render itself.
         template_version=None,
+        recipient=await _party_address(db, loan_file=loan_file, party=party),
         initiated_by_user_id=actor_user_id,
     )
     db.add(draft)
     await db.flush()
 
-    # ORDER IS THE ORDER A BORROWER READS. The carried needs first, oldest membership first, then
-    # what this request adds — so a processor who asked for three things on Tuesday and one on
-    # Wednesday sees the new one at the bottom rather than the list reshuffled.
+    # ORDER IS THE ORDER A READER READS. What this party already had first, oldest membership first,
+    # then what this request adds.
     for need in [*outstanding, *fresh]:
         db.add(CommunicationNeedsItem(communication_id=draft.id, needs_item_id=need.id))
     await db.flush()
 
     await _regenerate(db, draft=draft, loan_file=loan_file)
-    return DraftUpdate(
+    return PartyDraft(
+        party=party,
         draft=draft,
         added=tuple(need.id for need in fresh),
         already_present=already,
-        skipped_not_borrower=skipped,
     )
 
 
@@ -685,12 +847,23 @@ async def compose_request(
     already in an unsent draft should not put it in the email twice, and `add_needs_to_draft` would
     dedupe the membership anyway — this stops the redundant needs ROW, which the dedupe does not.
     """
-    outstanding = {
-        need.needs_type for need in await _outstanding_needs(db, loan_file_id=loan_file.id)
-    }
+    # LP-841 — PER PARTY, because "already outstanding" is now a question about a particular draft.
+    # A closing disclosure sitting in the lender's draft must not block a bank statement from
+    # joining the borrower's, and checking one file-wide set would have coupled them.
+    outstanding: dict[ResponsibleParty, set[str | None]] = {}
+
+    async def _is_outstanding(document_type: str) -> bool:
+        party = get_guidance(document_type).responsible_party
+        if party not in outstanding:
+            outstanding[party] = {
+                need.needs_type
+                for need in await _outstanding_needs(db, loan_file_id=loan_file.id, party=party)
+            }
+        return document_type in outstanding[party]
+
     created: list[NeedsItem] = []
     for document_type in document_types:
-        if document_type in outstanding:
+        if await _is_outstanding(document_type):
             continue
         created.append(
             await create_needs_item(

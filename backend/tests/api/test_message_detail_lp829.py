@@ -358,7 +358,12 @@ async def test_a_borrower_draft_is_editable_and_suggests_the_borrower(
     ).json()
 
     assert payload["is_editable"] is True
-    assert payload["suggested_recipient"] == "sarah@example.com"
+    # LP-841 — THE ADDRESS IS ON THE DRAFT NOW, not merely suggested. Every party's draft is created
+    # with its own recipient, the borrower's included, so `counterparty` carries it and
+    # `suggested_recipient` — which only fires when nobody has been addressed — is correctly empty.
+    # What matters to the modal is unchanged and is asserted as the modal reads it: address first
+    # from the row, then from the suggestion.
+    assert (payload["counterparty"] or payload["suggested_recipient"]) == "sarah@example.com"
 
 
 async def test_a_sent_message_is_not_editable(client: AsyncClient, db: AsyncSession) -> None:

@@ -15,6 +15,7 @@ from string import Template
 from uuid import uuid4
 
 import pytest
+from app.documents.catalog import ResponsibleParty
 from app.models import Company, LoanProgram
 from app.models.base import utcnow
 from app.models.communication import Communication, CommunicationStatus
@@ -189,9 +190,23 @@ async def test_a_need_the_borrower_does_not_hold_is_not_added(db_session: AsyncS
         db_session, loan_file=loan_file, needs=[theirs, not_theirs], actor_user_id=actor
     )
 
-    assert result.added == (theirs.id,)
-    assert result.skipped_not_borrower == (not_theirs.id,)
-    assert "Appraisal" not in result.draft.body
+    # LP-841 — THE APPRAISAL IS NOT DISCARDED ANY MORE, IT IS ROUTED. This asserted
+    # `skipped_not_borrower`, which is the field that ticket removed: a request for a document the
+    # borrower does not hold now produces a draft to whoever does, rather than a needs item and no
+    # message to anybody.
+    #
+    # What this test was protecting is unchanged and is asserted below: the appraisal must not be in
+    # an email addressed to the BORROWER. That was always the point; "and nothing else happens" was
+    # the limitation, not the requirement.
+    borrower = result.borrower
+    assert borrower is not None and borrower.draft is not None
+    assert borrower.added == (theirs.id,)
+    assert "Appraisal" not in borrower.draft.body
+
+    lender = next(p for p in result.parties if p.party is ResponsibleParty.LENDER)
+    assert lender.added == (not_theirs.id,)
+    assert lender.draft is not None
+    assert "Appraisal" in (lender.draft.body or "")
 
 
 async def test_a_skipped_need_still_exists_on_the_file(db_session: AsyncSession) -> None:
@@ -734,3 +749,54 @@ def test_a_number_in_a_note_does_not_license_the_model_to_state_one() -> None:
 
     # THE SPECIFIC REASON, not merely "rejected": that is what makes this about licensing.
     assert rejection_reason(facts, composition) == "unsupported_numbers:1"
+
+
+async def test_a_processor_owned_document_gets_no_draft_at_all(db_session: AsyncSession) -> None:
+    """LP-841 — THE ONE PARTY THAT IS NOT A RECIPIENT.
+
+    Routing every requested document to its responsible party's draft is the whole ticket, and the
+    catalog's 24 processor-owned types are the exception: a tax transcript is ordered by the
+    processor from the IRS, so a draft addressed to the processor would be an email a person writes
+    to themselves. It stays a needs item and nothing else.
+
+    THE POSITIVE CONTROL IS IN THE SAME CALL. Without it this passes on a build that creates no
+    drafts for anybody — which is the state this ticket exists to fix, and it would read as green.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    mine = await _need(db_session, loan_file, title="Tax transcripts", needs_type="tax_transcript")
+    theirs = await _need(db_session, loan_file, title="Credit report", needs_type="credit_report")
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[mine, theirs], actor_user_id=actor
+    )
+
+    by_party = {p.party.value: p for p in result.parties}
+    # The processor's half is REPORTED — the caller has to be able to say where the request went —
+    # and carries no draft. Asserting its absence from the list instead would pass on a build that
+    # silently dropped it, which is the old discard behaviour wearing this ticket's name.
+    assert by_party["processor"].draft is None, "an email the processor writes to themselves"
+    # The control: the lender's half of the same call did produce one.
+    assert by_party["lender"].draft is not None
+
+
+def test_every_party_bucket_round_trips_to_the_key_its_drafts_are_filed_under() -> None:
+    """LP-841 — THE TABS AND THE FILING ARE ONE DECISION.
+
+    A draft is filed under `draft_template_key(party)` and shown under `party_for_draft_template`.
+    If those two ever disagree for one party, that party's drafts exist and its tab is empty — a
+    failure with no error, on a screen whose whole job is to show the processor what is waiting.
+
+    The borrower is the one that would break it: their key is `initial_documentation_request`, not
+    the `document_request_borrower` the pattern implies (ADR-401 pins the historical key), so the
+    inverse cannot be "strip the prefix".
+    """
+    from app.documents.catalog import ResponsibleParty
+    from app.services.email_draft import draft_template_key, party_for_draft_template
+
+    for party in ResponsibleParty:
+        assert party_for_draft_template(draft_template_key(party)) is party, party
+
+    # A template that is not a document request belongs in NO bucket. Without this the function
+    # could return BORROWER for everything and still pass the loop above.
+    assert party_for_draft_template("password_reset") is None
+    assert party_for_draft_template(None) is None

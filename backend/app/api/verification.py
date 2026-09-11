@@ -904,7 +904,7 @@ async def bulk_request_docs_endpoint(
     return status_public.model_copy(
         update={
             "document_request": DocumentRequestOutcome(
-                added_to_draft=outcome.added, not_borrower_facing=outcome.not_borrower
+                added_to_draft=outcome.added, routed_elsewhere=outcome.elsewhere
             )
         }
     )
@@ -1158,7 +1158,7 @@ async def request_docs_endpoint(
     return status_public.model_copy(
         update={
             "document_request": DocumentRequestOutcome(
-                added_to_draft=outcome.added, not_borrower_facing=outcome.not_borrower
+                added_to_draft=outcome.added, routed_elsewhere=outcome.elsewhere
             )
         }
     )

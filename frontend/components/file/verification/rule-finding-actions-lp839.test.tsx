@@ -23,7 +23,7 @@ function finding(over: Partial<RuleFinding> = {}): RuleFinding {
     resolution_status: "open",
     missing_documents: ["verification of employment"],
     documents_requested: false,
-    documents_not_borrower: [],
+    documents_other_party: {},
     can_apply: false,
     ratification_pending: false,
     ...over,
@@ -45,7 +45,7 @@ describe("before a request", () => {
     // VOE case: `voe`'s responsible party is the EMPLOYER.
     render(
       <RuleFindingActions
-        finding={finding({ documents_not_borrower: ["verification of employment"] })}
+        finding={finding({ documents_other_party: { "verification of employment": "employer" } })}
         onAct={vi.fn()}
       />,
     );
@@ -78,21 +78,24 @@ describe("after a request", () => {
     expect(screen.getByText(/in the latest draft/)).toBeTruthy();
   });
 
-  it("says it is on the NEEDS LIST when the draft never took it", () => {
-    // THE REPORTED CASE. "Requested" and "in the draft" are different claims, and for 16 of 43
-    // documents only the first is true — a row that said "in the draft" for a VOE would be the same
-    // untrue confirmation, moved from a toast onto the page.
+  it("names the party whose draft took it, when it was not the borrower's", () => {
+    // THE REPORTED CASE. "Requested" and "in the BORROWER's draft" are different claims, and for 16
+    // of 43 documents only the first is true — a row that said "in the latest draft" for a VOE
+    // would be the same untrue confirmation, moved from a toast onto the page.
+    //
+    // LP-841 — AND THE OPPOSITE SENTENCE IS NOW THE FALSE ONE. This asserted "not the borrower's to
+    // send", which read as "so nobody was asked". The VOE is in a draft to the employer.
     render(
       <RuleFindingActions
         finding={finding({
           documents_requested: true,
-          documents_not_borrower: ["verification of employment"],
+          documents_other_party: { "verification of employment": "employer" },
         })}
         onAct={vi.fn()}
       />,
     );
 
-    expect(screen.getByText(/not the borrower's to send/)).toBeTruthy();
+    expect(screen.getByText(/in a draft for the employer/)).toBeTruthy();
     expect(screen.queryByText(/in the latest draft/)).toBeNull();
   });
 
@@ -105,14 +108,14 @@ describe("after a request", () => {
         finding={finding({
           documents_requested: true,
           missing_documents: ["pay stub", "verification of employment"],
-          documents_not_borrower: ["verification of employment"],
+          documents_other_party: { "verification of employment": "employer" },
         })}
         onAct={vi.fn()}
       />,
     );
 
     expect(screen.getByText(/in the latest draft/)).toBeTruthy();
-    expect(screen.getByText(/not the borrower's to send/)).toBeTruthy();
+    expect(screen.getByText(/in a draft for the employer/)).toBeTruthy();
   });
 
   it("says nothing about a request that has not happened", () => {

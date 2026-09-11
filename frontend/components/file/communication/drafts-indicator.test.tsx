@@ -33,6 +33,7 @@ function draft(over: Partial<TimelineEntry> = {}): TimelineEntry {
     attachments: [],
     is_important: false,
     unread: false,
+    party: "borrower",
     detail: {},
     ...over,
   };

@@ -1841,7 +1841,7 @@ async def test_a_request_says_what_the_draft_took(client: AsyncClient, db: Async
     )
 
     assert resp.status_code == 200
-    assert resp.json()["document_request"] == {"added_to_draft": 1, "not_borrower_facing": 0}
+    assert resp.json()["document_request"] == {"added_to_draft": 1, "routed_elsewhere": {}}
 
 
 async def test_a_non_borrower_request_is_reported_as_going_elsewhere(
@@ -1878,7 +1878,10 @@ async def test_a_non_borrower_request_is_reported_as_going_elsewhere(
     assert resp.status_code == 200
     outcome = resp.json()["document_request"]
     assert outcome["added_to_draft"] == 0, "an appraisal must not enter the borrower's email"
-    assert outcome["not_borrower_facing"] == 1
+    # LP-841 — AND IT REACHES SOMEBODY. This asserted `not_borrower_facing: 1`, a count of what the
+    # borrower's email did not get; the appraisal is the LENDER's and now lands in a draft to them.
+    # The name is the part a processor is owed — "1 went elsewhere" does not say where.
+    assert outcome["routed_elsewhere"] == {"lender": 1}
 
 
 async def test_an_ordinary_action_carries_no_request_outcome(
@@ -1958,7 +1961,7 @@ async def test_a_second_click_on_a_finding_that_names_no_document_does_not_ask_t
     await db.refresh(draft)
     assert (draft.body or "").count(ask) == 1, "the borrower's email asks for the same thing twice"
     # And the click says so rather than claiming an addition.
-    assert second.json()["document_request"] == {"added_to_draft": 0, "not_borrower_facing": 0}
+    assert second.json()["document_request"] == {"added_to_draft": 0, "routed_elsewhere": {}}
 
 
 async def test_two_findings_that_name_no_document_get_their_own_asks(
@@ -2050,7 +2053,7 @@ async def test_the_row_says_a_request_happened_and_where_it_went(
     `documents_requested` is LP-801's marker, written at request time since that ticket and read by
     nothing; the row offered an identical button before and after.
 
-    `documents_not_borrower` is the one the client cannot work out: responsible party lives in the
+    `documents_other_party` is the one the client cannot work out: responsible party lives in the
     server's catalog and `missing_documents` is a list of LABELS. Measured over the rule specs, **16
     of the 43 documents any rule can request are somebody else's to send** — including the credit
     report, the appraisal and the title commitment — so this is the common case, not the edge.
@@ -2086,7 +2089,12 @@ async def test_the_row_says_a_request_happened_and_where_it_went(
     # The control on the field below: it is populated because the document is somebody else's, not
     # because the endpoint fills it in regardless.
     assert row["missing_documents"], "IN-8 declares documents; the fixture is not exercising this"
-    assert row["documents_not_borrower"] == row["missing_documents"]
+    # LP-841 — `{label: party}`, so this asserts the NAME as well as the membership. A bare set
+    # comparison passed on a build that returned every label mapped to "borrower", which is the
+    # one answer that would put a lender document in the borrower's email.
+    assert set(row["documents_other_party"]) == set(row["missing_documents"])
+    # IN-8 asks for a VOE, which the EMPLOYER holds.
+    assert set(row["documents_other_party"].values()) == {"employer"}
 
     await client.post(
         f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
@@ -2130,4 +2138,116 @@ async def test_a_borrower_document_is_not_reported_as_somebody_elses(
     row = next(f for f in payload["rule_findings"] if f["id"] == str(finding.id))
 
     assert row["missing_documents"]
-    assert row["documents_not_borrower"] == []
+    assert row["documents_other_party"] == {}
+
+
+async def test_a_pending_need_in_no_draft_can_still_be_requested(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-841 — THE REPORTED DEAD END, at the layer it was reported from.
+
+    On LF-JR4T the rate lock agreement, the closing disclosure and the credit report had been PENDING
+    on the needs list since the rule engine created them, and NONE was in a draft. The duplicate
+    check asked "is there a pending need of this type?" and answered yes, so every click was refused
+    — while the thing it was protecting had never been in a message. Permanently stuck, with no way
+    to ask for the document.
+
+    "Already asked" means IN A DRAFT or ALREADY SENT. A pending need that reached nobody is not a
+    request that happened.
+    """
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    from app.models.needs_item import NeedsItem, NeedsItemOrigin
+
+    # The state the engine leaves behind: a need, pending, in no draft.
+    db.add(
+        NeedsItem(
+            loan_file_id=loan_file.id,
+            title="Bank statements",
+            needs_type="bank_statement",
+            origin=NeedsItemOrigin.AI_REASONING,
+        )
+    )
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="AS-1",  # wants a bank statement
+        message="assets could not be verified",
+        subject_key="loan",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.ASSETS,
+        confidence=1.0,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        details={},
+    )
+    db.add(finding)
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["document_request"]["added_to_draft"] == 1, (
+        "a pending need that is in no draft still cannot be asked for"
+    )
+
+
+async def test_a_lender_document_lands_in_a_lender_draft(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-841 — THE TICKET. A request for somebody else's document produced a needs item and no
+    message to anybody; 53 of 166 types are somebody else's.
+
+    CR-6 wants a credit report and a closing disclosure, both the LENDER's.
+    """
+    from app.documents.catalog import ResponsibleParty
+    from app.services.email_draft import draft_template_key
+
+    company, _user, token = await _user_and_token(db, slug="acme", email="u@acme.com")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    finding = Finding(
+        loan_file_id=loan_file.id,
+        rule_id="CR-6",
+        message="the file does not establish the credit position",
+        subject_key="loan",
+        load_bearing_tags=[],
+        status=FindingStatus.YELLOW,
+        category=FindingCategory.CREDIT,
+        confidence=1.0,
+        evaluation_outcome=EvaluationOutcome.COULDNT_CHECK,
+        details={},
+    )
+    db.add(finding)
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
+        headers=_auth(token),
+        json={"note": None},
+    )
+
+    assert resp.status_code == 200
+    outcome = resp.json()["document_request"]
+    assert outcome["added_to_draft"] == 0, "the lender's documents must not enter a borrower email"
+    assert outcome["routed_elsewhere"] == {"lender": 2}
+
+    drafts = (
+        (
+            await db.execute(
+                select(Communication).where(
+                    Communication.loan_file_id == loan_file.id,
+                    Communication.template_key == draft_template_key(ResponsibleParty.LENDER),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(drafts) == 1
+    # NO ADDRESS IS NOT A REFUSAL — the processor's own instruction. A draft with an empty To is a
+    # message they can write and address; a refusal is a message nobody ever writes.
+    assert drafts[0].recipient is None
+    assert "credit report" in (drafts[0].body or "").lower()

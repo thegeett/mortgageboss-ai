@@ -22,6 +22,17 @@ import type { VerificationStatus } from "@/lib/types/verification";
  *
  * One module so a third surface cannot invent a third sentence.
  */
+/** The party names as a processor says them, not as the catalog keys them. */
+const PARTY_NOUN: Record<string, string> = {
+  borrower: "borrower",
+  employer: "employer",
+  lender: "lender",
+  title: "title company",
+  cpa: "accountant",
+  agent: "agent",
+  insurer: "insurer",
+};
+
 export function requestConsequence(status: VerificationStatus | undefined): string {
   // TOLERATES NO STATUS AT ALL, which is not defensiveness for its own sake: this now runs in two
   // mutation handlers, and a toast that throws takes the confirmation with it — leaving a processor
@@ -31,20 +42,24 @@ export function requestConsequence(status: VerificationStatus | undefined): stri
   if (!outcome) {
     return "On the needs list, and whatever the borrower can send is in the file's email draft. The finding stays open until it is met.";
   }
-  const { added_to_draft: added, not_borrower_facing: elsewhere } = outcome;
+  const { added_to_draft: added, routed_elsewhere: elsewhere } = outcome;
   const parts: string[] = [];
   if (added > 0) {
     parts.push(
       added === 1
-        ? "1 document was added to the file's email draft"
-        : `${added} documents were added to the file's email draft`,
+        ? "1 document was added to the borrower's email draft"
+        : `${added} documents were added to the borrower's email draft`,
     );
   }
-  if (elsewhere > 0) {
+  // LP-841 — NAMES WHO, because there is now a who. This said "N are not the borrower's to send, so
+  // they are on the needs list only", which was true while those documents were dropped from the
+  // draft and put nowhere. They go to the party who holds them now, and the old sentence tells a
+  // processor their request reached nobody in exactly the case where it reached somebody.
+  for (const [party, count] of Object.entries(elsewhere ?? {})) {
     parts.push(
-      elsewhere === 1
-        ? "1 is not the borrower's to send, so it is on the needs list only"
-        : `${elsewhere} are not the borrower's to send, so they are on the needs list only`,
+      count === 1
+        ? `1 went to a draft for the ${PARTY_NOUN[party] ?? party}`
+        : `${count} went to a draft for the ${PARTY_NOUN[party] ?? party}`,
     );
   }
   if (parts.length === 0) {

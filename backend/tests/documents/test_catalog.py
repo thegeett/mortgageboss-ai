@@ -380,9 +380,9 @@ def test_every_matched_slug_is_actually_in_the_catalog() -> None:
 
 
 def test_no_two_document_types_share_a_label() -> None:
-    """LP-839 REVIEW — `_not_borrower_facing` round-trips through labels, so uniqueness is load-bearing.
+    """LP-839 REVIEW — `_other_party_documents` round-trips through labels, so uniqueness is load-bearing.
 
-    `schemas/verification._not_borrower_facing` builds `{document_label(t): t for t in CATALOG}` to get
+    `schemas/verification._other_party_documents` builds `{document_label(t): t for t in CATALOG}` to get
     from a label back to a type, because `missing_documents` carries labels and the responsible party
     lives on the type. A dict comprehension keeps the LAST writer, so two types sharing a label would
     silently resolve to one of them — and if their parties differed, the screen would tell a processor
@@ -394,7 +394,7 @@ def test_no_two_document_types_share_a_label() -> None:
 
     A COLLISION IS NOT NECESSARILY A BUG IN THE CATALOG — two types may deserve the same human name.
     It is a bug in reading a label as an identity, and this failing is the signal to give
-    `_not_borrower_facing` the type rather than the label.
+    `_other_party_documents` the type rather than the label.
     """
     from collections import Counter
 
@@ -405,7 +405,7 @@ def test_no_two_document_types_share_a_label() -> None:
 
     assert not shared, (
         f"{len(shared)} label(s) are produced by more than one document type: {sorted(shared)}. "
-        "`_not_borrower_facing` maps a label back to a type and would silently pick one of them."
+        "`_other_party_documents` maps a label back to a type and would silently pick one of them."
     )
     # The control: the comprehension actually ran over the catalog. An empty CATALOG would satisfy
     # the assertion above and prove nothing.

@@ -154,9 +154,13 @@ export interface RuleFinding {
    *
    * Served, because responsible party lives in the server's catalog and these are LABELS. 16 of the
    * 43 documents a rule can request are somebody else's — the credit report, the appraisal, the
-   * title commitment among them — and every one is correctly kept out of the borrower's draft.
+   * title commitment among them.
+   *
+   * LP-841 — `{label: party}`, where this was a list of labels. Those 16 used to be kept out of the
+   * borrower's draft and put nowhere else, so naming them was the whole answer. They now go to the
+   * party who holds them, and a row that says only "not the borrower's" is now false.
    */
-  documents_not_borrower?: string[];
+  documents_other_party?: Record<string, string>;
   /** Would Apply actually change anything? Apply acts on the finding's declared change, and a rule
    *  that declares none would give a button that looks right and does nothing. */
   can_apply: boolean;
@@ -207,8 +211,10 @@ export interface VerificationStatus {
   document_request?: {
     /** How many of this request's needs joined the borrower draft. */
     added_to_draft: number;
-    /** How many did not, because they are not the borrower's to send. They are on the needs list. */
-    not_borrower_facing: number;
+    /** LP-841 — how many joined each OTHER party's draft, keyed by party. This was a single count
+     * of what the borrower's email did NOT get, which was the whole story while those documents
+     * were discarded; they are in a draft to somebody now, and the count cannot say who. */
+    routed_elsewhere: Record<string, number>;
   } | null;
   /** The file's loan program (conventional / fha) — drives the rule set + the tab header. */
   program: string | null;

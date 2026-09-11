@@ -103,7 +103,7 @@ def party_for(need: NeedsItem) -> ResponsibleParty:
     return get_guidance(need.needs_type).responsible_party
 
 
-async def _addresses(
+async def party_addresses(
     db: AsyncSession, *, loan_file: LoanFile
 ) -> dict[ParticipantRole, tuple[str, str | None]]:
     """`{role: (address, name)}` for this file's participants.
@@ -185,7 +185,7 @@ async def open_requests(db: AsyncSession, *, loan_file: LoanFile) -> list[PartyR
         .scalars()
         .all()
     )
-    addresses = await _addresses(db, loan_file=loan_file)
+    addresses = await party_addresses(db, loan_file=loan_file)
 
     grouped: dict[ResponsibleParty, list[NeedsItem]] = {}
     for need in needs:
@@ -400,6 +400,7 @@ __all__ = [
     "add_participant",
     "build_party_draft",
     "open_requests",
+    "party_addresses",
     "party_for",
     "remove_participant",
     "template_key_for",
