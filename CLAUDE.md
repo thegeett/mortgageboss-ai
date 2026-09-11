@@ -103,7 +103,8 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
 
 Every ticket gets a `docs/tickets/LP-XXX.md` recording what was done, assumptions,
 and decisions. Architectural decisions go in [`decisions.md`](decisions.md) as a
-new ADR. CI (ruff/mypy/pytest, biome/tsc/build) must stay green; install
+new ADR. CI (ruff/mypy/pytest, biome/tsc/vitest/build) must stay green — the
+frontend suite runs locally as CI does with `CI=true TZ=UTC pnpm test`; install
 pre-commit hooks for local feedback (see
 [`docs/development-workflow.md`](docs/development-workflow.md)).
 
