@@ -6,6 +6,7 @@
  * that skipped that would be the one outbound message in the product with no guardrails on it.
  */
 import { apiClient } from "@/lib/api/client";
+import { invalidateDraftViews } from "@/lib/api/draft-views";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 const messagesPath = (fileId: string) => `/api/v1/loan-files/${fileId}/messages`;
@@ -34,10 +35,18 @@ export async function fetchReplyContext(
   ).data;
 }
 
-/** Everything on this screen changes when a message does — the list, the flags and the badge. */
+/** Everything on this screen changes when a message does — the list, the flags and the badge.
+ *
+ * LP-840 REVIEW — THROUGH THE ONE PLACE, and the deleted draft key is gone from it. (Named rather
+ * than quoted: the guard in `verification-draft-invalidation.test.ts` is a substring scan, and
+ * prose holding the literal would report the file it had just fixed — LP-838's lesson.) That key
+ * was spelled here as a literal, so deleting `outboundDraftQueryKey` and its named usages left this
+ * copy behind: an invalidation of a query with no reader, which is the exact thing the ticket was
+ * written about. A reply IS a draft, so this goes through `invalidateDraftViews` rather than keeping
+ * a second list — the drift between those lists is what produced the reported bug.
+ */
 function invalidateTimeline(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
-  void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
-  void queryClient.invalidateQueries({ queryKey: ["outbound-draft", fileId] });
+  invalidateDraftViews(queryClient, fileId);
 }
 
 export function useReply(fileId: string) {

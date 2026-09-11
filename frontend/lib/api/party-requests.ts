@@ -6,6 +6,7 @@
  * and starts LP-814's clock. That call is the whole reason these are real drafts.
  */
 import { apiClient } from "@/lib/api/client";
+import { invalidateDraftViews } from "@/lib/api/draft-views";
 import type { PartyRequest, ResponsibleParty } from "@/lib/types/party-request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -24,8 +25,14 @@ export function usePartyRequests(fileId: string) {
 /** Everything a party change touches: this list, the draft panel, and the file's timeline. */
 function invalidate(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
   void queryClient.invalidateQueries({ queryKey: partyRequestsQueryKey(fileId) });
-  void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
-  void queryClient.invalidateQueries({ queryKey: ["outbound-draft", fileId] });
+  // LP-840 REVIEW — THROUGH THE ONE PLACE. `build_party_draft` creates a Communication, and
+  // `build_timeline` has no template filter, so a party draft IS a row in the mailbox. This listed
+  // the timeline by hand and also the draft key LP-840 deleted the query for — named rather than
+  // quoted, because the guard is a substring scan and prose holding the literal would report the
+  // file it had just fixed (LP-838's lesson, one module over),
+  // spelled as a literal here and so missed when the named constant went. Two hand-kept lists
+  // drifting apart is what produced the reported bug; this is the second of them.
+  invalidateDraftViews(queryClient, fileId);
 }
 
 export interface AddAddressInput {

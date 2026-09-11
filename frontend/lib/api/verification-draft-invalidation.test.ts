@@ -60,3 +60,59 @@ describe("useResolveFinding — what the request just wrote", () => {
     expect(client.getQueryState(["documents", FILE])?.isInvalidated).toBe(false);
   });
 });
+
+/**
+ * LP-840 REVIEW — THE RULE, NOT THE CALLERS.
+ *
+ * The build named the gap itself: `invalidateDraftViews` is called by several mutations and nothing
+ * asserted that, so a new one could hand-roll its own list and nothing would fail. Two already had —
+ * `messages.ts` and `party-requests.ts` each kept their own, and each still invalidated
+ * `["outbound-draft", fileId]`, a key whose query this very ticket deleted. The named constant went
+ * and two string literals stayed.
+ *
+ * Enumerating the callers would be a list that goes stale the same way. The rule is derivable
+ * instead: **refreshing the mailbox means going through the one place that knows what else to
+ * refresh.** Anything that invalidates a timeline key directly has, by construction, decided on its
+ * own what a draft change is visible in — which is the decision this module exists to own.
+ */
+describe("the one place a draft change is refreshed from", () => {
+  // `process.cwd()` rather than `import.meta.url`: vitest runs from the frontend root, and the
+  // URL form resolved to a bare "/lib/api" here — measured, and it made the scan read nothing.
+  const SOURCE_DIR = `${process.cwd()}/lib/api/`;
+
+  async function apiSources(): Promise<{ name: string; body: string }[]> {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    return readdirSync(SOURCE_DIR)
+      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+      .map((name) => ({ name, body: readFileSync(`${SOURCE_DIR}${name}`, "utf8") }));
+  }
+
+  it("is the only module that invalidates a timeline key", async () => {
+    const offenders = (await apiSources())
+      .filter(({ name }) => name !== "draft-views.ts" && name !== "timeline.ts")
+      .filter(({ body }) => /invalidateQueries\(\{\s*queryKey:\s*\["timeline"/.test(body))
+      .map(({ name }) => name);
+
+    expect(offenders).toEqual([]);
+    // The control: the scan read the modules. An empty directory reports no offenders.
+    expect((await apiSources()).length).toBeGreaterThan(5);
+  });
+
+  it("leaves no invalidation of the draft query this ticket deleted", async () => {
+    // `useOutboundDraft` and `outboundDraftQueryKey` are gone. A key nothing reads is the defect
+    // this ticket is about, so the literal must not survive the constant.
+    const offenders = (await apiSources())
+      .filter(({ body }) => body.includes('"outbound-draft"'))
+      .map(({ name }) => name);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("still names the timeline somewhere, or the mailbox refreshes for nobody", async () => {
+    // THE POSITIVE HALF. Both assertions above are satisfied by a codebase that never mentions the
+    // timeline at all — which is the reported bug with the invalidation removed rather than moved.
+    const helper = (await apiSources()).find(({ name }) => name === "draft-views.ts");
+    expect(helper).toBeDefined();
+    expect(helper?.body).toMatch(/invalidateQueries\(\{\s*queryKey:\s*\["timeline"/);
+  });
+});
