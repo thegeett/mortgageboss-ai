@@ -400,7 +400,12 @@ AS-12:
     artifact) + has_identified_source 93.8% (n=16) -> both gates measured -> calibratable-now. Judgmental ->
     ships RATIFY (a human ratifies EVERY verdict, LP-376-B), so 100%/93.8% is far more than enough for the
     tags to SURFACE a pattern for human judgment; unlike AS-2, AS-12 reasons over apparent_category BROADLY
-    (no single trigger value), so the loan_proceeds n=0 caveat does not bind it. PROPOSED 0.90 surfacing floor;
+    (no single trigger value), so the loan_proceeds n=0 caveat does not bind it. bug-019 review — "both
+    gates measured" above is now HALF TRUE, and this is the note asking for it: apparent_category LEFT
+    load_bearing_tags, because the tag the model can least often resolve was vetoing the rule on a deposit
+    whose source was already matched and verified. It stays in the list above deliberately — reasoned_over
+    and the exempt_when clearing both rest on it, so what this bar must cover is unchanged; only has_identified_source
+    now gates. PROPOSED 0.90 surfacing floor;
     Priya confirms. Still one-file n — she weighs that before sign-off.
 
 IN-7:

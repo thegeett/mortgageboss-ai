@@ -187,9 +187,15 @@ async def test_an_undetermined_category_never_exempts() -> None:
     gated, and on LF-XMB2 the category's veto silenced the rule on an $8,000 deposit whose source was
     already matched and verified.
 
-    So an unknown category now reaches the model and comes back ratification-pending — which is this
-    file's own stated design ("the model is still consulted on every deposit; only a non-'yes' answer is
-    suppressed"), and it still never clears. The first assertion is the invariant and is untouched.
+    So an unknown category now reaches the model and comes back ratification-pending, and it still never
+    clears. The first assertion is the invariant and is untouched.
+
+    THIS FOLLOWS LP-516'S OWN DECISION rather than bending it (established in bug-019's review). LP-516
+    §A7 posed the fork in as many words — "scope-before-asking (cheaper, but forfeits the guide's own
+    escape hatch) or ask-then-suppress-a-no (costs an AI call per deposit, but honours it)" — and Phase B
+    took ask-then-suppress. Gating the category before asking IS scope-before-asking. The
+    "category unknown -> couldnt_check" row sometimes read the other way sits under "Phase C — proof",
+    which records what the tests observed, not what was decided.
     """
     evaluation, reasoner = await _evaluate("unknown", "no")
 
