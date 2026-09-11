@@ -411,7 +411,10 @@ def _outcome_result(
         outcome.reasoning.format(**fields) + reason_suffix,
         gathered,
         verdict_confidence=verdict_confidence,
-        how_to_fix=outcome.how_to_fix,
+        # bug-014 — the same fields `reasoning` is formatted over, for the same reason. No consistency
+        # spec references one today; passing it through raw is what let MI-1 ship a literal
+        # `{mi_threshold}%` on the deterministic side, and this is the other half of that gap.
+        how_to_fix=(outcome.how_to_fix.format(**fields) if outcome.how_to_fix else None),
         ratification_pending=ratification_pending,
     )
 

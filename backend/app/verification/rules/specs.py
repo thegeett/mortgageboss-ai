@@ -487,6 +487,21 @@ class DeterministicEval(BaseModel):
                     f"outcome reasoning references unknown operand(s) {sorted(unknown)} "
                     f"(operands: {sorted(operand_names)})"
                 )
+            # bug-014 — `how_to_fix` IS FORMATTED TOO, and was not validated because it was not
+            # formatted: MI-1 shipped "at or below {mi_threshold}% the requirement falls away" to a
+            # processor. Now that the evaluator fills it, an unknown placeholder would raise mid-run
+            # inside a Celery task, so it is held to exactly the same standard as `reasoning`.
+            if outcome.how_to_fix:
+                try:
+                    fix_fields = _template_fields(outcome.how_to_fix)
+                except ValueError as exc:
+                    raise ValueError(f"outcome how_to_fix template is malformed: {exc}") from exc
+                unknown_fix = {f.removesuffix("_percent") for f in fix_fields} - operand_names
+                if unknown_fix:
+                    raise ValueError(
+                        f"outcome how_to_fix references unknown operand(s) {sorted(unknown_fix)} "
+                        f"(operands: {sorted(operand_names)})"
+                    )
         return self
 
     # LP-563 — the structured change this rule's finding declares (see ApplySpec).
@@ -1000,16 +1015,26 @@ class ConsistencyEval(BaseModel):
         ):
             if outcome is None:
                 continue
-            try:
-                fields = _template_fields(outcome.reasoning)
-            except ValueError as exc:
-                raise ValueError(f"{name} reasoning template is malformed: {exc}") from exc
-            unknown = fields - _CONSISTENCY_TEMPLATE_FIELDS
-            if unknown:
-                raise ValueError(
-                    f"{name} reasoning references unknown placeholder(s) {sorted(unknown)} "
-                    f"(allowed: {sorted(_CONSISTENCY_TEMPLATE_FIELDS)})"
-                )
+            # bug-014 — `how_to_fix` is checked beside `reasoning` because the evaluator now formats
+            # both. No consistency spec references a placeholder in a fix today; the deterministic side
+            # is where that gap shipped a literal `{mi_threshold}%`, and leaving this half unguarded
+            # would let the same thing arrive here the first time someone writes one.
+            for field, template in (
+                ("reasoning", outcome.reasoning),
+                ("how_to_fix", outcome.how_to_fix),
+            ):
+                if not template:
+                    continue
+                try:
+                    fields = _template_fields(template)
+                except ValueError as exc:
+                    raise ValueError(f"{name} {field} template is malformed: {exc}") from exc
+                unknown = fields - _CONSISTENCY_TEMPLATE_FIELDS
+                if unknown:
+                    raise ValueError(
+                        f"{name} {field} references unknown placeholder(s) {sorted(unknown)} "
+                        f"(allowed: {sorted(_CONSISTENCY_TEMPLATE_FIELDS)})"
+                    )
         return self
 
 

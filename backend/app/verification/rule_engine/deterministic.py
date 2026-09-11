@@ -574,7 +574,15 @@ def evaluate_deterministic_rule(
                         subject_tags,
                         verdict_confidence=gate.verdict_confidence,
                         threshold_used=threshold_used,
-                        how_to_fix=outcome.how_to_fix,
+                        # bug-014 — FORMATTED, like `reasoning` on the line above. It was passed through
+                        # raw, so MI-1's fix reached a processor reading "at or below {mi_threshold}% the
+                        # requirement falls away" — the one number the sentence exists to give. MI-4
+                        # ({required}) and IN-15 ({end_date}) carry the same latent defect.
+                        how_to_fix=(
+                            outcome.how_to_fix.format(**_reason_fields(operands))
+                            if outcome.how_to_fix
+                            else None
+                        ),
                     )
                 )
                 break
