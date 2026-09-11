@@ -2251,3 +2251,69 @@ async def test_a_lender_document_lands_in_a_lender_draft(
     # message they can write and address; a refusal is a message nobody ever writes.
     assert drafts[0].recipient is None
     assert "credit report" in (drafts[0].body or "").lower()
+
+
+def test_the_frontend_declares_no_field_the_backend_does_not_send() -> None:
+    """LP-841 REVIEW — THE RENAME THAT TYPE-CHECKED AND NEVER FIRED.
+
+    LP-841 renamed `not_borrower_facing` to `routed_elsewhere` and `documents_not_borrower` to
+    `documents_other_party`. The frontend kept declaring the OLD names, so `tsc` passed, the branches
+    reading them were dead, and the copy they rendered had become a false account of a request that
+    reached the lender. The build found both by grepping the renamed columns — its own note says
+    neither side had a test that could fail.
+
+    The backend side is pinned now, by assertions on the response bodies. The FRONTEND side is not:
+    its tests build findings by hand, so a fixture and a component can agree on a field name the
+    server stopped sending and both suites stay green. That is the same disagreement, one layer over.
+
+    SUBSET, NOT EQUALITY, and the direction is the whole point. A backend field the frontend ignores
+    is a feature nobody renders yet; a FRONTEND field the backend does not send is a branch that can
+    never run, which is what happened. Only the second is an error.
+
+    Read off the declarations rather than a round trip, because the failure is a NAME and a running
+    request cannot tell a key that is absent from one that is absent-and-also-renamed.
+    """
+    import re
+    from pathlib import Path
+
+    from app.schemas.verification import DocumentRequestOutcome, RuleFindingPublic
+
+    ts = (
+        Path(__file__).resolve().parents[3] / "frontend" / "lib" / "types" / "verification.ts"
+    ).read_text()
+
+    def declared_fields(interface: str) -> set[str]:
+        """The field names a TS interface (or inline object) declares, comments stripped."""
+        start = ts.index(interface)
+        depth, i = 0, ts.index("{", start)
+        for end in range(i, len(ts)):
+            if ts[end] == "{":
+                depth += 1
+            elif ts[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+        body = re.sub(r"/\*[\s\S]*?\*/", "", ts[i : end + 1])
+        body = re.sub(r"//.*$", "", body, flags=re.M)
+        return set(re.findall(r"^\s*([a-z_][a-z0-9_]*)\??\s*:", body, re.M))
+
+    checks = [
+        ("export interface RuleFinding {", RuleFindingPublic),
+        ("document_request?: {", DocumentRequestOutcome),
+    ]
+    for interface, model in checks:
+        frontend = declared_fields(interface)
+        backend = set(model.model_fields)
+        assert frontend, f"parsed no fields out of {interface!r} — the scan read nothing"
+        extra = frontend - backend
+        assert not extra, (
+            f"{interface!r} declares {sorted(extra)}, which {model.__name__} does not send. A "
+            "frontend field the server never sends is a branch that can never run — the LP-841 "
+            "defect, which type-checked."
+        )
+
+    # THE CONTROL: the two renamed fields are what this exists for, and both must be on both sides.
+    assert "documents_other_party" in declared_fields("export interface RuleFinding {")
+    assert "documents_other_party" in RuleFindingPublic.model_fields
+    assert "routed_elsewhere" in declared_fields("document_request?: {")
+    assert "routed_elsewhere" in DocumentRequestOutcome.model_fields
