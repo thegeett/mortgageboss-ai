@@ -124,6 +124,11 @@ def _named_documents(load_bearing: tuple[LoadBearingTag, ...]) -> tuple[str, ...
     fall back to `(subject_id,)`, which for a loan subject is the string "loan" and resolves to
     nothing; for a per-document subject it is that document's own id, which the subject path already
     supplies. So this adds links exactly where a producer chose to name them.
+
+    bug-013 — FOR A PER-TRANSACTION SUBJECT THAT FALLBACK IS A TRANSACTION ID, and "a transaction id
+    can never resolve as a document" is exactly what went wrong: AS-1 and AS-2 carried `("txn…",)`,
+    `_attach_document_provenance` treated that as the rule's own answer, and the finding named no
+    statement. That step now translates a carried id nested inside a document to the document.
     """
     return tuple(
         dict.fromkeys(cid for tag in load_bearing for cid in tag.source_facts)  # order-preserving

@@ -894,12 +894,28 @@ def _attach_document_provenance(
     A subject with no document in the map — a borrower, the loan, a MISMO-stated liability — gets
     NOTHING, and the finding says nothing. Attributing it to a document it did not come from would
     send a processor to the wrong page with the system's confidence behind it.
+
+    bug-013 — WHAT THE RULE CARRIED CAN BE A TRANSACTION, NOT A DOCUMENT. LP-647 made the deterministic
+    evaluator carry the ids its tags NAMED, and a per-transaction tag names its own transaction
+    (`source_facts=(subject_id,)`). So AS-1 and AS-2 arrived here carrying `("txn…",)`, took the
+    "rule knew better" branch, and `_source_document_ids` then dropped the transaction id because it is
+    not a document: LF-XMB2's AS-1 findings named no statement, and 203 of staging's 368 AS-1 findings
+    were the same. A carried id NESTED inside a document is therefore translated to that document —
+    the same parent link the subject path uses — while a carried DOCUMENT id, or any id this map does
+    not know, passes through untouched, so a consistency rule's included/excluded sources still stand.
     """
     parents = source_document_by_subject(snapshot)
     attached: list[RuleEvaluation] = []
     for result in results:
         if result.source_content_ids:  # the rule knew better than the subject does
-            attached.append(result)
+            carried = tuple(
+                dict.fromkeys(parents.get(cid, cid) for cid in result.source_content_ids)
+            )
+            attached.append(
+                result
+                if carried == result.source_content_ids
+                else replace(result, source_content_ids=carried)
+            )
             continue
         parent = parents.get(result.subject_id)
         attached.append(
