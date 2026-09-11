@@ -1,0 +1,86 @@
+/* =============================================================================
+   PALETTE — Petrol (the default)                       LP-UI-001, split LP-901
+   -----------------------------------------------------------------------------
+   A palette is ONLY raw colours. What each colour is FOR — which one is the
+   background, which one a button — is decided once, in the role layer in
+   app/globals.css, and never here. So:
+
+     - to change the colours, edit a palette (or pick another one);
+     - to change which colour plays which part, edit a role in globals.css.
+
+   Every palette defines exactly this set of names, for light (:root) AND dark
+   (.dark). app/palettes/palettes.test.ts fails on a missing or extra name, and
+   computes every text/ground contrast pair from the values — nothing here is
+   "verified" by a comment.
+
+   Values are space-separated HSL triples, never hex: the role layer passes them
+   straight through to hsl(var(--x)), which is what makes opacity modifiers
+   (bg-warning/10, ~200 of them) work. See ADR-389.
+
+   THE NEUTRAL RAMP is numbered by JOB, not by lightness, and the dark theme
+   restates the same jobs with dark values — that is what lets the role layer be
+   written once for both themes:
+
+      1 app background          5 hover fill            9 control border (>=3:1)
+      2 raised surface (card)   6 hairline              10 quiet text    (>=4.5:1)
+      3 overlay (popover)       7 loading placeholder   11 secondary text
+      4 subtle fill (muted)     8 strong hairline       12 primary text
+
+   `brand` is the one accent (SPEC rule 3). Each hue carries a `-contrast`: the
+   colour of text and icons laid ON a fill of that hue.
+   ============================================================================= */
+
+:root {
+  --neutral-1: 180 14.3% 98.6%;
+  --neutral-2: 0 0% 100%;
+  --neutral-3: 0 0% 100%;
+  --neutral-4: 180 9.1% 95.7%;
+  --neutral-5: 180 8.6% 93.1%;
+  --neutral-6: 165 7.7% 89.8%;
+  --neutral-7: 168 9.4% 89.6%;
+  --neutral-8: 170 6.4% 81.6%;
+  --neutral-9: 168 4.3% 54.5%;
+  --neutral-10: 168 4.4% 41%;
+  --neutral-11: 168 6.6% 29.8%;
+  --neutral-12: 188.6 17.9% 7.6%;
+
+  /* Petrol: far in hue from red, amber and green, so it never argues with a status. */
+  --brand: 187.9 67.9% 22%;
+  --brand-contrast: 0 0% 100%;
+
+  --red: 7.1 61.8% 43.1%;
+  --red-contrast: 0 0% 100%;
+  --green: 159.8 60.6% 26.9%;
+  --green-contrast: 0 0% 100%;
+  --amber: 37.8 89.4% 29.6%;
+  --amber-contrast: 0 0% 100%;
+  --violet: 248.1 36% 48.4%;
+  --violet-contrast: 0 0% 100%;
+}
+
+.dark {
+  --neutral-1: 192 17.2% 5.7%;
+  --neutral-2: 180 14.3% 8.2%;
+  --neutral-3: 180 14.3% 9.6%;
+  --neutral-4: 180 14.3% 11%;
+  --neutral-5: 180 11.4% 13.7%;
+  --neutral-6: 180 11.7% 15.1%;
+  --neutral-7: 173.3 9.9% 17.8%;
+  --neutral-8: 180 9.8% 20%;
+  --neutral-9: 174.5 5.4% 39.8%;
+  --neutral-10: 162 4.5% 56.5%;
+  --neutral-11: 168 7.1% 72.5%;
+  --neutral-12: 168 12.8% 92.4%;
+
+  --brand: 186.9 47.3% 53.1%;
+  --brand-contrast: 187.5 75% 6.3%;
+
+  --red: 7.1 75.8% 69.2%;
+  --red-contrast: 9.2 33.3% 7.6%;
+  --green: 155.5 46.6% 53.7%;
+  --green-contrast: 161.5 68.4% 7.5%;
+  --amber: 37.9 67.1% 54.7%;
+  --amber-contrast: 40 62.8% 8.4%;
+  --violet: 250.1 70.9% 77.1%;
+  --violet-contrast: 249.2 43.3% 11.8%;
+}

@@ -16123,3 +16123,48 @@ reasoning as prompts (LP-38); the version pin is the part that prompts do not ne
 is not evidence.
 
 *Status.* Accepted (LP-817).
+
+---
+
+## ADR-402
+
+**Colour is a palette of raw values and a layer of roles that point into it; a palette is swapped, never edited in place.**
+
+*Context.* ADR-389 made `globals.css` the one source of colour, and LP-UI-004 removed every palette
+class from the components, so every screen already asks for a role (`bg-primary`, `text-warning`)
+and nothing else. But each role held a literal HSL value, restated in a `.dark` block. Petrol was
+typed three times per theme (`primary`, `info`, `ring`), the near-black text colour five times, white
+eight. Changing the accent meant editing ten lines and remembering which ones, and trying a second
+palette meant copying sixty values. The contrast guarantee — "every text tone clears 4.5:1 … verified,
+not assumed" — was a comment, true of one set of values and silent about the next.
+
+*Decision.* Two layers. A **palette** (`app/palettes/<id>.css`) holds raw colours only, in a fixed
+vocabulary: a twelve-step neutral ramp numbered by *job* (1 app background … 9 control border … 12
+primary text), `brand`, and `red` / `green` / `amber` / `violet`, each with a `-contrast` for content
+laid on it — for light under `:root` and dark under `.dark`. The **roles** in `globals.css` are written
+once, as `var(--palette-colour)`, with no dark block: dark mode is the palette's dark values flowing
+through the same roles. The default palette owns bare `:root` / `.dark`; any other is scoped to
+`:root[data-palette="<id>"]`, whose specificity outranks the default in either theme regardless of
+stylesheet order.
+
+*Rationale.* Numbering the neutral ramp by job rather than by lightness is what lets a role be written
+once. `--muted-foreground: var(--neutral-10)` means "quiet text" in both themes because step 10 *is*
+quiet text in both; a lightness scale (`gray-500`) would flip meaning between themes and force a second
+role block, which is the duplication this removes. The split puts the two changes a person actually
+wants in two different places: *recolour the app* is a palette, *make this part a different colour*
+is a role, and neither can be done by accident while attempting the other.
+
+Contrast moves from a comment to arithmetic. `palettes.test.ts` resolves every role through every
+palette in both themes and computes WCAG ratios for the pairs the UI draws — text tones on every
+surface, each `-foreground` on its fill, status text on its own `/10` chip tint, `input` and `ring` at
+3:1 — so a palette cannot be added, or edited, below the floor. It also fails a palette missing a
+colour, which would otherwise render that colour from the default and look like it worked.
+
+*Consequences.* The palette and theme are applied to `<html>` and only there. A role is declared on
+`:root`, resolves there, and is inherited as a value, so a `.dark` or `data-palette` on an inner element
+does not re-theme its subtree; a side-by-side light/dark preview would need the roles restated on those
+selectors too. `text-primary/80`-style exemptions in `a11y-contrast.test.ts` carry ratios measured
+against Petrol and are not recomputed per palette. Values stay HSL triples, unchanged from ADR-389, so
+all ~200 opacity modifiers keep working. Extends ADR-389.
+
+*Status.* Accepted (LP-901).

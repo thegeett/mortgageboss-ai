@@ -25,6 +25,9 @@ const PAIRS: [string, string][] = [
   [`${ASSETS}/fonts.ts`, "lib/fonts.ts"],
   [`${ASSETS}/tailwind.config.ts`, "tailwind.config.ts"],
   [`${ASSETS}/globals.css`, "app/globals.css"],
+  // Since LP-901 globals.css holds only roles (`--primary: var(--brand)`), so
+  // the asset copy of it is not a drop-in without the colours it points at.
+  [`${ASSETS}/palettes/petrol.css`, "app/palettes/petrol.css"],
 ];
 
 /** Formatting is allowed to differ; nothing else is. */

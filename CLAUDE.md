@@ -78,10 +78,16 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
   needed.
 - **Biome** for lint + format (2-space, double quotes; config in
   `frontend/biome.json`).
-- **Design tokens** from LP-5: primary blue (`#2563EB`), cool-gray neutrals,
-  semantic success/warning/danger/info, system font stack. Defined as CSS
-  variables in `app/globals.css` and `tailwind.config.ts` — use the tokens, never
-  ad-hoc colors.
+- **Colour is two layers** (ADR-389, ADR-402). **Palettes** in
+  `app/palettes/*.css` hold raw colours only (a 12-step neutral ramp, `brand`,
+  and red/green/amber/violet, each for light and dark); **roles** in
+  `app/globals.css` (`--primary: var(--brand)`) say what each colour is for, and
+  `tailwind.config.ts` exposes the roles. Components use role classes
+  (`bg-primary`, `text-warning`) and never a palette name, a Tailwind palette
+  scale, or a hex value. Recolour the app by editing a palette; change which
+  colour plays which part by editing a role. `app/palettes/palettes.test.ts`
+  computes WCAG contrast for every palette in both themes. The default palette
+  is Petrol.
 
 **Data model principles** (apply as Epic 2+ lands)
 

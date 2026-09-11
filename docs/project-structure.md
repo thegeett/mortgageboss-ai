@@ -62,7 +62,8 @@ frontend/
 │   ├── api/              # Next.js route handlers (proxy to backend when needed)
 │   ├── layout.tsx        # Root layout (metadata, fonts, providers)
 │   ├── page.tsx          # Home page
-│   └── globals.css       # Tailwind layers + design-token CSS variables
+│   ├── palettes/         # Raw colours, one file per palette, light + dark (LP-901, ADR-402)
+│   └── globals.css       # Tailwind layers + design tokens; colour ROLES point into a palette
 ├── components/
 │   ├── ui/               # shadcn/ui components (owned, in-repo)
 │   └── providers.tsx     # Client providers (TanStack Query, Toaster)

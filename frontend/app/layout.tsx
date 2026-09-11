@@ -3,6 +3,9 @@ import { plexMono, plexSans, plexSerif } from "@/lib/fonts";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import "./globals.css";
+// The colours the role layer in globals.css points at (LP-901). Every file in
+// app/palettes/ is imported here; palettes.test.ts fails on one that is not.
+import "./palettes/petrol.css";
 
 export const metadata: Metadata = {
   title: {

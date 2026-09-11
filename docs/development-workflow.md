@@ -127,7 +127,8 @@ change to it alone skips the test that checks it.
 3. `pnpm typecheck` — `tsc --noEmit`.
 4. `pnpm test` — the vitest suite, run with `TZ=UTC` (LP-900). This is where the
    design-token guards live (`tailwind.config.test.ts`, `lib/design-tokens.test.ts`,
-   `lib/a11y-contrast.test.ts`), so CI is what enforces them. The runner also sets
+   `lib/a11y-contrast.test.ts`, and since LP-901 `app/palettes/palettes.test.ts`,
+   which computes every palette's contrast), so CI is what enforces them. The runner also sets
    `CI=true`, under which vitest fails a stray `.only` rather than running only
    that test — so the local equivalent is `CI=true TZ=UTC pnpm test`.
 5. `pnpm build` — production `next build`.
