@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 
 from app.verification.rule_engine.reasons import document_label, fact_phrase
 from app.verification.rule_engine.result import Verdict
-from app.verification.rules.specs import DOC_TYPE_TAG, TagCondition
+from app.verification.rules.specs import DOC_TYPE_PROXY_TAGS, DOC_TYPE_TAG, TagCondition
 from app.verification.snapshot.tag import Tag
 
 _UNKNOWN = "unknown"
@@ -140,7 +140,21 @@ def undetermined_by_document_type(
             return False  # scope-false wins outright — there is no abstention to consolidate
         if cause is None:
             cause = applic.tag_id
-    return cause == DOC_TYPE_TAG
+    if cause == DOC_TYPE_TAG:
+        return True
+    # bug-020 — A PROXY FOR THE DOCUMENT TYPE IS THE DOCUMENT TYPE. LO-2 cannot scope itself on
+    # DOC_TYPE_TAG (the DSL has eq/ne and its scope is eight types), so it abstains on a tag computed
+    # from the type alone — and its rows stayed out of the consolidated finding: four untyped documents
+    # on LF-XMB2 produced four extra LO-2 items beside the one row that already named them.
+    #
+    # THE SECOND HALF IS WHAT KEEPS IT HONEST. The subject's OWN type must be what is missing. A proxy
+    # that abstains on a document whose type IS known failed for some other reason, and folding that
+    # into "identify these documents" would tell a processor to do the wrong thing — the same care
+    # `undetermined_by_document_type` already takes over a conjunction's other predicates.
+    if cause in DOC_TYPE_PROXY_TAGS:
+        doc_type = subject_tags.get(DOC_TYPE_TAG)
+        return doc_type is None or str(doc_type.value) in ("", _UNKNOWN)
+    return False
 
 
 # The subject_id a missing-document couldnt_check is keyed under — a STABLE identity per (rule, type),

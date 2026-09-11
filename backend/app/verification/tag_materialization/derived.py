@@ -1755,7 +1755,25 @@ def _borrower_id_expiration(
         raw = str(tag.value)
         values[coerce_date(raw) or raw] = raw
     if not values:
-        return _UNKNOWN, "this borrower: no driver's licence found for this borrower"
+        # bug-020 — SAY WHETHER THE FILE MIGHT ALREADY HAVE IT. `_GOVERNMENT_ID_DOC_TYPES` skips a
+        # document nobody has classified, so a licence sitting in the file untyped reads exactly like no
+        # licence at all: on LF-XMB2 ID-5 told the processor to upload an ID while their driver's licence
+        # was on the file, unclassified. Counted FILE-WIDE rather than per borrower on purpose — an
+        # untyped document usually has no belongs_to either, so scoping the count to this borrower would
+        # hide the very documents being pointed at.
+        #
+        # The trailing "for this borrower" went with it: every branch here already opens "this borrower:".
+        untyped = sum(
+            1
+            for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
+            if entry.document_type is None or entry.document_type == _UNKNOWN_DOC_TYPE
+        )
+        if untyped:
+            return _UNKNOWN, (
+                f"this borrower: no driver's licence has been identified — {untyped} document(s) in "
+                "the file are not identified yet and may include it; identify those first"
+            )
+        return _UNKNOWN, "this borrower: no driver's licence found"
     if len(values) > 1:
         return _UNKNOWN, (
             f"this borrower: the borrower's ID documents disagree on the expiration date "

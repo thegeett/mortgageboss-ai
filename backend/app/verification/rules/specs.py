@@ -159,6 +159,22 @@ class ReferenceValues(BaseModel):
 # absent → the rule silently never applies). Not a vocabulary tag (never in fact_tags.csv).
 DOC_TYPE_TAG = "document.document_type"
 
+# bug-020 — tags whose value is derived from NOTHING BUT the document's own type, so abstaining on one
+# is abstaining on the document type by another name.
+#
+# LO-2 cannot scope itself on DOC_TYPE_TAG: the applicability DSL has only eq/ne and its scope is EIGHT
+# document types, so it reads a proxy (`loe.is_explanation_letter`) that a recipe computes from the type
+# alone — "yes" for a letter type, "no" for any other, "unknown" for an unclassified document. That last
+# case is the same abstention as an unidentified document, with the same remedy ("identify this file"),
+# but `undetermined_by_document_type` saw a tag id it did not recognise and kept the row out of the
+# consolidated finding: on LF-XMB2 four untyped documents became four extra LO-2 rows beside the one
+# UNIDENTIFIED-DOCUMENTS row that already covered them.
+#
+# A tag belongs here ONLY if an unclassified document is the sole way it reads "unknown". A tag that can
+# abstain for any other reason would fold a different problem into "identify these documents" and send a
+# processor after the wrong thing.
+DOC_TYPE_PROXY_TAGS = frozenset({"loe.is_explanation_letter"})
+
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 
