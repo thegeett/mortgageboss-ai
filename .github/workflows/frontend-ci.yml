@@ -1,16 +1,32 @@
 name: Frontend CI
 
+# The paths outside frontend/ are files the vitest suite reads (LP-900 review):
+# a change to one of them alone can turn a frontend test red, so it has to run
+# this workflow. Keep the two lists identical, and add to them whenever a test
+# starts reading another file from outside frontend/.
+#   backend/app/ai/prompts/extraction    lib/loan-files/extraction-contracts.test.tsx
+#   backend/app/services/page_render.py  components/file/documents/reviewer/page-budget.test.ts
+#   backend/app/schemas/preferences.py   components/file/documents/reviewer/split-agreement.test.ts
+#   docs/design/ledger/assets            ledger-assets.test.ts
 on:
   push:
     branches: [main]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-ci.yml"
+      - "backend/app/ai/prompts/extraction/**"
+      - "backend/app/services/page_render.py"
+      - "backend/app/schemas/preferences.py"
+      - "docs/design/ledger/assets/**"
   pull_request:
     branches: [main]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-ci.yml"
+      - "backend/app/ai/prompts/extraction/**"
+      - "backend/app/services/page_render.py"
+      - "backend/app/schemas/preferences.py"
+      - "docs/design/ledger/assets/**"
 
 defaults:
   run:
@@ -52,8 +68,11 @@ jobs:
       # classes, every colour token defined, no faded text) and the ledger-asset
       # drift check. Before this step they only ran when someone remembered
       # `pnpm test` locally, so a PR could break any of them and still go green.
-      # TZ is pinned so a date-formatting test cannot pass here and fail on a
-      # laptop (or the reverse) purely because of the runner's clock.
+      # TZ is pinned so this run is reproducible locally with
+      # `CI=true TZ=UTC pnpm test` (the runner sets CI, and under it vitest fails
+      # a stray `.only` instead of running just that test). It does not make the
+      # suite timezone-independent: plain `pnpm test` on a laptop still runs in
+      # the laptop's zone.
       - name: Run tests (vitest)
         run: pnpm test
         env:

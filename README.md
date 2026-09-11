@@ -403,10 +403,12 @@ checks via GitHub Actions:
 - **Backend** (`.github/workflows/backend-ci.yml`) — `ruff` lint, `ruff format`
   check, `mypy` strict type checking, `pytest`, and `uv.lock` verification.
 - **Frontend** (`.github/workflows/frontend-ci.yml`) — Biome lint/format,
-  `tsc` type checking, and a production `next build`.
+  `tsc` type checking, the `vitest` suite, and a production `next build`.
 
-Path filters mean each pipeline only runs when its area changes. CI status is
-shown by the badges at the top of this file.
+Path filters mean each pipeline only runs when its area changes — plus the frontend
+pipeline runs on the handful of backend and design-asset files its tests read (see
+[`docs/development-workflow.md`](docs/development-workflow.md)). CI status is shown
+by the badges at the top of this file.
 
 For fast local feedback, install the **pre-commit hooks** (lint, format, secret
 detection, and hygiene checks that run on every commit):

@@ -93,7 +93,10 @@ moves the failure later.
 Two workflows live in [`.github/workflows/`](../.github/workflows/):
 
 - **`backend-ci.yml`** — runs on changes under `backend/` (or the workflow file).
-- **`frontend-ci.yml`** — runs on changes under `frontend/` (or the workflow file).
+- **`frontend-ci.yml`** — runs on changes under `frontend/` (or the workflow file),
+  and on changes to the few files outside `frontend/` that its tests read: the
+  extraction prompts, `page_render.py`, `schemas/preferences.py` and the ledger
+  design assets (LP-900; the list is at the top of the workflow).
 
 ### When they run
 
@@ -101,7 +104,10 @@ Two workflows live in [`.github/workflows/`](../.github/workflows/):
 - On **pull requests targeting `main`**.
 
 Path filters mean a backend-only change won't spend CI minutes on the frontend
-pipeline, and vice versa.
+pipeline, and vice versa — except for a change to one of the backend files the
+frontend tests read, which runs both. A frontend test that starts reading a new
+file outside `frontend/` has to add that file to the workflow's `paths`, or a
+change to it alone skips the test that checks it.
 
 ### What each job checks
 
@@ -121,7 +127,9 @@ pipeline, and vice versa.
 3. `pnpm typecheck` — `tsc --noEmit`.
 4. `pnpm test` — the vitest suite, run with `TZ=UTC` (LP-900). This is where the
    design-token guards live (`tailwind.config.test.ts`, `lib/design-tokens.test.ts`,
-   `lib/a11y-contrast.test.ts`), so CI is what enforces them.
+   `lib/a11y-contrast.test.ts`), so CI is what enforces them. The runner also sets
+   `CI=true`, under which vitest fails a stray `.only` rather than running only
+   that test — so the local equivalent is `CI=true TZ=UTC pnpm test`.
 5. `pnpm build` — production `next build`.
 
 > **Service-backed tests:** CI runs a **Postgres** service container, so the
@@ -178,7 +186,7 @@ status badges in the README link straight to the latest runs.
 | `uv.lock` out of sync           | `cd backend && uv lock`                                |
 | Biome lint/format fails         | `cd frontend && pnpm lint:fix`                          |
 | `tsc` errors                    | `cd frontend && pnpm typecheck` and fix the types      |
-| `vitest` fails                  | `cd frontend && TZ=UTC pnpm test` and fix the test/code |
+| `vitest` fails                  | `cd frontend && CI=true TZ=UTC pnpm test`, fix it      |
 | `next build` fails              | `cd frontend && pnpm build` and fix the error          |
 | pnpm lockfile mismatch          | `cd frontend && pnpm install` then commit the lockfile |
 
