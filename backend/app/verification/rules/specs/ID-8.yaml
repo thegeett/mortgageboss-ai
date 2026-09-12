@@ -74,8 +74,8 @@ judgment:
           Document the status from the file's identity documents — a permanent resident card, an
           unexpired visa with work authorization, or an EAD — and confirm the programme and the
           investor accept it. Where the status is unclear, obtain the document that states it rather
-          than inferring it, and check the file's unidentified documents first: one of them may
-          already be it.
+          than inferring it. If the file holds documents that have not been identified yet, check
+          those first — one of them may already be it.
   value_domain: ["yes", "no", "unknown"]
   confidence_floor: 0.5
   system_prompt: |

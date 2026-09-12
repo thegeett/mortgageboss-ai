@@ -10,6 +10,13 @@ shows it verbatim) and deliberately names no document type, so "identify the unt
 instruction to the processor — must never leak into it.
 """
 
+# bug-023 review — ID-8'S SENTENCE IS UNCONDITIONAL SPEC TEXT, so it must be true of a file with NO
+# unidentified documents too. Measured on staging: ID-8 carries 9 needs_review findings across 8 files
+# and only 5 of them sit on a file holding any untyped document — so the imperative form ("check the
+# file's unidentified documents first") was wrong on 4 of 9 live findings, telling a processor to go and
+# look at something that is not there. A judgment rule's guidance cannot read the snapshot (its
+# templates interpolate `reasoned_over` tags only), so the fix is grammatical rather than a count: a
+# CONDITIONAL clause is true either way.
 from __future__ import annotations
 
 from datetime import UTC, datetime
