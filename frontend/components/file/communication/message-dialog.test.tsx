@@ -372,3 +372,40 @@ describe("the secure upload link (LP-834)", () => {
     expect(screen.queryByRole("button", { name: /secure/i })).toBeNull();
   });
 });
+
+/**
+ * LP-844 — the body is read as a letter, and copied in a form that survives the paste.
+ */
+describe("the rendered body", () => {
+  it("shows the document list as a list, not as a monospace dump", async () => {
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ body: "Hello,\n\n- Bank statements\n- Pay stubs" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    await screen.findByText("Hello,");
+
+    // SCOPED TO THE BODY. "Bank statements" is also in the "What it asks for" list below, which has
+    // been a real `<ul>` all along — an unscoped query would pass against a body still rendered as
+    // a monospace dump, which is the exact thing this asserts is gone.
+    // `document`, not the render container: the dialog is portalled to document.body, so a
+    // container-scoped query finds nothing and an `expect([]).toEqual([])` would have passed.
+    const items = [...document.querySelectorAll(".message-body li")].map((li) => li.textContent);
+    expect(items).toEqual(["Bank statements", "Pay stubs"]);
+    expect(document.querySelector(".message-body p")?.textContent).toBe("Hello,");
+    expect(document.querySelector("pre")).toBeNull();
+  });
+
+  it("renders a script tag in a body as text", async () => {
+    // The reader uses dangerouslySetInnerHTML, so the escape-first renderer is load-bearing HERE and
+    // not only in its own unit test. A body carries a borrower's words and a processor's note.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ body: "Please send <script>alert(1)</script> it" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await screen.findByText(/Please send/);
+    expect(document.querySelector("script")).toBeNull();
+    // The control: the text really did arrive, so this is not passing on an empty dialog.
+    expect(document.querySelector(".message-body")?.textContent).toContain("<script>");
+  });
+});

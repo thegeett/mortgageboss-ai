@@ -14,6 +14,23 @@ import {
   useMessageDetail,
   useSendDraft,
 } from "@/lib/api/communications";
+import { copyMessage } from "@/lib/markdown/copy-rich";
+import { emailBodyToHtml } from "@/lib/markdown/email-body";
+
+/**
+ * LP-844 — how a rendered body is styled.
+ *
+ * ARBITRARY VARIANTS RATHER THAN A RULE IN `globals.css`, for two reasons. The base layer resets
+ * list styling globally (Tailwind preflight), so a `<ul>` here needs its bullets back — but this is
+ * a FEATURE style, not a design token, and `globals.css` has a reference copy in the design ledger
+ * that implementers drop in. Adding a message-body rule there would ship this ticket's CSS to every
+ * new screen as though it were part of the system.
+ *
+ * It styles the PREVIEW, never the send: `emailBodyToHtml` emits no classes at all, because a mail
+ * client keeps the semantic tags and discards our stylesheet.
+ */
+const BODY_PROSE =
+  "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
 import { Check, Copy, Link as LinkIcon, Mail, Send } from "lucide-react";
 import { useState } from "react";
@@ -58,6 +75,7 @@ export function MessageDialog({
   const send = useSendDraft(fileId);
   const attachLink = useAttachUploadLink(fileId, messageId ?? "");
   const [copied, setCopied] = useState(false);
+  const [preview, setPreview] = useState(false);
   const open = messageId !== null;
 
   // SEEDED ON THE MESSAGE'S IDENTITY, not in an effect — the same pattern `OutboundDraftPanel` used
@@ -134,23 +152,62 @@ export function MessageDialog({
                     className="rounded-md border border-input bg-background px-3 py-2 text-sm"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-foreground">Message</span>
-                  <textarea
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    rows={16}
-                    className="rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
-                  />
-                </label>
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-foreground" id="message-label">
+                      Message
+                    </span>
+                    {/* LP-844 — WHAT THEY ARE ABOUT TO SEND. The editor is Markdown, so `**this**`
+                        is bold in the recipient's inbox and not in the box being typed into. A
+                        processor who cannot see the result before copying is proof-reading the
+                        wrong artefact. */}
+                    <button
+                      type="button"
+                      onClick={() => setPreview((on) => !on)}
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    >
+                      {preview ? "Edit" : "Preview"}
+                    </button>
+                  </div>
+                  {preview ? (
+                    <div
+                      className={`message-body min-h-[16rem] break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
+                      // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer
+                      dangerouslySetInnerHTML={{ __html: emailBodyToHtml(body) }}
+                    />
+                  ) : (
+                    <textarea
+                      aria-labelledby="message-label"
+                      value={body}
+                      onChange={(event) => setBody(event.target.value)}
+                      rows={16}
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {/* SAYS WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by
+                        RFC 6068 — no client renders markup in one — so the two buttons below are
+                        not equivalent and a processor should not have to discover that. */}
+                    Use <code>**bold**</code> and <code>- bullets</code>. Formatting survives{" "}
+                    <span className="text-foreground">Copy message</span>; the mail-client link
+                    sends plain text.
+                  </p>
+                </div>
               </div>
             ) : (
-              // READ-ONLY, AND RENDERED AS TEXT. A borrower's sentence is not markup and a dollar
-              // sign in it is a dollar sign; this is the one place a body is shown in full, so it is
-              // the one place that could get it wrong.
-              <pre className="whitespace-pre-wrap break-words rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                {data.body}
-              </pre>
+              // LP-844 — READ AS A LETTER, NOT AS A DUMP. This was a monospace `<pre>`, which is
+              // part of why the message read as machine-generated: the product showed a business
+              // letter in a code font.
+              //
+              // A borrower's sentence is still not markup. `emailBodyToHtml` escapes every
+              // character that could start a tag BEFORE it emits one, so `dangerouslySetInnerHTML`
+              // here is handed a string in which the only tags are the ones that function built.
+              // That ordering is the entire safety argument and it is tested directly.
+              <div
+                className={`message-body break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer, see above
+                dangerouslySetInnerHTML={{ __html: emailBodyToHtml(data.body) }}
+              />
             )}
 
             {data.documents.length > 0 ? (
@@ -215,7 +272,10 @@ export function MessageDialog({
                   variant="outline"
                   className="gap-2"
                   onClick={async () => {
-                    await navigator.clipboard.writeText(body);
+                    // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
+                    // here or nowhere: `mailto:` bodies are plain text by RFC 6068 and no client
+                    // renders markup in one.
+                    await copyMessage(body);
                     setCopied(true);
                     window.setTimeout(() => setCopied(false), 2000);
                   }}
