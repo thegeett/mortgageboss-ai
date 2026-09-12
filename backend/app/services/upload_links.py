@@ -44,7 +44,7 @@ from app.models.upload_link import (
     mint_token,
 )
 from app.services.attachment_safety import assess
-from app.services.documents import create_document
+from app.services.documents import DuplicateDocumentError, create_document
 from app.storage import get_storage_backend
 
 logger = get_logger(__name__)
@@ -271,21 +271,32 @@ async def redeem_link(
         filename=filename,
         content=content,
     )
-    document = await create_document(
-        db,
-        loan_file=loan_file,
-        document_id=document_id,
-        filename=filename,
-        storage_path=storage_path,
-        mime_type=outcome.sniffed_content_type or "application/octet-stream",
-        # WHAT WAS WRITTEN, not what was claimed — the LP-806 lesson. A recorded size taken from
-        # anywhere but the bytes agrees with a document containing something else.
-        size=len(content),
-        # ADR-056: no user actor. A borrower delivered this; naming the processor who minted the
-        # link would make the provenance say something untrue.
-        uploaded_by_user_id=None,
-        upload_source=UploadSource.SECURE_LINK,
-    )
+    # LP-1000 — the borrower sending the same file twice is the most likely duplicate of all (a
+    # retry, a second tap on an unresponsive button), so this path gets the same refusal as the
+    # others, in `UploadLinkError`'s borrower-facing register. It says the file is already there
+    # WITHOUT naming the existing document: this response goes to an unauthenticated stranger
+    # holding a link, and which documents a loan file holds is not theirs to learn.
+    try:
+        document = await create_document(
+            db,
+            loan_file=loan_file,
+            document_id=document_id,
+            filename=filename,
+            content=content,
+            storage_path=storage_path,
+            mime_type=outcome.sniffed_content_type or "application/octet-stream",
+            # WHAT WAS WRITTEN, not what was claimed — the LP-806 lesson. A recorded size taken
+            # from anywhere but the bytes agrees with a document containing something else.
+            size=len(content),
+            # ADR-056: no user actor. A borrower delivered this; naming the processor who minted
+            # the link would make the provenance say something untrue.
+            uploaded_by_user_id=None,
+            upload_source=UploadSource.SECURE_LINK,
+        )
+    except DuplicateDocumentError as exc:
+        raise UploadLinkError(
+            "We already have that file — there is no need to send it again."
+        ) from exc
 
     link.uses += 1
     link.last_used_at = utcnow()

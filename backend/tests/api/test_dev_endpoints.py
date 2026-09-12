@@ -105,6 +105,7 @@ async def _store_document(
         loan_file=loan_file,
         document_id=document_id,
         filename=filename,
+        content=content,
         mime_type=mime_type,
         size=len(content),
         storage_path=storage_path,

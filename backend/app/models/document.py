@@ -31,7 +31,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
@@ -196,6 +196,14 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """An uploaded file attached to a loan file (metadata + storage path)."""
 
     __tablename__ = "documents"
+    # LP-1000 — the duplicate lookup is always (this loan file, this digest), so the index carries
+    # both. NOT a unique constraint, deliberately: the existing rows already hold duplicates (22
+    # groups on staging when this was written), so a unique index cannot be created until they are
+    # reconciled, and a constraint would turn an edge case into a 500 where the service raises a
+    # 409 with the colliding document named.
+    __table_args__ = (
+        Index("ix_documents_loan_file_content_sha256", "loan_file_id", "content_sha256"),
+    )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
     loan_file_id: Mapped[UUID] = mapped_column(
@@ -211,6 +219,20 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Path/key in the storage backend, not the bytes. LongStr (1024) because S3
     # keys and nested local paths can exceed the 256 of MediumStr.
     storage_path: Mapped[LongStr] = mapped_column(nullable=False)
+    # LP-1000 — SHA-256 of the uploaded BYTES, hex. The identity "is this the same document?"
+    # that nothing in the system could express before: no hash, no checksum, no digest existed
+    # anywhere, so the only way to ask was to compare `file_size_bytes` and hope.
+    #
+    # NULLABLE, and it stays nullable. Every document uploaded before this column existed has no
+    # digest and there is nothing to backfill from without re-reading every blob out of storage —
+    # so a NULL means "uploaded before LP-1000", never "this file has no content". The duplicate
+    # check treats NULL as no-match rather than as a match, which is the fail-open direction on
+    # purpose: refusing an upload because an old row happens to be unhashed would be a worse error
+    # than accepting a duplicate.
+    #
+    # `String(64)` and the name follow `InboundAttachment.sha256`, which has hashed attachment
+    # bytes since LP-806 — one convention for the same fact, not two.
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # --- Classification (set by the classifier, Epic 5 / Phase 2) ----------
     # Flexible string slug, NOT an enum: the ~100-type set is finalized in

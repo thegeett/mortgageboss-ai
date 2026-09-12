@@ -19,6 +19,7 @@ extension is sanitized there too (defense in depth). Services ``flush``; the
 endpoint commits. Soft-delete preserves the stored bytes (audit).
 """
 
+import hashlib
 from uuid import UUID
 
 from fastapi import status
@@ -81,6 +82,51 @@ class DocumentValidationError(Exception):
         self.http_status = http_status
 
 
+class DuplicateDocumentError(DocumentValidationError):
+    """The same bytes are already on this loan file (LP-1000).
+
+    A subclass of :class:`DocumentValidationError` so every route that already maps that exception
+    to an HTTP status maps this one too, with ``409 Conflict`` — the upload is refused because of
+    the file's relationship to what is already there, not because the file itself is bad.
+
+    Carries the document it collided with so the caller can NAME it. "Duplicate rejected" with no
+    referent is worse than accepting the duplicate: the processor cannot tell which of their files
+    was refused, or find the one already on the loan.
+    """
+
+    def __init__(self, message: str, *, existing: Document) -> None:
+        super().__init__(message, http_status=status.HTTP_409_CONFLICT)
+        self.existing = existing
+
+
+def content_digest(content: bytes) -> str:
+    """The SHA-256 of the uploaded bytes, hex — the document's content identity (LP-1000)."""
+    return hashlib.sha256(content).hexdigest()
+
+
+async def find_duplicate(
+    db: AsyncSession, *, loan_file_id: UUID, digest: str, exclude_id: UUID | None = None
+) -> Document | None:
+    """An ACTIVE document on this loan file with the same bytes, or ``None``.
+
+    SCOPED TO THE LOAN FILE, never wider. The same document legitimately appears on different loan
+    files (a lender's blank form, a borrower with two applications), and a global check would also
+    leak across companies — `Document` has no `company_id` of its own, so the loan file IS the
+    tenant boundary here (ADR-052). Scoping to it is what makes this tenant-safe by construction.
+
+    SOFT-DELETED ROWS DO NOT COUNT (`only_active`). A processor who deletes a bad upload must be
+    able to upload it again; matching against deleted rows would make that impossible and give them
+    no way out.
+    """
+    stmt = select(Document).where(
+        Document.loan_file_id == loan_file_id,
+        Document.content_sha256 == digest,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Document.id != exclude_id)
+    return (await db.scalars(only_active(stmt, Document))).first()
+
+
 def _detect_content_type(content: bytes) -> str | None:
     """The content type proven by the leading magic bytes, or ``None``."""
     for signature, content_type in _MAGIC:
@@ -128,6 +174,7 @@ async def create_document(
     loan_file: LoanFile,
     document_id: UUID,
     filename: str,
+    content: bytes,
     mime_type: str,
     size: int,
     storage_path: str,
@@ -139,13 +186,36 @@ async def create_document(
     ``document_id`` is the UUID already used to build the storage path (LP-35),
     so the record and the stored bytes share one id. The processing pipeline
     (LP-42) later advances the status. Uses ``flush``; the endpoint commits.
+
+    LP-1000 — THE DUPLICATE CHECK LIVES HERE, and here is the whole point. Four routes create
+    documents — the bulk upload, the replace, the email triage accept, and the borrower upload link
+    — and every one of them already holds the bytes and calls this function. A check in any of them
+    would have to be written four times and would be missed once; a check here covers all four by
+    construction, including whatever route is added next.
+
+    It raises rather than flags. Byte-identical content on the same loan file carries no information
+    the first copy does not already carry, so accepting it only creates work: a second row for every
+    per-document rule to answer, a second set of extracted rows for every aggregate to gather. The
+    caller gets the colliding document back on the exception so it can say WHICH file it collided
+    with, which is the difference between a refusal a processor can act on and one they cannot.
     """
+    digest = content_digest(content)
+    existing = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+    if existing is not None:
+        raise DuplicateDocumentError(
+            f"This file is already on the loan as {existing.original_filename!r} "
+            f"(uploaded {existing.created_at.strftime('%b')} {existing.created_at.day}, "
+            f"{existing.created_at.year}). Upload a different file, or replace the existing "
+            f"document if this one supersedes it.",
+            existing=existing,
+        )
     document = Document(
         id=document_id,
         loan_file_id=loan_file.id,
         original_filename=filename,
         mime_type=mime_type,
         file_size_bytes=size,
+        content_sha256=digest,
         storage_path=storage_path,
         status=DocumentStatus.PENDING,
         upload_source=upload_source,

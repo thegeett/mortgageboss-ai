@@ -476,6 +476,7 @@ async def test_document_subject_reads_the_filename_via_the_content_id_bridge(
         loan_file=loan_file,
         document_id=uuid4(),
         filename="Statement_Mar2026.pdf",
+        content=b"Statement_Mar2026 bytes",
         mime_type="application/pdf",
         size=1024,
         storage_path="acme/lf/doc.pdf",

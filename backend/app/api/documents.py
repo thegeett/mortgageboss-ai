@@ -54,10 +54,13 @@ from app.services.document_versioning import supersede_document
 from app.services.documents import (
     MAX_FILE_SIZE_BYTES,
     DocumentValidationError,
+    DuplicateDocumentError,
     build_document_detail,
     build_document_response,
     build_document_responses,
+    content_digest,
     create_document,
+    find_duplicate,
     get_current_extraction,
     get_document_for_company,
     get_version_group_documents,
@@ -333,15 +336,45 @@ async def upload(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
     # Stage 1 — read + validate every file first (all-or-nothing).
+    #
+    # LP-1000 — THE DUPLICATE CHECK BELONGS HERE, not only in `create_document`. That one is the
+    # backstop every route shares, but it fires in stage 2, after `storage.save` has already written
+    # bytes — so a duplicate in a ten-file batch would leave up to ten orphaned objects behind a
+    # request that stored nothing. Checking in stage 1 keeps the all-or-nothing promise this
+    # docstring makes and costs one indexed lookup per file.
     staged: list[tuple[UUID, UploadFile, bytes, str]] = []
+    seen: dict[str, str] = {}
     for upload_file in files:
         try:
             content = await _read_capped(upload_file, max_bytes=MAX_FILE_SIZE_BYTES)
             mime_type = validate_upload(
                 content=content, declared_content_type=upload_file.content_type or ""
             )
+            digest = content_digest(content)
+            # The same file selected twice in ONE request. Neither copy is in the database yet, so
+            # only the batch itself can catch this — and it is the likeliest duplicate of all.
+            twin = seen.get(digest)
+            if twin is not None:
+                raise DocumentValidationError(
+                    f"{upload_file.filename or 'This file'} is the same file as {twin!r}, "
+                    "selected twice in one upload. Remove one of them.",
+                    http_status=status.HTTP_409_CONFLICT,
+                )
+            already = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+            if already is not None:
+                raise DuplicateDocumentError(
+                    f"{upload_file.filename or 'This file'} is already on the loan as "
+                    f"{already.original_filename!r} (uploaded "
+                    f"{already.created_at.strftime('%b')} {already.created_at.day}, "
+                    f"{already.created_at.year}). Remove it from this upload, or replace the "
+                    "existing document if this one supersedes it.",
+                    existing=already,
+                )
         except DocumentValidationError as exc:
+            # `DuplicateDocumentError` is a `DocumentValidationError`, so it maps through here too,
+            # carrying its own 409 rather than the 413/415 a size or type failure carries.
             raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+        seen[digest] = upload_file.filename or "upload"
         staged.append((uuid4(), upload_file, content, mime_type))
 
     # Stage 2 — store bytes + create records (the request already passed validation).
@@ -361,6 +394,7 @@ async def upload(
             loan_file=loan_file,
             document_id=document_id,
             filename=filename,
+            content=content,
             mime_type=mime_type,
             size=len(content),
             storage_path=storage_path,
@@ -853,16 +887,25 @@ async def replace(
         filename=filename,
         content=content,
     )
-    new_document = await create_document(
-        db,
-        loan_file=loan_file,
-        document_id=new_id,
-        filename=filename,
-        mime_type=mime_type,
-        size=len(content),
-        storage_path=storage_path,
-        uploaded_by_user_id=current_user.id,
-    )
+    # LP-1000 — replacing a document with the SAME bytes is refused. A replace exists to supersede
+    # what is there with something different; re-uploading the identical file would mark the old
+    # version historical, re-open the need it satisfied and re-run the pipeline, all to arrive at
+    # the file already on the loan. The check in `create_document` catches it; this maps it to the
+    # 409 this endpoint already uses for "that is not a replaceable state".
+    try:
+        new_document = await create_document(
+            db,
+            loan_file=loan_file,
+            document_id=new_id,
+            filename=filename,
+            content=content,
+            mime_type=mime_type,
+            size=len(content),
+            storage_path=storage_path,
+            uploaded_by_user_id=current_user.id,
+        )
+    except DocumentValidationError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
     await supersede_document(db, old_document=old, new_document=new_document)
 
     await log_activity(

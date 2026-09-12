@@ -41,7 +41,7 @@ from app.models.inbound_attachment import (
 from app.models.inbound_message import InboundMessage
 from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
-from app.services.documents import create_document
+from app.services.documents import DuplicateDocumentError, create_document
 from app.storage import get_storage_backend
 
 logger = get_logger(__name__)
@@ -189,24 +189,32 @@ async def accept_attachment(
         filename=attachment.filename_normalized or "attachment",
         content=content,
     )
-    document = await create_document(
-        db,
-        loan_file=loan_file,
-        document_id=document_id,
-        filename=attachment.filename_normalized or "attachment",
-        mime_type=attachment.sniffed_content_type or "application/octet-stream",
-        # `len(content)` RATHER THAN `attachment.size_bytes`. They should agree — the bytes were
-        # matched back by sha256 — but the recorded size is a fact about what was parsed and this is
-        # a fact about what is being stored. Using the recorded one would let a document whose stored
-        # bytes are something else still report the right size, which is the one number anybody would
-        # check.
-        size=len(content),
-        storage_path=storage_path,
-        # NULL, per ADR-056. A borrower emailed it; no user uploaded it, and naming the processor who
-        # clicked accept would make the provenance say something untrue.
-        uploaded_by_user_id=None,
-        upload_source=UploadSource.BORROWER_INBOX,
-    )
+    # LP-1000 — an attachment whose bytes are already on the file is refused with the rule that
+    # stopped it, like every other refusal here. `CannotAcceptError` is what the endpoint maps to a
+    # 409 carrying the message, so the processor triaging the mailbox is told WHICH document it
+    # duplicates rather than being handed a 500.
+    try:
+        document = await create_document(
+            db,
+            loan_file=loan_file,
+            document_id=document_id,
+            filename=attachment.filename_normalized or "attachment",
+            content=content,
+            mime_type=attachment.sniffed_content_type or "application/octet-stream",
+            # `len(content)` RATHER THAN `attachment.size_bytes`. They should agree — the bytes were
+            # matched back by sha256 — but the recorded size is a fact about what was parsed and
+            # this is a fact about what is being stored. Using the recorded one would let a document
+            # whose stored bytes are something else still report the right size, which is the one
+            # number anybody would check.
+            size=len(content),
+            storage_path=storage_path,
+            # NULL, per ADR-056. A borrower emailed it; no user uploaded it, and naming the
+            # processor who clicked accept would make the provenance say something untrue.
+            uploaded_by_user_id=None,
+            upload_source=UploadSource.BORROWER_INBOX,
+        )
+    except DuplicateDocumentError as exc:
+        raise CannotAcceptError(str(exc)) from exc
     flagged = await _flag_possible_duplicate(db, loan_file_id=loan_file.id, document=document)
 
     attachment.disposition = AttachmentDisposition.ACCEPTED

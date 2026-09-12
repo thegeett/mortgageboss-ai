@@ -1,0 +1,238 @@
+"""LP-1000 — the same bytes are not two documents.
+
+Nothing in this system could express "is this the same document?". There was no hash, checksum or
+digest on `documents`, and `create_document` did no duplicate check, so the only way to ask was to
+compare `file_size_bytes` and hope. Staging held 22 groups of duplicate uploads across eight
+document types when this was written, including one credit report present twice whose 24 tradelines
+were therefore gathered as 48.
+
+The check lives in `create_document` because all four intake routes pass through it — bulk upload,
+replace, email-triage accept, borrower upload link — so one check covers four paths and whatever
+route is added next.
+
+WHAT THESE TESTS PIN, in order of how much they would hurt to get wrong:
+  * the loan-file scope (a wider check would reject legitimate uploads and leak across companies);
+  * the soft-delete exemption (without it, deleting a bad upload makes re-uploading it impossible);
+  * the NULL fail-open (an unhashed pre-LP-1000 row must not refuse today's upload).
+"""
+
+from __future__ import annotations
+
+import hashlib
+from uuid import uuid4
+
+import pytest
+from app.core.security import hash_password
+from app.models import Company, User, UserRole
+from app.models.document import Document
+from app.models.loan_file import LoanFile
+from app.services.documents import (
+    DuplicateDocumentError,
+    content_digest,
+    create_document,
+    find_duplicate,
+    soft_delete_document,
+)
+from app.services.loan_files import create_loan_file
+from sqlalchemy.ext.asyncio import AsyncSession
+
+PDF_BYTES = b"%PDF-1.7\n%the same bytes twice\n"
+OTHER_BYTES = b"%PDF-1.7\n%different bytes\n"
+
+
+async def _company(db: AsyncSession, *, slug: str) -> tuple[Company, User]:
+    company = Company(name=slug.title(), slug=slug)
+    db.add(company)
+    await db.flush()
+    user = User(
+        company_id=company.id,
+        email=f"u@{slug}.com",
+        hashed_password=hash_password("irrelevant"),
+        first_name="Test",
+        last_name="User",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return company, user
+
+
+async def _add(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    *,
+    filename: str,
+    content: bytes = PDF_BYTES,
+    user: User | None = None,
+) -> Document:
+    """Create one document the way every real route does."""
+    document_id = uuid4()
+    return await create_document(
+        db,
+        loan_file=loan_file,
+        document_id=document_id,
+        filename=filename,
+        content=content,
+        mime_type="application/pdf",
+        size=len(content),
+        storage_path=f"{loan_file.company_id}/{loan_file.id}/{document_id}.pdf",
+        uploaded_by_user_id=user.id if user else None,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The digest itself
+# --------------------------------------------------------------------------- #
+def test_the_digest_is_the_sha256_of_the_bytes() -> None:
+    """Not a private scheme — the same hex sha256 anyone else would compute over the same file,
+    which is what makes it comparable outside this codebase."""
+    assert content_digest(PDF_BYTES) == hashlib.sha256(PDF_BYTES).hexdigest()
+    assert content_digest(b"") == hashlib.sha256(b"").hexdigest()
+
+
+async def test_the_digest_is_stored_on_the_document(db_session: AsyncSession) -> None:
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    document = await _add(db_session, loan_file, filename="paystub.pdf", user=user)
+
+    assert document.content_sha256 == hashlib.sha256(PDF_BYTES).hexdigest()
+
+
+# --------------------------------------------------------------------------- #
+# The refusal
+# --------------------------------------------------------------------------- #
+async def test_the_same_bytes_on_one_loan_file_are_refused(db_session: AsyncSession) -> None:
+    """THE SHAPE THIS TICKET EXISTS FOR: the same file uploaded twice. On staging that was three
+    purchase-agreement pairs at 3,037,074 bytes each, one of each pair named "… (1).pdf"."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    first = await _add(db_session, loan_file, filename="Purchase Agreement.pdf", user=user)
+
+    with pytest.raises(DuplicateDocumentError) as caught:
+        await _add(db_session, loan_file, filename="Purchase Agreement (1).pdf", user=user)
+
+    assert caught.value.http_status == 409
+    assert caught.value.existing.id == first.id, "the caller needs the row it collided with"
+
+
+async def test_the_refusal_names_the_document_it_collided_with(db_session: AsyncSession) -> None:
+    """⚠️ "Duplicate rejected" with no referent is worse than accepting the duplicate: the
+    processor can neither tell which of their files was refused nor find the one already there."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    await _add(db_session, loan_file, filename="Credit_Report_Naveen.pdf", user=user)
+
+    with pytest.raises(DuplicateDocumentError) as caught:
+        await _add(db_session, loan_file, filename="credit report copy.pdf", user=user)
+
+    assert "Credit_Report_Naveen.pdf" in str(caught.value)
+
+
+# --------------------------------------------------------------------------- #
+# What must STILL be accepted — each one a way this could have been too strict
+# --------------------------------------------------------------------------- #
+async def test_the_same_bytes_on_a_DIFFERENT_loan_file_are_accepted(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE SCOPE, and the reason it is the loan file and not the company or the world. The same
+    document legitimately appears on two loans (a blank lender form, a borrower with two
+    applications). `Document` has no `company_id` of its own — it is company-scoped transitively
+    through its loan file (ADR-052) — so scoping the check to the loan file is also what makes it
+    tenant-safe by construction rather than by a filter somebody must remember."""
+    company, user = await _company(db_session, slug="acme")
+    one = await create_loan_file(db_session, company_id=company.id)
+    two = await create_loan_file(db_session, company_id=company.id)
+
+    await _add(db_session, one, filename="form.pdf", user=user)
+    second = await _add(db_session, two, filename="form.pdf", user=user)
+
+    assert second.loan_file_id == two.id
+
+
+async def test_another_companys_identical_document_does_not_block(
+    db_session: AsyncSession,
+) -> None:
+    """The cross-tenant case stated separately from the cross-file one, because it is the one that
+    would be a security bug rather than an annoyance: company B must never learn that company A
+    holds a file, and must never be refused because of it."""
+    company_a, user_a = await _company(db_session, slug="acme")
+    company_b, user_b = await _company(db_session, slug="globex")
+    file_a = await create_loan_file(db_session, company_id=company_a.id)
+    file_b = await create_loan_file(db_session, company_id=company_b.id)
+
+    await _add(db_session, file_a, filename="w2.pdf", user=user_a)
+    theirs = await _add(db_session, file_b, filename="w2.pdf", user=user_b)
+
+    assert theirs.loan_file_id == file_b.id
+
+
+async def test_a_soft_deleted_twin_does_not_block_re_uploading_it(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ WITHOUT THIS THERE IS NO WAY OUT. A processor who uploads the wrong file and deletes it
+    must be able to upload it again; matching against deleted rows would refuse them forever with a
+    message pointing at a document they can no longer see."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    mistake = await _add(db_session, loan_file, filename="wrong.pdf", user=user)
+    await soft_delete_document(db_session, document=mistake)
+
+    again = await _add(db_session, loan_file, filename="wrong.pdf", user=user)
+
+    assert again.id != mistake.id
+
+
+async def test_different_bytes_with_the_same_name_are_accepted(db_session: AsyncSession) -> None:
+    """The check is on CONTENT, never on the filename. Two statements both saved as "statement.pdf"
+    are two documents; refusing on the name would reject the ordinary case."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    await _add(db_session, loan_file, filename="statement.pdf", user=user)
+    other = await _add(
+        db_session, loan_file, filename="statement.pdf", content=OTHER_BYTES, user=user
+    )
+
+    assert other.content_sha256 == hashlib.sha256(OTHER_BYTES).hexdigest()
+
+
+async def test_a_row_with_no_digest_does_not_refuse_todays_upload(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE FAIL-OPEN DIRECTION, chosen deliberately. Every document uploaded before this column
+    existed has `content_sha256 = NULL` and cannot be backfilled without re-reading every blob out
+    of object storage. So NULL means "uploaded before LP-1000", never "this file has no content" —
+    and refusing an upload because an old row happens to be unhashed would be a worse error than
+    accepting a duplicate."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    legacy = await _add(db_session, loan_file, filename="legacy.pdf", user=user)
+    legacy.content_sha256 = None  # a pre-LP-1000 row
+    await db_session.flush()
+
+    accepted = await _add(db_session, loan_file, filename="legacy again.pdf", user=user)
+
+    assert accepted.id != legacy.id
+
+
+# --------------------------------------------------------------------------- #
+# find_duplicate on its own — the seam the bulk upload's stage 1 uses
+# --------------------------------------------------------------------------- #
+async def test_find_duplicate_can_exclude_a_document(db_session: AsyncSession) -> None:
+    """`exclude_id` is what lets a caller ask "is anything OTHER than this one the same?" — needed
+    by any later reconciliation of the duplicates already in the database, which is the half
+    LP-1000 does not fix."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    only = await _add(db_session, loan_file, filename="one.pdf", user=user)
+    digest = content_digest(PDF_BYTES)
+
+    assert await find_duplicate(db_session, loan_file_id=loan_file.id, digest=digest) is not None
+    assert (
+        await find_duplicate(
+            db_session, loan_file_id=loan_file.id, digest=digest, exclude_id=only.id
+        )
+        is None
+    )
