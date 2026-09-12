@@ -123,9 +123,16 @@ requires_documents:
 # the master policy certificate". So the insurer would receive an email asking them to go and ask
 # somebody else for the insurer's own document.
 #
-# The ask is well written for a BORROWER or a processor, which is the condition it was written under.
-# Deleted rather than re-aimed, because an ask that names a third party is correct only when the
-# reader is not that third party, and nothing in the renderer knows who the reader is.
+# The ask was well written for a BORROWER or a processor, which is the condition it was written
+# under. It was deleted rather than re-aimed because "nothing in the renderer knows who the reader
+# is" — and LP-843 is the ticket that made the renderer know. Re-aimed now, at the party this
+# document actually routes to.
+#
+# ADDRESSED TO THE INSURER, who holds it. The deleted version told the reader to go and ask the
+# association; that instruction belongs to a borrower, and this email does not reach one.
+outbound_ask: >-
+  Please send the current master policy certificate for the project — an ACORD 28, or your
+  evidence of commercial property insurance.
 
 spec_version: 1
 

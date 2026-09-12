@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from string import Template
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.email_draft import (
@@ -191,10 +191,57 @@ def _borrower_label(need: NeedsItem) -> str:
     return need.title or (document_label(need.needs_type) if need.needs_type else "")
 
 
+def _identification_block(loan_file: LoanFile, *, borrower_name: str, property_address: str) -> str:
+    """How a third party finds this loan in THEIR system (LP-843).
+
+    `display_id` is OURS. A lender, a title company and an employer each file by something else —
+    the borrower's name, the property address, their own loan number — and an email that offers only
+    "LF-XMB2" names nothing they can search. The reference is still included, because it is what they
+    quote back to us.
+
+    OMITS WHAT THE FILE DOES NOT HAVE rather than printing an empty label. "Property:" with nothing
+    after it tells a reader the address is missing from our system, which is true and useless; the
+    line simply does not appear. A purchase file often has no address for weeks (`Property.address_line`
+    is nullable precisely for that), so this is the ordinary case rather than the degraded one.
+
+    NO LOAN NUMBER. A lender's own loan number is not a field this system holds, and inventing a
+    label for it would put an empty promise in every email.
+    """
+    lines = []
+    if borrower_name:
+        lines.append(f"Borrower: {borrower_name}")
+    if property_address:
+        lines.append(f"Property: {property_address}")
+    lines.append(f"Our reference: {loan_file.display_id}")
+    return "\n".join(lines)
+
+
+def template_for(party: ResponsibleParty) -> TemplateKey:
+    """Which template renders a draft to this party (LP-843).
+
+    TWO NON-BORROWER VOICES, not six. Lender, title, accountant, agent and insurer are all third
+    parties being asked for a document they already hold, and the same professional words serve all
+    of them — what differs is the document list. The employer is its own, because a VOE is a form to
+    complete rather than a document to retrieve, and an incomplete one costs another round trip.
+
+    THIS IS NOT THE BUCKET. `Communication.party` decides which tab a draft appears under, and five
+    parties sharing one template still get five tabs. The two were the same field until this ticket,
+    which is exactly why every party draft was rendered from the borrower's template.
+    """
+    if party is ResponsibleParty.BORROWER:
+        return DRAFT_TEMPLATE
+    if party is ResponsibleParty.EMPLOYER:
+        return TemplateKey.DOCUMENT_REQUEST_EMPLOYER
+    return TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY
+
+
 def render_draft_body(
     loan_file: LoanFile,
     needs: list[NeedsItem],
     *,
+    party: ResponsibleParty = ResponsibleParty.BORROWER,
+    borrower_name: str = "",
+    property_address: str = "",
     framing: Framing | None = None,
     upload_link_url: str | None = None,
 ) -> RenderedTemplate:
@@ -211,6 +258,26 @@ def render_draft_body(
     now would bake in whoever happened to click "request", who is not necessarily who sends it.
     """
     document_list = "\n\n".join(_document_line(need) for need in needs)
+    key = template_for(party)
+    if key is not DRAFT_TEMPLATE:
+        # LP-843 — NO `$inbox_address` AND NO BORROWER FRAMING. The third-party and employer
+        # templates declare neither, so supplying them would fail the declared-variables check
+        # rather than leak quietly, which is the right way round.
+        return render(
+            key,
+            {
+                "processor_name": "$processor_name",
+                "loan_reference": loan_file.display_id,
+                "borrower_name": borrower_name or "the borrower",
+                "loan_identification": _identification_block(
+                    loan_file,
+                    borrower_name=borrower_name,
+                    property_address=property_address,
+                ),
+                "document_list": document_list,
+                "secure_upload_block": secure_upload_block(upload_link_url),
+            },
+        )
     # LP-810 — the composed framing where there is one, the file's own plain sentences otherwise.
     # `plain_framing()` carries v1's exact wording, so a reader with the flag off sees what v1 sent.
     words = framing or plain_framing()
@@ -356,17 +423,22 @@ NO_RECIPIENT = ResponsibleParty.PROCESSOR
 
 
 def draft_template_key(party: ResponsibleParty) -> str:
-    """The template key a draft to this party is filed under (LP-841).
+    """The template key stored on a draft to this party — WHAT RENDERED IT (LP-843).
 
-    THE BORROWER KEEPS `initial_documentation_request`, and the asymmetry is deliberate rather than
-    untidy: that key is on every draft and every sent message this product has ever produced, and it
-    is what ADR-401's version pin resolves against. Renaming it to match the pattern would orphan
-    every historical row's template + version pair, which is the one thing that pin exists to make
-    impossible.
+    LP-841 stored `document_request_<party>` here so the communication page could bucket by it. That
+    made the key mean two things, and LP-843 separated them: the bucket is `Communication.party` now,
+    and this is the template again.
+
+    IT HAD TO CHANGE, and the reason is ADR-401 rather than tidiness. A lender draft stored
+    `template_key="document_request_lender"` with `template_version="v1"` — and no such template has
+    ever existed, so the pair named nothing. The pin's entire purpose is that a stored key and
+    version resolve to the exact words that were sent; a row that resolves to nothing cannot be
+    audited and cannot be told apart from one that resolves to something.
+
+    The borrower still keeps `initial_documentation_request`, which is the genuine historical pin:
+    that key is on every message this product has ever sent.
     """
-    if party is ResponsibleParty.BORROWER:
-        return DRAFT_TEMPLATE.value
-    return template_key_for(party)
+    return template_for(party).value
 
 
 def party_for_draft_template(template_key: str | None) -> ResponsibleParty | None:
@@ -385,6 +457,15 @@ def party_for_draft_template(template_key: str | None) -> ResponsibleParty | Non
         return None
     if template_key == DRAFT_TEMPLATE.value:
         return ResponsibleParty.BORROWER
+    # LP-843 — THE HISTORICAL KEYS ONLY. `document_request_<party>` is what LP-841 stored, and a
+    # draft written before that ticket's column existed still carries one; that is the whole reason
+    # this function survives.
+    #
+    # IT CANNOT ANSWER FOR A DRAFT WRITTEN SINCE. Five parties share `document_request_third_party`,
+    # so a lender draft and a title draft are now indistinguishable by key — which is exactly why the
+    # audience is stored. Returning None here is not a gap, it is the honest answer: a caller that
+    # needs the party reads `Communication.party`, and one that falls back to this for a modern row
+    # is asking a question the key genuinely no longer carries.
     for party in ResponsibleParty:
         if template_key == template_key_for(party):
             return party
@@ -397,7 +478,18 @@ def _open_drafts_stmt(loan_file_id: UUID, party: ResponsibleParty):  # type: ign
         select(Communication).where(
             Communication.loan_file_id == loan_file_id,
             Communication.status == CommunicationStatus.DRAFT,
-            Communication.template_key == draft_template_key(party),
+            # LP-843 — MATCHES ON THE AUDIENCE, or on the key for a draft written before the
+            # column existed. Filtering on the key alone would strand every draft open across the
+            # deploy in a bucket nothing looks in; filtering on the column alone would find none of
+            # them. The backfill sets `party` for existing rows, so the second arm covers only a
+            # draft created between the migration and the deploy of this code.
+            or_(
+                Communication.party == party.value,
+                and_(
+                    Communication.party.is_(None),
+                    Communication.template_key == draft_template_key(party),
+                ),
+            ),
         ),
         Communication,
     ).order_by(Communication.created_at.desc(), Communication.id.desc())
@@ -572,6 +664,49 @@ def _framing_from_body(body: str) -> DraftComposition | None:
     return DraftComposition(parts[0], parts[1], parts[2])
 
 
+def _party_of_draft(draft: Communication) -> ResponsibleParty:
+    """The audience of a stored draft.
+
+    READS THE COLUMN, falls back to the template key. `Communication.party` is LP-843's and every
+    draft written since carries it; a draft composed before the migration has its party recoverable
+    from the key LP-841 filed it under, which is what the backfill used. The fallback is not
+    defensive padding — a draft open across the deploy is the ordinary case.
+    """
+    if draft.party:
+        try:
+            return ResponsibleParty(draft.party)
+        except ValueError:
+            pass
+    return party_for_draft_template(draft.template_key) or ResponsibleParty.BORROWER
+
+
+async def _identification(db: AsyncSession, *, loan_file: LoanFile) -> tuple[str, str]:
+    """`(borrower_name, property_address)` for a third-party email's identification block.
+
+    EMPTY STRINGS WHERE THE FILE IS SILENT, never a placeholder or an invented value. The block
+    omits a line it has nothing for; see `_identification_block`.
+    """
+    borrower = await primary_borrower(db, loan_file_id=loan_file.id)
+    name = borrower.full_name if borrower else ""
+
+    from app.models.property import Property
+
+    row = (
+        await db.execute(
+            only_active(select(Property).where(Property.loan_file_id == loan_file.id), Property)
+        )
+    ).scalar_one_or_none()
+    parts = [
+        (row.address_line if row else None),
+        (row.city if row else None),
+        " ".join(
+            p for p in [(row.state if row else None), (row.postal_code if row else None)] if p
+        ),
+    ]
+    address = ", ".join(p.strip() for p in parts if p and p.strip())
+    return name, address
+
+
 async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> None:
     """Rewrite the draft's subject and body from its current membership."""
     needs = await _needs_in_draft(db, draft=draft)
@@ -580,8 +715,20 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     # template on every add and remove; a link that lived only in the prose would be wiped the first
     # time a processor requested one more document, and could not be rebuilt because the token is
     # hashed in `upload_links`.
+    party = _party_of_draft(draft)
+    identity = (
+        await _identification(db, loan_file=loan_file)
+        if party is not ResponsibleParty.BORROWER
+        else ("", "")
+    )
     rendered = render_draft_body(
-        loan_file, needs, framing=framing, upload_link_url=draft.upload_link_url
+        loan_file,
+        needs,
+        party=party,
+        borrower_name=identity[0],
+        property_address=identity[1],
+        framing=framing,
+        upload_link_url=draft.upload_link_url,
     )
     draft.subject = rendered.subject
     draft.body = rendered.body
@@ -772,6 +919,10 @@ async def _add_to_party_draft(
         direction=CommunicationDirection.OUTBOUND,
         status=CommunicationStatus.DRAFT,
         template_key=draft_template_key(party),
+        # LP-843 — THE AUDIENCE, stored rather than inferred from the key. The two were one field
+        # until this ticket, and that is why five parties could not share a template: the key had to
+        # stay per-party for the tabs, so the words had to be per-party too, or borrower's.
+        party=party.value,
         # Stamped by `_regenerate` below, from the render itself.
         template_version=None,
         recipient=await _party_address(db, loan_file=loan_file, party=party),

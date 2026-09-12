@@ -1,0 +1,29 @@
+Subject: Verification of employment — $borrower_name
+
+Hello,
+
+We are processing a mortgage application for the employee below and need a Verification of Employment.
+
+$loan_identification
+
+Please confirm, as applicable:
+
+- Employment status, and whether it is full time or part time
+- Job title
+- Start date
+- Current base salary or hourly rate
+- Average hours per week, if paid hourly
+- Year-to-date earnings
+- Prior-year earnings, where available
+- Bonus, overtime or commission, if any
+
+$document_list
+
+Please reply to this message with the completed verification attached.
+
+$secure_upload_block
+
+If your company uses a third-party verification service, please tell us which one and what we need to do to obtain the verification from them.
+
+Thank you,
+$processor_name

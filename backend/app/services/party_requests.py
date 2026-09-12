@@ -236,7 +236,7 @@ async def build_party_draft(
     """
     from app.models.communication import CommunicationDirection, CommunicationStatus
     from app.models.communication_needs_item import CommunicationNeedsItem
-    from app.services.email_draft import render_draft_body
+    from app.services.email_draft import _identification, render_draft_body
 
     if party is ResponsibleParty.PROCESSOR:
         raise ValueError("A processor orders these; there is nobody to send a request to.")
@@ -271,6 +271,11 @@ async def build_party_draft(
             status=CommunicationStatus.DRAFT,
             recipient=request.address,
             template_key=key,
+            # LP-843 — the SECOND draft-creation path, and the asymmetry this would have been.
+            # `email_draft` sets the audience on the drafts it makes; a draft born here without one
+            # falls back to reading its template key, which works today and silently stops the day
+            # the key set and the party set diverge — which is exactly what this ticket separated.
+            party=party.value,
             initiated_by_user_id=actor_user_id,
         )
         db.add(draft)
@@ -298,7 +303,19 @@ async def build_party_draft(
             existing.add(need.id)
     await db.flush()
 
-    rendered = render_draft_body(loan_file, list(request.needs), framing=None)
+    # LP-843 — THE PARTY'S OWN TEMPLATE. This rendered the BORROWER's file for every party, which
+    # is how a title company came to read "we are working through your loan file and there are a few
+    # documents we still need from you". The renderer picks the template from the party now, so the
+    # one thing this call had to say is the one thing it was not saying.
+    borrower_name, property_address = await _identification(db, loan_file=loan_file)
+    rendered = render_draft_body(
+        loan_file,
+        list(request.needs),
+        party=party,
+        borrower_name=borrower_name,
+        property_address=property_address,
+        framing=None,
+    )
     draft.subject = rendered.subject
     draft.body = rendered.body
     draft.template_version = rendered.version

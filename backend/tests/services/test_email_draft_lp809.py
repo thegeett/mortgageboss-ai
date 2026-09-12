@@ -779,25 +779,47 @@ async def test_a_processor_owned_document_gets_no_draft_at_all(db_session: Async
     assert by_party["lender"].draft is not None
 
 
-def test_every_party_bucket_round_trips_to_the_key_its_drafts_are_filed_under() -> None:
-    """LP-841 — THE TABS AND THE FILING ARE ONE DECISION.
+def test_every_party_draft_names_a_template_that_exists() -> None:
+    """LP-843 — ADR-401'S PIN, WHICH LP-841 HAD QUIETLY BROKEN.
 
-    A draft is filed under `draft_template_key(party)` and shown under `party_for_draft_template`.
-    If those two ever disagree for one party, that party's drafts exist and its tab is empty — a
-    failure with no error, on a screen whose whole job is to show the processor what is waiting.
+    A stored `template_key` + `template_version` must resolve to the exact words that were sent;
+    that is the entire purpose of the pin. LP-841 filed a lender draft under
+    `document_request_lender` so the communication page could bucket it, and NO SUCH TEMPLATE HAS
+    EVER EXISTED — so the pair named nothing, and a row that resolves to nothing cannot be told
+    apart from one that resolves to something.
 
-    The borrower is the one that would break it: their key is `initial_documentation_request`, not
-    the `document_request_borrower` the pattern implies (ADR-401 pins the historical key), so the
-    inverse cannot be "strip the prefix".
+    The key means "what rendered this" again. The bucket moved to `Communication.party`, which is
+    what it needed to be all along: five parties can share one professional template and still need
+    five tabs.
+    """
+    from app.communications.templates import TEMPLATES
+    from app.documents.catalog import ResponsibleParty
+    from app.services.email_draft import draft_template_key
+
+    registered = {key.value for key in TEMPLATES}
+    for party in ResponsibleParty:
+        assert draft_template_key(party) in registered, party
+
+    # The borrower's historical key is the one thing that must NOT have moved: it is on every message
+    # this product has ever sent, and renaming it orphans every audit row that names it.
+    assert draft_template_key(ResponsibleParty.BORROWER) == "initial_documentation_request"
+
+
+def test_the_old_per_party_keys_still_resolve_for_drafts_written_before_the_column() -> None:
+    """A draft open across the deploy keeps LP-841's key and has no stored party until the backfill.
+
+    `party_for_draft_template` exists for exactly those rows. It cannot answer for a modern one —
+    five parties share `document_request_third_party` — and that is the honest answer rather than a
+    gap: the caller reads the column.
     """
     from app.documents.catalog import ResponsibleParty
-    from app.services.email_draft import draft_template_key, party_for_draft_template
+    from app.services.email_draft import party_for_draft_template
 
-    for party in ResponsibleParty:
-        assert party_for_draft_template(draft_template_key(party)) is party, party
-
-    # A template that is not a document request belongs in NO bucket. Without this the function
-    # could return BORROWER for everything and still pass the loop above.
+    assert party_for_draft_template("document_request_lender") is ResponsibleParty.LENDER
+    assert party_for_draft_template("document_request_title") is ResponsibleParty.TITLE
+    assert party_for_draft_template("initial_documentation_request") is ResponsibleParty.BORROWER
+    # The shared key names no single party, and saying so is the point.
+    assert party_for_draft_template("document_request_third_party") is None
     assert party_for_draft_template("password_reset") is None
     assert party_for_draft_template(None) is None
 
@@ -863,3 +885,157 @@ async def test_a_dollar_sign_in_an_ask_survives_as_a_literal(db_session: AsyncSe
     # The control: the REAL placeholders did resolve, so this is not passing because nothing ran.
     assert "Felicia" in final
     assert "$borrower_first_name" not in final
+
+
+async def test_a_lender_is_not_told_it_is_their_loan_file(db_session: AsyncSession) -> None:
+    """LP-843 — THE REPORTED DEFECT, in the words that were reported.
+
+    "Current email message says 'We are working through your loan file and there are a few documents
+    we still need from you' to send an email to Employer. Also to send email to lender... These look
+    like processor sending email to borrower. It is actually borrower's file."
+
+    LP-841 filed a lender draft under `document_request_lender` and no such template existed, so
+    `render_draft_body` rendered the borrower's file for everybody.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Credit report", needs_type="credit_report")
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    lender = next(p for p in result.parties if p.party.value == "lender")
+    body = (lender.draft.body or "").lower()
+    assert "your loan file" not in body
+    assert "we still need from you" not in body
+    assert "$borrower_first_name" not in (lender.draft.body or "")
+    # The control: it is still a document request that names the document.
+    assert "credit report" in body
+
+
+async def test_no_third_party_email_carries_the_file_inbox_address(
+    db_session: AsyncSession,
+) -> None:
+    """LP-843 — THE SECURITY DECISION, asserted rather than described.
+
+    The file inbox address is a bearer capability (ADR-397): anyone holding it can post documents
+    into this loan file and nothing authenticates the sender. The borrower's template carries it by
+    design. A third party's must not — handing an employer or a title company write access to a
+    borrower's file is a capability we cannot withdraw once the mail has left, and the person who
+    carries the consequence is not the person we gave it to.
+
+    ASSERTED ON THE RENDERED BODY, not on the template's declared variables. A template that does not
+    declare `inbox_address` could still be handed the address through any other slot — the
+    identification block is built from file data and is exactly the kind of place it would arrive.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    inbox = loan_file.get_inbox_address()
+    assert inbox, "the fixture has no inbox address; this test would pass on nothing"
+
+    appraisal = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+    voe = await _need(db_session, loan_file, title="VOE", needs_type="voe")
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[appraisal, voe], actor_user_id=actor
+    )
+
+    seen = 0
+    for party_draft in result.parties:
+        if party_draft.draft is None or party_draft.party.value == "borrower":
+            continue
+        seen += 1
+        assert inbox not in (party_draft.draft.body or ""), party_draft.party
+        assert inbox not in (party_draft.draft.subject or ""), party_draft.party
+    # THE CONTROL. Every assertion above is satisfied when no third-party draft was built at all,
+    # which is the state before LP-841 and would read as green.
+    assert seen >= 2, "no third-party drafts were produced; the loop asserted nothing"
+
+
+async def test_a_third_party_can_find_the_loan_in_their_own_system(
+    db_session: AsyncSession,
+) -> None:
+    """LP-843 — `display_id` IS OURS.
+
+    A lender files by borrower name and property address; "LF-XMB2" names nothing they can search,
+    and an email that offers only that is one they cannot act on. The reference stays, because it is
+    what they quote back to us.
+    """
+    from app.models.borrower import Borrower
+    from app.models.property import Property
+
+    loan_file, actor = await _file_and_actor(db_session)
+    db_session.add(Borrower(loan_file_id=loan_file.id, first_name="Felicia", last_name="Vance"))
+    db_session.add(
+        Property(
+            loan_file_id=loan_file.id,
+            address_line="41 Bellweather Lane",
+            city="Fresno",
+            state="CA",
+            postal_code="93720",
+        )
+    )
+    await db_session.flush()
+    need = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    body = next(p for p in result.parties if p.party.value == "lender").draft.body or ""
+    assert loan_file.display_id in body, "the reference they quote back to us"
+    # The two things a lender actually files by. Our display_id names nothing in their system.
+    assert "Felicia Vance" in body
+    assert "41 Bellweather Lane" in body
+
+
+async def test_the_identification_block_omits_what_the_file_does_not_have(
+    db_session: AsyncSession,
+) -> None:
+    """A purchase file often has no address for weeks — `Property.address_line` is nullable exactly
+    for that — so this is the ordinary case, not the degraded one.
+
+    "Property:" with nothing after it tells a reader the address is missing from our system, which is
+    true and useless. The line does not appear at all.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    body = next(p for p in result.parties if p.party.value == "lender").draft.body or ""
+    assert "Property:" not in body
+    assert "Borrower:" not in body
+    # The control: the block still rendered, and still carries the one thing this file does have.
+    assert loan_file.display_id in body
+
+
+async def test_an_employer_is_asked_for_a_verification_not_for_their_loan_file(
+    db_session: AsyncSession,
+) -> None:
+    """LP-843 — THE EMPLOYER GETS ITS OWN VOICE, and the reason it is not the third-party one.
+
+    A VOE is a form to COMPLETE, not a document to retrieve. An employer who sends back a letter
+    confirming employment and nothing else costs another round trip, so the email names the fields a
+    complete verification carries. It also spells out "Verification of Employment": "VOE" is our
+    jargon, and the person opening this email works in payroll.
+    """
+    from app.models.borrower import Borrower
+
+    loan_file, actor = await _file_and_actor(db_session)
+    db_session.add(Borrower(loan_file_id=loan_file.id, first_name="Felicia", last_name="Vance"))
+    await db_session.flush()
+    need = await _need(db_session, loan_file, title="VOE", needs_type="voe")
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    draft = next(p for p in result.parties if p.party.value == "employer").draft
+    body = draft.body or ""
+    assert "Verification of Employment" in body, "spelled out, not our acronym"
+    assert "Felicia Vance" in body, "payroll needs to know which employee"
+    assert "Year-to-date earnings" in body, "the fields that make one round trip enough"
+    # NOT the borrower's words, and not the third party's either.
+    assert "your loan file" not in body.lower()
+    assert "the following from you" not in body.lower()

@@ -345,23 +345,28 @@ async def test_sending_the_stored_body_still_resolves_it(
 async def test_a_party_request_is_not_addressed_to_the_borrower_by_name(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    """`render_draft_body` is shared, and resolving from the borrower unconditionally leaked a name.
+    """A title company must not be GREETED as the borrower — while still being told whose loan it is.
 
-    `party_requests.build_party_draft` renders the SAME template for the title company, the agent,
-    the lender, the CPA, the insurer and the employer — each under its own `template_key`, all
-    carrying `Hello $borrower_first_name,`. LP-823 resolved that from `primary_borrower` in
-    `send_draft`, which sends every outbound draft on the file. Measured before the fix: a title
-    request to `t@title.example` went out reading "Hello Akash,".
+    LP-823's finding: `build_party_draft` rendered the borrower's template for every party, so a
+    title request carried `Hello $borrower_first_name,` and `send_draft` resolved it from
+    `primary_borrower`. Measured then: a request to `t@title.example` went out reading "Hello Akash,".
 
-    Worse than what it replaced, and that is the reason this is a finding rather than a nit. A
-    placeholder in a message to the wrong reader is visibly broken and gets noticed. A real
-    borrower's name in it is not — LP-820's docstring even records the belief that the greeting "is
-    generic in the template rather than addressed to a borrower", which was true only while nothing
-    resolved it.
+    Worse than what it replaced, which is why it was a finding rather than a nit. A placeholder in a
+    message to the wrong reader is visibly broken and gets noticed; a real borrower's name in it is
+    not.
 
-    The positive control is the second half: the borrower's OWN draft on the same file, with the
-    same borrower, still resolves to their name. Without it, a fix that stopped resolving anywhere
-    would pass the first assertion.
+    LP-843 SPLIT THE TWO THINGS THIS TEST WAS CONFLATING. It asserted the borrower's name appeared
+    NOWHERE in a third-party message, which was the right guard while the only place a name could
+    appear was the greeting. The third party now needs the borrower's name — it is how a title
+    company finds the file in their own system, and an email carrying only our `display_id` names
+    nothing they can search.
+
+    So the property is about the ROLE the name plays, not its presence: the borrower is the SUBJECT
+    of this message and never its ADDRESSEE. "Borrower: Akash Shah" is the file being identified;
+    "Hello Akash," is us mistaking a title company for the borrower.
+
+    The positive control is the second half: the borrower's OWN draft on the same file still greets
+    them by name. Without it, a build that greeted nobody anywhere would pass.
     """
     from app.documents.catalog import ResponsibleParty
     from app.models.loan_file_participant import ParticipantRole
@@ -390,8 +395,10 @@ async def test_a_party_request_is_not_addressed_to_the_borrower_by_name(
     party_draft = await build_party_draft(
         db, loan_file=loan_file, party=ResponsibleParty.TITLE, actor_user_id=user.id
     )
-    # The stored body is what a caller posts back; the party draft has no panel to resolve it first.
-    assert "$borrower_first_name" in (party_draft.body or "")
+    # LP-843 — NO GREETING SLOT AT ALL, which is stronger than a slot that resolves safely. The
+    # third-party template cannot leak a borrower's name into a greeting because it has no greeting
+    # to leak it into; that is the difference between a guard and an absence of the hazard.
+    assert "$borrower_first_name" not in (party_draft.body or "")
 
     sent = await send_draft(
         db,
@@ -402,13 +409,17 @@ async def test_a_party_request_is_not_addressed_to_the_borrower_by_name(
         approver_user_id=user.id,
     )
 
-    assert "Akash" not in (sent.body or ""), (
-        "the borrower's first name went out in a message addressed to the title company"
-    )
-    assert "$borrower_first_name" not in (sent.body or ""), (
+    body = sent.body or ""
+    # THE DEFECT ITSELF: the title company greeted as though they were the borrower.
+    assert "Hello Akash" not in body, "the title company was addressed as the borrower"
+    assert "$borrower_first_name" not in body, (
         "the placeholder survived to the title company — the greeting resolved to nothing"
     )
-    assert "Hello there," in (sent.body or "")
+    assert "Hello," in body
+    # AND THE NAME IS STILL THERE, as the subject of the message rather than its addressee. Asserting
+    # its absence would now fail the thing LP-843 exists to provide: a title company cannot match
+    # "LF-…" to anything in their own system.
+    assert "Akash" in body, "the title company was not told whose loan this is"
 
     # THE CONTROL: the same borrower, the same file, their own draft — still resolved by name.
     assert borrower_draft is not None

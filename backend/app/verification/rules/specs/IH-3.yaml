@@ -80,10 +80,16 @@ requires_documents:
   - [homeowners_insurance]
   - [closing_disclosure]
 
-# LP-842 — what this document has to ESTABLISH, in words safe to send out.
-# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
-outbound_ask: >-
-  Please send an insurance binder with coverage effective on or before the closing date, so the property is covered from day one.
+# LP-843 — NO `outbound_ask`, and that is a decision rather than an omission.
+#
+# This rule needs documents from TWO parties: the borrower's insurance binder and the lender's Closing Disclosure. An ask is stored on the
+# need and rendered for whoever holds that need's document, but it is chosen once per RULE — so one
+# sentence is read by both, and the sentence that is right for one is wrong for the other.
+# "please send an insurance binder effective on or before the closing date" reaching the lender is the same defect the LP-842
+# review found on IH-7, CR-8 and CR-12; this is the rest of that class.
+#
+# The real fix is to choose the ask per DOCUMENT rather than per rule, which is a model change this
+# ticket did not make. Until then, silent renders exactly as before LP-842.
 
 spec_version: 1
 

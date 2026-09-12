@@ -198,6 +198,12 @@ def _party_of(
         return party.value if party else None
     from app.services.email_draft import party_for_draft_template
 
+    # LP-843 — THE STORED AUDIENCE FIRST. `template_key` answered this until five parties came to
+    # share one template, at which point it stopped being able to: a lender draft and a title draft
+    # are both `document_request_third_party`, and deriving the bucket from the key would put them
+    # in one tab. The key remains the fallback for a draft written before the column existed.
+    if message.party:
+        return message.party
     party = party_for_draft_template(message.template_key)
     return party.value if party else None
 

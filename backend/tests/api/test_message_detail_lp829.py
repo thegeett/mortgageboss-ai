@@ -289,10 +289,17 @@ async def test_a_party_request_resolves_its_placeholders_too(
     Measured before the fix: opening one showed "Hello $borrower_first_name," signed
     "$processor_name" — the exact words a processor reported on the panel in LP-823.
 
-    The greeting resolves to the generic form rather than the borrower's name, which is LP-823's
-    review fix doing its job one layer down: this message is addressed to the title company, and
-    Akash's name has no business in it. Both halves are asserted — no placeholder survives, and the
-    borrower is not named — because either alone passes on the other being wrong.
+    LP-843 — THE PLACEHOLDER THIS WATCHED FOR IS GONE, and the one that matters is not. The
+    third-party template has no greeting slot at all, so `$borrower_first_name` cannot survive into a
+    title company's inbox because it is never written there. `$processor_name` still is — a draft is
+    not signed until somebody sends it — so that is what the vacuity control must anchor on now. A
+    fixture check on a placeholder the template stopped emitting is a control that passes by being
+    unreachable, which is the failure it exists to prevent.
+
+    "The borrower is not named" ALSO STOPPED BEING THE PROPERTY. LP-843 puts the borrower's name in
+    the identification block deliberately: a title company cannot match our `display_id` to anything
+    in their own system. What must not happen is being GREETED as the borrower — subject of the
+    message, never its addressee.
     """
     from app.documents.catalog import ResponsibleParty
     from app.models.loan_file_participant import ParticipantRole
@@ -322,9 +329,12 @@ async def test_a_party_request_resolves_its_placeholders_too(
     party = await build_party_draft(
         db, loan_file=loan_file, party=ResponsibleParty.TITLE, actor_user_id=actor.id
     )
-    assert "$borrower_first_name" in (party.body or ""), (
+    assert "$processor_name" in (party.body or ""), (
         "the fixture must actually store a placeholder, or this test asserts nothing"
     )
+    # And the one this test used to anchor on is absent by construction now — asserted so the change
+    # is deliberate rather than a fixture that quietly stopped exercising anything.
+    assert "$borrower_first_name" not in (party.body or "")
     await db.commit()
 
     resp = await client.get(
@@ -334,11 +344,14 @@ async def test_a_party_request_resolves_its_placeholders_too(
     body = resp.json()["body"]
 
     assert "$borrower_first_name" not in body
-    assert "$processor_name" not in body
-    assert "Akash" not in body, (
-        "the borrower's name went into a message addressed to the title company"
+    assert "$processor_name" not in body, "the signature placeholder reached the title company"
+    assert "Hello Akash" not in body, (
+        "the title company was greeted as though they were the borrower"
     )
-    assert "Hello there," in body
+    assert "Hello," in body
+    # The borrower IS named, as the subject of the message. This is what lets a title company find
+    # the file; asserting its absence would fail the feature rather than guard it.
+    assert "Akash" in body
     # `is_open_draft` still means what it says: the panel above is NOT editing this one.
     assert resp.json()["is_open_draft"] is False
 

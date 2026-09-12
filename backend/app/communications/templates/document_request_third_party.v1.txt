@@ -1,0 +1,18 @@
+Subject: Outstanding documents — $borrower_name — $loan_reference
+
+Hello,
+
+We are processing the mortgage application below and still need the following from you.
+
+$loan_identification
+
+$document_list
+
+Please reply to this message with the documents attached.
+
+$secure_upload_block
+
+If any of these have already been sent, please let us know and we will confirm receipt against the file rather than ask again.
+
+Thank you,
+$processor_name

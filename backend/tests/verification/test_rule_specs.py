@@ -159,9 +159,15 @@ def test_no_outbound_ask_sits_on_a_rule_that_declares_no_document() -> None:
 #: rules co-firing on one document silences it. Measured, and the distribution is the point:
 _ASKS_PER_SHARED_DOCUMENT = {
     "bank_statement": 6,  # AS-1, AS-2, AS-8, AS-9, AS-10, AS-12
-    "closing_disclosure": 4,  # CL-1, CR-13, ID-5, IH-3
-    "homeowners_insurance": 3,  # IH-1, IH-3, IH-9
+    "closing_disclosure": 2,  # CL-1, CR-13
+    "homeowners_insurance": 2,  # IH-1, IH-9
 }
+# LP-843 — `closing_disclosure` fell from 4 and `homeowners_insurance` from 3, and the reduction is
+# a CONSEQUENCE rather than a fix aimed at this number. ID-5 and IH-3 lost their asks because each
+# declares documents held by two different parties, so one sentence would have been read by the
+# borrower and the lender both — the rest of the class the LP-842 review opened with IH-7, CR-8 and
+# CR-12. Contention falling is the side effect; `test_every_ask_has_exactly_one_possible_reader` is
+# where that decision is actually pinned.
 
 
 def test_how_many_asks_compete_for_one_document() -> None:
@@ -196,3 +202,40 @@ def test_how_many_asks_compete_for_one_document() -> None:
     )
     # The control: single-document asks exist too, or the rule above is about an empty set.
     assert any(n == 1 for n in competing.values())
+
+
+def test_every_ask_has_exactly_one_possible_reader() -> None:
+    """LP-843 — THE FACT AN AUTHOR NEEDS, made checkable.
+
+    The LP-842 review found three asks written to the wrong person: IH-7 told the INSURER to go and
+    ask the association for the insurer's own document, and CR-8 and CR-12 asked the LENDER for
+    things only a borrower can supply. All three were well written — for a reader who was never going
+    to receive them.
+
+    Voice is not checkable. WHO WILL READ IT is: an ask rides its need, LP-841 routes each need by
+    the responsible party of its document, and `BorrowerGuidance.responsible_party` is a single value
+    per type. So every ask has exactly one reader, and an author can always know which.
+
+    THIS FAILS WHEN THAT STOPS BEING TRUE — a rule whose alternative document groups are held by
+    DIFFERENT parties. Then one ask would be read by two audiences, one of which cannot act on it,
+    and there is no sentence that is right for both. That is the moment to split the ask per party,
+    and this test is what says so instead of a wrong email saying it.
+    """
+    from app.documents.catalog import get_guidance
+
+    ambiguous = {}
+    for rule_id, spec in _authored_asks().items():
+        parties = {
+            get_guidance(document_type).responsible_party
+            for group in (spec.requires_documents or ())
+            for document_type in group
+        }
+        if len(parties) > 1:
+            ambiguous[rule_id] = sorted(p.value for p in parties)
+
+    assert not ambiguous, (
+        f"these asks can be read by more than one party: {ambiguous}. One sentence cannot be right "
+        "for a borrower and the lender at once — split the ask, or drop it."
+    )
+    # The control: an empty set of authored asks satisfies the line above.
+    assert len(_authored_asks()) > 10, "too few authored asks for this to have checked anything"

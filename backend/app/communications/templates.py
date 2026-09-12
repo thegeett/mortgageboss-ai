@@ -107,6 +107,20 @@ class TemplateKey(StrEnum):
     STATUS_UPDATE = "status_update"
     CONDITION_RESPONSE_REQUEST = "condition_response_request"
     CUSTOM = "custom"
+    # LP-843 — the two NON-BORROWER voices. LP-841 routed a request to whoever holds the document
+    # and there was no template to render it with, so an employer read "we are working through your
+    # loan file and there are a few documents we still need from you" — every word of which is
+    # addressed to the borrower, about a file that is not the employer's.
+    #
+    # TWO, NOT SIX. Lender, title, accountant, agent and insurer are all third-party professionals
+    # being asked for a document they hold; the same words serve them and the DOCUMENT LIST is what
+    # differs. The employer is the one that needs its own, because a VOE is a form to complete rather
+    # than a document to retrieve, and an incomplete one costs another round trip.
+    #
+    # The BUCKET a draft appears under is `Communication.party`, not this key — see that column. Five
+    # parties sharing one template still get five tabs.
+    DOCUMENT_REQUEST_THIRD_PARTY = "document_request_third_party"
+    DOCUMENT_REQUEST_EMPLOYER = "document_request_employer"
 
 
 @dataclass(frozen=True)
@@ -194,6 +208,41 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         version="v2",
         variables=_COMMON | {"loan_reference", "condition_list", "inbox_address"},
     ),
+    # LP-843 — NEITHER CARRIES `$inbox_address`, and that is a decision rather than an omission.
+    # The file inbox address is a bearer capability (ADR-397): anyone holding it can post documents
+    # into this loan file, and nothing authenticates the sender. Handing that to a borrower is the
+    # design; handing it to their employer, their insurer or a title company gives file-write access
+    # to a third party, and the person who carries the consequence is not the person we gave it to.
+    #
+    # Reply-to is the return path here. Adding the address later is one template version; un-sending
+    # it is impossible, so the reversible direction is the one to be wrong in.
+    TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY: TemplateSpec(
+        key=TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY,
+        version="v1",
+        variables=frozenset(
+            {
+                "processor_name",
+                "loan_reference",
+                "borrower_name",
+                "loan_identification",
+                "document_list",
+                "secure_upload_block",
+            }
+        ),
+    ),
+    TemplateKey.DOCUMENT_REQUEST_EMPLOYER: TemplateSpec(
+        key=TemplateKey.DOCUMENT_REQUEST_EMPLOYER,
+        version="v1",
+        variables=frozenset(
+            {
+                "processor_name",
+                "borrower_name",
+                "loan_identification",
+                "document_list",
+                "secure_upload_block",
+            }
+        ),
+    ),
     TemplateKey.CUSTOM: TemplateSpec(
         key=TemplateKey.CUSTOM,
         version="v1",
@@ -209,6 +258,14 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY,
+        "v1",
+    ): "387b38ceee6313473c3b1b241e0c8313664acc937de3e8637a687c87b19efb01",  # pragma: allowlist secret
+    (
+        TemplateKey.DOCUMENT_REQUEST_EMPLOYER,
+        "v1",
+    ): "9a547cb14e514da2ddcd1a8fb291a9a62363fdf480a019d56bd1a3022ee2771d",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v4",

@@ -124,6 +124,24 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     recipient: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: LP-843 — WHO this message is for, as a `ResponsibleParty` value ("borrower", "lender", …).
+    #:
+    #: SEPARATE FROM `template_key`, which says what RENDERED it, and the two were one field until
+    #: this ticket. LP-841 filed a lender draft under the key `document_request_lender` so the
+    #: communication page could bucket it — but no such template exists, so every party draft was
+    #: rendered from the borrower's file and an employer read "we are working through your loan
+    #: file". Giving each party its own template key would fix the words and force six near-identical
+    #: template files, because ADR-401 pins a fingerprint per key and version.
+    #:
+    #: They are different questions. Five parties can share one professional template and still need
+    #: five tabs; the borrower and the employer need different words and are one tab each. Storing
+    #: the audience separately lets the template set and the bucket set move independently, and it is
+    #: what `template_key` was being asked to mean in addition to its own job.
+    #:
+    #: NULL for anything not addressed to a party — an inbound message from an unrecognised sender,
+    #: a notification. Backfilled for existing drafts from their LP-841 template key, which is
+    #: derivable and therefore honest.
+    party: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     # --- Links + provenance ------------------------------------------------
     # The need this message concerns, if any (e.g. a document request). SET NULL:

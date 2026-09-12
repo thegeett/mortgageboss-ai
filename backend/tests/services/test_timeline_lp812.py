@@ -720,3 +720,52 @@ async def test_a_truncated_timeline_says_so(db_session: AsyncSession) -> None:
     capped, truncated = await build_timeline(db_session, loan_file=loan_file, limit=2)
     assert len(capped) == 2
     assert truncated is True
+
+
+async def test_a_lender_and_a_title_draft_land_in_different_buckets(
+    db_session: AsyncSession,
+) -> None:
+    """LP-843 — THE TAB READS THE STORED AUDIENCE, because the template key can no longer say.
+
+    LP-841 gave each party its own template key and the timeline derived the bucket from it. LP-843
+    moved five parties onto ONE professional template — lender, title, accountant, agent and insurer
+    all render `document_request_third_party` — so a lender draft and a title draft are now
+    indistinguishable by key. Deriving the bucket from it would put both in one tab, which is the
+    reported requirement ("there should be tab for each bucket") failing silently.
+
+    TWO PARTIES SHARING ONE TEMPLATE is the whole point of the test. One draft would pass against a
+    build that reads the key, because one key still maps to one something.
+    """
+    from app.documents.catalog import ResponsibleParty
+    from app.models.needs_item import NeedsItem, NeedsItemOrigin
+    from app.services.email_draft import add_needs_to_draft
+    from app.services.timeline import build_timeline
+
+    _company, loan_file = await _company_and_file(db_session, slug="acme")
+    needs = []
+    for title, needs_type in [("Appraisal", "appraisal"), ("Title commitment", "title_commitment")]:
+        item = NeedsItem(
+            loan_file_id=loan_file.id,
+            title=title,
+            needs_type=needs_type,
+            origin=NeedsItemOrigin.MANUAL,
+        )
+        db_session.add(item)
+        needs.append(item)
+    await db_session.flush()
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=needs, actor_user_id=None
+    )
+    built = {p.party for p in result.parties if p.draft is not None}
+    assert {ResponsibleParty.LENDER, ResponsibleParty.TITLE} <= built, (
+        "the fixture did not produce both drafts; the assertion below would be vacuous"
+    )
+    # The control on the premise: they really do share one template key.
+    keys = {p.draft.template_key for p in result.parties if p.draft is not None}
+    assert keys == {"document_request_third_party"}
+
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
+    parties = {e.party for e in timeline if e.party}
+    assert "lender" in parties
+    assert "title" in parties

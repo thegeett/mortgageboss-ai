@@ -45,6 +45,11 @@ _CONTEXT = {
     "status_summary": "The appraisal came back on Tuesday.",
     "next_step": "We expect the underwriter's decision this week.",
     "condition_list": "- A letter of explanation",
+    # LP-843 — the non-borrower slots. `borrower_name` and `loan_identification` exist because a
+    # third party cannot match our `display_id` to anything: a lender files by borrower name and
+    # property address, and an email that names neither is one they cannot act on.
+    "borrower_name": "Akash Shah",
+    "loan_identification": "Borrower: Akash Shah\nProperty: 41 Bellweather Lane, Fresno CA",
     # LP-810 — the initial request's three framing slots. Supplied here rather than defaulted, so the
     # declared-variables test still compares the file against the spec in both directions.
     "opening": "We are working through your file.",
@@ -84,10 +89,16 @@ def _raw_framing(stem: str, version: str) -> str:
     return (_TEMPLATES_DIR / f"framing.{stem}.{version}.txt").read_text(encoding="utf-8")
 
 
-def test_all_five_templates_are_registered() -> None:
-    """Spec 4.1 names five. A key with no spec is a draft that cannot render at all."""
+def test_every_template_key_is_registered() -> None:
+    """A key with no spec is a draft that cannot render at all.
+
+    Spec 4.1 named five and this asserted the number. LP-843 adds the two NON-BORROWER voices, and
+    the count was the part of this test that said nothing: the property is that the key set and the
+    spec set agree, which is what fails when somebody adds a key and forgets the spec. Seven is
+    asserted below so the growth is deliberate rather than silent, but the set equality is the test.
+    """
     assert set(TEMPLATES) == set(TemplateKey)
-    assert len(TemplateKey) == 5
+    assert len(TemplateKey) == 7
 
 
 def test_declared_variables_match_the_files_exactly() -> None:
