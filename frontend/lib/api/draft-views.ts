@@ -1,3 +1,4 @@
+import { announceDraftChange } from "@/lib/api/draft-broadcast";
 import { needsQueryKey } from "@/lib/api/needs";
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -22,6 +23,20 @@ import type { QueryClient } from "@tanstack/react-query";
  * filter's query, which is what makes one line cover the pills.
  */
 export function invalidateDraftViews(queryClient: QueryClient, fileId: string): void {
+  invalidateDraftViewsLocally(queryClient, fileId);
+  // LP-845 — AND TELL THE OTHER TABS. A processor with the communication page open beside the
+  // verification tab clicks Request and goes back to a list that has not moved. This tab refreshing
+  // itself was LP-840; the second tab is a different QueryClient and hears nothing without this.
+  announceDraftChange(fileId);
+}
+
+/**
+ * The three invalidations, WITHOUT announcing them.
+ *
+ * Separate from the function above so the broadcast listener has something to call that does not
+ * broadcast. Two tabs each re-announcing what they received would refresh each other forever.
+ */
+export function invalidateDraftViewsLocally(queryClient: QueryClient, fileId: string): void {
   // The mailbox and the header badge — both read the timeline, under every filter.
   void queryClient.invalidateQueries({ queryKey: ["timeline", fileId] });
   // A request creates a needs item; the needs list is what tracks it.
