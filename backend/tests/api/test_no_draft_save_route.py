@@ -69,13 +69,24 @@ def test_no_route_takes_draft_body_text_except_the_send() -> None:
         # passed. Two earlier mutants were caught only because they happened to name the parameter
         # `{draft_id}`, which is the word appearing by luck rather than by the route being read.
         prefixes = re.findall(r"""APIRouter\([^)]*prefix\s*=\s*['"]([^'"]*)['"]""", source)
+        # THE MODULE COUNTS TOO, because the word "draft" was never the property. LP-849 review
+        # round two: a `PATCH /{identifier}` in `communications.py`, whose router is prefixed
+        # `/loan-files/{id}/outbound`, has "draft" in neither its path nor its prefix — and it
+        # writes exactly the body this guard exists to protect. Two rounds of narrowing by NAME each
+        # left a door open, which is the lesson this file already carries about its first version.
+        #
+        # What identifies the hazard is ownership: these two modules hold the `Communication` rows,
+        # so a mutating route here that takes body text is a save wherever it sits in the URL. A
+        # reply or a note elsewhere carries a body legitimately and is not this.
+        owns_communications = path.name in {"communications.py", "party_requests.py"}
         for match in re.finditer(
             r"@router\.(post|put|patch)\(\s*\n?\s*[\"']([^\"']*)[\"'][\s\S]{0,400}?"
             r"\n(?:async )?def \w+\(\s*\n?\s*(\w+)\s*:\s*(\w+)",
             source,
         ):
             verb, route, _arg, model = match.groups()
-            if "draft" not in route and not any("draft" in prefix for prefix in prefixes):
+            in_path = "draft" in route or any("draft" in prefix for prefix in prefixes)
+            if not in_path and not owns_communications:
                 continue
             scanned += 1
             if model in carriers and not _ALLOWED_ROUTE.search(route):
