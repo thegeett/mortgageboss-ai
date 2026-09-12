@@ -484,3 +484,76 @@ async def test_the_window_still_applies_across_one_companys_files(
             body="Hello, please send documents.",
             approver_user_id=actor,
         )
+
+
+async def test_two_drafts_with_no_recipient_do_not_rate_limit_each_other(
+    db_session: AsyncSession,
+) -> None:
+    """LP-847 — THE TRAP AN EMPTY RECIPIENT WALKS INTO, and it would have shipped silently.
+
+    LP-843 gives a party with no contact on file a draft with an empty To, and LP-847 lets a
+    processor mark it sent. But the rate limiter matches on `Communication.recipient == recipient`,
+    so every empty-recipient send shares the key `""` — and the second one, a title company after a
+    lender and entirely unrelated, is refused with "was emailed less than five minutes ago" about a
+    mailbox that does not exist.
+
+    TWO BLANKS ARE NOT THE SAME MAILBOX. Both the suppression check and the limit are questions
+    about a specific address, and neither has anything to say when there is none.
+
+    The failure mode is what makes this worth a test: a processor sees a plausible, specific,
+    entirely false message about a send they never made, on a feature where nothing transmits.
+    """
+    loan_file, actor, _needs, draft = await _setup(db_session)
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="",
+        body="To a lender we have no address for.",
+        approver_user_id=actor,
+    )
+
+    second_file, second_need = await _second_file_in(db_session, loan_file.company_id)
+    second = await add_needs_to_draft(
+        db_session, loan_file=second_file, needs=[second_need], actor_user_id=actor
+    )
+
+    # No raise. Before the guards were scoped this was `CannotSendError("… minutes ago")`.
+    sent = await send_draft(
+        db_session,
+        loan_file=second_file,
+        draft_id=second.draft.id,
+        recipient="",
+        body="To a title company we also have no address for.",
+        approver_user_id=actor,
+    )
+    assert sent.status is CommunicationStatus.SENT
+    assert not (sent.recipient or ""), "an empty recipient must not be invented on the record"
+
+    # THE CONTROL: the limit still bites where there IS an address. Without this, scoping the guards
+    # to `if recipient:` could have been written as `if False:` and this file would still be green.
+    third_file, third_need = await _second_file_in(db_session, loan_file.company_id)
+    third = await add_needs_to_draft(
+        db_session, loan_file=third_file, needs=[third_need], actor_user_id=actor
+    )
+    await send_draft(
+        db_session,
+        loan_file=third_file,
+        draft_id=third.draft.id,
+        recipient="real@example.com",
+        body="First to a real address.",
+        approver_user_id=actor,
+    )
+    fourth_file, fourth_need = await _second_file_in(db_session, loan_file.company_id)
+    fourth = await add_needs_to_draft(
+        db_session, loan_file=fourth_file, needs=[fourth_need], actor_user_id=actor
+    )
+    with pytest.raises(CannotSendError, match="minutes ago"):
+        await send_draft(
+            db_session,
+            loan_file=fourth_file,
+            draft_id=fourth.draft.id,
+            recipient="real@example.com",
+            body="Second to the same real address.",
+            approver_user_id=actor,
+        )

@@ -159,9 +159,30 @@ describe("MessageDialog", () => {
     );
   });
 
-  it("refuses to send with no recipient", () => {
+  it("can be marked sent with NO recipient", () => {
+    // LP-847 — THE REPORTED BUG, and it was two of our own decisions contradicting. LP-843 gives a
+    // party with no contact on file a draft with an empty To, deliberately ("processor mostly worry
+    // about a message"); this button required one, so every such draft was permanently grey with
+    // nothing saying why.
+    //
+    // Nothing here transmits. Marking sent records that a PROCESSOR sent it from their own mail
+    // client, possibly to an address they know and have never typed into this system, so refusing
+    // the record for want of our own bookkeeping is refusing to believe them.
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, status: "draft", counterparty: null })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(
+      (screen.getByRole("button", { name: /Mark as sent/ }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("still refuses to send an empty message", () => {
+    // THE CONTROL. Dropping the recipient requirement must not drop the body requirement: there is
+    // no message to have sent without one, and the server refuses it too.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, status: "draft", counterparty: null, body: "   " })),
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 

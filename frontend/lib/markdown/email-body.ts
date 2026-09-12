@@ -39,19 +39,40 @@ function inline(escaped: string): string {
 }
 
 const LIST_ITEM = /^[-*]\s+(.*)$/;
+/** `Where to get it: …` — a catalog detail line, whose label is worth seeing separately. */
+const LABELLED = /^([A-Z][^:]{2,40}):\s*(.*)$/;
 
 /**
- * The body as a self-contained HTML fragment.
+ * One document's detail lines, as a nested list (LP-846).
  *
- * NO CLASSES AND NO STYLESHEET. This string is pasted into Gmail, Outlook or Word, which keep the
- * semantic tags and discard everything that depends on our page — a class name that styles the
- * detail lines here would leave them indistinguishable there. Emphasis and structure survive
- * because they are `<strong>` and `<ul>`, not because of CSS.
+ * A NESTED `<ul>` RATHER THAN `<br>` OR A CLASS, and the constraint decides it. The clipboard's
+ * HTML carries no classes and a mail client discards our stylesheet, so indentation has to come
+ * from a tag a composer keeps. A nested list is the only structure that indents AND separates
+ * without CSS — `<br>`-joining is what LP-844 did, and it turned three labelled facts into one
+ * run-on sentence inside the bullet.
+ *
+ * THE LABEL IS EMPHASISED SEPARATELY because it is what makes the block scannable: a borrower
+ * looking for where to get a document should find "Where to get it:" without reading the sentence
+ * around it. `<strong>` survives a paste; a colour or an indent would not.
  */
+function detailBlock(lines: string[]): string {
+  const items = lines.map((line) => {
+    const labelled = LABELLED.exec(line);
+    if (!labelled) return `<li>${inline(escapeHtml(line))}</li>`;
+    const label = escapeHtml(labelled[1] ?? "");
+    const rest = inline(escapeHtml(labelled[2] ?? ""));
+    return `<li><strong>${label}:</strong> ${rest}</li>`;
+  });
+  return `<ul>${items.join("")}</ul>`;
+}
+
 export function emailBodyToHtml(body: string): string {
   const out: string[] = [];
-  let list: string[] = [];
+  /** Open list items, each with its own detail lines. */
+  let items: { text: string; details: string[] }[] = [];
   let paragraph: string[] = [];
+  /** A blank line was seen and not yet acted on — see the flush rules below. */
+  let blank = false;
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
@@ -60,39 +81,48 @@ export function emailBodyToHtml(body: string): string {
     }
   };
   const flushList = () => {
-    if (list.length > 0) {
-      out.push(`<ul>${list.join("")}</ul>`);
-      list = [];
+    if (items.length > 0) {
+      const rendered = items.map(
+        (item) =>
+          `<li>${item.text}${item.details.length > 0 ? detailBlock(item.details) : ""}</li>`,
+      );
+      out.push(`<ul>${rendered.join("")}</ul>`);
+      items = [];
     }
   };
 
   for (const raw of body.split("\n")) {
     const line = raw.replace(/\s+$/, "");
     if (line.trim() === "") {
+      // A BLANK LINE ENDS A PARAGRAPH BUT NOT A LIST. The catalog separates documents with one, and
+      // flushing on it made every document its own single-item `<ul>` — two documents rendering as
+      // two lists with a gap between them rather than as one list of two.
       flushParagraph();
-      flushList();
+      blank = true;
       continue;
     }
     const item = LIST_ITEM.exec(line.trim());
     if (item) {
       flushParagraph();
-      list.push(`<li>${inline(escapeHtml(item[1] ?? ""))}`);
+      items.push({ text: inline(escapeHtml(item[1] ?? "")), details: [] });
+      blank = false;
       continue;
     }
-    // AN INDENTED LINE UNDER A BULLET IS THAT BULLET'S DETAIL, not a new paragraph and not a code
-    // block. The catalog emits "Where to get it: …" indented beneath each document, and a general
-    // markdown reader would treat four spaces as preformatted code — which is why the subset is
-    // written against what the templates actually produce.
-    if (list.length > 0 && /^\s+\S/.test(raw)) {
-      list[list.length - 1] += `<br>${inline(escapeHtml(line.trim()))}`;
+    const indented = /^\s+\S/.test(raw);
+    // AN INDENTED LINE IMMEDIATELY UNDER A BULLET is that bullet's detail. Separated from it by a
+    // blank line it is not: the borrower template indents `$inbox_address` further down, and
+    // adopting it into the document above would put the file's address inside "what we cannot
+    // accept".
+    if (indented && items.length > 0 && !blank) {
+      const last = items[items.length - 1];
+      if (last) last.details.push(line.trim());
       continue;
     }
     flushList();
     paragraph.push(inline(escapeHtml(line)));
+    blank = false;
   }
   flushParagraph();
   flushList();
-  // `</li>` is closed here rather than per push, because a detail line appends to the item that is
-  // still open. Browsers forgive an unclosed `<li>`; a mail client pasted into may not.
-  return out.join("\n").replace(/<li>((?:(?!<\/li>).)*?)(?=<\/ul>|<li>)/g, "<li>$1</li>");
+  return out.join("\n");
 }

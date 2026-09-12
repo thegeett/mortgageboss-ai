@@ -80,8 +80,10 @@ describe("every registered template, rendered for the clipboard", () => {
     // renderer, because my first attempt at this asserted it through a template and could not fail:
     // removing the blank line after `$document_list` changed nothing, since the prose line between
     // them flushes the list anyway. A test that cannot fail from a plausible edit is not a guard.
+    // LP-846 changed the SHAPE a fold produces — a nested list rather than `<br>` — and not the
+    // rule. The property is still "this line belongs to that bullet".
     const folded = emailBodyToHtml("- a document\n    detail about it");
-    expect(folded).toContain("<li>a document<br>detail about it</li>");
+    expect(folded).toContain("<li>a document<ul><li>detail about it</li></ul></li>");
 
     const flushed = emailBodyToHtml("- a document\n\n    not a detail");
     expect(flushed).toContain("<li>a document</li>");
@@ -138,5 +140,61 @@ describe("the only way HTML reaches the DOM", () => {
 
     expect(offenders).toEqual([]);
     expect(sinks, "the scan found no sink — it read nothing").toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * LP-846 — the reported gap, asserted on a REAL catalog body rather than a hand-written one.
+ *
+ * The backend half is pinned in `test_a_borrower_is_told_where_to_get_each_document`: a request
+ * produces a body containing "Where to get it:" for each document. This is the other side of that
+ * seam — the same text, through the renderer a processor and a borrower actually read it in.
+ *
+ * The fixture is the catalog's true output for two real types, copied verbatim. Hand-writing a
+ * simpler shape is how LP-844 shipped a renderer that worked on `- one item` and flattened the
+ * thing the catalog actually emits.
+ */
+describe("the guidance a borrower reads", () => {
+  const REAL_BLOCK = [
+    "- Driver's licence — front and back",
+    "    Where to get it: A photograph or scan of your current licence.",
+    "    What we need to see: Both sides, unexpired, with all four corners in frame.",
+    "    What we cannot accept: an expired licence; the front only.",
+    "",
+    "- Homeowner's insurance — the declarations page",
+    "    Where to get it: From your insurance agent or the insurer's website.",
+    "    What we need to see: The declarations page showing the property address.",
+  ].join("\n");
+
+  it("gives each document one entry, with its guidance inside it", () => {
+    const html = emailBodyToHtml(REAL_BLOCK);
+
+    // ONE list of two documents, not two lists of one.
+    const topLevel = html.match(/^<ul>/)?.length ?? 0;
+    expect(topLevel).toBe(1);
+    expect(html).toContain("<li>Driver&#39;s licence — front and back<ul>");
+    expect(html).toContain("<li>Homeowner&#39;s insurance — the declarations page<ul>");
+
+    // Each guidance line is its own item with its label emphasised — the thing that makes it
+    // findable, and the thing `<br>`-joining destroyed.
+    expect(html.match(/<strong>Where to get it:<\/strong>/g)).toHaveLength(2);
+    expect(html.match(/<strong>What we need to see:<\/strong>/g)).toHaveLength(2);
+    expect(html).toContain("<strong>What we cannot accept:</strong>");
+
+    // THE REGRESSION ITSELF: no run-on. `<br>` inside a bullet is what the report described as the
+    // section being missing.
+    expect(html).not.toContain("<br>");
+  });
+
+  it("does not put one document's guidance under another", () => {
+    // The blank line between documents no longer flushes the list, so the rule that decides whose
+    // detail a line is has to be the INDENT and the immediacy. If it were only "a list is open",
+    // the second document's guidance would land under the first.
+    const html = emailBodyToHtml(REAL_BLOCK);
+    const [first, second] = html.split("<li>Homeowner&#39;s insurance");
+
+    expect(first).toContain("an expired licence");
+    expect(first).not.toContain("insurance agent");
+    expect(second).toContain("insurance agent");
   });
 });

@@ -1087,3 +1087,42 @@ async def test_a_draft_left_by_the_old_code_is_found_rather_than_forked(
     assert (
         await open_drafts(db_session, loan_file_id=loan_file.id, party=ResponsibleParty.TITLE) == []
     ), "an unlabelled draft was adopted by the wrong party"
+
+
+async def test_a_borrower_is_told_where_to_get_each_document(db_session: AsyncSession) -> None:
+    """LP-846 — WHAT A BORROWER READS, asserted from the request rather than from a layer.
+
+    Reported: "it does not have section where to get each document."
+
+    Eleven communication tickets have each asserted at one layer — the catalog has guidance, the
+    block renderer formats it, the template interpolates it, the HTML renderer displays it — and
+    nearly every defect since has lived in the SEAM between two of them. This one did: the sections
+    were generated correctly and the HTML renderer flattened them.
+
+    So this test spans the whole backend half in the terms the report used: ask for a document, and
+    the words a borrower receives name it AND say where to get it AND what we need to see. It has no
+    business knowing which function produced which line.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    licence = await _need(
+        db_session, loan_file, title="drivers license", needs_type="drivers_license"
+    )
+    insurance = await _need(
+        db_session, loan_file, title="homeowners insurance", needs_type="homeowners_insurance"
+    )
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[licence, insurance], actor_user_id=actor
+    )
+
+    body = result.borrower.draft.body or ""
+    # Both documents, by the name a borrower would recognise rather than by slug.
+    assert "Driver's licence" in body
+    assert "Homeowner's insurance" in body
+    # AND THE GUIDANCE, which is the reported gap. Two of them, so this cannot pass on one document
+    # happening to carry a section while the other does not.
+    assert body.count("Where to get it:") == 2, body
+    assert body.count("What we need to see:") == 2
+    # The slug must never reach a borrower's inbox.
+    assert "drivers_license" not in body
+    assert "homeowners_insurance" not in body

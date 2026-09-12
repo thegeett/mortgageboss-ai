@@ -14,14 +14,44 @@ describe("emailBodyToHtml", () => {
     expect(html).toContain("<p>Hello,</p>");
   });
 
-  it("keeps a document's detail with its document", () => {
+  it("keeps a document's detail with its document, and readable", () => {
     // The catalog indents "Where to get it" under each item. A general markdown reader treats four
     // spaces as a CODE BLOCK, which would render the instructions in a monospace box detached from
     // the thing they describe.
-    const html = emailBodyToHtml("- Bank statements\n    Where to get it: your bank's portal");
-    expect(html).toContain("<li>Bank statements<br>Where to get it: your bank&#39;s portal</li>");
+    //
+    // LP-846 — AND NOT AS A RUN-ON. LP-844 joined these with `<br>` inside the bullet, which the
+    // user reported as the section being absent: three labelled facts became one sentence with no
+    // indent and no emphasis, where the monospace block it replaced had them on separate lines.
+    const html = emailBodyToHtml(
+      "- Bank statements\n    Where to get it: your bank's portal\n    What we need to see: every page",
+    );
+    // A NESTED LIST, because the clipboard's HTML carries no classes and a mail client discards our
+    // stylesheet — indentation has to come from a tag a composer keeps.
+    expect(html).toContain("<li>Bank statements<ul>");
+    expect(html).toContain("<li><strong>Where to get it:</strong> your bank&#39;s portal</li>");
+    expect(html).toContain("<li><strong>What we need to see:</strong> every page</li>");
+    expect(html).not.toContain("<br>");
     expect(html).not.toContain("<code>");
     expect(html).not.toContain("<pre>");
+  });
+
+  it("keeps consecutive documents in ONE list", () => {
+    // LP-846 — the other half of the report. A blank line separates documents in the catalog's
+    // output, and flushing the list on it made each document its own single-item `<ul>`: two
+    // documents rendered as two lists with a gap, which is why the email read as a series of
+    // fragments rather than a list of what is needed.
+    const html = emailBodyToHtml("- Pay stubs\n\n- Bank statements");
+    expect(html.match(/<ul>/g)).toHaveLength(1);
+    expect(html).toContain("<li>Pay stubs</li><li>Bank statements</li>");
+  });
+
+  it("does not invent a label out of ordinary prose", () => {
+    // The label rule matches `Word words:` at the start of a detail line. A sentence that merely
+    // contains a colon must not be split at it — "Send it by Friday: the underwriter needs it"
+    // would put half the sentence in bold.
+    const html = emailBodyToHtml("- A document\n    send it by Friday because we need it");
+    expect(html).toContain("<li>send it by Friday because we need it</li>");
+    expect(html).not.toContain("<strong>");
   });
 
   it("emphasises what the template marked", () => {

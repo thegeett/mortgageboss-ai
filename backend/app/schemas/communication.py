@@ -47,7 +47,18 @@ class SendDraftRequest(BaseModel):
     recorded as sent while the processor had edited it in a window that never posted.
     """
 
-    recipient: str = Field(min_length=3, max_length=256)
+    #: LP-847 — MAY BE EMPTY, and that is the product's shape rather than a loosened validation.
+    #:
+    #: Nothing here transmits: "send" records that a PROCESSOR sent the message from their own mail
+    #: client, to an address they may know perfectly well and have never typed into this system.
+    #: LP-843 deliberately gives a party with no contact on file a draft with an empty To — and the
+    #: bound here was `min_length=3`, so the ticket that made an empty To legitimate never looked at
+    #: the control that refuses one. A processor could compose the message and never record sending
+    #: it.
+    #:
+    #: `min_length` was never a format check either: it accepted "abc" (LP-841 review). Dropping it
+    #: removes a bound that was protecting nothing, not a validation that was.
+    recipient: str = Field(default="", max_length=256)
     body: str = Field(min_length=1)
     #: LP-831 — the subject the processor is actually sending.
     #:

@@ -92,7 +92,13 @@ export function MessageDialog({
     setSubject(data.subject ?? "");
     setBody(data.body);
   }
-  const canSend = recipient.trim().length > 0 && body.trim().length > 0 && !send.isPending;
+  // LP-847 — NO RECIPIENT REQUIRED. LP-843 gives a party with no contact on file a draft with an
+  // empty To, deliberately; requiring one here meant every such draft had a permanently greyed
+  // "Mark as sent" with nothing saying why, which is how it was reported. Nothing in this product
+  // transmits — this records that a PROCESSOR sent the message from their own mail client, possibly
+  // to an address they know and have never typed in here. A body is still required: there is no
+  // message to have sent without one.
+  const canSend = body.trim().length > 0 && !send.isPending;
   // Built from the EDITED body and the typed recipient, so the link carries what is on screen.
   const mailtoHref = data ? messageMailtoUrl(data, recipient, body) : null;
 

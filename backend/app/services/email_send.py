@@ -247,12 +247,19 @@ async def send_draft(
     # bounce, and enough of those damage a sending reputation shared by every borrower this system
     # writes to. Checked BEFORE the rate limit so the message says the useful thing: "this address is
     # dead" is actionable, "wait five minutes" is not.
-    if await is_suppressed(db, company_id=loan_file.company_id, address=recipient):
-        raise CannotSendError(
-            f"{recipient} is suppressed — an earlier message to it bounced permanently. "
-            "Confirm the address with the borrower before sending again."
-        )
-    await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
+    # LP-847 — BOTH GUARDS ARE ABOUT A SPECIFIC ADDRESS, so neither has anything to say when there
+    # is none. Skipped rather than fed an empty string, and the rate limiter is the reason this is a
+    # decision rather than tidiness: it matches on `Communication.recipient == recipient`, so EVERY
+    # empty-recipient send shares the key "". The second one — a title company after a lender,
+    # entirely unrelated — would be refused with "was emailed less than N minutes ago" about a
+    # mailbox that does not exist. Two blanks are not the same mailbox.
+    if recipient:
+        if await is_suppressed(db, company_id=loan_file.company_id, address=recipient):
+            raise CannotSendError(
+                f"{recipient} is suppressed — an earlier message to it bounced permanently. "
+                "Confirm the address with the borrower before sending again."
+            )
+        await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
 
     needs = await _needs_in_draft(db, draft=draft)
     # CAPTURED BEFORE THE OVERWRITE (LP-821). The next line replaces `draft.body` with what the
