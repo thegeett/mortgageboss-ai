@@ -887,10 +887,16 @@ async def replace(
         filename=filename,
         content=content,
     )
-    # LP-1000 — replacing a document with the SAME bytes is refused. A replace exists to supersede
-    # what is there with something different; re-uploading the identical file would mark the old
-    # version historical, re-open the need it satisfied and re-run the pipeline, all to arrive at
-    # the file already on the loan.
+    # LP-1000 — replacing a document with the SAME bytes is refused, and the reason is stronger than
+    # "it would change nothing". A replace exists to supersede what is there with something
+    # different: this one marks the old version historical, re-opens the need it satisfied, and
+    # re-runs the pipeline over identical bytes.
+    #
+    # ⚠️ AND RE-READING IDENTICAL BYTES IS NOT GUARANTEED TO RETURN IDENTICAL VALUES. Extraction is a
+    # model call, and LP-1000's own investigation measured the proof: two byte-identical bank
+    # statements extracted once as 20 rows and once as 21. So an identical replace can MOVE a finding
+    # while the document has not changed — an unexplainable diff in a file a human has to defend.
+    # That is the harm; the wasted pipeline run is only the cost.
     #
     # ⚠️ LP-1000 review — AND THE REFUSAL MUST NOT NAME THE DOCUMENT BEING REPLACED. `create_document`
     # runs BEFORE `supersede_document`, so at this moment `old` is still current and not deleted —
@@ -908,8 +914,11 @@ async def replace(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "This is the same file as the document you are replacing, so replacing it would "
-                "change nothing. Upload a different version, or leave the document as it is."
+                "This is the same file as the document you are replacing. Replacing it would "
+                "supersede the current version and read the file again from scratch, which can "
+                "return slightly different values from identical bytes — so it may move a finding "
+                "without changing the document. To have the system read this document again, use "
+                "“Re-read this document”. To change it, upload a different version."
             ),
         )
     if other is not None:

@@ -24,8 +24,9 @@ from uuid import uuid4
 import pytest
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus, UploadSource
 from app.models.loan_file import LoanFile
+from app.services import documents as documents_service
 from app.services.documents import (
     DuplicateDocumentError,
     content_digest,
@@ -34,6 +35,8 @@ from app.services.documents import (
     soft_delete_document,
 )
 from app.services.loan_files import create_loan_file
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 PDF_BYTES = b"%PDF-1.7\n%the same bytes twice\n"
@@ -293,3 +296,136 @@ async def test_find_duplicate_can_exclude_a_document(db_session: AsyncSession) -
         )
         is None
     )
+
+
+# --------------------------------------------------------------------------- #
+# The race — `uq_documents_loan_file_content_sha256` (b8e2f5a91c73)
+#
+# The pre-check above is a SELECT and the insert is an INSERT, separated by an object-storage write
+# per file and the caller's commit. Two requests for one loan file can both read clean and both
+# insert; a double-click does it. These pin the database refusing what the check cannot.
+# --------------------------------------------------------------------------- #
+async def test_the_database_refuses_a_second_active_row_with_the_same_digest(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE GUARANTEE ITSELF, tested by BYPASSING the service check entirely — which is what a
+    racing request effectively does. If this test ever passes without raising, the constraint is
+    missing from the schema and every other test in this section proves nothing."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    await _add(db_session, loan_file, filename="first.pdf", user=user)
+
+    twin = Document(
+        id=uuid4(),
+        loan_file_id=loan_file.id,
+        original_filename="racing-second.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=len(PDF_BYTES),
+        content_sha256=content_digest(PDF_BYTES),
+        storage_path=f"{loan_file.company_id}/{loan_file.id}/twin.pdf",
+        status=DocumentStatus.PENDING,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+
+    # In a SAVEPOINT so the violation does not poison this test's session — the same containment
+    # `create_document` uses, for the same reason.
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            db_session.add(twin)
+            await db_session.flush()
+
+
+async def test_a_lost_race_is_the_same_409_and_not_a_500(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The constraint's job is to refuse; translating its refusal is `create_document`'s.
+
+    The pre-check is blinded ONCE — exactly what the loser of a race experiences: it looked, saw
+    nothing, and by the time it inserted the winner had committed. The processor must still get the
+    sentence naming the file they collided with, not a driver error.
+    """
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    winner = await _add(db_session, loan_file, filename="winner.pdf", user=user)
+
+    real_find_duplicate = documents_service.find_duplicate
+    calls = {"n": 0}
+
+    async def blind_on_the_first_look(*args: object, **kwargs: object) -> Document | None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None  # the race: the twin is not visible yet
+        return await real_find_duplicate(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(documents_service, "find_duplicate", blind_on_the_first_look)
+
+    with pytest.raises(DuplicateDocumentError) as caught:
+        await _add(db_session, loan_file, filename="loser.pdf", user=user)
+
+    assert caught.value.existing is not None
+    assert caught.value.existing.id == winner.id
+    assert "winner.pdf" in caught.value.message, "the refusal must name the file it collided with"
+
+
+async def test_losing_the_race_does_not_poison_the_rest_of_the_batch(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """⚠️ THE REASON THE INSERT RUNS INSIDE `begin_nested()`, and the failure that would hurt most.
+
+    A failed flush poisons the session: without the SAVEPOINT the caller's transaction is unusable
+    after the violation and their commit raises PendingRollbackError — so one duplicate in a
+    ten-file upload would take the whole request down, activity log included. Here the next document
+    must still save.
+    """
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    await _add(db_session, loan_file, filename="winner.pdf", user=user)
+
+    real_find_duplicate = documents_service.find_duplicate
+    calls = {"n": 0}
+
+    async def blind_on_the_first_look(*args: object, **kwargs: object) -> Document | None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await real_find_duplicate(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(documents_service, "find_duplicate", blind_on_the_first_look)
+    with pytest.raises(DuplicateDocumentError):
+        await _add(db_session, loan_file, filename="loser.pdf", user=user)
+    monkeypatch.setattr(documents_service, "find_duplicate", real_find_duplicate)
+
+    survivor = await _add(
+        db_session, loan_file, filename="next-in-the-batch.pdf", content=OTHER_BYTES, user=user
+    )
+
+    assert survivor.id is not None
+    assert survivor.content_sha256 == content_digest(OTHER_BYTES)
+
+
+async def test_a_deleted_twin_and_its_replacement_coexist_under_the_constraint(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ WHAT A TOTAL UNIQUE INDEX WOULD HAVE BROKEN, which is why the index is PARTIAL.
+
+    Deleting a bad upload and re-adding the same file leaves TWO rows with one digest on one loan
+    file — one soft-deleted, one active. `deleted_at IS NULL` in the predicate is what permits that,
+    and it is the same filter `find_duplicate` applies, so the index and the service agree.
+    """
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    first = await _add(db_session, loan_file, filename="mistake.pdf", user=user)
+    await soft_delete_document(db_session, document=first)
+
+    again = await _add(db_session, loan_file, filename="mistake.pdf", user=user)
+
+    rows = (
+        await db_session.scalars(
+            select(Document).where(
+                Document.loan_file_id == loan_file.id,
+                Document.content_sha256 == content_digest(PDF_BYTES),
+            )
+        )
+    ).all()
+    assert {row.id for row in rows} == {first.id, again.id}
+    assert again.deleted_at is None

@@ -24,6 +24,7 @@ from uuid import UUID
 
 from fastapi import status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -177,6 +178,29 @@ def validate_upload(*, content: bytes, declared_content_type: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: The partial unique index that makes the duplicate check mutual exclusion (`b8e2f5a91c73`). Named
+#: here because a violation arrives as a driver error whose TEXT is the only thing identifying which
+#: constraint refused the row — so this string is load-bearing and must match the migration and the
+#: model declaration exactly.
+_UNIQUE_DIGEST_INDEX = "uq_documents_loan_file_content_sha256"
+
+
+def _already_on_the_loan(existing: Document) -> str:
+    """The refusal sentence, in ONE place, because two different mechanisms raise it.
+
+    `find_duplicate` seeing the twin is the common case; the unique index catching a twin that landed
+    between that SELECT and the INSERT is the race. A processor must not be able to tell which one
+    refused them — the fact is the same and so is what they should do about it — so the wording
+    cannot live at either site.
+    """
+    return (
+        f"This file is already on the loan as {existing.original_filename!r} "
+        f"(uploaded {existing.created_at.strftime('%b')} {existing.created_at.day}, "
+        f"{existing.created_at.year}). Upload a different file, or replace the existing "
+        f"document if this one supersedes it."
+    )
+
+
 async def create_document(
     db: AsyncSession,
     *,
@@ -211,13 +235,7 @@ async def create_document(
     digest = content_digest(content)
     existing = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
     if existing is not None:
-        raise DuplicateDocumentError(
-            f"This file is already on the loan as {existing.original_filename!r} "
-            f"(uploaded {existing.created_at.strftime('%b')} {existing.created_at.day}, "
-            f"{existing.created_at.year}). Upload a different file, or replace the existing "
-            f"document if this one supersedes it.",
-            existing=existing,
-        )
+        raise DuplicateDocumentError(_already_on_the_loan(existing), existing=existing)
     document = Document(
         id=document_id,
         loan_file_id=loan_file.id,
@@ -230,8 +248,35 @@ async def create_document(
         upload_source=upload_source,
         uploaded_by_user_id=uploaded_by_user_id,
     )
-    db.add(document)
-    await db.flush()
+    # ⚠️ THE CHECK ABOVE IS NOT MUTUAL EXCLUSION — the database is (`b8e2f5a91c73`). That SELECT and
+    # this INSERT are separated by an object-storage write PER FILE and the caller's commit, so two
+    # requests for one loan file can both read clean and both insert. A double-click does it; so does
+    # the email-triage worker racing a manual upload. The unique index refuses the loser, and this
+    # block turns its refusal back into the same 409 the pre-check raises.
+    #
+    # INSIDE `begin_nested()` BECAUSE A FAILED FLUSH POISONS THE SESSION. Without the SAVEPOINT the
+    # caller's transaction is unusable after the violation and their commit raises
+    # PendingRollbackError — taking the activity log and every other document in the batch with it.
+    # `verification_run.py` records the same lesson in its own words: "A SQLAlchemy error poisons the
+    # session ... contained with begin_nested()".
+    try:
+        async with db.begin_nested():
+            db.add(document)
+            await db.flush()
+    except IntegrityError as exc:
+        if _UNIQUE_DIGEST_INDEX not in str(getattr(exc, "orig", exc)):
+            raise
+        # The rolled-back SAVEPOINT may leave `document` pending in the session, and the SELECT below
+        # would AUTOFLUSH it — re-running the insert that just failed. Checked rather than assumed,
+        # because `expunge` raises on an instance the rollback already removed.
+        if document in db.sync_session:
+            db.expunge(document)
+        winner = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+        if winner is None:
+            # It collided with a row this transaction cannot see (committed, then soft-deleted). Not
+            # ours to narrate: a 500 naming the constraint beats a 409 pointing at nothing.
+            raise
+        raise DuplicateDocumentError(_already_on_the_loan(winner), existing=winner) from exc
     # A document changed → the cross-source verification is out of date (LP-78).
     # Covers upload and replace (replace creates its new document through here).
     await mark_verification_stale(db, loan_file_id=loan_file.id)

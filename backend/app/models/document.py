@@ -31,7 +31,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
@@ -197,12 +197,32 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "documents"
     # LP-1000 — the duplicate lookup is always (this loan file, this digest), so the index carries
-    # both. NOT a unique constraint, deliberately: the existing rows already hold duplicates (22
-    # groups on staging when this was written), so a unique index cannot be created until they are
-    # reconciled, and a constraint would turn an edge case into a 500 where the service raises a
-    # 409 with the colliding document named.
+    # both, and it is UNIQUE over exactly the rows that lookup considers.
+    #
+    # ⚠️ LP-1000 DECLARED A UNIQUE INDEX IMPOSSIBLE HERE, and that reasoning was wrong. It read: "the
+    # existing rows already hold duplicates (22 groups on staging), so a unique index cannot be
+    # created until they are reconciled". Every row predating LP-1000 has `content_sha256 IS NULL`
+    # and this index is PARTIAL on `content_sha256 IS NOT NULL`, so none of them are in it at all —
+    # and those 22 groups were found by PROXY, `(loan file, type, byte size)`, carrying no digests to
+    # collide. The cleanup treated as a prerequisite was not one.
+    #
+    # THE PREDICATE MATCHES `only_active` EXACTLY (`deleted_at IS NULL`, `models/helpers.py`), which
+    # is what `find_duplicate` filters on — so the index and the service agree on what a duplicate
+    # IS. It deliberately omits `is_current`: a replaced document stays ACTIVE and merely historical,
+    # which is why `find_duplicate` needed an `exclude_id` at all.
+    #
+    # DECLARED HERE AS WELL AS IN THE MIGRATION because tests and CI build the schema with
+    # `create_all`; without it the race test would run against a database that cannot refuse, and
+    # pass by proving nothing. The 409 survives: `create_document` catches the violation inside a
+    # SAVEPOINT and re-raises `DuplicateDocumentError` naming the row that won (`b8e2f5a91c73`).
     __table_args__ = (
-        Index("ix_documents_loan_file_content_sha256", "loan_file_id", "content_sha256"),
+        Index(
+            "uq_documents_loan_file_content_sha256",
+            "loan_file_id",
+            "content_sha256",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND content_sha256 IS NOT NULL"),
+        ),
     )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
