@@ -116,9 +116,16 @@ requires_documents:
   - [master_insurance_policy_for_condominium]
 
 # LP-842 — what this document has to ESTABLISH, in words safe to send out.
-# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
-outbound_ask: >-
-  Please ask the association or its management company for the master policy certificate — an ACORD 28, or the carrier's evidence of commercial property insurance.
+# NO `outbound_ask`, and that is a decision rather than an omission (LP-842 review).
+#
+# The sharpest of the three. This rule's document is the condominium MASTER POLICY, which LP-841
+# routes to the INSURER — and the ask said "please ask the association or its management company for
+# the master policy certificate". So the insurer would receive an email asking them to go and ask
+# somebody else for the insurer's own document.
+#
+# The ask is well written for a BORROWER or a processor, which is the condition it was written under.
+# Deleted rather than re-aimed, because an ask that names a third party is correct only when the
+# reader is not that third party, and nothing in the renderer knows who the reader is.
 
 spec_version: 1
 

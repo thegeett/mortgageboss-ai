@@ -188,8 +188,16 @@ requires_documents:
   - [credit_report]
 
 # LP-842 — what this document has to ESTABLISH, in words safe to send out.
-# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
-outbound_ask: >-
-  Please send a short signed and dated letter explaining the late payments shown on the credit report — what happened, when, and whether it is resolved.
+# NO `outbound_ask`, and that is a decision rather than an omission (LP-842 review).
+#
+# This rule's document is the CREDIT REPORT, which LP-841 routes to the LENDER. The ask written here
+# was "send a short signed and dated letter explaining the late payments" — a borrower's letter of
+# explanation, which the lender cannot write and does not hold. Rendered in the lender's draft it
+# asks the wrong party for a document only the borrower can produce.
+#
+# DELETED RATHER THAN REWRITTEN. Absent renders exactly as today, and the sentence that belongs here
+# depends on a routing decision this ticket does not make: whether a finding may attach an ask to a
+# party other than the one its document routes to. Until it does, no ask is better than one aimed at
+# somebody who cannot act on it.
 
 spec_version: 1

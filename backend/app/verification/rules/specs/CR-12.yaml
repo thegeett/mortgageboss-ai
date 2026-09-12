@@ -98,9 +98,14 @@ requires_documents:
   - [credit_report]
 
 # LP-842 — what this document has to ESTABLISH, in words safe to send out.
-# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
-outbound_ask: >-
-  Please confirm whether the credit dispute is still open or has been resolved. If it is resolved, we need an updated report or a statement from the creditor confirming that.
+# NO `outbound_ask`, and that is a decision rather than an omission (LP-842 review).
+#
+# Same reason as CR-8. The document is the CREDIT REPORT, routed to the LENDER, and the ask asked the
+# reader to "confirm whether the credit dispute is still open" — which only the BORROWER knows. The
+# lender would be asked to report on something it cannot see.
+#
+# Deleted rather than rewritten: absent renders as today, and the borrower-facing version of this ask
+# needs a way to attach an ask to a party other than the document's own.
 
 spec_version: 1
 
