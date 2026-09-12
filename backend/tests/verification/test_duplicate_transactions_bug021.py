@@ -122,6 +122,28 @@ def test_the_same_deposit_on_two_uploads_becomes_one_finding() -> None:
     assert collapsed[0].subject_id == "txn_a", "the first is kept, deterministically"
 
 
+def test_the_survivor_does_not_depend_on_the_order_the_rows_arrive_in() -> None:
+    """bug-024 review — A CORRECTION TO THIS TICKET'S OWN REVIEW, which let list order decide.
+
+    The surviving row keeps its `subject_id`, and that becomes the finding's `subject_key`. If a later
+    run picks the other twin, the reconciler meets a subject it has never seen: it mints a new finding
+    and retires the old one, discarding its history and any disposition short of "resolved". Document
+    order is `(document_type, created_at, id)`, so classifying a previously untyped statement reshuffles
+    the group — the survivor cannot be "whichever came first in the list".
+    """
+    forward = [_result("txn_a", sources=("stmt_a",)), _result("txn_b", sources=("stmt_b",))]
+    reversed_order = [_result("txn_b", sources=("stmt_b",)), _result("txn_a", sources=("stmt_a",))]
+
+    (first,) = _collapse_duplicate_transactions(forward, _TWIN_SNAPSHOT)
+    (second,) = _collapse_duplicate_transactions(reversed_order, _TWIN_SNAPSHOT)
+
+    assert first.subject_id == second.subject_id == "txn_a", (
+        "the same pair arriving in the other order chose a different survivor, which re-keys the "
+        "finding and throws away its history"
+    )
+    assert set(first.source_content_ids) == set(second.source_content_ids) == {"stmt_a", "stmt_b"}
+
+
 def test_the_surviving_row_names_both_uploads() -> None:
     """The point of collapsing at emission rather than in the enumerator: the processor can still see
     the deposit appears on two files, which is how the duplicate upload becomes visible at all."""

@@ -79,6 +79,35 @@ def _result(
 _ONE_ACCOUNT = _snap([_statement("stmt_a"), _statement("stmt_b"), _statement("stmt_c")])
 
 
+def test_the_survivor_does_not_depend_on_the_order_the_rows_arrive_in() -> None:
+    """bug-024 review — THE RECONCILER'S EXPOSURE, closed.
+
+    The surviving row keeps its own `subject_id`, and that IS the finding's `subject_key`. If a later
+    run picks a different statement, the reconciler meets a subject it has never seen: it mints a fresh
+    finding and retires the old one, taking its history and any disposition short of "resolved".
+
+    List order cannot be trusted for that choice. Documents load ordered by
+    `(document_type, created_at, id)`, so classifying a previously untyped statement — or a
+    re-extraction that changes a type — moves a row within its group. Here the same three rows arrive
+    in three different orders and the survivor must not move.
+    """
+    for order in (
+        ("stmt_a", "stmt_b", "stmt_c"),
+        ("stmt_c", "stmt_a", "stmt_b"),
+        ("stmt_b", "stmt_c", "stmt_a"),
+    ):
+        (survivor,) = _collapse_per_account_duplicates(
+            [_result(cid) for cid in order], _ONE_ACCOUNT
+        )
+
+        assert survivor.subject_id == "stmt_a", (
+            f"arriving as {order} chose {survivor.subject_id!r}; the survivor must be the same "
+            "statement on every run, or the finding is re-keyed and its history is discarded"
+        )
+        # Every statement stays named regardless of the order they arrived in.
+        assert set(survivor.source_content_ids) == {"stmt_a", "stmt_b", "stmt_c"}
+
+
 # --------------------------------------------------------------------------- #
 # The collapse
 # --------------------------------------------------------------------------- #
@@ -89,7 +118,9 @@ def test_three_statements_of_one_account_ask_the_question_once() -> None:
     collapsed = _collapse_per_account_duplicates(results, _ONE_ACCOUNT)
 
     assert len(collapsed) == 1
-    assert collapsed[0].subject_id == "stmt_a", "the first is kept, deterministically"
+    # bug-024 review — the LOWEST content id survives, not "the first in the list"; here they coincide.
+    # The test above is the one that pins it, by feeding these same rows in other orders.
+    assert collapsed[0].subject_id == "stmt_a"
 
 
 def test_the_surviving_row_names_every_statement_it_covers() -> None:

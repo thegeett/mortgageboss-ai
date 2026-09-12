@@ -756,7 +756,17 @@ def _collapse_per_account_duplicates(
     for members in groups.values():
         if len(members) < 2:
             continue
-        keep, *rest = members
+        # bug-024 review — THE SURVIVOR IS CHOSEN BY A STABLE KEY, not by list order. The surviving row
+        # keeps its own `subject_id`, and that becomes the finding's `subject_key`: if a later run picks
+        # a different member, the reconciler sees a subject it has never met, mints a fresh finding and
+        # retires the old one — taking its history, and any disposition short of "resolved" with it.
+        # `results` order is NOT stable for this purpose: documents load ordered by
+        # `(document_type, created_at, id)`, so classifying an untyped statement — or a re-extraction
+        # that changes a type — moves a row within its group and silently re-keys the finding. A
+        # content id is stable per document by construction (LP-312), so the lowest one is the same
+        # choice on every run over the same set. A NEW statement whose id sorts lower still moves it,
+        # which no local rule can prevent; this removes the reordering class, which is the reachable one.
+        keep, *rest = sorted(members, key=lambda i: results[i].subject_id)
         merged_into[keep] = rest
         dropped.update(rest)
 
@@ -892,7 +902,13 @@ def _collapse_duplicate_transactions(
         }
         if len(fingerprints) > 1:
             continue  # the copies were read differently; say so twice rather than pick one
-        keep, *rest = members
+        # bug-024 review — STABLE SURVIVOR, and this is a correction to bug-021's review, which let
+        # list order decide. The survivor's `subject_id` becomes the finding's `subject_key`, so a run
+        # that picks a different twin re-keys the finding: the reconciler retires the old row and mints
+        # a new one, losing its history. Document order is `(document_type, created_at, id)`, so typing
+        # a previously unclassified statement reshuffles the group. A transaction content id is stable
+        # per document (it hashes `{"doc": ..., **content}`), so the lowest is the same every run.
+        keep, *rest = sorted(members, key=lambda i: results[i].subject_id)
         merged_into[keep] = rest
         dropped.update(rest)
 
