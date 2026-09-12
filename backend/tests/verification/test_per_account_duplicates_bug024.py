@@ -151,22 +151,32 @@ def test_a_rule_that_does_not_declare_it_never_merges() -> None:
     """⚠️ THE GUARD THIS TICKET TURNS ON, and AS-9 is why it exists rather than a rule blacklist.
 
     Exactly two rules take a bank statement as their subject. AS-6's answer is about the ACCOUNT; AS-9
-    ("declares 3 pages, 2 present") is about the STATEMENT. AS-9's page counts are not extracted today,
-    so every one of its rows is a couldnt_check whose fact set is identically EMPTY on every statement
-    of an account — an ungated collapse merges them TODAY. When the extraction lands it gets worse: three
-    statements each declaring 3 pages with 2 present carry identical values, and three separate
-    incomplete statements would become one row naming one of them.
+    ("declares 2 pages, 2 present") is about the STATEMENT.
+
+    THE ROWS BELOW ARE THE LIVE SHAPE, and an earlier version of this test got it wrong in a way worth
+    recording: it built AS-9 rows as couldnt_checks with EMPTY tags, on the belief that the page counts
+    were not extracted yet. They are. AS-9's staging rows are `satisfied` and carry real counts, so
+    statements of one account routinely agree on both values — nine such groups, and an ungated collapse
+    folds 10 AS-9 rows today. A guard pinned with a fixture that cannot occur proves nothing about the
+    data it is meant to protect, so these rows now look like the ones in staging.
 
     This reads the REAL spec, so deleting `answers_per_account: true` from AS-6 or adding it to AS-9
     fails here rather than in staging.
     """
+    page_counts = (
+        _tag("2", "stmt.page_count_declared"),
+        _tag("2", "stmt.page_count_present"),
+    )
     results = [
-        _result("stmt_a", rule_id="AS-9", verdict=Verdict.COULDNT_CHECK, tags=()),
-        _result("stmt_b", rule_id="AS-9", verdict=Verdict.COULDNT_CHECK, tags=()),
-        _result("stmt_c", rule_id="AS-9", verdict=Verdict.COULDNT_CHECK, tags=()),
+        _result("stmt_a", rule_id="AS-9", verdict=Verdict.SATISFIED, tags=page_counts),
+        _result("stmt_b", rule_id="AS-9", verdict=Verdict.SATISFIED, tags=page_counts),
+        _result("stmt_c", rule_id="AS-9", verdict=Verdict.SATISFIED, tags=page_counts),
     ]
 
-    assert len(_collapse_per_account_duplicates(results, _ONE_ACCOUNT)) == 3
+    assert len(_collapse_per_account_duplicates(results, _ONE_ACCOUNT)) == 3, (
+        "three statements of one account, agreeing on declared and present pages, are three separate "
+        "answers about three separate documents — AS-9 does not declare answers_per_account"
+    )
 
 
 def test_an_unknown_rule_id_never_merges() -> None:

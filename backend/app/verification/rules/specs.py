@@ -1149,12 +1149,12 @@ class RuleSpec(BaseModel):
     # subject is a bank statement either way, and only the author knows what the sentence is ABOUT.
     #
     # AS-6 ("this is a joint account with a non-borrower co-holder") is about the account. AS-9
-    # ("declares 3 pages, 2 present") is about the statement, and it is the reason the default is off
-    # rather than a list of rules to exclude: its two load-bearing tags are not extracted today, so
-    # every AS-9 row is a couldnt_check whose fact set is identically EMPTY on every statement of an
-    # account — an ungated collapse merges them now. When the extraction lands it gets worse, not
-    # better: three statements each declaring 3 pages with 2 present carry identical values, and three
-    # separate incomplete statements would become one row naming one of them.
+    # ("declares 2 pages, 2 present") is about the statement, and it is the reason the default is off
+    # rather than a list of rules to exclude. Measured on staging: AS-9's rows are `satisfied` and carry
+    # real page counts, so statements of one account routinely agree on both values — nine such groups,
+    # and an ungated collapse folds 10 AS-9 rows today. Three statements that each declare 2 pages with
+    # 2 present are three answers about three documents; one row where three checks were is a worse
+    # error than three rows where one would do.
     #
     # The same shape as `collapse_uniform.unresolved` one field above, for the same reason — declare it
     # where the sentence summarises the set, leave it off everywhere else, and the default stays safe.

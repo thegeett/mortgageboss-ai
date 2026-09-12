@@ -693,8 +693,9 @@ def _collapse_per_account_duplicates(
     AS-6's question is whose account this is, and its answer is a property of the account: "this is a
     joint account with an additional holder who is not a borrower" is true of the account, not of one
     statement of it. It enumerates `per_document`, so three statements of PNC ****1943 on LF-XMB2
-    produced three identical needs_review rows. Across staging that shape accounts for 22 rows on 9
-    files.
+    produced three identical needs_review rows. Across staging, grouping AS-6's live rows on this
+    function's own key gives 22 duplicate rows over 9 files; grouping on the account as well gives 14,
+    which is the honest ceiling (the two differ because the first ignores account boundaries).
 
     WHY NOT `collapse_uniform`, which exists for "N subjects, one sentence": it groups per RULE per
     FILE and abandons the collapse at the first dissenting verdict. On LF-XMB2 — five satisfied and
@@ -714,11 +715,15 @@ def _collapse_per_account_duplicates(
 
     OPT-IN PER RULE (`answers_per_account`), and it cannot be otherwise. A statement subject does not
     say what the sentence is ABOUT, and exactly two rules take one: AS-6, whose answer is about the
-    account, and AS-9 ("declares 3 pages, 2 present"), whose answer is about the statement. AS-9 is why
-    the default is off rather than a hard-coded exclusion — its load-bearing page counts are not
-    extracted today, so every one of its rows is a couldnt_check with an identically EMPTY fact set on
-    every statement of an account, and an ungated collapse merges them today. Applying this to a rule
-    whose subject really is the statement hides real per-statement problems behind one row.
+    account, and AS-9 ("declares 2 pages, 2 present"), whose answer is about the statement.
+
+    AS-9 is why the default is off rather than a hard-coded exclusion, and the live data is blunt about
+    it: its rows are `satisfied` and carry REAL page counts (`stmt.page_count_declared=2`,
+    `stmt.page_count_present=…`), so statements of one account routinely agree on both — nine such
+    groups on staging, and an ungated collapse folds 10 AS-9 rows TODAY. Three statements that each
+    declare 2 pages with 2 present are three separate answers about three separate documents, and
+    merging them would put one row where three checks were. Applying this to a rule whose subject really
+    is the statement hides real per-statement problems behind one row.
 
     A rule a processor has already answered per subject is left alone entirely — `_collapse_uniform_passes`
     settled that principle (bug-007) and bug-021 adopted it: re-keying retires their answer into fresh
