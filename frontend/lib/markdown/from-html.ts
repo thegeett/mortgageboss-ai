@@ -19,6 +19,8 @@
  * keeps them. Getting this wrong inflates every template body with `**` on every reopen.
  */
 
+import { isCatalogLabel } from "./email-body";
+
 const BOLD = /<strong>(.*?)<\/strong>/g;
 
 /** Undo the five entities `escapeHtml` writes, and nothing else. */
@@ -39,7 +41,9 @@ function unescapeHtml(text: string): string {
 function inlineText(html: string, { asLabel }: { asLabel: boolean }): string {
   const marked = html.replace(BOLD, (_match, inner: string) => {
     const content = String(inner);
-    if (asLabel && content.trimEnd().endsWith(":")) return content;
+    // THE RENDERER'S OWN RULE, not "ends in a colon". See `isCatalogLabel` — the two were different
+    // tests, so a bold the renderer would not re-emphasise lost its asterisks permanently.
+    if (asLabel && isCatalogLabel(content)) return content;
     return `**${content}**`;
   });
   return unescapeHtml(marked.replace(/<br\s*\/?>/g, "\n").replace(/<[^>]+>/g, ""));
@@ -83,12 +87,6 @@ function items(listHtml: string): string[] {
 }
 
 /**
- * The stored body for `html`.
- *
- * INDENTED WITH FOUR SPACES, which is what the catalog emits and therefore what the renderer's
- * detail rule recognises. Any other width round-trips to a paragraph instead of a detail line.
- */
-/**
  * Top-level `<p>` and `<ul>` blocks, in order.
  *
  * DEPTH-AWARE, not a regex. The first version used `/<(p|ul)>([\s\S]*?)<\/\1>/g` and a non-greedy
@@ -130,6 +128,33 @@ function blocksOf(html: string): { kind: string; inner: string }[] {
  * INDENTED WITH FOUR SPACES, which is what the catalog emits and therefore what the renderer's
  * detail rule recognises. Any other width round-trips to a paragraph instead of a detail line.
  */
+/**
+ * Every nested item's text, FLATTENED TO THE ONE DETAIL LEVEL the plain body has (LP-849 review).
+ *
+ * THE PLAIN FORM HAS EXACTLY TWO LEVELS — a bullet and its four-space detail lines — and the editor's
+ * schema has unbounded ones, because `ListItem` admits a `BulletList` and that is also what makes the
+ * catalog's own guidance expressible. Taking a nested item's text with `inlineText` took the deeper
+ * list's text along with it and ran the words together: a document with a sub-sub-item serialised as
+ * `detaildeeper`, one word, with no separator and nothing to show a processor what had happened.
+ *
+ * PASTE IS WHY THIS IS THE SERIALISER'S PROBLEM AND NOT A KEYMAP'S. Tab can be rebound; pasting a
+ * nested list out of Word or Gmail cannot, and Tiptap parses it into the schema either way. So the
+ * depth is collapsed here, where every route in has to come through.
+ *
+ * EMPTY ITEMS ARE DROPPED rather than emitted as an indented blank, which the renderer would read as
+ * the blank line that ENDS a detail run — turning one flattened list into two.
+ */
+function detailLines(nestedHtml: string): string[] {
+  const out: string[] = [];
+  for (const item of items(nestedHtml)) {
+    const { own, nested } = splitItem(item);
+    const text = inlineText(own, { asLabel: true });
+    if (text.trim() !== "") out.push(text);
+    if (nested) out.push(...detailLines(nested));
+  }
+  return out;
+}
+
 export function htmlToEmailBody(html: string): string {
   const blocks: string[] = [];
   for (const { kind, inner } of blocksOf(html)) {
@@ -142,8 +167,8 @@ export function htmlToEmailBody(html: string): string {
       const { own, nested } = splitItem(item);
       lines.push(`- ${inlineText(own, { asLabel: false })}`);
       if (nested) {
-        for (const detail of items(nested)) {
-          lines.push(`    ${inlineText(detail, { asLabel: true })}`);
+        for (const detail of detailLines(nested)) {
+          lines.push(`    ${detail}`);
         }
       }
     }

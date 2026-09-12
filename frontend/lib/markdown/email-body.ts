@@ -43,6 +43,26 @@ const LIST_ITEM = /^[-*]\s+(.*)$/;
 const LABELLED = /^([A-Z][^:]{2,40}):\s*(.*)$/;
 
 /**
+ * Whether `text` is a label THIS RENDERER WOULD ITSELF EMPHASISE — exported so the inverse strips the
+ * asterisks for exactly those and no others (LP-849 review).
+ *
+ * THE TWO RULES HAD DRIFTED, which is the whole reason this is a function rather than a comment.
+ * `htmlToEmailBody` removed the `**` from any `<strong>` ending in a colon; this rule re-bolds only a
+ * capitalised run of three to forty-one characters. Everything in the gap — `**note:**`, `**A:**`,
+ * `**2 things:**`, a label longer than forty-one characters — lost its asterisks on the way to storage
+ * and was not bolded on the way back. A processor watched their formatting vanish on save, which is
+ * the exact failure the editor's schema restriction exists to prevent.
+ *
+ * Derived from `LABELLED` rather than restating it, so a change to one cannot leave the other behind.
+ */
+export function isCatalogLabel(text: string): boolean {
+  const trimmed = text.trimEnd();
+  if (!trimmed.endsWith(":")) return false;
+  const match = LABELLED.exec(`${trimmed} rest`);
+  return match !== null && `${match[1]}:` === trimmed;
+}
+
+/**
  * One document's detail lines, as a nested list (LP-846).
  *
  * A NESTED `<ul>` RATHER THAN `<br>` OR A CLASS, and the constraint decides it. The clipboard's

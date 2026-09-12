@@ -63,13 +63,19 @@ def test_no_route_takes_draft_body_text_except_the_send() -> None:
     scanned = 0
     for path in sorted((_APP / "api").glob("*.py")):
         source = path.read_text(encoding="utf-8")
+        # THE ROUTER'S PREFIX COUNTS AS PART OF THE PATH. Found by mutation in the LP-849 review: a
+        # `PATCH /{identifier}` on a router declared `APIRouter(prefix="/draft")` has "draft" nowhere
+        # in its own decorator, so it was skipped before this check was even applied and the guard
+        # passed. Two earlier mutants were caught only because they happened to name the parameter
+        # `{draft_id}`, which is the word appearing by luck rather than by the route being read.
+        prefixes = re.findall(r"""APIRouter\([^)]*prefix\s*=\s*['"]([^'"]*)['"]""", source)
         for match in re.finditer(
             r"@router\.(post|put|patch)\(\s*\n?\s*[\"']([^\"']*)[\"'][\s\S]{0,400}?"
             r"\n(?:async )?def \w+\(\s*\n?\s*(\w+)\s*:\s*(\w+)",
             source,
         ):
             verb, route, _arg, model = match.groups()
-            if "draft" not in route:
+            if "draft" not in route and not any("draft" in prefix for prefix in prefixes):
                 continue
             scanned += 1
             if model in carriers and not _ALLOWED_ROUTE.search(route):

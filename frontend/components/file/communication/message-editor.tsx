@@ -39,7 +39,12 @@ import Text from "@tiptap/extension-text";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Bold as BoldIcon, List } from "lucide-react";
 
-const EXTENSIONS = [
+/**
+ * Exported so a test can drive the REAL schema rather than a copy of it (LP-849 review). Tiptap
+ * parses the rendered HTML and re-serialises it, which is a third escape/unescape path beside
+ * `escapeHtml` and its inverse — and the only way to check it is to run it.
+ */
+export const EXTENSIONS = [
   Document,
   Paragraph,
   Text,
