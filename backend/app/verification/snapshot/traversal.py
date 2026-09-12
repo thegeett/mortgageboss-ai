@@ -29,6 +29,32 @@ def all_transactions(snapshot: Snapshot) -> list[TransactionRecord]:
     return [txn for entry in snapshot.documents.entries for txn in (entry.transactions or ())]
 
 
+#: The classifier's UNCLASSIFIED sentinel. A slug, not None — `classification.py` writes it both when
+#: the model is unsure and when the call never completed, so a document can be unclassified either way.
+_UNKNOWN_DOC_TYPE = "unknown"
+
+
+def unclassified_documents(snapshot: Snapshot) -> tuple[str, ...]:
+    """Content ids of the documents nobody has identified yet (bug-023).
+
+    ONE definition, because it was becoming several. A rule that looks for a document type skips an
+    unclassified file exactly as if it were absent, so its finding says the file does not have it — on
+    LF-XMB2, ID-5 asked for a government ID while the borrower's licence sat in the file, untyped, and
+    ID-3 said only one document states the date of birth when the licence would have been the second.
+    Both need the same clause, and bug-020 wrote the predicate inline for the first of them.
+
+    Returns ids rather than a count so a caller can name them; empty when the documents section itself
+    is absent, which is the honest answer — a build that could not look has not found untyped files.
+    """
+    if snapshot.documents.absent:
+        return ()
+    return tuple(
+        entry.content_id
+        for entry in snapshot.documents.entries
+        if entry.document_type is None or entry.document_type == _UNKNOWN_DOC_TYPE
+    )
+
+
 def all_list_rows(
     snapshot: Snapshot, list_name: str, *, document_type: str | None = None
 ) -> list[ListRow]:

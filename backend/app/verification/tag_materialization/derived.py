@@ -24,7 +24,11 @@ from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
-from app.verification.snapshot.traversal import all_list_rows, all_transactions
+from app.verification.snapshot.traversal import (
+    all_list_rows,
+    all_transactions,
+    unclassified_documents,
+)
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
     LOAN_SUBJECT,
@@ -1763,11 +1767,11 @@ def _borrower_id_expiration(
         # hide the very documents being pointed at.
         #
         # The trailing "for this borrower" went with it: every branch here already opens "this borrower:".
-        untyped = sum(
-            1
-            for entry in (() if snapshot.documents.absent else snapshot.documents.entries)
-            if entry.document_type is None or entry.document_type == _UNKNOWN_DOC_TYPE
-        )
+        #
+        # bug-023 — the predicate moved to `traversal.unclassified_documents`, because ID-3 needs the
+        # same sentence and `_UNKNOWN_DOC_TYPE` was already declared in three modules. One definition,
+        # two callers; the inline copy this replaced was the start of a fourth.
+        untyped = len(unclassified_documents(snapshot))
         if untyped:
             return _UNKNOWN, (
                 f"this borrower: no driver's licence has been identified — {untyped} document(s) in "
