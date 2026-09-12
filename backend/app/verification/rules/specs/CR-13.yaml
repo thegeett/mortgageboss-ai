@@ -67,6 +67,11 @@ requires_documents:
   - [credit_report]
   - [closing_disclosure]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the most recent credit report — the one on file will be more than four months old at closing.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). One fired outcome (older than the window) and a default

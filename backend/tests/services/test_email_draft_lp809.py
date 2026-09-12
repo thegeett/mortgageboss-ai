@@ -800,3 +800,66 @@ def test_every_party_bucket_round_trips_to_the_key_its_drafts_are_filed_under() 
     # could return BORROWER for everything and still pass the loop above.
     assert party_for_draft_template("password_reset") is None
     assert party_for_draft_template(None) is None
+
+
+async def test_the_ask_says_what_the_document_must_establish(db_session: AsyncSession) -> None:
+    """LP-842 — THE REASON THAT REACHED NOBODY.
+
+    The catalog says where to get a homeowner's policy. Only the rule that fired knows this file
+    needs one showing the dwelling settled on a replacement-cost basis. Reported from the other end:
+    the borrower sends another declarations page, it does not state the loss-settlement basis
+    (because the first one did not either — that IS the finding), and the file is a round trip older
+    and no closer.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
+    need.outbound_ask = "Please include every page, including any that are intentionally blank."
+    await db_session.flush()
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    body = result.borrower.draft.body or ""
+    assert "including any that are intentionally blank" in body
+    # The control: the document itself is still named. An ask that REPLACED the document line would
+    # satisfy the line above and tell the borrower nothing about what to send.
+    assert "statement" in body.lower()
+
+
+async def test_a_dollar_sign_in_an_ask_survives_as_a_literal(db_session: AsyncSession) -> None:
+    """LP-823's trap, reachable through a new door.
+
+    The stored draft body keeps `$borrower_first_name` and friends UNRESOLVED — that is the whole
+    point of the deferred-placeholder design — so something later runs `Template.substitute` over
+    the stored text. Rule authors write about money, so an ask will eventually contain a `$`, and
+    `substitute` is strict: an unknown `$word` raises, mid-send, on a draft a processor is watching.
+
+    `$2,000` is the shape that is actually safe (a digit cannot start an identifier) and `$2,000 in
+    deposits` is not the test. `$AMOUNT` is: it looks exactly like a placeholder.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
+    need.outbound_ask = "Show the source of any deposit over $AMOUNT, and any $2,000 transfer."
+    await db_session.flush()
+
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+
+    body = result.borrower.draft.body or ""
+    assert "$AMOUNT" in body, "a literal dollar sign did not survive composition"
+    assert "$2,000" in body
+
+    # AND THROUGH THE SECOND PASS, which is where it would actually die. Composition stores the body
+    # with `$borrower_first_name` still in it; `finalise_draft_body` resolves that at read and send.
+    # Asserting only on the stored body would pass against a build that raises the moment anybody
+    # opens the draft — the failure is downstream of where this need was written.
+    from app.services.email_draft import finalise_draft_body
+
+    final = finalise_draft_body(body, borrower_first_name="Felicia", processor_name="Geet")
+    assert "$AMOUNT" in final
+    assert "$2,000" in final
+    # The control: the REAL placeholders did resolve, so this is not passing because nothing ran.
+    assert "Felicia" in final
+    assert "$borrower_first_name" not in final

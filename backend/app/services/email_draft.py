@@ -166,6 +166,18 @@ def _document_line(need: NeedsItem) -> str:
     # survive: the body is rewritten from the needs on every add and remove, so a note living
     # anywhere but the need it belongs to would be wiped by the next request — LP-834's problem, with
     # a cheaper answer available because a note already has a row to live on.
+    # LP-842 — WHAT IT HAS TO ESTABLISH, which the catalog cannot say. The catalog knows where to
+    # get a homeowner's policy; only the rule that fired knows this file needs one showing the
+    # dwelling settled on a replacement-cost basis. Without it the recipient sends another
+    # declarations page that does not say so — because the first one did not either, which IS the
+    # finding — and the file is a round trip older and no closer.
+    #
+    # ABOVE the processor's note, because they are answering different questions and the order is
+    # the order they are read in: what this document must show, then anything the processor wants to
+    # add about this particular one.
+    ask = (need.outbound_ask or "").strip()
+    if ask:
+        line = f"{line}\n  {ask}"
     note = (need.description or "").strip()
     if note:
         line = f"{line}\n  {note}"

@@ -95,6 +95,11 @@ guideline_reference: "Fannie Mae Selling Guide B7-3 — property insurance must 
 requires_documents:
   - [homeowners_insurance]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please ask your insurance agent for a policy or endorsement confirming that the dwelling (Coverage A) is insured on a REPLACEMENT-COST loss-settlement basis. A declarations page alone often does not state this.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (the generic evaluator runs THIS — zero per-rule Python). Per-document,

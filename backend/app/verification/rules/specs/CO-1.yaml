@@ -73,6 +73,11 @@ guideline_reference: "A condominium project requires a project review before del
 requires_documents:
   - [condo_questionnaire]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please ask the homeowners association or its management company for a completed condominium questionnaire naming this project, signed and dated.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to

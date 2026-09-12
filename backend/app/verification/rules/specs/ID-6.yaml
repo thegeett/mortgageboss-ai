@@ -36,6 +36,11 @@ guideline_reference: >-
 requires_documents:
   - [uniform_residential_loan_application]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please complete the application fields noted — the form is missing entries that are required before it can be submitted.
+
 spec_version: 1
 deterministic:
   load_bearing_tags:

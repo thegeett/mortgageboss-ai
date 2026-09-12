@@ -97,6 +97,11 @@ guideline_reference: "Consumer-disputed tradelines must be reviewed before the d
 requires_documents:
   - [credit_report]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please confirm whether the credit dispute is still open or has been resolved. If it is resolved, we need an updated report or a statement from the creditor confirming that.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). Two explicit outcomes on the closed vocabulary; an

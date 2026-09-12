@@ -98,4 +98,9 @@ judgment:
 requires_documents:
   - [power_of_attorney]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the full power of attorney document, showing who is authorised to act, the powers granted, and the effective and expiry dates.
+
 spec_version: 1

@@ -33,6 +33,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 (Verification of Deposi
 requires_documents:
   - [bank_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the most recent statement for this account — we are missing the current period.
+
 spec_version: 1
 deterministic:
   load_bearing_tags:

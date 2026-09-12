@@ -106,4 +106,9 @@ judgment:
 requires_documents:
   - [permanent_resident_card, uscis_notice_of_action, visa_documentation, work_visa_ead_card, passport]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send documentation of current work authorization — a permanent resident card, an unexpired visa with work authorization, or an EAD card.
+
 spec_version: 1

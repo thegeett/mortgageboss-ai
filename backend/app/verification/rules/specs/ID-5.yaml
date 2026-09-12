@@ -53,6 +53,11 @@ requires_documents:
   - [drivers_license, passport, government_issued_id, military_id]
   - [closing_disclosure]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send a clear copy of the front and back of a current, unexpired government photo ID, with all four corners visible and the text readable.
+
 spec_version: 1
 deterministic:
   # LP-608 — see AS-4. Both sides are named because either can be the missing one: an unexpired ID

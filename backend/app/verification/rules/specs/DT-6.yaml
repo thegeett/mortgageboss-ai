@@ -100,6 +100,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-6-02 (Debt-to-Income Ratios) �
 requires_documents:
   - [mortgage_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the current mortgage statement showing the TOTAL monthly payment, including taxes, insurance and any association dues — not principal and interest alone.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to

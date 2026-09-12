@@ -1101,6 +1101,29 @@ class RuleSpec(BaseModel):
     # and CR-6 classified as "read what is here" on a file whose credit report is absent, purely because
     # the Closing Disclosure was present. The distinction is the whole point of the field.
     requires_documents: tuple[tuple[str, ...], ...] | None = None
+    # LP-842 — WHAT TO ASK FOR, in words that can leave the building.
+    #
+    # A request from this rule says only the document's catalog name today ("homeowner's insurance"),
+    # so the recipient is told WHAT to send and never what it has to establish. On IH-1 a borrower
+    # sends another declarations page, it does not state the loss-settlement basis — because the
+    # first one did not either, which IS the finding — and the file is a round trip older and no
+    # closer.
+    #
+    # WHY THIS IS NOT `how_to_fix`, which already says exactly the right thing on IH-1 ("obtain a
+    # policy or endorsement that settles the dwelling on a replacement-cost basis") and is declared
+    # by all 84 specs. `how_to_fix` is addressed to the PROCESSOR and is written on the assumption
+    # that only a processor reads it. Measured across the 84: nine carry language that must never be
+    # sent to the person it is about — ID-1, ID-2 and ID-3 each say a mismatch "may indicate identity
+    # fraud and must be escalated"; CO-5, CR-6 and IH-7 say "ineligible"; PR-6 says "decline".
+    # Forwarding that to a borrower accuses them, and to a lender it discloses an internal posture.
+    #
+    # SO THIS IS AN ALLOW-LIST, and deliberately not a filtered `how_to_fix`. A deny-list of alarming
+    # words is scoped by SYMPTOM: it passes everything nobody thought to add, and the sentence it
+    # lets through is judged safe because it lacks a keyword rather than because anybody decided it
+    # was. A rule is silent here until somebody writes a sentence for it and means it.
+    #
+    # Absent → no reason line, which is today's behaviour exactly. The feature cannot half-appear.
+    outbound_ask: str | None = None
     # LP-549 — may a BLOCKED build of this rule surface an LP-391 manual-review flag?
     #
     # LP-391's flag says "this file has something in scope and nothing looked at it", which is a real

@@ -1169,3 +1169,49 @@ def test_the_select_list_parser_reads_the_columns_a_view_returns(
     genuinely drops the column. The two cases in the middle are both taken from views in this repo.
     """
     assert _output_columns(view_sql) == expected
+
+
+def test_every_migration_that_recreates_a_readonly_view_regrants_it() -> None:
+    """LP-842 — DROPPING A VIEW DROPS ITS GRANTS, and nothing else here notices.
+
+    `CREATE OR REPLACE VIEW` cannot change a column list, so adding a column means `DROP VIEW` then
+    `CREATE VIEW` — and Postgres takes the privileges with the old view. The rebuilt view exists, has
+    the right columns, passes `test_no_model_column_drifts`, and `mbai_readonly` can no longer read
+    it. The whole staging query path returns "permission denied for view" and the drift guard that
+    exists to police these rebuilds says nothing, because a grant is not a column.
+
+    Found by writing exactly that bug: this ticket's first rebuild of `readonly.needs_items` dropped
+    both the grant AND three columns a later migration had added, because it was copied from C7
+    rather than from the current definition. The columns were caught. The grant would have reached
+    staging.
+
+    A RULE OVER THE TREE, not a list of migrations, for the reason b7's field-name guard gives: a
+    list goes stale exactly when someone adds the migration it needed to cover.
+    """
+    import re
+
+    offenders = []
+    checked = 0
+    for path in sorted(_MIGRATION.parent.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        # THE FUNCTION BODY, not everything above `downgrade`. The first version sliced from the
+        # top of the file, so a module-level `_GRANT = """… GRANT SELECT …"""` constant satisfied
+        # the check whether or not `upgrade()` ever executed it — and the mutant that deleted the
+        # `op.execute(_GRANT)` call passed. The constant's EXISTENCE is not the property; running it
+        # is.
+        if "\ndef upgrade" not in text:
+            continue
+        upgrade = text.split("\ndef upgrade", 1)[1].split("\ndef downgrade", 1)[0]
+        # Only migrations that RECREATE one — C7 creates them all and grants in its own block.
+        if path.name == _MIGRATION.name:
+            continue
+        views = set(re.findall(r"CREATE VIEW\s+(?:\{_SCHEMA\}|readonly)\.(\w+)", upgrade))
+        if not views:
+            continue
+        checked += 1
+        if "GRANT SELECT" not in upgrade and "_GRANT" not in upgrade:
+            offenders.append(f"{path.name} recreates {sorted(views)} and never re-grants")
+
+    assert not offenders, "\n".join(offenders)
+    # THE CONTROL: a tree where no migration recreates a view satisfies the line above.
+    assert checked > 0, "no migration recreates a readonly view; this test proved nothing"

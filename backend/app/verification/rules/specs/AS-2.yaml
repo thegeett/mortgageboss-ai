@@ -37,6 +37,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2-02 (Earnest money)."
 requires_documents:
   - [bank_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the complete statement for each account, including every page, so the balances and the account holder's name are visible.
+
 spec_version: 1
 deterministic:
   load_bearing_tags:

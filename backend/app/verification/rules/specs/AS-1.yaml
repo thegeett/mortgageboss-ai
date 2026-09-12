@@ -168,4 +168,9 @@ deterministic:
 requires_documents:
   - [bank_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please include the full statement for every account, showing the account holder's name, the account number, and every page — we need to see where each large deposit came from.
+
 spec_version: 2

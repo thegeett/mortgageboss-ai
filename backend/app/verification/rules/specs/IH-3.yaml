@@ -80,6 +80,11 @@ requires_documents:
   - [homeowners_insurance]
   - [closing_disclosure]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send an insurance binder with coverage effective on or before the closing date, so the property is covered from day one.
+
 spec_version: 1
 
 # LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).

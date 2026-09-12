@@ -99,6 +99,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.1-02 (interested party contr
 requires_documents:
   - [purchase_agreement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the purchase contract together with every addendum and any side agreement it refers to, so the credits and concessions are all visible.
+
 spec_version: 1
 
 judgment:

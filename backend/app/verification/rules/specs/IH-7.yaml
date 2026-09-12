@@ -115,6 +115,11 @@ guideline_reference: "Fannie Mae Selling Guide B7-3-03 (08/05/2026) — master p
 requires_documents:
   - [master_insurance_policy_for_condominium]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please ask the association or its management company for the master policy certificate — an ACORD 28, or the carrier's evidence of commercial property insurance.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to

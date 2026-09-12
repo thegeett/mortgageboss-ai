@@ -62,6 +62,7 @@ from app.services.finding_requests import (
 from app.services.needs_engine import canonical_need_type
 from app.services.needs_items import create_needs_item
 from app.services.verifications import mark_verification_stale
+from app.verification.rules.specs import RuleSpecError, load_rule_spec
 
 
 async def apply_finding(
@@ -537,6 +538,34 @@ async def _already_asked(db: AsyncSession, *, loan_file_id: UUID) -> set[str]:
     return {_already_asked_key(row.needs_type, row.title) for row in rows}
 
 
+def _outbound_ask(findings: Sequence[Finding]) -> str | None:
+    """What the requested document has to ESTABLISH, in words that can leave the building (LP-842).
+
+    ONE ASK, from the rules that agree on it. A need can be created from several findings at once
+    (the bulk route groups by document), and two rules wanting the same document for different
+    reasons have no single sentence between them. Joining them would produce a paragraph that
+    contradicts itself in an email; picking the first would be a coin toss a reader cannot see. When
+    the contributing rules do not agree, the need carries none and the email says what it says today.
+
+    A rule that declares no `outbound_ask` contributes nothing rather than blocking the others: that
+    is the ordinary state of a rule nobody has written a sentence for, not a disagreement.
+
+    NEVER `how_to_fix`, which every spec declares and which is written for a processor — nine of the
+    84 say "identity fraud", "ineligible" or "decline". See `RuleSpec.outbound_ask`.
+    """
+    asks: set[str] = set()
+    for finding in findings:
+        try:
+            spec = load_rule_spec(finding.rule_id)
+        except RuleSpecError:
+            # A finding whose spec has been retired still has a needs item to create. The ask is the
+            # part that cannot be recovered, not the request.
+            continue
+        if spec.outbound_ask:
+            asks.add(spec.outbound_ask.strip())
+    return asks.pop() if len(asks) == 1 else None
+
+
 async def _create_document_needs(
     db: AsyncSession,
     *,
@@ -635,6 +664,7 @@ async def _create_document_needs(
             # carry is therefore textual — the rule ids in `reasoning` — and `request_docs_for_finding`
             # has the same limit for the same reason.
             reasoning=f"Requested from verification findings: {rules}",
+            outbound_ask=_outbound_ask(findings),
         )
         existing.add(key)
         created.append(item)

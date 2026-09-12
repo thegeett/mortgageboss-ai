@@ -217,4 +217,9 @@ judgment:
 requires_documents:
   - [bank_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  For the transfer shown, please also send the statement for the account the money came FROM, showing the matching withdrawal.
+
 spec_version: 1

@@ -187,4 +187,9 @@ judgment:
 requires_documents:
   - [credit_report]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send a short signed and dated letter explaining the late payments shown on the credit report — what happened, when, and whether it is resolved.
+
 spec_version: 1

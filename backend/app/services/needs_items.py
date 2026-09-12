@@ -42,6 +42,7 @@ async def create_needs_item(
     reasoning: str | None = None,
     source_facts: list[dict[str, Any]] | None = None,
     source_finding_id: UUID | None = None,
+    outbound_ask: str | None = None,
 ) -> NeedsItem:
     """Create a ``PENDING`` needs item on a loan file (LP-68).
 
@@ -67,6 +68,7 @@ async def create_needs_item(
         reasoning=reasoning,
         source_facts=source_facts,
         source_finding_id=source_finding_id,
+        outbound_ask=outbound_ask,
     )
     db.add(item)
     await db.flush()

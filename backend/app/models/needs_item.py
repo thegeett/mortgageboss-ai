@@ -133,6 +133,17 @@ class NeedsItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # --- What is needed ----------------------------------------------------
     title: Mapped[MediumStr] = mapped_column(nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: LP-842 — what the requested document has to ESTABLISH, in words safe to send out.
+    #:
+    #: Copied from the causing rule's `outbound_ask` at request time rather than looked up at render
+    #: time, because the need outlives the request: a rule's spec can be reworded or retired, and a
+    #: draft composed today must keep saying what it said when the processor read it before sending.
+    #:
+    #: DISTINCT FROM `description`, which is the processor's own note (LP-839), and from `reasoning`,
+    #: which is provenance ("Requested from verification findings: IH-1") and is processor-facing.
+    #: Three fields because they have three audiences, and the one that leaves the building must not
+    #: be the one that can carry an internal posture.
+    outbound_ask: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Reused DocumentCategory enum (ADR-068) so the needs list groups like the
     # document list. Nullable — a need may be uncategorized.
     category: Mapped[DocumentCategory | None] = mapped_column(

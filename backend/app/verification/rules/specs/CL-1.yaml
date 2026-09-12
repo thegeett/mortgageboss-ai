@@ -65,6 +65,11 @@ requires_documents:
   - [rate_lock_agreement]
   - [closing_disclosure]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please confirm the current rate lock expiration date, and send the extension or re-lock if the lock has been moved.
+
 spec_version: 1
 
 # The MACHINE-READABLE deterministic body (LP-324). One fired outcome (the lock expires first) and a

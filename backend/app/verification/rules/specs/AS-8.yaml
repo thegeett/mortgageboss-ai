@@ -72,6 +72,11 @@ guideline_reference: "Fannie Mae Selling Guide B3-4.2-01 — bank statements mus
 requires_documents:
   - [bank_statement]
 
+# LP-842 — what this document has to ESTABLISH, in words safe to send out.
+# NOT `how_to_fix`, which is written for a processor. See RuleSpec.outbound_ask.
+outbound_ask: >-
+  Please send the statements for consecutive months, with no gaps, so each month's closing balance matches the next month's opening balance.
+
 spec_version: 1
 
 # LP-324 — the MACHINE-READABLE deterministic body (the generic evaluator runs THIS, zero per-rule Python).
