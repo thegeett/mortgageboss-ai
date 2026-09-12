@@ -1126,3 +1126,139 @@ async def test_a_borrower_is_told_where_to_get_each_document(db_session: AsyncSe
     # The slug must never reach a borrower's inbox.
     assert "drivers_license" not in body
     assert "homeowners_insurance" not in body
+
+
+async def test_a_draft_written_before_the_template_changed_is_brought_current(
+    db_session: AsyncSession,
+) -> None:
+    """LP-848 — THE REPORTED STATE, reproduced from the row a processor was looking at.
+
+    Measured on staging: the lender draft on that file carried `template_key =
+    document_request_lender` and `template_version = v4` — LP-841's key and the BORROWER template's
+    version — because it was composed two and a half hours before LP-843 existed. A stored body is
+    only rewritten when documents are added or removed, so there was no path by which those words
+    would ever become right. The processor either notices, or sends the borrower's email to a lender.
+    """
+    from app.services.email_draft import refresh_if_stale
+
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+    draft = next(p for p in result.parties if p.party.value == "lender").draft
+    assert draft is not None
+
+    # Put it back into the state the deploy left behind: LP-841's key, the borrower template's
+    # version, and the borrower's words.
+    draft.template_key = "document_request_lender"
+    draft.template_version = "v4"
+    draft.body = "Hello $borrower_first_name,\n\nWe are working through your loan file.\n"
+    await db_session.flush()
+
+    assert await refresh_if_stale(db_session, draft=draft, loan_file=loan_file) is True
+
+    assert draft.template_key == "document_request_third_party"
+    assert "your loan file" not in (draft.body or "").lower()
+    assert "$borrower_first_name" not in (draft.body or "")
+    # A second pass is a no-op: staleness is derived, so a current draft is left alone.
+    assert await refresh_if_stale(db_session, draft=draft, loan_file=loan_file) is False
+
+
+async def test_a_draft_whose_audience_is_unknown_is_left_alone(
+    db_session: AsyncSession,
+) -> None:
+    """LP-848 — THE WORSE BUG THE FIRST VERSION OF THIS FIX SHIPPED.
+
+    `_party_of_draft` defaults to BORROWER for a key it cannot place, which is right for choosing a
+    greeting. Used here it was catastrophic: an unrecognised key is "not the borrower's template",
+    which reads as stale, so a TITLE COMPANY's draft was re-rendered as a borrower email and greeted
+    the title company by the borrower's first name.
+
+    The property is not "this differs from what I expect" — it is "I know what this should say, and
+    it does not say it". Without a knowable audience there is no version of the draft that is known
+    to be better, so it is not touched.
+    """
+    from app.models.communication import CommunicationDirection, CommunicationStatus
+    from app.services.email_draft import refresh_if_stale
+
+    loan_file, _actor = await _file_and_actor(db_session)
+    original = "Hello,\n\nPlease send the title commitment.\n\n$processor_name"
+    orphan = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        # A key from no version of this system — which is what real data is allowed to contain.
+        template_key="title_document_request",
+        body=original,
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+
+    assert await refresh_if_stale(db_session, draft=orphan, loan_file=loan_file) is False
+    assert orphan.body == original, "an unplaceable draft was rewritten"
+    assert orphan.template_key == "title_document_request"
+
+
+async def test_a_sent_message_is_never_rewritten(db_session: AsyncSession) -> None:
+    """Its body is the record of what went out. Rewriting it to today's template would falsify
+    history, which is the opposite of what ADR-401 exists for."""
+    from app.models.communication import CommunicationStatus
+    from app.services.email_draft import refresh_if_stale
+
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
+    )
+    draft = next(p for p in result.parties if p.party.value == "lender").draft
+    assert draft is not None
+    draft.status = CommunicationStatus.SENT
+    draft.template_key = "document_request_lender"
+    draft.template_version = "v4"
+    draft.body = "Whatever went out."
+    await db_session.flush()
+
+    assert await refresh_if_stale(db_session, draft=draft, loan_file=loan_file) is False
+    assert draft.body == "Whatever went out."
+
+
+async def test_reading_a_stale_draft_returns_current_words(db_session: AsyncSession) -> None:
+    """LP-848 — THE WIRING, which every test above assumes.
+
+    They call `refresh_if_stale` themselves, so all of them pass against a build where nothing on
+    the read path ever calls it — the heal complete and connected to nothing. That is the FOURTH
+    time in this run of tickets that a thing was built correctly and wired to nothing, and it is the
+    shape of the original LF-JR4T report.
+
+    `draft_for_reading` is the function the message dialog uses, so it is where a stale draft has to
+    stop being stale: healing anywhere else leaves the screen that produced the report showing the
+    old words.
+    """
+    from app.models import User
+    from app.services.email_draft import draft_for_reading
+
+    loan_file, actor_id = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
+    result = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor_id
+    )
+    draft = next(p for p in result.parties if p.party.value == "lender").draft
+    assert draft is not None
+
+    draft.template_key = "document_request_lender"
+    draft.template_version = "v4"
+    draft.body = "Hello $borrower_first_name,\n\nWe are working through your loan file.\n"
+    await db_session.flush()
+
+    reader = await db_session.get(User, actor_id)
+    assert reader is not None
+    body, _borrower_email = await draft_for_reading(
+        db_session, draft=draft, loan_file=loan_file, reader=reader
+    )
+
+    # What a processor reads, through the path they read it by.
+    assert "your loan file" not in body.lower()
+    assert "Appraisal" in body or "appraisal" in body.lower()
+    # And the row itself was corrected, not just the returned string.
+    assert draft.template_key == "document_request_third_party"

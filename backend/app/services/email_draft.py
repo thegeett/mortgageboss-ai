@@ -33,6 +33,7 @@ from app.ai.email_draft import (
     rejection_reason,
 )
 from app.communications.templates import (
+    TEMPLATES,
     Framing,
     RenderedTemplate,
     TemplateKey,
@@ -365,6 +366,77 @@ async def greeting_name_for(db: AsyncSession, *, draft: Communication, loan_file
     return borrower.first_name if borrower else BORROWER_NAME_FALLBACK
 
 
+def _known_party_of(draft: Communication) -> ResponsibleParty | None:
+    """The audience of a draft, or None when it cannot be established (LP-848).
+
+    STRICTER THAN `_party_of_draft`, DELIBERATELY, and the two are not interchangeable. That one
+    answers "whose name goes in the greeting" and a wrong answer there is cosmetic, so it defaults
+    to the borrower. This one answers "may I rewrite this message", where a wrong answer sends the
+    borrower's words to a third party — so it has no default.
+    """
+    if draft.party:
+        try:
+            return ResponsibleParty(draft.party)
+        except ValueError:
+            return None
+    return party_for_draft_template(draft.template_key)
+
+
+async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> bool:
+    """Re-render an unsent draft whose template has moved on. Returns whether it did (LP-848).
+
+    THE DEFECT: a stored body is only rewritten when documents are added or removed, so a draft
+    composed before a template change keeps its old words forever. Reported from staging — the
+    lender and employer drafts on a file were created two and a half hours before LP-843 existed,
+    and there was no path by which they would ever become right. A processor either notices and
+    deletes them, or sends the borrower's words to a lender.
+
+    STALENESS IS DERIVED, NOT GUESSED. The draft records what rendered it; `template_for(party)` and
+    the registry say what would render it now. If those disagree the words are old, and that
+    comparison keeps working for the NEXT template bump without anybody remembering this function.
+
+    REGENERATION IS LOSSLESS FOR AN UNSENT DRAFT, which is what makes doing it on read safe rather
+    than destructive. Measured: exactly two things write `Communication.body` — `_regenerate`, from
+    the template, and `send_draft`, which stores the processor's own edit at the moment of sending.
+    There is no save-without-sending path, so before a send the stored body is always
+    template-generated and there is no human edit to discard. If an edit-and-save endpoint is ever
+    added, THIS BECOMES DESTRUCTIVE and must move behind an explicit action.
+
+    A SENT MESSAGE IS NEVER TOUCHED. Its body is the record of what went out; rewriting it to
+    today's template would be falsifying history, which is the opposite of what ADR-401 is for.
+    """
+    if draft.status is not CommunicationStatus.DRAFT or draft.deleted_at is not None:
+        return False
+    # ONLY WHERE THE AUDIENCE IS KNOWN, and this is the difference between a fix and a worse bug.
+    #
+    # `_party_of_draft` falls back to BORROWER for a key it cannot place, which is right for
+    # choosing a greeting and catastrophic here: the first version of this function used it, met a
+    # draft under an unrecognised key, concluded "not the borrower template, therefore stale", and
+    # re-rendered a TITLE COMPANY's draft as a borrower email — greeting the title company by the
+    # borrower's first name. Caught by a test that had been asserting exactly that for two tickets.
+    #
+    # The property is not "this differs from what I expect". It is "I know what this should say, and
+    # it does not say it". A draft whose audience cannot be established is left exactly as it is,
+    # because there is no version of it that is known to be better.
+    party = _known_party_of(draft)
+    if party is None:
+        return False
+    expected = template_for(party)
+    if (
+        draft.template_key == expected.value
+        and draft.template_version == TEMPLATES[expected].version
+    ):
+        return False
+    await _regenerate(db, draft=draft, loan_file=loan_file)
+    logger.info(
+        "draft_refreshed_after_template_change",
+        loan_file_id=str(loan_file.id),
+        draft_id=str(draft.id),
+        was=f"{draft.template_key}",
+    )
+    return True
+
+
 async def draft_for_reading(
     db: AsyncSession, *, draft: Communication, loan_file: LoanFile, reader: User
 ) -> tuple[str, str | None]:
@@ -382,6 +454,10 @@ async def draft_for_reading(
     Resolving here rather than in `render_draft_body` keeps both true: the stored draft is still
     unaddressed, and a colleague who opens the same draft sees their own name.
     """
+    # LP-848 — BRING IT CURRENT BEFORE RESOLVING IT. This is where a processor actually reads a
+    # draft, so it is where a stale one has to stop being stale; healing it anywhere else leaves the
+    # screen that produced the report showing the old words.
+    await refresh_if_stale(db, draft=draft, loan_file=loan_file)
     body = finalise_draft_body(
         draft.body or "",
         borrower_first_name=await greeting_name_for(db, draft=draft, loan_file=loan_file),
@@ -760,9 +836,18 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     )
     draft.subject = rendered.subject
     draft.body = rendered.body
-    # The version is stamped from what ACTUALLY rendered, not from the registry read separately.
-    # Read separately, a template bumped between the render and the stamp would file the new words
-    # under the old version — the one thing ADR-401's hash pin exists to make impossible.
+    # LP-848 — THE KEY AND THE VERSION ARE ONE FACT AND ARE WRITTEN TOGETHER.
+    #
+    # This stamped the version alone. A draft composed before LP-843 carries the key
+    # `document_request_lender`, so regenerating it produced `document_request_lender` + `v1` — and
+    # no such template has ever existed at any version. That is exactly the ADR-401 breakage LP-843
+    # was written to fix, reintroduced through the back door on precisely the rows most likely to
+    # hit it: the ones open across the deploy that changed the template.
+    #
+    # Both come from `rendered`, not from the registry read separately. Read separately, a template
+    # bumped between the render and the stamp would file the new words under the old version — the
+    # one thing the hash pin exists to make impossible.
+    draft.template_key = rendered.template_key.value
     draft.template_version = rendered.version
     await db.flush()
 
