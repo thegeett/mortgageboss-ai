@@ -67,7 +67,51 @@ depends_on: str | Sequence[str] | None = None
 _ACTIVE_AND_HASHED = "deleted_at IS NULL AND content_sha256 IS NOT NULL"
 
 
+#: Active rows that already share a digest on one loan file — what `CREATE UNIQUE INDEX` would fail
+#: on, asked BEFORE it does.
+_EXISTING_COLLISIONS = """
+    SELECT loan_file_id::text AS loan_file_id,
+           content_sha256,
+           string_agg(id::text, ', ' ORDER BY created_at) AS ids
+    FROM documents
+    WHERE deleted_at IS NULL AND content_sha256 IS NOT NULL
+    GROUP BY loan_file_id, content_sha256
+    HAVING count(*) > 1
+"""
+
+
+def _refuse_rather_than_fail_obscurely() -> None:
+    """Name the rows that would break the index, instead of letting Postgres raise over them.
+
+    ⚠️ THE WINDOW THIS EXISTS FOR IS REAL, and the reasoning in the docstring above does not cover
+    it. "Every pre-LP-1000 row has a NULL digest" is true, and says nothing about rows written AFTER
+    LP-1000 shipped and BEFORE this migration runs — which is exactly the period in which the race
+    being closed here still operates. One double-click in that window leaves two active rows with one
+    digest, and `CREATE UNIQUE INDEX` then takes the deploy down with a bare driver error at the
+    worst possible moment.
+
+    IT DOES NOT RECONCILE THEM, deliberately. Choosing which copy survives is a judgment — the
+    documents may have different filenames, different extractions, different findings already
+    attached — and a migration silently picking one is how a person's work disappears. It reports
+    what to look at and stops.
+    """
+    rows = op.get_bind().execute(sa.text(_EXISTING_COLLISIONS)).mappings().all()
+    if not rows:
+        return
+    detail = "\n".join(
+        f"  loan_file {row['loan_file_id']} · digest {row['content_sha256'][:12]}… · ids {row['ids']}"
+        for row in rows
+    )
+    raise RuntimeError(
+        f"{len(rows)} group(s) of active documents already share a content digest on one loan "
+        f"file, so the unique index cannot be created yet:\n{detail}\n"
+        "Soft-delete the redundant copy in each group (keeping the one whose extractions and "
+        "findings you want to preserve), then run this migration again."
+    )
+
+
 def upgrade() -> None:
+    _refuse_rather_than_fail_obscurely()
     op.create_index(
         "uq_documents_loan_file_content_sha256",
         "documents",

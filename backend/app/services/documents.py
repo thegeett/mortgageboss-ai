@@ -119,14 +119,17 @@ async def find_duplicate(
     able to upload it again; matching against deleted rows would make that impossible and give them
     no way out.
 
-    ⚠️ LP-1000 review — TWO SIMULTANEOUS UPLOADS OF THE SAME BYTES BOTH PASS THIS. There is no
-    unique constraint (deliberately — the existing duplicates would fail its creation) and no lock
-    around document creation, so two requests can both read "no duplicate" and both insert. The
-    window is small and the outcome is the state that existed before this ticket rather than a new
-    failure, so it is recorded rather than patched: an advisory lock per loan file would close it,
-    and the unique constraint closes it properly once the existing duplicates are reconciled. Worth
-    knowing before anyone reads this check as a guarantee — it is a guard against the common case
-    (a person clicking twice, a browser re-sending), not mutual exclusion.
+    ⚠️ THIS SELECT ALONE IS NOT MUTUAL EXCLUSION — THE DATABASE IS. Two requests can both run this
+    and both see nothing: the INSERT lands in a later stage, after an object-storage write per file,
+    and only the caller's commit makes the row visible. `uq_documents_loan_file_content_sha256`
+    (`b8e2f5a91c73`) refuses the loser, and `create_document` turns that refusal back into the same
+    `DuplicateDocumentError` this check raises — so which of the two refused a processor is not
+    something they can tell, or need to.
+
+    BOTH ARE NEEDED, for different reasons. Without this check a duplicate costs an orphaned storage
+    object, because the bytes are written before the INSERT that would have been refused; without
+    the constraint a double-click creates the row twice. This is the fast, friendly path; the index
+    is the guarantee.
     """
     stmt = select(Document).where(
         Document.loan_file_id == loan_file_id,
@@ -183,6 +186,26 @@ def validate_upload(*, content: bytes, declared_content_type: str) -> str:
 #: constraint refused the row — so this string is load-bearing and must match the migration and the
 #: model declaration exactly.
 _UNIQUE_DIGEST_INDEX = "uq_documents_loan_file_content_sha256"
+
+
+def _is_our_digest_violation(exc: IntegrityError) -> bool:
+    """Whether this violation is OUR unique index — keyed on the field the driver fills in.
+
+    asyncpg maps Postgres' error field ``'n'`` to ``constraint_name``
+    (``asyncpg/exceptions/_base.py:44``) and the server populates it for a unique INDEX violation as
+    well as a named constraint, so the attribute is EXACT where a substring of the message is
+    incidental. That matters more than it looks: if the match ever stops working, every lost race
+    becomes a 500 instead of the 409 the pre-check raises — worse than the bug this closes. The
+    message test stays as a fallback for a driver that does not carry the field, and the dialect's
+    wrapper is unwrapped first because SQLAlchemy's ``orig`` may be the adapter's own exception with
+    the asyncpg one on ``__cause__``.
+    """
+    orig = getattr(exc, "orig", None)
+    for candidate in (orig, getattr(orig, "__cause__", None)):
+        name = getattr(candidate, "constraint_name", None)
+        if name is not None:
+            return bool(name == _UNIQUE_DIGEST_INDEX)
+    return _UNIQUE_DIGEST_INDEX in str(orig if orig is not None else exc)
 
 
 def _already_on_the_loan(existing: Document) -> str:
@@ -264,13 +287,15 @@ async def create_document(
             db.add(document)
             await db.flush()
     except IntegrityError as exc:
-        if _UNIQUE_DIGEST_INDEX not in str(getattr(exc, "orig", exc)):
+        if not _is_our_digest_violation(exc):
             raise
-        # The rolled-back SAVEPOINT may leave `document` pending in the session, and the SELECT below
-        # would AUTOFLUSH it — re-running the insert that just failed. Checked rather than assumed,
-        # because `expunge` raises on an instance the rollback already removed.
-        if document in db.sync_session:
-            db.expunge(document)
+        # NO EXPUNGE IS NEEDED HERE, and the first cut of this guarded for one — wrongly, in a way
+        # worth recording because the guard LOOKED prudent. Rolling back a SAVEPOINT runs
+        # `_restore_snapshot` (sqlalchemy/orm/session.py:1098), which expunges everything added
+        # inside it TO TRANSIENT before this line runs; `Session.__contains__` (:4297) is True only
+        # for a PENDING or PERSISTENT instance, so a `document in session` test can never be True
+        # here. The autoflush-reinsert that guard was written to prevent cannot happen: a transient
+        # object is not in `session._new`, so the SELECT below has nothing to flush.
         winner = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
         if winner is None:
             # It collided with a row this transaction cannot see (committed, then soft-deleted). Not
