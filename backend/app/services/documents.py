@@ -307,8 +307,14 @@ async def create_document(
             #      TRANSACTION: the twin's `deleted_at` was still NULL when the INSERT hit the index,
             #      and is set by the time this query filters on it.
             #
-            # (2) has no instance today: `soft_delete_document` has exactly one caller
-            # (`api/documents.py:1302`, the delete endpoint), which creates nothing. And REPLACE is
+            # (2) HAS NO INSTANCE IN APP CODE — scoped deliberately, because an unscoped claim fails
+            # the first grep that checks it. `soft_delete_document` has exactly one caller there
+            # (`api/documents.py:1302`, the delete endpoint), which creates nothing. Five TEST call
+            # sites exist, and two do delete-then-create on one session
+            # (`test_document_dedup_lp1000.py:183` and `:418`) — cause (2)'s SHAPE without its
+            # outcome: `soft_delete_document` flushes, so the pre-check's `only_active` already
+            # returns None and the INSERT never violates a predicate the twin is excluded from. And
+            # REPLACE is
             # not an instance of it, for two independent reasons — the API pre-checks with
             # `exclude_id=old.id` and raises before `create_document` runs, AND `supersede_document`
             # only flips `is_current`, retaining both rows (`document_versioning.py:39`), so the old
