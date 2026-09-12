@@ -298,8 +298,25 @@ async def create_document(
         # object is not in `session._new`, so the SELECT below has nothing to flush.
         winner = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
         if winner is None:
-            # It collided with a row this transaction cannot see (committed, then soft-deleted). Not
-            # ours to narrate: a 500 naming the constraint beats a 409 pointing at nothing.
+            # ⚠️ THIS BRANCH IS LOAD-BEARING, NOT DEFENSIVE, and it has TWO causes. A comment naming
+            # only the first sends the next reader to the wrong conclusion about whether it can fire.
+            #
+            #   1. The colliding row was committed by ANOTHER transaction and soft-deleted before
+            #      this SELECT ran — the index saw it, `only_active` does not.
+            #   2. A caller that soft-deletes a document and creates its replacement IN ONE
+            #      TRANSACTION: the twin's `deleted_at` was still NULL when the INSERT hit the index,
+            #      and is set by the time this query filters on it.
+            #
+            # (2) has no instance today: `soft_delete_document` has exactly one caller
+            # (`api/documents.py:1302`, the delete endpoint), which creates nothing. And REPLACE is
+            # not an instance of it, for two independent reasons — the API pre-checks with
+            # `exclude_id=old.id` and raises before `create_document` runs, AND `supersede_document`
+            # only flips `is_current`, retaining both rows (`document_versioning.py:39`), so the old
+            # document stays visible to `only_active` regardless.
+            #
+            # Whoever writes the first create-and-delete-in-one-transaction flow lands here and gets
+            # a 500 where a 409 naming a document on its way out would be the honest answer. Until
+            # then a 500 naming the constraint beats a 409 pointing at nothing.
             raise
         raise DuplicateDocumentError(_already_on_the_loan(winner), existing=winner) from exc
     # A document changed → the cross-source verification is out of date (LP-78).
