@@ -1626,9 +1626,26 @@ def _stmt_nsf_count(
     same way a fabricated 0 would (the perceiver emits "unknown" only for a genuinely illegible line)."""
     if snapshot.tags.absent:
         return _UNKNOWN, "no tags materialized — cannot count NSF/overdraft items"
+    # ⚠️ bug-025 review — ONE NSF LINE FILED TWICE IS ONE NSF LINE. A document filed twice surfaces its
+    # transactions twice, and `assign_content_ids` folds an OCCURRENCE INDEX so byte-identical siblings
+    # receive DISTINCT subject ids (LP-312) — so counting subjects counts the duplicate, and this is a
+    # COUNT, which is the shape that breaks (a maximum or a set-membership test survives duplication).
+    # `_stmt_repeated_money_in_max_total` already guards the same data one recipe up ("the same deposit,
+    # seen again in a duplicate or overlapping statement"); bug-025 fixed it for LIST rows in
+    # `all_list_rows`. Neither reaches here, because this aggregates TAGS rather than rows or findings.
+    #
+    # ⚠️ ONLY A FULLY-DETERMINED IDENTITY DEDUPLICATES, and that asymmetry is the point. This recipe's
+    # whole discipline is never to undercount — an "unknown" status abstains rather than report a lower
+    # bound — so two NSF lines that cannot be told apart (no amount, no date) must BOTH count. Collapsing
+    # those would be precisely the undercount the abstention above exists to refuse.
+    descriptions = {
+        record.content_id: str(record.description.value or "")
+        for record in all_transactions(snapshot)
+    }
     count = 0
     any_seen = False
-    for tags in snapshot.tags.by_subject.values():
+    counted: set[tuple[Decimal, date, str]] = set()
+    for subject_id, tags in snapshot.tags.by_subject.items():
         tag = tags.get("txn.is_nsf_or_overdraft")
         if tag is None:
             continue
@@ -1639,8 +1656,16 @@ def _stmt_nsf_count(
                 "a transaction's NSF/overdraft status is unreadable (unknown) — the count could be an "
                 "undercount, so it cannot be asserted (never false-green a possibly-missed NSF)",
             )
-        if str(tag.value) == "yes":
-            count += 1
+        if str(tag.value) != "yes":
+            continue
+        amount = _decimal_or_none(tags.get("txn.amount"))
+        day = _date_or_none(tags.get("txn.date"))
+        if amount is not None and day is not None:
+            key = (amount, day, descriptions.get(subject_id, ""))
+            if key in counted:
+                continue  # the same NSF line, seen again in a duplicate or overlapping statement
+            counted.add(key)
+        count += 1
     if not any_seen:
         return (
             _UNKNOWN,

@@ -168,6 +168,67 @@ def test_nsf_count_abstains_when_a_transaction_status_is_unreadable() -> None:
     assert v == "unknown" and "undercount" in r
 
 
+def test_one_nsf_line_filed_twice_is_one_nsf_line() -> None:
+    """bug-025 review — THE FIFTH AGGREGATE. A statement filed twice surfaces its transactions twice, and
+    `assign_content_ids` folds an occurrence index so the two copies receive DISTINCT subject ids. This is
+    a COUNT, so it doubled — the shape bug-025's own audit names ("a sum or a count doubles; a max is
+    idempotent"), but fed by TAGS rather than list rows, which is why neither `all_list_rows`' collapse
+    nor bug-021's emission collapse reaches it. AS-7 compares this count against a tolerance of 3.
+    """
+    duplicated = _snap(
+        by_subject={
+            "copy_a": {
+                "txn.is_nsf_or_overdraft": _tag("yes"),
+                "txn.amount": _tag("35.00"),
+                "txn.date": _tag("2026-05-14"),
+            },
+            "copy_b": {
+                "txn.is_nsf_or_overdraft": _tag("yes"),
+                "txn.amount": _tag("35.00"),
+                "txn.date": _tag("2026-05-14"),
+            },
+        }
+    )
+    assert _stmt_nsf_count(duplicated, "loan", None)[0] == "1"
+
+
+def test_two_nsf_lines_on_different_days_are_two() -> None:
+    """The control the de-duplication must not break: two GENUINE NSF events, the same $35 fee, different
+    days. Collapsing these would be the undercount this recipe's abstention discipline refuses."""
+    real_pair = _snap(
+        by_subject={
+            "t1": {
+                "txn.is_nsf_or_overdraft": _tag("yes"),
+                "txn.amount": _tag("35.00"),
+                "txn.date": _tag("2026-05-14"),
+            },
+            "t2": {
+                "txn.is_nsf_or_overdraft": _tag("yes"),
+                "txn.amount": _tag("35.00"),
+                "txn.date": _tag("2026-06-02"),
+            },
+        }
+    )
+    assert _stmt_nsf_count(real_pair, "loan", None)[0] == "2"
+
+
+def test_nsf_lines_that_cannot_be_told_apart_both_count() -> None:
+    """⚠️ THE ASYMMETRY, and it is deliberate rather than a gap in the guard. Only a FULLY-DETERMINED
+    identity de-duplicates: with no amount and no date there is nothing to compare, and this recipe never
+    undercounts — an unreadable status abstains rather than report a lower bound. So two NSF lines that
+    cannot be told apart BOTH count, which is the same direction as that abstention.
+
+    This is also why `test_nsf_count_and_min_account_months_recipes` above still reads 2 from two bare
+    "yes" tags: the de-duplication cannot fire without an identity to compare."""
+    no_identity = _snap(
+        by_subject={
+            "t1": {"txn.is_nsf_or_overdraft": _tag("yes")},
+            "t2": {"txn.is_nsf_or_overdraft": _tag("yes")},
+        }
+    )
+    assert _stmt_nsf_count(no_identity, "loan", None)[0] == "2"
+
+
 def test_min_account_months_abstains_when_an_account_has_no_parseable_dates() -> None:
     # Account A (Chase) has a dated statement; account B (Wells Fargo) has ONLY an unparseable date. B is
     # uncountable — counting it as 0 months would fire a FALSE recency violation, and the true min is
