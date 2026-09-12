@@ -18,7 +18,11 @@ import pytest
 from app.documents.catalog import ResponsibleParty
 from app.models import Company, LoanProgram
 from app.models.base import utcnow
-from app.models.communication import Communication, CommunicationStatus
+from app.models.communication import (
+    Communication,
+    CommunicationDirection,
+    CommunicationStatus,
+)
 from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import (
@@ -1039,3 +1043,47 @@ async def test_an_employer_is_asked_for_a_verification_not_for_their_loan_file(
     # NOT the borrower's words, and not the third party's either.
     assert "your loan file" not in body.lower()
     assert "the following from you" not in body.lower()
+
+
+async def test_a_draft_left_by_the_old_code_is_found_rather_than_forked(
+    db_session: AsyncSession,
+) -> None:
+    """LP-843 REVIEW — THE DEPLOY WINDOW, which the compatibility arm was not covering.
+
+    `_open_drafts_stmt` matches `party == X OR (party IS NULL AND template_key IN <legacy keys>)`. The
+    second arm existed for exactly one row: a draft created by the OLD code AFTER the migration ran,
+    which has no `party` and an LP-841 key like `document_request_lender`.
+
+    It compared against `draft_template_key(party)` — this ticket's value — so for a lender it looked
+    for `document_request_third_party` among rows carrying `document_request_lender`. Measured across
+    all eight parties: only `employer` matched, and only because its new key equals its old one. Six
+    of eight covered nothing, so such a draft was invisible and the next request minted a second one —
+    the fork the arm was written to prevent.
+
+    Simulated by writing the row the old code would have written. The control is the second half: a
+    row whose key belongs to a DIFFERENT party must not be adopted, or the arm would collapse every
+    unlabelled draft into whichever party asked first.
+    """
+    loan_file, _actor = await _file_and_actor(db_session)
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.DRAFT,
+            # What LP-841's code wrote: the per-party key, and no `party` column to set.
+            template_key="document_request_lender",
+            template_version="v1",
+            party=None,
+        )
+    )
+    await db_session.flush()
+
+    found = await open_drafts(db_session, loan_file_id=loan_file.id, party=ResponsibleParty.LENDER)
+
+    assert [d.template_key for d in found] == ["document_request_lender"], (
+        "a draft the old code left behind is invisible — the next request would fork it"
+    )
+    # THE CONTROL: it is the LENDER's key, and title must not adopt it.
+    assert (
+        await open_drafts(db_session, loan_file_id=loan_file.id, party=ResponsibleParty.TITLE) == []
+    ), "an unlabelled draft was adopted by the wrong party"

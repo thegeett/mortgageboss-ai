@@ -205,7 +205,25 @@ def _party_of(
     if message.party:
         return message.party
     party = party_for_draft_template(message.template_key)
-    return party.value if party else None
+    if party:
+        return party.value
+    # LP-843 REVIEW — AND THE ADDRESS WE SENT IT TO, for an outbound row that has neither.
+    #
+    # A reply and a compose draft carry `template_key=None` (LP-818, so several can be open at once
+    # without colliding on the one-draft index) and nothing sets `party` on them — measured: of seven
+    # `Communication(...)` construction sites, only `email_draft` and `party_requests` set it. So a
+    # processor who replies to the title company got a draft in NO tab, on the screen this ticket
+    # exists to give them tabs on, and the most natural follow-up action was the one that fell out.
+    #
+    # Unlike the inbound case, this is placeable: we chose the recipient, it is on the row, and
+    # `by_address` is already built for this page. None stays the answer for an address nobody on the
+    # file recognises — a processor writing to somebody who is not a participant is exactly the
+    # "cannot place it" case, and the unfiltered list is where it belongs.
+    if message.recipient:
+        matched = by_address.get(message.recipient.strip().lower())
+        if matched:
+            return matched.value
+    return None
 
 
 def _message_at(message: Communication) -> datetime:

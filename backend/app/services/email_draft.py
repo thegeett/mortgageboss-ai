@@ -472,6 +472,34 @@ def party_for_draft_template(template_key: str | None) -> ResponsibleParty | Non
     return None
 
 
+def _legacy_draft_keys(party: ResponsibleParty) -> tuple[str, ...]:
+    """The `template_key` values an LP-841-era draft to this party could carry.
+
+    LP-843 REVIEW — THE COMPATIBILITY ARM WAS MATCHING THE NEW KEY. It compared `template_key` against
+    `draft_template_key(party)`, which is this ticket's value — so for a lender it looked for
+    `document_request_third_party` among rows that carry `document_request_lender`. Measured across all
+    eight parties: only `employer` matched, and only because its new key happens to equal its old one.
+    Six of eight covered nothing.
+
+    That is the one case the arm exists for: a draft created by the OLD code AFTER the migration ran,
+    which has `party IS NULL` and an LP-841 key. Invisible to `open_drafts`, so the next request mints
+    a second draft and the processor's open one forks — the failure this arm was written to prevent.
+    Rows that predate the migration are fine either way; the backfill sets `party` and arm one finds
+    them.
+
+    `template_key_for` is LP-841's own function, so the set is derived from the thing that wrote the
+    rows rather than restated. The borrower carries both: `initial_documentation_request` is the
+    genuine historical pin on every message this product has sent, and LP-841's own per-party name is
+    what its backfill CASE maps alongside it.
+    """
+    from app.services.party_requests import template_key_for
+
+    keys = {template_key_for(party)}
+    if party is ResponsibleParty.BORROWER:
+        keys.add(draft_template_key(party))
+    return tuple(sorted(keys))
+
+
 def _open_drafts_stmt(loan_file_id: UUID, party: ResponsibleParty):  # type: ignore[no-untyped-def]
     """This party's unsent drafts on the file, newest first."""
     return only_active(
@@ -487,7 +515,7 @@ def _open_drafts_stmt(loan_file_id: UUID, party: ResponsibleParty):  # type: ign
                 Communication.party == party.value,
                 and_(
                     Communication.party.is_(None),
-                    Communication.template_key == draft_template_key(party),
+                    Communication.template_key.in_(_legacy_draft_keys(party)),
                 ),
             ),
         ),

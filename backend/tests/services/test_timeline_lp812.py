@@ -769,3 +769,62 @@ async def test_a_lender_and_a_title_draft_land_in_different_buckets(
     parties = {e.party for e in timeline if e.party}
     assert "lender" in parties
     assert "title" in parties
+
+
+async def test_a_reply_to_a_party_lands_in_that_partys_tab(db_session: AsyncSession) -> None:
+    """LP-843 REVIEW — a reply draft had no party and could have had one.
+
+    `create_reply_draft` and `create_compose_draft` set `template_key=None` (LP-818, so several can be
+    open at once without colliding on the one-draft index) and nothing sets `party`. Measured: of the
+    seven `Communication(...)` construction sites in `app/`, only `email_draft` and `party_requests`
+    set it. So `_party_of` fell through both arms and returned None — and a processor who replies to
+    the title company got a draft in NO tab, on the screen this ticket exists to give them tabs on.
+
+    It is placeable, unlike the inbound case: WE chose the recipient, it is on the row, and the
+    address map is already built for the page. Both halves are asserted — the recognised address is
+    placed, and an address nobody on the file knows is still None, because filing a stranger under a
+    party is the failure the None answer exists to prevent.
+    """
+    from app.models.loan_file_participant import ParticipantRole
+    from app.services.party_requests import add_participant
+
+    _company, loan_file = await _company_and_file(db_session, slug="replytab")
+    await add_participant(
+        db_session,
+        loan_file=loan_file,
+        role=ParticipantRole.TITLE,
+        email="closings@titleco.example",
+    )
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.DRAFT,
+            recipient="Closings@TitleCo.Example",  # case and spacing are not a difference
+            subject="Re: title commitment",
+            template_key=None,
+            template_version=None,
+        )
+    )
+    db_session.add(
+        Communication(
+            loan_file_id=loan_file.id,
+            direction=CommunicationDirection.OUTBOUND,
+            status=CommunicationStatus.DRAFT,
+            recipient="someone@unknown.example",
+            subject="Re: something else",
+            template_key=None,
+            template_version=None,
+        )
+    )
+    await db_session.flush()
+
+    timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
+    by_subject = {entry.subject: entry.party for entry in timeline}
+
+    assert by_subject["Re: title commitment"] == "title", (
+        "a reply to a known participant still has no tab"
+    )
+    assert by_subject["Re: something else"] is None, (
+        "a reply to an address nobody on this file knows was filed under a party anyway"
+    )
