@@ -136,6 +136,52 @@ def test_lo2_over_four_untyped_documents_consolidates() -> None:
     )
 
 
+def test_four_lo2_rows_actually_become_one_finding() -> None:
+    """bug-020 review — THE CLAIM ITSELF, driven rather than inferred.
+
+    The test above proves every LO-2 row carries `unidentified_document`, which is the INPUT to the
+    collapse; it does not prove the collapse. LP-640's own suite proves the mechanism generically
+    (22 rules x 3 documents -> one finding) over hand-built evaluations. What nothing covered is this
+    ticket's actual sentence — that the new proxy path reaches that mechanism — so: the real spec, the
+    real evaluator, then the real consolidator, and four rows must come out as one.
+    """
+    from app.services.rule_findings import (
+        UNIDENTIFIED_DOCUMENTS_RULE_ID,
+        consolidate_unidentified_documents,
+    )
+    from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
+    from app.verification.rule_engine.enumerators import LOAN_SUBJECT
+    from app.verification.rules.specs import load_rule_spec
+
+    cids = ("dl", "ead", "pa3", "chime")
+    snapshot = Snapshot(
+        loan_file_id=uuid4(),
+        run_id=uuid4(),
+        created_at=datetime(2026, 9, 11, tzinfo=UTC),
+        documents=DocumentsSection.present(
+            [DocumentEntry(content_id=cid, document_type="unknown") for cid in cids]
+        ),
+        tags=TagsSection.present(
+            {cid: {"loe.is_explanation_letter": _tag("unknown")} for cid in cids}
+        ),
+    )
+
+    results = evaluate_deterministic_rule(load_rule_spec("LO-2"), snapshot)
+    out = consolidate_unidentified_documents(results)
+
+    assert [r.rule_id for r in out] == [UNIDENTIFIED_DOCUMENTS_RULE_ID], (
+        "four LO-2 rows must leave the queue entirely, replaced by the one row that already names "
+        f"the same four documents — got {[r.rule_id for r in out]}"
+    )
+    (consolidated,) = out
+    assert consolidated.subject_id == LOAN_SUBJECT
+    assert (
+        consolidated.verdict is Verdict.COULDNT_CHECK
+    )  # the queue collapses, never the conclusion
+    assert consolidated.source_content_ids == cids  # and it links all four, in order
+    assert "4 documents" in consolidated.reasoning and "4 checks" in consolidated.reasoning
+
+
 def test_lo2_on_a_typed_non_letter_is_not_attributed_to_an_unidentified_document() -> None:
     """A pay stub is confidently not a letter — not_applicable, and nothing to consolidate."""
     from app.verification.rule_engine.deterministic import evaluate_deterministic_rule
