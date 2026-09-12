@@ -1144,6 +1144,21 @@ class RuleSpec(BaseModel):
     # bug-005 — collapse a uniform conclusion to one row. Absent means "show every subject", which
     # stays the default: most per-subject rules are worth seeing per subject.
     collapse_uniform: CollapseUniform | None = None
+    # bug-024 — this rule enumerates per STATEMENT but its answer is about the ACCOUNT, so N statements
+    # of one account should say it once. Opt-in, and it must be, because no code can derive it: the
+    # subject is a bank statement either way, and only the author knows what the sentence is ABOUT.
+    #
+    # AS-6 ("this is a joint account with a non-borrower co-holder") is about the account. AS-9
+    # ("declares 3 pages, 2 present") is about the statement, and it is the reason the default is off
+    # rather than a list of rules to exclude: its two load-bearing tags are not extracted today, so
+    # every AS-9 row is a couldnt_check whose fact set is identically EMPTY on every statement of an
+    # account — an ungated collapse merges them now. When the extraction lands it gets worse, not
+    # better: three statements each declaring 3 pages with 2 present carry identical values, and three
+    # separate incomplete statements would become one row naming one of them.
+    #
+    # The same shape as `collapse_uniform.unresolved` one field above, for the same reason — declare it
+    # where the sentence summarises the set, leave it off everywhere else, and the default stays safe.
+    answers_per_account: bool = False
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)

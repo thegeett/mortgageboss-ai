@@ -682,6 +682,115 @@ def _ordered_union(sequences: Iterable[Sequence[Any]]) -> tuple[Any, ...]:
     return tuple(out)
 
 
+def _collapse_per_account_duplicates(
+    results: list[RuleEvaluation],
+    snapshot: Snapshot,
+    *,
+    humanly_resolved_rule_ids: frozenset[str] = frozenset(),
+) -> list[RuleEvaluation]:
+    """A rule that asks about an ACCOUNT but enumerates per STATEMENT says it once (bug-024).
+
+    AS-6's question is whose account this is, and its answer is a property of the account: "this is a
+    joint account with an additional holder who is not a borrower" is true of the account, not of one
+    statement of it. It enumerates `per_document`, so three statements of PNC ****1943 on LF-XMB2
+    produced three identical needs_review rows. Across staging that shape accounts for 22 rows on 9
+    files.
+
+    WHY NOT `collapse_uniform`, which exists for "N subjects, one sentence": it groups per RULE per
+    FILE and abandons the collapse at the first dissenting verdict. On LF-XMB2 — five satisfied and
+    three needs_review — it does nothing at all, and on a file with co-holders on TWO accounts it would
+    produce one row naming neither. The grouping has to be the account, because that is what the
+    sentence is about.
+
+    THE KEY IS (rule, account, verdict, facts), and every part of it is load-bearing:
+
+    * **account** — two accounts are two answers, whatever they say;
+    * **verdict** — a satisfied statement and a needs_review statement of one account disagree about
+      something real;
+    * **facts** — the decisive one, and the data proves it. LF-AYK4 has five rows under a single
+      outcome but two fact sets: four about a co-holder, and one about a misspelled holder name, which
+      is a different question with a different remedy. A collapse keyed on the account alone folds that
+      row away silently.
+
+    OPT-IN PER RULE (`answers_per_account`), and it cannot be otherwise. A statement subject does not
+    say what the sentence is ABOUT, and exactly two rules take one: AS-6, whose answer is about the
+    account, and AS-9 ("declares 3 pages, 2 present"), whose answer is about the statement. AS-9 is why
+    the default is off rather than a hard-coded exclusion — its load-bearing page counts are not
+    extracted today, so every one of its rows is a couldnt_check with an identically EMPTY fact set on
+    every statement of an account, and an ungated collapse merges them today. Applying this to a rule
+    whose subject really is the statement hides real per-statement problems behind one row.
+
+    A rule a processor has already answered per subject is left alone entirely — `_collapse_uniform_passes`
+    settled that principle (bug-007) and bug-021 adopted it: re-keying retires their answer into fresh
+    OPEN work, and the safe direction is showing more rows, not fewer.
+    """
+    accounts, _unresolvable = resolve_accounts(snapshot)
+    account_of: dict[str, str] = {
+        content_id: key for key, content_ids in accounts.items() for content_id in content_ids
+    }
+    if not account_of:
+        return results
+
+    opted_in: dict[str, bool] = {}
+
+    def _answers_per_account(rule_id: str) -> bool:
+        if rule_id not in opted_in:
+            try:
+                opted_in[rule_id] = load_rule_spec(rule_id).answers_per_account
+            except RuleSpecNotFound:
+                opted_in[rule_id] = False  # no spec, no declaration, no collapse
+        return opted_in[rule_id]
+
+    groups: dict[tuple[str, str, str, tuple[tuple[str, str], ...]], list[int]] = {}
+    for index, result in enumerate(results):
+        account = account_of.get(result.subject_id)
+        if account is None or result.rule_id in humanly_resolved_rule_ids:
+            continue
+        if not _answers_per_account(result.rule_id):
+            continue
+        facts = tuple(sorted((tag.tag_id, str(tag.value)) for tag in result.load_bearing_tags))
+        groups.setdefault((result.rule_id, account, result.verdict.value, facts), []).append(index)
+
+    merged_into: dict[int, list[int]] = {}
+    dropped: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        keep, *rest = members
+        merged_into[keep] = rest
+        dropped.update(rest)
+
+    if not dropped:
+        return results
+
+    collapsed: list[RuleEvaluation] = []
+    for index, result in enumerate(results):
+        if index in dropped:
+            continue
+        twins = merged_into.get(index)
+        if not twins:
+            collapsed.append(result)
+            continue
+        # Every statement the answer covers stays named, so the row a processor opens still lists them
+        # — the same reason bug-021's collapse unions its sources rather than keeping the first.
+        carried = tuple(
+            dict.fromkeys(
+                (
+                    *result.source_content_ids,
+                    *(cid for i in twins for cid in results[i].source_content_ids),
+                )
+            )
+        )
+        collapsed.append(replace(result, source_content_ids=carried))
+
+    logger.info(
+        "per_account_duplicates_collapsed",
+        findings_dropped=len(dropped),
+        accounts_merged=len(merged_into),
+    )
+    return collapsed
+
+
 def _transaction_identity(snapshot: Snapshot) -> dict[str, tuple[str, str, str, str]]:
     """Each transaction's content id → the identity it shares with its copies (bug-021).
 
@@ -1295,6 +1404,13 @@ async def run_verification(
     # this way deliberately: a rule whose subjects are a statement's deposits plus its duplicates could
     # otherwise read as "N subjects agreeing" on a set that is really N/2 transactions counted twice.
     results = _collapse_duplicate_transactions(
+        results, snapshot, humanly_resolved_rule_ids=humanly_resolved
+    )
+    # bug-024 — then the statements themselves: a rule whose answer is about an ACCOUNT should say it
+    # once, however many statements of that account the file holds. After the transaction collapse and
+    # before the uniform-pass one, for the same reason that one runs first — each pass should see a set
+    # already free of the duplication the previous pass understands.
+    results = _collapse_per_account_duplicates(
         results, snapshot, humanly_resolved_rule_ids=humanly_resolved
     )
     results = _collapse_uniform_passes(results, humanly_resolved_rule_ids=humanly_resolved)
