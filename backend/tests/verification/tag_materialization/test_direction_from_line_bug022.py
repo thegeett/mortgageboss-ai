@@ -123,6 +123,18 @@ def test_an_absent_description_stays_unknown() -> None:
     assert _money_in_tag(_txn(None), _judged("unknown")).value == "unknown"
 
 
+def test_a_payee_whose_name_follows_transfer_is_not_a_direction() -> None:
+    """bug-022 review — FROM THE REAL CORPUS, and the reason the table demands the preposition.
+
+    Staging carries two lines reading "Transfer Ila Patel": a payee whose given name begins with the
+    letters of a preposition. The table requires "transfer to " / "transfer from " with the trailing
+    space, so these stay unknown — but a future prefix of bare "transfer " would read this person's
+    name as a direction, and the mistake would be invisible because the line looks directional.
+    """
+    assert _money_in_tag(_txn("Transfer Ila Patel"), _judged("unknown")).value == "unknown"
+    assert _money_in_tag(_txn("Transfer Format Fee"), _judged("unknown")).value == "unknown"
+
+
 def test_the_eval_corpus_directional_keys_all_agree_with_the_table() -> None:
     """Corroboration from the labelled data rather than from intuition: every directional fixture in the
     eval corpus already carries a stubbed direction, and the table agrees with each one. If a future

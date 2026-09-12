@@ -305,7 +305,17 @@ FR-5:
   rationale: >-
     THE ONLY RULE THAT READS MONEY OUT. All three active transaction rules scope `txn.is_money_in eq in`,
     so on the file that exposed this 41 withdrawals were never looked at while 10 deposits produced five
-    findings. A debt visible only as a recurring bank debit — a private or family loan, a rent-to-own,
+    findings.
+    bug-022 review — AND ITS SCOPE JUST GREW, which is worth recording on the bar of the rule that reads
+    the far side of that predicate. `txn.is_money_in` gained a deterministic floor beneath the model
+    (`tag_production._money_in_tag`): a line the extractor left untyped now resolves from the preposition
+    the bank printed. Measured on staging, that clears 14 of the 48 transactions with no resolvable
+    direction, and 12 of the 14 resolve to "out" — so roughly a dozen lines that abstained everywhere now
+    enter THIS rule's subject domain, each one an AI call and a possible needs_review. Nothing about the
+    rule changed; what changed is how many transactions reach it. `txn.is_money_in` is in no bar's
+    `load_bearing_ai_tags` (it is an applicability predicate, and the measured tags here are
+    `txn.apparent_category` and `txn.has_identified_source`), so there is no accuracy number to restate —
+    this is a note about POPULATION, not calibration. A debt visible only as a recurring bank debit — a private or family loan, a rent-to-own,
     anything not reported to the bureaus — is invisible today, and it is the category most likely to be
     undisclosed.
     IT CANNOT SEE THE DISCLOSED DEBTS, AND ITS WORDING SAYS SO. `_build_context` hands a judgment rule the
