@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { announceDraftChange, listenForDraftChanges } from "./draft-broadcast";
@@ -136,5 +138,61 @@ describe("invalidateDraftViews", () => {
 
     expect(mine.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
     expect(other.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
+  });
+});
+
+/**
+ * WHY THIS IS A SOURCE SCAN AND NOT A BEHAVIOUR TEST.
+ *
+ * `listenForDraftChanges` returns a teardown and `makeQueryClient` drops it, which is safe for
+ * exactly one reason: the client is built once, from the lazy `useState` initialiser in the root
+ * layout's provider. That reason is a property of two call sites, so nothing inside the module can
+ * check it, and a comment saying "only call this once" enforces nothing.
+ *
+ * The difference from the two blob-url eviction handlers registered beside it, which is easy to miss
+ * because the comment there presents all three as the same move: those return a QueryCache
+ * subscription, which is owned by the client and dies with it. This one returns `bus.close()` on a
+ * BroadcastChannel — a browser resource whose `onmessage` closes over the client, so a discarded
+ * client stays reachable and its channel stays open for the life of the page. One is free to drop.
+ * The other is free to drop only while there is one client.
+ */
+// `process.cwd()` rather than `import.meta.url`, which Vite serves through a `/@fs/` prefix that
+// `node:fs` cannot open. `lib/status.test.ts` resolves its source the same way.
+const FRONTEND_ROOT = process.cwd();
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return entry.name === "node_modules" || entry.name.startsWith(".") ? [] : sourceFiles(path);
+    }
+    if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) return [];
+    // The file that DEFINES it is not a call site.
+    return path.endsWith(join("lib", "query-client.ts")) ? [] : [path];
+  });
+}
+
+function productionCallers(): string[] {
+  return sourceFiles(FRONTEND_ROOT)
+    .filter((file) => /\bmakeQueryClient\s*\(/.test(readFileSync(file, "utf8")))
+    .map((file) => relative(FRONTEND_ROOT, file));
+}
+
+describe("the draft listener is registered once per page", () => {
+  it("one production call site builds the client", () => {
+    const callers = productionCallers();
+    // THE POSITIVE CONTROL, FIRST. A walker that returned nothing — wrong root, a rename, the
+    // extension test inverted — makes the assertion below pass by finding no callers at all, which
+    // is the failure mode this whole describe block exists to catch in other code.
+    expect(callers).toContain(join("components", "providers.tsx"));
+    expect(callers).toHaveLength(1);
+  });
+
+  it("and builds it in a lazy initialiser, not on every render", () => {
+    // The regression this guards is a simplification, not a mistake: `const queryClient =
+    // makeQueryClient()` in the component body reads fine and runs on EVERY render, and since the
+    // teardown is dropped each render would leave another open BroadcastChannel behind.
+    const providers = readFileSync(join(FRONTEND_ROOT, "components/providers.tsx"), "utf8");
+    expect(providers).toMatch(/useState\(\s*\(\)\s*=>\s*makeQueryClient\(\)\s*\)/);
   });
 });

@@ -57,6 +57,12 @@ export function announceDraftChange(fileId: string): void {
  *
  * Registered on the CLIENT rather than from a hook, like the blob-url eviction handlers beside it:
  * the subscription has to outlive any component that happens to be mounted when a message arrives.
+ *
+ * ONE WAY IT IS NOT LIKE THOSE TWO, worth knowing before the pattern is copied to something heavier:
+ * they return a QueryCache subscription, which the client owns and drops along with itself, while
+ * this returns `bus.close()` on a BroadcastChannel that stays open whether the client survives or
+ * not. So `makeQueryClient` discarding the teardown is safe only while it is called once per page.
+ * `draft-broadcast.test.ts` asserts that rather than trusting this sentence.
  */
 export function listenForDraftChanges(queryClient: QueryClient): () => void {
   const bus = channel();
