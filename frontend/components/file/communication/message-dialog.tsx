@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/communications";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
+import dynamic from "next/dynamic";
 
 /**
  * LP-844 — how a rendered body is styled.
@@ -29,6 +30,29 @@ import { emailBodyToHtml } from "@/lib/markdown/email-body";
  * It styles the PREVIEW, never the send: `emailBodyToHtml` emits no classes at all, because a mail
  * client keeps the semantic tags and discards our stylesheet.
  */
+/**
+ * LP-849 — LOADED WHEN A PROCESSOR OPENS A DRAFT, not with the page.
+ *
+ * MEASURED: importing the editor statically took the communication route from 195 kB to 299 kB of
+ * first-load JS. ProseMirror is not small, and nobody needs it to READ the timeline — which is what
+ * this page is for most of the time. Behind `next/dynamic` the cost is paid on the click that
+ * actually needs an editor.
+ *
+ * `ssr: false` because Tiptap parses its content through the DOM; there is nothing here for a
+ * crawler and a server render would only warn about the mismatch.
+ */
+const MessageEditor = dynamic(
+  () => import("@/components/file/communication/message-editor").then((m) => m.MessageEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="min-h-[16rem] rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground">
+        Loading the editor…
+      </div>
+    ),
+  },
+);
+
 const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
@@ -75,7 +99,6 @@ export function MessageDialog({
   const send = useSendDraft(fileId);
   const attachLink = useAttachUploadLink(fileId, messageId ?? "");
   const [copied, setCopied] = useState(false);
-  const [preview, setPreview] = useState(false);
   const open = messageId !== null;
 
   // SEEDED ON THE MESSAGE'S IDENTITY, not in an effect — the same pattern `OutboundDraftPanel` used
@@ -159,44 +182,23 @@ export function MessageDialog({
                   />
                 </label>
                 <div className="flex flex-col gap-1 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-foreground" id="message-label">
-                      Message
-                    </span>
-                    {/* LP-844 — WHAT THEY ARE ABOUT TO SEND. The editor is Markdown, so `**this**`
-                        is bold in the recipient's inbox and not in the box being typed into. A
-                        processor who cannot see the result before copying is proof-reading the
-                        wrong artefact. */}
-                    <button
-                      type="button"
-                      onClick={() => setPreview((on) => !on)}
-                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                    >
-                      {preview ? "Edit" : "Preview"}
-                    </button>
-                  </div>
-                  {preview ? (
-                    <div
-                      className={`message-body min-h-[16rem] break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
-                      // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer
-                      dangerouslySetInnerHTML={{ __html: emailBodyToHtml(body) }}
-                    />
-                  ) : (
-                    <textarea
-                      aria-labelledby="message-label"
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      rows={16}
-                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    />
-                  )}
+                  <span className="font-medium text-foreground">Message</span>
+                  {/* LP-849 — A MESSAGE BOX, NOT A NOTEPAD. LP-844 put Markdown in a textarea with
+                      a Preview toggle to avoid an editor dependency; a processor used it and
+                      reported it as "simple notepad version" with "old scholl ***bold***". The
+                      toggle is gone because a WYSIWYG IS the preview.
+
+                      The stored body is still one plain string — see `MessageEditor`. `body` here
+                      is what will be sent and recorded, never HTML, which is why nothing else in
+                      this dialog had to change. */}
+                  <MessageEditor value={body} onChange={setBody} />
                   <p className="text-xs text-muted-foreground">
-                    {/* SAYS WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by
-                        RFC 6068 — no client renders markup in one — so the two buttons below are
-                        not equivalent and a processor should not have to discover that. */}
-                    Use <code>**bold**</code> and <code>- bullets</code>. Formatting survives{" "}
-                    <span className="text-foreground">Copy message</span>; the mail-client link
-                    sends plain text.
+                    {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
+                        6068 — no client renders markup in one — so the two buttons below are not
+                        equivalent and a processor should not have to discover that by sending a
+                        flattened email. */}
+                    Formatting survives <span className="text-foreground">Copy message</span>; the
+                    mail-client link sends plain text.
                   </p>
                 </div>
               </div>

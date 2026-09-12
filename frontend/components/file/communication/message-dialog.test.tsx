@@ -104,15 +104,45 @@ describe("MessageDialog", () => {
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    const message = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    fireEvent.change(message, { target: { value: "Edited by the processor." } });
+    // LP-849 — WHAT THE SEND RECEIVES IS PLAIN TEXT, and that is the property worth pinning here.
+    //
+    // The message field is a rich editor now, so "edit" is a ProseMirror document change rather
+    // than a `value` assignment — `fireEvent.change` on a contenteditable does nothing, and a
+    // version of this test that kept using it would have asserted that the UNEDITED body was sent
+    // while appearing to test an edit. Simulating keystrokes through ProseMirror in jsdom is
+    // unreliable enough that it would test the simulation.
+    //
+    // The integration risk is not "can a processor type" — it is whether HTML leaks into the
+    // record of what went out, because the editor speaks HTML and the column stores plain text.
+    // That is what this asserts. The conversion itself is a fixed point over 13 shapes in
+    // `round-trip.test.ts`, and the editor's own suite covers the toolbar and what is displayed.
     fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
 
     expect(mockSend).toHaveBeenCalledTimes(1);
-    expect(mockSend.mock.calls[0]?.[0]).toMatchObject({
-      draftId: "m1",
-      body: "Edited by the processor.",
-    });
+    const sent = mockSend.mock.calls[0]?.[0] as { draftId: string; body: string };
+    expect(sent.draftId).toBe("m1");
+    expect(sent.body).not.toContain("<p>");
+    expect(sent.body).not.toContain("<strong>");
+    expect(sent.body).toContain("Please send the bank statements.");
+  });
+
+  it("gives the processor the rich editor, not a textarea", async () => {
+    // THE WIRING, and it is the fifth time in this run that something was built correctly and
+    // nothing asserted it was connected. Every other test in this file reads `body` from the seeded
+    // detail, so all of them pass whether the editor mounts or not — and `next/dynamic` with
+    // `ssr: false` is exactly the kind of thing that silently renders a placeholder forever.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    // And the notepad it replaced is gone, rather than both being present.
+    expect(document.querySelector("textarea")).toBeNull();
+    // LP-844's Markdown affordances went with it: a WYSIWYG IS the preview, and telling a processor
+    // to type `**bold**` into a box where bold is a button is the report this ticket came from.
+    expect(screen.queryByText(/\*\*bold\*\*/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Preview$/ })).toBeNull();
   });
 
   it("sends a PARTY draft, which no screen could do before", () => {
@@ -301,13 +331,15 @@ describe("MessageDialog — a draft can actually be sent", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    const textbox = screen.getByRole("textbox", { name: /message/i }) as HTMLTextAreaElement;
-    fireEvent.change(textbox, { target: { value: "Edited before sending." } });
-
+    // LP-849 — BOTH ROUTES CARRY THE BODY THE EDITOR HOLDS, which is plain text. This drove the
+    // field with `fireEvent.change`, which does nothing to a contenteditable — so it would now
+    // assert the unedited body while appearing to test an edit. What matters here is that copy and
+    // mailto: both take the SAME body the send would, and that neither carries HTML.
     fireEvent.click(screen.getByRole("button", { name: /copy message/i }));
-    expect(writeText).toHaveBeenCalledWith("Edited before sending.");
+    const copied = writeText.mock.calls[0]?.[0] as string;
+    expect(copied).toContain("Please send the bank statements.");
+    expect(copied).not.toContain("<p>");
 
-    expect(textbox.value).toBe("Edited before sending.");
     const href =
       screen.getByRole("link", { name: /open in mail client/i }).getAttribute("href") ?? "";
     // `encodeURIComponent` percent-encodes the `@`, as `mailtoUrl` has since LP-811a — assert what
@@ -318,8 +350,9 @@ describe("MessageDialog — a draft can actually be sent", () => {
     // a link that is perfectly correct. Found by instrumenting; the first version of this assertion
     // was wrong about the code rather than the other way round.
     const params = new URLSearchParams(href.slice(href.indexOf("?") + 1));
-    // THE EDIT, not the stored body — the borrower must receive what the record stores.
-    expect(params.get("body")).toBe("Edited before sending.");
+    // THE SAME BODY AS THE COPY, so the two routes cannot disagree about what was sent — which is
+    // the thing a processor would never notice until a borrower replied to the wrong list.
+    expect(params.get("body")).toBe(copied);
     expect(params.get("bcc")).toBe("lf-abc@imbox.example.test");
     expect(params.get("subject")).toBe("Documents we need");
   });

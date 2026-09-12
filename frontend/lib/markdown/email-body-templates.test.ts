@@ -139,7 +139,12 @@ describe("the only way HTML reaches the DOM", () => {
     for (const root of ["components", "app", "lib"]) walk(`${process.cwd()}/${root}`);
 
     expect(offenders).toEqual([]);
-    expect(sinks, "the scan found no sink — it read nothing").toBeGreaterThanOrEqual(2);
+    // ONE SINK, where the LP-844 review recorded two. LP-849 replaced the Markdown preview with a
+    // WYSIWYG editor — the editor IS the preview, so that sink went with it, and only the
+    // read-only reader still injects HTML. The count is a CONTROL against a scan that read nothing,
+    // not a claim about how many sinks there should be, so it tracks the real number rather than
+    // holding a stale one and the guard above is unchanged.
+    expect(sinks, "the scan found no sink — it read nothing").toBeGreaterThanOrEqual(1);
   });
 });
 
