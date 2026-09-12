@@ -690,7 +690,6 @@ def _transaction_identity(snapshot: Snapshot) -> dict[str, tuple[str, str, str, 
     account cannot be identified (no institution or no masked number) is absent from this map and
     therefore never merges: no identity, no duplicate.
     """
-    parents = source_document_by_subject(snapshot)
     accounts, _unresolvable = resolve_accounts(snapshot)
     account_of: dict[str, str] = {
         content_id: key for key, content_ids in accounts.items() for content_id in content_ids
@@ -704,7 +703,12 @@ def _transaction_identity(snapshot: Snapshot) -> dict[str, tuple[str, str, str, 
 
     identities: dict[str, tuple[str, str, str, str]] = {}
     for entry in () if snapshot.documents.absent else snapshot.documents.entries:
-        account = account_of.get(parents.get(entry.content_id, entry.content_id))
+        # bug-021 review — LOOKED UP DIRECTLY. This read `parents.get(entry.content_id, ...)` through
+        # `source_document_by_subject`, which maps a document to ITSELF, so the indirection was a no-op
+        # that read as though `entry` might be a child of something. `resolve_accounts` keys on the
+        # statement's own content id; the txn -> statement direction is still needed below, where it
+        # is not a no-op.
+        account = account_of.get(entry.content_id)
         if account is None:
             continue
         for txn in entry.transactions or ():

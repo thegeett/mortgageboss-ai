@@ -32,14 +32,21 @@ def _f(value: str) -> Field:
 
 
 def _txn(
-    content_id: str, *, amount: str = "19039.08", date: str = "2026-02-25"
+    content_id: str,
+    *,
+    amount: str = "19039.08",
+    date: str = "2026-02-25",
+    description: str = "Instpmntin Intuit Payments Inc.",
 ) -> TransactionRecord:
+    # `description` is a parameter because the identity includes it, and the two real uploads differ in
+    # exactly that field on four lines (bug-021 review). TransactionRecord is a pydantic model, not a
+    # dataclass, so `dataclasses.replace` cannot build a variant of one.
     return TransactionRecord(
         content_id=content_id,
         date=_f(date),
         amount=_f(amount),
         direction=_f("credit"),
-        description=_f("Instpmntin Intuit Payments Inc."),
+        description=_f(description),
     )
 
 
@@ -175,6 +182,32 @@ def test_copies_the_extractor_read_differently_stay_two_findings() -> None:
     ]
 
     assert len(_collapse_duplicate_transactions(results, _TWIN_SNAPSHOT)) == 2
+
+
+def test_copies_whose_DESCRIPTION_differs_stay_two_findings() -> None:
+    """bug-021 review — MEASURED ON THE REAL FILE, and it is the identity's live edge.
+
+    Comparing the two LF-XMB2 uploads through the read-only views: 16 of the 20 lines carry
+    byte-identical (date, amount, description) and merge — including both pairs this ticket names. The
+    other four differ in the DESCRIPTION only, in two shapes: one copy prefixes a card-sequence number
+    ("1827 Debit Card Purchase Giv*Rccg Living Spring" vs "Debit Card Purchase Giv*Rccg Living
+    Spring"), and two `Web Pmt` lines carry a trailing identifier in one copy alone.
+
+    Those four stay two rows each, which is the fail-safe direction and is pinned here so nobody
+    "fixes" it by stripping digits from descriptions: "Check 1827" and "Check 1828" on one day for one
+    amount would then share an identity, and a real second cheque would disappear.
+    """
+    snapshot = _snap(
+        [
+            _statement("stmt_a", (_txn("txn_a"),)),
+            _statement(
+                "stmt_b", (_txn("txn_b", description="1827 Instpmntin Intuit Payments Inc."),)
+            ),
+        ]
+    )
+    results = [_result("txn_a", sources=("stmt_a",)), _result("txn_b", sources=("stmt_b",))]
+
+    assert len(_collapse_duplicate_transactions(results, snapshot)) == 2
 
 
 def test_a_verdict_disagreement_stays_two_findings() -> None:
