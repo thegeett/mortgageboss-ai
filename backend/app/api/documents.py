@@ -890,8 +890,38 @@ async def replace(
     # LP-1000 — replacing a document with the SAME bytes is refused. A replace exists to supersede
     # what is there with something different; re-uploading the identical file would mark the old
     # version historical, re-open the need it satisfied and re-run the pipeline, all to arrive at
-    # the file already on the loan. The check in `create_document` catches it; this maps it to the
-    # 409 this endpoint already uses for "that is not a replaceable state".
+    # the file already on the loan.
+    #
+    # ⚠️ LP-1000 review — AND THE REFUSAL MUST NOT NAME THE DOCUMENT BEING REPLACED. `create_document`
+    # runs BEFORE `supersede_document`, so at this moment `old` is still current and not deleted —
+    # which is to say ACTIVE, and exactly what `find_duplicate` looks for. Left to the backstop, an
+    # identical replace collided with its own target and told the processor "this file is already on
+    # the loan as <old name> … replace the existing document if this one supersedes it": advice to do
+    # the thing they had just done. The check runs here instead, against everything EXCEPT the target,
+    # which is what `find_duplicate`'s `exclude_id` is for — and then the sentence is about the
+    # replacement being pointless rather than about a collision with a third document.
+    same_as_target = content_digest(content) == old.content_sha256
+    other = await find_duplicate(
+        db, loan_file_id=loan_file.id, digest=content_digest(content), exclude_id=old.id
+    )
+    if same_as_target:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is the same file as the document you are replacing, so replacing it would "
+                "change nothing. Upload a different version, or leave the document as it is."
+            ),
+        )
+    if other is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This file is already on the loan as {other.original_filename!r} (uploaded "
+                f"{other.created_at.strftime('%b')} {other.created_at.day}, "
+                f"{other.created_at.year}). Replace that document instead, or upload a "
+                "different version of this one."
+            ),
+        )
     try:
         new_document = await create_document(
             db,
@@ -904,7 +934,7 @@ async def replace(
             storage_path=storage_path,
             uploaded_by_user_id=current_user.id,
         )
-    except DocumentValidationError as exc:
+    except DocumentValidationError as exc:  # pragma: no cover - the checks above pre-empt it
         raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
     await supersede_document(db, old_document=old, new_document=new_document)
 

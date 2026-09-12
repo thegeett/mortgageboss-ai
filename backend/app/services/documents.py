@@ -117,6 +117,15 @@ async def find_duplicate(
     SOFT-DELETED ROWS DO NOT COUNT (`only_active`). A processor who deletes a bad upload must be
     able to upload it again; matching against deleted rows would make that impossible and give them
     no way out.
+
+    ⚠️ LP-1000 review — TWO SIMULTANEOUS UPLOADS OF THE SAME BYTES BOTH PASS THIS. There is no
+    unique constraint (deliberately — the existing duplicates would fail its creation) and no lock
+    around document creation, so two requests can both read "no duplicate" and both insert. The
+    window is small and the outcome is the state that existed before this ticket rather than a new
+    failure, so it is recorded rather than patched: an advisory lock per loan file would close it,
+    and the unique constraint closes it properly once the existing duplicates are reconciled. Worth
+    knowing before anyone reads this check as a guarantee — it is a guard against the common case
+    (a person clicking twice, a browser re-sending), not mutual exclusion.
     """
     stmt = select(Document).where(
         Document.loan_file_id == loan_file_id,

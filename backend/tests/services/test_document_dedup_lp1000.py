@@ -218,6 +218,63 @@ async def test_a_row_with_no_digest_does_not_refuse_todays_upload(
 
 
 # --------------------------------------------------------------------------- #
+# Replace — the one route whose collision is with ITSELF (LP-1000 review)
+# --------------------------------------------------------------------------- #
+async def test_find_duplicate_excluding_the_target_is_how_replace_must_ask(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE DEFECT THIS FILE DID NOT COVER, and the reason it went unnoticed: nothing here
+    exercised the replace route at all.
+
+    `replace` calls `create_document` BEFORE `supersede_document`, so when the check fires the
+    document being replaced is still `is_current` and not deleted — which is to say ACTIVE, exactly
+    what `find_duplicate` looks for. An identical replace therefore collided with its own target,
+    and the backstop's message told the processor "this file is already on the loan as <the document
+    you are replacing> … replace the existing document if this one supersedes it": advice to do the
+    thing they had just done.
+
+    The question the route has to ask is "is anything OTHER than the target the same?", which is
+    what `exclude_id` exists for. Pinned at the seam rather than through the endpoint, because the
+    endpoint needs an HTTP client and this is the predicate the fix turns on.
+    """
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    target = await _add(db_session, loan_file, filename="Appraisal v1.pdf", user=user)
+    digest = content_digest(PDF_BYTES)
+
+    # Asked the way the backstop asks it, the target itself is the "duplicate" — the bug.
+    assert await find_duplicate(db_session, loan_file_id=loan_file.id, digest=digest) is target
+    # Asked the way replace must ask it, there is no collision: the only match IS the target.
+    assert (
+        await find_duplicate(
+            db_session, loan_file_id=loan_file.id, digest=digest, exclude_id=target.id
+        )
+        is None
+    )
+
+
+async def test_a_third_document_still_collides_with_a_replace(db_session: AsyncSession) -> None:
+    """Excluding the target must not excuse a real collision. Replacing document A with bytes that
+    match document B is still refused — B is a different document on the same loan file, and the
+    replacement would put the same bytes on the loan twice."""
+    company, user = await _company(db_session, slug="acme")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    target = await _add(
+        db_session, loan_file, filename="Appraisal v1.pdf", content=OTHER_BYTES, user=user
+    )
+    third = await _add(db_session, loan_file, filename="Survey.pdf", user=user)
+
+    found = await find_duplicate(
+        db_session,
+        loan_file_id=loan_file.id,
+        digest=content_digest(PDF_BYTES),
+        exclude_id=target.id,
+    )
+
+    assert found is not None and found.id == third.id
+
+
+# --------------------------------------------------------------------------- #
 # find_duplicate on its own — the seam the bulk upload's stage 1 uses
 # --------------------------------------------------------------------------- #
 async def test_find_duplicate_can_exclude_a_document(db_session: AsyncSession) -> None:
