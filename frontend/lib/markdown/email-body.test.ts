@@ -95,3 +95,60 @@ describe("emailBodyToHtml", () => {
     });
   });
 });
+
+/**
+ * LP-846 REVIEW — THE CASE ANALYSIS, DONE BY ENUMERATION RATHER THAN BY ARGUMENT.
+ *
+ * The blank-line rule now has three interacting conditions: a line is a bullet's detail if it is
+ * indented, AND a bullet is open, AND no blank line has intervened. The ticket says three is where
+ * its author stopped trusting their own reasoning about it, which is the right instinct — re-reading
+ * the conditions cannot catch an error the reasoning produced.
+ *
+ * So every sequence of five lines over {bullet, indented, paragraph, blank} is rendered — 1024 of
+ * them — and checked for the two properties that do not depend on knowing the intended output:
+ * nothing is lost, and the tags balance with no paragraph opening inside a list. The specific
+ * renderings that matter (a document's details nest, the inbox address does not get adopted) are
+ * asserted by name in the tests above; this covers the combinations nobody thought to name.
+ *
+ * IT FAILS WHEN IT SHOULD: with the trailing `flushList()` removed, 453 of the 1024 report loss.
+ */
+const KINDS = {
+  B: (i: number) => `- bullet${i}`,
+  I: (i: number) => `    Where to get it: detail${i}`,
+  P: (i: number) => `paragraph${i}`,
+  _: () => "",
+} as const;
+
+type Kind = keyof typeof KINDS;
+
+function sequencesOfFive(): Kind[][] {
+  const keys = Object.keys(KINDS) as Kind[];
+  let seqs: Kind[][] = [[]];
+  for (let len = 0; len < 5; len++) {
+    seqs = seqs.flatMap((s) => keys.map((k) => [...s, k]));
+  }
+  return seqs;
+}
+
+describe("every combination of line kinds", () => {
+  it("loses no content and closes every tag", () => {
+    const broken: string[] = [];
+    for (const seq of sequencesOfFive()) {
+      const html = emailBodyToHtml(seq.map((k, i) => KINDS[k](i)).join("\n"));
+      const problems: string[] = [];
+      const count = (re: RegExp) => (html.match(re) ?? []).length;
+      if (count(/<li>/g) !== count(/<\/li>/g)) problems.push("unbalanced-li");
+      if (count(/<ul>/g) !== count(/<\/ul>/g)) problems.push("unbalanced-ul");
+      if (count(/<p>/g) !== count(/<\/p>/g)) problems.push("unbalanced-p");
+      // A list item is not a place a paragraph can start. This is what `<br>`-joining used to do.
+      if (/<ul>(?:(?!<\/ul>)[\s\S])*<p>/.test(html)) problems.push("p-inside-ul");
+      for (const [i, k] of seq.entries()) {
+        if (k === "_") continue;
+        const token = k === "B" ? `bullet${i}` : k === "I" ? `detail${i}` : `paragraph${i}`;
+        if (!html.includes(token)) problems.push(`lost:${k}${i}`);
+      }
+      if (problems.length > 0) broken.push(`${seq.join("")} -> ${problems.join(",")}`);
+    }
+    expect(broken).toEqual([]);
+  });
+});

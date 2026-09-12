@@ -369,10 +369,12 @@ async def greeting_name_for(db: AsyncSession, *, draft: Communication, loan_file
 def _known_party_of(draft: Communication) -> ResponsibleParty | None:
     """The audience of a draft, or None when it cannot be established (LP-848).
 
-    STRICTER THAN `_party_of_draft`, DELIBERATELY, and the two are not interchangeable. That one
-    answers "whose name goes in the greeting" and a wrong answer there is cosmetic, so it defaults
-    to the borrower. This one answers "may I rewrite this message", where a wrong answer sends the
-    borrower's words to a third party — so it has no default.
+    NO DEFAULT, WHICH IS THE WHOLE POINT. A lenient version of this used to sit beside it, falling
+    back to the borrower for a key it could not place, on the reasoning that a wrong greeting is
+    cosmetic. That was true of the greeting and false of everything else it was used for: the
+    question this answers is "may I rewrite this message", where a wrong answer sends the borrower's
+    words to a third party. The LP-848 review deleted the lenient one rather than document the
+    difference, because the two were one keystroke apart and the safe choice was the longer name.
     """
     if draft.party:
         try:
@@ -409,11 +411,16 @@ async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file:
         return False
     # ONLY WHERE THE AUDIENCE IS KNOWN, and this is the difference between a fix and a worse bug.
     #
-    # `_party_of_draft` falls back to BORROWER for a key it cannot place, which is right for
-    # choosing a greeting and catastrophic here: the first version of this function used it, met a
-    # draft under an unrecognised key, concluded "not the borrower template, therefore stale", and
+    # A lenient resolver used to fall back to BORROWER for a key it could not place, which is right
+    # for choosing a greeting and catastrophic here: the first version of this function used it, met
+    # a draft under an unrecognised key, concluded "not the borrower template, therefore stale", and
     # re-rendered a TITLE COMPANY's draft as a borrower email — greeting the title company by the
     # borrower's first name. Caught by a test that had been asserting exactly that for two tickets.
+    #
+    # `_regenerate` now resolves the audience the same strict way, so this check is no longer the only
+    # thing standing between an unplaceable draft and a borrower-addressed rewrite. It stays because
+    # refusing here also avoids the pointless work, and because a guard that reads as load-bearing
+    # should not quietly become the second line of defence without saying so.
     #
     # The property is not "this differs from what I expect". It is "I know what this should say, and
     # it does not say it". A draft whose audience cannot be established is left exactly as it is,
@@ -768,22 +775,6 @@ def _framing_from_body(body: str) -> DraftComposition | None:
     return DraftComposition(parts[0], parts[1], parts[2])
 
 
-def _party_of_draft(draft: Communication) -> ResponsibleParty:
-    """The audience of a stored draft.
-
-    READS THE COLUMN, falls back to the template key. `Communication.party` is LP-843's and every
-    draft written since carries it; a draft composed before the migration has its party recoverable
-    from the key LP-841 filed it under, which is what the backfill used. The fallback is not
-    defensive padding — a draft open across the deploy is the ordinary case.
-    """
-    if draft.party:
-        try:
-            return ResponsibleParty(draft.party)
-        except ValueError:
-            pass
-    return party_for_draft_template(draft.template_key) or ResponsibleParty.BORROWER
-
-
 async def _identification(db: AsyncSession, *, loan_file: LoanFile) -> tuple[str, str]:
     """`(borrower_name, property_address)` for a third-party email's identification block.
 
@@ -813,13 +804,33 @@ async def _identification(db: AsyncSession, *, loan_file: LoanFile) -> tuple[str
 
 async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> None:
     """Rewrite the draft's subject and body from its current membership."""
+    # LP-848 REVIEW — THE AUDIENCE IS ESTABLISHED HERE, WHERE THE REWRITE HAPPENS, and not at each of
+    # the five doors into it. `refresh_if_stale` resolved it strictly and refused a draft it could not
+    # place; the other four callers did not, and this function then re-derived it with a lenient
+    # helper that fell back to the borrower — so removing a line from a title company's draft
+    # re-rendered it from the borrower template and greeted the closer by the borrower's first name.
+    # The same defect the heal's guard was written for, reachable by four other routes.
+    #
+    # A DRAFT WITH NO KNOWABLE AUDIENCE IS LEFT AS IT IS. Its MEMBERSHIP still changes, because what
+    # was asked for is a fact and the caller has already recorded it; the WORDS do not, because there
+    # is no version of them known to be better. That is the position the heal already took, now held
+    # in one place rather than in one of its callers.
+    #
+    # FIRST, before the two reads below, which would otherwise be fetched and discarded.
+    party = _known_party_of(draft)
+    if party is None:
+        logger.info(
+            "draft_not_regenerated_unknown_audience",
+            loan_file_id=str(loan_file.id),
+            draft_id=str(draft.id),
+        )
+        return
     needs = await _needs_in_draft(db, draft=draft)
     framing = await _cached_framing(db, loan_file=loan_file, needs=needs)
     # LP-834 — REGENERATION IS LOSSLESS BECAUSE THE DRAFT REMEMBERS. The body is rewritten from the
     # template on every add and remove; a link that lived only in the prose would be wiped the first
     # time a processor requested one more document, and could not be rebuilt because the token is
     # hashed in `upload_links`.
-    party = _party_of_draft(draft)
     identity = (
         await _identification(db, loan_file=loan_file)
         if party is not ResponsibleParty.BORROWER

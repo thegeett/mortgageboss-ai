@@ -200,6 +200,16 @@ async def transmit(
     a message that may well have gone out — a provider that timed out after accepting it is the
     ordinary failure, not the exception.
     """
+    # LP-847 REVIEW — NO MAILBOX MEANS NOTHING TO TRANSMIT, and this is the one place that can say so
+    # for every future provider at once. A no-contact party's draft is now sent with an empty
+    # recipient by design, and LP-847 skipped the suppression and rate-limit checks for it because
+    # both are questions about a specific address. That is right, and it makes the promise above —
+    # that a provider inherits every guard by construction — false for exactly this message unless
+    # somebody remembers. Returning None is the answer the docstring already defines: nothing was
+    # transmitted and the caller stays on copy-and-send, which is what a draft with no mailbox has
+    # always meant in practice.
+    if not envelope.to.strip():
+        return None
     transport = transport_for(connection)
     if transport is None:
         return None

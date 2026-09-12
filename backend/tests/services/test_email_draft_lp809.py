@@ -33,8 +33,8 @@ from app.services.email_draft import (
     open_drafts,
     remove_need_from_draft,
 )
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 
 async def _file_and_actor(db: AsyncSession):
@@ -1170,8 +1170,9 @@ async def test_a_draft_whose_audience_is_unknown_is_left_alone(
 ) -> None:
     """LP-848 — THE WORSE BUG THE FIRST VERSION OF THIS FIX SHIPPED.
 
-    `_party_of_draft` defaults to BORROWER for a key it cannot place, which is right for choosing a
-    greeting. Used here it was catastrophic: an unrecognised key is "not the borrower's template",
+    The lenient resolver this used to call defaulted to BORROWER for a key it could not place, which
+    is right for choosing a greeting. Used here it was catastrophic: an unrecognised key is "not the
+    borrower's template",
     which reads as stale, so a TITLE COMPANY's draft was re-rendered as a borrower email and greeted
     the title company by the borrower's first name.
 
@@ -1262,3 +1263,153 @@ async def test_reading_a_stale_draft_returns_current_words(db_session: AsyncSess
     assert "Appraisal" in body or "appraisal" in body.lower()
     # And the row itself was corrected, not just the returned string.
     assert draft.template_key == "document_request_third_party"
+
+
+async def test_editing_a_draft_whose_audience_is_unknown_does_not_readdress_it(
+    db_session: AsyncSession,
+) -> None:
+    """LP-848 REVIEW — THE SAME DEFECT ON THE OTHER FOUR PATHS INTO `_regenerate`.
+
+    `refresh_if_stale` resolves the audience strictly and refuses an unplaceable draft. But the
+    regeneration it guards is shared: `_add_to_party_draft`, `attach_upload_link`,
+    `remove_need_from_draft` and `compose_open_draft_prose` all reach it too, and it re-derives the
+    party itself with the LENIENT helper — so the guard protects one of five entrances.
+
+    Removing a line from a title company's draft therefore did what the heal was stopped from doing:
+    re-rendered it from the borrower template and stamped the borrower's key over it. The audience
+    is established once, where the rewrite happens, rather than at each door into it.
+
+    NOT CURRENTLY LIVE ON DATA, which is why it is a review finding and not a second bug report: of
+    the ten communications on staging, every one carries `party`, so nothing reaches the fallback
+    today. The column is nullable, the suite already contains such a row, and LP-843's own
+    `_legacy_draft_keys` exists for `party IS NULL` rows — so the gap is structural rather than
+    hypothetical.
+    """
+    from app.services.email_draft import remove_need_from_draft
+
+    loan_file, _actor = await _file_and_actor(db_session)
+    original = "Hello,\n\nPlease send the title commitment.\n\n$processor_name"
+    orphan = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        # A key from no version of this system, exactly as the heal's own test uses.
+        template_key="title_document_request",
+        recipient="closer@title.example",
+        subject="Documents we need",
+        body=original,
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+    need = await _need(db_session, loan_file, title="Title commitment", needs_type="title_report")
+    db_session.add(CommunicationNeedsItem(communication_id=orphan.id, needs_item_id=need.id))
+    await db_session.flush()
+
+    returned = await remove_need_from_draft(
+        db_session, loan_file=loan_file, needs_item_id=need.id, communication_id=orphan.id
+    )
+
+    assert returned is orphan
+    # The removal itself must still happen — the membership is a fact, and refusing to re-render the
+    # prose is not a reason to keep claiming the document is wanted.
+    assert await db_session.get(CommunicationNeedsItem, (orphan.id, need.id)) is None
+    # And the words must still be addressed to the title company.
+    assert orphan.body == original, "a draft with no knowable audience was re-rendered"
+    assert orphan.template_key == "title_document_request", "the borrower's key was stamped over it"
+
+
+async def test_two_concurrent_reads_of_one_stale_draft_both_heal_it_safely(
+    test_engine: AsyncEngine,
+) -> None:
+    """LP-848 REVIEW — THE HEAL RUNS ON A READ, SO TWO READERS RACE IT.
+
+    The ticket says this was reasoned about and not tested, and names the reason it is worth testing:
+    a write during a GET bites under load rather than in a suite. Two processors with the same file
+    open, or one with two tabs, is the ordinary way to get here.
+
+    REAL CONCURRENCY, NOT TWO SEQUENTIAL CALLS. Both tasks open their own session and meet at a
+    barrier before either touches the row, so the barrier completing IS the proof that both were
+    inside the heal at once — a version that slept between the calls would run them in sequence and
+    pass while proving nothing, which is how I got this wrong on LP-832.
+
+    WHAT IT MUST NOT DO: raise, leave the row half-written, or apply the regeneration twice in a way
+    that shows. It does not. Postgres serialises the two UPDATEs on the row, the render is a pure
+    function of the draft's membership, and nothing on this path inserts — `_cached_framing` only
+    reads the prose cache, which is the property that makes the second writer harmless rather than an
+    integrity error.
+    """
+    import asyncio
+
+    from app.services.email_draft import refresh_if_stale
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    # NOT THE `db_session` FIXTURE. It wraps the test in an outer transaction that is rolled back, so
+    # a commit inside it is invisible to any other connection — the setup has to be durable for a
+    # second session to see the row at all, which is the thing being tested.
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with sessions() as setup:
+        loan_file, actor = await _file_and_actor(setup)
+        need = await _need(setup, loan_file, title="Appraisal", needs_type="appraisal")
+        result = await add_needs_to_draft(
+            setup, loan_file=loan_file, needs=[need], actor_user_id=actor
+        )
+        draft = next(p for p in result.parties if p.party.value == "lender").draft
+        assert draft is not None
+        # Stale by the same means the heal's own test uses: an older version under the right key.
+        draft.template_version = "v0-before-lp843"
+        draft_id = draft.id
+        file_id = loan_file.id
+        company_id = loan_file.company_id
+        file_type = type(loan_file)
+        await setup.commit()
+
+    barrier = asyncio.Barrier(2)
+
+    async def heal() -> bool:
+        async with sessions() as session:
+            row = await session.get(Communication, draft_id)
+            assert row is not None
+            file_row = await session.get(file_type, file_id)
+            assert file_row is not None
+            # Both readers are here before either writes.
+            await barrier.wait()
+            did = await refresh_if_stale(session, draft=row, loan_file=file_row)
+            await session.commit()
+            return did
+
+    try:
+        outcomes = await asyncio.wait_for(asyncio.gather(heal(), heal()), timeout=30)
+
+        # Both believed they healed it, which is the honest outcome: neither can see the other's
+        # uncommitted work, and the regeneration is idempotent so the second is not wrong to do it.
+        assert outcomes == [True, True]
+
+        async with sessions() as check:
+            final = await check.get(Communication, draft_id)
+            assert final is not None
+            assert final.template_version != "v0-before-lp843", "the heal did not stick"
+            assert final.body is not None and final.body.count("Appraisal") == 1, (
+                "the regeneration was applied twice over itself"
+            )
+    finally:
+        # THE COMMITS HAVE TO BE UNDONE BY HAND. Every other test in this suite is isolated by the
+        # `db_session` fixture's rollback; this one cannot be, so it cleans up after itself or it
+        # becomes another test's mystery failure. It already did: `test_add_user` asserts a GLOBAL
+        # `count(User) == 0`, so a single committed user failed thirteen tests in a file this change
+        # has nothing to do with, and only when the whole suite ran.
+        #
+        # `communication_evidence` is the one table referencing a loan file with RESTRICT; the rest
+        # cascade, so it goes first and the file takes the drafts and needs with it.
+        async with sessions() as teardown:
+            await teardown.execute(
+                text("delete from communication_evidence where loan_file_id = :f"),
+                {"f": file_id},
+            )
+            await teardown.execute(text("delete from loan_files where id = :f"), {"f": file_id})
+            await teardown.execute(text("delete from users where id = :u"), {"u": actor})
+            await teardown.execute(text("delete from companies where id = :c"), {"c": company_id})
+            await teardown.commit()
+            left = await teardown.scalar(
+                text("select count(*) from users where id = :u"), {"u": actor}
+            )
+            assert left == 0, "the test left a committed user behind"

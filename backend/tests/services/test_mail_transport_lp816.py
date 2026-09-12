@@ -523,3 +523,58 @@ async def test_a_guard_refusal_still_raises(
             body="   ",  # empty after stripping — refused before anything is recorded
             approver_user_id=actor.id,
         )
+
+
+async def test_a_draft_with_no_recipient_reaches_no_transport(
+    db_session: AsyncSession, registry_restored: None
+) -> None:
+    """LP-847 REVIEW — THE SEND THAT DELIBERATELY HAS NO ADDRESS.
+
+    LP-847 let a no-contact party's draft be sent, which is right: "Mark as sent" is how a processor
+    records that they dealt with it, and a party we hold no email for is exactly when that is needed.
+    It also had to skip the suppression check and the rate limit for it, which is right for the same
+    reason — both ask a question about a specific address, and there is no address.
+
+    What that leaves is a message that reached the transport line having passed neither guard. Today
+    no provider is registered so nothing happens either way, and this test registers one so the
+    question is actually asked rather than answered by the absence of a transport.
+
+    IT MUST STAY COPY-AND-SEND. Not because an empty `To` would be accepted — a provider would reject
+    it — but because "every guard lives above the transport, so a provider inherits them by
+    construction" is a promise `transmit` makes in its own docstring, and this is the one message for
+    which it would otherwise need somebody to remember.
+    """
+    from app.services.email_send import send_draft
+
+    company, loan_file = await _company_and_file(db_session, slug="no-contact")
+    actor = await _actor(db_session, company)
+    draft = await _draft(db_session, loan_file, actor)
+    transport = RecordingTransport()
+    register(MailboxConnectionKind.GRAPH, transport)
+    await _connect(db_session, company)
+
+    sent = await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="",
+        body="please send these",
+        approver_user_id=actor.id,
+    )
+
+    # The RECORD is still made — that is the whole point of the button.
+    assert sent.status is CommunicationStatus.SENT
+    # THE POSITIVE CONTROL. A transport that is never reachable makes the assertion below pass for a
+    # reason that has nothing to do with the recipient, so prove the same transport does send when
+    # there is an address to send to.
+    assert transport.sent == []
+    second = await _draft(db_session, loan_file, actor)
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=second.id,
+        recipient="closer@title.example",
+        body="please send these",
+        approver_user_id=actor.id,
+    )
+    assert [e.to for e in transport.sent] == ["closer@title.example"]
