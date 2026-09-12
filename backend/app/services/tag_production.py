@@ -355,14 +355,53 @@ async def produce_stage_a_transaction_tags(
     return snapshot.model_copy(update={"tags": TagsSection.present(by_subject)})
 
 
+#: bug-022 — the ONLY line openings a direction may be read from without the model, and only when the
+#: model could not resolve one. Each is a preposition the bank itself printed: "Online Transfer TO" is
+#: money leaving, "FROM" is money arriving, and no bank prints the opposite. Deliberately tiny and
+#: deliberately anchored at the START of the line: "Zelle payment from J Smith returned" is a different
+#: sentence, which is what the reversal guard below is for.
+_DIRECTION_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("online transfer to ", "out"),
+    ("online transfer from ", "in"),
+    ("transfer to ", "out"),
+    ("transfer from ", "in"),
+    ("wire to ", "out"),
+    ("wire from ", "in"),
+    ("zelle payment to ", "out"),
+    ("zelle payment from ", "in"),
+    ("zelle to ", "out"),
+    ("zelle from ", "in"),
+    ("zel to ", "out"),
+    ("zel from ", "in"),
+)
+
+#: A line that also says it was undone means the preposition no longer describes where the money ended
+#: up. Fail closed to the model's own "unknown" rather than read the opening words literally.
+_DIRECTION_REVERSED = ("reversal", "reversed", "returned", "return of", "refund", "chargeback")
+
+#: The values that count as RESOLVED, sourced from the vocabulary rather than restated.
+_DEFINITE_DIRECTIONS = frozenset(IS_MONEY_IN_VALUES) - {"unknown"}
+
+
+def _direction_from_description(description: Field) -> tuple[str, str] | None:
+    """``(direction, the opening that decided it)`` for a line the bank labelled, else ``None``."""
+    if not description.is_present or description.value is None:
+        return None
+    text = " ".join(str(description.value).split()).lower()
+    if any(word in text for word in _DIRECTION_REVERSED):
+        return None
+    for prefix, direction in _DIRECTION_PREFIXES:
+        if text.startswith(prefix):
+            return direction, prefix.strip()
+    return None
+
+
 def _build_transaction_tags(txn: TransactionRecord, judged: _Judged) -> dict[str, Tag]:
     """The four Stage-A tags for one transaction, each citing its content_id."""
     return {
         _TAG_AMOUNT: _passthrough_tag(txn.amount, txn.content_id),
         _TAG_DATE: _passthrough_tag(txn.date, txn.content_id),
-        _TAG_IS_MONEY_IN: _ai_tag(
-            _TAG_IS_MONEY_IN, judged.is_money_in, txn.content_id, judged.reason
-        ),
+        _TAG_IS_MONEY_IN: _money_in_tag(txn, judged),
         _TAG_APPARENT_CATEGORY: _ai_tag(
             _TAG_APPARENT_CATEGORY, judged.apparent_category, txn.content_id, judged.reason
         ),
@@ -370,6 +409,48 @@ def _build_transaction_tags(txn: TransactionRecord, judged: _Judged) -> dict[str
         # check a creditor's name against, and inventing one would reject real names.
         _TAG_COUNTERPARTY: _ai_string_tag(judged.counterparty, txn.content_id, judged.reason),
     }
+
+
+def _money_in_tag(txn: TransactionRecord, judged: _Judged) -> Tag:
+    """``txn.is_money_in`` — the model's answer, or the direction the bank printed (bug-022).
+
+    THE MODEL IS ASKED FIRST AND ITS ANSWER IS NEVER OVERRIDDEN. This fills a gap beneath it: the
+    extractor classifies direction from ``transaction_type`` alone (`documents_section._direction`),
+    which is right — a positive amount carries no direction and inferring one would forge a deposit on
+    every unlabelled withdrawal. But when that field is null the model is handed ``"direction": null``
+    and answers "unknown" even where the bank printed the answer in words: on LF-XMB2 a $70 line reading
+    "Zel To Mariam Imoisili" and two $30 lines reading "Online Transfer To XXXXX8307" abstained, and
+    because direction is the applicability predicate of AS-1, AS-2 and AS-12, each line produced three
+    couldnt_checks — nine findings whose real content was that nobody read the first two words.
+
+    WHY DETERMINISTIC AND NOT A BETTER PROMPT: the prompt is the calibrated artefact
+    (`_stage_a_version` keys the Stage-A cache), so editing it re-runs the model over every transaction
+    in the corpus and invalidates a measured tag. This adds a floor under the model instead, in code,
+    where it can be read and tested.
+
+    Emitted as DERIVED, never as the model's own: it carries no confidence and a reason naming the
+    words it read, so a ratifier can see the difference between what was judged and what was printed.
+    """
+    if judged.is_money_in is not None and judged.is_money_in.value in _DEFINITE_DIRECTIONS:
+        return _ai_tag(_TAG_IS_MONEY_IN, judged.is_money_in, txn.content_id, judged.reason)
+    resolved = _direction_from_description(txn.description)
+    if resolved is None:
+        return _ai_tag(_TAG_IS_MONEY_IN, judged.is_money_in, txn.content_id, judged.reason)
+    direction, opening = resolved
+    return Tag(
+        value=direction,
+        confidence=None,
+        reasoning=(
+            f'the statement line begins "{opening}", so the money moved '
+            f"{'in' if direction == 'in' else 'out'}; read from the line itself because the "
+            "transaction carries no type for the direction to be classified from"
+        ),
+        source_facts=(txn.content_id,),
+        produced_by=TagProducedBy.DERIVED,
+        tag_role=TagRole.STRUCTURAL_FACT,
+        tag_version=_TAG_VERSION,
+        stage=TagStage.A,
+    )
 
 
 def _passthrough_tag(field: Field, content_id: str) -> Tag:
