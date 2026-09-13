@@ -488,6 +488,33 @@ describe("when it happened (LP-838)", () => {
     expect(screen.getByText(/^Marked sent · /)).toBeTruthy();
   });
 
+  it("does not call a queued message a draft", () => {
+    // LP-852 REVIEW — `draft` and `queued` were one branch, so the one thing that produces a queued
+    // row (`auto_reply.record_auto_reply`, an automated nudge carrying an upload link) would have
+    // read "Draft · …" under the compose pen: a message nobody wrote, nobody can edit and nobody
+    // needs to act on, filed under the word that means the opposite.
+    //
+    // Unreachable today — `record_auto_reply` has no caller, because the nudge is one of the things
+    // this epic's fence defers — and live again the moment it comes back, which is what makes it
+    // worth a test rather than a note.
+    loaded([{ ...MESSAGE, id: "q1", direction: "outbound", status: "queued", body_edited: false }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Queued · /)).toBeTruthy();
+    // Scoped to the STATUS LINE's shape — a bare /^Draft/ also matches the "Drafts" filter pill,
+    // which is a button that is always on screen and has nothing to do with this row.
+    expect(screen.queryByText(/^Draft · /)).toBeNull();
+  });
+
+  it("still calls a draft a draft", () => {
+    // THE POSITIVE CONTROL for the assertion above. Without it, `queryByText(/^Draft/)` being null
+    // is also satisfied by a build where no status line renders at all.
+    loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: false }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Draft · /)).toBeTruthy();
+  });
+
   it("says a draft has been edited when it has", () => {
     loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: true }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });

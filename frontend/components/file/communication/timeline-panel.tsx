@@ -103,8 +103,21 @@ function PartyCell({ party }: { party: string | null }) {
  */
 function statusLine(entry: TimelineEntry): string {
   const when = messageTimeShort(entry.at);
-  if (entry.status === "draft" || entry.status === "queued") {
+  if (entry.status === "draft") {
     return entry.body_edited ? `Draft · edited · ${when}` : `Draft · ${when}`;
+  }
+  // LP-852 REVIEW — `queued` IS NOT A DRAFT, AND THIS SAID IT WAS. The two were grouped here, so
+  // the one thing that produces a queued row — `auto_reply.record_auto_reply`, an automated nudge
+  // carrying an upload link — would have read "Draft · 2 hours ago" with the draft pen beside it:
+  // a message nobody composed, nobody can edit and nobody needs to act on, filed under the one word
+  // on this screen that means "you still have to do something with this".
+  //
+  // UNREACHABLE TODAY AND NOT FOR LONG. `record_auto_reply` has no caller, because the nudge is one
+  // of the things this epic's fence puts in the next phase — which is also when it comes back and
+  // this becomes a live mislabel with nothing to catch it. Before LP-852 the fall-through said
+  // "Created", which is vague and true; grouping it with `draft` made it specific and false.
+  if (entry.status === "queued") {
+    return `Queued · ${when}`;
   }
   if (entry.status === "sent" || entry.status === "delivered") {
     return entry.actor_name
@@ -125,7 +138,10 @@ function statusLine(entry: TimelineEntry): string {
 function EntryIcon({ entry }: { entry: TimelineEntry }) {
   if (entry.status === "failed")
     return <TriangleAlert className="h-4 w-4 text-danger" aria-hidden />;
-  if (entry.status === "draft" || entry.status === "queued") {
+  // LP-852 REVIEW — THE PEN IS THE DRAFT'S, and `queued` is not a draft. See `statusLine`: an
+  // automated nudge wearing the compose pen tells a processor there is something here to write.
+  // A queued message is outbound and on its way, so it takes the outbound envelope below.
+  if (entry.status === "draft") {
     return <PenLine className="h-4 w-4 text-muted-foreground" aria-hidden />;
   }
   if (entry.direction === "inbound")

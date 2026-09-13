@@ -25,8 +25,35 @@ function tab() {
   return client;
 }
 
-/** A message is delivered on a later task, so the assertion has to wait for one. */
-const delivered = () => new Promise((resolve) => setTimeout(resolve, 0));
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Wait until `predicate` holds, or give up.
+ *
+ * LP-852 REVIEW — THIS FILE WAS FLAKY, and the assumption is why. `delivered` was a single
+ * `setTimeout(…, 0)`, which assumes a BroadcastChannel message is delivered within exactly the
+ * NEXT macrotask. It usually is. Under a full parallel run it sometimes is not, and the assertion
+ * then reads the state before delivery and reports the feature broken. Observed twice: once by the
+ * author, once here — failing in a full run and passing alone and in the run immediately after.
+ *
+ * One test in this file had already grown a second `await delivered()` for the same reason, which
+ * is the same fix applied one tick at a time. A positive assertion now waits for the CONDITION
+ * rather than for a guess about how many tasks it takes.
+ */
+async function until(predicate: () => boolean): Promise<void> {
+  for (let index = 0; index < 50 && !predicate(); index += 1) await tick();
+}
+
+/**
+ * Nothing should arrive — so wait long enough that it would have.
+ *
+ * A negative assertion cannot poll for a condition that must never hold; it can only give delivery
+ * a generous chance to happen and then check that it did not. Five tasks rather than one, for the
+ * same reason as above.
+ */
+const delivered = async () => {
+  for (let index = 0; index < 5; index += 1) await tick();
+};
 
 let stop: (() => void) | undefined;
 afterEach(() => {
@@ -40,7 +67,7 @@ describe("a draft change reaches the other tab", () => {
     stop = listenForDraftChanges(other);
 
     announceDraftChange(FILE);
-    await delivered();
+    await until(() => other.getQueryState(["timeline", FILE, "all"])?.isInvalidated === true);
 
     expect(other.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
     expect(other.getQueryState(needsQueryKey(FILE))?.isInvalidated).toBe(true);
@@ -121,7 +148,7 @@ describe("the app's own client listens", () => {
     client.setQueryData(["timeline", FILE, "all"], { entries: [] });
 
     announceDraftChange(FILE);
-    await delivered();
+    await until(() => client.getQueryState(["timeline", FILE, "all"])?.isInvalidated === true);
 
     expect(client.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
   });
@@ -134,7 +161,11 @@ describe("invalidateDraftViews", () => {
     stop = listenForDraftChanges(other);
 
     invalidateDraftViews(mine, FILE);
-    await delivered();
+    await until(
+      () =>
+        mine.getQueryState(["timeline", FILE, "all"])?.isInvalidated === true &&
+        other.getQueryState(["timeline", FILE, "all"])?.isInvalidated === true,
+    );
 
     expect(mine.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
     expect(other.getQueryState(["timeline", FILE, "all"])?.isInvalidated).toBe(true);
