@@ -181,14 +181,21 @@ describe("the only way HTML reaches the DOM", () => {
    * column" is a claim about the backend that no regex over this file can check. Listing it forces
    * the next person adding a sink to say which of the two arguments theirs rests on.
    */
+  //
+  // LP-856 REVIEW — `emailBodyToHtml(data.body)` WAS STILL LISTED AND NO LONGER EXISTS. LP-853
+  // replaced that sink with the ternary below and left the bare entry behind, so the set carried a
+  // permission for a shape nothing in the tree uses. Harmless in effect — anything matching it is
+  // safe by the first argument anyway — and exactly the kind of dead permission that makes an
+  // allow-list stop meaning what it says. Found by the control added under the scan, which is what
+  // a `>= 1` count could never have caught.
   const ALLOWED = new Set([
-    "emailBodyToHtml(data.body)",
     'data.body_format === "html" ? data.body : emailBodyToHtml(data.body)',
     "emailBodyToHtml(proposal)",
   ]);
 
   it("feeds every dangerouslySetInnerHTML from a renderer or a sanitised column, and nothing else", () => {
     const offenders: string[] = [];
+    const seen = new Set<string>();
     let sinks = 0;
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -202,6 +209,7 @@ describe("the only way HTML reaches the DOM", () => {
           sinks += 1;
           // Line breaks are formatting; the expression is what matters.
           const expression = raw.replace(/,\s*$/, "").replace(/\s+/g, " ").trim();
+          seen.add(expression);
           if (!ALLOWED.has(expression)) offenders.push(`${entry.name}: ${expression}`);
         }
       }
@@ -213,6 +221,17 @@ describe("the only way HTML reaches the DOM", () => {
     // what caught the `[^}]*` matcher going blind when LP-853 made the sink a ternary. The count
     // tracks the real number rather than holding a stale one.
     expect(sinks, "the scan found no sink — it read nothing").toBeGreaterThanOrEqual(1);
+
+    // LP-856 REVIEW — AND IT SAW EVERY ONE, not merely one of them. `>= 1` catches a matcher that
+    // went totally blind and misses the more likely failure: going blind to ONE shape while still
+    // reading the others. There are three permitted sinks now, so a matcher that stopped seeing the
+    // newest — the proposal, which renders the least-trusted string on the screen — would leave
+    // `offenders` empty and the count above satisfied, and the allow-list entry for it would be
+    // decoration. This is the same control `test_no_draft_save_route.py` puts on its allowed
+    // routes: a permission nothing was observed to need is a permission that has drifted.
+    for (const allowed of ALLOWED) {
+      expect(seen, `the scan never saw the sink for ${allowed}`).toContain(allowed);
+    }
   });
 
   it("would notice an unsanitised sink", () => {

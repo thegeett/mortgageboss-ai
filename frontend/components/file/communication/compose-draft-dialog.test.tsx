@@ -44,6 +44,24 @@ function openDialog() {
 }
 
 describe("Compose", () => {
+  it("does not fetch the borrower until the dialog is opened", async () => {
+    // LP-856 REVIEW — A BORROWER'S ADDRESS IS NOT FETCHED TO SUPPLY A DEFAULT NOBODY ASKED FOR.
+    // `useLoanFileBorrowers` is enabled on the identifier alone, so the only thing keeping it off
+    // the page load is that the component calling it is mounted behind `open`. Hoisting the hook
+    // into `ComposeDraftButton` is the obvious tidy-up and would make every file screen request
+    // `BorrowerDetail` — the payload whose own docstring explains why the loan-file view omits the
+    // email — for a button nobody has pressed.
+    render(<ComposeDraftButton fileId="LF-JR4T" />);
+
+    expect(mockBorrowers).not.toHaveBeenCalled();
+
+    // THE CONTROL: it is called once the dialog is open, so "not called" above is about the gate
+    // rather than about a mock that is never reached at all.
+    fireEvent.click(screen.getByRole("button", { name: "Compose" }));
+    await screen.findByLabelText("To");
+    expect(mockBorrowers).toHaveBeenCalled();
+  });
+
   it("seeds To from the PRIMARY borrower, not the first one", async () => {
     // ORDER IS NOT PRIMACY. The fixture lists the co-borrower first on purpose — a `[0]` would
     // agree with a `find(is_primary)` on any fixture where they happen to coincide, and would put a

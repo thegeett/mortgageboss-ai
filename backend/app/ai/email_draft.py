@@ -252,9 +252,15 @@ def regulatory_refusal(text: str) -> str | None:
 
     LIFTED OUT FOR LP-856, which needs exactly these and none of the composition-shaped ones. The
     polish button rewrites a processor's own words and has to be held to the same regulatory floor
-    as a composed framing — a model that turns "we need your statements" into "we can close by
-    Friday" has made a commitment the file did not make, and it does not matter which button
-    produced it.
+    as a composed framing — a model that turns "we need your statements" into "you are approved"
+    has made a commitment the file did not make, and it does not matter which button produced it.
+
+    LP-856 REVIEW — THE EXAMPLE USED TO BE "we can close by Friday", WHICH THIS DOES NOT CATCH.
+    `_COMMITMENT` matches approval vocabulary — approved, denied, guarantee, cleared to close, an
+    underwriting decision — and nothing about a closing DATE. A promised date may well belong on
+    that list; whether it does is a domain question for the resident expert rather than a reviewer's
+    to answer, so the example has been replaced with one the guard actually trips rather than the
+    guard widened to fit the sentence. The gap is recorded in `docs/tickets/LP-856.md`.
 
     ONE LIST, IMPORTED. A second copy of the regulatory checks would be the thing that drifts, and
     the drift would be silent: the tests for each would pass over its own copy. `rejection_reason`

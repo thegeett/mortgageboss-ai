@@ -226,3 +226,54 @@ describe("✦ polish", () => {
     expect(button).toBeTruthy();
   });
 });
+
+describe("the copy door", () => {
+  /**
+   * THE THIRD DOOR, and it was unasserted.
+   *
+   * `bodyThatWouldGoOut` goes through "Mark as sent". Copy-to-clipboard reads the same
+   * `bodyForSend` expression, so today one proves the other — but only because they share one
+   * derivation, which is a fact about the current code rather than a property anything holds to.
+   * A change that made the copy button read `proposal` directly would put the model's words on a
+   * processor's clipboard with every existing assertion still green, and pasting is how the message
+   * actually leaves this product.
+   */
+  it("copies the processor's words while a proposal is on screen, not the model's", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const button = await open();
+    fireEvent.click(button);
+    answer({ polished: POLISHED, refusal: null });
+    await screen.findByText(/After ✦ polish — not saved yet/i);
+
+    const copy = screen.getAllByRole("button", { name: /Copy message/i })[0];
+    if (!copy) throw new Error("no copy button while a proposal is on screen");
+    fireEvent.click(copy);
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+
+    const copied = writeText.mock.calls.at(-1)?.[0] as string;
+    expect(copied).toContain("Could you send the March statement");
+    expect(copied).not.toContain("Would you kindly");
+  });
+
+  it("copies the model's words once they have been accepted", async () => {
+    // THE POSITIVE CONTROL. Without it the assertion above also passes on a copy button that is
+    // wired to nothing, or one that always copies the seed whatever the processor decided.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const button = await open();
+    fireEvent.click(button);
+    answer({ polished: POLISHED, refusal: null });
+    await screen.findByText(/After ✦ polish — not saved yet/i);
+    fireEvent.click(screen.getByRole("button", { name: /Keep this/i }));
+    await screen.findByTestId("editor");
+
+    const copy = screen.getAllByRole("button", { name: /Copy message/i })[0];
+    if (!copy) throw new Error("no copy button after accepting");
+    fireEvent.click(copy);
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+
+    const copied = writeText.mock.calls.at(-1)?.[0] as string;
+    expect(copied).toContain("Would you kindly");
+  });
+});
