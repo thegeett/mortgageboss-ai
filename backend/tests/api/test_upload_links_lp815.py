@@ -17,7 +17,9 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
+from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
 from app.models import Company, LoanProgram, User, UserRole
@@ -34,6 +36,23 @@ API = "/api/v1"
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "attachments"
 _PDF = (_FIXTURES / "clean.pdf").read_bytes()
 _ZIP_AS_PDF = (_FIXTURES / "zip_named_as.pdf").read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def _receiving_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LP-857 — MINTING IS GATED IN V1, AND THAT IS WHY THESE STILL RUN.
+
+    `receiving_enabled` is off, and `POST /loan-files/{id}/upload-links` refuses while it is: a link
+    is a live route into a loan file handed to a borrower, and a refusal that lived only in a hidden
+    panel would be a claim about the only caller we happen to know about. LP-815 is written,
+    reviewed and returns with the phase that brings receiving back, so its behaviour goes on being
+    asserted rather than being deleted and rewritten later.
+
+    THE OFF STATE IS ASSERTED TOO, in `test_next_phase_off_lp857.py`, in both directions — including
+    the deliberate boundary that REDEEMING is not gated. Without that, turning the flag on here
+    would be a suite quietly testing a configuration nobody runs.
+    """
+    monkeypatch.setattr(settings, "receiving_enabled", True)
 
 
 @pytest_asyncio.fixture

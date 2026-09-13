@@ -12,6 +12,7 @@ introduce it — so the fact is one setting, served by one endpoint, and asserte
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -27,10 +28,15 @@ from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
 from app.services.email_draft import compose_request
 from app.services.loan_files import create_loan_file
 from app.services.party_requests import add_participant
+from app.services.upload_links import list_links, mint_upload_link
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 API = "/api/v1/loan-files"
+# The same clean PDF LP-815's own cases use. A handful of bytes that merely START with %PDF is
+# refused by `assess`, which is the safety gate doing its job and would make this test pass for the
+# wrong reason — a 400 that looks like the flag refusing the upload.
+_PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
 
 @pytest_asyncio.fixture
@@ -315,6 +321,89 @@ async def test_a_link_can_be_minted_when_the_version_can_receive(
 
     assert resp.status_code == 200, resp.text
     assert "/upload/" in resp.json()["body"]
+
+
+async def test_the_file_level_mint_is_refused_too(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-857 REVIEW — THE SAME ACT THROUGH THE OTHER DOOR.
+
+    `POST /messages/{id}/upload-link` was refused because a refusal living only in a hidden button
+    is a claim about the only caller we happen to know about. That argument does not distinguish
+    between the two mints: both create a live route into a loan file for a borrower, and they differ
+    only in where the URL ends up. Gating one and not the other would have left the fence wherever
+    somebody's attention happened to fall.
+    """
+    company, _user, token = await _company_user_token(db, slug="filemint")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/upload-links", json={}, headers=_auth(token)
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert "cannot receive uploads" in resp.text
+    # NOTHING WAS WRITTEN. A refusal that had already minted the row would leave a live token behind
+    # the sentence saying none could exist.
+    assert await list_links(db, loan_file=loan_file) == []
+
+
+async def test_the_file_level_mint_works_when_the_version_can_receive(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE POSITIVE CONTROL. A 409 also comes back from a file that does not exist and from a route
+    that was never reachable."""
+    company, _user, token = await _company_user_token(db, slug="filemint2")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    await db.commit()
+    monkeypatch.setattr(settings, "receiving_enabled", True)
+
+    resp = await client.post(
+        f"{API}/{loan_file.display_id}/upload-links", json={}, headers=_auth(token)
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert "/upload/" in resp.json()["url"]
+
+
+async def test_a_token_already_in_a_borrowers_hands_still_redeems(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE BOUNDARY, ASSERTED DELIBERATELY — this is a decision, not a gap.
+
+    REFUSING A CREATION COSTS NOBODY ANYTHING. REFUSING A REDEMPTION DESTROYS A DOCUMENT. A token
+    holder was told by us to upload; a refusal on the way in loses the file they just chose and
+    gives them no way to know whether to try again. With both mints gated the set of live tokens can
+    only shrink, so the hole closes on its own.
+
+    Written as a test rather than a comment because "we chose not to gate this" and "we forgot to
+    gate this" look identical in a diff, and the next person to read the flag's name will assume the
+    second.
+    """
+    company, _user, _token = await _company_user_token(db, slug="redeems")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    # MINTED AS IT WOULD HAVE BEEN BEFORE THE FLAG — through the service, because the route now
+    # refuses. That is exactly the population this test is about.
+    monkeypatch.setattr(settings, "receiving_enabled", True)
+    minted = await mint_upload_link(db, loan_file=loan_file)
+    await db.commit()
+    monkeypatch.setattr(settings, "receiving_enabled", False)
+
+    url_token = minted.url.rsplit("/", 1)[-1]
+    described = await client.get(f"/api/v1/upload/{url_token}")
+    accepted = await client.post(
+        f"/api/v1/upload/{url_token}",
+        files={"file": ("statement.pdf", _PDF, "application/pdf")},
+    )
+
+    assert described.status_code == 200, described.text
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json() == {"status": "received"}
 
 
 # --- Acceptance 2 and 3: the address is asked where it blocks --------------------------------- #

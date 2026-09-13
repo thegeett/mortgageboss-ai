@@ -16,6 +16,28 @@ follows from that being the only credential:
 * **There is a size bound and a use bound.** A route anybody can reach with neither is a way to fill
   a bucket.
 * **The bytes go through the same safety gate as inbound mail.** Same threat model, same `assess`.
+
+LP-857 — MINTING IS GATED, REDEEMING IS NOT, and the line is drawn on purpose.
+
+`receiving_enabled` is off in v1, and both ways to create a link refuse while it is: this file's
+`POST` and `POST /messages/{id}/upload-link`. A link is a live route into a loan file handed to a
+borrower, and a refusal that lives only in a hidden panel is a claim about the only caller we happen
+to know about.
+
+The public routes below still work, and that is not an oversight.
+
+* **Refusing a creation costs nobody anything. Refusing a redemption destroys a document.** A token
+  holder was told by us to upload; a 409 on the way in loses the file they just chose, and they have
+  no way to know whether to try again.
+* **The population can only shrink.** With both mints refused, no new token can exist, so the only
+  links that can be redeemed are ones minted before the flag — a set that expires on its own.
+* **Inbound ingestion is not gated either, for the stronger version of the same reason.** Dropping a
+  borrower's email to keep a panel hidden is data loss in service of a screen. The mail is recorded
+  and simply is not surfaced, which is the right failure.
+
+Making the flag mean *"this deployment cannot receive at all"* — refusing live tokens and discarding
+arriving mail — is a different decision from *"this version offers no way in"*, and it is not one
+this ticket makes.
 """
 
 from typing import Annotated
@@ -25,6 +47,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
+from app.core.config import settings
 from app.core.database import DbSession
 from app.models.upload_link import DEFAULT_MAX_USES, DEFAULT_TTL_HOURS, UploadLink
 from app.services.upload_links import (
@@ -110,7 +133,23 @@ async def mint(
     db: DbSession,
     current_user: CurrentUser,
 ) -> MintedLinkResponse:
-    """Mint a link for this file, and return its URL once."""
+    """Mint a link for this file, and return its URL once.
+
+    LP-857 — REFUSED WHILE THE VERSION CANNOT RECEIVE, on the same argument that refuses
+    `POST /messages/{id}/upload-link`: a link is a live route into this file handed to a borrower,
+    and a refusal that lives only in a hidden panel is a claim about the only caller we happen to
+    know about. The two mints do the same thing and differ only in where the URL ends up, so gating
+    one and not the other would leave the fence where somebody's attention happened to fall.
+
+    MINTING IS GATED; REDEEMING IS NOT. The public route below still accepts a document from a token
+    holder, deliberately — see the module docstring. Refusing a creation costs nobody anything;
+    refusing a redemption destroys the document a borrower has already been told to send.
+    """
+    if not settings.receiving_enabled:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="This version cannot receive uploads, so a secure link cannot be minted.",
+        )
     minted = await mint_upload_link(
         db,
         loan_file=loan_file,

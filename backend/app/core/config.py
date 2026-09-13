@@ -233,18 +233,29 @@ class Settings(BaseSettings):
     # LP-857 — THE NEXT PHASE, OFF THE PAGE AND OUT OF THE EMAIL. V1 is draft-only — "No receiving,
     # sending, secure upload link, reply email and all. We will do it in next phase."
     #
-    # WHAT IT ACTUALLY GATES, because the name is wider than the switch. Three things: the panels on
-    # the Communication page (through `GET /capabilities`), the closing sentence of a generated
-    # request, and `POST /messages/{id}/upload-link`, which is the one call that writes a live link
-    # into a body bound for a borrower.
+    # WHAT IT GATES: NO WAY IN IS OFFERED. Four things — the panels on the Communication page
+    # (through `GET /capabilities`), the closing sentence of a generated request, and BOTH ways to
+    # create an upload link: `POST /messages/{id}/upload-link` and the file-level
+    # `POST /loan-files/{id}/upload-links`.
     #
-    # WHAT IT DOES NOT GATE, said here so nobody reads the name and assumes otherwise: the
-    # file-level `POST /loan-files/{id}/upload-links`, the public redemption route a token holder
-    # posts a document to, and inbound ingestion. Those are LP-815's and LP-807's own surfaces and
-    # they still work — so a link minted before this flag existed can still be redeemed, and a
-    # deployment that wires the inbound webhook still receives. Nothing on the page reaches any of
-    # them in v1, which is what this ticket was for; making the flag mean "this deployment cannot
-    # receive at all" is a larger decision about the epic's fence than a config comment can make.
+    # BOTH MINTS, because the argument for refusing the first does not distinguish them. A refusal
+    # that lives only in a hidden button or a hidden panel is a claim about the only caller we
+    # happen to know about; the two calls create the same thing — a live route into a loan file
+    # handed to a borrower — and differ only in where the URL ends up. Gating one would have left
+    # the fence wherever somebody's attention happened to fall.
+    #
+    # WHAT IT DOES NOT GATE, and this is a decision rather than a gap: the public route a token
+    # holder redeems, and inbound ingestion.
+    #
+    # Refusing a creation costs nobody anything; refusing a redemption destroys a document a
+    # borrower was told by us to send, and gives them no way to know whether to try again. With both
+    # mints refused no new token can exist, so the redeemable set can only shrink. Dropping arriving
+    # mail is the same argument with more force — that is data loss in service of hiding a screen,
+    # and the mail is recorded and simply not surfaced, which is the right failure.
+    #
+    # Both boundaries are asserted in `tests/api/test_next_phase_off_lp857.py`, because "we chose
+    # not to gate this" and "we forgot to gate this" look identical in a diff. Making the flag mean
+    # "this deployment cannot receive AT ALL" is a different decision about the epic's fence.
     #
     # ONE FLAG AND NOT TWO, because the two halves make one promise to a borrower. With it off the
     # request's closing sentence is the caution alone; with it on, the caution plus a route — either
