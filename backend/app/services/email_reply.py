@@ -36,6 +36,7 @@ from app.models.communication import (
     CommunicationDirection,
     CommunicationStatus,
 )
+from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.helpers import only_active
 from app.models.inbound_message import InboundMessage
 from app.models.loan_file import LoanFile
@@ -174,11 +175,23 @@ async def create_compose_draft(
     processor asked for. A server that demanded a recipient, a subject and a body first made that
     shape impossible.
 
-    WHAT WAS BEING PROTECTED IS STILL PROTECTED, one step later. The argument for refusing an empty
-    subject was *"a subject a system invented is one a borrower cannot recognise"* — which is an
-    argument against DEFAULTING one, and nothing here defaults anything: the field stays empty and
-    the processor fills it. "An empty message cannot be sent" is enforced by `send_draft`, which is
-    where it belongs, because a draft nobody has finished is not a message anybody sent.
+    THE BODY GUARANTEE MOVED. THE SUBJECT GUARANTEE WAS DROPPED. Those are different things and an
+    earlier version of this docstring ran them together, which review caught.
+
+    *"An empty message cannot be sent"* is enforced by `send_draft` — verified, `email_send.py`
+    refuses it — so relaxing creation moved that check rather than deleting it, and a draft nobody
+    has finished is not a message anybody sent.
+
+    The subject is not checked anywhere now. The old refusal's ARGUMENT was against defaulting one
+    (*"a subject a system invented is one a borrower cannot recognise"*) and that still holds —
+    nothing here invents anything. But its EFFECT was that every composed draft had a subject, and
+    that effect is gone: a draft with none can now be marked sent, which was impossible before.
+    The cost is small and specific, and it is recorded in `docs/tickets/LP-858.md` rather than left
+    for somebody to find — LP-821's evidence row can record a message with no subject for a message
+    that almost certainly had one, because the processor typed it into Gmail after `Copy & open`
+    handed them a blank subject line. Whether `send_draft` should refuse an empty subject the way it
+    refuses an empty body is a design call neither §4 nor §8 makes, and this ticket does not make it
+    either.
 
     A RECIPIENT THAT IS PRESENT MUST STILL BE VALID. Absent and malformed are different answers:
     one is "not yet", the other is a typo worth reporting.
@@ -202,6 +215,83 @@ async def create_compose_draft(
     await db.flush()
     logger.info("compose_draft_created", loan_file_id=str(loan_file.id))
     return draft
+
+
+async def delete_draft(
+    db: AsyncSession, *, loan_file: LoanFile, draft_id: UUID, hard: bool = False
+) -> None:
+    """Remove a draft. ``flush`` only (LP-858 §7, §8).
+
+    TWO DELETES, AND THEY ARE NOT THE SAME OPERATION.
+
+    * **A draft the processor deletes** — any draft, any state — is a **soft** delete. `deleted_at`
+      is set and the row stays, which is this codebase's convention for anything a person wrote.
+    * **A composed draft closed without a single modification** is a **hard** delete. Nothing was
+      ever written, so there is nothing to keep, and a `deleted_at` row for a message that never
+      held a word is litter with a timestamp on it.
+
+    IT DOES NOT UN-REQUEST. DECIDED, and the decision is *"keep it simple, do not un-request."*
+    Needs items, findings and `details.docs_requested` are left exactly as they are, and
+    `_clear_finding_markers` is **not** called — it exists for the bounce path and matching on
+    `requested_needs_item_id` here would reopen needs a processor did not reopen.
+
+    The recorded consequence: the originating finding keeps rendering its request button as
+    "Requested" and disabled. The processor is not blocked, because the **Request documents** catalog
+    dialog still adds the document. The residue is smaller than it looks — `request_needs_item` has
+    no caller, so `requested_at` is NULL and the needs items are still PENDING on an unsent draft.
+    There is no clock running and nothing to unwind. **The only stale thing is that one button.**
+
+    A SENT MESSAGE IS NOT DELETABLE. LP-821's record is what actually went out; a processor who wants
+    it off the list is asking for the evidence to go, which is a different request and not this one.
+
+    THE DESTRUCTIVE OPTION IS THE GUARDED ONE. `hard=True` is refused for anything that is not an
+    empty, needs-less, template-less draft — so a client that miscomputes "no modification" can only
+    ever cause a soft delete. The client decides *whether* to ask; the server decides whether the
+    row is one that may be removed, and it re-derives that from the row rather than trusting the
+    claim.
+    """
+    draft = await _scoped(db, loan_file=loan_file, communication_id=draft_id)
+    if draft.direction is not CommunicationDirection.OUTBOUND:
+        raise CannotReplyError("An arrived message cannot be deleted.")
+    if draft.status is not CommunicationStatus.DRAFT:
+        raise CannotReplyError(f"A message that is already {draft.status.value} cannot be deleted.")
+
+    if hard:
+        if not await _is_untouched_compose_draft(db, draft=draft):
+            raise CannotReplyError("This draft has content; it can only be deleted, not discarded.")
+        await db.delete(draft)
+        await db.flush()
+        logger.info("compose_draft_discarded", loan_file_id=str(loan_file.id))
+        return
+
+    draft.deleted_at = utcnow()
+    await db.flush()
+    logger.info("draft_deleted", loan_file_id=str(loan_file.id))
+
+
+async def _is_untouched_compose_draft(db: AsyncSession, *, draft: Communication) -> bool:
+    """Whether this row never held anything — the only thing a hard delete may remove.
+
+    RE-DERIVED FROM THE ROW, never taken from the caller. "No modification" is a claim about a
+    browser session, and a hard delete acting on a claim is how a processor's half-written message
+    disappears because a comparison somewhere was wrong about whitespace.
+
+    A TEMPLATE KEY OR A NEEDS LINK DISQUALIFIES IT whatever the text says. A generated request is
+    not a compose draft even when a processor has emptied it, and its `communication_needs_items`
+    rows are a record that the document was asked for.
+    """
+    if draft.template_key is not None:
+        return False
+    if (draft.recipient or "").strip() or (draft.subject or "").strip():
+        return False
+    if (draft.body or "").strip():
+        return False
+    linked = await db.execute(
+        select(CommunicationNeedsItem.needs_item_id).where(
+            CommunicationNeedsItem.communication_id == draft.id
+        )
+    )
+    return linked.first() is None
 
 
 async def set_important(

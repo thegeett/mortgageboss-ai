@@ -62,6 +62,10 @@ export default function CommunicationPage() {
   // impossible to dismiss.
   const [seededFromUrl, setSeededFromUrl] = useState<string | null>(linkedDraft);
   const [closed, setClosed] = useState(false);
+  // Rows deleted during THIS visit. Held because the timeline refetch is not instant: for the frame
+  // between the 204 and the new list arriving, the deleted row is still in `entries` and rule 6's
+  // "select the next newest" would land straight back on it.
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   if (linkedDraft !== seededFromUrl) {
     setSeededFromUrl(linkedDraft);
     setChosen(linkedDraft);
@@ -91,8 +95,15 @@ export default function CommunicationPage() {
   // what the processor came for. Safe because opening a draft has no side effect: autosave is
   // guarded by `dirtyRef` and only marks dirty when the html differs from what the pane opened
   // with, so selecting one cannot write to it.
-  const autoSelected = narrow || closed ? null : (openDrafts[0]?.id ?? null);
-  const selected = chosen ?? autoSelected;
+  // §2.1 rule 6 — NEVER LEAVE THE PANE SHOWING A DELETED ROW. `chosen` is not validated against the
+  // list in general — a stale `?draft=` parameter renders "this message could not be loaded", which
+  // is the honest answer for a link to something that is gone. A DELETE is different: the processor
+  // just did it on purpose, and an error message for their own successful action is the one case
+  // where that answer is wrong.
+  const deleted = deletedIds.has(chosen ?? "") ? null : chosen;
+  const autoSelected =
+    narrow || closed ? null : (openDrafts.find((d) => !deletedIds.has(d.id))?.id ?? null);
+  const selected = deleted ?? autoSelected;
 
   const compose = useComposeDraft(id);
   function startCompose() {
@@ -167,6 +178,13 @@ export default function CommunicationPage() {
             <DraftPane
               fileId={id}
               messageId={selected}
+              onDeleted={(draftId) => {
+                // §2.1 rule 6 — the next newest open draft, or the empty state. `closed` stays
+                // false, because a delete is not a close: the processor is still working, and the
+                // next draft is what they want in front of them.
+                setDeletedIds((seen) => new Set(seen).add(draftId));
+                setChosen(null);
+              }}
               onClose={() => {
                 setChosen(null);
                 // CLOSING MEANS CLOSED, and the auto-selection must not immediately undo it. Rule 2

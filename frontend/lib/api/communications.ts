@@ -152,6 +152,40 @@ export interface SaveDraftBodyInput {
  * message identity to avoid. Only the format and the subject are written back; the body on screen
  * is already the newest copy.
  */
+/**
+ * Delete a draft (LP-858 §7, §8).
+ *
+ * TWO DELETES THROUGH ONE ROUTE, and `discard` is a REQUEST rather than an instruction. It asks for
+ * the hard delete §8 describes — a composed draft closed without a single modification, which never
+ * held anything — and the server re-derives from the row whether that is allowed. A client that
+ * miscomputes "no modification" therefore gets a refusal, not data loss.
+ *
+ * IT DOES NOT UN-REQUEST. Needs items and finding markers are left alone, deliberately; the
+ * originating finding keeps its request button greyed and that is accepted.
+ */
+export function useDeleteDraft(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ draftId, discard = false }: { draftId: string; discard?: boolean }) => {
+      await apiClient.delete(`${outboundPath(fileId)}/draft/${draftId}`, {
+        params: discard ? { discard: true } : undefined,
+      });
+      return draftId;
+    },
+    // THE LIST IS THE THING THAT CHANGED. The pane's own query is not invalidated: the caller has
+    // already moved the selection off this draft (§2.1 rule 6), so refetching it would ask for a
+    // row that is gone and paint "could not be loaded" over a delete that worked.
+    // THROUGH `invalidateDraftViews`, NOT BY NAMING THE KEY. An inlined `["timeline", fileId]` here
+    // was caught by `verification-draft-invalidation.test.ts`, which exists because every mutation
+    // touching a draft used to keep its own list of keys and the lists drifted — one of them ending
+    // up on a query nothing reads, so a request refreshed nothing a processor could see.
+    //
+    // It also gets the broadcast for free, which matters more for a delete than for a request: a
+    // processor with this file open in two tabs would otherwise keep clicking a row that is gone.
+    onSuccess: () => invalidateDraftViews(queryClient, fileId),
+  });
+}
+
 export function useSaveDraftBody(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({

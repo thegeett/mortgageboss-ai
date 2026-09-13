@@ -59,6 +59,7 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
 vi.mock("@/lib/api/capabilities", () => ({
   useCapabilities: () => ({ data: { receiving: false } }),
 }));
+const mockDeleteState = { mutate: vi.fn(), isPending: false };
 vi.mock("@/lib/api/communications", () => ({
   useMessageDetail: (...args: unknown[]) => {
     mockMessageDetailArgs.push(args);
@@ -73,6 +74,9 @@ vi.mock("@/lib/api/communications", () => ({
   // LP-856 — the modal this panel opens now holds a polish mutation. Resting state only; the ✦
   // button's behaviour is asserted in `message-dialog-polish.test.tsx`.
   usePolishDraft: () => ({ mutate: vi.fn(), isPending: false }),
+  // LP-858 §7 — the pane holds a delete mutation, and an unmocked one reaches for a QueryClient
+  // this tree does not have. What delete DOES is asserted in `message-dialog-delete.test.tsx`.
+  useDeleteDraft: () => mockDeleteState,
   useSaveDraftBody: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   messageMailtoUrl: () => "mailto:someone@example.com",
 }));

@@ -37,11 +37,15 @@ vi.mock("@/lib/api/capabilities", () => ({
   // than rotting, which is the same shape LP-857 used for LP-834's suite.
   useCapabilities: () => ({ data: { receiving: false, polish: true } }),
 }));
+const mockDeleteState = { mutate: vi.fn(), isPending: false };
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => ({ mutate: mockSend, isPending: false, isError: false }),
   useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // LP-858 §7 — the pane holds a delete mutation, and an unmocked one reaches for a QueryClient
+  // this tree does not have. What delete DOES is asserted in `message-dialog-delete.test.tsx`.
+  useDeleteDraft: () => mockDeleteState,
   useSaveDraftBody: () => ({ mutate: mockSave, isPending: false, isError: false }),
   usePolishDraft: () => ({ mutate: mockPolish, isPending: false }),
 }));

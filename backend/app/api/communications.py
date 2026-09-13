@@ -48,6 +48,7 @@ from app.services.email_reply import (
     CannotReplyError,
     create_compose_draft,
     create_reply_draft,
+    delete_draft,
     log_reply_sent,
     mark_read,
     reply_context,
@@ -177,6 +178,40 @@ async def compose_request_endpoint(
         ],
         composed_by_model=composed.composed_by_model,
     )
+
+
+@router.delete("/draft/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_draft_endpoint(
+    draft_id: UUID,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+    discard: bool = False,
+) -> None:
+    """Delete a draft (LP-858 §7, §8).
+
+    THE ROUTE THAT WAS SPECIFIED AND NEVER BUILT. `comm-v1-draft-only-spec.md` §6 listed `[Delete]`
+    as the quiet fourth button, and `message-dialog.tsx` carried a **comment** describing that exact
+    button row — the comment shipped, the button did not. This is the other half.
+
+    `discard=true` IS THE HARD DELETE, and it is a REQUEST, not an instruction. §8's case is a
+    composed draft closed without a single modification: nothing was ever written, so a `deleted_at`
+    row would be litter with a timestamp on it. The service re-derives from the row whether it is
+    removable and refuses otherwise, so a client that miscomputes "no modification" can only cause
+    a soft delete — never data loss.
+
+    IT DOES NOT UN-REQUEST. Needs items and `details.docs_requested` are untouched, and
+    `_clear_finding_markers` is not called. See `delete_draft` for the consequence and why it is
+    accepted.
+
+    204 AND NO BODY. There is nothing to return: the row is gone or marked gone, and the caller's
+    next act is to select another draft, which it does from the list it already refetches.
+    """
+    try:
+        await delete_draft(db, loan_file=loan_file, draft_id=draft_id, hard=discard)
+    except CannotReplyError as exc:
+        raise _refuse(exc) from exc
+    await db.commit()
 
 
 @router.put("/draft/{draft_id}/body", response_model=SavedDraftPublic)

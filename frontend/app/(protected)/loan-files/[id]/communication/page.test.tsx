@@ -63,16 +63,21 @@ vi.mock("@/components/file/communication/message-dialog", () => ({
     fileId,
     messageId,
     onClose,
+    onDeleted,
   }: {
     fileId: string;
     messageId: string | null;
     onClose: () => void;
+    onDeleted?: (id: string) => void;
   }) => {
     paneArgs.push([fileId, messageId]);
     return (
       <div data-testid="pane" data-message={messageId ?? ""}>
         <button type="button" onClick={onClose}>
           close-pane
+        </button>
+        <button type="button" onClick={() => onDeleted?.(messageId ?? "")}>
+          delete-pane
         </button>
       </div>
     );
@@ -242,6 +247,71 @@ describe("the landing state", () => {
     expect(screen.queryByTestId("pane")).toBeNull();
   });
 
+  it("selects the next newest open draft after deleting the selected one", () => {
+    // §2.1 rule 6 — NEVER LEAVE THE PANE SHOWING A DELETED ROW.
+    //
+    // The refetch is not instant: for the frame between the 204 and the new list arriving, the
+    // deleted row is still in `entries`, so "select the next newest" would land straight back on
+    // it. The fixture is deliberately unchanged here — the page must skip the deleted id rather
+    // than wait for the server to stop reporting it.
+    entries([{ id: "d-new" }, { id: "d-old" }]);
+    render(<CommunicationPage />);
+    expect(selectedMessage()).toBe("d-new");
+
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    expect(selectedMessage()).toBe("d-old");
+  });
+
+  it("falls to the empty state when the last draft is deleted", () => {
+    // Rule 6's other half. The pane must not show the row that just went, and there is nothing
+    // else to show — so the empty state, inside the split, because the history is still there.
+    entries([{ id: "d-only" }, { id: "s-1", status: "sent" }]);
+    render(<CommunicationPage />);
+    expect(selectedMessage()).toBe("d-only");
+
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    expect(screen.queryByTestId("pane")).toBeNull();
+    expect(screen.getByTestId("rail")).toBeTruthy();
+    expect(screen.getByText("No drafts on this file")).toBeTruthy();
+  });
+
+  it("a deleted draft is not re-selected on the next render", () => {
+    // THE STICKING HALF, and the same shape as the linked-draft case: the re-select would happen on
+    // the NEXT render rather than on the delete, so asserting only the line above would pass on a
+    // build where the pane reopens the row a moment later.
+    entries([{ id: "d-only" }]);
+    const { rerender } = render(<CommunicationPage />);
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    rerender(<CommunicationPage />);
+
+    expect(screen.queryByTestId("pane")).toBeNull();
+  });
+
+  it("a url pointing at a draft deleted this session falls to the next one", () => {
+    // THE CASE THAT MAKES THE DELETED-ID GUARD LOAD-BEARING, and it was found by mutation: in the
+    // ordinary flow `onDeleted` clears the selection, so nothing ever consults the set and removing
+    // the check left every test green.
+    //
+    // It separates when the URL puts a deleted id BACK — the browser Back button after a delete,
+    // which is one keystroke away. Without the guard the pane renders "This message could not be
+    // loaded" for a row the processor deleted a moment ago on purpose; with it, they land on the
+    // next draft, which is where they were going anyway.
+    entries([{ id: "d-new" }, { id: "d-old" }]);
+    const { rerender } = render(<CommunicationPage />);
+    fireEvent.click(screen.getByRole("button", { name: "select-other" }));
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    // Back: the address bar names the row that has just gone.
+    mockSearchParams.mockReturnValue(new URLSearchParams("draft=m-other"));
+    rerender(<CommunicationPage />);
+
+    expect(selectedMessage()).not.toBe("m-other");
+    expect(selectedMessage()).toBe("d-new");
+  });
+
   it("selecting a row swaps the pane and leaves the layout alone", () => {
     // §2 — "Selecting a row swaps the right pane's content and moves nothing." The rail is present
     // before and after, which is the half a list that collapsed on selection would fail.
@@ -317,7 +387,8 @@ describe("what the version cannot do", () => {
     const buttons = screen
       .getAllByRole("button")
       .map((b) => b.textContent)
-      .filter((label) => label !== "select-other" && label !== "close-pane");
+      // The stub's own controls are not the page's buttons.
+      .filter((label) => !["select-other", "close-pane", "delete-pane"].includes(label ?? ""));
     expect(buttons).toEqual(["Request documents", "+ Compose"]);
   });
 });

@@ -1,11 +1,13 @@
 "use client";
 
+import { DeleteDraftDialog } from "@/components/file/communication/delete-draft-dialog";
 import { MailClientDialog } from "@/components/file/communication/mail-client-dialog";
 import { PartyAddressForm } from "@/components/file/communication/party-address-form";
 import { Button } from "@/components/ui/button";
 import { useCapabilities } from "@/lib/api/capabilities";
 import {
   useAttachUploadLink,
+  useDeleteDraft,
   useMessageDetail,
   usePolishDraft,
   useSaveDraftBody,
@@ -19,9 +21,11 @@ import {
   effectiveClient,
 } from "@/lib/communication/compose-routes";
 import { polishMessage } from "@/lib/communication/polish-messages";
+import { getErrorMessage } from "@/lib/errors/api-error";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
+import { notifyError, notifySuccess } from "@/lib/toast";
 import type { ResponsibleParty } from "@/lib/types/party-request";
 import dynamic from "next/dynamic";
 
@@ -63,7 +67,7 @@ const MessageEditor = dynamic(
 const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
-import { Check, Copy, ExternalLink, Link as LinkIcon, Sparkles, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Link as LinkIcon, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -97,10 +101,13 @@ export function DraftPane({
   fileId,
   messageId,
   onClose,
+  onDeleted,
 }: {
   fileId: string;
   messageId: string | null;
   onClose: () => void;
+  /** LP-858 §2.1 rule 6 — the page moves the selection off a row that no longer exists. */
+  onDeleted?: (draftId: string) => void;
 }) {
   const { data, isPending, isError } = useMessageDetail(fileId, messageId);
   const send = useSendDraft(fileId);
@@ -134,6 +141,10 @@ export function DraftPane({
   // What the draft LOOKED like when it was opened. Kept so that "did anything actually change?"
   // is answerable — see `onEdit`.
   const [openedAs, setOpenedAs] = useState("");
+  // LP-858 §8 — WHAT THE OTHER TWO FIELDS HELD WHEN THE PANE OPENED. "No modification" means To,
+  // Subject and body all unchanged, so all three need a baseline; the body already had one for
+  // autosave, and these two are the rest of the same question.
+  const [openedWith, setOpenedWith] = useState({ recipient: "", subject: "" });
   // Starts as the server's answer and becomes "html" once a save has landed.
   const [format, setFormat] = useState<"plain" | "html">("plain");
   if (data !== undefined && data.id !== seededFrom) {
@@ -143,6 +154,10 @@ export function DraftPane({
     const seeded = data.body_format === "html" ? data.body : emailBodyToHtml(data.body);
     setBodyHtml(seeded);
     setOpenedAs(seeded);
+    setOpenedWith({
+      recipient: data.counterparty ?? data.suggested_recipient ?? "",
+      subject: data.subject ?? "",
+    });
     setFormat(data.body_format);
   }
 
@@ -266,6 +281,37 @@ export function DraftPane({
     !data.suggested_recipient &&
     recipient.trim() === "";
 
+  // LP-858 §7 — DELETE, AND THE CONFIRM THAT ONLY APPEARS WHEN THERE IS SOMETHING TO LOSE.
+  //
+  // `body_format === "html"` IS `body_edited`. LP-853 made that one fact in one place: the column
+  // records that a person wrote this body, and there is no second flag to disagree with it.
+  const deleteDraft = useDeleteDraft(fileId);
+  const [confirming, setConfirming] = useState(false);
+  const edited = data?.body_format === "html";
+
+  function removeDraft() {
+    if (!data) return;
+    setConfirming(false);
+    deleteDraft.mutate(
+      { draftId: data.id },
+      {
+        // THE SELECTION MOVES FIRST, and the page decides where to. Leaving it on a row that is
+        // gone paints "This message could not be loaded" over a delete that worked — an error for
+        // something the processor just did on purpose.
+        onSuccess: () => {
+          onDeleted?.(data.id);
+          notifySuccess({
+            title: "Draft deleted",
+            consequence:
+              "The documents it asked for are still on the needs list — deleting a draft does not un-request them.",
+          });
+        },
+        onError: (error) =>
+          notifyError({ title: "Couldn’t delete the draft", whatToDo: getErrorMessage(error) }),
+      },
+    );
+  }
+
   /** What just happened to the compose window — see the sentence under the buttons. */
   const [opened, setOpened] = useState<"idle" | "opened" | "blocked" | "copy-failed">("idle");
 
@@ -380,6 +426,41 @@ export function DraftPane({
   }
 
   function close() {
+    // LP-858 §8 — A COMPOSE DRAFT NOBODY TOUCHED IS REMOVED, not soft-deleted. It never held
+    // anything, so a `deleted_at` row would be litter with a timestamp on it.
+    //
+    // "NO MODIFICATION" IS ALL THREE FIELDS, and a recipient alone counts as work: *"A processor
+    // who typed a recipient and stopped has done work; do not destroy it."* Compared against what
+    // the pane OPENED with rather than against emptiness, so a draft seeded from the file's own
+    // suggestion — which the processor did not type — is not mistaken for one they filled in.
+    //
+    // THE SERVER DECIDES WHETHER IT MAY GO. This is a request: `discard` is refused for anything
+    // with a template key, a needs link or any content, so a bug in the comparison below can only
+    // cost a soft delete, never a processor's words. That asymmetry is deliberate — the client
+    // decides whether to ask, the server decides whether the row is one that may be removed.
+    const untouched =
+      data !== undefined &&
+      data.template_key === null &&
+      bodyHtml === openedAs &&
+      recipient === openedWith.recipient &&
+      subject === openedWith.subject &&
+      bodyPlain.trim() === "" &&
+      recipient.trim() === "" &&
+      subject.trim() === "";
+
+    if (untouched && data) {
+      // NOT FLUSHED FIRST. There is nothing to save — `dirtyRef` is false by construction here, and
+      // a save would write `body_format = html` onto a row about to be removed.
+      const draftId = data.id;
+      deleteDraft.mutate(
+        { draftId, discard: true },
+        // SILENT, per §7: no toast and no undo, because there is nothing to undo. A refusal is
+        // silent too — the draft simply stays in the list, which is the safe outcome.
+        { onSuccess: () => onDeleted?.(draftId) },
+      );
+      onClose();
+      return;
+    }
     flush();
     onClose();
   }
@@ -760,6 +841,26 @@ export function DraftPane({
                         : "Add a secure upload link"}
                     </Button>
                   ) : null}
+
+                  {/* LP-858 §4 — DELETE, AFTER A SPACER, QUIET, IN DANGER TEXT. Specified since the
+                      v1 spec's §6 and never built: the comment above this row described this exact
+                      button and shipped without it, which is the failure the design contract's §6
+                      rule exists to stop.
+
+                      THE SPACER IS THE POINT, not decoration. It is the only destructive control on
+                      the screen and it sits away from the three a processor presses all day, so the
+                      miss that lands on it is a miss nobody makes twice. */}
+                  <div className="ml-auto">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-danger hover:bg-danger/5 hover:text-danger"
+                      disabled={deleteDraft.isPending}
+                      onClick={() => (edited ? setConfirming(true) : removeDraft())}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden /> Delete
+                    </Button>
+                  </div>
                 </div>
 
                 {/* WHAT JUST HAPPENED, in the processor's next action rather than as reassurance.
@@ -802,6 +903,17 @@ export function DraftPane({
           accessibility bug by creating the one this ticket is about. Opening on a button press
           means there is never a second modal to collide with on mount — the draft is a pane now,
           not a competing dialog — so both fixes hold and neither is re-solved. */}
+      {/* §7 — THE CONFIRM, on an edited draft only. `firstEditedLine` is derived from the body in
+          the pane rather than from the stored one: the processor is looking at their own unsaved
+          sentence, and quoting the last SAVED version back at them would show words that are not
+          on their screen. */}
+      <DeleteDraftDialog
+        open={confirming}
+        firstEditedLine={firstLineOf(bodyPlain)}
+        pending={deleteDraft.isPending}
+        onCancel={() => setConfirming(false)}
+        onConfirm={removeDraft}
+      />
       <MailClientDialog
         open={pickerOpen}
         suggested={preferences.data?.suggested_mail_client ?? "mailto"}
@@ -821,4 +933,21 @@ export function DraftPane({
       />
     </>
   );
+}
+
+/**
+ * The first line of a body that says something — for the delete confirm's quote.
+ *
+ * BLANK LINES ARE NOT THE FIRST LINE. A body that opens with a greeting and a gap would otherwise
+ * quote the gap, and the confirm would ask a processor to recognise nothing at all.
+ *
+ * Returns "" for a body with no readable line, which the dialog renders as an ellipsis rather than
+ * as an empty quote block.
+ */
+export function firstLineOf(plain: string): string {
+  for (const line of (plain ?? "").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
 }

@@ -20,11 +20,15 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
   usePreferences: () => ({ data: { mail_client: "gmail", suggested_mail_client: "gmail" } }),
   useUpdatePreferences: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+const mockDeleteState = { mutate: vi.fn(), isPending: false };
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // LP-858 §7 — the pane holds a delete mutation, and an unmocked one reaches for a QueryClient
+  // this tree does not have. What delete DOES is asserted in `message-dialog-delete.test.tsx`.
+  useDeleteDraft: () => mockDeleteState,
   useSaveDraftBody: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   usePolishDraft: () => ({ mutate: vi.fn(), isPending: false }),
 }));
